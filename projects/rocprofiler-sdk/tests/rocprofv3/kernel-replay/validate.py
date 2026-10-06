@@ -37,6 +37,8 @@
 #   5. dispatch_id identity: a replayed dispatch keeps ONE dispatch_id across its passes (only the
 #      replay_pass index advances), and dispatch_id increments sequentially across dispatches -- one
 #      id minted per logical dispatch, reused by every pass (never one id per pass).
+#   6. With --rocpd-input, the rocpd counters_collection view reports each (dispatch, counter) as
+#      the mean of the passes that collected it, so the common counters are not multiplied by N.
 # (The app verifies its own results in the generate step, guarding the restored data itself.)
 
 import collections
@@ -389,6 +391,39 @@ def test_common_counters_constant_across_passes(json_data, common_counters):
                 f"replay passes (allowed relative {tolerance.relative:.0%}, "
                 f"absolute {tolerance.absolute:g}): {values}"
             )
+
+
+def test_rocpd_counters_collection_averages_passes(json_data, rocpd_db):
+    # rocpd stores every pass of a replayed dispatch under the dispatch's one event, so the
+    # counters_collection view must average a counter over the passes that collected it. Summing
+    # them reported each common counter, which every group lists, at N times its value.
+    per_pass = {}
+    for dispatch_id, entry in _records_by_dispatch(_sdk(json_data)).items():
+        for batch in entry["passes"].values():
+            for counter, value in batch.items():
+                per_pass.setdefault((dispatch_id, counter), []).append(value)
+    assert any(
+        len(values) > 1 for values in per_pass.values()
+    ), "no counter was collected by more than one pass, so the run cannot show summed passes"
+
+    actual = {
+        (int(dispatch_id), counter): float(value)
+        for dispatch_id, counter, value in rocpd_db.execute(
+            "SELECT dispatch_id, counter_name, value FROM counters_collection"
+        )
+    }
+    assert sorted(actual) == sorted(per_pass), (
+        "rocpd counters_collection and JSON disagree on the (dispatch, counter) pairs: "
+        f"only in rocpd {sorted(set(actual) - set(per_pass))}, "
+        f"only in JSON {sorted(set(per_pass) - set(actual))}"
+    )
+    for (dispatch_id, counter), values in sorted(per_pass.items()):
+        mean = sum(values) / len(values)
+        assert actual[(dispatch_id, counter)] == pytest.approx(mean, rel=1e-9), (
+            f"dispatch {dispatch_id} counter {counter}: rocpd counters_collection reports "
+            f"{actual[(dispatch_id, counter)]}, but its replay passes in JSON are {values} "
+            f"(mean {mean})"
+        )
 
 
 def test_each_pass_collects_distinct_batch(json_data, expected_passes, common_counters):

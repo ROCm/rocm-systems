@@ -38,6 +38,8 @@ Key invariants verified:
   * CSV  — graph_exec_id / graph_node_id columns absent for pre-latest schemas;
            out_graph_launch_trace.csv not created for pre-latest schemas.
   * CSV  — above columns / file ARE present for the latest schema.
+  * CSV  — counters_collection averages a counter over kernel-replay passes for the
+           latest schema instead of summing them.
   * Perfetto — .pftrace exists and is non-empty for every schema.
   * OTF2 — "HIP Graph Launch" locations absent for pre-latest schemas;
             present for the latest schema (requires the ``otf2`` package).
@@ -252,6 +254,29 @@ def test_csv_for_schema_3_0_4_changes_present(output_root, latest_schema):
         assert (
             expected in cols
         ), f"Column '{expected}' missing from hip_event CSV for schema {latest_schema}"
+
+
+def test_csv_counter_collection_averages_replay_passes(output_root, latest_schema):
+    """counters_collection must average a counter over kernel-replay passes, not sum them.
+
+    make_db.py gives dispatch 1 SQ_WAVES in three replay passes with per-pass sums 16, 18
+    and 20, plus GRBM_COUNT in pass 0 only, and gives dispatch 2 untagged SQ_WAVES rows
+    that sum to 8.
+    """
+    counter_csv = output_root / latest_schema / "csv" / "out_counter_collection_trace.csv"
+    assert (
+        counter_csv.exists()
+    ), f"out_counter_collection_trace.csv not found for schema {latest_schema}: {counter_csv}"
+    with open(counter_csv) as fh:
+        values = {
+            (int(row["Dispatch_Id"]), row["Counter_Name"]): float(row["Counter_Value"])
+            for row in csv_mod.DictReader(fh)
+        }
+    assert values == {
+        (1, "SQ_WAVES"): 18.0,
+        (1, "GRBM_COUNT"): 1000.0,
+        (2, "SQ_WAVES"): 8.0,
+    }, f"unexpected counter_collection values for schema {latest_schema}: {values}"
 
 
 # ---------------------------------------------------------------------------

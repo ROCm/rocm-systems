@@ -784,7 +784,12 @@ SELECT
     PMC_I.expression,
     PMC_I.value_type,
     PMC_I.id AS counter_id,
-    SUM(PMC_E.value) AS value,
+    -- Kernel replay records every pass of a dispatch under the same event and tags passes after
+    -- the first with extdata.replay_pass. Sum the instances of each pass, then average over the
+    -- passes that collected the counter instead of adding the passes together.
+    SUM(PMC_E.value) / COUNT(
+        DISTINCT COALESCE(json_extract(PMC_E.extdata, '$.replay_pass'), 0)
+    ) AS value,
     K.start,
     K.end,
     PMC_I.is_constant,

@@ -55,8 +55,8 @@ add_test(
         --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --pmc SQ_WAVES SQ_INSTS_VALU
         SQ_INSTS_SALU --pmc SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM --pmc SQ_WAVES
         SQ_INSTS_VALU SQ_INSTS_LDS --replay-mode kernel --kernel-replay-beta-enabled
-        --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay -o out --
-        $<TARGET_FILE:kernel-replay> 1048576 1)
+        --output-format csv json rocpd -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay -o
+        out -- $<TARGET_FILE:kernel-replay> 1048576 1)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-generate
@@ -74,14 +74,16 @@ set_tests_properties(
                rocprofv3-test-kernel-replay-data)
 
 # Validate replay structure: each dispatch replayed REPLAY_PASSES times, the shared sanity
-# counters (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, and the
-# kernels are present.
+# counters (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, the kernels
+# are present, and rocpd's counters_collection averages the shared counters over the
+# passes rather than summing them.
 add_test(
     NAME rocprofv3-test-kernel-replay-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json --passes
-        ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU)
+        ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU --rocpd-input
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.db)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-validate
@@ -107,8 +109,9 @@ add_test(
         --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --pmc SQ_WAVES SQ_INSTS_VALU
         SQ_INSTS_SALU --pmc SQ_WAVES SQ_INSTS_VALU SQ_INSTS_SMEM --pmc SQ_WAVES
         SQ_INSTS_VALU SQ_INSTS_LDS --replay-mode kernel --kernel-replay-beta-enabled
-        --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval -o
-        out -- $<TARGET_FILE:kernel-replay> 1048576 1)
+        --output-format csv json rocpd -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval -o out --
+        $<TARGET_FILE:kernel-replay> 1048576 1)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-interval-generate
@@ -130,7 +133,8 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.json --passes
-        ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU)
+        ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU --rocpd-input
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.db)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-interval-validate

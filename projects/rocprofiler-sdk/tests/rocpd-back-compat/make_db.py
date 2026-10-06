@@ -74,6 +74,7 @@ _EVT_HIP_EVENT_1 = 9
 
 _PMC_NO_SPM_ID = 1
 _PMC_SPM_ID = 2
+_PMC_GRBM_COUNT_ID = 3
 _TRACK_SPM_ID = 1
 _SAMPLE_SPM_ID = 1
 
@@ -542,6 +543,56 @@ def insert_minimal_data(
                 _EVT_HIP_EVENT_1,
                 "{}",
             ),
+        )
+
+        # Kernel-replay dispatch counters. Dispatch 1 is replayed three times: SQ_WAVES has two
+        # instances in every pass, with per-pass sums 16, 18 and 20, and GRBM_COUNT is collected
+        # by pass 0 only. Passes after the first carry replay_pass in extdata, as rocprofv3
+        # writes them. Dispatch 2 has untagged SQ_WAVES rows, like a run without kernel replay.
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_info_pmc')} "
+            "(id, guid, nid, pid, agent_id, target_arch, name, symbol, description, "
+            "component, value_type, block, expression, is_constant, is_derived, "
+            "spm_support, extdata) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                _PMC_GRBM_COUNT_ID,
+                guid,
+                _NID,
+                _PID,
+                _AGENT_ID,
+                "GPU",
+                "GRBM_COUNT",
+                "GRBM_COUNT",
+                "Tie High - Count Number of Clocks",
+                "rocm",
+                "ABS",
+                "GRBM",
+                "",
+                0,
+                0,
+                None,
+                "{}",
+            ),
+        )
+
+        def replay_pass(index):
+            return "{}" if index == 0 else f'{{"replay_pass":{index}}}'
+
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_pmc_event')} "
+            "(id, guid, event_id, pmc_id, value, extdata) VALUES (?,?,?,?,?,?)",
+            [
+                (3, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 8.0, replay_pass(0)),
+                (4, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 8.0, replay_pass(0)),
+                (5, guid, _EVT_KERNEL_1, _PMC_GRBM_COUNT_ID, 1000.0, replay_pass(0)),
+                (6, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 9.0, replay_pass(1)),
+                (7, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 9.0, replay_pass(1)),
+                (8, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 10.0, replay_pass(2)),
+                (9, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 10.0, replay_pass(2)),
+                (10, guid, _EVT_KERNEL_2, _PMC_NO_SPM_ID, 4.0, "{}"),
+                (11, guid, _EVT_KERNEL_2, _PMC_NO_SPM_ID, 4.0, "{}"),
+            ],
         )
 
 

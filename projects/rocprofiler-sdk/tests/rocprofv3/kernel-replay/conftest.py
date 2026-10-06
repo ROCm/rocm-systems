@@ -22,6 +22,7 @@
 
 import json
 import os
+import sqlite3
 
 import pytest
 
@@ -47,6 +48,12 @@ def pytest_addoption(parser):
         default=["SQ_WAVES", "SQ_INSTS_VALU"],
         help="counters shared by every --pmc group; must be constant across a kernel's passes",
     )
+    parser.addoption(
+        "--rocpd-input",
+        action="store",
+        default=None,
+        help="rocpd database written by the same run as --json-input",
+    )
 
 
 @pytest.fixture
@@ -55,6 +62,17 @@ def json_data(request):
     assert os.path.isfile(path), f"missing JSON input: {path}"
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+@pytest.fixture
+def rocpd_db(request):
+    path = request.config.getoption("--rocpd-input")
+    if path is None:
+        pytest.skip("no --rocpd-input given")
+    assert os.path.isfile(path), f"missing rocpd input: {path}"
+    connection = sqlite3.connect(path)
+    yield connection
+    connection.close()
 
 
 @pytest.fixture

@@ -139,6 +139,13 @@ Default ``rocpd``
 The default output format is ``rocpd``. Convert with ``rocpd convert`` as described in
 :ref:`using-rocpd-output-format`.
 
+The ``counters_collection`` view, which ``rocpd convert`` uses for counter CSV and Perfetto output,
+has one row per dispatch and counter. A counter repeated across groups is collected by every pass
+whose group lists it, and the view reports the mean of those passes, so a sanity counter such as
+``SQ_WAVES`` in every group reads the same as it does in a single pass. The individual passes stay
+in the database: a ``rocpd_pmc_event`` row from a pass after the first carries the pass index as
+``replay_pass`` in its ``extdata`` column, and a row without it belongs to pass 0.
+
 What is snapshotted
 ===================
 
