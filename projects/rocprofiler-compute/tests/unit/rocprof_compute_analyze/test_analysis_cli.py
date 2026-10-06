@@ -260,3 +260,12 @@ def test_apply_operator_filter_intersects_existing_kernel_ids(monkeypatch):
         for item in warnings
     )
     assert workload.filter_kernel_ids == [0]
+
+
+def test_apply_operator_filter_keeps_intersection():
+    args = Namespace(torch_operator=["*addmm*"])
+    cli = cli_analysis(args, {})
+    workload = workload_with_operator_forest()
+    workload.filter_kernel_ids = [0]
+    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
+    assert workload.filter_kernel_ids == [0]
