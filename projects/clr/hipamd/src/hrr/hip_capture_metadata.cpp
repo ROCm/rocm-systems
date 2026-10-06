@@ -15,6 +15,16 @@
 #include <string>
 #include <vector>
 
+// Kept out of hip_capture.cpp: glibc's <sys/auxv.h> includes <elf.h>, whose
+// Elf64_* typedefs collide with the ones CLR's ELF headers put in the global
+// namespace.
+#if defined(__linux__)
+#include <sys/auxv.h>
+#ifndef AT_SECURE
+#define AT_SECURE 23  // Linux ABI value; same fallback as ROCr's runtime.cpp
+#endif
+#endif
+
 namespace hip {
 class Device;
 extern std::vector<hip::Device*> g_devices;
@@ -189,6 +199,14 @@ std::string collect_json() {
   os << "  \"devices\": " << device_metadata.devices_json << "\n"
      << "}";
   return os.str();
+}
+
+bool secure_exec() {
+#if defined(__linux__)
+  return getauxval(AT_SECURE) != 0;
+#else
+  return false;
+#endif
 }
 
 }  // namespace metadata

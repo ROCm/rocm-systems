@@ -39,6 +39,7 @@ int RasTestPoll(struct pollfd*, nfds_t, int);
 int RasTestClose(int);
 int RasTestAtexit(void (*)(void));
 uint64_t RasTestClockNano();
+ncclResult_t RasTestDiagnosticsContextInit(struct rasDiagnosticsContext*, const struct ncclComm*);
 
 // Redirect the process-wide APIs used by ras.cc before including that file,
 // then restore their real names immediately afterward. Every header that uses
@@ -47,6 +48,7 @@ uint64_t RasTestClockNano();
 #define close RasTestClose
 #define atexit RasTestAtexit
 #define clockNano RasTestClockNano
+#define rasDiagnosticsContextInit RasTestDiagnosticsContextInit
 
 namespace {
 
@@ -79,6 +81,7 @@ const char* ncclSocketToString(const union ncclSocketAddress*, char* buf, const 
 #undef close
 #undef clockNano
 #undef poll
+#undef rasDiagnosticsContextInit
 
 namespace {
 
@@ -631,7 +634,7 @@ void rasClientSupportTerminate() { ++g_cleanupCalls[0]; }
 void rasNetTerminate() { ++g_cleanupCalls[1]; }
 void rasCollectivesTerminate() { ++g_cleanupCalls[2]; }
 void rasPeersTerminate() { ++g_cleanupCalls[3]; }
-ncclResult_t rasDiagnosticsContextInit(struct rasDiagnosticsContext* ctx, const struct ncclComm* comm) {
+ncclResult_t RasTestDiagnosticsContextInit(struct rasDiagnosticsContext* ctx, const struct ncclComm* comm) {
   ++g_diagnosticsInitCalls;
   g_diagnosticsInitComm = comm;
   if (ctx) std::memset(ctx, 0, sizeof(*ctx));

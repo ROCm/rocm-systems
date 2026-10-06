@@ -1,6 +1,6 @@
 # Website build and test
 
-The Rocjitsu simulation-performance dashboard lives in `emulation/rocjitsu/website`. It is a standalone
+The Rocjitsu simulation-performance dashboard lives in `emulation/rocjitsu/website/dashboard`. It is a standalone
 React + Vite source package. Real benchmark data belongs on the
 `gh-pages-rocjitsu` branch under `rocjitsu-dashboard/data/`; dummy data is retained only
 as test fixtures.
@@ -9,7 +9,7 @@ installation, GPU, or benchmark service.
 
 ## Prerequisites
 
-- Node.js matching `website/package.json`: `^20.19.0 || ^22.13.0 || >=24.0.0`.
+- Node.js matching `website/dashboard/package.json`: `^20.19.0 || ^22.13.0 || >=24.0.0`.
 - npm and network access to install the locked dependencies.
 - Chromium and its system libraries for Playwright browser tests. The install
   command below downloads Chromium and may need administrator privileges to
@@ -20,7 +20,7 @@ installation, GPU, or benchmark service.
 Run from the `rocm-systems` repository root:
 
 ```bash
-cd emulation/rocjitsu/website
+cd emulation/rocjitsu/website/dashboard
 node --version
 npm --version
 npm ci
@@ -29,13 +29,14 @@ npm run verify
 ```
 
 `npm run verify` runs ESLint, a production build, Vitest unit tests, Playwright
-desktop and mobile browser tests, and the chart interaction race test ten times
-sequentially. A successful run exits with status 0. Playwright builds the current
+desktop and mobile browser tests, the chart interaction race test ten times
+sequentially, and the production-hosting smoke test. A successful run exits with
+status 0. Playwright builds the current
 source with dummy fixtures into `.test-dist/`, starts its own preview server at
 `http://127.0.0.1:4174`, and stops it when done. Keep port 4174 free. Browser tests
 leave the data-free production build in `dist/` untouched.
 
-`npm run test:e2e:production` separately rebuilds and previews the production
+`npm run test:e2e:production` (also included in `verify`) rebuilds and previews the production
 artifact on port 4175, loads the published GitHub Raw dataset, and verifies real
 browser-cache reuse without request interception. CI runs this live production
 smoke test after the fixture suite; it requires network access and valid
@@ -44,7 +45,7 @@ published data.
 If port 4174 is occupied, select a free port without stopping other servers:
 `PLAYWRIGHT_PORT=4176 npm run verify` (or use the same variable with `npm run test:e2e`).
 
-Individual commands, all run from `website/`:
+Individual commands, all run from `website/dashboard/`:
 
 | Command | Purpose |
 | --- | --- |
@@ -58,7 +59,7 @@ Individual commands, all run from `website/`:
 | `npm run test:e2e:production` | Smoke test the production build, GitHub Raw hosting, and browser caching |
 | `npm run test:e2e:chart-race` | Run the chart interaction race test ten times sequentially |
 | `npm test` | Run the unit tests, the browser suites, and the ten-repeat chart race test |
-| `npm run verify` | Run lint, build, and everything in `npm test` |
+| `npm run verify` | Run lint, build, everything in `npm test`, and the production-hosting smoke test |
 
 Run the two browser commands one at a time. Both rebuild the shared `.test-dist/`
 fixture output before starting their server, so a concurrent run deletes files the other
@@ -73,7 +74,7 @@ after updating Playwright if its required browser version changes.
 ## Run locally
 
 ```bash
-# From emulation/rocjitsu/website:
+# From emulation/rocjitsu/website/dashboard:
 npm run dev:fixtures -- --host 127.0.0.1
 npm run dev:data -- /absolute/path/to/staged/data --host 127.0.0.1
 ```
@@ -121,9 +122,12 @@ validated JSON independently under that directory. It contains
 `metadata.json`, `index.json`, `test-catalogs/`, and `runs/`; a data-only update
 does not require rebuilding the application.
 
-This source package does not provide a deployment workflow. The hosting owner
-chooses how to publish the contents of `dist/` through its existing release
-process.
+The [rocjitsu-publish-website workflow](../../../../../.github/workflows/rocjitsu-publish-website.yml)
+verifies the dashboard and publishes `dist/` from `develop` to
+`gh-pages/rocjitsu-dashboard/`. It runs the same `npm run verify` suite as website
+CI (lint, build, unit, browser, chart-race, and production-hosting tests) before
+creating a publishing token. Benchmark data remains independently published on
+`gh-pages-rocjitsu`.
 
 ```bash
 npm run validate:data -- /absolute/path/to/staged/data
@@ -144,5 +148,5 @@ npm run preview -- --host 127.0.0.1
 
 Dependencies, generated fixture data, production/test build output, coverage, and Playwright reports/results
 are ignored by Git. Keep the source, lockfile, tests, and test fixtures under version
-control. Parent-repository automation should use `emulation/rocjitsu/website` as its
+control. Parent-repository automation should use `emulation/rocjitsu/website/dashboard` as its
 working directory and its `package-lock.json` as the npm cache key.
