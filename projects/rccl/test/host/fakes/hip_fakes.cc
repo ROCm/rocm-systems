@@ -175,6 +175,14 @@ static hipError_t DefaultHipMalloc(void** ptr, std::size_t)
 }
 std::function<hipError_t(void**, std::size_t)> g_hipMalloc = DefaultHipMalloc;
 
+static hipError_t DefaultHipMallocManaged(void** ptr, std::size_t, unsigned)
+{
+    if (ptr) *ptr = nullptr;
+    return hipErrorInvalidValue;
+}
+std::function<hipError_t(void**, std::size_t, unsigned)>
+    g_hipMallocManaged = DefaultHipMallocManaged;
+
 static hipError_t DefaultHipFree(void* ptr)
 {
     std::free(ptr);
@@ -253,6 +261,7 @@ hipError_t g_hipStreamCreateResult       = hipErrorInvalidValue;
 hipError_t g_hipAsyncOpsResult           = hipErrorInvalidValue;
 int        g_hipWarpSize                 = 64;
 int        g_hipDirectManagedMemAccess   = 1;
+int        g_hipMemoryPoolsSupported     = 1;
 int        g_hipMemcpyAsyncCalls         = 0;
 std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
 
@@ -562,6 +571,7 @@ void ResetHipFakes()
     g_hipExtMallocWithFlags         = DefaultHipExtMallocWithFlags;
     g_hipHostMalloc                 = DefaultHipHostMalloc;
     g_hipMalloc                     = DefaultHipMalloc;
+    g_hipMallocManaged              = DefaultHipMallocManaged;
     g_hipFree                       = DefaultHipFree;
     g_hipHostFree                   = DefaultHipHostFree;
     g_hipGetDevice                  = DefaultHipGetDevice;
@@ -581,6 +591,7 @@ void ResetHipFakes()
     g_hipAsyncOpsResult             = hipErrorInvalidValue;
     g_hipWarpSize                   = 64;
     g_hipDirectManagedMemAccess     = 1;
+    g_hipMemoryPoolsSupported       = 1;
     g_hipMemcpyAsyncCalls           = 0;
     g_hipMemcpyAsyncArgs.clear();
     // VMM / IPC / stream seams (undoes InstallHipVmmEmulator too)
@@ -672,6 +683,8 @@ static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
             *pi = g_hipWarpSize; break;
         case hipDeviceAttributeDirectManagedMemAccessFromHost:
             *pi = g_hipDirectManagedMemAccess; break;   // 1 -> ncclCudaHostCalloc takes the extMalloc arm
+        case hipDeviceAttributeMemoryPoolsSupported:
+            *pi = g_hipMemoryPoolsSupported; break;     // 1 -> commAlloc creates comm->memPool (NCCL 2.32 gate)
         default:
             *pi = 0; break;
     }
@@ -901,6 +914,10 @@ hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode)
 
 hipError_t hipSetDevice(int deviceId) { return g_hipSetDevice(deviceId); }
 hipError_t hipMalloc(void** p, size_t size) { return g_hipMalloc(p, size); }
+hipError_t hipMallocManaged(void** p, size_t size, unsigned int flags)
+{
+    return g_hipMallocManaged(p, size, flags);
+}
 hipError_t hipMemcpy(void* d, const void* s, size_t n, hipMemcpyKind k) { return g_hipMemcpy(d, s, n, k); }
 hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
