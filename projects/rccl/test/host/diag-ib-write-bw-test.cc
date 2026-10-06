@@ -11,7 +11,6 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -368,6 +367,7 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
   }
 
   void SetDevices(const std::vector<const char*>& devices) {
+    ASSERT_LE(devices.size(), info_.size());
     for (std::size_t r = 0; r < devices.size(); r++) {
       info_[r] = Info(("host" + std::to_string(r)).c_str(), devices[r]);
     }
@@ -572,7 +572,7 @@ TEST_F(DiagIbWriteBwMicrotest, FindPair_CrossClientAnchorsOnPreviousDeviceOfThre
   ASSERT_TRUE(FindPair(0, true, &server, &client));
   EXPECT_EQ(server, 0);
   EXPECT_EQ(client, 4);
-  comm_->rank = 3;
+  PlaceRank(3);
   ASSERT_TRUE(FindPair(0, true, &server, &client));
   EXPECT_EQ(server, 2);
   EXPECT_EQ(client, 3);
@@ -590,12 +590,13 @@ TEST_F(DiagIbWriteBwMicrotest, FindPair_BothEndsOfEveryPairAgree) {
   struct Topology {
     std::vector<std::vector<int>> nodes;
     std::vector<const char*> devices;
+    int pairedRanks[2][2];  // [phase][cross]
   };
   const std::vector<Topology> topologies = {
-      {{{0, 1, 2}, {3, 4, 5}}, {"A", "B", "C", "C", "A", "B"}},
-      {{{0, 1, 2, 3}, {4, 5, 6, 7}}, {"A", "A", "B", "C", "C", "B", "A", "A"}},
-      {{{0, 1}, {2, 3}, {4, 5}}, {"A", "B", "B", "A", "A", "C"}},
-      {{{3, 0}, {1, 4}, {2, 5}, {6, 7}}, {"A", "B", "A", "B", "A", "B", "B", "A"}},
+      {{{0, 1, 2}, {3, 4, 5}}, {"A", "B", "C", "C", "A", "B"}, {{6, 6}, {6, 6}}},
+      {{{0, 1, 2, 3}, {4, 5, 6, 7}}, {"A", "A", "B", "C", "C", "B", "A", "A"}, {{8, 6}, {8, 6}}},
+      {{{0, 1}, {2, 3}, {4, 5}}, {"A", "B", "B", "A", "A", "C"}, {{4, 4}, {2, 2}}},
+      {{{3, 0}, {1, 4}, {2, 5}, {6, 7}}, {"A", "B", "A", "B", "A", "B", "B", "A"}, {{8, 8}, {8, 8}}},
   };
   for (std::size_t t = 0; t < topologies.size(); t++) {
     BuildComm(0, topologies[t].nodes);
@@ -622,7 +623,7 @@ TEST_F(DiagIbWriteBwMicrotest, FindPair_BothEndsOfEveryPairAgree) {
           EXPECT_EQ(clients[peer], clients[r]) << r;
           pairs++;
         }
-        EXPECT_GT(pairs, 0);
+        EXPECT_EQ(pairs, topologies[t].pairedRanks[phase][cross]);
       }
     }
   }
@@ -911,6 +912,20 @@ TEST_F(DiagIbWriteBwMicrotest, BandwidthOutlier_StrictlyBeyondThirtyPercent) {
   EXPECT_FALSE(bandwidthOutlier(130, 100));
   EXPECT_TRUE(bandwidthOutlier(69.9, 100));
   EXPECT_TRUE(bandwidthOutlier(130.1, 100));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, CommUsesCrossNic_NeedsCrossNicGraphWithChannels) {
+  BuildComm(0, {{0}, {1}});
+  EXPECT_FALSE(commUsesCrossNic(comm_.get()));
+  comm_->graphs[NCCL_NUM_ALGORITHMS - 1].crossNic = 1;
+  EXPECT_FALSE(commUsesCrossNic(comm_.get()));
+  comm_->graphs[NCCL_NUM_ALGORITHMS - 1].nChannels = 1;
+  EXPECT_TRUE(commUsesCrossNic(comm_.get()));
+  comm_->graphs[NCCL_NUM_ALGORITHMS - 1].crossNic = 0;
+  comm_->graphs[0].nChannels = 1;
+  EXPECT_FALSE(commUsesCrossNic(comm_.get()));
+  comm_->graphs[0].crossNic = 1;
+  EXPECT_TRUE(commUsesCrossNic(comm_.get()));
 }
 
 TEST_F(DiagIbWriteBwMicrotest, ReportBandwidthStats_SummaryOnRankZeroWithCappedOutlierLines) {
@@ -1250,20 +1265,6 @@ TEST_F(DiagIbWriteBwMicrotest, RunSchedule_TransportFailureOnAnyVoteFails) {
     EXPECT_FALSE(RunSchedule(false, true));
     EXPECT_EQ(gathers_, failAt);
   }
-}
-
-TEST_F(DiagIbWriteBwMicrotest, CommUsesCrossNic_NeedsCrossNicGraphWithChannels) {
-  BuildComm(0, {{0}, {1}});
-  EXPECT_FALSE(commUsesCrossNic(comm_.get()));
-  comm_->graphs[NCCL_NUM_ALGORITHMS - 1].crossNic = 1;
-  EXPECT_FALSE(commUsesCrossNic(comm_.get()));
-  comm_->graphs[NCCL_NUM_ALGORITHMS - 1].nChannels = 1;
-  EXPECT_TRUE(commUsesCrossNic(comm_.get()));
-  comm_->graphs[NCCL_NUM_ALGORITHMS - 1].crossNic = 0;
-  comm_->graphs[0].nChannels = 1;
-  EXPECT_FALSE(commUsesCrossNic(comm_.get()));
-  comm_->graphs[0].crossNic = 1;
-  EXPECT_TRUE(commUsesCrossNic(comm_.get()));
 }
 
 TEST_F(DiagIbWriteBwMicrotest, Run_ReportsCoverageGapsThenSummaryWithOutlier) {

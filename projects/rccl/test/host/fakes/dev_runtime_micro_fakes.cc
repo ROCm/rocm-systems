@@ -100,6 +100,7 @@ ncclResult_t bootstrapIntraNodeAllGather(void* bs, int* ranks, int self, int siz
 
 static ncclResult_t DefaultBootstrapSend(void*, int, int, void*, int) { return ncclSuccess; }
 std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapSend = DefaultBootstrapSend;
+ASSERT_HOOK_MATCHES_PROD(g_devrBootstrapSend, bootstrapSend);
 
 ncclResult_t bootstrapSend(void* bs, int peer, int tag, void* data, int size) {
   return g_devrBootstrapSend(bs, peer, tag, data, size);
@@ -107,7 +108,6 @@ ncclResult_t bootstrapSend(void* bs, int peer, int tag, void* data, int size) {
 
 static ncclResult_t DefaultBootstrapRecv(void*, int, int, void*, int) { return ncclSuccess; }
 std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv = DefaultBootstrapRecv;
-ASSERT_HOOK_MATCHES_PROD(g_devrBootstrapSend, bootstrapSend);
 ASSERT_HOOK_MATCHES_PROD(g_devrBootstrapRecv, bootstrapRecv);
 
 ncclResult_t bootstrapRecv(void* bs, int peer, int tag, void* data, int size) {
