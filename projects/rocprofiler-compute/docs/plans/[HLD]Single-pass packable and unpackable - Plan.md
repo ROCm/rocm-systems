@@ -89,7 +89,7 @@ When packing duplicates hub counters across passes:
 2. Bind each SPP metric’s expression to a co-located pass (`PassLayout` / `pass_provenance.py`).
 3. Wire CLI (`eval_metric`) and DB (`calc_expressions` / `bind_expression_dataframe`).
 
-Without this bind, SPP layouts can produce impossible percent averages/maxes (e.g. CPC Utilization avg ≫ 100%).
+Without this bind, SPP layouts can produce incorrect percent averages/maxes (e.g. CPC Utilization avg ≫ 100%).
 
 **Primary bind code:** `pass_provenance.py`, `file_io` / `utils_analysis` shadow columns, analyze CLI+DB bind paths.
 
@@ -151,6 +151,7 @@ After SPP + SPU collectables land and verification (including blocking-ticket ch
 - Profile: drop `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC` / `ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0` escape hatches and the old heuristic allocator path once SPP is the sole default.
 - Analyze: drop `ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE` and merged-pass analyze fallbacks once same-pass bind is mandatory.
 - Dead priority-coalesce / obsolete grouping helpers that exist only for the pre-SPP layout.
+- Drop the priority-tier sort in `_iter_metric_groups`. It still consults `_same_bucket_priority_metric_ids()`. SPP ignores that sort key and orders unions largest-first.
 - Docs/tests that exercise only the legacy escape hatches.
 
 Keep cleanup gated on Phase 1 + Phase 2 (collectables) acceptance so rollback via env vars remains available during soak.
