@@ -446,6 +446,30 @@ def test_rebuild_tcc_channel_file_map(perfmon_config):
 # =============================================================================
 
 
+def test_legacy_heuristic_does_not_call_single_pass_allocator(
+    perfmon_config, monkeypatch
+):
+    """Legacy heuristic env skips try_allocate_single_pass_packable."""
+    soc = _make_soc(perfmon_config)
+    monkeypatch.setenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", "1")
+
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError("try_allocate_single_pass_packable must not be called")
+
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.try_allocate_single_pass_packable",
+        _forbidden,
+    )
+    counters = {"SQ_WAVES", "SQ_BUSY", "SQ_INSTS"}
+    with patch.object(soc, "_same_bucket_priority_metric_ids", return_value=()):
+        files, file_count, accu_count = soc._allocate_perfmon_counter_files(counters)
+
+    assert accu_count == 0
+    assert len(files) == 1
+    assert file_count == 1
+    assert set(flat_counters_in_perfmon_file(files[0])) == counters
+
+
 def test_allocate_accum_counters_cost_two_sq_slots(perfmon_config):
     """Named *_ACCUM counters (sdk accumulate()) cost two SQ slots each—no
     dedicated ACCUM files and no SQ_ACCUM_PREV_HIRES pairing reserve."""

@@ -21,6 +21,7 @@ from rocprof_compute_soc.counter_file import (
     LimitedSet as LimitedSet,
 )
 from rocprof_compute_soc.counter_grouping_single_pass import (
+    single_pass_packable_enabled_from_env,
     try_allocate_single_pass_packable,
 )
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
@@ -563,20 +564,20 @@ class OmniSoC_Base:
     ) -> tuple[list[CounterFile], int, int]:
         """Bin-pack counters into perfmon buckets.
 
-        Returns (output_files, file_count, accu_file_count).
+        Named *_ACCUM counters from rocprofiler-sdk (accumulate(BASE, HIGH_RES)
+        in sdk_config.yaml) cost two block slots alone (BASE + HIGH_RES). If
+        BASE is already in the same bucket, only +1 is charged; adding BASE
+        after its *_ACCUM charges 0. Legacy SQ_ACCUM_PREV_HIRES pairing and
+        dedicated accum buckets are not used.
 
-        Named ``*_ACCUM`` counters from rocprofiler-sdk
-        (``accumulate(BASE, HIGH_RES)`` in ``sdk_config.yaml``) cost two block
-        slots alone (BASE + HIGH_RES). If BASE is already in the same bucket,
-        only +1 is charged; adding BASE after its ``*_ACCUM`` charges 0. Legacy
-        ``SQ_ACCUM_PREV_HIRES`` pairing / dedicated accum buckets are not used.
+        The default path is single-pass-packable: every metric whose PMC set
+        fits one CounterFile gets a full-bucket collection (counters may be
+        duplicated across passes), then SPU PMCs are filled into existing
+        buckets. Set ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1 for the legacy
+        heuristic (priority coalesce, then first-fit).
 
-        **Default:** single-pass-packable — every metric whose PMC set fits one
-        ``CounterFile`` gets a full-bucket collection (counters may be duplicated
-        across passes), then SPU PMCs are filled into existing buckets.
-
-        **Legacy heuristic** (priority coalesce → first-fit):
-        set ``ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1``.
+        Returns:
+            output_files, file_count, and accu_file_count.
         """
         output_files: list[CounterFile] = []
         # Kept for call-site compatibility; dedicated accum files are gone.
@@ -585,17 +586,18 @@ class OmniSoC_Base:
         file_count = 0
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
 
-        single_pass = try_allocate_single_pass_packable(
-            self,
-            work_set,
-            self.__perfmon_config,
-            file_count_start=file_count,
-        )
-        if single_pass is not None:
-            output_files, file_count, _stats = single_pass
-            return output_files, file_count, accu_file_count
+        if single_pass_packable_enabled_from_env():
+            single_pass = try_allocate_single_pass_packable(
+                self,
+                work_set,
+                self.__perfmon_config,
+                file_count_start=file_count,
+            )
+            if single_pass is not None:
+                output_files, file_count, _stats = single_pass
+                return output_files, file_count, accu_file_count
 
-        # Legacy path: priority coalesce → first-fit.
+        # Legacy path: priority coalesce, then first-fit.
         if self._same_bucket_priority_metric_ids():
             work_set, output_files, file_count = self._metric_aware_coalesce_pass(
                 work_set, output_files, file_count

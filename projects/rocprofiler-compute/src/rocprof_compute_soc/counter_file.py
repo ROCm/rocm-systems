@@ -3,7 +3,7 @@
 
 """Perfmon bucket file types, independent of the SoC allocator."""
 
-from __future__ import annotations
+from typing import Dict, List
 
 from utils.utils_counter_defs import counter_to_block, pmc_slot_cost
 
@@ -11,7 +11,7 @@ from utils.utils_counter_defs import counter_to_block, pmc_slot_cost
 class LimitedSet:
     def __init__(self, maxsize: int) -> None:
         self.avail: int = maxsize
-        self.elements: list[str] = []
+        self.elements: List[str] = []
 
     def add(self, element: str, cost: int = 1) -> bool:
         if element in self.elements:
@@ -41,9 +41,9 @@ class LimitedSet:
 class CounterFile:
     """One perfmon pass file. Block sizes come from ``perfmon_config``."""
 
-    def __init__(self, name: str, perfmon_config: dict[str, int]) -> None:
+    def __init__(self, name: str, perfmon_config: Dict[str, int]) -> None:
         self.name: str = name
-        self.blocks: dict[str, LimitedSet] = {
+        self.blocks: Dict[str, LimitedSet] = {
             block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
         }
 
@@ -56,7 +56,7 @@ class CounterFile:
         return self.blocks[counter_to_block(counter)].reserve(n)
 
 
-def flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
+def flat_counters_in_perfmon_file(counter_file: CounterFile) -> List[str]:
     """Ordered list of PMC counter names assigned to one perfmon bucket file."""
     return [
         ctr
