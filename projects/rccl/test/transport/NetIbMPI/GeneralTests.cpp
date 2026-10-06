@@ -67,15 +67,30 @@ TEST(NetPluginSelection, NonIbAndUnknownNamesAreDistinguishable) {
     }
 }
 
+// Written out by hand, not derived from CanonicalNetName/ResolveNetPlugin:
+// the expectation must not come from the code SetUp already ran.
+static ncclNet_t* ExpectedPluginFor(const char* env) {
+    static const struct {
+        const char* env;
+        ncclNet_t* plugin;
+    } kExpected[] = {
+        {"IB", &ncclNetIb},
+        {"IB-CAST", &netIbCast},
+        {"ROCM-IB", &netIbCast},
+    };
+    for (const auto& e : kExpected) {
+        if (strcasecmp(env, e.env) == 0) return e.plugin;
+    }
+    return nullptr;
+}
+
 TEST_F(NetIbMPITest, PluginMatchesNcclNetEnv) {
     const char* env = getenv("NCCL_NET");
     ASSERT_NE(net_, nullptr);
-    if (const char* expected = CanonicalNetName(env)) {
-        EXPECT_STRCASEEQ(net_->name, expected)
-            << "NCCL_NET=" << env << " but the fixture selected " << net_->name;
-    } else {
-        EXPECT_EQ(net_, rcclUseAinic() ? &netIbCast : &ncclNetIb);
-    }
+    ncclNet_t* expected = env ? ExpectedPluginFor(env) : rcclUseAinic() ? &netIbCast : &ncclNetIb;
+    ASSERT_NE(expected, nullptr) << "NCCL_NET=" << env << " is missing from this test's table";
+    EXPECT_EQ(net_, expected) << "NCCL_NET=" << (env ? env : "<unset>") << " but the fixture selected "
+                              << net_->name << ", expected " << expected->name;
     TEST_INFO("Rank %d: NCCL_NET=%s resolved to plugin %s", MPIEnvironment::world_rank,
               env ? env : "<unset>", net_->name);
 }
