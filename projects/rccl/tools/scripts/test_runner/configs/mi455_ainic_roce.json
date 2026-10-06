@@ -6880,7 +6880,7 @@
       "env_variables": {
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_DEBUG": "INFO",
-        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_DEBUG_SUBSYS": "REG,TUNING",
         "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
