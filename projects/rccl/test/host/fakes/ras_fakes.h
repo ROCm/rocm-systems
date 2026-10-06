@@ -38,6 +38,7 @@ extern std::function<ncclResult_t(struct rasDiagnosticsContext*, const struct nc
 ncclResult_t RasTestGetNewPollEntry(int* index);
 ncclResult_t RasTestMsgAlloc(struct rasMsg** msg, size_t msgLen);
 void RasTestMsgFree(struct rasMsg* msg);
+ncclResult_t RasTestDiagnosticsContextInit(struct rasDiagnosticsContext* ctx, const struct ncclComm* comm);
 
 void ResetRasFakes();
 

@@ -44,6 +44,7 @@ uint64_t RasTestClockNano();
 #define close RasTestClose
 #define atexit RasTestAtexit
 #define clockNano RasTestClockNano
+#define rasDiagnosticsContextInit RasTestDiagnosticsContextInit
 
 namespace {
 
@@ -76,6 +77,7 @@ const char* ncclSocketToString(const union ncclSocketAddress*, char* buf, const 
 #undef close
 #undef clockNano
 #undef poll
+#undef rasDiagnosticsContextInit
 
 namespace {
 

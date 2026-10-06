@@ -74,7 +74,7 @@ ncclResult_t RasTestGetNewPollEntry(int* index) { return g_rasGetNewPollEntry(in
 ncclResult_t RasTestMsgAlloc(struct rasMsg** msg, size_t msgLen) { return g_rasMsgAlloc(msg, msgLen); }
 void RasTestMsgFree(struct rasMsg* msg) { g_rasMsgFree(msg); }
 
-ncclResult_t rasDiagnosticsContextInit(struct rasDiagnosticsContext* ctx, const struct ncclComm* comm) {
+ncclResult_t RasTestDiagnosticsContextInit(struct rasDiagnosticsContext* ctx, const struct ncclComm* comm) {
   return g_rasDiagnosticsContextInit(ctx, comm);
 }
 
