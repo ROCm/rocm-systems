@@ -15,6 +15,7 @@
 
 #include <fmt/ranges.h>
 
+#include <algorithm>
 #include <timemory/backends/process.hpp>
 #include <timemory/config.hpp>
 #include <timemory/environment/types.hpp>
@@ -223,11 +224,16 @@ void
 activate_signal_handlers(const std::vector<sys_signal>& _signals)
 {
     for(const auto& itr : _signals)
+    {
         signal_settings::enable(itr);
+    }
 
     static bool _protect     = false;
-    auto        _exit_action = [](int nsig) {
-        if(_protect) return;
+    auto const  _exit_action = [](int nsig) {
+        if(_protect)
+        {
+            return;
+        }
         _protect = true;
         TIMEMORY_PRINTF_FATAL(
             stderr, "rocprof-sys exited with signal %i :: %s\n", nsig,
@@ -248,11 +254,14 @@ activate_signal_handlers(const std::vector<sys_signal>& _signals)
         TIMEMORY_PRINTF_FATAL(
             stderr,
             "These were the last %i log entries from rocprof-sys. You can control the "
-                   "number of log entries via the '--log <N>' option or ROCPROFSYS_LOG_COUNT "
-                   "env variable.\n",
+             "number of log entries via the '--log <N>' option or ROCPROFSYS_LOG_COUNT "
+             "env variable.\n",
             num_log_entries);
 
-        if(log_ofs) log_ofs->close();
+        if(log_ofs)
+        {
+            log_ofs->close();
+        }
         log_ofs.reset();
 
         _protect = false;
@@ -284,7 +293,7 @@ main(int argc, char** argv)
 {
     argv0 = argv[0];
 
-    auto rocprofsys_root_from_env = rocprofsys::get_env<std::string>(
+    auto const rocprofsys_root_from_env = rocprofsys::get_env<std::string>(
         "rocprofiler_systems_ROOT",
         rocprofsys::get_env<std::string>(rocprofsys::env_vars::ROOT, ""));
     if(!rocprofsys_root_from_env.empty() &&
@@ -309,14 +318,16 @@ main(int argc, char** argv)
 
     auto _rocprofsys_exe_filepath = path::realpath(get_absolute_exe_filepath(argv[0]));
     if(!path::is_regular_file(absolute(_rocprofsys_exe_filepath)))
+    {
         _rocprofsys_exe_filepath =
             path::realpath(get_absolute_exe_filepath(rocprofsys_get_exe_realpath()));
+    }
     bin_search_paths.emplace_back(path::parent_path(_rocprofsys_exe_filepath));
 
     // Strip 2 levels from exe filepath <root>/bin/<exe> to reach <root>
-    auto rocprofsys_root_from_exe = path::parent_path(_rocprofsys_exe_filepath, 2);
+    auto const rocprofsys_root_from_exe = path::parent_path(_rocprofsys_exe_filepath, 2);
 
-    auto _rocprofsys_lib_path = rocprofsys_root_from_exe + "/lib";
+    auto const _rocprofsys_lib_path = rocprofsys_root_from_exe + "/lib";
     bin_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems");
     bin_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems/bin");
 
@@ -337,12 +348,12 @@ main(int argc, char** argv)
 
     const auto libs_regex =
         std::regex{ "lib(dyninstAPI|stackwalk|pcontrol|patchAPI|parseAPI|"
-                    "instructionAPI|symtabAPI|dynDwarf|common|dynElf|tbb|tbbmalloc|"
-                    "tbbmalloc_proxy|gotcha|libunwind|hsa-runtime|amdhip|"
+                    "instructionAPI|symtabAPI|dynDwarf|common|dynElf|"
+                    "gotcha|libunwind|hsa-runtime|amdhip|"
                     "amd_comgr|amd_smi|rocprofiler-register|"
                     "rocprofiler-sdk|rocprofiler-sdk-roctx)\\.(so|a)" };
 
-    auto is_instrumentation_lib = [&libs_regex](const std::string& lib_path) {
+    auto const is_instrumentation_lib = [&libs_regex](const std::string& lib_path) {
         return lib_path.find("rocprofsys") != std::string::npos ||
                lib_path.find("rocprof-sys") != std::string::npos ||
                lib_path.find("rocprofiler-systems") != std::string::npos ||
@@ -351,20 +362,22 @@ main(int argc, char** argv)
 
     for(const auto& lib_path : rocprofsys_get_link_map(nullptr))
     {
-        if(!is_instrumentation_lib(lib_path)) continue;
+        if(!is_instrumentation_lib(lib_path))
+        {
+            continue;
+        }
 
         auto lib_dir = path::parent_path(lib_path);
-        if(std::find(lib_search_paths.begin(), lib_search_paths.end(), lib_dir) ==
-           lib_search_paths.end())
+        if(std::ranges::find(lib_search_paths, lib_dir) == lib_search_paths.end())
         {
             lib_search_paths.emplace_back(std::move(lib_dir));
         }
     }
 
     // DO NOT SORT! Just remove adjacent duplicates
-    bin_search_paths.erase(std::unique(bin_search_paths.begin(), bin_search_paths.end()),
+    bin_search_paths.erase(std::ranges::unique(bin_search_paths).begin(),
                            bin_search_paths.end());
-    lib_search_paths.erase(std::unique(lib_search_paths.begin(), lib_search_paths.end()),
+    lib_search_paths.erase(std::ranges::unique(lib_search_paths).begin(),
                            lib_search_paths.end());
 
     for(const auto& itr : bin_search_paths)
@@ -404,7 +417,9 @@ main(int argc, char** argv)
     char** _cmdv = nullptr;
 
     for(int i = 0; i < argc; ++i)
+    {
         _argv[i] = nullptr;
+    }
 
     auto copy_str = [](char*& _dst, const char* _src) { _dst = strdup(_src); };
 
@@ -422,30 +437,36 @@ main(int argc, char** argv)
             int k        = 0;
             for(int j = i + 1; j < argc; ++j, ++k)
             {
-                auto _v =
+                auto const _v =
                     std::regex_replace(argv[j], std::regex{ "(.*)([ \t\n\r]+)$" }, "$1");
                 copy_str(_cmdv[k], _v.c_str());
             }
-            if(_cmdc > 0) mutname = _cmdv[0];
+            if(_cmdc > 0)
+            {
+                mutname = _cmdv[0];
+            }
             break;
         }
-        else
-        {
-            copy_str(_argv[i], argv[i]);
-        }
+
+        copy_str(_argv[i], argv[i]);
     }
 
-    auto cmd_string = [](int _ac, char** _av) -> std::string {
-        if(_ac == 0) return std::string{};
+    auto const cmd_string = [](int _ac, char** _av) -> std::string {
+        if(_ac == 0)
+        {
+            return std::string{};
+        }
         stringstream_t ss;
         for(int i = 0; i < _ac; ++i)
+        {
             ss << " " << _av[i];
+        }
         return ss.str().substr(1);
     };
 
     if(_cmdc > 0 && !mutname.empty())
     {
-        auto resolved_mutname = path::realpath(get_absolute_filepath(mutname));
+        auto const resolved_mutname = path::realpath(get_absolute_filepath(mutname));
         if(resolved_mutname != mutname)
         {
             mutname = resolved_mutname;
@@ -462,7 +483,10 @@ main(int argc, char** argv)
                   << std::endl;
     }
 
-    if(_cmdc > 0) cmdv0 = _cmdv[0];
+    if(_cmdc > 0)
+    {
+        cmdv0 = _cmdv[0];
+    }
 
     // now can loop through the options.  If the first character is '-', then we know
     // we have an option.  Check to see if it is one of our options and process it. If
@@ -482,9 +506,13 @@ main(int argc, char** argv)
         .max_count(1)
         .action([](parser_t& p) {
             if(p.get_count("v") == 0)
+            {
                 verbose_level = 1;
+            }
             else
+            {
                 verbose_level = p.get<int>("v");
+            }
         });
     parser.add_argument({ "-e", "--error" }, "All warnings produce runtime errors")
         .dtype("boolean")
@@ -494,7 +522,10 @@ main(int argc, char** argv)
         .max_count(1)
         .action([](parser_t& p) {
             debug_print = p.get<bool>("debug");
-            if(debug_print && !p.exists("verbose")) verbose_level = 256;
+            if(debug_print && !p.exists("verbose"))
+            {
+                verbose_level = 256;
+            }
         });
     parser
         .add_argument({ "--log" }, "Number of log entries to display after an error. Any "
@@ -506,8 +537,8 @@ main(int argc, char** argv)
                       "Write the log out the specified file during the run")
         .count(1)
         .action([&logfile](parser_t& p) {
-            auto _oname       = p.get<std::string>("log-file");
-            auto _cfg         = tim::settings::compose_filename_config{};
+            auto const _oname = p.get<std::string>("log-file");
+            auto       _cfg   = tim::settings::compose_filename_config{};
             _cfg.subdirectory = "instrumentation";
             logfile = tim::settings::compose_output_filename(_oname, "log", _cfg);
         });
@@ -628,7 +659,9 @@ main(int argc, char** argv)
         .action([](parser_t& p) {
             instr_mode = p.get<string_t>("mode");
             if(instr_mode == "coverage" && !p.exists("coverage"))
+            {
                 coverage_mode = CODECOV_FUNCTION;
+            }
         });
     parser
         .add_argument(
@@ -658,7 +691,9 @@ main(int argc, char** argv)
                 _cmdc      = keys.size();
                 _cmdv      = new char*[_cmdc];
                 for(int i = 0; i < _cmdc; ++i)
+                {
                     copy_str(_cmdv[i], keys.at(i).c_str());
+                }
             });
     }
 
@@ -686,9 +721,11 @@ main(int argc, char** argv)
                       "'libinstr' for 'libinstr.so' or 'libinstr.a')")
         .dtype("string")
         .action([](parser_t& p) {
-            auto _load = p.get<strvec_t>("load");
+            auto const _load = p.get<strvec_t>("load");
             for(const auto& itr : _load)
+            {
                 extra_libs.insert(itr);
+            }
         });
     parser
         .add_argument({ "--load-instr" },
@@ -697,7 +734,7 @@ main(int argc, char** argv)
         .dtype("filepath")
         .max_count(-1)
         .action([](parser_t& p) {
-            auto                              _load = p.get<strvec_t>("load-instr");
+            auto const                        _load = p.get<strvec_t>("load-instr");
             std::map<std::string, fmodset_t*> module_function_map = {
                 { "available_module_functions", &available_module_functions },
                 { "instrumented_module_functions", &instrumented_module_functions },
@@ -706,10 +743,12 @@ main(int argc, char** argv)
                 { "overlapping_module_functions", &overlapping_module_functions },
             };
             for(const auto& itr : _load)
+            {
                 load_info(itr, module_function_map, 0);
+            }
             for(const auto& itr : module_function_map)
             {
-                auto _empty = itr.second->empty();
+                auto const _empty = itr.second->empty();
                 if(!_empty)
                     verbprintf(0, "Loaded %zu module functions for %s\n",
                                itr.second->size(), itr.first.c_str());
@@ -784,7 +823,7 @@ main(int argc, char** argv)
             include_internal_linked_libs = p.get<bool>("internal-library-deps");
         });
 
-    auto _internal_libs = get_internal_basic_libs();
+    auto const _internal_libs = get_internal_basic_libs();
 
     parser
         .add_argument({ "--internal-library-append" },
@@ -793,7 +832,9 @@ main(int argc, char** argv)
                       "this library and prevent them from being instrumented.")
         .action([](parser_t& p) {
             for(const auto& itr : p.get<strvec_t>("internal-library-append"))
+            {
                 get_internal_basic_libs().emplace(itr);
+            }
         });
 
     parser
@@ -803,25 +844,33 @@ main(int argc, char** argv)
                       "these libraries to be eligible for instrumentation.")
         .choices(_internal_libs)
         .action([](parser_t& p) {
-            auto  _remove   = p.get<strset_t>("internal-library-remove");
-            auto& _internal = get_internal_basic_libs();
+            auto const _remove   = p.get<strset_t>("internal-library-remove");
+            auto&      _internal = get_internal_basic_libs();
             for(const auto& itr : _remove)
+            {
                 _internal.erase(itr);
+            }
         });
 
     auto available_linkage    = std::vector<symbol_linkage_t>{};
     auto available_visibility = std::vector<symbol_visibility_t>{};
 
     for(int i = SL_UNKNOWN; i < SL_END_V; ++i)
+    {
         available_linkage.emplace_back(static_cast<symbol_linkage_t>(i));
+    }
     for(int i = SV_UNKNOWN; i < SV_END_V; ++i)
+    {
         available_visibility.emplace_back(static_cast<symbol_visibility_t>(i));
+    }
 
-    auto _get_strvec = [](const auto& _inp) {
+    auto const _get_strvec = [](const auto& _inp) {
         auto _ret = std::vector<std::string>{};
         _ret.reserve(_inp.size());
         for(const auto& itr : _inp)
+        {
             _ret.emplace_back(std::to_string(itr));
+        }
         return _ret;
     };
 
@@ -835,12 +884,14 @@ main(int argc, char** argv)
         .choices(_get_strvec(available_linkage))
         .set_default(_get_strvec(default_enabled_linkage))
         .action([](parser_t& p) {
-            auto selected_linkage = p.get<std::set<std::string>>("linkage");
+            auto const selected_linkage = p.get<std::set<std::string>>("linkage");
             if(!selected_linkage.empty())
             {
                 enabled_linkage.clear();
                 for(const auto& itr : selected_linkage)
+                {
                     enabled_linkage.emplace(from_string<symbol_linkage_t>(itr));
+                }
             }
         });
 
@@ -855,12 +906,14 @@ main(int argc, char** argv)
         .choices(_get_strvec(available_visibility))
         .set_default(_get_strvec(default_enabled_visibility))
         .action([](parser_t& p) {
-            auto selected_visibility = p.get<std::set<std::string>>("visibility");
+            auto const selected_visibility = p.get<std::set<std::string>>("visibility");
             if(!selected_visibility.empty())
             {
                 enabled_visibility.clear();
                 for(const auto& itr : selected_visibility)
+                {
                     enabled_visibility.emplace(from_string<symbol_visibility_t>(itr));
+                }
             }
         });
 
@@ -875,20 +928,28 @@ main(int argc, char** argv)
         .choices({ "file", "line", "return", "args" })
         .dtype("string")
         .action([](parser_t& p) {
-            auto _labels = p.get<strvec_t>("label");
+            auto const _labels = p.get<strvec_t>("label");
             for(const auto& itr : _labels)
             {
                 if(std::regex_match(itr, std::regex("file", std::regex_constants::icase)))
+                {
                     use_file_info = true;
+                }
                 else if(std::regex_match(
                             itr, std::regex("return", std::regex_constants::icase)))
+                {
                     use_return_info = true;
+                }
                 else if(std::regex_match(itr,
                                          std::regex("args", std::regex_constants::icase)))
+                {
                     use_args_info = true;
+                }
                 else if(std::regex_match(itr,
                                          std::regex("line", std::regex_constants::icase)))
+                {
                     use_line_info = true;
+                }
             }
         });
     parser.add_argument()
@@ -982,13 +1043,19 @@ main(int argc, char** argv)
         .max_count(1)
         .choices({ "none", "function", "basic_block" })
         .action([](parser_t& p) {
-            auto _v = p.get<std::string>("coverage");
+            auto const _v = p.get<std::string>("coverage");
             if(_v == "function" || _v.empty())
+            {
                 coverage_mode = CODECOV_FUNCTION;
+            }
             else if(_v == "basic_block")
+            {
                 coverage_mode = CODECOV_BASIC_BLOCK;
+            }
             else
+            {
                 coverage_mode = CODECOV_NONE;
+            }
         });
     parser
         .add_argument({ "--dynamic-callsites" },
@@ -1070,8 +1137,7 @@ main(int argc, char** argv)
         .min_count(1)
         .action([](parser_t& _p) {
             auto _v = _p.get<strvec_t>("dyninst-rt");
-            std::copy(_dyn_api_rt_paths.begin(), _dyn_api_rt_paths.end(),
-                      std::back_inserter(_v));
+            std::ranges::copy(_dyn_api_rt_paths, std::back_inserter(_v));
             std::swap(_dyn_api_rt_paths, _v);
         });
     parser
@@ -1082,7 +1148,7 @@ main(int argc, char** argv)
                    "InstrStackFrames", "TrampRecursive", "MergeTramp",
                    "BaseTrampDeletion" });
 
-    auto err = parser.parse(_argc, _argv);
+    auto const err = parser.parse(_argc, _argv);
 
     if(parser.exists("h") || parser.exists("help"))
     {
@@ -1105,13 +1171,16 @@ main(int argc, char** argv)
     {
         struct rocprofsys_env_config_s
         {};
-        auto _configs = parser.get<strvec_t>("config");
+        auto const _configs = parser.get<strvec_t>("config");
         for(auto&& itr : _configs)
         {
-            auto _settings = tim::settings::push<rocprofsys_env_config_s>();
+            auto const _settings = tim::settings::push<rocprofsys_env_config_s>();
             for(auto&& iitr : *_settings)
             {
-                if(iitr.second->get_updated()) iitr.second->set_user_updated();
+                if(iitr.second->get_updated())
+                {
+                    iitr.second->set_user_updated();
+                }
             }
             _settings->read(itr);
             for(auto&& iitr : *_settings)
@@ -1135,21 +1204,21 @@ main(int argc, char** argv)
         }
     }
 
-    auto _handle_heuristics = [&parser](std::string&& _exists, std::string&& _not_exists,
-                                        auto& _field, auto _value, std::string&& _msg,
-                                        bool _cond) {
-        // if first is specified but second is not, to reduce verbosity of command-line
-        // and increase simplicity, set _field to specified value
-        if(parser.exists(_exists) && !parser.exists(_not_exists) && _cond)
-        {
-            verbprintf(3,
-                       "Option '--%s' specified but '--%s <N>' was not specified. "
-                       "Setting %s to %s...\n",
-                       _exists.c_str(), _not_exists.c_str(), _msg.c_str(),
-                       fmt::format("{}", _value).c_str());
-            _field = _value;
-        }
-    };
+    auto const _handle_heuristics =
+        [&parser](std::string&& _exists, std::string&& _not_exists, auto& _field,
+                  auto _value, std::string&& _msg, bool _cond) {
+            // if first is specified but second is not, to reduce verbosity of
+            // command-line and increase simplicity, set _field to specified value
+            if(parser.exists(_exists) && !parser.exists(_not_exists) && _cond)
+            {
+                verbprintf(3,
+                           "Option '--%s' specified but '--%s <N>' was not specified. "
+                           "Setting %s to %s...\n",
+                           _exists.c_str(), _not_exists.c_str(), _msg.c_str(),
+                           fmt::format("{}", _value).c_str());
+                _field = _value;
+            }
+        };
 
     // if instructions was specified and address range was not
     _handle_heuristics("min-instructions", "min-address-range", min_address_range, 0,
@@ -1185,17 +1254,20 @@ main(int argc, char** argv)
                        !parser.exists("min-instructions") &&
                            !parser.exists("min-address-range-loop"));
 
-    auto _rocprofsys_exe_path = path::parent_path(path::realpath("/proc/self/exe"));
+    auto const _rocprofsys_exe_path = path::parent_path(path::realpath("/proc/self/exe"));
     verbprintf(4, "rocprof-sys exe path: %s\n", _rocprofsys_exe_path.c_str());
 
     if(_cmdv && _cmdv[0] && strlen(_cmdv[0]) > 0)
     {
-        auto _is_executable = rocprofsys_get_is_executable(_cmdv[0], binary_rewrite);
-        const std::string cmdv_base      = path::filename(_cmdv[0]);
-        auto              has_lib_suffix = cmdv_base.length() > 3 &&
-                              (cmdv_base.find(".so.") != std::string::npos ||
-                               cmdv_base.ends_with(".so") || cmdv_base.ends_with(".a"));
-        auto has_lib_prefix = cmdv_base.length() > 3 && cmdv_base.starts_with("lib");
+        auto const _is_executable =
+            rocprofsys_get_is_executable(_cmdv[0], binary_rewrite);
+        const std::string cmdv_base = path::filename(_cmdv[0]);
+        auto const        has_lib_suffix =
+            cmdv_base.length() > 3 &&
+            (cmdv_base.find(".so.") != std::string::npos || cmdv_base.ends_with(".so") ||
+             cmdv_base.ends_with(".a"));
+        auto const has_lib_prefix =
+            cmdv_base.length() > 3 && cmdv_base.starts_with("lib");
         if(!force_config && !_is_executable && !binary_rewrite &&
            (has_lib_prefix || has_lib_suffix))
         {
@@ -1240,13 +1312,13 @@ main(int argc, char** argv)
 
     if(binary_rewrite && outfile.empty())
     {
-        auto _is_local = (path::realpath(cmdv0) ==
-                          fmt::format("{}/{}", get_cwd(), path::filename(cmdv0)));
-        auto _cmd      = path::filename(cmdv0);
+        auto const _is_local = (path::realpath(cmdv0) ==
+                                fmt::format("{}/{}", get_cwd(), path::filename(cmdv0)));
+        auto const _cmd      = path::filename(cmdv0);
         if(_cmd.find('.') == std::string::npos)
         {
             // there is no extension, assume it is an exe
-            outfile = (_is_local) ? _cmd + ".inst" : _cmd;
+            outfile = _is_local ? _cmd + ".inst" : _cmd;
         }
         else if(_cmd.starts_with("lib") || _cmd.find(".so") != std::string::npos ||
                 _cmd.ends_with(".a"))
@@ -1254,11 +1326,11 @@ main(int argc, char** argv)
             // if it starts with lib, ends with .a, or contains .so (e.g. libfoo.so,
             // libfoo.so.2), assume it is a library and retain the name but put it in a
             // different directory
-            outfile = (_is_local) ? "instrumented/" + _cmd : _cmd;
+            outfile = _is_local ? "instrumented/" + _cmd : _cmd;
         }
         else
         {
-            outfile = (_is_local) ? _cmd + ".inst" : _cmd;
+            outfile = _is_local ? _cmd + ".inst" : _cmd;
         }
         verbprintf(0,
                    "Binary rewrite was activated via '-o' but no filename was provided. "
@@ -1304,7 +1376,9 @@ main(int argc, char** argv)
                 fmt::format(R"(Adding regular expression "{}" to regex_array@{})",
                             regex_expr, fmt::ptr(&regex_array)));
             if(!regex_expr.empty())
+            {
                 regex_array.emplace_back(std::regex(regex_expr, regex_opts));
+            }
         };
 
         add_regex(func_include,
@@ -1334,13 +1408,15 @@ main(int argc, char** argv)
                       rocprofsys::env_vars::REGEX_INSTRUCTION_EXCLUDE, ""));
 
         //  Helper function for parsing the regex options
-        auto _parse_regex_option = [&parser, &add_regex](const string_t& _option,
-                                                         regexvec_t&     _regex_vec) {
+        auto const _parse_regex_option = [&parser, &add_regex](const string_t& _option,
+                                                               regexvec_t& _regex_vec) {
             if(parser.exists(_option))
             {
-                auto keys = parser.get<strvec_t>(_option);
+                auto const keys = parser.get<strvec_t>(_option);
                 for(const auto& itr : keys)
+                {
                     add_regex(_regex_vec, itr);
+                }
             }
         };
 
@@ -1377,8 +1453,8 @@ main(int argc, char** argv)
         dyninst_verb = 0;
     }
 
-    auto get_dyninst_option = [&](const std::string& _opt) {
-        const bool _ret = dyninst_defs.find(_opt) != dyninst_defs.end();
+    auto const get_dyninst_option = [&](const std::string& _opt) {
+        const bool _ret = dyninst_defs.contains(_opt);
         verbprintf(dyninst_verb, "[dyninst-option]> %-20s = %4s\n", _opt.c_str(),
                    (_ret) ? "on" : "off");
         return _ret;
@@ -1424,13 +1500,15 @@ main(int argc, char** argv)
     verbprintf(1, "instrumentation target: %s\n", mutname.c_str());
 
     // did we load a library?  if not, load the default
-    auto generate_libnames = [](auto& _targ, const auto& _base,
-                                const std::set<string_t>& _ext) {
+    auto const generate_libnames = [](auto& _targ, const auto& _base,
+                                      const std::set<string_t>& _ext) {
         for(const auto& bitr : _base)
+        {
             for(const auto& eitr : _ext)
             {
                 _targ.emplace_back(bitr + eitr);
             }
+        }
     };
 
     generate_libnames(libname, inputlib, { "" });
@@ -1448,13 +1526,15 @@ main(int argc, char** argv)
     //----------------------------------------------------------------------------------//
 
     // prioritize the user environment arguments
-    auto instr_mode_v =
+    auto const instr_mode_v =
         binary_rewrite ? InstrumentMode::binary_rewrite : InstrumentMode::process_create;
     auto instr_mode_v_int = static_cast<int>(instr_mode_v);
     auto env_vars         = parser.get<strvec_t>("env");
     env_vars.reserve(env_vars.size() + env_config_variables.size());
     for(auto&& itr : env_config_variables)
+    {
         env_vars.emplace_back(itr);
+    }
     env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::MODE, instr_mode));
     env_vars.emplace_back(
         fmt::format("{}={}", rocprofsys::env_vars::INSTRUMENT_MODE, instr_mode_v_int));
@@ -1480,8 +1560,8 @@ main(int argc, char** argv)
                   rocprofsys::utility::demangle<process_t*>().c_str());
     }
 
-    auto _rewrite = (dynamic_cast<binary_edit_t*>(addr_space) != nullptr &&
-                     dynamic_cast<process_t*>(addr_space) == nullptr);
+    auto const _rewrite = (dynamic_cast<binary_edit_t*>(addr_space) != nullptr &&
+                           dynamic_cast<process_t*>(addr_space) == nullptr);
     if(_rewrite != binary_rewrite)
     {
         errprintf(-1, "binary rewrite was %s but has been deduced to be %s\n",
@@ -1534,14 +1614,20 @@ main(int argc, char** argv)
     //----------------------------------------------------------------------------------//
     std::set<std::string> module_names = {};
 
-    static auto _insert_module_function = [](fmodset_t& _module_funcs, auto _v) {
-        if(!fixed_module_functions.at(&_module_funcs)) _module_funcs.emplace(_v);
+    static auto const _insert_module_function = [](fmodset_t& _module_funcs, auto _v) {
+        if(!fixed_module_functions.at(&_module_funcs))
+        {
+            _module_funcs.emplace(_v);
+        }
     };
 
-    auto _add_overlapping = [](module_t* mitr, procedure_t* pitr) {
+    auto const _add_overlapping = [](module_t* mitr, procedure_t* pitr) {
         ROCPROFSYS_ADD_LOG_ENTRY("Checking if procedure", get_name(pitr), "in module",
                                  get_name(mitr), "is overlapping");
-        if(!pitr->isInstrumentable()) return;
+        if(!pitr->isInstrumentable())
+        {
+            return;
+        }
         std::vector<procedure_t*> _overlapping{};
         if(pitr->findOverlapping(_overlapping))
         {
@@ -1551,7 +1637,10 @@ main(int argc, char** argv)
                                     module_function{ mitr, pitr });
             for(auto* oitr : _overlapping)
             {
-                if(!oitr->isInstrumentable()) continue;
+                if(!oitr->isInstrumentable())
+                {
+                    continue;
+                }
                 _insert_module_function(overlapping_module_functions,
                                         module_function{ oitr->getModule(), oitr });
             }
@@ -1566,7 +1655,9 @@ main(int argc, char** argv)
             {
                 functions.emplace(itr);
                 if(itr->getModule()->getObject())
+                {
                     objects.emplace(itr->getModule()->getObject());
+                }
             }
         }
         verbprintf(2, "Adding %zu procedures found in the app image...\n",
@@ -1575,8 +1666,8 @@ main(int argc, char** argv)
         {
             if(itr->isInstrumentable() || (simulate && include_uninstr))
             {
-                module_t* mod    = itr->getModule();
-                auto      _modfn = module_function{ mod, itr };
+                module_t*  mod    = itr->getModule();
+                auto const _modfn = module_function{ mod, itr };
                 module_names.insert(_modfn.module_name);
                 _insert_module_function(available_module_functions, _modfn);
                 _add_overlapping(mod, itr);
@@ -1596,12 +1687,14 @@ main(int argc, char** argv)
     {
         module_function::reset_width();
         for(const auto& itr : available_module_functions)
+        {
             module_function::update_width(itr);
+        }
 
-        auto mwid = module_function::get_width().at(0);
-        mwid      = std::max<size_t>(mwid, 15);
-        mwid      = std::min<size_t>(mwid, 90);
-        auto ncol = 180 / std::min<size_t>(mwid, 180);
+        auto mwid       = module_function::get_width().at(0);
+        mwid            = std::max<size_t>(mwid, 15);
+        mwid            = std::min<size_t>(mwid, 90);
+        auto const ncol = 180 / std::min<size_t>(mwid, 180);
         std::cout << "### MODULES ###\n| ";
         for(size_t i = 0; i < module_names.size(); ++i)
         {
@@ -1610,11 +1703,14 @@ main(int argc, char** argv)
             std::string _v = *itr;
             if(_v.length() >= mwid)
             {
-                auto _resume = _v.length() - mwid + 15;
-                _v           = _v.substr(0, 12) + "..." + _v.substr(_resume);
+                auto const _resume = _v.length() - mwid + 15;
+                _v                 = _v.substr(0, 12) + "..." + _v.substr(_resume);
             }
             std::cout << std::setw(mwid) << _v << " | ";
-            if(i % ncol == ncol - 1) std::cout << "\n| ";
+            if(i % ncol == ncol - 1)
+            {
+                std::cout << "\n| ";
+            }
         }
         std::cout << '\n' << std::endl;
     }
@@ -1642,9 +1738,13 @@ main(int argc, char** argv)
     ROCPROFSYS_ADD_LOG_ENTRY("address space is", (is_static_exe) ? "" : "not",
                              "a static executable");
     if(binary_rewrite)
+    {
         app_binary = static_cast<BPatch_binaryEdit*>(addr_space);
+    }
     else
+    {
         app_thread = static_cast<BPatch_process*>(addr_space);
+    }
 
     if(!app_binary && !app_thread)
     {
@@ -1658,7 +1758,7 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    auto load_library = [addr_space](const std::vector<string_t>& _libnames) {
+    auto const load_library = [addr_space](const std::vector<string_t>& _libnames) {
         bool result = false;
         // track the tried library names
         string_t _tried_libs;
@@ -1688,9 +1788,9 @@ main(int argc, char** argv)
         }
     };
 
-    auto get_library_ext = [=](const std::vector<string_t>& linput) {
-        auto lnames           = linput;
-        auto _get_library_ext = [](string_t lname) {
+    auto const get_library_ext = [=](const std::vector<string_t>& linput) {
+        auto       lnames           = linput;
+        auto const _get_library_ext = [](string_t lname) {
             if(lname.find(".so") != string_t::npos || lname.ends_with(".a"))
             {
                 return lname;
@@ -1700,10 +1800,8 @@ main(int argc, char** argv)
                 return (lname +
                         ((prefer_library == "static" || is_static_exe) ? ".a" : ".so"));
             }
-            else
-            {
-                return (lname + ((is_static_exe) ? ".a" : ".so"));
-            }
+
+            return lname + (is_static_exe ? ".a" : ".so");
         };
         for(auto& lname : lnames)
         {
@@ -1741,10 +1839,15 @@ main(int argc, char** argv)
     // symbol that has the same start address, allowing Dyninst to latch onto that.
     // However, if problems persist, users should specify their main with
     // "--main-function"
-    if(!main_func) main_func = find_function(filtered_modules, main_fname);
+    if(!main_func)
+    {
+        main_func = find_function(filtered_modules, main_fname);
+    }
 
     if(!main_func && main_fname == "main")
+    {
         main_func = find_function(filtered_modules, "_main");
+    }
 
 #if ROCPROFSYS_USE_MPI > 0 || ROCPROFSYS_USE_MPI_HEADERS > 0
     // if any of the below MPI functions are found, enable MPI support
@@ -1759,7 +1862,7 @@ main(int argc, char** argv)
             use_mpi = true;
             break;
         }
-        else if(find_undefined_function_symbol(objects, itr) != nullptr)
+        if(find_undefined_function_symbol(objects, itr) != nullptr)
         {
             verbprintf(0,
                        "Found undefined symbol '%s' in '%s'. Enabling MPI support...\n",
@@ -1779,7 +1882,9 @@ main(int argc, char** argv)
     load_library(get_library_ext(libname));
 
     for(const auto& itr : extra_libs)
+    {
         load_library(get_library_ext({ itr }));
+    }
 
     // Refresh objects after loading libraries, track newly added ones
     auto new_objects = std::vector<object_t*>{};
@@ -1821,12 +1926,15 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    auto add_instr_library = [&](const string_t& _name, const string_t& _beg,
-                                 const string_t& _end) {
+    auto const add_instr_library = [&](const string_t& _name, const string_t& _beg,
+                                       const string_t& _end) {
         verbprintf(3,
                    "Attempting to find instrumentation for '%s' via '%s' and '%s'...\n",
                    _name.c_str(), _beg.c_str(), _end.c_str());
-        if(_beg.empty() || _end.empty()) return false;
+        if(_beg.empty() || _end.empty())
+        {
+            return false;
+        }
         auto* _beg_func = find_function(new_objects, _beg);
         auto* _end_func = find_function(new_objects, _end);
         if(_beg_func && _end_func)
@@ -1852,14 +1960,24 @@ main(int argc, char** argv)
     {
         string_t _name = path::filename(itr);
         size_t   _pos  = _name.find('.');
-        if(_pos != npos_v) _name = _name.substr(0, _pos);
+        if(_pos != npos_v)
+        {
+            _name = _name.substr(0, _pos);
+        }
         _pos = _name.find("librocprof-sys-");
         if(_pos != npos_v)
+        {
             _name = _name.erase(_pos, std::string("librocprof-sys-").length());
+        }
         _pos = _name.find("lib");
-        if(_pos == 0) _name = _name.substr(_pos + std::string("lib").length());
+        if(_pos == 0)
+        {
+            _name = _name.substr(_pos + std::string("lib").length());
+        }
         while((_pos = _name.find('-')) != npos_v)
+        {
             _name.replace(_pos, 1, "_");
+        }
 
         verbprintf(2,
                    "Supplemental instrumentation library '%s' is named '%s' after "
@@ -1872,7 +1990,7 @@ main(int argc, char** argv)
         string_t best_init_name = {};
         for(const auto& sitr : init_stub_names)
         {
-            if(sitr.find(_name) != npos_v && used_stub_names.count(sitr) == 0)
+            if(sitr.find(_name) != npos_v && !used_stub_names.contains(sitr))
             {
                 verbprintf(
                     3, "Found possible match for '%s' instrumentation init: '%s'...\n",
@@ -1885,7 +2003,7 @@ main(int argc, char** argv)
         string_t base_fini_name = {};
         for(const auto& sitr : fini_stub_names)
         {
-            if(sitr.find(_name) != npos_v && used_stub_names.count(sitr) == 0)
+            if(sitr.find(_name) != npos_v && !used_stub_names.contains(sitr))
             {
                 verbprintf(
                     3, "Found possible match for '%s' instrumentation fini: '%s'...\n",
@@ -1895,24 +2013,37 @@ main(int argc, char** argv)
             }
         }
 
-        if(add_instr_library(_name, best_init_name, base_fini_name)) continue;
+        if(add_instr_library(_name, best_init_name, base_fini_name))
+        {
+            continue;
+        }
 
         // check user-specified signatures first
         for(const auto& bitr : init_stub_names)
         {
-            if(used_stub_names.find(bitr) != used_stub_names.end()) continue;
+            if(used_stub_names.contains(bitr))
+            {
+                continue;
+            }
             for(const auto& fitr : fini_stub_names)
             {
-                if(used_stub_names.find(fitr) != used_stub_names.end()) continue;
+                if(used_stub_names.contains(fitr))
+                {
+                    continue;
+                }
                 if(add_instr_library(_name, bitr, fitr))
+                {
                     goto found_instr_functions;  // exit loop after match
+                }
             }
         }
 
         // check standard function signature if no user-specified matches
         if(add_instr_library(_name, "rocprofsys_register_" + _name,
                              "rocprofsys_deregister_" + _name))
+        {
             continue;
+        }
 
     found_instr_functions:
         continue;
@@ -1953,8 +2084,8 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    std::vector<point_t*>* main_entr_points = nullptr;
-    std::vector<point_t*>* main_exit_points = nullptr;
+    std::vector<point_t*>*       main_entr_points = nullptr;
+    std::vector<point_t*> const* main_exit_points = nullptr;
 
     if(main_func)
     {
@@ -1983,12 +2114,18 @@ main(int argc, char** argv)
     {
         verbprintf(2, "Getting main function signature...\n");
         main_sign = get_func_file_line_info(main_func->getModule(), main_func);
-        if(main_sign.m_params == "()") main_sign.m_params = "(int argc, char** argv)";
+        if(main_sign.m_params == "()")
+        {
+            main_sign.m_params = "(int argc, char** argv)";
+        }
     }
 
     verbprintf(2, "Getting call expressions... ");
 
-    if(main_func) main_sign.get();
+    if(main_func)
+    {
+        main_sign.get();
+    }
 
     auto init_call_args = rocprofsys_call_expr(instr_mode, binary_rewrite, "");
     auto fini_call_args = rocprofsys_call_expr();
@@ -1999,10 +2136,10 @@ main(int argc, char** argv)
     verbprintf(2, "Done\n");
     verbprintf(2, "Getting call snippets... ");
 
-    auto init_call      = init_call_args.get(init_func);
-    auto fini_call      = fini_call_args.get(fini_func);
-    auto umpi_call      = umpi_call_args.get(mpi_func);
-    auto set_instr_call = set_instr_args.get(set_instr_func);
+    auto const init_call      = init_call_args.get(init_func);
+    auto const fini_call      = fini_call_args.get(fini_func);
+    auto const umpi_call      = umpi_call_args.get(mpi_func);
+    auto const set_instr_call = set_instr_args.get(set_instr_func);
 
     verbprintf(2, "Done\n");
 
@@ -2018,34 +2155,48 @@ main(int argc, char** argv)
     std::string _libname = {};
     for(auto&& itr : sharedlibname)
     {
-        if(_libname.empty()) _libname = get_absolute_lib_filepath(itr);
+        if(_libname.empty())
+        {
+            _libname = get_absolute_lib_filepath(itr);
+        }
     }
     for(auto&& itr : staticlibname)
     {
-        if(_libname.empty()) _libname = get_absolute_lib_filepath(itr);
+        if(_libname.empty())
+        {
+            _libname = get_absolute_lib_filepath(itr);
+        }
     }
-    if(_libname.empty()) _libname = "librocprof-sys-dl.so";
+    if(_libname.empty())
+    {
+        _libname = "librocprof-sys-dl.so";
+    }
 
-    if(!binary_rewrite) env_vars.clear();
+    if(!binary_rewrite)
+    {
+        env_vars.clear();
+    }
 
     env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::USE_MPIP,
                                       (binary_rewrite && use_mpi) ? "ON" : "OFF"));
     if(use_mpi)
+    {
         env_vars.emplace_back(fmt::format("{}=ON", rocprofsys::env_vars::USE_PID));
+    }
 
     env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::SCRIPT_PATH,
                                       _rocprofsys_internal_libexec_path));
 
-    for(auto& itr : env_vars)
+    for(auto const& itr : env_vars)
     {
-        auto _pos = itr.find('=');
+        auto const _pos = itr.find('=');
         if(_pos == std::string::npos)
         {
             errprintf(0, "environment variable %s not in form VARIABLE=VALUE\n",
                       itr.c_str());
         }
-        auto _var = itr.substr(0, _pos);
-        auto _val = itr.substr(_pos + 1);
+        auto const _var = itr.substr(0, _pos);
+        auto const _val = itr.substr(_pos + 1);
         rocprofsys::set_env(_var.c_str(), _val, 0);
         auto _expr = rocprofsys_call_expr(_var, _val);
         env_variables.emplace_back(_expr.get(env_func));
@@ -2065,7 +2216,10 @@ main(int argc, char** argv)
 
     for(const auto& itr : env_variables)
     {
-        if(itr) init_names.emplace_back(itr.get());
+        if(itr)
+        {
+            init_names.emplace_back(itr.get());
+        }
     }
 
     for(const auto& itr : beg_expr)
@@ -2081,12 +2235,26 @@ main(int argc, char** argv)
         }
     }
 
-    if(umpi_call) init_names.emplace_back(umpi_call.get());
-    if(!binary_rewrite && init_call) init_names.emplace_back(init_call.get());
+    if(umpi_call)
+    {
+        init_names.emplace_back(umpi_call.get());
+    }
+    if(!binary_rewrite && init_call)
+    {
+        init_names.emplace_back(init_call.get());
+    }
 
     for(const auto& itr : end_expr)
-        if(itr.second) fini_names.emplace_back(itr.second.get());
-    if(fini_call) fini_names.emplace_back(fini_call.get());
+    {
+        if(itr.second)
+        {
+            fini_names.emplace_back(itr.second.get());
+        }
+    }
+    if(fini_call)
+    {
+        fini_names.emplace_back(fini_call.get());
+    }
 
     //----------------------------------------------------------------------------------//
     //
@@ -2109,18 +2277,24 @@ main(int argc, char** argv)
             if(coverage_mode != CODECOV_NONE)
             {
                 if(itr.should_coverage_instrument())
+                {
                     _insert_module_function(coverage_module_functions, itr);
+                }
             }
             if(itr.is_overlapping())
+            {
                 _insert_module_function(overlapping_module_functions, itr);
+            }
         }
     }
     else
     {
         // in sampling mode, we instrument either main or add init and fini callbacks
         if(main_func)
+        {
             _insert_module_function(instrumented_module_functions,
                                     module_function{ main_func->getModule(), main_func });
+        }
 
         for(const auto& itr : available_module_functions)
         {
@@ -2128,10 +2302,14 @@ main(int argc, char** argv)
             if(coverage_mode != CODECOV_NONE)
             {
                 if(itr.should_coverage_instrument())
+                {
                     _insert_module_function(coverage_module_functions, itr);
+                }
             }
             if(itr.is_overlapping())
+            {
                 _insert_module_function(overlapping_module_functions, itr);
+            }
         }
     }
 
@@ -2171,7 +2349,10 @@ main(int argc, char** argv)
             size_t _ninits = 0;
             for(auto* itr : _objs)
             {
-                if(itr->name().find("librocprof-sys") != std::string::npos) continue;
+                if(itr->name().find("librocprof-sys") != std::string::npos)
+                {
+                    continue;
+                }
                 try
                 {
                     verbprintf(2, "Adding main init callbacks (via %s)...\n",
@@ -2191,11 +2372,17 @@ main(int argc, char** argv)
 
         if(binary_rewrite)
         {
-            if(!_insert_init_callbacks()) _insert_init_snippets();
+            if(!_insert_init_callbacks())
+            {
+                _insert_init_snippets();
+            }
         }
         else
         {
-            if(!_insert_init_snippets()) _insert_init_callbacks();
+            if(!_insert_init_snippets())
+            {
+                _insert_init_callbacks();
+            }
         }
     }
 
@@ -2209,7 +2396,10 @@ main(int argc, char** argv)
     {
         for(auto* itr : _objs)
         {
-            if(itr->name().find("librocprof-sys") != std::string::npos) continue;
+            if(itr->name().find("librocprof-sys") != std::string::npos)
+            {
+                continue;
+            }
             try
             {
                 itr->insertFiniCallback(_fini_sequence);
@@ -2232,12 +2422,13 @@ main(int argc, char** argv)
     }
 
     verbprintf(2, "Beginning instrumentation loop...\n");
-    auto _report_info = [](int _lvl, const string_t& _action, const string_t& _type,
-                           const string_t& _reason, const string_t& _name,
-                           const std::string& _extra = {}) {
+    auto const _report_info = [](int _lvl, const string_t& _action, const string_t& _type,
+                                 const string_t& _reason, const string_t& _name,
+                                 const std::string& _extra = {}) {
         static std::map<std::string, strset_t> already_reported{};
-        auto _key = fmt::format("{}_{}_{}_{}_{}", _type, _action, _reason, _name, _extra);
-        if(already_reported[_key].count(_name) == 0)
+        auto const                             _key =
+            fmt::format("{}_{}_{}_{}_{}", _type, _action, _reason, _name, _extra);
+        if(!already_reported[_key].contains(_name))
         {
             verbprintf(_lvl, "[%s][%s] %s :: '%s'", _type.c_str(), _action.c_str(),
                        _reason.c_str(), _name.c_str());
@@ -2253,22 +2444,30 @@ main(int argc, char** argv)
         const int _pass_verbose_lvl = 0;
         for(const auto& itr : instrumented_module_functions)
         {
-            if(itr.function == main_func) continue;
-            auto _count = itr(addr_space, entr_trace, entr_trace_args, exit_trace);
+            if(itr.function == main_func)
+            {
+                continue;
+            }
+            auto const _count = itr(addr_space, entr_trace, entr_trace_args, exit_trace);
             _pass_info[itr.module_name].first += _count.first;
             _pass_info[itr.module_name].second += _count.second;
 
             for(const auto& mitr : itr.messages)
+            {
                 _report_info(std::get<0>(mitr), std::get<1>(mitr), std::get<2>(mitr),
                              std::get<3>(mitr), std::get<4>(mitr));
+            }
         }
 
         // report the trace instrumented functions
-        for(auto& itr : _pass_info)
+        for(auto const& itr : _pass_info)
         {
             auto _valid = (verbose_level >= _pass_verbose_lvl ||
                            (itr.second.first + itr.second.second) > 0);
-            if(!_valid) continue;
+            if(!_valid)
+            {
+                continue;
+            }
             verbprintf(_pass_verbose_lvl, "%4zu instrumented funcs in %s\n",
                        itr.second.first, itr.first.c_str());
             _valid = (loop_level_instr &&
@@ -2287,23 +2486,31 @@ main(int argc, char** argv)
         const int                                        _covr_verbose_lvl = 1;
         for(const auto& itr : coverage_module_functions)
         {
-            if(itr.function == main_func) continue;
+            if(itr.function == main_func)
+            {
+                continue;
+            }
             itr.register_source(addr_space, reg_src_func, *main_entr_points);
-            auto _count = itr.register_coverage(addr_space, reg_cov_func);
+            auto const _count = itr.register_coverage(addr_space, reg_cov_func);
             _covr_info[itr.module_name].first += _count.first;
             _covr_info[itr.module_name].second += _count.second;
 
             for(const auto& mitr : itr.messages)
+            {
                 _report_info(std::get<0>(mitr), std::get<1>(mitr), std::get<2>(mitr),
                              std::get<3>(mitr), std::get<4>(mitr));
+            }
         }
 
         // report the coverage instrumented functions
-        for(auto& itr : _covr_info)
+        for(auto const& itr : _covr_info)
         {
-            auto _valid = (verbose_level > _covr_verbose_lvl ||
-                           (itr.second.first + itr.second.second) > 0);
-            if(!_valid) continue;
+            auto const _valid = (verbose_level > _covr_verbose_lvl ||
+                                 (itr.second.first + itr.second.second) > 0);
+            if(!_valid)
+            {
+                continue;
+            }
             switch(coverage_mode)
             {
                 case CODECOV_NONE:
@@ -2334,9 +2541,8 @@ main(int argc, char** argv)
         const bool success  = addr_space->finalizeInsertionSet(true, &modified);
         if(!success)
         {
-            verbprintf(
-                1,
-                "Using insertion set failed. Restarting with individual insertion...\n");
+            verbprintf(1, "Using insertion set failed. Restarting with individual "
+                          "insertion...\n");
             auto _execute_batch = [&addr_space, &entr_trace, &entr_trace_args,
                                    &exit_trace](size_t _beg, size_t _end) {
                 verbprintf(1, "Instrumenting batch of functions [%lu, %lu)\n",
@@ -2345,22 +2551,24 @@ main(int argc, char** argv)
                 auto itr = instrumented_module_functions.begin();
                 std::advance(itr, _beg);
                 for(size_t i = _beg; i < _end; ++i, ++itr)
+                {
                     (*itr)(addr_space, entr_trace, entr_trace_args, exit_trace);
+                }
                 bool       _modified = true;
                 const bool _success  = addr_space->finalizeInsertionSet(true, &_modified);
                 return _success;
             };
 
-            auto execute_batch = [&_execute_batch, &addr_space, &entr_trace,
-                                  &entr_trace_args, &exit_trace](size_t _beg) {
+            auto const execute_batch = [&_execute_batch, &addr_space, &entr_trace,
+                                        &entr_trace_args, &exit_trace](size_t _beg) {
                 if(!_execute_batch(_beg, _beg + batch_size))
                 {
                     verbprintf(1,
                                "Batch instrumentation of functions [%lu, %lu) failed. "
                                "Beginning non-batched instrumentation for this set\n",
                                (unsigned long) _beg, (unsigned long) _beg + batch_size);
-                    auto itr  = instrumented_module_functions.begin();
-                    auto _end = instrumented_module_functions.end();
+                    auto       itr  = instrumented_module_functions.begin();
+                    auto const _end = instrumented_module_functions.end();
                     std::advance(itr, _beg);
                     for(size_t i = _beg; i < _beg + batch_size && itr != _end; ++i, ++itr)
                     {
@@ -2394,18 +2602,20 @@ main(int argc, char** argv)
         dump_info("excluded", excluded_module_functions, 0, werror,
                   "excluded_module_functions", print_formats);
         if(coverage_mode != CODECOV_NONE)
+        {
             dump_info("coverage", coverage_module_functions, 0, werror,
                       "coverage_module_functions", print_formats);
+        }
         dump_info("overlapping", overlapping_module_functions, 0, werror,
                   "overlapping_module_functions", print_formats);
     }
 
-    auto _dump_info = [](const std::string& _label, const string_t& _mode,
-                         const fmodset_t& _modset) {
+    auto const _dump_info = [](const std::string& _label, const string_t& _mode,
+                               const fmodset_t& _modset) {
         std::map<std::string, std::vector<std::string>>                  _data{};
         std::unordered_map<std::string, std::unordered_set<std::string>> _dups{};
-        auto _insert = [&](const std::string& _m, const std::string& _v) {
-            if(_dups[_m].find(_v) == _dups[_m].end())
+        auto const _insert = [&](const std::string& _m, const std::string& _v) {
+            if(!_dups[_m].contains(_v))
             {
                 _dups[_m].emplace(_v);
                 _data[_m].emplace_back(_v);
@@ -2414,19 +2624,25 @@ main(int argc, char** argv)
         if(_mode == "modules")
         {
             for(const auto& itr : _modset)
+            {
                 _insert(itr.module_name, fmt::format("[{}]", itr.module_name));
+            }
         }
         else if(_mode == "functions")
         {
             for(const auto& itr : _modset)
+            {
                 _insert(itr.module_name,
                         fmt::format("[{}][{}]", itr.function_name, itr.num_instructions));
+            }
         }
         else if(_mode == "functions+")
         {
             for(const auto& itr : _modset)
+            {
                 _insert(itr.module_name, fmt::format("[{}][{}]", itr.signature.get(),
                                                      itr.num_instructions));
+            }
         }
         else if(_mode == "pair")
         {
@@ -2453,9 +2669,11 @@ main(int argc, char** argv)
         for(auto& mitr : _data)
         {
             if(_mode != "modules" && _mode != "pair" && _mode != "pair+")
+            {
                 std::cout << "\n[" << _label << "] " << mitr.first << ":\n";
-            std::sort(mitr.second.begin(), mitr.second.end());
-            for(auto& itr : mitr.second)
+            }
+            std::ranges::sort(mitr.second);
+            for(auto const& itr : mitr.second)
             {
                 std::cout << "[" << _label << "]    " << itr << "\n";
             }
@@ -2464,24 +2682,40 @@ main(int argc, char** argv)
 
     // Print to stdout, inexpensive time-wise
     if(!print_available.empty())
+    {
         _dump_info("available", print_available, available_module_functions);
+    }
     if(!print_instrumented.empty())
+    {
         _dump_info("instrumented", print_instrumented, instrumented_module_functions);
+    }
     if(!print_excluded.empty())
+    {
         _dump_info("excluded", print_excluded, excluded_module_functions);
+    }
     if(!print_coverage.empty())
+    {
         _dump_info("coverage", print_coverage, coverage_module_functions);
+    }
     if(!print_overlapping.empty())
+    {
         _dump_info("overlapping", print_overlapping, overlapping_module_functions);
+    }
 
-    if(simulate) exit(EXIT_SUCCESS);
+    if(simulate)
+    {
+        exit(EXIT_SUCCESS);
+    }
 
     //----------------------------------------------------------------------------------//
     //
     //  Either write the instrumented binary or execute the application
     //
     //----------------------------------------------------------------------------------//
-    if(binary_rewrite) addr_space->finalizeInsertionSet(false, nullptr);
+    if(binary_rewrite)
+    {
+        addr_space->finalizeInsertionSet(false, nullptr);
+    }
 
     int code = -1;
     if(binary_rewrite)
@@ -2500,7 +2734,7 @@ main(int argc, char** argv)
         }
 
         const bool success = app_binary->writeFile(outfile.c_str());
-        code               = (success) ? EXIT_SUCCESS : EXIT_FAILURE;
+        code               = success ? EXIT_SUCCESS : EXIT_FAILURE;
         if(success)
         {
             verbprintf(0, "\n");
@@ -2525,13 +2759,18 @@ main(int argc, char** argv)
             auto cmdv_envp = std::array<char*, 2>{};
             cmdv_envp.fill(nullptr);
             cmdv_envp.at(0) = strdup("LD_TRACE_LOADED_OBJECTS=1");
-            auto ldd        = tim::popen::popen(cmdv0.c_str(), nullptr, cmdv_envp.data());
-            auto linked_libs = tim::popen::read_ldd_fork(ldd);
-            auto perr        = tim::popen::pclose(ldd);
+            auto       ldd  = tim::popen::popen(cmdv0.c_str(), nullptr, cmdv_envp.data());
+            auto const linked_libs = tim::popen::read_ldd_fork(ldd);
+            auto const perr        = tim::popen::pclose(ldd);
             for(auto& itr : cmdv_envp)
+            {
                 ::free(itr);
+            }
 
-            if(perr != 0) perror("Error in rocprofsys_fork");
+            if(perr != 0)
+            {
+                perror("Error in rocprofsys_fork");
+            }
 
             for(const auto& itr : linked_libs)
                 verbprintf(0, "\t%s\n", itr.c_str());
@@ -2554,14 +2793,14 @@ main(int argc, char** argv)
                    WIFSIGNALED(status));                                                 \
     }
 
-        auto _compute_exit_code = [app_thread, &code]() {
+        auto const _compute_exit_code = [app_thread, &code]() {
             if(app_thread->terminationStatus() == ExitedNormally)
             {
                 if(app_thread->isTerminated()) verbprintf(0, "End of rocprof-sys\n");
             }
             else if(app_thread->terminationStatus() == ExitedViaSignal)
             {
-                auto sign = app_thread->getExitSignal();
+                auto const sign = app_thread->getExitSignal();
                 fprintf(stderr, "\nApplication exited with signal: %i\n",
                         static_cast<int>(sign));
             }
@@ -2609,10 +2848,14 @@ main(int argc, char** argv)
 
     // cleanup
     for(int i = 0; i < argc; ++i)
+    {
         free(_argv[i]);
+    }
     delete[] _argv;
     for(int i = 0; i < _cmdc; ++i)
+    {
         free(_cmdv[i]);
+    }
     delete[] _cmdv;
 
     verbprintf(0, "End of rocprof-sys\n");
@@ -2633,33 +2876,50 @@ bool
 query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cfGraph,
             basic_loop_t* loopToInstrument, bool allow_traps)
 {
-    module_t* module = funcToInstr->getModule();
-    if(!module) return false;
+    module_t const* module = funcToInstr->getModule();
+    if(!module)
+    {
+        return false;
+    }
 
     std::vector<point_t*>* _points = nullptr;
 
     if(cfGraph && loopToInstrument)
     {
         if(traceLoc == BPatch_entry)
+        {
             _points = cfGraph->findLoopInstPoints(BPatch_locLoopEntry, loopToInstrument);
+        }
         else if(traceLoc == BPatch_exit)
+        {
             _points = cfGraph->findLoopInstPoints(BPatch_locLoopExit, loopToInstrument);
+        }
     }
     else
     {
         _points = funcToInstr->findPoint(traceLoc);
     }
 
-    if(_points == nullptr) return false;
-    if(_points->empty()) return false;
+    if(_points == nullptr)
+    {
+        return false;
+    }
+    if(_points->empty())
+    {
+        return false;
+    }
 
     size_t _n = _points->size();
     for(auto& itr : *_points)
     {
         if(!itr)
+        {
             --_n;
+        }
         else if(itr && !allow_traps && itr->usesTrap_NP())
+        {
             --_n;
+        }
     }
 
     return (_n > 0);
@@ -2669,18 +2929,30 @@ std::tuple<size_t, size_t>
 query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cfGraph,
             basic_loop_t* loopToInstrument)
 {
-    module_t* module = funcToInstr->getModule();
-    if(!module) return { 0, 0 };
+    module_t const* module = funcToInstr->getModule();
+    if(!module)
+    {
+        return { 0, 0 };
+    }
 
-    if(!cfGraph) cfGraph = funcToInstr->getCFG();
+    if(!cfGraph)
+    {
+        cfGraph = funcToInstr->getCFG();
+    }
 
     std::vector<point_t*>* _points = nullptr;
 
     if((cfGraph && loopToInstrument) ||
        (traceLoc == BPatch_locLoopEntry || traceLoc == BPatch_locLoopExit))
     {
-        if(!cfGraph) throw std::runtime_error("No control flow graph");
-        if(!loopToInstrument) throw std::runtime_error("No loop to instrument");
+        if(!cfGraph)
+        {
+            throw std::runtime_error("No control flow graph");
+        }
+        if(!loopToInstrument)
+        {
+            throw std::runtime_error("No loop to instrument");
+        }
 
         if(traceLoc == BPatch_entry || traceLoc == BPatch_locLoopEntry)
         {
@@ -2701,8 +2973,14 @@ query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cf
         _points = funcToInstr->findPoint(traceLoc);
     }
 
-    if(_points == nullptr) return { 0, 0 };
-    if(_points->empty()) return { 0, 0 };
+    if(_points == nullptr)
+    {
+        return { 0, 0 };
+    }
+    if(_points->empty())
+    {
+        return { 0, 0 };
+    }
 
     size_t _n = 0;
     size_t _t = 0;
@@ -2711,7 +2989,10 @@ query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cf
         if(itr)
         {
             ++_n;
-            if(itr->usesTrap_NP()) ++_t;
+            if(itr->usesTrap_NP())
+            {
+                ++_t;
+            }
         }
     }
 
@@ -2734,8 +3015,8 @@ canonicalize(std::string _path)
         _path = _path.insert(0, get_cwd() + "/");
     }
 
-    auto leading_dash = _path.starts_with('/');
-    auto pieces       = rocprofsys::delimit(_path, "/");
+    auto const leading_dash = _path.starts_with('/');
+    auto       pieces       = rocprofsys::delimit(_path, "/");
     std::ranges::reverse(pieces);
     auto _tree = std::vector<std::string>{};
     for(size_t i = 0; i < pieces.size(); ++i)
@@ -2745,15 +3026,21 @@ canonicalize(std::string _path)
         {
             continue;
         }
-        else if(itr == "..")
+        if(itr == "..")
+        {
             ++i;
+        }
         else
+        {
             _tree.emplace_back(itr);
+        }
     }
-    std::reverse(_tree.begin(), _tree.end());
+    std::ranges::reverse(_tree);
     auto cpath = std::string{ leading_dash ? "/" : "" };
     for(size_t i = 0; i < _tree.size() - 1; ++i)
+    {
         cpath += _tree.at(i) + "/";
+    }
     cpath += _tree.back();
     return cpath;
 }
@@ -2777,7 +3064,7 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
 {
     if(!_name.empty() && !path::is_regular_file(absolute(_name)))
     {
-        auto _orig = _name;
+        auto const _orig = _name;
         for(auto itr : _search_paths)
         {
             if(!path::is_directory(itr))
@@ -2800,12 +3087,16 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
                     break;
                 }
             }
-            if(_exists) break;
+            if(_exists)
+            {
+                break;
+            }
         }
 
         if(!path::is_regular_file(absolute(_name)))
         {
-            auto _search_paths_v = fmt::format("{}", fmt::join(bin_search_paths, ", "));
+            auto const _search_paths_v =
+                fmt::format("{}", fmt::join(bin_search_paths, ", "));
             verbprintf(
                 0, "Warning! File path to '%s' could not be determined... search: %s\n",
                 _name.c_str(), _search_paths_v.c_str());
@@ -2813,8 +3104,8 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
     }
     else if(!_name.empty())
     {
-        auto _orig = _name;
-        _name      = absolute(_name);
+        auto const _orig = _name;
+        _name            = absolute(_name);
         verbprintf(1, "Resolved '%s' to '%s'...\n", _orig.c_str(), _name.c_str());
     }
 
@@ -2826,14 +3117,14 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
 std::string
 get_absolute_filepath(std::string _name)
 {
-    auto _search_paths  = strvec_t{};
-    auto _combine_paths = std::vector<strvec_t>{ bin_search_paths, lib_search_paths };
-    auto _base_name     = path::filename(_name);
+    auto _search_paths    = strvec_t{};
+    auto _combine_paths   = std::vector<strvec_t>{ bin_search_paths, lib_search_paths };
+    auto const _base_name = path::filename(_name);
     // if the name looks like a library, put the lib_search_paths first
     if(_base_name.starts_with("lib") || _base_name.find(".so") != std::string::npos ||
        _base_name.find(".a") != std::string::npos)
     {
-        std::reverse(_combine_paths.begin(), _combine_paths.end());
+        std::ranges::reverse(_combine_paths);
     }
     _search_paths.reserve(bin_search_paths.size() + lib_search_paths.size());
     for(const auto& pitr : _combine_paths)
@@ -2860,8 +3151,8 @@ get_absolute_exe_filepath(std::string exe_name)
 std::string
 get_absolute_lib_filepath(std::string lib_name)
 {
-    auto _orig_name = lib_name;
-    lib_name        = get_absolute_filepath(std::move(lib_name), lib_search_paths);
+    auto const _orig_name = lib_name;
+    lib_name              = get_absolute_filepath(std::move(lib_name), lib_search_paths);
     if(_orig_name == lib_name && !path::is_regular_file(absolute(lib_name)) &&
        lib_name.find(".so") == std::string::npos &&
        lib_name.find(".a") == std::string::npos)
@@ -2891,17 +3182,19 @@ find_dyn_api_rt()
 {
 #if defined(ROCPROFSYS_BUILD_DYNINST)
     const std::string _dyn_api_rt_base =
-        (binary_rewrite) ? "librocprof-sys-rt" : "libdyninstAPI_RT";
+        binary_rewrite ? "librocprof-sys-rt" : "libdyninstAPI_RT";
 #else
     std::string _dyn_api_rt_base = "libdyninstAPI_RT";
 #endif
 
-    auto _dyn_api_rt_env =
+    auto const _dyn_api_rt_env =
         rocprofsys::get_env<std::string>("DYNINSTAPI_RT_LIB", _dyn_api_rt_base + ".so");
     auto _dyn_api_rt_abs = get_absolute_lib_filepath(_dyn_api_rt_env);
 
     if(!path::is_regular_file(absolute(_dyn_api_rt_abs)))
+    {
         _dyn_api_rt_abs = get_absolute_lib_filepath(_dyn_api_rt_base + ".a");
+    }
 
     if(path::is_regular_file(absolute(_dyn_api_rt_abs)))
     {
@@ -2913,7 +3206,7 @@ find_dyn_api_rt()
                                       1);
     }
 
-    auto _v = rocprofsys::get_env<string_t>("DYNINSTAPI_RT_LIB", "");
+    auto const _v = rocprofsys::get_env<string_t>("DYNINSTAPI_RT_LIB", "");
     verbprintf(0, "DYNINST_API_RT: %s\n", (_v.empty()) ? "<unknown>" : _v.c_str());
 }
 }  // namespace

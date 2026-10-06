@@ -54,13 +54,8 @@ RJ_NOINLINE void VMovB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
 
 void VReadfirstlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint32_t val = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (exec & (1ULL << lane)) {
-      val = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-      break;
-    }
-  }
+  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0;
+  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar_selected_lane(src0, lane);
   amdgpu::RegisterAccess(wf).write_scalar(vdst, val);
 }
 
@@ -69,6 +64,9 @@ void VMovB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, [](auto a) { return a; }))
+    return;
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -101,6 +99,9 @@ RJ_NOINLINE void VMovB16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, [](auto a) { return a; }))
+    return;
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -484,6 +485,7 @@ RJ_NOINLINE void VMovrelsd2B32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
 }
 
 void VPermlane16SwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
   uint32_t tmp_dst[64] = {}, tmp_src[64] = {};
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     tmp_dst[lane] = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
@@ -491,8 +493,10 @@ void VPermlane16SwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   for (uint32_t base = 0; base + 16 < wf.wf_size(); base += 2u * 16) {
     for (uint32_t i = 0; i < 16; ++i) {
-      amdgpu::RegisterAccess(wf).write_lane(src0, base + i, tmp_dst[base + 16 + i]);
-      amdgpu::RegisterAccess(wf).write_lane(vdst, base + 16 + i, tmp_src[base + i]);
+      if (exec & (1ULL << (base + i)))
+        amdgpu::RegisterAccess(wf).write_lane(src0, base + i, tmp_dst[base + 16 + i]);
+      if (exec & (1ULL << (base + 16 + i)))
+        amdgpu::RegisterAccess(wf).write_lane(vdst, base + 16 + i, tmp_src[base + i]);
     }
   }
 }
@@ -824,6 +828,16 @@ void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<2, false, true, 3>(
+          inst, wf, [&](auto a, auto b, uint32_t base) {
+            const uint64_t mask = amdgpu::read_wave_mask_scalar(inst.src2, wf);
+            util::native<uint32_t> choose(
+                [&](auto i) { return uint32_t((mask >> (base + i)) & 1u); });
+            util::stdx::where(choose != 0u, a) = b;
+            return a;
+          }))
+    return;
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -860,6 +874,16 @@ RJ_NOINLINE void VCndmaskB16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<2, false, true, 3>(
+          inst, wf, [&](auto a, auto b, uint32_t base) {
+            const uint64_t mask = amdgpu::read_wave_mask_scalar(inst.src2, wf);
+            util::native<uint32_t> choose(
+                [&](auto i) { return uint32_t((mask >> (base + i)) & 1u); });
+            util::stdx::where(choose != 0u, a) = b;
+            return a;
+          }))
+    return;
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

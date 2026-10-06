@@ -27,8 +27,8 @@ struct attach_options
 {
     int                      pid            = -1;
     int                      detach_after   = -1;  // seconds; -1 = wait for stdin ENTER
-    std::string              output_path    = {};
-    std::vector<std::string> profile_format = {};
+    std::string              output_path;
+    std::vector<std::string> profile_format;
 };
 
 void
@@ -114,10 +114,13 @@ setup_output_env(const std::string& output_path)
 void
 setup_output_format_env(const std::vector<std::string>& formats)
 {
-    if(formats.empty()) return;
+    if(formats.empty())
+    {
+        return;
+    }
 
-    auto has_format = [&formats](const std::string& fmt) {
-        return std::find(formats.begin(), formats.end(), fmt) != formats.end();
+    auto const has_format = [&formats](const std::string& fmt) {
+        return std::ranges::find(formats, fmt) != formats.end();
     };
 
     // setenv("ROCPROFSYS_PROFILE", "false", 1);
@@ -276,7 +279,7 @@ main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    auto opts = parse_args(argc, argv);
+    auto const opts = parse_args(argc, argv);
 
     if(opts.pid < 0)
     {

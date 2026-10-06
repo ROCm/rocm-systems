@@ -46,8 +46,7 @@
 #ifndef ROCRTST_SUITES_PERFORMANCE_MEMORY_ASYNC_COPY_H_
 #define ROCRTST_SUITES_PERFORMANCE_MEMORY_ASYNC_COPY_H_
 
-#include <hwloc.h>
-
+#include <cstdint>
 #include <vector>
 #include <algorithm>
 
@@ -133,6 +132,8 @@ typedef struct NodeInfo {
 
 class MemoryAsyncCopy : public TestBase {
  public:
+  static constexpr uint32_t kUnknownNumaNode = UINT32_MAX;
+
   MemoryAsyncCopy();
 
   // @Brief: Destructor for test case of MemoryAsyncCopy
@@ -172,13 +173,9 @@ class MemoryAsyncCopy : public TestBase {
   std::vector<AgentInfo *> *agent_info(void) {return &agent_info_;}
   std::vector<NodeInfo> *node_info(void) {return &node_info_;}
 
-  hwloc_topology_t topology(void) const {return topology_;}
-  void set_topology(hwloc_topology_t t) {topology_ = t;}
+  uint32_t cpu_numa_node_id(void) const { return cpu_numa_node_id_; }
+  void set_cpu_numa_node_id(uint32_t node_id) { cpu_numa_node_id_ = node_id; }
 
-  hwloc_nodeset_t cpu_hwl_numa_nodeset(void) const {
-                                                return cpu_hwl_numa_nodeset_;}
-  void set_cpu_hwl_numa_nodeset(hwloc_nodeset_t ns) {
-                                                  cpu_hwl_numa_nodeset_ = ns;}
   hsa_agent_t gpu_local_agent1() const {return gpu_local_agent1_;}
   void set_gpu_local_agent1(hsa_agent_t a) {gpu_local_agent1_ = a;}
   hsa_agent_t gpu_local_agent2() const {return gpu_local_agent2_;}
@@ -268,8 +265,7 @@ class MemoryAsyncCopy : public TestBase {
 
   rocrtst::PerfTimer copy_timer_;
 
-  hwloc_topology_t topology_;
-  hwloc_nodeset_t cpu_hwl_numa_nodeset_;
+  uint32_t cpu_numa_node_id_;
 
   // hsa_agent_t cpu_agent_; use one in base class
   hsa_agent_t gpu_local_agent1_;

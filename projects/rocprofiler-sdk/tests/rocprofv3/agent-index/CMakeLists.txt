@@ -50,6 +50,7 @@ rocprofiler_add_integration_execute_test(
         -- $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-absolute)
@@ -63,6 +64,7 @@ rocprofiler_add_integration_execute_test(
         ${LOG_LEVEL} -- $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-type-relative)
@@ -76,6 +78,7 @@ rocprofiler_add_integration_execute_test(
         -- $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-relative)

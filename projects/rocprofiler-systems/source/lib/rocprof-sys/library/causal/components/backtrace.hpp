@@ -19,11 +19,7 @@
 #include <chrono>
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 struct overflow : comp::empty_base
 {
@@ -45,7 +41,7 @@ struct overflow : comp::empty_base
 private:
     std::int32_t  m_selected = 0;
     std::uint32_t m_index    = 0;
-    alt_stack_t   m_stack    = {};
+    alt_stack_t   m_stack;
 };
 
 struct backtrace : comp::empty_base
@@ -84,8 +80,6 @@ struct backtrace : comp::empty_base
 private:
     bool                  m_selected = false;
     std::uint32_t         m_index    = 0;
-    causal::unwind_addr_t m_stack    = {};
+    causal::unwind_addr_t m_stack;
 };
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component

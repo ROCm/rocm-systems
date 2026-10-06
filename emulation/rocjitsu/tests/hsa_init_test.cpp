@@ -79,7 +79,7 @@ TEST_F(HsaTest, SdmaPublishesCompletePackets) {
     const uint64_t address = reinterpret_cast<uint64_t>(&values[destination]);
     auto *packet = reinterpret_cast<uint32_t *>(static_cast<uint8_t *>(queue->base_address) +
                                                 cursor % queue->size);
-    std::fill_n(packet, 8, 0u); // Pad each submission to 32 bytes with NOPs.
+    std::ranges::fill_n(packet, 8, 0u); // Pad each submission to 32 bytes with NOPs.
     packet[0] = iteration % 2 ? kSdmaOpFence : kSdmaOpWrite;
     packet[1] = static_cast<uint32_t>(address);
     packet[2] = static_cast<uint32_t>(address >> 32);

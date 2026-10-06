@@ -36,6 +36,7 @@ SLoadDwordSmem::SLoadDwordSmem(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -67,6 +68,7 @@ SLoadDwordx2Smem::SLoadDwordx2Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -99,6 +101,7 @@ SLoadDwordx4Smem::SLoadDwordx4Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -131,6 +134,7 @@ SLoadDwordx8Smem::SLoadDwordx8Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -163,6 +167,7 @@ SLoadDwordx16Smem::SLoadDwordx16Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -194,6 +199,7 @@ SScratchLoadDwordSmem::SScratchLoadDwordSmem(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -226,6 +232,7 @@ SScratchLoadDwordx2Smem::SScratchLoadDwordx2Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -258,6 +265,7 @@ SScratchLoadDwordx4Smem::SScratchLoadDwordx4Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -289,6 +297,7 @@ SBufferLoadDwordSmem::SBufferLoadDwordSmem(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -321,6 +330,7 @@ SBufferLoadDwordx2Smem::SBufferLoadDwordx2Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -353,6 +363,7 @@ SBufferLoadDwordx4Smem::SBufferLoadDwordx4Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -385,6 +396,7 @@ SBufferLoadDwordx8Smem::SBufferLoadDwordx8Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -417,6 +429,7 @@ SBufferLoadDwordx16Smem::SBufferLoadDwordx16Smem(const MachineInst *inst)
       {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -435,6 +448,7 @@ SGl1InvSmem::SGl1InvSmem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SGl1InvSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -452,6 +466,7 @@ SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SDcacheInvSmem)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -471,6 +486,7 @@ SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -490,6 +506,7 @@ SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -515,6 +532,7 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -539,6 +557,7 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -559,6 +578,7 @@ SGetWaveidInWorkgroupSmem::SGetWaveidInWorkgroupSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

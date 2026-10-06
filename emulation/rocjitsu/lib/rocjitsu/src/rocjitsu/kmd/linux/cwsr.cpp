@@ -190,8 +190,8 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
                       geometry.vgpr_bytes;
 
   const uint64_t num_waves = waves.size();
-  const uint64_t num_groups = std::count_if(
-      waves.begin(), waves.end(), [](const auto &wave) { return wave.is_first_in_group; });
+  const uint64_t num_groups =
+      std::ranges::count_if(waves, [](const auto &wave) { return wave.is_first_in_group; });
   const uint64_t wave_state_size = geometry.per_wave * num_waves + geometry.lds_bytes * num_groups;
   const uint64_t control_stack_size = (2u + geometry.state_words + num_waves) * sizeof(uint32_t);
   const uint64_t wave_area_begin = kControlStackOffset + control_stack_size;
