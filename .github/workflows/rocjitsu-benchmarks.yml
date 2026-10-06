@@ -33,6 +33,7 @@ jobs:
     outputs:
       machine: ${{ steps.machine.outputs.name }}
       ran: ${{ steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure' }}
+      uploads_authorized: ${{ steps.authorize_uploads.outputs.allowed }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --user 0:0
@@ -151,7 +152,7 @@ jobs:
   publish:
     name: Publish dashboard data
     needs: benchmark
-    if: ${{ !cancelled() && github.ref == 'refs/heads/develop' && needs.benchmark.outputs.ran == 'true' }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/develop' && needs.benchmark.outputs.ran == 'true' && needs.benchmark.outputs.uploads_authorized == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
