@@ -2,6 +2,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+# Remove this file after the legacy cleanup. The health test report uses it
+# only while the legacy heuristic is still available.
+
 """Compare SPP vs legacy metric medians from 500-iter health workloads.
 
 Analyze ``--view table`` logs expose Avg/Min/Max, not Median. This tool:
