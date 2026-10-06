@@ -3266,6 +3266,26 @@ def test_process_two_passes_collapse_to_one_launch(tmp_path):
     assert workload.ml_api_call_trees["1"][0].kernel_launches == 1
 
 
+def test_process_collapse_keeps_pass0_gpu_time(tmp_path):
+    workload_dir = tmp_path / "pass0_gpu_time"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(11, 0, 100)],
+        [counter_row(11, "addmm_kernel", 10, 40, dispatch_id=1)],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(22, 1000, 1100)],
+        [counter_row(22, "addmm_kernel", 1010, 1100, dispatch_id=9)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    stats = workload.ml_api_call_trees["1"][0].kernels["addmm_kernel"]
+    assert stats.total_duration_ns == 30
+
+
 def test_marker_stitch_key_keeps_seqnr_tid_ftid_omits_ltid():
     with_ltid = (
         "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|ltid=7|scope=FUNCTION|args=()|torch"
