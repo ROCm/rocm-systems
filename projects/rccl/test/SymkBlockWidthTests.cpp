@@ -16,7 +16,7 @@
 // constant were changed, which is exactly the regression these tests exist to
 // catch.
 //
-// AllGatherPrefersStoreFrom4M covers the one threshold that picks a kernel
+// AllGatherPrefersStoreFrom1M covers the one threshold that picks a kernel
 // rather than a width. UntunedCollectivesKeepUpstreamWidth pins down the blast
 // radius: the width bands must never reach a collective other than AllReduce,
 // ReduceScatter and AllGather.
@@ -153,7 +153,7 @@ TEST(SymkBlockWidthTest, ReduceScatterLDBands)
 
 // ===========================================================================
 // AllGather: LL widens from 512 KB bus, and the store kernel stays narrow below
-// 64 MB bus and widens above. The store kernel takes over from LL at 4 MB bus.
+// 64 MB bus and widens above. The store kernel takes over from LL at 1 MB bus.
 // Thresholds are bus bytes, like ReduceScatter's.
 // ===========================================================================
 
@@ -174,11 +174,11 @@ TEST(SymkBlockWidthTest, AllGatherStoreBands)
     EXPECT_EQ(ldWidth(ncclFuncAllGather, busToBytes(4 * GiB)), kWide);
 }
 
-TEST(SymkBlockWidthTest, AllGatherPrefersStoreFrom4M)
+TEST(SymkBlockWidthTest, AllGatherPrefersStoreFrom1M)
 {
-    EXPECT_FALSE(ncclSymkGfx950AllGatherPrefersStore(kRanks, busToBytes(2 * MiB)));
-    EXPECT_FALSE(ncclSymkGfx950AllGatherPrefersStore(kRanks, busToBytes(4 * MiB) - 1));
-    EXPECT_TRUE(ncclSymkGfx950AllGatherPrefersStore(kRanks, busToBytes(4 * MiB)));
+    EXPECT_FALSE(ncclSymkGfx950AllGatherPrefersStore(kRanks, busToBytes(512 * KiB)));
+    EXPECT_FALSE(ncclSymkGfx950AllGatherPrefersStore(kRanks, busToBytes(1 * MiB) - 1));
+    EXPECT_TRUE(ncclSymkGfx950AllGatherPrefersStore(kRanks, busToBytes(1 * MiB)));
     EXPECT_TRUE(ncclSymkGfx950AllGatherPrefersStore(kRanks, busToBytes(4 * GiB)));
 }
 
