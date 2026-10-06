@@ -1919,7 +1919,8 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
           // A replica does not own the queue, so it must not report it idle: its
           // shards drain before the owner's and the same KFD queue would otherwise
           // raise this from several CPs at once.
-          if (compute_queues_[queue_index].fanout_replica)
+          if (compute_queues_[queue_index].fanout_replica ||
+              compute_queues_[queue_index].packet_format != QueuePacketFormat::Aql)
             continue;
           if (!compute_queues_[queue_index].has_pending_commands() &&
               compute_queues_[queue_index].process_id != 0) {

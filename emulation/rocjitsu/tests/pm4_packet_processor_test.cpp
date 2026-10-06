@@ -425,6 +425,28 @@ TEST_F(Pm4PacketProcessorTest, WideWaitUsesMaskedHighBitsAndRetriesUnavailableMe
   }
 }
 
+TEST_F(Pm4PacketProcessorTest, ReleaseInterruptFollowsWriteAndUsesContextId) {
+  uint32_t calls = 0;
+  InterruptSubscription subscription([&](uint32_t process_id, uint32_t event_id) {
+    ++calls;
+    EXPECT_EQ(process_id, 42u);
+    EXPECT_EQ(event_id, 73u);
+    EXPECT_EQ(memory->load<uint64_t>(kOutput), 0x123456789abcdef0ull);
+  });
+  queue.process_id = 42;
+  queue.interrupt_sink = subscription.sink();
+  for (uint32_t interrupt : {0u, 2u}) {
+    const std::array words{0xc0064900u, 0u, (2u << 29) | (interrupt << 24),
+                           kOutput,     0u, 0x9abcdef0u,
+                           0x12345678u, 73u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Ready);
+    EXPECT_EQ(calls, interrupt == 0 ? 0u : 1u);
+    EXPECT_EQ(service(), Pm4TestStatus::Ready);
+    EXPECT_EQ(calls, interrupt == 0 ? 0u : 1u);
+  }
+}
+
 TEST_F(Pm4PacketProcessorTest, DispatchPausesInterpretationUntilCpRetiresIt) {
   const std::array words{0xc0031500u, 2u,     3u,      4u, 1u,
                          0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};

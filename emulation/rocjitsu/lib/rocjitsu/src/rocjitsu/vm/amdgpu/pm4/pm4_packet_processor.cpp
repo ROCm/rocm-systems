@@ -321,6 +321,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         if (bytes && access->write(address(2), {reinterpret_cast<const std::byte *>(&value),
                                                 bytes}) != VmAccessOutcome::Complete)
           throw std::runtime_error("PM4 RELEASE_MEM failed");
+        const uint32_t interrupt = (words[1] >> 24) & 7;
+        if (interrupt == 1 || interrupt == 2)
+          queue.interrupt_sink.deliver(queue.process_id, words[6]);
         break;
       }
       case Pm4Opcode::CopyData: {
