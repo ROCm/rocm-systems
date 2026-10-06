@@ -45,18 +45,20 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_EngramMixedWindowIGet)
         GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
 
     Barrier();
+    bool getOk = true;
     if (worldRank_ == 0)
     {
         void* req = nullptr;
-        ASSERT_EQ(ncclSuccess,
-                  rma_->iget(rmaCtx_, 0,
-                             /*remoteOff=*/kRemoteOff, mh, kPayload,
-                             /*localOff=*/kLocalOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
-        ASSERT_TRUE(PollUntilDone(req));
+        getOk = rma_->iget(rmaCtx_, 0,
+                           /*remoteOff=*/kRemoteOff, mh, kPayload,
+                           /*localOff=*/kLocalOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
+        if (getOk) getOk = PollUntilDone(req);
+    }
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(getOk)) << "DeepEP Engram IGet failed";
+    if (worldRank_ == 0)
         ExpectPayloadIsolated(window->ptr, kGpuBytes, kLocalOff, kPayload,
                               /*seed=*/0x4D, kSentinel,
                               "DeepEP CPU-to-GPU IGet");
-    }
     Barrier();
 }
 
