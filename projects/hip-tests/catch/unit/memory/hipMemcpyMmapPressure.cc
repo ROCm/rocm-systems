@@ -279,7 +279,7 @@ HIP_TEST_CASE(Unit_hipMemcpyMmapPressure_UnderPressure) {
   }
   int64_t cg_limit = readCgroupMemLimit();
   int64_t effective_total = cg_limit > 0 ? cg_limit : mem_total;
-  int64_t threshold = std::max(2LL * 1024 * 1024 * 1024, effective_total * 5 / 100);
+  int64_t threshold = std::max<int64_t>(2LL * 1024 * 1024 * 1024, effective_total * 5 / 100);
   INFO("Pressure detector threshold: " << (threshold / (1024 * 1024)) << " MiB"
                                        << " (effective_total: " << (effective_total / (1024 * 1024))
                                        << " MiB)");
