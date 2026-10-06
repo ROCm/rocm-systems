@@ -173,7 +173,3 @@ class TestEventMultiDeviceFanout(unittest.TestCase):
             self.assertIn(f"GPU: {gpu}", output)
         self.assertEqual(output.count("EVENT:"), len(queue))
         self.assertIn("EVENT: VMFAULT", output)
-
-
-if __name__ == "__main__":
-    unittest.main()
