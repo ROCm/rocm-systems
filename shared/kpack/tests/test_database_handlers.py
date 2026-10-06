@@ -669,6 +669,28 @@ class TestMIOpenHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx900"
 
+    def test_detect_windows_bin_databases(self, handler, prefix_root):
+        """Windows MIOpen installs system DBs directly under bin/."""
+        for filename, expected_arch in (
+            ("gfx110136.HIP.fdb.txt", "gfx1101"),
+            ("gfx110136.db.txt", "gfx1101"),
+            ("gfx1030.kdb", "gfx1030"),
+        ):
+            file_path = prefix_root / "bin" / filename
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
+            assert handler.detect(file_path, prefix_root) == expected_arch
+
+    def test_reject_windows_models_and_nested_bins(self, handler, prefix_root):
+        """Do not split Windows models or similarly named files outside stage/bin."""
+        for relative in ("bin/gfx908.tn.model", "other/bin/gfx110136.db.txt"):
+            file_path = prefix_root / relative
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
+            assert handler.detect(file_path, prefix_root) is None
+
     def test_detect_various_architectures(self, handler, prefix_root):
         test_cases = [
             ("gfx908.tn.model", "gfx908"),
