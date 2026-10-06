@@ -7525,7 +7525,13 @@ class CodeGenerator:
             )
 
         if cls.startswith('dot4_'):
-            return gen_dot4(dst_ops, src_ops, cls)
+            return gen_dot4(
+                dst_ops,
+                src_ops,
+                cls,
+                instruction=sem.name,
+                dot_accumulation=self.isa_spec.profile.float_dot_accumulation,
+            )
 
         if cls.startswith('dot8_'):
             return gen_dot8(dst_ops, src_ops, cls)
@@ -13638,6 +13644,7 @@ class CodeGenerator:
                 'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': (
                     'gfx12_dot2_f32',
                     'gfx12_dot2_packed16',
+                    'gfx12_dot4_f32_fp8',
                 ),
                 'rocjitsu/isa/arch/amdgpu/shared/cube.h': 'cube::',
                 'rocjitsu/isa/arch/amdgpu/shared/division.h': (

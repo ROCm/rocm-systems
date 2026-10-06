@@ -388,6 +388,41 @@ def test_dot2_true16_rejects_host_float_accumulation():
         )
 
 
+def test_rdna4_fp8_dot4_uses_the_gfx12_dot_model():
+    for instruction, bf8_a, bf8_b in (
+        ('V_DOT4_F32_FP8_FP8', 'false', 'false'),
+        ('V_DOT4_F32_FP8_BF8', 'false', 'true'),
+        ('V_DOT4_F32_BF8_FP8', 'true', 'false'),
+        ('V_DOT4_F32_BF8_BF8', 'true', 'true'),
+    ):
+        cpp = gen_dot4(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            'dot4_f32_fp8',
+            instruction=instruction,
+            dot_accumulation=FloatDotAccumulation.GFX12,
+        )
+        assert f'amdgpu::gfx12_dot4_f32_fp8<{bf8_a}, {bf8_b}>(raw0, raw1, acc)' in cpp
+        assert (
+            'acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, '
+            'inst_.neg_hi, inst_.neg);' in cpp
+        )
+        assert 'fp8_e4m3_to_f32' not in cpp
+
+
+def test_fp8_dot4_rejects_other_accumulation_models():
+    import pytest
+
+    with pytest.raises(ValueError, match='GFX12 DOT accumulation model'):
+        gen_dot4(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            'dot4_f32_fp8',
+            instruction='V_DOT4_F32_FP8_FP8',
+            dot_accumulation=FloatDotAccumulation.HOST_F32,
+        )
+
+
 def test_dot2_integer_forms_leave_inline_constants_alone():
     for cls in ('dot2_i32_i16', 'dot2_u32_u16'):
         cpp = gen_dot2(

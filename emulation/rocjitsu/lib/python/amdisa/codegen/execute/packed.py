@@ -1408,8 +1408,15 @@ def gen_dot2_true16(
     return '\n'.join(L)
 
 
-def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
-    """Generate V_DOT4_I32_I8 / V_DOT4_I32_IU8 / V_DOT4_U32_U8."""
+def gen_dot4(
+    dst: list[str],
+    src: list[str],
+    cls: str,
+    instruction: str = '',
+    dot_accumulation: FloatDotAccumulation = FloatDotAccumulation.HOST_F32,
+) -> str:
+    """Generate V_DOT4_I32_I8 / V_DOT4_I32_IU8 / V_DOT4_U32_U8 and the RDNA4
+    V_DOT4_F32_{FP8,BF8}_{FP8,BF8} forms (``instruction`` names the formats)."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -1451,22 +1458,24 @@ def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(sum));'
         )
     elif cls == 'dot4_f32_fp8':
-        # FP8 dot product: D.f32 += sum(A.fp8[i] * B.fp8[i]) for i in 0..3
+        # Only RDNA4 has these; gfx1201 runs them through its DOT datapath.
+        if dot_accumulation is not FloatDotAccumulation.GFX12:
+            raise ValueError(f'{instruction} needs the GFX12 DOT accumulation model')
+        formats = instruction.upper().removeprefix('V_DOT4_F32_').split('_')
+        if len(formats) != 2 or not set(formats) <= {'FP8', 'BF8'}:
+            raise ValueError(f'unhandled FP8 dot instruction: {instruction}')
+        bf8_a, bf8_b = (str(f == 'BF8').lower() for f in formats)
         L.append(
-            f'    float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({s2}, lane));'
+            f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
         )
-        L.append('    for (int i = 0; i < 4; ++i) {')
+        # As for DOT2 F32, NEG_HI on the F32 accumulator is ABS.
         L.append(
-            '      float a = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));'
+            '    acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);'
         )
         L.append(
-            '      float b = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));'
+            f'    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<{bf8_a}, {bf8_b}>(raw0, raw1, acc);'
         )
-        L.append('      acc += a * b;')
-        L.append('    }')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(acc));'
-        )
+        L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, result);')
     else:  # dot4_u32_u8
         L.append(
             f'    uint64_t sum = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'

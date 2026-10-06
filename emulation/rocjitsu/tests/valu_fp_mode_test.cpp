@@ -2892,6 +2892,32 @@ std::vector<DotLane> dot_family_lanes() {
       0x8a244c00u, 0u, {0x30u, 0xc0u});
   add("F32Bf16TinyNegativeAccumulatorLowHalves", bf16, {.opsel_hi = 0}, 0xc1200003u, 0xc4f54b59u,
       0x800a3302u, 0x0a22bff8u, 0u, {0x30u, 0xc0u});
+  // RDNA4 FP8 (E4M3) / BF8 (E5M2) DOT4: the four products align on one grid
+  // before C, and a NaN factor or an invalid product or sum returns 0xffc00a3d.
+  const uint16_t fp8_fp8 = rdna4::kVDot4F32Fp8Fp8Vop3p;
+  const uint16_t fp8_bf8 = rdna4::kVDot4F32Fp8Bf8Vop3p;
+  const uint16_t bf8_fp8 = rdna4::kVDot4F32Bf8Fp8Vop3p;
+  const uint16_t bf8_bf8 = rdna4::kVDot4F32Bf8Bf8Vop3p;
+  const std::vector<uint32_t> fp8_modes{0x30u, 0xc0u, 0xf3u};
+  add("Fp8Fp8FactorNan", fp8_fp8, {}, 0xffb88100u, 0xffb88100u, 0u, 0xffc00a3du, {}, fp8_modes);
+  add("Fp8Fp8OneGrid", fp8_fp8, {}, 0x259ade4cu, 0xcf5a6651u, 0xce741245u, 0xce74125du, {},
+      fp8_modes);
+  add("Fp8Bf8InvalidProduct", fp8_bf8, {}, 0x003040feu, 0xfcbc8100u, 0u, 0xffc00a3du, {},
+      fp8_modes);
+  add("Fp8Bf8InfiniteProduct", fp8_bf8, {}, 0x407e0780u, 0xfcbc8100u, 0u, 0xff800000u, {},
+      fp8_modes);
+  add("Bf8Fp8InfinitiesCancel", bf8_fp8, {}, 0xfcbc8100u, 0x407e0780u, 0x7f800000u, 0xffc00a3du, {},
+      fp8_modes);
+  add("Bf8Fp8Finite", bf8_fp8, {}, 0xd2e6da86u, 0xc5364dadu, 0x2b21369bu, 0xc5184000u, {},
+      fp8_modes);
+  add("Bf8Bf8Finite", bf8_bf8, {}, 0x733c7351u, 0x2f7892a9u, 0x43d88000u, 0x4707c4f0u, {},
+      fp8_modes);
+  add("Fp8Fp8NegAccumulator", fp8_fp8, {.neg = kSrc2}, 0xb1b95cc9u, 0x624037c6u, 0x659a2f29u,
+      0xe59a2f29u, {}, {0x30u, 0xc0u, 0xffu});
+  add("Bf8Bf8AbsAccumulator", bf8_bf8, {.neg_hi = kSrc2}, 0xbc7897a1u, 0x42bfb6a8u, 0xf3aa2116u,
+      0x73aa2116u, {}, {0x30u, 0xc0u, 0xffu});
+  add("Bf8Bf8AbsSubnormalAccumulator", bf8_bf8, {.neg_hi = kSrc2}, 0x53b44830u, 0xa4473741u,
+      0x0099da20u, 0x3f980000u, {}, {0x30u, 0xc0u});
   return lanes;
 }
 
