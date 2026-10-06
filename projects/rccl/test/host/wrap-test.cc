@@ -5938,6 +5938,14 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherReachesCeRegisteredUnlikeGe
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        // nullptr buffers yield ncclSymSendNonregRecvNonreg; override to
+        // ncclSymSendNonregRecvReg so rcclAllGatherCeRegisteredWindowTab
+        // reaches the regMax check instead of returning false at the recv-reg gate.
+        ScopedHook regType(g_getSymRegType,
+            [](struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t* out) {
+              *out = ncclSymSendNonregRecvReg;
+              return ncclSuccess;
+            });
         // gfx942/gfx950 have ceRegMax[AllGather]=0 by tuning design; supply the
         // threshold via param seam so the size window opens. gfx1250 has a non-zero
         // table entry (8 GiB) and does not need the override.
