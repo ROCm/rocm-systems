@@ -80,6 +80,35 @@ Algorithm (normative sketch):
 3. Run **SPU residual fill** so residual SPU PMC pieces appear somewhere (+0 extra passes on gfx942).
 4. Harden **TCC series affinity + coverage** (and ACCUM slot charging where required).
 
+Flow — single-pass packable + SPU residual fill (default).
+
+```mermaid
+flowchart TD
+  A[Profile PMC set] --> B{LEGACY_HEURISTIC=1<br/>or SINGLE_PASS_PACKABLE=0?}
+  B -->|yes| SH[Legacy path:<br/>heuristic coalesce + first-fit]
+  B -->|no default| U[Unique SPP PMC unions<br/>skip SPU parents]
+  U --> O[Order unions:<br/>largest PMC sets first]
+  O --> L[Next SPP union]
+  L --> H{Some bucket already<br/>contains the full union?}
+  H -->|yes| M{More unions?}
+  H -->|no| E{Extend an existing bucket<br/>to hold the full union?}
+  E -->|yes| X[Extend that bucket]
+  E -->|no| N[Open a new bucket<br/>with the full union<br/>may duplicate PMCs]
+  X --> M
+  N --> M
+  M -->|yes| L
+  M -->|no| FF[First-fit PMCs<br/>not in any bucket yet]
+  FF --> R[Merge bucket pairs when the union<br/>still fits and the SPP guarantee holds]
+  R --> S[SPU residual fill:<br/>each unique SPU PMC set]
+  S --> S1{Every PMC already<br/>in some bucket?}
+  S1 -->|yes| G[pmc_perf buckets<br/>gfx942: 14 total, +0 for SPU fill]
+  S1 -->|no| S2{Fit remaining PMCs<br/>into an existing bucket?}
+  S2 -->|yes| S3[Place into that bucket]
+  S2 -->|no| S4[Open a new bucket<br/>with the largest fitting subset]
+  S3 --> S1
+  S4 --> S1
+```
+
 #### TCC series affinity + coverage (SPP packing harden)
 
 TCC channel series need packing rules beyond plain PMC-union co-location. On gfx942, TCC allows **4 event bases per pass** (channel instances `[i]` are dimensions of one base, not extra slots). Full policy (approved for design): [TCC series affinity + coverage](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-tcc-series-affinity-coverage.md).
