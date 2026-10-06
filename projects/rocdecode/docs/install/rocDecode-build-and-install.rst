@@ -52,7 +52,7 @@ Windows prerequisites
 
 * HIP runtime from `TheRock <https://github.com/ROCm/TheRock>`__ for Windows
 * vaon12 — VA-API on D3D12 libraries (Mesa's ``vaon12_drv_video.dll`` plus libva), provided by
-  TheRock for Windows under ``%ROCM_PATH%\lib\rocm_sysdeps``; no separate download is required
+  TheRock for Windows under ``%ROCM_PATH%\lib\rocm_sysdeps``. No separate download is required
 * Visual Studio 2022 version 17.13 or later with the C++ desktop workload (MSVC 19.43+, C++17).
   Earlier toolsets fail at link time because ROCm's prebuilt libraries reference C++ standard
   library internals introduced in MSVC 19.43. See `TheRock Windows support
