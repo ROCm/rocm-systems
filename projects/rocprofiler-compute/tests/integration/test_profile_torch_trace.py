@@ -759,3 +759,40 @@ def test_torch_operator_with_dispatch_filter(
         "No PyTorch kernels mapped to kernel-top IDs" in miss_out
         or "No PyTorch operators matched" in miss_out
     )
+
+
+@pytest.mark.torch_trace
+def test_torch_trace_user_range_in_marker_csv(binary_handler_profile_rocprof_compute):
+    require_torch(gpu=True)
+    workload_dir = common.get_output_dir(param_id="torch_trace_user_range")
+    profile_config = dict(config)
+    profile_config["simple_net_user_range"] = [
+        sys.executable,
+        "./sample/simple_net.py",
+        "--user-range",
+    ]
+    try:
+        returncode = binary_handler_profile_rocprof_compute(
+            profile_config,
+            workload_dir,
+            [
+                "--experimental",
+                "--torch-trace",
+                "--iteration-multiplexing",
+            ],
+            check_success=False,
+            app_name="simple_net_user_range",
+        )
+        if returncode == 1:
+            pytest.skip("user-range workload exited 1")
+        assert returncode == 0
+        marker_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv.gz"))
+        assert marker_files
+        functions = []
+        for marker_file in marker_files:
+            with csv_compression.open_gzip_csv_read(marker_file) as f:
+                for row in csv.DictReader(f):
+                    functions.append(row["Function"])
+        assert any(fn == "training_loop" for fn in functions)
+    finally:
+        common.clean_output_dir(config["cleanup"], workload_dir)
