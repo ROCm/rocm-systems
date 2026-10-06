@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Generate the checked GFX1201 descriptor and text for aql-copy-add.c."""
 
 import argparse

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Passive Linux topology discovery and validation.
 //!
 //! Discovery reads fixed-size sysfs records and opens no native execution
@@ -216,9 +218,10 @@ fn cache_properties(text: &str) -> Result<CacheInfo, Error> {
     let _ = properties.u32("cache_lines_per_tag")?;
     let _ = properties.u32("association")?;
     let _ = properties.u32("latency")?;
+    // KFD reports cache capacity in KiB; provider facts use bytes.
     Ok(CacheInfo {
         level: properties.u32("level")?,
-        size: properties.u32("size")?,
+        size_bytes: u64::from(properties.u32("size")?) * 1024,
         kind: properties.u32("type")?,
     })
 }
@@ -301,7 +304,7 @@ pub(super) fn enumerate(
             continue;
         }
         result?;
-        records.sort_unstable_by_key(|record| record.native.node);
+        records.sort_unstable_by_key(|record| record.topology_key.group);
         for endpoint in records {
             visitor(endpoint)?;
         }
@@ -795,7 +798,7 @@ fn read_node(
             member: gpu_id,
         },
         provider_instance: 0,
-        native,
+        native: crate::driver::EndpointSelector::LinuxKfd(native),
     }))
 }
 
@@ -943,7 +946,7 @@ mod tests {
         })
         .unwrap();
         let endpoint = found.unwrap();
-        let linux = endpoint.linux_kfd_drm_info();
+        let linux = endpoint.linux_kfd_drm_info().unwrap();
         assert_eq!(linux.node_id, 1);
         assert_eq!(linux.gpu_id, 42);
         let gpu = endpoint.gpu().unwrap();
@@ -1170,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn cache_records_preserve_topology_order_and_types() {
+    fn cache_records_convert_kib_and_preserve_order_and_types() {
         let fixture = Fixture::new();
         let properties = fixture.0.join("topology/nodes/1/properties");
         let contents = std::fs::read_to_string(&properties).unwrap();
@@ -1180,10 +1183,10 @@ mod tests {
         )
         .unwrap();
         for (ordinal, level, size, kind) in [
-            (3, 2, 262_144, 8),
-            (1, 1, 32_768, 10),
-            (0, 1, 32_768, 9),
-            (2, 3, 8_388_608, 5),
+            (3, 2, 256, 8),
+            (1, 1, 32, 10),
+            (0, 1, 32, 9),
+            (2, 3, 8192, 5),
         ] {
             let directory = fixture.0.join(format!("topology/nodes/1/caches/{ordinal}"));
             std::fs::create_dir_all(&directory).unwrap();
@@ -1205,13 +1208,13 @@ mod tests {
         .unwrap();
         assert_eq!(endpoint.caches().len(), 4);
         assert_eq!(endpoint.caches()[0].level(), 1);
-        assert_eq!(endpoint.caches()[0].size(), 32_768);
+        assert_eq!(endpoint.caches()[0].size_bytes(), 32_768);
         assert!(crate::gpu::is_compute_data_cache(&endpoint.caches()[0]));
         assert!(!crate::gpu::is_compute_data_cache(&endpoint.caches()[1]));
         assert!(!crate::gpu::is_compute_data_cache(&endpoint.caches()[2]));
         assert!(crate::gpu::is_compute_data_cache(&endpoint.caches()[3]));
         assert_eq!(endpoint.caches()[3].level(), 2);
-        assert_eq!(endpoint.caches()[3].size(), 262_144);
+        assert_eq!(endpoint.caches()[3].size_bytes(), 262_144);
     }
 
     #[test]
@@ -1419,6 +1422,44 @@ mod tests {
             ErrorKind::ResourceExhausted
         );
         assert!(!visited);
+    }
+
+    #[test]
+    fn generated_topology_and_cache_mutations_stay_bounded() {
+        const NODE: &str = "simd_count 64\nmax_slots_scratch_cu 32\nnum_xcc 1\n";
+        const CACHE: &str = concat!(
+            "processor_id_low 0\nlevel 2\nsize 512\ncache_line_size 64\n",
+            "cache_lines_per_tag 1\nassociation 16\nlatency 1\n",
+            "type 2\nsibling_map 1,0,0,0\n"
+        );
+        assert!(Properties::new(NODE).is_ok());
+        assert!(cache_properties(CACHE).is_ok());
+        let mut seed = 0xd1b5_4a32_d192_ed03_u64;
+        for case in 0..2048 {
+            let mut bytes = if case % 2 == 0 {
+                NODE.as_bytes().to_vec()
+            } else {
+                CACHE.as_bytes().to_vec()
+            };
+            for _ in 0..=(case % 5) {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                let index = usize::try_from(seed % u64::try_from(bytes.len()).unwrap()).unwrap();
+                bytes[index] = b"0x 19\n,+-_z"[(seed >> 32) as usize % 11];
+            }
+            let length = if case % 4 == 0 {
+                usize::try_from(seed % u64::try_from(bytes.len() + 1).unwrap()).unwrap()
+            } else {
+                bytes.len()
+            };
+            let input = String::from_utf8_lossy(&bytes[..length]);
+            if let Ok(properties) = Properties::new(&input) {
+                let _ = properties.required("simd_count");
+                let _ = properties.optional_u32("num_xcc");
+            }
+            let _ = cache_properties(&input);
+        }
     }
 
     #[test]
