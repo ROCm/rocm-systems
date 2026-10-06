@@ -1012,6 +1012,16 @@ def _vec_binop_expr(
 ) -> SemaNode:
     if op is None:
         return SemaNode(SemaNodeKind.ADD, ty=ty, children=(src0, src1))
+    if op in ('sub', 'subrev', 'rsub') and ty.base == 'F':
+        # ISA discrepancy: the ISA expects S0 - S1 (S1 - S0 for SUBREV), but
+        # gfx1201 adds the negated subtrahend with the sources kept in operand
+        # order. A NaN subtrahend therefore returns with its sign flipped, and
+        # when both sources are NaN, S0's NaN wins, as for ADD.
+        if op == 'sub':
+            src1 = SemaNode(SemaNodeKind.UMINUS, ty=ty, children=(src1,))
+        else:
+            src0 = SemaNode(SemaNodeKind.UMINUS, ty=ty, children=(src0,))
+        return SemaNode(SemaNodeKind.ADD, ty=ty, children=(src0, src1))
     if op in ('subrev', 'rsub'):
         return SemaNode(SemaNodeKind.SUB, ty=ty, children=(src1, src0))
     if op in ('lshlrev', 'lshrrev', 'shl', 'shr'):
