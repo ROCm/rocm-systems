@@ -5,6 +5,7 @@
 
 import csv
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -18,6 +19,9 @@ from tests.integration.common import (
     require_torch,
 )
 from utils import csv_compression
+from utils.inject_roctx._backends.torch_trace_collector import (
+    _find_collector,
+)
 
 MARKER_API_COLUMNS = {
     "Domain",
@@ -187,11 +191,18 @@ def torch_trace_profiled_workload(
 ):
     """Profile simple_net with --torch-trace and return the workload directory."""
     require_torch(gpu=True)
+    if _find_collector() is None:
+        pytest.skip("torch_trace_collector .so not found")
     if not torch_trace_workload_state["profiled"]:
         workload_dir = common.get_output_dir(param_id="torch_trace")
         torch_trace_workload_state["dir"] = workload_dir
+        profile_config = dict(config)
+        profile_config["torch_test_app"] = [
+            sys.executable,
+            *config["torch_test_app"][1:],
+        ]
         returncode = binary_handler_profile_rocprof_compute(
-            config,
+            profile_config,
             workload_dir,
             [
                 "--experimental",
@@ -232,13 +243,25 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
                     f"Column '{column}' missing in {marker_file}"
                 )
             found_row = False
+            functions = []
             for row in reader:
                 found_row = True
+                functions.append(row["Function"])
                 assert row["Function"], f"Empty Function in {marker_file}"
                 assert row["Correlation_Id"], f"Empty Correlation ID in {marker_file}"
                 assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
                 assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
             assert found_row, f"{marker_file} is empty"
+            assert any("nn.Module.Linear.forward" in fn for fn in functions)
+            assert any("aten::addmm" in fn for fn in functions)
+            assert any("scope=FUNCTION" in fn for fn in functions)
+            assert any("|seqNr=" in fn for fn in functions)
+            assert any("|tid=" in fn for fn in functions)
+            assert any("|ftid=" in fn for fn in functions)
+            assert any("|ltid=" in fn for fn in functions)
+            assert any("|scope=" in fn for fn in functions)
+            assert any("|args=" in fn for fn in functions)
+            assert any(fn.endswith("|torch") for fn in functions)
         with csv_compression.open_gzip_csv_read(corresponding_counter_file) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
