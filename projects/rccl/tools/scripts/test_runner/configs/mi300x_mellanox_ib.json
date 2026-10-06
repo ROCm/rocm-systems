@@ -367,6 +367,11 @@
           "name": "MultiSegment_CAST_RMA_All_MultiNode",
           "description": "CAST RMA registration, boundary, signal, flush, and DeepEP-style multi-segment coverage",
           "test_filter": "RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
+        },
+        {
+          "name": "MultiSegment_CAST_RMA_PostPath",
+          "description": "Post-path fixture under IB-CAST: WR chains, aggregation, rejected-op slot accounting, registration churn and send-queue credits",
+          "test_filter": "RmaMultiSegmentPostMPITest.*"
         }
       ]
     },

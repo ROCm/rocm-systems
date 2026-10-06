@@ -3176,6 +3176,10 @@
         {
           "name": "MultiSegment_CAST_RMA_All_MultiNode",
           "test_filter": "RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
+        },
+        {
+          "name": "MultiSegment_CAST_RMA_PostPath",
+          "test_filter": "RmaMultiSegmentPostMPITest.*"
         }
       ]
     }
