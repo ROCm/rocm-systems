@@ -42,8 +42,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
     `GinPluginInitTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
-  - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suite
-    `GroupEndInternalTest.*`.
+  - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
+    `GroupEndInternalTest.*`, `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`,
+    `GroupJobAbortTest.*`, `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
@@ -90,6 +91,17 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
     filtering, aligned local-record collection, allocation and callback
     failures, rank ordering and formatting, and reporter output.
+  - `ras/collectives.cc` (`COLLECTIVES_CC_PATH`, from
+    `ras-collectives-test.cc`); suite `RasCollectivesMicrotest.*`. Covers
+    request initialization, collective forwarding and responses, completion,
+    timeout handling, history, connection cleanup, diagnostics-init failure
+    absorption, and dependency-error propagation.
+    `DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable`
+    tracks [AICOMRCCL-2740](https://amd-hub.atlassian.net/browse/AICOMRCCL-2740).
+    This deferred production regression currently crashes when communicator-data
+    allocation fails after request rewriting. Enable it with the production fix;
+    it is excluded from normal host-test runs. To reproduce explicitly, run
+    `rccl-UnitTestsMicro --gtest_also_run_disabled_tests --gtest_filter=RasCollectivesMicrotest.DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable`.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
@@ -105,6 +117,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     channel/warp-selection, and tuning-ID helpers without a GPU. This TU
     defines `ncclParamNthreads` and `ncclParamLl128Nthreads`; do not duplicate
     them in `fakes/tuning_fakes.cc`.
+  - `tuning/tuning.cc` (`TUNING_CC_PATH`, from `tuning-test.cc`); suite
+    `TuningMicrotest.*`. Covers tuning lifecycle, candidate selection, tuner
+    overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
+    `ncclParamSingleProcMemRegEnable` resolves from `group.cc` via
+    `group-test.cc`; do not add `fakes/group_fakes.cc` to this binary.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
@@ -360,6 +377,10 @@ Five things do NOT follow the TU-per-file rule, deliberately:
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
   It therefore cannot link into the enqueue target and stays target-shaped.
+  One symbol in it, `ncclArgsGlobalCheck`, is a controllable hook
+  (`g_ncclArgsGlobalCheck` in `fakes/collective_stubs.h`) rather than a hard
+  `::abort()`, for `group-test.cc`'s `ArgsGlobalCheckTest`; everything else in
+  the file is still the same fail-loud floor described above.
 - `ncclStrongStreamAcquire` / `Release` stay in `nccl_fakes.cc` rather than
   `strongstream_stubs.cc`: they carry `ASSERT_HOOK_MATCHES_PROD` drift
   assertions and moving those is a larger change.
