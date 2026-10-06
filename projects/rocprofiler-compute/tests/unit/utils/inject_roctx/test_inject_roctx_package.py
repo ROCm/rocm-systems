@@ -368,3 +368,22 @@ def test_cap_args_balanced_parens():
     assert cap_args("x" * 513).endswith("...")
     blob = "(" + "float32[2x4], " * 40 + ")"
     assert cap_args(blob).endswith("...)")
+
+
+def test_push_scope_emits_composed_marker_and_pop_is_idempotent():
+    from utils.inject_roctx import core
+
+    previous = core.get_python_tier_io()
+    pushes = []
+    pops = []
+    core.set_python_tier_io(pushes.append, lambda: pops.append("pop"))
+    core._thread_local.depth = 0
+    try:
+        core._push_scope("aten::addmm", "n/a", backend="torch")
+        assert pushes == [core.compose_marker("aten::addmm", "n/a", backend="torch")]
+        core._pop_scope()
+        core._pop_scope()
+        assert pops == ["pop"]
+    finally:
+        core.set_python_tier_io(*previous)
+        core._thread_local.depth = 0
