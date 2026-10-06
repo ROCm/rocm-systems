@@ -139,7 +139,8 @@ std::string runBarrierScenarioChild(const std::string& scenario) {
     setenv("GPU_MAX_HW_QUEUES", "1", 1);
     setenv("DEBUG_CLR_AQL_BARRIER_OPT", "1", 1);
     setenv("AMD_LOG_LEVEL", "5", 1);
-    setenv("AMD_LOG_MASK", "8", 1);
+    // LOG_AQL | LOG_INIT: the packet trace and the ordering edge state line.
+    setenv("AMD_LOG_MASK", "2056", 1);
 
     const int log_fd = open(log_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (log_fd < 0) _exit(127);
@@ -185,6 +186,28 @@ int dispatchBarrierBitForWorkgroup(const std::string& log, uint32_t workgroup_si
     }
   }
   return -1;
+}
+
+// Whether the runtime publishes ordering edges, each of which adds a barrier packet.
+bool orderingEdgeSignalsEnabled(const std::string& log) {
+  const std::string state_token = "Ordering edge signals: ";
+  const size_t pos = log.find(state_token);
+  if (pos == std::string::npos) {
+    HIP_SKIP_TEST("Runtime does not report its ordering edge state");
+  }
+  const size_t begin = pos + state_token.size();
+  const size_t end = log.find(", ", begin);  // "<state>, <n> of <m> slots created"
+  REQUIRE(end != std::string::npos);
+  const std::string state = log.substr(begin, end - begin);
+  if (state == "enabled") {
+    return true;
+  }
+  INFO("Ordering edge state: " << state);
+  REQUIRE((state == "disabled by DEBUG_CLR_DEVICE_ORDERING_EDGE=0" ||
+           state == "unavailable: runtime has no hsa_amd_signal_create_v2" ||
+           state == "unavailable: agent capability query failed" ||
+           state == "unavailable: agent cannot host the value word"));
+  return false;
 }
 
 }  // namespace
@@ -393,9 +416,14 @@ HIP_TEST_CASE(Unit_hipStreamAqlBarrierBit_Scenarios) {
         barrier_bits.push_back(1);
       }
     }
-    REQUIRE(barrier_bits.size() == 2);
-    REQUIRE(barrier_bits[0] == 1);
-    REQUIRE(barrier_bits[1] == 0);
+    // Record, [ordering edge], wait.
+    const bool ordering_edge = orderingEdgeSignalsEnabled(log);
+    REQUIRE(barrier_bits.size() == (ordering_edge ? 3u : 2u));
+    REQUIRE(barrier_bits.front() == 1);
+    if (ordering_edge) {
+      REQUIRE(barrier_bits[1] == 1);
+    }
+    REQUIRE(barrier_bits.back() == 0);
   }
 }
 
