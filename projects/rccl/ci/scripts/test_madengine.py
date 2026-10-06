@@ -89,7 +89,7 @@ OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 # execute a multi-node workload in place instead of submitting its own sbatch
 # (ROCm/madengine#213).  That is not on develop yet, so the fork is pinned.
 MADENGINE_REPO = "https://github.com/mkuznet1/madengine.git"
-MADENGINE_REF = "4ece67d7ce32dc7abd503970fd66748f12751903"  # madengine#213
+MADENGINE_REF = "10a0414b644d204e45437ab01d9e795176e0ee4f"  # madengine#213
 MAD_REPO = "https://github.com/ROCm/MAD.git"
 MAD_REF = "b4b296310e52ba5cd67d898825165b06b60cf9bf"  # mad-rccl, 2026-09-08
 MAD_BRANCH = "mad-rccl"
