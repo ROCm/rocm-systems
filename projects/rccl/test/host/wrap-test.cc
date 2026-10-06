@@ -3110,23 +3110,6 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_CountNotDivisibleByNRanksReturnsFalse
       });
 }
 
-TEST(WrapMicrotestIsolated, UseCeAllReduce_MsgTooLargeReturnsFalse) {
-  RUN_ISOLATED_TEST(
-      "Wrap_UseCeAllReduce_MsgTooLargeReturnsFalse",
-      []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
-        ncclComm* comm = MakeZeroedComm();
-        comm->symmetricSupport = 1;
-        comm->nNodes = 1;
-        comm->nRanks = 1;
-        // count * sizeof(float) must exceed RCCL_CE_AR_2SHOT_MAX_BYTES (256MiB).
-        size_t count = (256ull * 1024 * 1024 / 4) + 1;
-        std::string log = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, count, ncclFloat32, ncclSum, nullptr)); });
-        EXPECT_NE(std::string::npos, log.find("msgBytes"));
-        DeleteCommWithArch(comm);
-      });
-}
 
 TEST(WrapMicrotestIsolated, UseCeAllReduce_NonZeroCtaPolicyWithoutForceReturnsFalse) {
   RUN_ISOLATED_TEST(
@@ -3801,6 +3784,151 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenStagingBufferN
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// CE 2-shot is suppressed when the message exceeds the env-injected cap.
+// gfx942 is used because it has ceNonRegMax[AR]=256MiB in the table so
+// rcclCeAllReduceEnabled accepts RCCL_CE_ALLREDUCE=1, and the 1KiB env
+// override via g_loadParam wins over the table. RCCL_FORCE_CE_ALLREDUCE
+// bypasses CTAPolicy so that is not a confounding gate. The only false
+// conjunct in ceAllReduceAllowed is twoShotWindow.
+// twoShotWindow tests: verify rcclSelectAllReduce enforces the [min, max] size window.
+// gfx950 has ceNonRegMax[AllReduce]=256MiB and ceNonRegMin[AllReduce]=0 in its arch table.
+// Env params RCCL_CE_AR_2SHOT_MAX_BYTES / RCCL_CE_AR_2SHOT_MIN_BYTES override the table.
+// RCCL_CE_ALLREDUCE=1 and RCCL_FORCE_CE_ALLREDUCE=1 are set so eligibility gates pass;
+// only the size window check should determine whether RCCL_CE_2SHOT is selected.
+
+// (a) Table-driven max: message exceeds gfx950 table max (256 MiB). No env override.
+//     count = 256*1024*1024/4 + 8 floats => totalBytes = 256 MiB + 32 bytes > 256 MiB.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveTableMax) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenAboveTableMax",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)       return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
+          return deft;  // no size override -- table value (256 MiB) is used
+        };
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 8;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // 256 MiB + 32 bytes: just past the table ceiling, divisible by nRanks=8.
+        constexpr size_t kCount = (256ULL * 1024 * 1024 / sizeof(float)) + 8;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/kCount, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// (b) Env-override max: RCCL_CE_AR_2SHOT_MAX_BYTES=1024. Message is 2048 bytes > 1 KiB.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveEnvMax) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenAboveEnvMax",
+      []() {
+        constexpr int64_t kCap = 1024;
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)          return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)    return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MAX_BYTES") == 0) return kCap;
+          return deft;
+        };
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 8;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // 512 * 4 = 2048 bytes > kCap (1024).
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/512, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// (c) Env-override min: RCCL_CE_AR_2SHOT_MIN_BYTES=8192. Message is 4 bytes < 8 KiB.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMin) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMin",
+      []() {
+        constexpr int64_t kMin = 8192;
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)          return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)    return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MIN_BYTES") == 0) return kMin;
+          return deft;
+        };
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 8;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // 8 * 4 = 32 bytes < kMin (8192), divisible by nRanks=8.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// (d) Within env window: min=4 bytes, max=1 MiB. Message is 32 bytes -- must pick CE 2-shot.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenWithinEnvWindow) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotChosenWhenWithinEnvWindow",
+      []() {
+        constexpr int64_t kMin = 4;
+        constexpr int64_t kMax = 1048576;  // 1 MiB
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)          return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)    return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MIN_BYTES") == 0) return kMin;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MAX_BYTES") == 0) return kMax;
+          return deft;
+        };
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 8;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        // RCCL_FORCE_CE_ALLREDUCE=1 (above) stands in for symReg=true since null
+        // send/recv pointers mean ncclCeAvailable returns false in unit test context.
+        // CTAPolicy=ZERO satisfies rcclUseCeAr2Shot; force satisfies ceAllReduceAllowed.
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // 8 * 4 = 32 bytes: inside [4, 1 MiB] window, divisible by nRanks=8.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
