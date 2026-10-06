@@ -163,7 +163,9 @@ if(RJ_INSTALL_TESTS)
 
     install(FILES "${RJ_INSTALL_CTEST_FILE}" DESTINATION ${RJ_INSTALL_TEST_DIR})
     install(
-        FILES "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+        FILES
+            "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+            "${PROJECT_SOURCE_DIR}/cmake/rj_run_gtest_shard.cmake"
         DESTINATION ${RJ_INSTALL_TEST_DIR}
     )
     install(
@@ -874,14 +876,20 @@ foreach(_shard RANGE 0 ${_rj_fp_mode_last_shard})
         "GTEST_TOTAL_SHARDS=${_rj_fp_mode_shards}"
         "GTEST_SHARD_INDEX=${_shard}"
     )
-    set(_shard_output
-        "--gtest_output=xml:gtest-results/rocjitsu_fp_mode_${_shard}.xml"
-    )
+    set(_shard_output "gtest-results/rocjitsu_fp_mode_${_shard}.xml")
     rj_add_test(
         NAME "ValuFpModeTest.Shard${_shard}"
-        COMMAND $<TARGET_FILE:rocjitsu_fp_mode_tests> "${_shard_output}"
+        COMMAND
+            "${CMAKE_COMMAND}"
+            "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_fp_mode_tests>"
+            "-DTEST_OUTPUT_FILE=${_shard_output}" -P
+            "${PROJECT_SOURCE_DIR}/cmake/rj_run_gtest_shard.cmake"
         ENVIRONMENT ${_shard_env}
-        INSTALL_COMMAND "bin/rocjitsu_fp_mode_tests" "${_shard_output}"
+        INSTALL_COMMAND
+            "${CMAKE_COMMAND}"
+            "-DTEST_EXECUTABLE=bin/rocjitsu_fp_mode_tests"
+            "-DTEST_OUTPUT_FILE=${_shard_output}" -P
+            "rj_run_gtest_shard.cmake"
         INSTALL_ENVIRONMENT ${_shard_env}
         LABELS fp-mode
     )

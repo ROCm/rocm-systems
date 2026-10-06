@@ -89,8 +89,11 @@ ctest --test-dir build -L '^fp-mode$' --output-on-failure
 
 Each batch writes per-case GoogleTest results under `build/tests/gtest-results/`.
 Installed tests use the same batches and write results under `gtest-results/`
-in the installed test directory. To select individual cases or a family, run
-the dedicated executable with a GoogleTest filter:
+in the installed test directory. The launcher removes each batch's previous XML
+before starting GoogleTest to avoid stale results after a crash or timeout.
+CTest batches ignore an inherited `GTEST_FILTER` and suppress passing-case output;
+failure diagnostics and per-case XML are retained. To select individual cases or
+a family, run the dedicated executable with a GoogleTest filter:
 
 ```bash
 build/tests/rocjitsu_fp_mode_tests --gtest_filter='BinaryF32/ValuFpModeTest.*'
