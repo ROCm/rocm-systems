@@ -265,6 +265,17 @@ void copy_to_device(void* dev, uint32_t seed, size_t len) {
   HRR_HIP_CHECK(hipMemcpy(dev, host.data(), len, hipMemcpyHostToDevice));
 }
 
+// A forked child opens its archive on its first record, not at fork. This
+// records one without touching the device, which a forked child must not use:
+// a launch configuration pushed and popped through the compiler dispatch table.
+void record_in_child() {
+  dim3 grid, block;
+  size_t shared = 0;
+  hipStream_t stream = nullptr;
+  (void)__hipPushCallConfiguration(dim3(1), dim3(1), 0, nullptr);
+  (void)__hipPopCallConfiguration(&grid, &block, &shared, &stream);
+}
+
 // Wait for a forked child for at most 60 s; -1 when it had to be killed.
 int wait_child(pid_t child) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
@@ -389,6 +400,7 @@ TEST_CASE("Unit_HRR_DiskSpace_ForkAfterStop_Direct", "[.][hrr-direct]") {
   const pid_t child = fork();
   if (child == 0) {
     g_quick_exit_pid.store(getpid());
+    record_in_child();
     std::exit(0);
   }
   REQUIRE(child > 0);
@@ -417,6 +429,8 @@ TEST_CASE("Unit_HRR_DiskSpace_RefusedForkChild_Direct", "[.][hrr-direct]") {
   const pid_t child = fork();
   if (child == 0) {
     g_quick_exit_pid.store(getpid());
+    // Its open, and so the refusal, comes with its first record.
+    record_in_child();
     std::exit(0);
   }
   REQUIRE(child > 0);
