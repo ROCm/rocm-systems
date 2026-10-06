@@ -49,11 +49,19 @@ private:
 
 // gtest assigns the child's single filtered test to shard 0, so a non-zero shard index must not reach the child.
 TEST(ProcessIsolatedRunnerMicrotest, NonZeroShard_ChildStillRunsBody) {
-  const std::string marker = ::testing::TempDir() + "rccl_pit_shard_marker_" + std::to_string(getpid());
-  std::remove(marker.c_str());
+  // Private 0700 dir so another local user cannot pre-plant a symlink at the marker or status-file path.
+  std::string dir = ::testing::TempDir() + "rccl_pit_XXXXXX";
+  // The re-exec child re-enters this body only to reach its lambda and then _exit()s, so it must not create a dir.
+  if (std::getenv(RcclUnitTesting::ProcessIsolatedTestRunner::kReexecMarkerEnvVar) == nullptr) {
+    ASSERT_NE(nullptr, mkdtemp(&dir[0])) << "mkdtemp failed under " << ::testing::TempDir();
+  }
+  const std::string marker = dir + "/marker";
+  const std::string statusFile = dir + "/shard_status";
   {
     ScopedEnv totalShards("GTEST_TOTAL_SHARDS", "2");
     ScopedEnv shardIndex("GTEST_SHARD_INDEX", "1");
+    // Set after this process's gtest started, so only a child that inherits it would create the file.
+    ScopedEnv shardStatusFile("GTEST_SHARD_STATUS_FILE", statusFile.c_str());
     RUN_ISOLATED_TEST_WITH_ENV(
       "Pit_NonZeroShard_ChildStillRunsBody",
       []() {
@@ -65,6 +73,11 @@ TEST(ProcessIsolatedRunnerMicrotest, NonZeroShard_ChildStillRunsBody) {
       },
       {{kMarkerEnvVar, marker}});
   }
-  EXPECT_EQ(0, access(marker.c_str(), F_OK)) << "isolated body never ran: the child ran 0 tests and exited 0";
+  const bool markerWritten = access(marker.c_str(), F_OK) == 0;
+  const bool statusFileWritten = access(statusFile.c_str(), F_OK) == 0;
   std::remove(marker.c_str());
+  std::remove(statusFile.c_str());
+  rmdir(dir.c_str());
+  EXPECT_TRUE(markerWritten) << "isolated body never ran: the child ran 0 tests and exited 0";
+  EXPECT_FALSE(statusFileWritten) << "child inherited GTEST_SHARD_STATUS_FILE and its gtest wrote the status file";
 }
