@@ -49,6 +49,7 @@ test_categories:
       - "Ipcsocket.*"
       - "XmlTest.*"
       - "NetDevsPolicyP2pNetTests.*"
+      - "P2pPxnLevel1NetId.*"
       - "TopoTest.*"
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
