@@ -8,6 +8,7 @@
 #include "os.h"
 
 #include "checks.h"
+#include "crypt.h"
 #include "utils.h"
 
 #include <cstdint>
@@ -52,7 +53,6 @@ ncclOsLibraryHandle ncclOsDlopen(const char* filename) {
   ncclOsLibraryHandle handle = dlopen(filename, RTLD_NOW | RTLD_LOCAL);
   if (handle == NULL) {
     saveDlError();
-    INFO(NCCL_INIT, "ncclOsDlopen(%s) failed: %s", filename, ncclDlErrorBuf);
   }
   return handle;
 }
@@ -61,7 +61,6 @@ void* ncclOsDlsym(ncclOsLibraryHandle handle, const char* symbol) {
   void* ptr = dlsym(handle, symbol);
   if (ptr == NULL) {
     saveDlError();
-    INFO(NCCL_INIT, "ncclOsDlsym(%s) failed: %s", symbol, ncclDlErrorBuf);
   }
   return ptr;
 }
@@ -71,7 +70,9 @@ const char* ncclOsDlerror() {
 }
 
 ncclOsLibraryHandle ncclOsDlopen(const char* path, int mode) {
-  return (ncclOsLibraryHandle)dlopen(path, (mode == NCCL_OS_DL_NOW) ? RTLD_NOW : RTLD_LAZY);
+  ncclOsLibraryHandle handle = dlopen(path, (mode == NCCL_OS_DL_NOW) ? RTLD_NOW : RTLD_LAZY);
+  if (handle == NULL) saveDlError();
+  return handle;
 }
 
 void ncclOsDlclose(ncclOsLibraryHandle handle) {
@@ -93,6 +94,10 @@ uint64_t ncclOsGetTid() {
 
 size_t ncclOsGetPageSize() {
   return (size_t)sysconf(_SC_PAGESIZE);
+}
+
+size_t ncclOsGetCommMempoolMaxSize() {
+  return 0;
 }
 
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
@@ -521,11 +526,11 @@ ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) {
     if (sock->state > ncclSocketStateNone && sock->state < ncclSocketStateNum && ncclOsSocketIsValid(sock)) {
       if (wait) {
         char data;
-        int closed = 0;
+        bool closed = false;
         do {
           int offset = 0;
           if (ncclSocketProgress(NCCL_SOCKET_RECV, sock, &data, sizeof(char), &offset, &closed) != ncclSuccess) break;
-        } while (closed == 0);
+        } while (!closed);
       }
       /* shutdown() is needed to send FIN packet to proxy thread; shutdown() is not affected
        * by refcount of fd, but close() is. close() won't close a fd and send FIN packet if
@@ -534,13 +539,18 @@ ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) {
       (void)shutdown(sock->socketDescriptor, SHUT_RDWR);
       (void)close(sock->socketDescriptor);
     }
+    if (sock->crypto) {
+      ncclCryptFree(sock->crypto);
+      sock->crypto = nullptr;
+    }
     sock->state = ncclSocketStateClosed;
     sock->socketDescriptor = NCCL_INVALID_SOCKET;
   }
   return ncclSuccess;
 }
 
-void ncclOsSetMutexCondShared(std::mutex& mutex, std::condition_variable& cond) {
+void ncclOsSetMutexCondShared(std::mutex& mutex, std::condition_variable& cond, int* initialized) {
+  if (initialized != NULL && *initialized) return;
   pthread_mutexattr_t mutexAttr;
   pthread_mutexattr_init(&mutexAttr);
   pthread_mutexattr_setpshared(&mutexAttr, PTHREAD_PROCESS_SHARED);
@@ -554,6 +564,14 @@ void ncclOsSetMutexCondShared(std::mutex& mutex, std::condition_variable& cond) 
   pthread_cond_t* condHandle = cond.native_handle();
   pthread_cond_init(condHandle, &condAttr);
   pthread_condattr_destroy(&condAttr);
+  if (initialized != NULL) *initialized = 1;
+}
+
+void ncclOsUnsetMutexCondShared(std::mutex& mutex, std::condition_variable& cond, int* initialized) {
+  if (initialized != NULL && *initialized == 0) return;
+  pthread_cond_destroy(cond.native_handle());
+  pthread_mutex_destroy(mutex.native_handle());
+  if (initialized != NULL) *initialized = 0;
 }
 
 void ncclOsCpuZero(ncclAffinity& affinity) {
@@ -711,7 +729,8 @@ ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen) {
+ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen, int* cpuOffset) {
+  *cpuOffset = 0;
   char filePath[PATH_MAX];
   snprintf(filePath, sizeof(filePath), "/sys/devices/system/node/node%u/cpumap", numaId);
   int offset = 0;

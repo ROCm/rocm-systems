@@ -240,6 +240,15 @@ protected:
         float* sendPtr = static_cast<float*>(sendBuf);
         float* recvPtr = static_cast<float*>(recvBuf);
 
+        // Every rank contributes ones, so a correct sum is nRanks in every element. Filled through
+        // sendBuf before any deviation moves sendPtr, and recorded in res rather than returned, so
+        // that every rank still makes the same calls below.
+        ncclResult_t res = ncclSuccess;
+        std::vector<float> host(count, 1.0f);
+        if (hipMemcpy(sendBuf, host.data(), count * sizeof(float), hipMemcpyHostToDevice) != hipSuccess) {
+            res = ncclInternalError;
+        }
+
         if (isOdd && deviation == Deviation::Unregistered) {
             // Hand the collective a symmetric buffer that no window covers: every
             // peer still passes a registered buffer, so registrationCheck()
@@ -253,9 +262,21 @@ protected:
             sendPtr = reinterpret_cast<float*>(static_cast<char*>(sendBuf) + 8192);
         }
 
-        ncclResult_t res = ncclAllReduce(sendPtr, recvPtr, count, ncclFloat, ncclSum, comm, stream);
+        // Unconditional: a rank that skipped the collective would leave its peers blocked in it.
+        ncclResult_t collRes = ncclAllReduce(sendPtr, recvPtr, count, ncclFloat, ncclSum, comm, stream);
+        if (res == ncclSuccess) res = collRes;
         if (res == ncclSuccess && hipStreamSynchronize(stream) != hipSuccess) {
             res = ncclInternalError;
+        }
+
+        if (res == ncclSuccess) {
+            std::vector<float> out(count, 0.0f);
+            if (hipMemcpy(out.data(), recvPtr, count * sizeof(float), hipMemcpyDeviceToHost) != hipSuccess) {
+                res = ncclInternalError;
+            }
+            for (size_t i = 0; res == ncclSuccess && i < count; ++i) {
+                if (out[i] != static_cast<float>(nRanks)) res = ncclInternalError;
+            }
         }
 
         // The ranks must agree on the outcome; a split result (some ranks reject,
@@ -309,7 +330,9 @@ TEST_F(SymCheckMode_Registration, DebugGlobal_UserOffsetMismatch_Rejected)
     ASSERT_MPI_EQ(ncclInvalidArgument, runAllReduce(Deviation::ShiftedOffset));
 }
 
-TEST_F(SymCheckMode_Registration, Default_RegistrationMismatch_Accepted)
+// Mismatched registration needs NCCL_CHECK_MODE=DEBUG_GLOBAL to be diagnosed. Without it the
+// registered path must still run and reduce correctly, which runAllReduce checks element by element.
+TEST_F(SymCheckMode_Registration, Default_MatchingRegistration_Succeeds)
 {
     ScopedEnv checkMode("NCCL_CHECK_MODE", nullptr);
     if (!symmetricPrerequisitesMet()) {
@@ -317,9 +340,7 @@ TEST_F(SymCheckMode_Registration, Default_RegistrationMismatch_Accepted)
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-    // Same mismatch as above: without the variable the library must stay on the
-    // fast path and fall back instead of diagnosing.
-    ASSERT_MPI_EQ(ncclSuccess, runAllReduce(Deviation::Unregistered));
+    ASSERT_MPI_EQ(ncclSuccess, runAllReduce(Deviation::None));
 }
 
 // ============================================================================
@@ -386,9 +407,9 @@ TEST_F(SymCheckMode_Local, DebugGlobal_HostPointer_Rejected)
 // effect. NCCL_CHECK_MODE works because it is re-read through ncclGetEnv() on
 // each communicator, and DEBUG_LOCAL already covers the same rejection path.
 
-// The opt-in nature of the checking is covered by
-// SymCheckMode_Registration.Default_RegistrationMismatch_Accepted, which uses a
-// mismatch that is safe to actually execute. Enqueuing a host pointer without a
+// The default (no NCCL_CHECK_MODE) path is covered by
+// SymCheckMode_Registration.Default_MatchingRegistration_Succeeds, which uses buffers
+// that are safe to actually execute. Enqueuing a host pointer without a
 // check mode would let the kernel dereference unmapped memory and take the whole
 // process down with it, so that combination is deliberately not tested.
 

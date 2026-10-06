@@ -91,11 +91,12 @@ public:
 /// `Isa` struct adds `Decoder`, `MachineInst`, `OperandType`, and `StatusReg`
 /// type aliases.
 struct CdnaIsaBase {
-  static constexpr uint32_t WF_SIZE = 64;           ///< Lanes per wavefront (Wave64).
-  static constexpr uint32_t WF_SIZE_MAX = 64;       ///< CDNA is Wave64-only.
-  static constexpr uint32_t MAX_WF_SLOTS = 32;      ///< Maximum simulated CU wave slots.
-  static constexpr uint32_t MAX_SGPRS_PER_WF = 102; ///< SGPRs per wavefront.
-  static constexpr uint32_t MAX_VGPRS_PER_WF = 256; ///< VGPRs per wavefront.
+  static constexpr uint32_t ASYNC_MMA_WAVE_SIZE = 0; ///< No async MMA adapter.
+  static constexpr uint32_t WF_SIZE = 64;            ///< Lanes per wavefront (Wave64).
+  static constexpr uint32_t WF_SIZE_MAX = 64;        ///< CDNA is Wave64-only.
+  static constexpr uint32_t MAX_WF_SLOTS = 32;       ///< Maximum simulated CU wave slots.
+  static constexpr uint32_t MAX_SGPRS_PER_WF = 102;  ///< SGPRs per wavefront.
+  static constexpr uint32_t MAX_VGPRS_PER_WF = 256;  ///< VGPRs per wavefront.
   static constexpr uint32_t MAX_ADDRESSABLE_VGPRS_PER_WF =
       MAX_VGPRS_PER_WF;                                 ///< Maximum ordinary VGPR address span.
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0;   ///< AccVGPRs (0 = absent; CDNA1 default).

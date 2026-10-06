@@ -29,6 +29,7 @@
 uint64_t ncclOsGetPid();
 uint64_t ncclOsGetTid();
 size_t ncclOsGetPageSize();
+size_t ncclOsGetCommMempoolMaxSize();
 ncclResult_t ncclOsInitialize();
 
 ncclResult_t ncclOsSetFilesLimit();
@@ -67,7 +68,8 @@ ncclResult_t ncclOsSocketResetFd(struct ncclSocket* sock);
 void ncclOsSocketResetAccept(struct ncclSocket* sock);
 ncclResult_t ncclOsSocketTryAccept(struct ncclSocket* sock);
 
-void ncclOsSetMutexCondShared(std::mutex& mutex, std::condition_variable& cond);
+void ncclOsSetMutexCondShared(std::mutex& mutex, std::condition_variable& cond, int* initialized);
+void ncclOsUnsetMutexCondShared(std::mutex& mutex, std::condition_variable& cond, int* initialized);
 
 void ncclOsCpuZero(ncclAffinity& affinity);
 int ncclOsCpuCount(const ncclAffinity& affinity);
@@ -78,7 +80,7 @@ ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity);
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity);
 int ncclOsGetCpu();
 
-ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen);
+ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen, int* cpuOffset);
 
 ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass, size_t maxLen);
 

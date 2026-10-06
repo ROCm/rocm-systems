@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 33
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 36
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -99,7 +99,7 @@ typedef hipError_t (*t_hipBindTextureToArray)(const textureReference* tex, hipAr
 typedef hipError_t (*t_hipBindTextureToMipmappedArray)(const textureReference* tex,
                                                        hipMipmappedArray_const_t mipmappedArray,
                                                        const hipChannelFormatDesc* desc);
-typedef hipError_t (*t_hipChooseDevice)(int* device, const hipDeviceProp_t* prop);
+typedef hipError_t (*t_hipChooseDevice)(int* device, const hipDeviceProp_tR0600* prop);
 typedef hipError_t (*t_hipChooseDeviceR0000)(int* device, const hipDeviceProp_tR0000* properties);
 typedef hipError_t (*t_hipConfigureCall)(dim3 gridDim, dim3 blockDim, size_t sharedMem,
                                          hipStream_t stream);
@@ -1183,6 +1183,14 @@ typedef hipError_t (*t_hipExecutionCtxWaitEvent)(hipExecutionCtx_t ctx, hipEvent
 
 typedef hipError_t (*t_hipMemGetDefaultMemPool)(hipMemPool_t* memPool, hipMemLocation* location,
                                                 hipMemAllocationType type);
+typedef hipError_t (*t_hipModuleEnumerateFunctions)(hipFunction_t* functions,
+                                                    unsigned int numFunctions, hipModule_t module);
+// The enum keyword is required: this header is reached from C translation units (e.g. via
+// rocprofiler-sdk/hip/api_args.h), and these enums are declared without a typedef.
+typedef hipError_t (*t_hipDeviceFlushGPUDirectRDMAWrites)(
+    enum hipFlushGPUDirectRDMAWritesTarget target, enum hipFlushGPUDirectRDMAWritesScope scope);
+typedef hipError_t (*t_hipKernelSetAttributeForDevice)(hipKernel_t kernel, hipFuncAttribute attr,
+                                                        int value, int device);
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1836,8 +1844,17 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 33
   t_hipInitDevice hipInitDevice_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 34
+  t_hipModuleEnumerateFunctions hipModuleEnumerateFunctions_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 35
+  t_hipDeviceFlushGPUDirectRDMAWrites hipDeviceFlushGPUDirectRDMAWrites_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 36
+  t_hipKernelSetAttributeForDevice hipKernelSetAttributeForDevice_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 37
 
   // ******************************************************************************************* //
   //

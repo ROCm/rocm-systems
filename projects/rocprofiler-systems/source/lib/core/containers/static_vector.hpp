@@ -3,23 +3,26 @@
 
 #pragma once
 
-#include "core/common.hpp"
 #include "core/containers/c_array.hpp"
-#include "core/exception.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdlib>
+#include <initializer_list>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <utility>
 
-namespace rocprofsys
-{
-namespace container
+namespace rocprofsys::container
 {
 template <typename Tp, size_t N, bool AtomicSizeV = false>
 struct static_vector
 {
     using count_type      = std::conditional_t<AtomicSizeV, std::atomic<size_t>, size_t>;
-    using this_type       = static_vector<Tp, N>;
+    using this_type       = static_vector<Tp, N, AtomicSizeV>;
     using value_type      = Tp;
     using array_type      = std::array<Tp, N>;
     using reference       = value_type&;
@@ -29,68 +32,68 @@ struct static_vector
     using size_type       = size_t;
     using difference_type = std::ptrdiff_t;
 
-    static_vector()                                    = default;
-    static_vector(const static_vector&)                = default;
-    static_vector(static_vector&&) noexcept            = default;
-    static_vector& operator=(const static_vector&)     = default;
-    static_vector& operator=(static_vector&&) noexcept = default;
+    constexpr static_vector()                                    = default;
+    constexpr static_vector(const static_vector&)                = default;
+    constexpr static_vector(static_vector&&) noexcept            = default;
+    constexpr static_vector& operator=(const static_vector&)     = default;
+    constexpr static_vector& operator=(static_vector&&) noexcept = default;
 
-    static_vector(size_t _n, Tp _v = {});
-    explicit static_vector(c_array<Tp>&&);
+    constexpr static_vector(size_t count, Tp value = {});
+    explicit constexpr static_vector(c_array<Tp>&&);
 
     template <size_t M>
-    explicit static_vector(std::array<Tp, M>&&);
+    explicit constexpr static_vector(std::array<Tp, M>&&);
 
-    static_vector& operator=(std::initializer_list<Tp>&& _v);
-    static_vector& operator=(std::pair<std::array<Tp, N>, size_t>&&);
+    constexpr static_vector& operator=(std::initializer_list<Tp>&& values);
+    constexpr static_vector& operator=(std::pair<std::array<Tp, N>, size_t>&&);
 
     template <typename... Args>
-    value_type& emplace_back(Args&&... _v);
+    constexpr value_type& emplace_back(Args&&... args);
 
     template <typename Up>
-    decltype(auto) push_back(Up&& _v)
+    constexpr decltype(auto) push_back(Up&& value)
     {
-        return emplace_back(Tp{ std::forward<Up>(_v) });
+        return emplace_back(Tp{ std::forward<Up>(value) });
     }
 
-    void pop_back() { --m_size; }
+    constexpr void pop_back() { --m_size; }
 
-    void clear();
-    void reserve(size_t) noexcept {}
-    void shrink_to_fit() noexcept {}
-    auto capacity() noexcept { return N; }
+    constexpr void clear();
+    constexpr void reserve(size_t) noexcept {}
+    constexpr void shrink_to_fit() noexcept {}
+    constexpr auto capacity() noexcept { return N; }
 
-    size_t size() const { return m_size; }
-    bool   empty() const { return (size() == 0); }
+    [[nodiscard]] constexpr size_t size() const { return m_size; }
+    [[nodiscard]] constexpr bool   empty() const { return (size() == 0); }
 
-    auto begin() { return m_data.begin(); }
-    auto begin() const { return m_data.begin(); }
-    auto cbegin() const { return m_data.cbegin(); }
+    constexpr auto begin() { return m_data.begin(); }
+    constexpr auto begin() const { return m_data.begin(); }
+    constexpr auto cbegin() const { return m_data.cbegin(); }
 
-    auto end() { return m_data.begin() + size(); }
-    auto end() const { return m_data.begin() + size(); }
-    auto cend() const { return m_data.cbegin() + size(); }
+    constexpr auto end() { return m_data.begin() + size(); }
+    constexpr auto end() const { return m_data.begin() + size(); }
+    constexpr auto cend() const { return m_data.cbegin() + size(); }
 
-    decltype(auto) operator[](size_t _idx) { return m_data[_idx]; }
-    decltype(auto) operator[](size_t _idx) const { return m_data[_idx]; }
+    constexpr decltype(auto) operator[](size_t idx) { return m_data[idx]; }
+    constexpr decltype(auto) operator[](size_t idx) const { return m_data[idx]; }
 
-    decltype(auto) at(size_t _idx) { return m_data.at(_idx); }
-    decltype(auto) at(size_t _idx) const { return m_data.at(_idx); }
+    constexpr decltype(auto) at(size_t idx) { return m_data.at(idx); }
+    constexpr decltype(auto) at(size_t idx) const { return m_data.at(idx); }
 
-    decltype(auto) front() { return m_data.front(); }
-    decltype(auto) front() const { return m_data.front(); }
-    decltype(auto) back() { return *(m_data.begin() + size() - 1); }
-    decltype(auto) back() const { return *(m_data.begin() + size() - 1); }
+    constexpr decltype(auto) front() { return m_data.front(); }
+    constexpr decltype(auto) front() const { return m_data.front(); }
+    constexpr decltype(auto) back() { return *(m_data.begin() + size() - 1); }
+    constexpr decltype(auto) back() const { return *(m_data.begin() + size() - 1); }
 
-    auto*       data() { return m_data.data(); }
-    const auto* data() const { return m_data.data(); }
+    constexpr auto*       data() { return m_data.data(); }
+    constexpr const auto* data() const { return m_data.data(); }
 
-    void swap(this_type& _v);
+    constexpr void swap(this_type& other);
 
-    friend void swap(this_type& _lhs, this_type& _rhs) { _lhs.swap(_rhs); }
+    friend constexpr void swap(this_type& lhs, this_type& rhs) { lhs.swap(rhs); }
 
 private:
-    void update_size(size_t);
+    constexpr void update_size(size_t);
 
 private:
     count_type        m_size = count_type{ 0 };
@@ -98,111 +101,127 @@ private:
 };
 
 template <typename Tp, size_t N, bool AtomicSizeV>
-static_vector<Tp, N, AtomicSizeV>::static_vector(size_t _n, Tp _v)
+constexpr static_vector<Tp, N, AtomicSizeV>::static_vector(size_t count, Tp value)
 {
-    m_data.fill(_v);
-    update_size(_n);
+    m_data.fill(value);
+    update_size(count);
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
-static_vector<Tp, N, AtomicSizeV>::static_vector(c_array<Tp>&& _v)
+constexpr static_vector<Tp, N, AtomicSizeV>::static_vector(c_array<Tp>&& array)
 {
-    auto _n = std::min<size_t>(N, _v.size());
-    for(size_t i = 0; i < _n; ++i, ++m_size)
-        m_data[i] = _v[i];
+    auto count = std::min<size_t>(N, array.size());
+    for(size_t i = 0; i < count; ++i, ++m_size)
+    {
+        m_data[i] = array[i];
+    }
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
 template <size_t M>
-static_vector<Tp, N, AtomicSizeV>::static_vector(std::array<Tp, M>&& _v)
+constexpr static_vector<Tp, N, AtomicSizeV>::static_vector(std::array<Tp, M>&& arr)
 {
-    auto _n = std::min<size_t>(N, M);
-    for(size_t i = 0; i < _n; ++i, ++m_size)
-        m_data[i] = _v[i];
+    auto count = std::min<size_t>(N, M);
+    for(size_t i = 0; i < count; ++i, ++m_size)
+    {
+        m_data[i] = arr[i];
+    }
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
-static_vector<Tp, N, AtomicSizeV>&
-static_vector<Tp, N, AtomicSizeV>::operator=(std::initializer_list<Tp>&& _v)
+constexpr static_vector<Tp, N, AtomicSizeV>&
+static_vector<Tp, N, AtomicSizeV>::operator=(std::initializer_list<Tp>&& values)
 {
-    if(ROCPROFSYS_UNLIKELY(_v.size() > N))
+    if(values.size() > N) [[unlikely]]
     {
-        throw exception<std::out_of_range>(
+        throw std::out_of_range{
             std::string{ "static_vector::operator=(initializer_list) size > " } +
-            std::to_string(N));
+            std::to_string(N)
+        };
     }
 
     clear();
-    for(auto&& itr : _v)
+    for(auto&& itr : values)
+    {
         m_data[m_size++] = itr;
+    }
     return *this;
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
-static_vector<Tp, N, AtomicSizeV>&
-static_vector<Tp, N, AtomicSizeV>::operator=(std::pair<std::array<Tp, N>, size_t>&& _v)
+constexpr static_vector<Tp, N, AtomicSizeV>&
+static_vector<Tp, N, AtomicSizeV>::operator=(
+    std::pair<std::array<Tp, N>, size_t>&& src_pair)
 {
     update_size(0);
-    m_data = std::move(_v.first);
-    update_size(_v.second);
+    m_data = std::move(src_pair.first);
+    update_size(src_pair.second);
 
     return *this;
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
-void
+constexpr void
 static_vector<Tp, N, AtomicSizeV>::clear()
 {
     update_size(0);
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
-void
-static_vector<Tp, N, AtomicSizeV>::swap(this_type& _v)
+constexpr void
+static_vector<Tp, N, AtomicSizeV>::swap(this_type& other)
 {
     if constexpr(AtomicSizeV)
     {
-        auto _t_size = m_size;
-        auto _v_size = _v.m_size;
-        std::swap(m_data, _v.m_data);
-        update_size(_v_size);
-        _v.update_size(_t_size);
+        auto self_size  = m_size;
+        auto other_size = other.m_size;
+        std::swap(m_data, other.m_data);
+        update_size(other_size);
+        other.update_size(self_size);
     }
     else
     {
-        std::swap(m_size, _v.m_size);
-        std::swap(m_data, _v.m_data);
+        std::swap(m_size, other.m_size);
+        std::swap(m_data, other.m_data);
     }
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
 template <typename... Args>
-Tp&
-static_vector<Tp, N, AtomicSizeV>::emplace_back(Args&&... _v)
+constexpr Tp&
+static_vector<Tp, N, AtomicSizeV>::emplace_back(Args&&... args)
 {
-    auto _idx = m_size++;
-    if(_idx >= N)
+    const auto idx = static_cast<size_t>(m_size);
+    if(idx >= N) [[unlikely]]
     {
-        throw exception<std::out_of_range>(
-            std::string{ "static_vector::emplace_back - reached capacity " } +
-            std::to_string(N));
+        throw std::out_of_range{ std::string{
+                                     "static_vector::emplace_back - reached capacity " } +
+                                 std::to_string(N) };
     }
+    update_size(idx + 1);
 
-    if constexpr(std::is_assignable<Tp, decltype(std::forward<Args>(_v))...>::value)
-        m_data[_idx] = { std::forward<Args>(_v)... };
+    if constexpr(std::is_assignable<Tp, decltype(std::forward<Args>(args))...>::value)
+    {
+        m_data[idx] = { std::forward<Args>(args)... };
+    }
     else
-        m_data[_idx] = Tp{ std::forward<Args>(_v)... };
-    return m_data[_idx];
+    {
+        m_data[idx] = Tp{ std::forward<Args>(args)... };
+    }
+    return m_data[idx];
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
-void
-static_vector<Tp, N, AtomicSizeV>::update_size(size_t _n)
+constexpr void
+static_vector<Tp, N, AtomicSizeV>::update_size(size_t count)
 {
     if constexpr(AtomicSizeV)
-        m_size.store(_n);
+    {
+        m_size.store(count);
+    }
     else
-        m_size = _n;
+    {
+        m_size = count;
+    }
 }
-}  // namespace container
-}  // namespace rocprofsys
+}  // namespace rocprofsys::container

@@ -43,7 +43,8 @@ extern "C" {
   ncclResult_t ncclCommWindowRegister(ncclComm_t, void*, size_t, ncclWindow_t*, int) __attribute__((weak));
   ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) __attribute__((weak));
 #endif
-#if !(defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0))
+// Skip when common.h already included nccl_device.h.
+#if !((defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)) || NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0))
   struct ncclDevComm;          // Device API from 2.28
   struct ncclDevCommRequirements;
   ncclResult_t ncclDevCommCreate(ncclComm_t, ncclDevCommRequirements*, ncclDevComm*) __attribute__((weak));

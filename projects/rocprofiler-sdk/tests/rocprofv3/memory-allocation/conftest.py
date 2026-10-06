@@ -29,7 +29,6 @@ import pytest
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
-from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
 
 

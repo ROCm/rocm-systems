@@ -37,7 +37,9 @@
 #include <SymtabReader.h>
 #include <dyntypes.h>
 
+#include <array>  // NOLINT(misc-include-cleaner): used by std::array in macros below
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -58,10 +60,7 @@
 #include <unordered_map>
 #include <vector>
 
-#define MUTNAMELEN       1024
-#define FUNCNAMELEN      32 * 1024
-#define NO_ERROR         -1
-#define TIMEMORY_BIN_DIR "bin"
+inline constexpr std::size_t k_funcnamelen = 32UL * 1024UL;
 
 #if !defined(PATH_MAX)
 #    define PATH_MAX std::numeric_limits<int>::max();
@@ -78,9 +77,6 @@ using strset_t               = std::set<string_t>;
 using regexvec_t             = std::vector<std::regex>;
 using fmodset_t              = std::set<module_function>;
 using fixed_modset_t         = std::map<fmodset_t*, bool>;
-using exec_callback_t        = BPatchExecCallback;
-using exit_callback_t        = BPatchExitCallback;
-using fork_callback_t        = BPatchForkCallback;
 using patch_t                = BPatch;
 using process_t              = BPatch_process;
 using thread_t               = BPatch_thread;
@@ -139,9 +135,6 @@ constexpr auto SL_END_V =
 
 constexpr auto SV_END_V =
     std::max({ SV_UNKNOWN, SV_DEFAULT, SV_INTERNAL, SV_HIDDEN, SV_PROTECTED }) + 1;
-
-void
-rocprofsys_prefork_callback(thread_t* parent, thread_t* child);
 
 enum CodeCoverageMode
 {
@@ -203,7 +196,6 @@ extern string_t prefer_library;
 //  global variables
 //
 extern patch_pointer_t  bpatch;
-extern call_expr_t*     terminate_expr;
 extern snippet_vec_t    init_names;
 extern snippet_vec_t    fini_names;
 extern fmodset_t        available_module_functions;
@@ -227,12 +219,12 @@ extern CodeCoverageMode coverage_mode;
 //
 struct symtab_data_s
 {
-    std::vector<symtab_module_t*>                           modules              = {};
-    std::map<symtab_module_t*, std::vector<symtab_func_t*>> functions            = {};
-    std::map<symtab_func_t*, std::vector<symtab_symbol_t*>> symbols              = {};
-    std::unordered_map<std::string, symtab_symbol_t*>       mangled_symbol_names = {};
-    std::unordered_map<std::string, symtab_func_t*>         typed_func_names     = {};
-    std::unordered_map<std::string, symtab_symbol_t*>       typed_symbol_names   = {};
+    std::vector<symtab_module_t*>                           modules;
+    std::map<symtab_module_t*, std::vector<symtab_func_t*>> functions;
+    std::map<symtab_func_t*, std::vector<symtab_symbol_t*>> symbols;
+    std::unordered_map<std::string, symtab_symbol_t*>       mangled_symbol_names;
+    std::unordered_map<std::string, symtab_func_t*>         typed_func_names;
+    std::unordered_map<std::string, symtab_symbol_t*>       typed_symbol_names;
 };
 
 extern symtab_data_s                 symtab_data;
@@ -247,16 +239,17 @@ extern std::unique_ptr<std::ofstream> log_ofs;
 // control debug printf statements
 #define errprintf(LEVEL, ...)                                                            \
     {                                                                                    \
-        char _logmsgbuff[FUNCNAMELEN];                                                   \
-        snprintf(_logmsgbuff, FUNCNAMELEN, __VA_ARGS__);                                 \
-        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff);                                           \
+        std::array<char, k_funcnamelen> _logmsgbuff;                                     \
+        snprintf(_logmsgbuff.data(), k_funcnamelen, __VA_ARGS__);                        \
+        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff.data());                                    \
         if(werror || LEVEL < 0)                                                          \
         {                                                                                \
             if(debug_print || verbose_level >= LEVEL)                                    \
                 fprintf(stderr, "[rocprof-sys][exe] Error! " __VA_ARGS__);               \
-            char _buff[FUNCNAMELEN];                                                     \
-            snprintf(_buff, FUNCNAMELEN, "[rocprof-sys][exe] Error! " __VA_ARGS__);      \
-            throw std::runtime_error(std::string{ _buff });                              \
+            std::array<char, k_funcnamelen> _buff;                                       \
+            snprintf(_buff.data(), k_funcnamelen,                                        \
+                     "[rocprof-sys][exe] Error! " __VA_ARGS__);                          \
+            throw std::runtime_error(std::string{ _buff.data() });                       \
         }                                                                                \
         else                                                                             \
         {                                                                                \
@@ -269,9 +262,9 @@ extern std::unique_ptr<std::ofstream> log_ofs;
 // control verbose printf statements
 #define verbprintf(LEVEL, ...)                                                           \
     {                                                                                    \
-        char _logmsgbuff[FUNCNAMELEN];                                                   \
-        snprintf(_logmsgbuff, FUNCNAMELEN, __VA_ARGS__);                                 \
-        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff);                                           \
+        std::array<char, k_funcnamelen> _logmsgbuff;                                     \
+        snprintf(_logmsgbuff.data(), k_funcnamelen, __VA_ARGS__);                        \
+        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff.data());                                    \
         if(debug_print || verbose_level >= LEVEL)                                        \
             fprintf(stdout, "[rocprof-sys][exe] " __VA_ARGS__);                          \
         fflush(stdout);                                                                  \
@@ -279,19 +272,12 @@ extern std::unique_ptr<std::ofstream> log_ofs;
 
 #define verbprintf_bare(LEVEL, ...)                                                      \
     {                                                                                    \
-        char _logmsgbuff[FUNCNAMELEN];                                                   \
-        snprintf(_logmsgbuff, FUNCNAMELEN, __VA_ARGS__);                                 \
-        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff);                                           \
+        std::array<char, k_funcnamelen> _logmsgbuff;                                     \
+        snprintf(_logmsgbuff.data(), k_funcnamelen, __VA_ARGS__);                        \
+        ROCPROFSYS_ADD_LOG_ENTRY(_logmsgbuff.data());                                    \
         if(debug_print || verbose_level >= LEVEL) fprintf(stdout, __VA_ARGS__);          \
         fflush(stdout);                                                                  \
     }
-
-//======================================================================================//
-
-template <typename... T>
-void
-consume_parameters(T&&...)
-{}
 
 //======================================================================================//
 
@@ -366,19 +352,19 @@ symtab_func_t*
 get_symtab_function(procedure_t*);
 
 size_t
-get_object_procedure_count_lb(object_t*);
+get_object_procedure_count_lb(object_t const*);
 
 std::vector<object_t*>
-filter_objects(std::vector<object_t*>* app_objects);
+filter_objects(std::vector<object_t*> const* app_objects);
 
 std::vector<module_t*>
-filter_modules(std::vector<module_t*>* app_modules);
+filter_modules(std::vector<module_t*> const* app_modules);
 
 std::unique_ptr<std::vector<module_t*>>
-get_modules(std::vector<object_t*>* app_objects);
+get_modules(std::vector<object_t*> const* app_objects);
 
 std::unique_ptr<std::vector<procedure_t*>>
-get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable);
+get_procedures(std::vector<module_t*> const* app_modules, bool include_uninstrumentable);
 
 namespace std
 {

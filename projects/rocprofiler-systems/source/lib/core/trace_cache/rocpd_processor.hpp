@@ -8,6 +8,7 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 
+#include "library/pmc/collectors/hipfile/sample.hpp"
 #include "trace_cache/sample_type.hpp"
 
 #include <profiler-hub/storage.hpp>
@@ -19,9 +20,7 @@
 #include <string_view>
 #include <unordered_set>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 class rocpd_processor_t : public processor_t<rocpd_processor_t>
@@ -46,6 +45,7 @@ public:
     void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_pmc_sample& sample);
     void handle(const gpu_perf_counter_sample& sample);
+    void handle(const hipfile_pmc_sample& sample);
     void handle(const kfd_sample& sample);
 
 private:
@@ -79,5 +79,4 @@ private:
     std::size_t                     m_dropped_pmc_events_count = 0;
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

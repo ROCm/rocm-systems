@@ -16,6 +16,7 @@
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -23,7 +24,7 @@
 
 namespace {
 
-using dda::common::kDdaLLMaxBytes;
+using dda::common::kDdaLLRsMaxBytes;
 using dda::common::kDdaLLRsSlotStridePkts;
 using dda::common::LLPacket16;
 
@@ -63,22 +64,23 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk,
        grid.x, block.x);
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    dda::common::ddaReduceScatterFabricLL<T, 4><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
-                                                                            static_cast<const T*>(sendbuff), recvcount,
-                                                                            comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          recvcount, comm->rank, nRanks, epochDev, epochLen);
     break;
   case 8:
-    dda::common::ddaReduceScatterFabricLL<T, 8><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
-                                                                            static_cast<const T*>(sendbuff), recvcount,
-                                                                            comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          recvcount, comm->rank, nRanks, epochDev, epochLen);
     break;
   default:
-    dda::common::ddaReduceScatterFabricLL<T, 0><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
-                                                                            static_cast<const T*>(sendbuff), recvcount,
-                                                                            comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          recvcount, comm->rank, nRanks, epochDev, epochLen);
     break;
   }
 
@@ -117,8 +119,8 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   if (bytes % 16 != 0) {
     return false;
   }
-  // expand from 8B to 16B
-  if (bytes * 2 > kDdaLLMaxBytes) {
+  // Slot holds kDdaLLRsMaxBytes of payload (stride = cap/8 packets).
+  if (bytes > kDdaLLRsMaxBytes) {
     return false;
   }
   if (ddaLLRsScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
