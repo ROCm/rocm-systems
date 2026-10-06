@@ -93,10 +93,12 @@ dispatch's arguments. Recording the packet alone would therefore replay some dis
 wrong arguments — and there is nothing about the packet that would reveal it.
 
 So the recorder copies each dispatch's kernarg segment out at record time, while the block still
-holds that launch's arguments, and the executor allocates its own staging block for the replay,
-laying the recorded bytes out back to back with each kernel's 256-byte alignment honored and
-patching each packet to point at its slot. The block is refilled before every pass, so a pass never
-observes another pass's kernarg contents.
+holds that launch's arguments, and the executor stages them in a kernarg block of its own, laying
+the recorded bytes out back to back with each kernel's 256-byte alignment honored and patching each
+packet to point at its slot. The block is refilled before every pass, so a pass never observes
+another pass's kernarg contents. It comes from the agent's kernarg pool, or is the block the agent's
+previous range used when that one fits; a block is kept for the next range only after the last pass
+that read it has drained.
 
 Each recorded dispatch's completion signal is also cleared. The application has already consumed
 (and may have destroyed or reused) the signal a recorded packet carried; re-firing it would corrupt
@@ -127,7 +129,7 @@ take per-agent WRITER lock
   drain this queue's async handlers, then every queue on the agent
   verify the tracked allocation set still matches the entry snapshot's
   snap()  -> the EXIT snapshot: the state the application must resume with
-  reserve the kernarg staging block
+  reserve the kernarg staging block (the agent's retained block when it fits)
   install the localized-context-control guard; mark this thread replaying
   for pass = 1 ..:
       restore(entry snapshot)
@@ -138,6 +140,7 @@ take per-agent WRITER lock
       ask the tool whether to continue; break if not
   optionally: snap() and compare digests against the exit snapshot
   restore(exit snapshot)
+  retain the kernarg staging block for the agent's next range
 release per-agent WRITER lock
 ```
 
@@ -232,6 +235,7 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Replay window and pass loop | `source/lib/rocprofiler-sdk/range_replay/executor.cpp` | `execute_range()` |
 | Entry snapshot | `source/lib/rocprofiler-sdk/range_replay/executor.cpp` | `ensure_entry_snapshot()` |
 | Kernarg staging | `source/lib/rocprofiler-sdk/range_replay/executor.cpp` | `kernarg_staging` |
+| Kernarg block retention | `source/lib/rocprofiler-sdk/range_replay/retained_kernarg.cpp` | `kernarg_block_fits()`, `take_retained_kernarg_block()`, `retain_kernarg_block()` |
 | Divergence hashing | `source/lib/rocprofiler-sdk/range_replay/digest.cpp` | `hash_bytes()`, `count_divergent()` |
 | Passthrough gate | `source/lib/rocprofiler-sdk/hsa/replay_window.cpp` | `set_interceptor_passthrough()` |
 | Ring re-submission | `source/lib/rocprofiler-sdk/hsa/replay_window.cpp` | `replay_ring_submit()` |
