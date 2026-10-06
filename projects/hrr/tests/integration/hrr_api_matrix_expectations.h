@@ -5,10 +5,19 @@
  */
 
 /**
- * What every HIP API is expected to do at replay, and the coverage floor each
- * tier of hrr_api_matrix_test.cc must clear. Edited by hand: when HRR's
- * generator (projects/hrr/tools/gen_hrr_api_args.py) moves an API between
- * playback sets, update its row here.
+ * GENERATED FILE — do not edit by hand.
+ *
+ * Regenerate with:
+ *   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
+ *       rocm-systems/projects/hip-tests/catch/unit/hrr/hrr_api_matrix_expectations.h
+ *
+ * Source of truth is the pair api_classes.json (derived from HRR's generator)
+ * and api_matrix.yaml (the authored tier and expectation overlay). Generating
+ * this header rather than transcribing it is what keeps the Catch2 tests and
+ * the aim-labs reporter from drifting into disagreeing about what an API is
+ * supposed to do at replay.
+ *
+ * Generated 2026-08-24 from 553 HIP APIs.
  */
 
 #pragma once
@@ -689,9 +698,6 @@ inline constexpr HrrTierFloor kHrrTierFloors[] = {
     {"T2", 34, 1, false, kHrrWorkloadsT2},
     {"T3", 20, 2, false, kHrrWorkloadsT3},
     {"T4", 254, 1, false, kHrrWorkloadsT4},
-    // What T5 reaches on a part with no image support, such as gfx950, where
-    // hipArrayCreate and hipArray3DCreate fail and so are not recorded. A part
-    // with image support reaches far more.
     {"T5", 12, 1, true, kHrrWorkloadsT5},
 };
 

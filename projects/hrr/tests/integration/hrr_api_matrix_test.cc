@@ -45,7 +45,9 @@
  * instead has to clear a coverage floor. A workload that dies on its second
  * line then fails loudly, instead of reporting a clean sweep of nothing.
  *
- * Set HRR_MATRIX_RESULTS_DIR to have each tier write its observations as JSON.
+ * Set HRR_MATRIX_RESULTS_DIR to have each tier write its observations as JSON
+ * for aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py to turn into a
+ * coverage report.
  */
 
 #include "hrr_test_process.hh"
@@ -289,8 +291,7 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
       // succeeding on one archive's arguments and failing on another's —
       // hipGraphInstantiate replays fine for a stream-captured graph and
       // fails for one built out of ERROR_STUB node-adds. Keep the failure:
-      // it is the finding, and hrr_api_matrix_expectations.h is where it gets
-      // declared.
+      // it is the finding, and api_matrix.yaml is where it gets declared.
       //
       // Anything else — NOOP against REAL, ERROR_STUB against NOOP — is the
       // API having been reclassified, which is what this matrix exists to
@@ -375,7 +376,7 @@ void run_tier(const std::string& tier) {
     INFO("Observed replay class: " << hrr_replay_class_name(observed));
     // A payload-loss API is still expected to run a real handler — that is
     // precisely what hides the loss. The class is what this test asserts; the
-    // loss itself is the row's payload_loss flag.
+    // loss itself is what check_matrix.py records as XFAIL.
     INFO("Known payload loss (section 8.3): " << (e.payload_loss ? "yes" : "no"));
     // A handler declared as failing on this tier's arguments may come back
     // either way: hipGraphInstantiate replays fine for the stream-captured
@@ -383,8 +384,7 @@ void run_tier(const std::string& tier) {
     // which of those a run lands on depends on which workloads ran.
     if (e.handler_error_ok && expected == HrrReplayClass::kReal &&
         observed == HrrReplayClass::kHandlerError) {
-      INFO("Declared in hrr_api_matrix_expectations.h as failing for this "
-           "tier's arguments");
+      INFO("Declared in api_matrix.yaml as failing for this tier's arguments");
       continue;
     }
     CHECK(observed == expected);
@@ -408,9 +408,9 @@ void run_tier(const std::string& tier) {
   // "APIs with positive evidence".
   //
   // This keeps the same effective threshold as before rather than raising
-  // it: min_covered counts these rows (T1 is 10 of 14, T0 6 of 67 against a
-  // floor of 65), so tightening the floor as well means recounting
-  // min_covered over assertable rows only.
+  // it: min_covered is generated counting these rows (T1 is 10 of 14, T0 6
+  // of 67 against a floor of 65), so tightening the floor as well needs
+  // check_matrix.py to re-emit min_covered over assertable rows only.
   const int evidence_floor = floor.min_covered - absent_asserted;
   INFO("Tier " << tier << ": " << covered << " covered with evidence, "
                << absent_asserted << " absence-asserted, " << not_exercised
@@ -456,7 +456,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T0_Roundtrip", "[.][hrr][api-matrix]") {
  *   - The assertion is deliberately that the handler still runs. That is what
  *     makes the loss invisible today, and it is why these are XFAIL in the
  *     report rather than PASS: they turn into XPASS the day P2 lands, which is
- *     the signal to update hrr_api_matrix_expectations.h.
+ *     the signal to update api_matrix.yaml.
  */
 TEST_CASE("Unit_HRR_ApiMatrix_T1_Roundtrip", "[.][hrr][api-matrix]") {
   run_tier("T1");
