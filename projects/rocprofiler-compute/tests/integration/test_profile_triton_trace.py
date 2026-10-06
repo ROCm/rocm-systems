@@ -4,6 +4,7 @@
 """Integration tests for Triton operator tracing during profiling."""
 
 import csv
+import re
 import sys
 from pathlib import Path
 
@@ -107,3 +108,38 @@ def test_triton_operator_matmul_selects_kernels(
     out = captured.out + captured.err
     assert "Matched Triton Operators:" in out
     assert "triton.JITFunction.matmul_kernel" in out
+
+
+@pytest.mark.triton_trace
+def test_triton_operator_intersects_kernel_id(
+    triton_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    list_code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-triton-operators",
+        "--path",
+        triton_trace_profiled_workload,
+    ])
+    assert list_code == 0
+    captured = capsys.readouterr()
+    list_out = captured.out + captured.err
+    matmul_idx = list_out.find("triton.JITFunction.matmul_kernel")
+    assert matmul_idx >= 0
+    match = re.search(r"\(id (\d+)\)", list_out[matmul_idx:])
+    assert match is not None
+    kernel_id = match.group(1)
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--triton-operator",
+        "*matmul*",
+        "--kernel",
+        kernel_id,
+        "--path",
+        triton_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "operator filter selected 1 kernel" in out
