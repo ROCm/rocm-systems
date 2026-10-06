@@ -312,6 +312,10 @@ class Flag {
     rocm_timesync_enable_ = (var == "1") ? true : false;
     rocm_timesync_config_ = os::GetEnvVar("HSA_ROCM_TIMESYNC_CONFIG");
     rocm_timesync_stats_ = os::GetEnvVar("HSA_ROCM_TIMESYNC_STATS");
+
+    // a parameter for testing in containerized environments where we don't want
+    // to use the system's actual realtime clock
+    rocm_timesync_clockdev_ = os::GetEnvVar("HSA_ROCM_TIMESYNC_CLOCKDEV");
 #endif
   }
 
@@ -459,6 +463,7 @@ class Flag {
   bool rocm_timesync_enable() const { return rocm_timesync_enable_; }
   std::string rocm_timesync_config() const { return rocm_timesync_config_; }
   std::string rocm_timesync_stats() const { return rocm_timesync_stats_; }
+  std::string rocm_timesync_clockdev() const { return rocm_timesync_clockdev_; }
 
   void set_sdma(bool peer_sdma, bool sdma_gang) {
     enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
@@ -557,8 +562,9 @@ class Flag {
   std::string core_dump_pattern_;
 
   bool rocm_timesync_enable_ = false;
-  std::string rocm_timesync_config_;
-  std::string rocm_timesync_stats_;
+  std::string rocm_timesync_config_ = {};
+  std::string rocm_timesync_stats_ = {};
+  std::string rocm_timesync_clockdev_ = {};
 
   // Map GPU index post RVD to its default cu mask.
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;
