@@ -178,6 +178,58 @@ TEST(AmdSmiWrapLifecycle, ShutdownCleansUpAfterVersionFailure)
     );
 }
 
+// The RAS diagnostics initialize the library themselves on the default path. amd_smi_shutdown has to undo that,
+// and the next diagnostics query has to initialize it again rather than use a library that is shut down.
+TEST(AmdSmiWrapLifecycle, ShutdownUndoesDiagnosticsInit)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "ShutdownUndoesDiagnosticsInit",
+        []() {
+            if(amd_smi_diagInit() != ncclSuccess)
+                GTEST_SKIP() << "amd_smi_diagInit() failed: built without the amdsmi header";
+            EXPECT_EQ(amd_smi_diagInit(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 1u);
+
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 1u);
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 1u);
+
+            EXPECT_EQ(amd_smi_diagInit(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 2u);
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 2u);
+        },
+        {{"RCCL_USE_AMD_SMI_LIB", "0"},
+         {"LD_LIBRARY_PATH", lifecycleStubLibraryPath()}}
+    );
+}
+
+// With RCCL_USE_AMD_SMI_LIB both the wrapper and the RAS diagnostics need the library, in either order; it is
+// initialized once and one shutdown undoes it.
+TEST(AmdSmiWrapLifecycle, WrapperAndDiagnosticsShareOneInit)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "WrapperAndDiagnosticsShareOneInit",
+        []() {
+            ASSERT_EQ(amd_smi_init(), ncclSuccess);
+            if(amd_smi_diagInit() != ncclSuccess)
+                GTEST_SKIP() << "amd_smi_diagInit() failed: built without the amdsmi header";
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 1u);
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 1u);
+
+            EXPECT_EQ(amd_smi_diagInit(), ncclSuccess);
+            EXPECT_EQ(amd_smi_init(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 2u);
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 2u);
+        },
+        {{"RCCL_USE_AMD_SMI_LIB", "1"},
+         {"LD_LIBRARY_PATH", lifecycleStubLibraryPath()}}
+    );
+}
+
 TEST_F(AmdSmiWrapTest, PciBusIdIsPopulatedForEveryDevice)
 {
     requireDevices(1);

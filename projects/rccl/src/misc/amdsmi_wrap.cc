@@ -136,7 +136,12 @@ ncclResult_t fabricInitResult = ncclSuccess;
 std::mutex amdSmiInitLock;
 ncclResult_t amdSmiInitResult = ncclSuccess;
 bool amdSmiInitCalled = false;
+// Set by whichever of the RCCL_USE_AMD_SMI_LIB path and the RAS diagnostics called amdsmi_init, so the library is
+// initialized once and amd_smi_shutdown undoes it through that path's amdsmi_shut_down.
 bool amdSmiLibInitialized = false;
+amdsmi_status_t (*amdSmiLibShutDown)() = nullptr;
+// Cleared by amd_smi_shutdown, so the RAS diagnostics initialize the library again on their next query.
+bool amdSmiDiagLoadCalled = false;
 
 // Major version of the loaded amd_smi, as it reports itself. Selects the telemetry
 // name call convention; see amdSmiTelemIdUsesOutParam().
@@ -240,8 +245,11 @@ static ncclResult_t amd_smi_init_impl() {
     }
 
     // initialize amd-smi for AMD GPUs
-    AMDSMITRY(amdsmi_init, AMDSMI_INIT_AMD_GPUS);
-    amdSmiLibInitialized = true;
+    if (!amdSmiLibInitialized) {
+      AMDSMITRY(amdsmi_init, AMDSMI_INIT_AMD_GPUS);
+      amdSmiLibInitialized = true;
+      amdSmiLibShutDown = pfn_amdsmi_shut_down;
+    }
 
     // get amd-smi version
     amdsmi_version_t version;
@@ -275,12 +283,19 @@ ncclResult_t amd_smi_init() {
 ncclResult_t amd_smi_shutdown() {
   std::lock_guard<std::mutex> lock(amdSmiInitLock);
 
-  if (!amdSmiInitCalled) return ncclSuccess;
+  if (!amdSmiInitCalled && !amdSmiLibInitialized) return ncclSuccess;
 
   // The backend may be initialized even if a later version query failed.
   if (amdSmiLibInitialized) {
-    AMDSMITRY(amdsmi_shut_down);
+    if (amdSmiLibShutDown == nullptr) return ncclInternalError;
+    amdsmi_status_t ret = amdSmiLibShutDown();
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      ERROR("AMD SMI failure: amdsmi_shut_down returned %d", (int)ret);
+      return ncclInternalError;
+    }
     amdSmiLibInitialized = false;
+    amdSmiLibShutDown = nullptr;
+    amdSmiDiagLoadCalled = false;
   }
 
   amdSmiLibMajor.store(kAmdSmiLibVersionUnknown, std::memory_order_release);
@@ -863,6 +878,7 @@ namespace {
 // when its own amdsmi_init pointer is still null.
 struct AmdSmiDiagFns {
   amdsmi_status_t (*init)(uint64_t initFlags);
+  amdsmi_status_t (*shutDown)();
   amdsmi_status_t (*getSocketHandles)(uint32_t* socketCount, amdsmi_socket_handle* socketHandles);
   amdsmi_status_t (*getProcessorHandles)(amdsmi_socket_handle socketHandle, uint32_t* processorCount,
                                          amdsmi_processor_handle* processorHandles);
@@ -874,7 +890,6 @@ struct AmdSmiDiagFns {
                                           amdsmi_xgmi_link_status_t* linkStatus);
 };
 AmdSmiDiagFns amdSmiDiag = {};
-bool amdSmiDiagLoadCalled = false;
 ncclResult_t amdSmiDiagLoadResult = ncclSystemError;
 } // namespace
 
@@ -905,6 +920,7 @@ static ncclResult_t amd_smi_diagLoadImpl() {
   };
   std::initializer_list<Symbol> symbols = {
     {(void**)&amdSmiDiag.init, "amdsmi_init"},
+    {(void**)&amdSmiDiag.shutDown, "amdsmi_shut_down"},
     {(void**)&amdSmiDiag.getSocketHandles, "amdsmi_get_socket_handles"},
     {(void**)&amdSmiDiag.getProcessorHandles, "amdsmi_get_processor_handles"},
     {(void**)&amdSmiDiag.getProcessorType, "amdsmi_get_processor_type"},
@@ -919,7 +935,11 @@ static ncclResult_t amd_smi_diagLoadImpl() {
   }
 
   // The RCCL_USE_AMD_SMI_LIB path may have initialized the library already; amdsmi_init is not called twice.
-  if (!amdSmiLibInitialized) AMDSMIDIAG(init, AMDSMI_INIT_AMD_GPUS);
+  if (!amdSmiLibInitialized) {
+    AMDSMIDIAG(init, AMDSMI_INIT_AMD_GPUS);
+    amdSmiLibInitialized = true;
+    amdSmiLibShutDown = amdSmiDiag.shutDown;
+  }
   return ncclSuccess;
 }
 
