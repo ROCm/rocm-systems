@@ -192,7 +192,15 @@ typedef struct ncclConfigExt {
  * members will be added at the end, and existing members will never be removed or
  * reordered. The user owns the storage and must keep the struct (and any linked ncclConfigExt_t)
  * valid for the duration of every call that uses it. The same configuration must be
- * set on every rank; NCCL validates it only locally. */
+ * set on every rank; NCCL validates it only locally.
+ *
+ * Initialize with NCCL_COLLCONFIG_INITIALIZER. NULL passed to an nccl*Config entry point is
+ * equivalent to the plain collective. cgaClusterSize is accepted and has no effect on HIP.
+ * algSelection names a general or symmetric algorithm; the accepted names depend on the collective
+ * ("RING" and "TREE" for AllReduce, "PAT" for AllGather and ReduceScatter, and the per-collective
+ * "SYMK_*" kernels). An unset CTAPolicy inherits the communicator policy, and NCCL_CTA_POLICY
+ * overrides the per-call value; a per-call CTAPolicy steers the kernel-path tuners only, as the
+ * copy-engine backend is still chosen from the communicator policy. */
 typedef struct ncclCollConfig_v23100 {
   /* attributes that users should never touch. */
   size_t size;
@@ -1065,45 +1073,77 @@ ncclResult_t pncclAllToAllv(const void *sendbuff, const size_t sendcounts[],
  * ncclCollConfig_t describing per-call customization. Initialize the config with
  * NCCL_COLLCONFIG_INITIALIZER and set it identically on every rank. config == NULL is
  * equivalent to the plain API. */
+/*! @brief      All-Reduce with a per-collective configuration
+    @details    Same as ncclAllReduce, with *config* applying to this call only. */
 ncclResult_t  ncclAllReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     ncclRedOp_t op, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @cond       include_hidden */
 ncclResult_t pncclAllReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     ncclRedOp_t op, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @endcond */
 
+/*! @brief      Broadcast with a per-collective configuration
+    @details    Same as ncclBroadcast, with *config* applying to this call only. */
 ncclResult_t  ncclBroadcastConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @cond       include_hidden */
 ncclResult_t pncclBroadcastConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @endcond */
 
+/*! @brief      Reduce with a per-collective configuration
+    @details    Same as ncclReduce, with *config* applying to this call only. */
 ncclResult_t  ncclReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     ncclRedOp_t op, int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @cond       include_hidden */
 ncclResult_t pncclReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     ncclRedOp_t op, int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @endcond */
 
+/*! @brief      All-Gather with a per-collective configuration
+    @details    Same as ncclAllGather, with *config* applying to this call only. */
 ncclResult_t  ncclAllGatherConfig(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
     ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @cond       include_hidden */
 ncclResult_t pncclAllGatherConfig(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
     ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @endcond */
 
+/*! @brief      Reduce-Scatter with a per-collective configuration
+    @details    Same as ncclReduceScatter, with *config* applying to this call only. */
 ncclResult_t  ncclReduceScatterConfig(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
     ncclRedOp_t op, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @cond       include_hidden */
 ncclResult_t pncclReduceScatterConfig(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
     ncclRedOp_t op, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @endcond */
 
+/*! @brief      All-To-All with a per-collective configuration
+    @details    Same as ncclAllToAll, with *config* applying to this call only. */
 ncclResult_t  ncclAlltoAllConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @cond       include_hidden */
 ncclResult_t pncclAlltoAllConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @endcond */
 
+/*! @brief      Gather with a per-collective configuration
+    @details    Same as ncclGather, with *config* applying to this call only. */
 ncclResult_t  ncclGatherConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @cond       include_hidden */
 ncclResult_t pncclGatherConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @endcond */
 
+/*! @brief      Scatter with a per-collective configuration
+    @details    Same as ncclScatter, with *config* applying to this call only. */
 ncclResult_t  ncclScatterConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @cond       include_hidden */
 ncclResult_t pncclScatterConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+/*! @endcond */
 
 /*! @brief      Send
     @details    Send data from *sendbuff* to rank *peer*.

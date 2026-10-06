@@ -55,8 +55,12 @@ ncclResult_t ncclParseCollConfig(const ncclCollConfig_t* config, ncclCollConfig_
     }
     // copy user config to internal_config for safe access later
     if (config->version <= NCCL_VERSION_CODE) {
-      // A same/older user config struct is smaller than (or equal to) current library's struct.
-      memcpy(internal_config, config, config->size);
+      // A same/older user config is no larger than the library struct. Clamp anyway: a caller can
+      // set size past the real object, and copying config->size would write off the end of
+      // internal_config.
+      size_t copyBytes = config->size;
+      if (copyBytes > sizeof(*internal_config)) copyBytes = sizeof(*internal_config);
+      memcpy(internal_config, config, copyBytes);
     } else {
       // A newer user config struct is larger than current library's struct
       memcpy(internal_config, config, internal_config->size);

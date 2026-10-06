@@ -137,3 +137,34 @@ The Scatter operation distributes a total of N*k values from the root rank to k 
 Important note: The root argument is one of the ranks, not a device number, and is therefore impacted by a different rank to device mapping.
 
 Related links: :c:func:`ncclScatter`.
+
+.. _coll-config:
+
+Per-collective configuration
+----------------------------
+
+Each collective has an ``nccl*Config`` entry point that takes a trailing ``ncclCollConfig_t*``.
+``NULL`` is the same call as the plain collective. Initialize the struct with ``NCCL_COLLCONFIG_INITIALIZER``
+and pass the same config on every rank.
+
+.. code-block:: c++
+
+   ncclCollConfig_t config = NCCL_COLLCONFIG_INITIALIZER;
+   config.algSelection = "RING";
+   config.minCTAs = 2;
+   config.maxCTAs = 8;
+   config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+   config.userProfilerTag = 42;
+   ncclAllReduceConfig(send, recv, count, ncclFloat, ncclSum, comm, stream, &config);
+
+``algSelection`` limits that call to the named algorithms. The accepted names depend on the collective:
+``RING`` and ``TREE`` for AllReduce, ``PAT`` for AllGather and ReduceScatter, plus the per-collective
+``SYMK_*`` symmetric kernels.
+An unknown name is an error unless ``forceAlgSelection`` is 0, in which case RCCL falls back to automatic selection.
+``NCCL_ALGO`` and ``NCCL_PROTO`` still override the per-call string. ``minCTAs`` and ``maxCTAs`` bound the channel
+count for that call. An unset ``CTAPolicy`` inherits the communicator policy and ``NCCL_CTA_POLICY`` overrides both;
+note a per-call ``CTAPolicy`` steers the kernel-path tuners only, since the copy-engine backend is still chosen from
+the communicator policy.
+``userProfilerTag`` is copied into profiler events and does not change the algorithm. ``cgaClusterSize`` is accepted
+and has no effect on HIP. Vendor options can be attached through ``ncclConfigExt_t`` on ``config.ext``; RCCL ignores
+extensions it does not recognize.

@@ -50,6 +50,23 @@
 #include "dev_runtime.h"
 using namespace rccl;
 
+// True when algSelection named at least one general (non-symmetric) algorithm, and so constrains
+// the general cost model. A symmetric-only selection does not: symmetric_sched.cc decides whether
+// an unavailable symmetric kernel is an error or falls back to automatic general selection.
+static bool ncclAlgMaskSelectsGeneral(uint64_t algMask) {
+  return (algMask & NCCL_TUNING_MASK_GENERAL_KERNELS) != 0;
+}
+
+// Only meaningful when ncclAlgMaskSelectsGeneral(algMask); bit (algo * NCCL_NUM_PROTOCOLS + proto)
+// must be set for the pair to stay in the cost table.
+static bool ncclAlgMaskAllowsGeneral(uint64_t algMask, int algo, int proto) {
+  if (!ncclAlgMaskSelectsGeneral(algMask)) return true;
+  if (algo < 0 || proto < 0 || proto >= NCCL_NUM_PROTOCOLS) return false;
+  int bit = algo * NCCL_NUM_PROTOCOLS + proto;
+  if (bit < 0 || bit >= 64) return false;
+  return (algMask & (1ull << bit)) != 0;
+}
+
 struct ncclKernelMatch {
   void* kernelFn;
   bool specialized;
@@ -618,6 +635,9 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
       t->maxCTAs = comm->config.maxCTAs;
       t->nvlsCTAs = comm->config.nvlsCTAs;
       t->cgaClusterSize = comm->config.cgaClusterSize;
+      t->CTAPolicy = comm->config.CTAPolicy;
+      t->algMask = 0;
+      t->forceAlgSelection = 0;
       ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);
       planner->nTasksColl += 1;
       ncclMemoryPoolFree(&comm->memPool_ncclTaskBcast, bcastTask);
@@ -2874,7 +2894,10 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
         (info->opDev.op == ncclDevPreMulSum || info->opDev.op == ncclDevSumPostDiv))
       continue;
     if (a == NCCL_ALGO_PAT && (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather)) {
-      if (!userAlgoInput) {
+      // A per-call algSelection that names PAT opts into it; the size window is only an automatic heuristic.
+      bool patSelected = ncclAlgMaskSelectsGeneral(info->algMask) &&
+                         ncclAlgMaskAllowsGeneral(info->algMask, a, NCCL_PROTO_SIMPLE);
+      if (!userAlgoInput && !patSelected) {
         int nNodes = comm->nNodes;
         bool inRange = false;
         if (nNodes <= 4) {
@@ -2898,6 +2921,11 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
     }
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
       if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL) && !userProtoInput) {
+        table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+        continue;
+      }
+      // Per-call algSelection: a non-zero mask keeps only the named general algorithms.
+      if (!ncclAlgMaskAllowsGeneral(info->algMask, a, p)) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         continue;
       }
@@ -2934,6 +2962,11 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
         minTime = table[a][p];
       }
     }
+  }
+  if ((algorithm == NCCL_ALGO_UNDEF || protocol == NCCL_PROTO_UNDEF) &&
+      ncclAlgMaskSelectsGeneral(info->algMask) && info->forceAlgSelection) {
+    WARN("config->algSelection cannot be honored for %s on this communicator", ncclFuncToString(info->func));
+    return ncclInvalidArgument;
   }
   if (algorithm == NCCL_ALGO_UNDEF) {
     INFO(NCCL_INIT, "Optimal algorithm is not found in collCostTable, Setting it a default value NCCL_ALGO_RING");
@@ -3046,7 +3079,8 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   }
   nt = nt / comm->WarpSize < 3 ? 3 * comm->WarpSize : nt;
 #endif
-  if (info->func == ncclFuncAllReduce && comm->topo->pivotA2ANumBiRings == 3) {
+  // Per-call algSelection already filtered the cost table. These topology shortcuts would replace it.
+  if (!ncclAlgMaskSelectsGeneral(info->algMask) && info->func == ncclFuncAllReduce && comm->topo->pivotA2ANumBiRings == 3) {
     static int userTuneInput = -2;
     if (userTuneInput == -2) {
       const char* protoStr = getenv("NCCL_PROTO");
@@ -3066,7 +3100,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
         info->algorithm = NCCL_ALGO_RING;
       }
     }
-  } else if (info->func == ncclFuncAllReduce && comm->topo->treeDefined == 1) {
+  } else if (!ncclAlgMaskSelectsGeneral(info->algMask) && info->func == ncclFuncAllReduce && comm->topo->treeDefined == 1) {
     info->algorithm = NCCL_ALGO_TREE;
 #ifdef ENABLE_WARP_SPEED
     nc = std::min(nc, 64); // Tree uses at most 64 channels as we don't support WarpSpeed Tree.
@@ -3167,13 +3201,14 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
     NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float**)collCostTable, simInfo));
     // override algo, tree doesn't work with fewer than 64 bytes
     size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
-    if (!userAlgoInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 &&
+    if (!userAlgoInput && !ncclAlgMaskSelectsGeneral(info->algMask) &&
+        IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 &&
         (info->func == ncclFuncAllReduce) && sizePerRank >= 64 && sizePerRank <= 262144) {
       info->algorithm = NCCL_ALGO_TREE;
       info->protocol = NCCL_PROTO_LL;
     }
 
-    if (!userAlgoInput &&
+    if (!userAlgoInput && !ncclAlgMaskSelectsGeneral(info->algMask) &&
         (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1200") ||
          IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1201")) &&
         comm->nNodes == 1 && (info->func == ncclFuncAllReduce)) {
@@ -3181,8 +3216,8 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
     }
 
     // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL)
-    if (comm->config.CTAPolicy == NCCL_CTA_POLICY_EFFICIENCY && !userAlgoInput && ncclGetEnv("NCCL_PROTO") == NULL &&
-        !comm->MNNVL) {
+    if (info->CTAPolicy == NCCL_CTA_POLICY_EFFICIENCY && !userAlgoInput && !ncclAlgMaskSelectsGeneral(info->algMask) &&
+        ncclGetEnv("NCCL_PROTO") == NULL && !comm->MNNVL) {
       // make algorithm selection based on buffer registration
       // there can be other specialized policies for algorithms and protocols pickup in the future
       NCCLCHECK(ncclRegFind(comm, info->sendbuff, sendbuffSize, &regSendBuf));
@@ -3211,6 +3246,11 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
   // Direct ReduceScatter only works with the RING/Simple kernel (reduceCopy path
   // is compiled only for ProtoSimple). Force RING/SIMPLE regardless of tuner choice.
   if (info->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter) {
+    if (ncclAlgMaskSelectsGeneral(info->algMask) && info->forceAlgSelection &&
+        !ncclAlgMaskAllowsGeneral(info->algMask, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE)) {
+      WARN("config->algSelection cannot be honored for ReduceScatter: direct ReduceScatter requires RING/SIMPLE");
+      return ncclInvalidArgument;
+    }
     if (info->algorithm != NCCL_ALGO_RING || info->protocol != NCCL_PROTO_SIMPLE) {
       INFO(NCCL_TUNING, "%s: %ld Bytes -> Direct ReduceScatter overrides tuner Algo %s proto %s with Ring/Simple",
            ncclFuncToString(info->func), (long)nBytes, ncclAlgoToString(info->algorithm),
@@ -3866,10 +3906,11 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     t->root = info->root;
     t->datatype = info->datatype;
     // A per-call CTAPolicy that resolves to something other than the comm default must also be
-    // isolated from aggregation. It is resolved in place, so compare against the comm policy
-    // rather than the UNDEF sentinel the other per-call options use.
-    t->aggIsolate =
-      ncclCollConfigNeedAggIsolate(&info->collConfig) || info->collConfig.CTAPolicy != comm->config.CTAPolicy;
+    // isolated from aggregation. taskAppend already resolved it in place, so compare against the
+    // comm policy rather than the UNDEF sentinel the other per-call options use.
+    const int ctaPolicy = info->collConfig.size == 0 ? comm->config.CTAPolicy : info->collConfig.CTAPolicy;
+    t->aggIsolate = ncclCollConfigNeedAggIsolate(&info->collConfig) || ctaPolicy != comm->config.CTAPolicy;
+    t->CTAPolicy = ctaPolicy;
     // Resolve the config options (env > per-call > comm) here at task-append:
     // info->collConfig holds the raw per-call values.
     NCCL_CONFIG_SET(t, minCTAs, ncclParamMinCTAs(), info->collConfig.minCTAs, comm->config.minCTAs, 1, MAXCHANNELS);
@@ -3885,7 +3926,6 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     NCCL_CONFIG_SET(t, cgaClusterSize, ncclParamCGAClusterSize(), info->collConfig.cgaClusterSize,
                     comm->config.cgaClusterSize, 0, NCCL_MAX_CGA_CLUSTER_SIZE);
     NCCLCHECK(ncclCollConfigGetAlgMask(&info->collConfig, info->coll, &t->algMask));
-    t->CTAPolicy = info->collConfig.CTAPolicy;
     t->forceAlgSelection = info->collConfig.forceAlgSelection;
     t->profilerTag = info->collConfig.userProfilerTag;
 
@@ -4440,6 +4480,16 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
   } else {
     // Empty collectives can be discarded.
     if (info->count == 0 && info->coll != ncclFuncAlltoAllv) return ncclSuccess;
+
+    // Resolve per-call CTAPolicy up front so every later reader sees a concrete policy rather than
+    // the UNDEF sentinel. An unset value inherits the communicator policy (env already folded in at
+    // init). Plain collectives have size 0. Note the CE backend choice is still made from
+    // comm->config.CTAPolicy by the rcclSelect* selectors, so a per-call policy reaches the
+    // kernel-path tuners (symmetric scheduler, CTA_POLICY_EFFICIENCY) but not CE dispatch.
+    if (info->collConfig.size != 0) {
+      info->collConfig.CTAPolicy = ncclCollConfigResolveCTAPolicy(
+          info->collConfig.CTAPolicy, comm->config.CTAPolicy, ncclGetEnvCtaPolicy() != NCCL_CONFIG_UNDEF_INT);
+    }
 
     // Validate any per-call algorithm selection up front, before the single-rank early-out and
     // before AllToAll/Gather/Scatter lower to point-to-point tasks. Those paths never reach the

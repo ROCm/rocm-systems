@@ -67,6 +67,7 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
     tcoll.datatype = ncclInt8;
     tcoll.algorithm = NCCL_ALGO_RING;
     tcoll.protocol = NCCL_PROTO_UNDEF;
+    tcoll.CTAPolicy = comm->config.CTAPolicy;
     NCCLCHECK(ncclGetAlgoInfo(comm, &tcoll, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*nTasksPerChannel=*/1,
                               /*simInfo=*/nullptr));
 

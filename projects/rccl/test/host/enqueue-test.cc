@@ -3638,6 +3638,86 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_SelectsTheCheapestScriptedCell) {
   EXPECT_EQ(NCCL_PROTO_LL, task.protocol) << "SIMPLE here means the table was not read";
 }
 
+// --- per-call config->algSelection (ncclCollConfig_t) -----------------------
+// algMask is the parsed form of config->algSelection: bit (algo * NCCL_NUM_PROTOCOLS + proto)
+// for a general algorithm, and bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId) for a
+// symmetric kernel. These pin that a general selection narrows the cost model and that a
+// symmetric-only selection deliberately does not.
+static constexpr uint64_t GeneralAlgBit(int algo, int proto) {
+  return 1ull << (algo * NCCL_NUM_PROTOCOLS + proto);
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_GeneralAlgSelectionKeepsOnlyTheNamedPair) {
+  AlgoInfoComm cc;
+  auto task = CostTask(ncclFuncAllReduce);
+  CostTable tbl;
+  // TREE/LL is the cheapest cell, so picking RING/SIMPLE can only come from the mask.
+  g_topoGetAlgoTime = [](struct ncclComm*, int, int a, int p, size_t, int, float* t) {
+    if (t) *t = (a == NCCL_ALGO_TREE && p == NCCL_PROTO_LL) ? 0.5f : 1.0f;
+    return ncclSuccess;
+  };
+  task.algMask = GeneralAlgBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0,
+                                             /*nvls=*/0, /*numPipeOps=*/1,
+                                             /*userAlgoInput=*/0, tbl.ptr()));
+  EXPECT_EQ(1, tbl.countWritten()) << "only the selected pair may survive the filter";
+  EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE));
+  EXPECT_FALSE(tbl.written(NCCL_ALGO_TREE, NCCL_PROTO_LL)) << "cheaper but not selected";
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+  EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_SymmetricOnlySelectionLeavesTheGeneralTableIntact) {
+  AlgoInfoComm cc;
+  ScriptAllTimes(1.0f);
+  // Baseline: how much of the table an unconstrained AllReduce populates.
+  auto autoTask = CostTask(ncclFuncAllReduce);
+  CostTable autoTbl;
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &autoTask, 1 << 20, /*collNet=*/0,
+                                             /*nvls=*/0, /*numPipeOps=*/1,
+                                             /*userAlgoInput=*/0, autoTbl.ptr()));
+  ASSERT_GT(autoTbl.countWritten(), 1) << "baseline must leave several candidates";
+
+  // A SYMK_* selection names no general algorithm, so it must not narrow the general table:
+  // the symmetric scheduler decides whether an unavailable symmetric kernel errors or falls
+  // back to automatic general selection, and this path is that fallback.
+  auto symTask = CostTask(ncclFuncAllReduce);
+  symTask.algMask = 1ull << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + 3);
+  symTask.forceAlgSelection = 1;
+  CostTable symTbl;
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &symTask, 1 << 20, /*collNet=*/0,
+                                             /*nvls=*/0, /*numPipeOps=*/1,
+                                             /*userAlgoInput=*/0, symTbl.ptr()));
+  EXPECT_EQ(autoTbl.countWritten(), symTbl.countWritten())
+      << "a symmetric-only selection must leave the general cost table unfiltered";
+  EXPECT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &symTask, 1 << 20, symTbl.ptr(), /*simInfo=*/nullptr))
+      << "forceAlgSelection must not reject the general fallback for a symmetric-only selection";
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ForcedGeneralSelectionWithNoSurvivingPairIsRejected) {
+  AlgoInfoComm cc;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralAlgBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  task.forceAlgSelection = 1;
+  CostTable tbl;  // left all-IGNORE: nothing the selection named is available here
+  EXPECT_EQ(ncclInvalidArgument,
+            topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_UnforcedGeneralSelectionWithNoSurvivingPairFallsBack) {
+  AlgoInfoComm cc;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralAlgBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  task.forceAlgSelection = 0;
+  CostTable tbl;  // all-IGNORE, as above
+  EXPECT_EQ(ncclSuccess,
+            topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr))
+      << "forceAlgSelection=0 must fall back to automatic selection, not error";
+}
+
 // ===========================================================================
 // Seams whose comments promised a tested rejection path. Driving them here so
 // the promise holds; the remaining declared-but-undriven seams are marked in

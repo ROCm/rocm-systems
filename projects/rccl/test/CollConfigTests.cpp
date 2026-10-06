@@ -5,7 +5,6 @@
  ************************************************************************/
 // Unit tests for per-collective config validation: src/config/collconfig.cc (ncclParseCollConfig)
 // and its eight call sites in src/collectives.cc (the nccl*Config entry points).
-// One case pins a known unfixed defect: it asserts the parser still overruns the destination on an oversized config.
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 
@@ -147,16 +146,14 @@ TEST(CollConfigTests, AcceptedConfigs_ReturnSuccess) {
   });
 }
 
-// The clamp is not in ncclParseCollConfig yet, so an oversized config still writes past the destination.
-// This pins that: the guard must be dirty today, and any fix, clamp or reject, turns the test red.
-TEST(CollConfigTests, OversizedSize_OverrunsDestination_PinsKnownDefect) {
-  RUN_ISOLATED_TEST("OversizedSize_OverrunsDestination", []() {
-    // One byte past the end: the copy dirties guard[0] rather than crashing the child.
+// An oversized same-version config must be clamped to the library struct. One byte past the end
+// used to dirty guard[0]; the copy now stops at sizeof(ncclCollConfig_t).
+TEST(CollConfigTests, OversizedSize_ClampedToLibraryStruct) {
+  RUN_ISOLATED_TEST("OversizedSize_ClampedToLibraryStruct", []() {
     std::vector<unsigned char> storage = makeOversizedConfig(sizeof(ncclCollConfig_t) + 1);
     GuardedConfig dst = makeGuardedConfig();
     ASSERT_EQ(ncclParseCollConfig(asConfig(storage), &dst.config), ncclSuccess);
-    EXPECT_FALSE(guardIntact(dst))
-        << "ncclParseCollConfig no longer overruns the destination; the clamp landed, so invert this pin";
+    EXPECT_TRUE(guardIntact(dst)) << "oversized same-version config must not write past the struct";
   });
 }
 
@@ -196,6 +193,22 @@ TEST(CollConfigTests, NewerVersion_CopiesLibraryStructSizeWithoutOverrun) {
     EXPECT_EQ(dst.config.userProfilerTag, header.userProfilerTag) << "trailing member must be copied";
     EXPECT_EQ(dst.config.CTAPolicy, NCCL_CTA_POLICY_EFFICIENCY);
     EXPECT_EQ(dst.config.version, header.version);
+  });
+}
+
+// "RING" and "TREE" are disjoint prefix matches in the algorithm registry.
+TEST(CollConfigTests, AlgSelection_RingAndTreeAreDisjoint) {
+  RUN_ISOLATED_TEST("AlgSelection_RingAndTreeAreDisjoint", []() {
+    ncclCollConfig_t config = NCCL_COLLCONFIG_INITIALIZER;
+    config.algSelection = "RING";
+    uint64_t ring = 0;
+    ASSERT_EQ(ncclCollConfigGetAlgMask(&config, ncclFuncAllReduce, &ring), ncclSuccess);
+    config.algSelection = "TREE";
+    uint64_t tree = 0;
+    ASSERT_EQ(ncclCollConfigGetAlgMask(&config, ncclFuncAllReduce, &tree), ncclSuccess);
+    EXPECT_NE(ring, 0u);
+    EXPECT_NE(tree, 0u);
+    EXPECT_EQ(ring & tree, 0u);
   });
 }
 

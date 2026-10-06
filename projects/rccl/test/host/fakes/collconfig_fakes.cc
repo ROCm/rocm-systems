@@ -44,3 +44,11 @@ ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t
   *outMask = 0;  // no selection -> automatic
   return ncclSuccess;
 }
+
+int ncclCollConfigResolveCTAPolicy(int configVal, int commVal, bool envOverridden) {
+  if (envOverridden || configVal == NCCL_CONFIG_UNDEF_INT) return commVal;
+  if ((configVal & NCCL_CTA_POLICY_ZERO) && (configVal & NCCL_CTA_POLICY_EFFICIENCY)) {
+    configVal &= ~NCCL_CTA_POLICY_EFFICIENCY;
+  }
+  return configVal;
+}
