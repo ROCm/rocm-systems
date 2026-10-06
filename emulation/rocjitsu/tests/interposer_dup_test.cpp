@@ -804,6 +804,104 @@ TEST(InterposerDrmTest, OpensWithinCurrentDescriptorLimit) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+TEST(InterposerDrmTest, GemMetadataRoundTripsOnABuffer) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 4096;
+  create.in.alignment = 4096;
+  create.in.domains = AMDGPU_GEM_DOMAIN_VRAM;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+
+  drm_amdgpu_gem_metadata query{};
+  query.handle = create.out.handle;
+  query.op = AMDGPU_GEM_METADATA_OP_GET_METADATA;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_METADATA, &query), 0);
+  EXPECT_EQ(query.data.data_size_bytes, 0u);
+
+  drm_amdgpu_gem_metadata store{};
+  store.handle = create.out.handle;
+  store.op = AMDGPU_GEM_METADATA_OP_SET_METADATA;
+  store.data.tiling_info = 0x11;
+  store.data.data_size_bytes = sizeof(uint32_t);
+  store.data.data[0] = 0xA1B2C3D4u;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_METADATA, &store), 0);
+
+  drm_amdgpu_gem_metadata again{};
+  again.handle = create.out.handle;
+  again.op = AMDGPU_GEM_METADATA_OP_GET_METADATA;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_METADATA, &again), 0);
+  EXPECT_EQ(again.data.tiling_info, 0x11u);
+  EXPECT_EQ(again.data.data_size_bytes, sizeof(uint32_t));
+  EXPECT_EQ(again.data.data[0], 0xA1B2C3D4u);
+
+  drm_amdgpu_gem_metadata missing{};
+  missing.handle = 0;
+  missing.op = AMDGPU_GEM_METADATA_OP_GET_METADATA;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_METADATA, &missing), -1);
+  EXPECT_EQ(errno, ENOENT);
+
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, GemOpReportsTheCreateSize) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 8192;
+  create.in.alignment = 4096;
+  create.in.domains = AMDGPU_GEM_DOMAIN_VRAM;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+
+  drm_amdgpu_gem_create_in info{};
+  drm_amdgpu_gem_op op{};
+  op.handle = create.out.handle;
+  op.op = AMDGPU_GEM_OP_GET_GEM_CREATE_INFO;
+  op.value = reinterpret_cast<uint64_t>(&info);
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &op), 0);
+  EXPECT_EQ(info.bo_size, 8192u);
+  EXPECT_EQ(info.domains, static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_VRAM));
+
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, PrimeHandleToFdReturnsTheBuffer) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 4096;
+  create.in.alignment = 4096;
+  create.in.domains = AMDGPU_GEM_DOMAIN_VRAM;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+
+  drm_prime_handle prime{};
+  prime.handle = create.out.handle;
+  prime.flags = DRM_CLOEXEC;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+  ASSERT_GE(prime.fd, 0);
+  struct stat st {};
+  ASSERT_EQ(fstat(prime.fd, &st), 0);
+  EXPECT_EQ(st.st_size, 4096);
+  EXPECT_EQ(close(prime.fd), 0);
+
+  drm_prime_handle missing{};
+  missing.handle = 0;
+  missing.flags = DRM_CLOEXEC;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_PRIME_HANDLE_TO_FD, &missing), -1);
+  EXPECT_EQ(errno, ENOENT);
+
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
 TEST(InterposerDrmTest, TimestampUsesAdvertisedNanosecondClock) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
