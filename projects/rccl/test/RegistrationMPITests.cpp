@@ -1253,9 +1253,9 @@ protected:
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
  * The collective operates on four segments per half, while ncclCommRegister
- * covers the complete eight-segment allocation. Skip unless some rank finished
- * NET registration for every peer. The cached count is a separate write and
- * must be 8; gating the skip on that count would hide a missing cache write.
+ * covers the complete eight-segment allocation. Skip unless some rank set
+ * NET_REG_COMPLETE. The all-peer flag and the count of 8 are cache writes
+ * asserted after that gate, so a missing write fails instead of skipping.
  */
 TEST_F(UBR_MultiSegment, Generic)
 {
@@ -1320,16 +1320,17 @@ TEST_F(UBR_MultiSegment, Generic)
     ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize, &reg);
     // ncclCommRegister must publish a cache entry for the multi-segment buffer.
     ASSERT_MPI_NE(reg, nullptr);
-    // NET_REG_COMPLETE is set on the first peer. allPeers is the all-peers
-    // success, so a wrong cached count fails instead of skipping.
-    const bool netPeersDone = reg->rcclNet.allPeers;
+    // Gate on NET_REG_COMPLETE, not allPeers: the commit writes allPeers, so a
+    // dropped commit must fail here instead of skipping.
+    const bool netRegistered = (reg->state & NET_REG_COMPLETE) != 0;
     {
         const std::string why = mpiCoordinatedSkipReason(
-            !MPIHelpers::anyRankTrue(netPeersDone),
-            "NET registration did not finish for every peer on any rank");
+            !MPIHelpers::anyRankTrue(netRegistered),
+            "NET registration did not happen on any rank");
         if (!why.empty()) GTEST_SKIP() << why;
     }
-    if (netPeersDone) {
+    if (netRegistered) {
+        ASSERT_TRUE(reg->rcclNet.allPeers) << "NET registration did not record all-peer completion";
         ASSERT_EQ(reg->rcclNet.nSegments, kNumSegments)
             << "NET registration walked a prefix of the ncclCommRegister range, not the full 8-segment allocation";
     }
