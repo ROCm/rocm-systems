@@ -80,47 +80,17 @@ concurrency:
 
 jobs:
   configure:
-    name: Configure Changed Projects
+    name: Configure CI
     runs-on: ubuntu-24.04
     outputs:
-      changed_projects: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
-      run_all_tests: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
-      skip_tests: ${{ steps.configure-pr.outputs.skip_tests || steps.configure-manual.outputs.skip_tests }}
+      changed_projects: ${{ steps.configure.outputs.changed_projects }}
+      run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
+      skip_tests: ${{ steps.configure.outputs.skip_tests }}
     steps:
-      - name: Checkout repository config
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: |
-            .github/repos-config.json
-          sparse-checkout-cone-mode: false
-
-      - name: Checkout TheRock for configure script
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/TheRock
-          ref: cdc7cfea960aaf2035613eb99a7baa246d3419cf # 2026-10-06
-          path: _therock
-          sparse-checkout: |
-            build_tools/github_actions
-          sparse-checkout-cone-mode: false
-
-      - name: Configure CI for pull request or push
-        id: configure-pr
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Configure CI
+        id: configure
         run: |
-          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
-            --event-name "${{ github.event_name }}" \
-            --github-repo "${{ github.repository }}" \
-            --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
-            --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
-            --config-path ".github/repos-config.json"
-
-      - name: Configure CI for manual run
-        id: configure-manual
-        if: ${{ github.event_name != 'pull_request' }}
-        run: |
+          # Run all tests by default (changed project detection not available at this TheRock commit)
           echo "changed_projects=" >> "${GITHUB_OUTPUT}"
           echo "run_all_tests=true" >> "${GITHUB_OUTPUT}"
           echo "skip_tests=false" >> "${GITHUB_OUTPUT}"
