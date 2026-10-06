@@ -54,7 +54,12 @@ amd::elf::Section* FindArchSection(amd::elf::Image* elf, std::string_view arch) 
 bool AieCode::IsAieCodeObject(const void* data, size_t size) {
   if (!data || size < sizeof(Elf64_Ehdr)) return false;
   const auto* ehdr = static_cast<const Elf64_Ehdr*>(data);
-  if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0) return false;
+  // Byte by byte rather than memcmp against ELFMAG: the Windows libelf headers do not define
+  // ELFMAG/SELFMAG.
+  if (ehdr->e_ident[EI_MAG0] != ELFMAG0 || ehdr->e_ident[EI_MAG1] != ELFMAG1 ||
+      ehdr->e_ident[EI_MAG2] != ELFMAG2 || ehdr->e_ident[EI_MAG3] != ELFMAG3) {
+    return false;
+  }
 
   auto img = std::unique_ptr<amd::elf::Image>(amd::elf::NewElf64Image());
   if (!img || !img->initAsBuffer(data, size)) return false;
