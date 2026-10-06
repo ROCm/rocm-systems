@@ -3,6 +3,7 @@
 
 import argparse
 import shutil
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -1238,3 +1239,11 @@ def test_compute_selected_frameworks_unions_torch_and_triton_flags():
     )
     assert both_flags == {"torch", "triton"}
     assert ml_api == both_flags
+
+
+def test_sanitize_rejects_torch_trace_with_attach_pid(tmp_path):
+    remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
+    args = _make_sanitize_args(remaining, torch_trace=True, attach_pid=12345)
+    profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
+    with pytest.raises(SystemExit):
+        profiler.sanitize()
