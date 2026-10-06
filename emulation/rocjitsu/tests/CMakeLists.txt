@@ -852,8 +852,7 @@ rj_add_gtest_tests(
 )
 
 # GoogleTest registers every parameter before applying its filter. Keep the FP
-# matrices out of unrelated test processes and amortize registration across
-# batches. Sharding includes new cases and helper tests without a filter list.
+# matrices in their own executable so unrelated tests do not pay that cost.
 add_executable(rocjitsu_fp_mode_tests valu_fp_mode_test.cpp)
 target_link_libraries(
     rocjitsu_fp_mode_tests
@@ -869,6 +868,8 @@ if(RJ_INSTALL_TESTS)
     rj_install_test_target(rocjitsu_fp_mode_tests)
 endif()
 
+# Batching amortizes registration, and GoogleTest assigns new cases to shards
+# automatically without maintaining per-case filters.
 set(_rj_fp_mode_shards 16)
 math(EXPR _rj_fp_mode_last_shard "${_rj_fp_mode_shards} - 1")
 foreach(_shard RANGE 0 ${_rj_fp_mode_last_shard})
