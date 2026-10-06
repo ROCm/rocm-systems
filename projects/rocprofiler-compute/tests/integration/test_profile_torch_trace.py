@@ -598,3 +598,26 @@ def test_torch_trace_deep_tensor_wraps_overhead(
     print(f"  Deep-wraps kernel duration:  {deep_kernel:.0f} ns")
     print(f"  Kernel overhead:             {kernel_overhead:.1f}%")
     print("=" * 70 + "\n")
+
+
+@pytest.mark.torch_trace
+def test_list_torch_operators_prints_call_tree(
+    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-torch-operators",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "PyTorch Operator Call Tree:" in out
+    assert "nn.Module.Linear.forward" in out
+    assert "aten::addmm" in out
+    assert "(id " in out
+    assert not (
+        Path(torch_trace_profiled_workload) / "ml_api_trace" / "consolidated.csv"
+    ).exists()
