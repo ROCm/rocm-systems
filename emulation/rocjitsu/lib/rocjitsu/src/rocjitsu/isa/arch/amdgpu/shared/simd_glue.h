@@ -796,6 +796,13 @@ inline conversion::PackB32F16 conversion_pack_b32_f16(const Wavefront &wf, uint3
           fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())};
 }
 
+/// @brief Resolve an F32-to-FP8/BF8 conversion; FP16_OVFL saturates finite overflow.
+template <typename Fmt>
+inline conversion::ToFp8<Fmt> conversion_to_fp8(const Wavefront &wf, uint32_t abs = 0,
+                                                uint32_t neg = 0) {
+  return {abs, neg, input_denormal::Policy::make(wf.fp_denorm_mode_f32()), wf.fp16_ovfl()};
+}
+
 /// @brief Resolve V_CVT_PK_RTZ_F16_F32: each F32 source rounds toward zero into one half.
 /// @details MODE.FP_ROUND is ignored. ABS/NEG bit i applies to source i; OMOD and
 /// CLAMP are not applied to the packed result.

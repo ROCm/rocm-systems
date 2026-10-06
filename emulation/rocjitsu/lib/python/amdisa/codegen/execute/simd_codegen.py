@@ -3359,18 +3359,21 @@ def _local_coverage_probe(
             e32_half_inputs=e32_half_inputs,
         )
     if template_name in ('v_cvt_f32_fp8_vop3', 'v_cvt_f32_bf8_vop3'):
-        convert = (
-            'util::bf8_e5m2_to_f32_simd(byte)'
-            if 'bf8' in template_name
-            else '(amdgpu::vop3_fp8_decode_e5m3(inst) ? util::fp8_e5m3_to_f32_simd(byte) : util::fp8_e4m3_to_f32_simd(byte))'
-        )
+        # Local probes cover OCP targets; see conversion.decode_fp8_expr.
+        decoded = conversion.decode_fp8_expr(template_name[10:13], 'byte')
+        if 'fp8' in template_name:
+            decoded = (
+                '(amdgpu::vop3_fp8_decode_e5m3(inst) ? '
+                'std::bit_cast<util::native<uint32_t>>(util::fp8_e5m3_to_f32_simd(byte)) : '
+                f'{decoded})'
+            )
         return call(
             1,
             False,
             0,
             '[&](auto a) { const uint32_t sel = amdgpu::vop3_opsel(inst.inst_); '
             'auto byte = (a >> ((((sel & 1u) << 1) | ((sel & 2u) >> 1)) * 8u)) & 0xffu; '
-            f'return std::bit_cast<util::native<uint32_t>>({convert}); }}',
+            f'return {decoded}; }}',
         )
     if template_name in ('v_cvt_f32_bf16_vop3',):
         # VOP3 conversion applies source half selection and floating modifiers.

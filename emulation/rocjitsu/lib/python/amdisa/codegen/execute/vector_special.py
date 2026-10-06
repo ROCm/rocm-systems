@@ -11,9 +11,12 @@ saturating packs, arithmetic, lane permutations, and packed type conversion.
 from __future__ import annotations
 
 from amdisa.codegen.execute.conversion import (
+    decode_fp8_expr,
     pack_b32_f16_expr,
     pk_rtz_f16_expr,
     pk_u8_expr,
+    to_fp8_expr,
+    uses_ocp_fp8,
 )
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
@@ -1383,6 +1386,54 @@ def gen_vector_permlane_idx_gen(dst: list[str], src: list[str]) -> str:
     return '\n'.join(L)
 
 
+def _gen_ocp_pk_fp8(
+    L: list[str],
+    dst: list[str],
+    src: list[str],
+    name: str,
+    opsel: str,
+    *,
+    is_vop3: bool,
+    has_abs: bool,
+    e5m3_select: str | None = None,
+    e5m3_fn: str | None = None,
+) -> None:
+    """Pack two F32 sources as OCP FP8/BF8 into the OPSEL[3] word, keeping the other."""
+    L.insert(
+        0, f'  const auto conversion = {to_fp8_expr(name, is_vop3, has_abs, "inst_")};'
+    )
+    L.append(f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);')
+    L.append(f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);')
+    packed = 'conversion(s0, s1)'
+    if e5m3_select is not None and e5m3_fn is not None:
+        e5m3 = [
+            f'static_cast<uint32_t>({e5m3_fn}(std::bit_cast<float>(s{i}), wf.fp16_ovfl()))'
+            for i in range(2)
+        ]
+        packed = f'({e5m3_select}) ? ({e5m3[0]} | ({e5m3[1]} << 8)) : {packed}'
+    L.append(f'    uint32_t packed = {packed};')
+    L.append(
+        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed, true);'
+    )
+
+
+def _gen_ocp_pk_f32_fp8(
+    L: list[str], dst: list[str], src: list[str], name: str, opsel: str
+) -> None:
+    """Decode the two OCP FP8/BF8 bytes of the OPSEL[0] half into two F32 results."""
+    L.append(
+        f'    uint32_t packed = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
+    )
+    half = 'packed' if opsel == '0u' else f'({opsel} & 1) ? (packed >> 16) : packed'
+    L.append(f'    uint32_t half = {half};')
+    low = decode_fp8_expr(name, 'half')
+    high = decode_fp8_expr(name, 'half >> 8')
+    L.append(
+        f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, '
+        f'static_cast<uint64_t>({low}) | (static_cast<uint64_t>({high}) << 32));'
+    )
+
+
 def gen_vector_cvt_pk(
     dst: list[str],
     src: list[str],
@@ -1499,7 +1550,21 @@ def gen_vector_cvt_pk(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1));'
         )
     elif cls == 'vector_cvt_pk':
-        if op in ('fp8_f32', 'bf8_f32', 'fp8_f16', 'bf8_f16'):
+        if op in ('fp8_f32', 'bf8_f32') and uses_ocp_fp8(arch_name):
+            _gen_ocp_pk_fp8(
+                L,
+                dst,
+                src,
+                op[:3],
+                opsel,
+                is_vop3=is_vop3,
+                has_abs=has_abs,
+                e5m3_select=fp8_format_select if op == 'fp8_f32' else None,
+                e5m3_fn='util::f32_to_fp8_e5m3_rne_mode',
+            )
+        elif op in ('f32_fp8', 'f32_bf8') and uses_ocp_fp8(arch_name):
+            _gen_ocp_pk_f32_fp8(L, dst, src, op[4:], opsel)
+        elif op in ('fp8_f32', 'bf8_f32', 'fp8_f16', 'bf8_f16'):
             # RDNA4 data-conversion prose scopes FP16_OVFL for FP8/BF8
             # destinations to conversions from F32 sources. Plain F16/BF16
             # sources convert the already-rounded 16-bit input value.
@@ -2131,7 +2196,41 @@ def gen_cvt_fp8(ctx) -> str:
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
-    if op == 'pk_fp8_f32':
+    if uses_ocp_fp8(ctx.arch_name) and op in (
+        'pk_fp8_f32',
+        'pk_bf8_f32',
+        'sr_fp8_f32',
+        'sr_bf8_f32',
+        'pk_f32_fp8',
+        'pk_f32_bf8',
+    ):
+        if op.startswith('pk_f32_'):
+            _gen_ocp_pk_f32_fp8(L, dst, src, op[-3:], opsel)
+        elif op.startswith('pk_'):
+            _gen_ocp_pk_fp8(
+                L,
+                dst,
+                src,
+                op[3:6],
+                opsel,
+                is_vop3=is_vop3,
+                has_abs=ctx.has_abs,
+                e5m3_select=fp8_format_select if op == 'pk_fp8_f32' else None,
+                e5m3_fn='util::f32_to_fp8_e5m3_rne_mode',
+            )
+        else:
+            _gen_ocp_sr_fp8(
+                L,
+                dst,
+                src,
+                op[3:6],
+                opsel,
+                is_vop3=is_vop3,
+                has_abs=ctx.has_abs,
+                e5m3_select=fp8_format_select if op == 'sr_fp8_f32' else None,
+                e5m3_fn='util::f32_to_fp8_e5m3_sr_mode',
+            )
+    elif op == 'pk_fp8_f32':
         _gen_pk_narrow_fp8(
             L,
             dst,
@@ -2253,6 +2352,40 @@ def _gen_sr_narrow_fp8(
     L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')
     L.append(
         f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));'
+    )
+
+
+def _gen_ocp_sr_fp8(
+    L: list[str],
+    dst: list[str],
+    src: list[str],
+    name: str,
+    opsel: str,
+    *,
+    is_vop3: bool,
+    has_abs: bool,
+    e5m3_select: str | None = None,
+    e5m3_fn: str | None = None,
+) -> None:
+    """One F32 source to OCP FP8/BF8 with stochastic rounding, into the OPSEL[3:2] byte."""
+    L.insert(
+        0, f'  const auto conversion = {to_fp8_expr(name, is_vop3, has_abs, "inst_")};'
+    )
+    L.append(f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);')
+    L.append(
+        f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+    )
+    result = 'conversion.stochastic(s0, seed)'
+    if e5m3_select is not None and e5m3_fn is not None:
+        e5m3 = f'static_cast<uint32_t>({e5m3_fn}(std::bit_cast<float>(s0), seed, wf.fp16_ovfl()))'
+        result = f'({e5m3_select}) ? {e5m3} : {result}'
+    L.append(f'    uint32_t result = {result};')
+    L.append(f'    uint32_t shift = (({opsel} >> 2) & 0x3u) * 8u;')
+    L.append(
+        f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({dst[0]}, lane);'
+    )
+    L.append(
+        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (old & ~(0xFFu << shift)) | (result << shift));'
     )
 
 

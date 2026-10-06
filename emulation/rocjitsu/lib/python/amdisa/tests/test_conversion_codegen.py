@@ -137,3 +137,24 @@ def test_f64_conversion_simd_uses_raw_lane_glue():
     )
     f16 = simd_probe_line('v_cvt_f16_f32_vop3', true16_vop3=True)
     assert f16.startswith('  if (amdgpu::try_execute_words_simd<1, false, true, 0>(')
+
+
+@pytest.mark.parametrize('name', ['fp8', 'bf8'])
+def test_fp8_decode_simd_probe_uses_the_shared_ocp_decoder(name):
+    layout = 'Fp8' if name == 'fp8' else 'Bf8'
+    probe = local_coverage_probe(f'v_cvt_f32_{name}_vop3')
+    assert (
+        f'amdgpu::conversion::decode_fp8<amdgpu::conversion::{layout}>(byte)' in probe
+    )
+    assert ('util::fp8_e5m3_to_f32_simd' in probe) == (name == 'fp8')
+    assert 'util::fp8_e4m3_to_f32_simd' not in probe
+    assert 'util::bf8_e5m2_to_f32_simd' not in probe
+
+
+def test_fp8_encodes_keep_fnuz_helpers_on_cdna3():
+    assert not conversion.uses_ocp_fp8('cdna3')
+    for arch in ('cdna4', 'cdna5', 'rdna4'):
+        assert conversion.uses_ocp_fp8(arch)
+    assert conversion.to_fp8_expr('bf8', True, False, 'inst_') == (
+        'amdgpu::conversion_to_fp8<amdgpu::conversion::Bf8>(wf, 0u, inst_.neg)'
+    )

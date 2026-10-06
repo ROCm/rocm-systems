@@ -105,6 +105,60 @@ TEST(ConversionTest, PackB32F16ModifiesFlushesAndQuietsEachHalf) {
   EXPECT_EQ(raw(0x7c01u, 0u), 0x7c01u);
 }
 
+TEST(ConversionTest, Fp8DecodeIsExactAndCanonicalizesNan) {
+  // Every non-NaN byte decodes to a value that encodes back to the same byte.
+  for (uint32_t byte = 0; byte < 0x100u; ++byte) {
+    const uint32_t fp8 = conversion::decode_fp8<conversion::Fp8>(byte);
+    const uint32_t bf8 = conversion::decode_fp8<conversion::Bf8>(byte);
+    if ((byte & 0x7fu) == 0x7fu)
+      EXPECT_EQ(fp8, 0xffc00000u) << byte;
+    else
+      EXPECT_EQ(conversion::encode_fp8<conversion::Fp8>(fp8, false), byte) << byte;
+    if ((byte & 0x7fu) > 0x7cu)
+      EXPECT_EQ(bf8, 0xffc00000u) << byte;
+    else
+      EXPECT_EQ(conversion::encode_fp8<conversion::Bf8>(bf8, false), byte) << byte;
+  }
+  EXPECT_EQ(conversion::decode_fp8<conversion::Fp8>(0x7eu), 0x43e00000u); // 448
+  EXPECT_EQ(conversion::decode_fp8<conversion::Fp8>(0x01u), 0x3b000000u); // 2^-9
+  EXPECT_EQ(conversion::decode_fp8<conversion::Bf8>(0xfcu), 0xff800000u);
+}
+
+TEST(ConversionTest, Fp8EncodeOverflowAndNan) {
+  // 464 ties to the even 448; 472 rounds up past it to the FP8 NaN pattern, or
+  // to 448 when saturating.
+  EXPECT_EQ(conversion::encode_fp8<conversion::Fp8>(0x43e80000u, false), 0x7eu);
+  EXPECT_EQ(conversion::encode_fp8<conversion::Fp8>(0x43ec0000u, false), 0x7fu);
+  EXPECT_EQ(conversion::encode_fp8<conversion::Fp8>(0xc3ec0000u, true), 0xfeu);
+  EXPECT_EQ(conversion::encode_fp8<conversion::Bf8>(0x7f7fffffu, false), 0x7cu);
+  EXPECT_EQ(conversion::encode_fp8<conversion::Bf8>(0x7f7fffffu, true), 0x7bu);
+  // Infinity keeps the overflow pattern even when saturating.
+  EXPECT_EQ(conversion::encode_fp8<conversion::Fp8>(0x7f800000u, true), 0x7fu);
+  EXPECT_EQ(conversion::encode_fp8<conversion::Bf8>(0xff800000u, true), 0xfcu);
+  // Every NaN encodes to one pattern.
+  EXPECT_EQ(conversion::encode_fp8<conversion::Fp8>(0x7fc00000u, false), 0xffu);
+  EXPECT_EQ(conversion::encode_fp8<conversion::Bf8>(0xff800001u, false), 0xfeu);
+}
+
+TEST(ConversionTest, Fp8StochasticRoundingAddsRandomBits) {
+  // 1 + 2^-4 lies between FP8 1.0 and 1.125: truncated, or rounded up by large random bits.
+  EXPECT_EQ(conversion::encode_fp8_stochastic<conversion::Fp8>(0x3f880000u, 0u, false), 0x38u);
+  EXPECT_EQ(conversion::encode_fp8_stochastic<conversion::Fp8>(0x3f880000u, 0x80000000u, false),
+            0x39u);
+  // A value headed for the subnormal range is truncated at normal precision first.
+  EXPECT_EQ(conversion::encode_fp8_stochastic<conversion::Fp8>(0x384b85fdu, 0xffffffffu, false),
+            0x01u);
+}
+
+TEST(ConversionTest, ToFp8AppliesModifiersAndFlushesInputs) {
+  const conversion::ToFp8<conversion::Fp8> plain{0, 0, kKeep, false};
+  EXPECT_EQ(plain(0x3f800000u, 0x80000000u), 0x8038u);
+  const conversion::ToFp8<conversion::Fp8> negated{0, 1, kKeep, false};
+  EXPECT_EQ(negated(0x3f800000u, 0x80000000u), 0x80b8u);
+  const conversion::ToFp8<conversion::Bf8> flush{0, 0, kFlush, false};
+  EXPECT_EQ(flush.stochastic(0x807fffffu, 0xffffffffu), 0x80u);
+}
+
 template <typename From, typename To>
 conversion::ToFloat<From, To> to_float(uint32_t mode, uint32_t omod = 0, bool clamp = false) {
   conversion::ToFloat<From, To> stages;

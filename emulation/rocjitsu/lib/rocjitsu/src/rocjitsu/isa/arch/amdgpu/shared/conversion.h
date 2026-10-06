@@ -306,4 +306,139 @@ template <typename From> struct PackedF16 {
   }
 };
 
+/// @brief OCP 8-bit float layouts, in the low byte of a 32-bit lane.
+/// @details FP8 (E4M3) has no infinity: exponent 15 encodes normal values except
+/// for the NaN encodings 0x7f and 0xff, and 448 is its largest value. BF8 (E5M2)
+/// follows the IEEE layout.
+using Fp8 = fp_format::Format<uint32_t, 4, 3>;
+using Bf8 = fp_format::Format<uint32_t, 5, 2>;
+
+namespace detail {
+
+template <typename Fmt> struct Fp8Encoding;
+template <> struct Fp8Encoding<Fp8> {
+  static constexpr uint32_t kLargest = 0x7e;
+  /// The magnitude of an overflowing value: the NaN encoding.
+  static constexpr uint32_t kOverflow = 0x7f;
+};
+template <> struct Fp8Encoding<Bf8> {
+  static constexpr uint32_t kLargest = 0x7b;
+  /// The magnitude of an overflowing value: infinity.
+  static constexpr uint32_t kOverflow = 0x7c;
+};
+
+// ISA discrepancy: the ISA keeps a NaN's sign, but gfx1201 encodes every NaN
+// as 0xff (FP8) or 0xfe (BF8) and decodes every NaN to 0xffc00000.
+inline constexpr uint32_t kFp8Nan = 0xff;
+inline constexpr uint32_t kBf8Nan = 0xfe;
+inline constexpr uint32_t kDecodedNan = 0xffc00000u;
+
+/// @brief Encode a rounded FP8/BF8 magnitude, resolving overflow and specials.
+/// @details Infinity and finite overflow give the overflow encoding, except that
+/// saturation (FP16_OVFL) turns finite overflow into the largest value.
+template <typename Fmt, typename V> constexpr V finish_fp8(V bits, V magnitude, bool saturate) {
+  using F32 = fp_format::F32;
+  using L = typename F32::Lane;
+  using Encoding = Fp8Encoding<Fmt>;
+  const V f32_magnitude = bits & V(F32::kMagnitude);
+  const V overflow(L{Encoding::kOverflow});
+  V result = choose(magnitude > V(L{Encoding::kLargest}),
+                    saturate ? V(L{Encoding::kLargest}) : overflow, magnitude);
+  result = choose(f32_magnitude == V(F32::kInfinity), overflow, result);
+  result = result | ((bits & V(F32::kSign)) >> 24);
+  const L nan = std::is_same_v<Fmt, Fp8> ? kFp8Nan : kBf8Nan;
+  return choose(f32_magnitude > V(F32::kInfinity), V(nan), result);
+}
+
+} // namespace detail
+
+/// @brief Decode an FP8 or BF8 byte to F32 bits exactly.
+/// @details `bits` holds the byte in its low eight bits. Every NaN decodes to
+/// 0xffc00000; BF8 infinities stay infinite.
+template <typename Fmt, typename V> constexpr V decode_fp8(V bits) {
+  using F32 = fp_format::F32;
+  using L = typename F32::Lane;
+  using detail::choose;
+  const V byte = bits & V(L{0xff});
+  V result = rounding::widen<Fmt, F32>(byte);
+  if constexpr (std::is_same_v<Fmt, Fp8>) {
+    // Exponent 15 encodes normal values; only 0x7f and 0xff are NaN.
+    constexpr L kRebias = (F32::kExponentMax >> 1) - (Fmt::kExponentMax >> 1);
+    const V magnitude = byte & V(Fmt::kMagnitude);
+    const V top = ((V(Fmt::kExponentMax) + V(kRebias)) << F32::kMantissaBits) |
+                  ((magnitude & V(Fmt::kMinNormal - 1)) << (F32::kMantissaBits - 3));
+    result = choose(magnitude >= V(Fmt::kInfinity), top | ((byte & V(Fmt::kSign)) << 24), result);
+    return choose(magnitude == V(Fmt::kMagnitude), V(detail::kDecodedNan), result);
+  } else {
+    const auto nan = (byte & V(Fmt::kMagnitude)) > V(Fmt::kInfinity);
+    return choose(nan, V(detail::kDecodedNan), result);
+  }
+}
+
+/// @brief Encode F32 bits as FP8 or BF8, rounding to nearest even.
+/// @details MODE rounding and output-denormal controls do not apply. Infinity and
+/// finite overflow give the signed overflow encoding (FP8 NaN, BF8 infinity), and
+/// saturation (FP16_OVFL) turns finite overflow into the signed largest value.
+template <typename Fmt, typename V> constexpr V encode_fp8(V bits, bool saturate) {
+  const V magnitude = rounding::round_finite<fp_format::F32, Fmt>(bits, rounding::Policy{});
+  return detail::finish_fp8<Fmt>(bits, magnitude, saturate);
+}
+
+/// @brief Encode F32 bits as FP8 or BF8 with stochastic rounding.
+/// @details A value headed for the subnormal range is first truncated to the
+/// precision of a normal result; the top bits of `random` are then added below
+/// the kept precision, and the sum is truncated.
+template <typename Fmt, typename V>
+constexpr V encode_fp8_stochastic(V bits, V random, bool saturate) {
+  using F32 = fp_format::F32;
+  using L = typename F32::Lane;
+  using detail::choose;
+  constexpr unsigned kDrop = F32::kMantissaBits - Fmt::kMantissaBits;
+  constexpr L kBiasStep = (F32::kExponentMax >> 1) + 1 - (Fmt::kExponentMax >> 1);
+  const V magnitude = bits & V(F32::kMagnitude);
+  const V field = magnitude >> F32::kMantissaBits;
+  const auto f32_subnormal = field == V(L{0});
+  const V significand =
+      (magnitude & V(F32::kMinNormal - 1)) | choose(f32_subnormal, V(L{0}), V(F32::kMinNormal));
+  // A result below Fmt's normal range keeps `extra` fewer bits; beyond 31 none remain.
+  const V effective_field = choose(f32_subnormal, V(L{1}), field);
+  const auto normal = effective_field >= V(kBiasStep);
+  V extra = choose(normal, V(L{0}), V(kBiasStep) - effective_field);
+  extra = choose(extra > V(L{31}), V(L{31}), extra);
+  const V units = ((significand >> extra) + (random >> (32 - kDrop))) >> kDrop;
+  // A normal result's units include the leading one, which adds one to the exponent field.
+  const V exponent_field =
+      choose(normal, (effective_field - V(kBiasStep)) << Fmt::kMantissaBits, V(L{0}));
+  return detail::finish_fp8<Fmt>(bits, exponent_field + units, saturate);
+}
+
+/// @brief F32 sources encoded as FP8 or BF8, after ABS/NEG and MODE input flushing.
+/// @details Fmt is Fp8 or Bf8. The pair form packs the first source into bits
+/// [7:0] and the second into [15:8] (V_CVT_PK_FP8_F32, V_CVT_PK_BF8_F32), rounding
+/// to nearest even; the stochastic form encodes one source with `random`
+/// (V_CVT_SR_FP8_F32, V_CVT_SR_BF8_F32).
+template <typename Fmt> struct ToFp8 {
+  /// VOP3 ABS and NEG fields; bit i applies to source i.
+  uint32_t abs = 0;
+  uint32_t neg = 0;
+  input_denormal::Policy input;
+  /// MODE.FP16_OVFL: finite overflow gives the largest value.
+  bool saturate = false;
+
+  template <typename V> constexpr V operator()(V first, V second) const {
+    return encode_fp8<Fmt>(prepare(first, 0), saturate) |
+           (encode_fp8<Fmt>(prepare(second, 1), saturate) << 8);
+  }
+
+  template <typename V> constexpr V stochastic(V bits, V random) const {
+    return encode_fp8_stochastic<Fmt>(prepare(bits, 0), random, saturate);
+  }
+
+private:
+  template <typename V> constexpr V prepare(V bits, unsigned index) const {
+    bits = source_modifier::apply<fp_format::F32>(bits, index, abs, neg);
+    return input_denormal::flush_input<fp_format::F32>(bits, input);
+  }
+};
+
 } // namespace rocjitsu::amdgpu::conversion

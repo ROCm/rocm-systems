@@ -2970,6 +2970,77 @@ std::vector<ArithmeticCase> pack_b32_f16_cases() {
   return cases;
 }
 
+// OCP FP8 (E4M3) and BF8 (E5M2) conversions. Every NaN decodes to 0xffc00000
+// and encodes as 0xff (FP8) or 0xfe (BF8). Infinity and finite overflow give the
+// FP8 NaN or BF8 infinity pattern; FP16_OVFL saturates finite overflow only.
+// Encoding takes ABS/NEG and the F32 input flush and rounds to nearest even, or
+// stochastically with the second source. Results are gfx1201 captures.
+std::vector<ArithmeticCase> fp8_cases() {
+  std::vector<ArithmeticCase> cases;
+  const auto add = [&](const char *name, std::array<uint32_t, 2> words,
+                       std::vector<std::pair<uint32_t, uint32_t>> sources,
+                       std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode) {
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     std::move(sources),
+                     std::move(expected),
+                     mode,
+                     FE_TONEAREST});
+  };
+  const auto vop1 = [](uint16_t op) {
+    return std::array<uint32_t, 2>{rdna4::build_vop1(op, {.src0 = 256, .vdst = 6})[0], 0u};
+  };
+  const auto vop3 = [](uint16_t op, rdna4::Vop3BuilderFields fields = {}) {
+    fields.vdst = 6;
+    fields.src0 = 256;
+    fields.src1 = 257;
+    return rdna4::build_vop3(op, fields);
+  };
+  const auto f32_fp8 = vop1(rdna4::kVCvtF32Fp8Vop1);
+  add("DecodeFp8Largest", f32_fp8, {{0, 0xfffffffeu}}, {{6, 0xc3e00000u}}, 0xf0u);
+  add("DecodeFp8Nan", f32_fp8, {{0, 0x5963057fu}}, {{6, 0xffc00000u}}, 0xf0u);
+  add("DecodeFp8Subnormal", f32_fp8, {{0, 0x00000008u}}, {{6, 0x3c800000u}}, 0x30u);
+  const auto f32_bf8 = vop1(rdna4::kVCvtF32Bf8Vop1);
+  add("DecodeBf8Infinity", f32_bf8, {{0, 0x967c9afcu}}, {{6, 0xff800000u}}, 0xf0u);
+  add("DecodeBf8Nan", f32_bf8, {{0, 0x0000007du}}, {{6, 0xffc00000u}}, 0xf0u);
+  // OP_SEL [1,0] selects byte 1.
+  add("DecodeFp8Byte1Nan", vop3(rdna4::kVCvtF32Fp8Vop3, {.opsel = 2}), {{0, 0x7fffffffu}},
+      {{6, 0xffc00000u}}, 0xf0u);
+  add("DecodePkBf8HighHalfNan", vop3(rdna4::kVCvtPkF32Bf8Vop3, {.opsel = 1}), {{0, 0xffffffffu}},
+      {{6, 0xffc00000u}, {7, 0xffc00000u}}, 0xf0u);
+
+  const auto pk_fp8 = [&](rdna4::Vop3BuilderFields fields = {}) {
+    return vop3(rdna4::kVCvtPkFp8F32Vop3, fields);
+  };
+  const auto pk_bf8 = vop3(rdna4::kVCvtPkBf8F32Vop3);
+  const auto pair = [](uint32_t low, uint32_t high, uint32_t old) {
+    return std::vector<std::pair<uint32_t, uint32_t>>{{0, low}, {1, high}, {6, old}};
+  };
+  add("PkFp8Nan", pk_fp8(), pair(0u, 0x7fc00000u, 0u), {{6, 0xff00u}}, 0xf0u);
+  add("PkFp8InfinityFp16Ovfl", pk_fp8(), pair(0x7f800000u, 0u, 0xffffffffu), {{6, 0xffff007fu}},
+      0x800030u);
+  add("PkFp8Overflow", pk_fp8(), pair(0x7f7fffffu, 0u, 0u), {{6, 0x7fu}}, 0x30u);
+  add("PkFp8OverflowFp16Ovfl", pk_fp8(), pair(0x7f7fffffu, 0u, 0u), {{6, 0x7eu}}, 0x800030u);
+  add("PkBf8Overflow", pk_bf8, pair(0x7f7fffffu, 0u, 0u), {{6, 0x7cu}}, 0x30u);
+  add("PkBf8OverflowFp16Ovfl", pk_bf8, pair(0x7f7fffffu, 0u, 0u), {{6, 0x7bu}}, 0x800030u);
+  add("PkFp8NegLow", pk_fp8({.neg = 1}), pair(0x3f800000u, 0x80000000u, 0u), {{6, 0x80b8u}}, 0xf0u);
+  // OP_SEL[3] writes the high word and keeps the low one.
+  add("PkFp8HighWord", pk_fp8({.opsel = 8}), pair(0x80000000u, 0u, 1u), {{6, 0x00800001u}}, 0xf0u);
+
+  const auto sr = [&](uint16_t op, rdna4::Vop3BuilderFields fields = {}) {
+    return vop3(op, fields);
+  };
+  add("SrFp8SubnormalRandom", sr(rdna4::kVCvtSrFp8F32Vop3),
+      pair(0x384b85fdu, 0xffffffffu, 0xffffffffu), {{6, 0xffffff01u}}, 0xf0u);
+  // OP_SEL[3:2] selects the destination byte.
+  add("SrFp8Byte2", sr(rdna4::kVCvtSrFp8F32Vop3, {.opsel = 8}), pair(0x80000000u, 0u, 0xffffffffu),
+      {{6, 0xff80ffffu}}, 0xf0u);
+  add("SrBf8Neg", sr(rdna4::kVCvtSrBf8F32Vop3, {.neg = 1}), pair(0x3f800000u, 1u, 0u), {{6, 0xbcu}},
+      0xf0u);
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -3263,6 +3334,11 @@ INSTANTIATE_TEST_SUITE_P(NormalizedAndByte, ValuConversionTest,
                          });
 
 INSTANTIATE_TEST_SUITE_P(PackB32F16, ValuConversionTest, testing::ValuesIn(pack_b32_f16_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Fp8, ValuConversionTest, testing::ValuesIn(fp8_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

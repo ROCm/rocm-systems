@@ -2032,6 +2032,17 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             arg = f'(({arg} >> (({ctx.fp8_byte_select}) * 8u)) & 0xFFu)'
         fp8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::fp8_e4m3_to_f32')
         bf8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::bf8_e5m2_to_f32')
+        if callee in ('cvt_f32_fp8', 'cvt_f32_bf8') and conversion.uses_ocp_fp8(
+            ctx.arch_name
+        ):
+            decoded = conversion.decode_fp8_expr(callee[-3:], arg)
+            if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f32_fp8':
+                e5m3 = f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg}))'
+                return (
+                    f'(({ctx.fp8_decode_e5m3_select}) ? std::bit_cast<uint32_t>({e5m3}) : '
+                    f'{decoded})'
+                )
+            return decoded
         if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f32_fp8':
             return (
                 f'std::bit_cast<uint32_t>(({ctx.fp8_decode_e5m3_select}) ? '

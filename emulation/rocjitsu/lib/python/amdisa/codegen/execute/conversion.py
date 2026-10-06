@@ -11,6 +11,8 @@ destination format's MODE, then applies OMOD and CLAMP, all on raw encodings.
 
 import re
 
+from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES
+
 # Conversion data type -> (source format, destination format). Integer
 # formats are shared/conversion.h tags; floating formats are fp_format layouts.
 TO_FLOAT: dict[str, tuple[str, str]] = {
@@ -147,3 +149,31 @@ def pack_b32_f16_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
         return 'amdgpu::conversion_pack_b32_f16(wf)'
     abs_field = f'{inst}.abs' if has_abs else '0u'
     return f'amdgpu::conversion_pack_b32_f16(wf, {abs_field}, {inst}.neg)'
+
+
+# OCP 8-bit float formats (shared/conversion.h); CDNA3 uses FNUZ helpers instead.
+_FP8_FORMATS = {'fp8': 'amdgpu::conversion::Fp8', 'bf8': 'amdgpu::conversion::Bf8'}
+
+
+def uses_ocp_fp8(arch_name: str) -> bool:
+    """Whether a target's FP8/BF8 conversions use the shared OCP encodings."""
+    return arch_name not in FNUZ_FP8_ARCHES
+
+
+def fp8_format(name: str) -> str:
+    """Return the conversion.h layout for 'fp8' or 'bf8'."""
+    return _FP8_FORMATS[name]
+
+
+def to_fp8_expr(name: str, is_vop3: bool, has_abs: bool, inst: str) -> str:
+    """Resolve an F32-to-FP8/BF8 conversion; VOP3 passes its ABS/NEG fields."""
+    stages = f'amdgpu::conversion_to_fp8<{fp8_format(name)}>'
+    if not is_vop3:
+        return f'{stages}(wf)'
+    abs_field = f'{inst}.abs' if has_abs else '0u'
+    return f'{stages}(wf, {abs_field}, {inst}.neg)'
+
+
+def decode_fp8_expr(name: str, byte: str) -> str:
+    """Decode the FP8/BF8 byte in the low bits of ``byte`` to F32 bits."""
+    return f'amdgpu::conversion::decode_fp8<{fp8_format(name)}>({byte})'

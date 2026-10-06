@@ -2898,14 +2898,17 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
         encoding_map=None,
     )
 
-    widen = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_f32_fp8'))
-    assert 'util::fp8_e4m3_to_f32' in widen
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in widen
+    # OCP targets decode and encode through shared/conversion.h.
+    widen = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_f32_fp8', has_abs=True))
+    assert 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>' in widen
+    assert 'fnuz' not in widen
 
-    narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32'))
-    assert 'util::f32_to_fp8_e4m3_rne_mode' in narrow
-    assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' not in narrow
-    assert 'wf.fp16_ovfl()' in narrow
+    narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32', has_abs=True))
+    assert (
+        'amdgpu::conversion_to_fp8<amdgpu::conversion::Fp8>(wf, inst_.abs, inst_.neg)'
+        in narrow
+    )
+    assert 'fnuz' not in narrow
 
     unary = gen_vector_unary(
         ['vdst'],
@@ -6304,8 +6307,9 @@ def test_shared_execute_preflight_detects_cdna3_fp8_cvt_divergence():
     assert fp8_cvt_keys <= unshared
 
     vop1_fp8_variants = variants[('v_cvt_f32_fp8', 'ENC_VOP1')]
+    ocp_decode = 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>'
     assert 'util::fp8_e4m3_fnuz_to_f32' in vop1_fp8_variants['cdna3'][2]
-    assert 'util::fp8_e4m3_to_f32' in vop1_fp8_variants['cdna4'][2]
+    assert ocp_decode in vop1_fp8_variants['cdna4'][2]
     assert 'util::fp8_e4m3_fnuz_to_f32' not in vop1_fp8_variants['cdna4'][2]
 
 
@@ -6339,7 +6343,7 @@ def test_multi_isa_regen_keeps_divergent_fp8_cvt_bodies_isa_local(tmp_path):
     )
 
     assert 'util::fp8_e4m3_fnuz_to_f32' in cdna3_fp8_body
-    assert 'util::fp8_e4m3_to_f32' in cdna4_fp8_body
+    assert 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>' in cdna4_fp8_body
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_fp8_body
     assert 'amdgpu::execute_v_cvt_f32_fp8_vop1' not in cdna3_fp8_body
     assert 'amdgpu::execute_v_cvt_f32_fp8_vop1' not in cdna4_fp8_body
@@ -6376,14 +6380,13 @@ def test_cdna4_generated_cvt_keeps_ocp_format(
     assert 'inline void execute_v_cvt_f32_bf8_vop1' not in shared
     assert 'inline void execute_v_cvt_f32_fp8_vop3' not in shared
     assert 'inline void execute_v_cvt_f32_bf8_vop3' not in shared
-    assert 'util::fp8_e4m3_to_f32' in cdna4_vop1
-    assert 'util::bf8_e5m2_to_f32' in cdna4_vop1
-    assert 'util::fp8_e4m3_to_f32' in cdna4_vop3
-    assert 'util::bf8_e5m2_to_f32' in cdna4_vop3
-    assert 'util::f32_to_fp8_e4m3_rne_mode' in cdna4_vop3
-    assert 'util::f32_to_bf8_e5m2_rne_mode' in cdna4_vop3
-    assert 'util::f32_to_fp8_e4m3_sr_mode' in cdna4_vop3
-    assert 'util::f32_to_bf8_e5m2_sr_mode' in cdna4_vop3
+    for layout in ('Fp8', 'Bf8'):
+        decode = f'amdgpu::conversion::decode_fp8<amdgpu::conversion::{layout}>'
+        encode = f'amdgpu::conversion_to_fp8<amdgpu::conversion::{layout}>'
+        assert decode in cdna4_vop1
+        assert decode in cdna4_vop3
+        assert encode in cdna4_vop3
+    assert 'conversion.stochastic(s0, seed)' in cdna4_vop3
     assert 'util::fp8_e4m3_fnuz_to_f32' not in shared
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop1
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop3
@@ -6578,7 +6581,7 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     assert 'amdgpu::vop3_opsel(inst_)' in body
     assert 'amdgpu::vop3_fp8_decode_e5m3(*this)' in body
     assert 'util::fp8_e5m3_to_f32' in body
-    assert 'util::fp8_e4m3_to_f32' in body
+    assert 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>' in body
     # The local SIMD probe binds an instruction alias; scalar execution still
     # reads the encoding member directly.
     assert 'auto &inst = *this;' in body
