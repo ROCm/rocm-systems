@@ -17,7 +17,12 @@ defaults:
     shell: bash
 
 env:
-  CORPUS_SHA: e1bac822f3fd2e8c29e3a08ae6c326db1692a757 # rocjitsu-test-corpus#44
+  # Land only after the threading-aware dashboard has deployed.
+  # TODO: Pin the published corpus revision with both suites and threadingMode metadata.
+  CORPUS_SHA: 2aa02d4ed18aa4c311f3ec96c7619c3d984ac368 # rocjitsu-test-corpus#54
+  TENSILE_SHA: dd77374194a3ea1a7258cd54f87af6747b6362a5
+  TENSILE_SOURCE: ${{ github.workspace }}/rocm-libraries
+  HSA_ENABLE_SDMA_COPY_SIZE_OVERRIDE: "0"
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   RESULTS_BRANCH: gh-pages-rocjitsu
@@ -32,7 +37,7 @@ jobs:
       contents: read
     outputs:
       machine: ${{ steps.machine.outputs.name }}
-      ran: ${{ steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure' }}
+      ran: ${{ steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure' || steps.benchmark_single.outcome == 'success' || steps.benchmark_single.outcome == 'failure' }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --user 0:0
@@ -47,6 +52,10 @@ jobs:
             echo "ROCJITSU_BUILD_DIR=${BENCHMARK_DIR}/build"
             echo "ROCJITSU_VENV=${BENCHMARK_DIR}/venv"
             echo "ROCJITSU_RESULT_DIR=${BENCHMARK_DIR}/results"
+            echo "TENSILE_BUILD_DIR=${BENCHMARK_DIR}/tensile-native"
+            echo "TENSILE_CANDIDATE_ARTIFACTS=${BENCHMARK_DIR}/tensile-candidates"
+            echo "TENSILE_CANDIDATE_RUNNER=${BENCHMARK_DIR}/tensile-native/tensile_candidate"
+            echo "CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)"
           } >> "${GITHUB_ENV}"
 
       - name: Install base dependencies
@@ -60,7 +69,8 @@ jobs:
             git \
             libclang-rt-dev \
             libdrm-dev \
-            ninja-build
+            ninja-build \
+            zlib1g-dev
 
       - name: Checkout rocm-systems
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -74,6 +84,14 @@ jobs:
           repository: ROCm/rocjitsu-test-corpus
           ref: ${{ env.CORPUS_SHA }}
           path: rocjitsu-test-corpus
+          persist-credentials: false
+
+      - name: Checkout pinned TensileLite source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ROCm/rocm-libraries
+          ref: ${{ env.TENSILE_SHA }}
+          path: rocm-libraries
           persist-credentials: false
 
       - name: Record benchmark machine
@@ -94,6 +112,8 @@ jobs:
 
           ROCM_PATH="$("${ROCJITSU_VENV}/bin/rocm-sdk" path --root)"
           echo "ROCM_PATH=${ROCM_PATH}" >> "${GITHUB_ENV}"
+          echo "${ROCM_PATH}/bin" >> "${GITHUB_PATH}"
+          echo "${ROCJITSU_VENV}/bin" >> "${GITHUB_PATH}"
           echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
       - name: Build rocjitsu
@@ -110,7 +130,32 @@ jobs:
           cmake --build "${ROCJITSU_BUILD_DIR}" \
             --target rocjitsu_bin rocjitsu_shared
 
-      - name: Run nightly suite
+      - name: Prepare TensileLite candidates
+        id: tensile
+        run: |
+          "${ROCJITSU_VENV}/bin/python" -m pip install \
+            -r "${TENSILE_SOURCE}/projects/hipblaslt/tensilelite/requirements.txt"
+          "${ROCJITSU_VENV}/bin/python" -m pip install \
+            "${TENSILE_SOURCE}/projects/hipblaslt/tensilelite/rocisa" \
+            --config-settings "build-dir=${TENSILE_BUILD_DIR}/rocisa" \
+            --config-settings "cmake.define.ROCM_PATH=${ROCM_PATH}" \
+            --config-settings "cmake.define.CMAKE_PREFIX_PATH=${ROCM_PATH}" \
+            --config-settings "cmake.define.CMAKE_CXX_COMPILER=${ROCM_PATH}/bin/amdclang++"
+          cmake -S "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates" \
+            -B "${TENSILE_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DTENSILE_SOURCE="${TENSILE_SOURCE}" \
+            -DROCM_PATH="${ROCM_PATH}" -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
+            -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/amdclang++" \
+            -DPython_EXECUTABLE="${ROCJITSU_VENV}/bin/python" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build "${TENSILE_BUILD_DIR}" --target tensile_candidate
+          "${ROCJITSU_VENV}/bin/python" \
+            "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates/generate.py" \
+            --source-root "${TENSILE_SOURCE}" \
+            --output "${TENSILE_CANDIDATE_ARTIFACTS}"
+
+      - name: Run default-thread nightly suite
         timeout-minutes: 60
         id: benchmark
         working-directory: ${{ env.CORPUS_SOURCE_DIR }}
@@ -122,7 +167,22 @@ jobs:
             --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
             --run-wrapper "\"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
             --manifest benchmarks/suites/nightly.toml \
-            --output "${ROCJITSU_RESULT_DIR}"
+            --output "${ROCJITSU_RESULT_DIR}/default"
+
+      - name: Run single-thread nightly suite
+        if: ${{ !cancelled() && steps.tensile.outcome == 'success' }}
+        timeout-minutes: 60
+        id: benchmark_single
+        working-directory: ${{ env.CORPUS_SOURCE_DIR }}
+        run: |
+          "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
+            --rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}" \
+            --build-dir "${ROCJITSU_BUILD_DIR}" \
+            --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json" \
+            --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
+            --run-wrapper "\"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
+            --manifest benchmarks/suites/nightly-single.toml \
+            --output "${ROCJITSU_RESULT_DIR}/single"
 
       - name: Upload benchmark diagnostics
         if: always()
@@ -215,23 +275,47 @@ jobs:
               exit "${REMOTE_STATUS}"
             fi
 
-            (
-              cd "${CORPUS_SOURCE_DIR}"
-              python -m benchmarks.dashboard_publish \
-                --raw-run "${GITHUB_WORKSPACE}/incoming/run.json" \
-                --data-dir "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data" \
-                --run-id "${RUN_ID}" \
-                --repository "https://github.com/${GITHUB_REPOSITORY}" \
-                --environment-id "rocjitsu-benchmark-u2404-4150afe4-rocm-10.1.0a20260812" \
-                --expected-sha "${GITHUB_SHA}" \
-                --expected-corpus-sha "${CORPUS_SHA}" \
-                --machine-id "${BENCHMARK_MACHINE}" \
-                --trigger "${TRIGGER}" \
-                --branch develop \
-                --commit-message "${COMMIT_MESSAGE}" \
-                --source-ref "${GITHUB_REF_NAME}" \
-                --is-beta
-            )
+            PUBLISHED=0
+            PUBLISH_STATUS=0
+            for THREADING in default single; do
+              RAW_RUN="${GITHUB_WORKSPACE}/incoming/${THREADING}/run.json"
+              if [[ ! -f "${RAW_RUN}" ]]; then
+                echo "No ${THREADING} run.json; skipping publication"
+                continue
+              fi
+              SUITE_RUN_ID="${RUN_ID}"
+              ENVIRONMENT_ID="rocjitsu-benchmark-u2404-4150afe4-rocm-10.1.0a20260812"
+              if [[ "${THREADING}" == single ]]; then
+                SUITE_RUN_ID="${RUN_ID}-single"
+                ENVIRONMENT_ID="${ENVIRONMENT_ID}-single"
+              fi
+              if (
+                cd "${CORPUS_SOURCE_DIR}"
+                python -m benchmarks.dashboard_publish \
+                  --raw-run "${RAW_RUN}" \
+                  --data-dir "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data" \
+                  --run-id "${SUITE_RUN_ID}" \
+                  --repository "https://github.com/${GITHUB_REPOSITORY}" \
+                  --environment-id "${ENVIRONMENT_ID}" \
+                  --expected-sha "${GITHUB_SHA}" \
+                  --expected-corpus-sha "${CORPUS_SHA}" \
+                  --machine-id "${BENCHMARK_MACHINE}" \
+                  --trigger "${TRIGGER}" \
+                  --branch develop \
+                  --commit-message "${COMMIT_MESSAGE}" \
+                  --source-ref "${GITHUB_REF_NAME}" \
+                  --is-beta
+              ); then
+                PUBLISHED=$((PUBLISHED + 1))
+              else
+                echo "::error::Could not publish ${THREADING} benchmark run"
+                PUBLISH_STATUS=1
+              fi
+            done
+            if [[ "${PUBLISHED}" == 0 ]]; then
+              echo "No benchmark runs available to publish"
+              exit "${PUBLISH_STATUS}"
+            fi
 
             node "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/dashboard/scripts/validate-dashboard-data.mjs" \
               "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data"
@@ -239,12 +323,12 @@ jobs:
             git add rocjitsu-dashboard/data
             if git diff --cached --quiet; then
               echo "Dashboard run ${RUN_ID} is already published"
-              exit 0
+              exit "${PUBLISH_STATUS}"
             fi
             git commit --signoff \
               -m "Publish rocjitsu benchmark run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
             if git push origin "HEAD:refs/heads/${RESULTS_BRANCH}"; then
-              exit 0
+              exit "${PUBLISH_STATUS}"
             fi
             if [[ "${ATTEMPT}" == "${MAX_ATTEMPTS}" ]]; then
               exit 1
