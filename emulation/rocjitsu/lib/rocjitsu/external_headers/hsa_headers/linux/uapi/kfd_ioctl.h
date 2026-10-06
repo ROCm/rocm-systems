@@ -44,9 +44,10 @@
  * - 1.16 - Add contiguous VRAM allocation flag
  * - 1.17 - Add SDMA queue creation with target SDMA engine ID
  * - 1.18 - Rename pad in set_memory_policy_args to misc_process_flag
+ * - 1.19 - Add queue creation with metadata ring base address
  */
 #define KFD_IOCTL_MAJOR_VERSION 1
-#define KFD_IOCTL_MINOR_VERSION 18
+#define KFD_IOCTL_MINOR_VERSION 19
 
 struct kfd_ioctl_get_version_args {
   __u32 major_version; /* from KFD */
@@ -82,7 +83,7 @@ struct kfd_ioctl_create_queue_args {
   __u32 ctx_save_restore_size;    /* to KFD */
   __u32 ctl_stack_size;           /* to KFD */
   __u32 sdma_engine_id;           /* to KFD */
-  __u32 pad;
+  __u32 metadata_ring_size;       /* to KFD */
 };
 
 struct kfd_ioctl_destroy_queue_args {
@@ -271,7 +272,7 @@ enum kfd_dbg_trap_mask {
   KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH = 128,
   KFD_DBG_TRAP_MASK_DBG_MEMORY_VIOLATION = 256,
   KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_START = (1 << 30),
-  KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END = (1 << 31)
+  KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END = (1U << 31)
 };
 
 /* Wave launch modes */
@@ -1018,7 +1019,7 @@ struct kfd_ioctl_acquire_vm_args {
 #define KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL (1 << 3)
 #define KFD_IOC_ALLOC_MEM_FLAGS_MMIO_REMAP (1 << 4)
 /* Allocation flags: attributes/access options */
-#define KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE (1 << 31)
+#define KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE (1U << 31)
 #define KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE (1 << 30)
 #define KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC (1 << 29)
 #define KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE (1 << 28)
