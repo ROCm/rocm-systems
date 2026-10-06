@@ -391,6 +391,10 @@ pub(crate) const AMD_QUEUE_INFO_PREFETCH_BARRIER_MAJOR: u32 = 6;
 pub(crate) const AMD_QUEUE_INFO_PREFETCH_BARRIER_MINOR: u32 = 7;
 pub(crate) const AMD_QUEUE_INFO_PREFETCH_RING_BUFFER: u32 = 8;
 pub(crate) const AMD_QUEUE_INFO_PROPERTIES: u32 = 9;
+pub(crate) const AMD_QUEUE_INFO_ENGINE_TYPE: u32 = 13;
+pub(crate) const AMD_QUEUE_INFO_SDMA_ENGINE_ID: u32 = 14;
+pub(crate) const AMD_QUEUE_INFO_READ_POINTER: u32 = 15;
+pub(crate) const AMD_QUEUE_INFO_WRITE_POINTER: u32 = 16;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
