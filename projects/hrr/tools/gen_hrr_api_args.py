@@ -2259,6 +2259,7 @@ extern HipDispatchTable         g_real_table;
 extern HipDispatchTable         g_cap_table;
 extern std::atomic<bool>        g_installed;
 extern std::atomic<bool>        g_table_built;
+extern std::atomic<bool>        g_cap_table_ready;
 extern HipCompilerDispatchTable g_real_compiler_table;
 extern std::atomic<bool>        g_compiler_installed;
 
@@ -2666,12 +2667,15 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
             lines.append(f"extern {e.ret_type} capture_{e.name}({_cpp_param_decl(e)});")
         lines.append("")
 
-    lines.append("void hip_capture_build_table() {")
+    lines.append("void hip_capture_build_table(const HipDispatchTable* live) {")
     lines.append("  // Guard: safe to call only once. A second call after shims are installed")
     lines.append("  // would snapshot shim ptrs into g_real_table, causing infinite recursion.")
     lines.append("  if (g_table_built.exchange(true)) return;")
-    lines.append("  // Snapshot the live real table; copy all slots as pass-through base")
-    lines.append("  g_real_table = *hip::GetHipDispatchTable();")
+    lines.append("  // Snapshot the live real table; copy all slots as pass-through base.")
+    lines.append("  // The early install passes the table directly because it runs inside the")
+    lines.append("  // initialiser of the function-local static GetHipDispatchTable() returns,")
+    lines.append("  // so calling that here would re-enter it.")
+    lines.append("  g_real_table = live ? *live : *hip::GetHipDispatchTable();")
     lines.append("  g_cap_table  = g_real_table;")
     lines.append("")
     lines.append("  // Override every runtime slot with its capture shim")
@@ -2684,6 +2688,11 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
             # keeping it preserves pass-through.
             continue
         lines.append(f"  g_cap_table.{e.name}_fn = capture_{e.name};")
+    lines.append("")
+    lines.append("  // Publish only now that every slot is populated. hip_capture_install()")
+    lines.append("  // refuses to copy the table until this is set, so a caller that returned")
+    lines.append("  // on the guard above cannot memcpy a zeroed table over the live one.")
+    lines.append("  g_cap_table_ready.store(true, std::memory_order_release);")
     lines.append("}")
     lines.append("")
 

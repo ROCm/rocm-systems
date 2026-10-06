@@ -82,6 +82,7 @@ HipDispatchTable         g_real_table{};
 HipDispatchTable         g_cap_table{};
 std::atomic<bool>        g_installed{false};
 std::atomic<bool>        g_table_built{false};  // guard for hip_capture_build_table()
+std::atomic<bool>        g_cap_table_ready{false};  // g_cap_table fully populated
 
 HipCompilerDispatchTable g_real_compiler_table{};
 std::atomic<bool>        g_compiler_installed{false};  // guard for hip_capture_build_compiler_table()
@@ -1390,6 +1391,34 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
 // hipModuleLoadData, making all kernel names resolvable.
 // ---------------------------------------------------------------------------
 
+// __hipRegisterFatBinary receives a HIPF/HIPK wrapper, not the clang offload
+// bundle itself; the live shim unwraps it before sizing.
+//
+// StatCO's keys are mixed, so the retroactive sweep at capture init sees both
+// kinds of pointer: HIPF modules are keyed by the unwrapped bundle
+// (AddFatBinary(fbwrapper->binary)), HIPK modules by the wrapper
+// (AddKpackBinary(..., data)). fat_binary_blob_ptr() is therefore tolerant by
+// design: it unwraps only on HIPF/HIPK magic and returns anything else as is.
+// A bundle cannot be mistaken for a wrapper, since it starts with "__CL" or
+// "CCOB" and is always longer than the 4-byte magic read. A HIPK wrapper
+// unwraps to msgpack metadata rather than a bundle, so compute_bundle_size()
+// returns 0 for it and no event is recorded.
+struct __HRRFatBinaryWrapper {
+  uint32_t magic;
+  uint32_t version;
+  const void* binary;
+  const void* dummy;
+};
+
+static const void* fat_binary_blob_ptr(const void* data) {
+  if (!data) return nullptr;
+  const auto* wrapper = static_cast<const __HRRFatBinaryWrapper*>(data);
+  if (wrapper->magic == 0x48495046u /* HIPF */ ||
+      wrapper->magic == 0x4B504948u /* HIPK */)
+    return wrapper->binary;
+  return data;
+}
+
 // Compute the total byte size of a clang offload bundle blob.
 // Supports both uncompressed ("__CLANG_OFFLOAD_BUNDLE__") and compressed ("CCOB") formats.
 // Returns 0 if the format is unrecognised.
@@ -1443,13 +1472,7 @@ void** capture___hipRegisterFatBinary(const void* data) {
   void** r = g_real_compiler_table.__hipRegisterFatBinary_fn(data);
   // Shim is only installed when capture is active — no hip_capture_enabled() check needed.
 
-  // data is a __CudaFatBinaryWrapper* { magic, version, binary, dummy }.
-  // Capture the fat binary blob (binary field) so replay can load it via hipModuleLoadData.
-  struct __HRRFatBinaryWrapper { uint32_t magic; uint32_t version; const void* binary; const void* dummy; };
-  const auto* wrapper = static_cast<const __HRRFatBinaryWrapper*>(data);
-  const void* blob = (wrapper && (wrapper->magic == 0x48495046u /*HIPF*/ ||
-                                   wrapper->magic == 0x4B504948u /*HIPK*/))
-                     ? wrapper->binary : nullptr;
+  const void* blob = fat_binary_blob_ptr(data);
   size_t blob_size = blob ? compute_bundle_size(blob) : 0;
 
   hrr_args___hipRegisterFatBinary a{};
@@ -2391,10 +2414,13 @@ hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
 // Install / uninstall (build_table functions live in hip_capture_generated.cpp)
 // ---------------------------------------------------------------------------
 
-void hip_capture_install() {
+void hip_capture_install(HipDispatchTable* target) {
+  // A caller that lost the hip_capture_build_table() guard race would otherwise
+  // publish a still-zeroed g_cap_table, nulling every slot of the live table.
+  if (!g_cap_table_ready.load(std::memory_order_acquire)) return;
   if (g_installed.exchange(true)) return;
-  std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
-              &g_cap_table, sizeof(HipDispatchTable));
+  if (!target) target = const_cast<HipDispatchTable*>(hip::GetHipDispatchTable());
+  std::memcpy(target, &g_cap_table, sizeof(HipDispatchTable));
 }
 
 void hip_capture_uninstall() {
@@ -2408,8 +2434,10 @@ void hip_capture_uninstall() {
 // ---------------------------------------------------------------------------
 
 // Record a single fat binary blob as a HRR_API_HIPREGISTERFATBINARY event.
-// blob_ptr is the fbwrapper->binary pointer (the actual clang offload bundle).
+// blob_ptr is a StatCO module key: the unwrapped bundle for HIPF, the wrapper
+// for HIPK. fat_binary_blob_ptr() accepts either (see its comment).
 static void record_fat_binary_blob(const void* blob_ptr) {
+  blob_ptr = fat_binary_blob_ptr(blob_ptr);
   if (!blob_ptr) return;
   size_t blob_size = compute_bundle_size(blob_ptr);
   if (blob_size == 0) return;
@@ -2451,16 +2479,61 @@ static void record_registered_var(const void* host_var, const char* name,
   hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERVAR, &a.hdr, sizeof(a));
 }
 
-// Runtime dispatch-table capture is installed only from hip_capture_init()
-// (after hip::init() has built the live HipDispatchTable).  We intentionally
-// do NOT hook at libamdhip64 static-init time when HIP_HRR_CAPTURE_OUTPUT is set:
-// early install ran before amd::Runtime::init() / Flag::init(), forced every
-// HIP API through capture shims from the moment the DSO loaded, and pulled host
-// stacks (e.g. Python import torch → multiprocessing spawn) into ordering where
-// the GPU runtime appeared "already initialized" before child processes start.
-// Events before writer::open() were dropped anyway (write_event_raw no-ops when
-// g_events_fd < 0), so deferring install loses no recorded events for that
-// window while restoring a normal pre-init load path.
+// ---------------------------------------------------------------------------
+// Where runtime dispatch-table capture gets installed, and why it is here.
+//
+// The exported entry points in hip_table_interface.cpp read the table and then
+// call through it:
+//
+//     return hip::GetHipDispatchTable()->hipMalloc_fn(ptr, size);
+//
+// hip::init() — and with it hip_capture_init() — does not run until the callee
+// is already executing, inside HIP_INIT_API. Installing from hip_capture_init()
+// therefore always misses the process's first HIP call: its slot was loaded
+// before the shims existed. When that first call is a hipMalloc the allocation
+// is absent from the archive and replay aborts translating a pointer it never
+// saw.
+//
+// Installing from UpdateDispatchTable() closes that window. It is the point
+// where every slot has just been given its real function pointer, and it runs
+// inside the initialiser of the function-local static that GetHipDispatchTable()
+// returns, so no caller can have loaded a slot yet.
+//
+// This is deliberately not the static-init hook that used to live here. That
+// one ran a DSO constructor which called GetHipDispatchTable() at library load,
+// forcing the table build and rocprofiler registration to happen before
+// amd::Runtime::init() / Flag::init() and pulling host stacks (Python import
+// torch, then multiprocessing spawn) into an ordering where the GPU runtime
+// looked "already initialized" before child processes started. The hook below
+// forces nothing early: it runs only when something already asked for the
+// table, so a process that never touches HIP still never builds one.
+//
+// The compiler table stays in hip_capture_init(). Installing it this early
+// races compiler-table setup and leaves ModuleInfo() null, which surfaces as
+// hipErrorInvalidDeviceFunction on the first kernel launch.
+//
+// Note this runs before ToolsInit() registers the table with rocprofiler, so a
+// profiler attaching to a capturing process wraps HRR's shims as its
+// "originals" rather than the reverse, and hip_capture_uninstall() restores a
+// pre-registration snapshot, dropping the tool's wrappers. That only matters
+// when capture and a profiler tool run together, which HRR does not support.
+// ---------------------------------------------------------------------------
+void hip_capture_install_early(HipDispatchTable* table) {
+#if defined(HIP_HRR_CAPTURE_ENABLED)
+  // Flag::init() has not run, so HIP_HRR_CAPTURE_OUTPUT is not populated yet and
+  // hip_capture_enabled() cannot be trusted here. getenv is safe this early and
+  // reads the same variable the flag is later initialised from.
+  const char* out = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+  if (!out || out[0] == '\0') return;
+
+  hip_capture_build_table(table);
+  hip_capture_install(table);
+#else
+  // Capture is compiled out: leave the dispatch table untouched even when
+  // HIP_HRR_CAPTURE_OUTPUT is set, so no shim is ever installed (R-06).
+  (void)table;
+#endif
+}
 
 // ---------------------------------------------------------------------------
 // Crash-time finalize through CLR exception handling.
@@ -2492,27 +2565,41 @@ void hrr_install_clr_exception_handler() {
 
 void hip_capture_init() {
   #if defined(HIP_HRR_CAPTURE_ENABLED)
-    if (!hip_capture_enabled()) return;
+  if (!hip_capture_enabled()) {
+    // hip_capture_install_early() gates on getenv() because Flag::init() has
+    // not run that early. If the flag disagrees with what getenv() saw, the
+    // shims are already latched with no writer behind them, which would drop
+    // every HIP API silently and never restore the table. Undo it instead.
+    if (g_installed) hip_capture_uninstall();
+    return;
+  }
 
-    // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
-    // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
-    // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
-    // level to LOG_INFO (never lower an already-higher level) so enabling
-    // HIP_HRR_DEBUG_ARGS alone is enough to get the traces, as it was when they
-    // went through raw fprintf(stderr).
-    if (hrr_dbg_args_enabled() && AMD_LOG_LEVEL < amd::LOG_INFO) {
-      AMD_LOG_LEVEL = amd::LOG_INFO;
-      LogPrintfInfo("[HRR capture] HIP_HRR_DEBUG_ARGS set — raised AMD_LOG_LEVEL "
-                    "to %d (LOG_INFO) so argument traces are visible",
-                    static_cast<int>(amd::LOG_INFO));
-    }
+  // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
+  // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
+  // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
+  // level to LOG_INFO (never lower an already-higher level) so enabling
+  // HIP_HRR_DEBUG_ARGS alone is enough to get the traces, as it was when they
+  // went through raw fprintf(stderr).
+  if (hrr_dbg_args_enabled() && AMD_LOG_LEVEL < amd::LOG_INFO) {
+    AMD_LOG_LEVEL = amd::LOG_INFO;
+    LogPrintfInfo("[HRR capture] HIP_HRR_DEBUG_ARGS set — raised AMD_LOG_LEVEL "
+                  "to %d (LOG_INFO) so argument traces are visible",
+                  static_cast<int>(amd::LOG_INFO));
+  }
 
-    // Snapshot the fully-initialized dispatch table and install runtime shims here
-    // only (see comment above — no static-init capture hook).
-    if (!g_installed) {
-      hip_capture_build_table();
-      hip_capture_install();
-    }
+  // Build the runtime dispatch table before touching the capture guards.
+  // Leaving it to hip_capture_build_table(), which called GetHipDispatchTable()
+  // itself, meant that when this was the first use of that table its static
+  // initialiser ran UpdateDispatchTable() -> hip_capture_install_early()
+  // underneath us with g_table_built already set: the nested build returned on
+  // the guard and installed a still-zeroed g_cap_table over the live table.
+  // Forcing the table here means install_early() has already run to completion,
+  // leaving the block below a fallback for when it declined to install.
+  HipDispatchTable* live = const_cast<HipDispatchTable*>(hip::GetHipDispatchTable());
+  if (!g_installed) {
+    hip_capture_build_table(live);
+    hip_capture_install(live);
+  }
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
     // A refused open leaves capture off, so take the shims out of the dispatch

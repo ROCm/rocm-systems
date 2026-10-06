@@ -96,8 +96,9 @@ namespace {
 // Capture the workload, keeping the child's stdout so the parent learns the
 // address it passed.
 inline uint64_t hrr_capture_direct_kargs(const fs::path& cap_path) {
+  hrr_skip_without_gpu();
   std::string out;
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+  { hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_KernelArgs_Direct\"");
@@ -144,7 +145,7 @@ inline bool hrr_live_arg(const std::string& out, uint64_t recorded,
 // sentinel arrived as null, or the lost pointer arrived as the recorded
 // address.
 // ---------------------------------------------------------------------------
-TEST_CASE("Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled", "[.][hrr]") {
+TEST_CASE("Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled", "[hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_kernel_args.hrr");
   const uint64_t lost = hrr_capture_direct_kargs(cap.path);
   REQUIRE(lost != 0);
