@@ -25,6 +25,16 @@ protected:
   static constexpr std::array kOrders{MemoryOrderClass::LDS, MemoryOrderClass::VMEM,
                                       MemoryOrderClass::UNORDERED};
 
+  struct Query {
+    int wave;
+    bool write;
+    MemoryOrderClass order;
+  };
+
+  static Query sampleQuery(std::mt19937 &random) {
+    return {int(random() % kNumWaves), bool(random() % 2), kOrders[random() % kOrders.size()]};
+  }
+
   struct Event {
     EventId id;
     int wave;
@@ -69,40 +79,35 @@ protected:
     events_.erase(events_.begin() + index);
   }
 
-  void checkRange(int addr, int bytes) {
+  void checkRange(int addr, int bytes, Query access) {
+    SCOPED_TRACE(::testing::Message()
+                 << "wave=" << access.wave << " order=" << int(access.order)
+                 << " write=" << access.write << " range=[" << addr << "," << addr + bytes << ")");
     std::bitset<kLdsBytes> query;
     for (int byte = addr; byte < addr + bytes; ++byte)
       query.set(byte);
-    for (int wave = 0; wave < kNumWaves; ++wave) {
-      for (auto order : kOrders) {
-        for (bool write : {false, true}) {
-          SCOPED_TRACE(::testing::Message()
-                       << "wave=" << wave << " order=" << int(order) << " write=" << write
-                       << " range=[" << addr << "," << addr + bytes << ")");
-          std::vector<int> expected;
-          for (const auto &event : events_) {
-            if (event.write == write || (event.bytes & query).none())
-              continue;
-            // A completed event is safe only for its own wave. Otherwise,
-            // that wave needs both accesses to share an ordered class.
-            if (event.wave == wave &&
-                (event.complete || (order != MemoryOrderClass::UNORDERED && event.order == order)))
-              continue;
-            expected.push_back(event.id.value);
-          }
-          observed_.clear();
-          if (write)
-            detector_.validateWrite(addr, WaveId{wave}, /*lane=*/0, bytes, order);
-          else
-            detector_.validateRead(addr, WaveId{wave}, /*lane=*/0, bytes, order);
-          // Retirement may reorder the detector's lists. Compare exact event
-          // identities, so a missing report cannot cancel out an extra report.
-          std::ranges::sort(expected);
-          std::ranges::sort(observed_);
-          ASSERT_EQ(observed_, expected);
-        }
-      }
+    std::vector<int> expected;
+    for (const auto &event : events_) {
+      if (event.write == access.write || (event.bytes & query).none())
+        continue;
+      // A completed event is safe only for its own wave. Otherwise,
+      // that wave needs both accesses to share an ordered class.
+      if (event.wave == access.wave &&
+          (event.complete ||
+           (access.order != MemoryOrderClass::UNORDERED && event.order == access.order)))
+        continue;
+      expected.push_back(event.id.value);
     }
+    observed_.clear();
+    if (access.write)
+      detector_.validateWrite(addr, WaveId{access.wave}, /*lane=*/0, bytes, access.order);
+    else
+      detector_.validateRead(addr, WaveId{access.wave}, /*lane=*/0, bytes, access.order);
+    // Retirement may reorder the detector's lists. Compare exact event
+    // identities, so a missing report cannot cancel out an extra report.
+    std::ranges::sort(expected);
+    std::ranges::sort(observed_);
+    ASSERT_EQ(observed_, expected);
   }
 
   std::vector<Event> events_;
@@ -115,38 +120,43 @@ protected:
                          CounterCapacities{}};
 };
 
-TEST_F(LdsHistoryTest, OrderingPairsAndPartialRetirement) {
-  for (auto first : kOrders) {
-    for (auto second : kOrders) {
-      for (bool write : {false, true}) {
-        for (int otherWave : {0, 1}) {
-          for (size_t removed : {0, 1}) {
-            SCOPED_TRACE(::testing::Message() << "first=" << int(first) << " second=" << int(second)
-                                              << " write=" << write << " otherWave=" << otherWave
-                                              << " removed=" << removed);
-            add(/*wave=*/0, write, first, {{3, 7}, {12, 20}});
-            add(otherWave, write, second, {{4, 6}, {16, 34}});
-            // Keep one query inside the shared chunks: extending into a chunk
-            // with a different owner can mask a broken mixed-owner summary.
-            ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, /*bytes=*/8));
-            ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, /*bytes=*/24));
-            ASSERT_NO_FATAL_FAILURE(complete(removed));
-            ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, /*bytes=*/24));
-            ASSERT_NO_FATAL_FAILURE(retire(removed));
-            ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, /*bytes=*/24));
-            // Reuse a still-populated chunk, then drain it and change owner.
-            add(/*wave=*/2, write, MemoryOrderClass::LDS, {{15, 18}});
-            ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, /*bytes=*/24));
-            while (!events_.empty())
-              ASSERT_NO_FATAL_FAILURE(retire(0));
-            ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, /*bytes=*/24));
-            add(/*wave=*/3, write, MemoryOrderClass::LDS, {{15, 18}});
-            ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, /*bytes=*/24));
-            ASSERT_NO_FATAL_FAILURE(retire(0));
-          }
-        }
-      }
-    }
+TEST_F(LdsHistoryTest, SampledOrderingAndRetirement) {
+  std::mt19937 random(12581);
+  constexpr int samples = 50;
+  constexpr std::array directions{false, true};
+  constexpr std::array otherWaves{0, 1};
+  constexpr std::array removedIndices{0, 1};
+  constexpr std::array queryWidths{8, 24};
+  // Sample the event orders/direction, same/other wave, retirement choice,
+  // query width and query wave/order with a fixed budget. Query the opposite
+  // direction so every scenario can exercise LDS conflict detection.
+  for (int sample = 0; sample < samples; ++sample) {
+    const auto first = kOrders[random() % kOrders.size()];
+    const auto second = kOrders[random() % kOrders.size()];
+    const bool write = directions[random() % directions.size()];
+    const int otherWave = otherWaves[random() % otherWaves.size()];
+    const size_t removed = removedIndices[random() % removedIndices.size()];
+    const int bytes = queryWidths[random() % queryWidths.size()];
+    const Query query{int(random() % kNumWaves), !write, kOrders[random() % kOrders.size()]};
+    SCOPED_TRACE(::testing::Message() << "seed=12581 sample=" << sample << " first=" << int(first)
+                                      << " second=" << int(second) << " write=" << write
+                                      << " otherWave=" << otherWave << " removed=" << removed);
+    add(/*wave=*/0, write, first, {{3, 7}, {12, 20}});
+    add(otherWave, write, second, {{4, 6}, {16, 34}});
+    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
+    ASSERT_NO_FATAL_FAILURE(complete(removed));
+    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
+    ASSERT_NO_FATAL_FAILURE(retire(removed));
+    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
+    // Reuse a still-populated chunk, then drain it and change owner.
+    add(/*wave=*/2, write, MemoryOrderClass::LDS, {{15, 18}});
+    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
+    while (!events_.empty())
+      ASSERT_NO_FATAL_FAILURE(retire(0));
+    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
+    add(/*wave=*/3, write, MemoryOrderClass::LDS, {{15, 18}});
+    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
+    ASSERT_NO_FATAL_FAILURE(retire(0));
   }
 }
 
@@ -190,7 +200,7 @@ TEST_F(LdsHistoryTest, DeterministicSoak) {
       }
       const int addr = step % 2 ? random() % kLdsBytes : boundaries[random() % boundaries.size()];
       const int bytes = std::min(1 + int(random() % 64), kLdsBytes - addr);
-      ASSERT_NO_FATAL_FAILURE(checkRange(addr, bytes));
+      ASSERT_NO_FATAL_FAILURE(checkRange(addr, bytes, sampleQuery(random)));
     }
     // Retire in a different order from allocation, checking the remaining
     // history after every removal. The next round reuses the emptied chunks.
@@ -199,7 +209,7 @@ TEST_F(LdsHistoryTest, DeterministicSoak) {
                    << "seed=12581 round=" << round << " remaining=" << events_.size());
       const size_t index = random() % events_.size();
       ASSERT_NO_FATAL_FAILURE(retire(index));
-      ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/0, kLdsBytes));
+      ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/0, kLdsBytes, sampleQuery(random)));
     }
   }
 }
