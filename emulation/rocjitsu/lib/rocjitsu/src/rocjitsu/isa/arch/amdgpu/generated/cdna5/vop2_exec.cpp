@@ -1481,7 +1481,7 @@ void VAddF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
                 util::f16_to_f32(static_cast<uint16_t>(
@@ -1539,7 +1539,7 @@ RJ_NOINLINE void VAddF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
                 util::f16_to_f32(static_cast<uint16_t>(
@@ -1583,7 +1583,7 @@ void VSubF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
                 util::f16_to_f32(static_cast<uint16_t>(
@@ -1641,7 +1641,7 @@ RJ_NOINLINE void VSubF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
                 util::f16_to_f32(static_cast<uint16_t>(
@@ -1685,7 +1685,7 @@ void VSubrevF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
                 util::f16_to_f32(static_cast<uint16_t>(
@@ -1743,7 +1743,7 @@ RJ_NOINLINE void VSubrevF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
                 util::f16_to_f32(static_cast<uint16_t>(
@@ -1787,7 +1787,7 @@ void VMulF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::MUL>(
                 util::f16_to_f32(static_cast<uint16_t>(
@@ -1845,7 +1845,7 @@ RJ_NOINLINE void VMulF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::MUL>(
                 util::f16_to_f32(static_cast<uint16_t>(

@@ -2585,6 +2585,49 @@ std::vector<ArithmeticCase> integral_rounding_input_flush_cases() {
   return cases;
 }
 
+// gfx1201 detects tininess after rounding: a result that rounds to the
+// smallest normal only on the subnormal grid is still tiny, and a flushing
+// output (or an active OMOD) turns it into zero. Results are gfx1201
+// captures. MODE 0x30 flushes F16/F64 outputs and keeps F32 ones; 0xc0 does
+// the reverse, so each pair catches a read of the wrong MODE field.
+std::vector<ArithmeticCase> tiny_result_cases() {
+  constexpr uint32_t kHigh = 0xa5a50000u;
+  std::vector<ArithmeticCase> cases;
+  // F16 operands in v0/v1; v6 keeps its 0xa5a5 high half.
+  const auto add_f16 = [&](const std::string &name, std::array<uint32_t, 2> words, uint16_t a,
+                           uint16_t b, uint32_t mode, uint16_t result) {
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     {{0, kHigh | a}, {1, kHigh | b}, {6, kHigh}},
+                     {{6, kHigh | result}},
+                     mode,
+                     FE_TONEAREST});
+  };
+  const auto mul_f16_vop2 =
+      rdna4::build_vop2(rdna4::kVMulF16Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 6});
+  const std::array<uint32_t, 2> mul_f16_e32{mul_f16_vop2[0], 0u};
+  const auto mul_f16 =
+      rdna4::build_vop3(rdna4::kVMulF16Vop3, {.vdst = 6, .src0 = 256, .src1 = 257});
+  const auto mul_f16_mul2 =
+      rdna4::build_vop3(rdna4::kVMulF16Vop3, {.vdst = 6, .src0 = 256, .src1 = 257, .omod = 1});
+  // (1 - 2^-11) * 2^-14 is exact in F16 precision, so it is tiny in every
+  // rounding mode although nearest-even subnormal rounding gives 0x0400.
+  add_f16("MulF16Vop2TinyMode30", mul_f16_e32, 0x3bffu, 0x0400u, 0x30u, 0x0000u);
+  add_f16("MulF16Vop2TinyModeC0", mul_f16_e32, 0x3bffu, 0x0400u, 0xc0u, 0x0400u);
+  add_f16("MulF16Vop2NegativeTinyMode30", mul_f16_e32, 0x3bffu, 0x8400u, 0x30u, 0x8000u);
+  add_f16("MulF16Vop2NegativeTinyModeC0", mul_f16_e32, 0x3bffu, 0x8400u, 0xc0u, 0x8400u);
+  add_f16("MulF16Vop3TinyRoundUp", mul_f16, 0x3bffu, 0x0400u, 0x35u, 0x0000u);
+  // (1 - 2^-20) * 2^-14 rounds to 2^-14 at F16 precision: not tiny, so it
+  // survives the flush, except when rounding toward zero.
+  add_f16("MulF16Vop3RoundsToNormalMode30", mul_f16, 0x3bfeu, 0x0401u, 0x30u, 0x0400u);
+  add_f16("MulF16Vop3RoundsToNormalTowardZero", mul_f16, 0x3bfeu, 0x0401u, 0x3fu, 0x0000u);
+  // OMOD flushes a tiny result even when MODE keeps output denormals.
+  add_f16("MulF16Vop3Mul2TinyModeF0", mul_f16_mul2, 0x3bffu, 0x0400u, 0xf0u, 0x0000u);
+  add_f16("MulF16Vop3Mul2RoundsToNormalModeF0", mul_f16_mul2, 0x3bfeu, 0x0401u, 0xf0u, 0x0800u);
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2715,6 +2758,12 @@ TEST_P(ValuRoundedResultModifierTest, MatchesGfx1201OnScalarAndSimdPaths) {
 
 INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
                          testing::ValuesIn(rounded_result_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Tininess, ValuRoundedResultModifierTest,
+                         testing::ValuesIn(tiny_result_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

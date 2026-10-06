@@ -2981,7 +2981,7 @@ inline void execute_v_add_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             inst, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
                 util::f16_to_f32(static_cast<uint16_t>(
@@ -3019,7 +3019,7 @@ inline void execute_v_add_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
         amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-            static_cast<uint32_t>(amdgpu::sdwa::finish_arithmetic_f16(
+            static_cast<uint32_t>(amdgpu::sdwa::round_arithmetic_f16(
                 inst, wf,
                 amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
                     amdgpu::source_modifier::apply_to_float(
@@ -3035,7 +3035,8 @@ inline void execute_v_add_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                                 input_policy))),
                         1, inst.inst_.abs, inst.inst_.neg),
                     0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
-                wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
+                wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(),
+                (output_policy.omod != 0))),
             output_policy));
   }
 }
@@ -15490,7 +15491,7 @@ inline void execute_v_mul_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             inst, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::MUL>(
                 util::f16_to_f32(static_cast<uint16_t>(
@@ -15528,7 +15529,7 @@ inline void execute_v_mul_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
         amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-            static_cast<uint32_t>(amdgpu::sdwa::finish_arithmetic_f16(
+            static_cast<uint32_t>(amdgpu::sdwa::round_arithmetic_f16(
                 inst, wf,
                 amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::MUL>(
                     amdgpu::source_modifier::apply_to_float(
@@ -15544,7 +15545,8 @@ inline void execute_v_mul_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                                 input_policy))),
                         1, inst.inst_.abs, inst.inst_.neg),
                     0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
-                wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
+                wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(),
+                (output_policy.omod != 0))),
             output_policy));
   }
 }
@@ -18159,7 +18161,7 @@ inline void execute_v_sub_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             inst, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
                 util::f16_to_f32(static_cast<uint16_t>(
@@ -18197,7 +18199,7 @@ inline void execute_v_sub_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
         amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-            static_cast<uint32_t>(amdgpu::sdwa::finish_arithmetic_f16(
+            static_cast<uint32_t>(amdgpu::sdwa::round_arithmetic_f16(
                 inst, wf,
                 amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
                     amdgpu::source_modifier::apply_to_float(
@@ -18213,7 +18215,8 @@ inline void execute_v_sub_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                                 input_policy))),
                         1, inst.inst_.abs, inst.inst_.neg),
                     0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
-                wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
+                wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(),
+                (output_policy.omod != 0))),
             output_policy));
   }
 }
@@ -18675,7 +18678,7 @@ inline void execute_v_subrev_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
-        amdgpu::sdwa::finish_arithmetic_f16(
+        amdgpu::sdwa::round_arithmetic_f16(
             inst, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
                 util::f16_to_f32(static_cast<uint16_t>(
@@ -18713,7 +18716,7 @@ inline void execute_v_subrev_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         inst, wf, inst.vdst, lane,
         amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-            static_cast<uint32_t>(amdgpu::sdwa::finish_arithmetic_f16(
+            static_cast<uint32_t>(amdgpu::sdwa::round_arithmetic_f16(
                 inst, wf,
                 amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
                     amdgpu::source_modifier::apply_to_float(
@@ -18729,7 +18732,8 @@ inline void execute_v_subrev_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
                                 input_policy))),
                         0, inst.inst_.abs, inst.inst_.neg),
                     0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
-                wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
+                wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(),
+                (output_policy.omod != 0))),
             output_policy));
   }
 }

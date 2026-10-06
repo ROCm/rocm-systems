@@ -3659,11 +3659,11 @@ def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
 
     assert 'if (wf.fp16_ovfl())' in vop2
     assert 'f32_to_f16_ovfl_simd' in vop2
-    assert 'sdwa::finish_arithmetic_f16' in vop2
+    assert 'sdwa::round_arithmetic_f16' in vop2
     assert 'wf.fp16_ovfl()' in vop2
     assert 'if (wf.fp16_ovfl())' in vop3
     assert 'f32_to_f16_ovfl_simd' in vop3
-    assert 'sdwa::finish_arithmetic_f16' in vop3
+    assert 'sdwa::round_arithmetic_f16' in vop3
     assert 'wf.fp16_ovfl()' in vop3
 
 

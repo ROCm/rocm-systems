@@ -1150,7 +1150,14 @@ def _lower_dst_write(
         )
         needs_bitcast = 0
     elif selection_node is not rhs_node and (
-        result := _destination_result(selection_node, ctx)
+        result := _destination_result(
+            selection_node,
+            # Active OMOD flushes a tiny arithmetic result before scaling it.
+            replace(
+                ctx,
+                arithmetic_flush_output=f'({vop3_modifiers.OUTPUT_POLICY}.omod != 0)',
+            ),
+        )
     ):
         # The operation has already rounded its result to the destination
         # format. Apply output modifiers to those bits using GPU MODE,
@@ -1171,10 +1178,7 @@ def _lower_dst_write(
     binding = ctx.operand_map.dst(idx) if ctx.operand_map else None
     if lhs_ty and lhs_ty.base == 'F' and lhs_ty.size == 16 and not writes_bits:
         if ctx.mode_arithmetic and _contains_mode_arithmetic(rhs_node):
-            rhs = (
-                f'amdgpu::fp_mode::finish_arithmetic_f16({rhs}, '
-                'wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())'
-            )
+            rhs = _round_f16_arithmetic(rhs_node, rhs)
         elif ctx.mode_sensitive_f16_dst:
             rhs = f'util::f32_to_f16_mode({rhs}, wf.fp16_ovfl())'
         else:
@@ -2282,10 +2286,7 @@ def _destination_result(
     value = _lower_expr(node, ctx)
     transcendental = False
     if mode_arithmetic:
-        half = (
-            f'amdgpu::fp_mode::finish_arithmetic_f16({value}, '
-            'wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())'
-        )
+        half = _round_f16_arithmetic(node, value, ctx.arithmetic_flush_output)
     else:
         transcendental = any(
             _contains_call(node, call) for call in _F16_TRANSCENDENTAL_CALLS
@@ -2296,6 +2297,26 @@ def _destination_result(
             else f'util::f32_to_f16({value})'
         )
     return 'f16', f'static_cast<uint32_t>({half})', transcendental
+
+
+def _round_f16_arithmetic(
+    node: SemaNode, value: str, force_output_flush: str | None = None
+) -> str:
+    """Round a wide F16 arithmetic value under MODE.
+
+    ADD, SUB and MUL detect tininess after rounding; LDEXP keeps its helper.
+    """
+    arguments = [
+        value,
+        'wf.fp_round_mode_f16_f64()',
+        'wf.fp_denorm_mode_f16_f64()',
+        'wf.fp16_ovfl()',
+    ]
+    if any(n.kind == SemaNodeKind.LDEXP for n in node.walk()):
+        return f'amdgpu::fp_mode::finish_arithmetic_f16({", ".join(arguments)})'
+    if force_output_flush is not None:
+        arguments.append(force_output_flush)
+    return f'amdgpu::fp_mode::round_arithmetic_f16({", ".join(arguments)})'
 
 
 def _unwrap_output_modifiers(node: SemaNode) -> tuple[SemaNode, tuple[str, str]]:

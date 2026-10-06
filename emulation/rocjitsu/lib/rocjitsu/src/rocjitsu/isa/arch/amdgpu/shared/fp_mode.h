@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rounding.h"
 #include "util/data_types.h"
 
 #include <algorithm>
@@ -919,6 +920,25 @@ inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_
   if ((denorm_mode & 2u) == 0 && (result & 0x7c00u) == 0)
     result &= 0x8000u;
   return finalize_omod_f16(result, omod);
+}
+
+/// @brief Round an F16 ADD, SUB or MUL destination and apply output-denormal policy.
+/// @details The value is exact. rounding.h rounds it once, judging tininess after
+/// rounding: a flushing output also flushes a result that reaches the smallest
+/// normal only through subnormal rounding. An active VOP3 OMOD flushes a tiny
+/// result even when MODE keeps output denormals (force_output_flush). SDWA OMOD
+/// (omod) scales the exact value before it is rounded.
+inline uint16_t round_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
+                                     bool fp16_ovfl, bool force_output_flush = false,
+                                     uint32_t omod = 0) {
+  if (omod != 0)
+    value = std::ldexp(value, omod == 3 ? -1 : static_cast<int>(omod));
+  const rounding::Policy policy{.mode = round_mode,
+                                .flush_tiny = force_output_flush || !(denorm_mode & 2u),
+                                .saturate = fp16_ovfl};
+  const uint64_t half =
+      rounding::narrow<fp_format::F64, fp_format::F16>(std::bit_cast<uint64_t>(value), policy);
+  return finalize_omod_f16(static_cast<uint16_t>(half), omod);
 }
 
 /// @brief Whether a host SIMD arithmetic fast path implements the wave's FP policy.

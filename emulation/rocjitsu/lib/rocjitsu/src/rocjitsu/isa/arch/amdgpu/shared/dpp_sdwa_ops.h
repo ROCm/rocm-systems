@@ -841,6 +841,16 @@ inline uint16_t finish_arithmetic_f16(const Inst &inst, const Wavefront &wf, dou
                                         output_modifier<ResultFormat::F16>(inst, wf));
 }
 
+/// @brief Apply SDWA scaling before guest-mode rounding of a wide F16 ADD, SUB or MUL result.
+template <typename Inst>
+inline uint16_t round_arithmetic_f16(const Inst &inst, const Wavefront &wf, double value,
+                                     uint32_t round_mode, uint32_t denorm_mode, bool fp16_ovfl,
+                                     bool force_output_flush = false) {
+  return fp_mode::round_arithmetic_f16(value, round_mode, denorm_mode, fp16_ovfl,
+                                       force_output_flush,
+                                       output_modifier<ResultFormat::F16>(inst, wf));
+}
+
 /// @brief Scale F32 bits with explicit rounding and OMOD output finalization.
 /// @details Powers of two only change the exponent, except at the format limits.
 /// Integer arithmetic keeps rounding and denormal handling independent of the host.

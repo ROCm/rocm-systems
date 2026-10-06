@@ -724,13 +724,33 @@ class TestLowerVectorAdd:
         assert apply in result
         # The arithmetic rounds to the destination format before OMOD and CLAMP.
         rounded = (
-            'amdgpu::fp_mode::finish_arithmetic_f16('
+            'amdgpu::fp_mode::round_arithmetic_f16('
             if result_type == SemaType.F16
             else 'std::bit_cast<uint64_t>(amdgpu::fp_mode::arithmetic<'
         )
         assert result.index(apply) < result.index(rounded)
         assert 'clamp_floating_result' not in result
         assert 'finalize_omod_' not in result
+
+    @pytest.mark.parametrize('modified', [False, True])
+    def test_f16_arithmetic_flushes_tiny_results_under_omod(self, modified: bool):
+        mul = SemaNode(
+            SemaNodeKind.MUL,
+            ty=SemaType.F16,
+            children=(_cast(_src(0), SemaType.F16), _cast(_src(1), SemaType.F16)),
+        )
+        value = self._output_modified(mul) if modified else mul
+        body = SemaNode(
+            SemaNodeKind.ASSIGN, children=(_cast(_dst(0), SemaType.F16), value)
+        )
+        result = lower_sema_block(SemaBlock('V_MUL_F16', ExecModel.VECTOR, body))
+
+        # Rounding detects tininess after rounding; an active OMOD also flushes
+        # a tiny product before scaling it.
+        force = ', (output_policy.omod != 0))' if modified else ', wf.fp16_ovfl())'
+        assert 'amdgpu::fp_mode::round_arithmetic_f16(' in result
+        assert 'finish_arithmetic_f16' not in result
+        assert force in result
 
     def test_vop3_f16_transcendental_overflows_to_nearest(self):
         rcp = SemaNode(

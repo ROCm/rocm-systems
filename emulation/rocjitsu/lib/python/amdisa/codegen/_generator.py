@@ -1053,10 +1053,11 @@ class CodeGenerator:
             'util::f32_to_f16_mode(',
             f'amdgpu::sdwa::{helper}({instruction}, wf, ',
         )
-        body = body.replace(
-            'amdgpu::fp_mode::finish_arithmetic_f16(',
-            f'amdgpu::sdwa::finish_arithmetic_f16({instruction}, wf, ',
-        )
+        for helper in ('finish_arithmetic_f16', 'round_arithmetic_f16'):
+            body = body.replace(
+                f'amdgpu::fp_mode::{helper}(',
+                f'amdgpu::sdwa::{helper}({instruction}, wf, ',
+            )
         return body
 
     @staticmethod
