@@ -87,7 +87,7 @@ FROM
 --
 -- `application_replay_projected` is only meaningful for a metric that
 -- accumulates across runs, i.e. wall_time and cpu_time. For a residency metric
--- such as peak_rss the projection is left to the reader.
+-- such as peak_rss the projection is NULL.
 CREATE VIEW IF NOT EXISTS
     `benchmark_replay_{{metric}}` AS
 WITH
@@ -95,6 +95,7 @@ WITH
         SELECT
             ST.app_id AS app_id,
             ST.sdk_id AS sdk_id,
+            BC.benchmark_mode AS benchmark_mode,
             MIN(ST.mean) AS mean
         FROM
             benchmark_statistics ST
@@ -104,7 +105,8 @@ WITH
             AND BC.counter_collection_mode = "single-pass"
         GROUP BY
             ST.app_id,
-            ST.sdk_id
+            ST.sdk_id,
+            BC.benchmark_mode
     )
 SELECT
     ST.id,
@@ -124,9 +126,13 @@ SELECT
     ST.mean AS measured,
     ST.std_dev AS `+/-`,
     SG.mean AS single_group_measured,
-    SG.mean * BC.counter_group_count AS application_replay_projected,
     CASE
-        WHEN ST.mean > 0 THEN (SG.mean * BC.counter_group_count) / ST.mean
+        WHEN ST.metric_name IN ("wall_time", "cpu_time") THEN
+            SG.mean * BC.counter_group_count
+    END AS application_replay_projected,
+    CASE
+        WHEN ST.metric_name IN ("wall_time", "cpu_time") AND ST.mean > 0 THEN
+            (SG.mean * BC.counter_group_count) / ST.mean
     END AS `speedup vs application replay`
 FROM
     benchmark_statistics ST
@@ -136,6 +142,7 @@ FROM
     LEFT JOIN single_group SG ON (
         SG.app_id = ST.app_id
         AND SG.sdk_id = ST.sdk_id
+        AND SG.benchmark_mode = BC.benchmark_mode
     )
 WHERE
     ST.metric_name = "{{metric}}"

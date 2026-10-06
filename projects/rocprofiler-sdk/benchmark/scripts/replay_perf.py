@@ -27,8 +27,8 @@ Measures the claims the design rests on rather than asserting a threshold, and
 compares the three ways of collecting several counter groups:
 
   application replay  one application run per group, costs the sum of them
-  multiplexed         one run, groups rotated across dispatches, so no dispatch
-                      carries every group
+  multiplexed         one run, groups rotated across dispatches using input-file
+                      pmc_groups, so no dispatch carries every group
   kernel replay       one run, every dispatch replayed once per group
 
   P1  application replay vs multiplexed vs kernel replay, for the same groups
@@ -53,6 +53,7 @@ command so a number can be traced back to what produced it.
 
 import argparse
 import csv
+import json
 import os
 import shutil
 import statistics
@@ -102,10 +103,31 @@ def _pmc_args(groups):
     return args
 
 
-def _profile_cmd(args, groups, outdir, replay=False, extra=None):
+def _multiplex_config(args, groups):
+    path = os.path.join(args.workdir, "multiplex-pmc-groups.json")
+    os.makedirs(args.workdir, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "jobs": [
+                    {
+                        "pmc_groups": [COMMON + [unique] for unique in groups],
+                        "pmc_group_interval": 1,
+                    }
+                ]
+            },
+            handle,
+        )
+    return path
+
+
+def _profile_cmd(args, groups, outdir, replay=False, extra=None, multiplex=False):
+    counter_args = (
+        ["-i", _multiplex_config(args, groups)] if multiplex else _pmc_args(groups)
+    )
     return (
         [args.rocprofv3]
-        + _pmc_args(groups)
+        + counter_args
         + ([REPLAY_FLAG] if replay else [])
         + (extra or [])
         + ["--output-format", "json", "-d", f"{args.workdir}/{outdir}", "-o", "out", "--"]
@@ -254,7 +276,7 @@ def p1_collection_modes(args, rec):
     if complete:
         print(f"  application replay total ({len(groups)} runs): {total:.3f}s")
 
-    cmd = _profile_cmd(args, groups, "p1-multiplexed")
+    cmd = _profile_cmd(args, groups, "p1-multiplexed", multiplex=True)
     rec.add(
         "P1",
         "multiplexed-all-groups",

@@ -29,23 +29,23 @@ times, snapshotting and restoring device memory around each pass. Application re
 application N times instead. Which is cheaper depends entirely on the workload, so this
 configuration is built to find the crossover rather than to assert a number.
 
-Passing several `--pmc` flags without `--kernel-replay-beta-enabled` is a third thing again: the
-group is rotated every few dispatches, so one run collects several groups but no dispatch carries
-all of them. It is measured here as a floor, not as a comparison, because it does not collect the
-same data.
+Passing several `--pmc` flags without kernel replay selects application replay: rocprofv3 runs the
+application once per group. Counter rotation is a separate mode configured through an input file's
+`pmc_groups` and `pmc_group_interval` fields; it runs the application once but no dispatch carries
+every group, so it is not a like-for-like comparison.
 
 The jobs vary the three terms of the cost model — `dispatches x tracked footprint x passes` —
 independently, so a result can be attributed to one of them instead of to the workload as a whole.
 A fourth sweep varies how many dispatches the application runs between synchronizations, which is
 the axis range replay will be measured on once it exists.
 
-A job is a single rocprofv3 invocation, so application replay has no job of its own: it is N runs
-whose costs add up. The single-group configuration is one of those runs, and the
-`benchmark_replay_*` views multiply it by the group count to project the total. The headline
-comparison is therefore between the replay configuration and that single-group run:
+A single rocprofv3 invocation can measure application replay directly: multiple `--pmc` groups
+cause one full application run per group. The single-group configuration is retained as a reference,
+and the `benchmark_replay_*` views multiply its additive metrics by the group count to project the
+total. For the four-group measured and projected comparison:
 
 ```bash
-rocprofv3-benchmark -i ./kernel-replay.yaml --filter-rocprofv3 replay_4_groups counters_only
+rocprofv3-benchmark -i ./kernel-replay.yaml --filter-rocprofv3 replay_4_groups application_replay_4_groups counters_only
 ```
 
 ```sql
@@ -53,9 +53,9 @@ SELECT benchmark_label, counter_collection_mode, measured, application_replay_pr
 FROM benchmark_replay_wall_time;
 ```
 
-`scripts/replay_perf.py` measures application replay directly rather than projecting it, and also
-covers the cost replay imposes on dispatches that opt out. It drives rocprofv3 itself, so it needs
-no database and is run by hand rather than in CI.
+`scripts/replay_perf.py` measures application replay directly, input-file counter rotation, and
+kernel replay, and also covers the cost replay imposes on dispatches that opt out. It drives rocprofv3
+itself, so it needs no database and is run by hand rather than in CI.
 
 One job is expected to show almost no overhead: `replay-hip-graph-declines`. A HIP graph launch is
 not a single-packet single-dispatch submission, so replay declines it. That job exists to make the

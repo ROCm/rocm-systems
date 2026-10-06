@@ -699,9 +699,10 @@ def derive_replay_config(rocprofv3_args):
     elif counter_groups == 1:
         mode = "single-pass"
     else:
-        # groups are rotated across dispatches within one run, so no dispatch
-        # carries every group
-        mode = "multiplexed"
+        # Multiple CLI groups trigger application replay: the application is
+        # re-run once per group. Counter rotation is configured separately
+        # through input-file pmc_groups and is not derived from CLI arguments.
+        mode = "application-replay"
 
     data["counter_collection_mode"] = mode
 

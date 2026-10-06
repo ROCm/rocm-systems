@@ -24,13 +24,16 @@ afterwards. It is the thing kernel replay exists to replace. Its cost is the app
 multiplied by the group count, so it is expensive exactly when the application is expensive to
 start, load and warm up, regardless of how much GPU work it does.
 
-**Multiplexed collection** is what `rocprofv3` does when it is given several `--pmc` flags and
-`--kernel-replay-beta-enabled` is not set. The tool counts dispatches and rotates the counter group
-every `ROCPROF_COUNTER_GROUPS_INTERVAL` of them, so one run yields all the groups but no single
-dispatch carries more than one. Where dispatches are homogeneous and numerous, that is a reasonable
-statistical trade; where the interesting kernel runs twice, it is not a measurement of that kernel
-at all. It belongs in a benchmark as a floor -- the cost of the group machinery when nothing is
-replayed -- and not as the comparison.
+**Multiplexed collection** uses the input-file `pmc_groups` and `pmc_group_interval` options. It
+counts dispatches and rotates the counter group at the configured interval, so one run yields all
+the groups but no single dispatch carries more than one. Where dispatches are homogeneous and
+numerous, that is a reasonable statistical trade; where the interesting kernel runs twice, it is not
+a measurement of that kernel at all. It can serve as a floor for the cost of group machinery, but is
+not the comparison.
+
+Multiple CLI `--pmc` groups without `--replay-mode kernel` use **application replay**: rocprofv3
+re-runs the whole application once per group. The input-file rotation options are a separate
+interface and are not enabled by several CLI flags.
 
 **Kernel replay** re-executes each dispatch once per group inside one application run, restoring the
 agent's tracked device memory between passes, so every dispatch carries every group. It produces the
@@ -44,9 +47,10 @@ with a large resident footprint or a very high dispatch count.
 
 ## What the benchmark suite records
 
-A benchmark job is a single `rocprofv3` invocation, so application replay cannot be written as a
-job: it is G runs whose costs add up. The suite handles this by measuring one of those runs and
-projecting the rest.
+A benchmark job is a single `rocprofv3` invocation, and that invocation can directly measure
+application replay: rocprofv3 launches the application once per group. The suite also measures a
+single-group run, which is useful for projecting the application-replay cost when the per-group
+runs are expected to be interchangeable.
 
 `benchmark_config` records how a run collected its counters, in `counter_collection_mode`,
 `counter_group_count` and `kernel_replay`. These are read from the `rocprofv3` command line rather

@@ -5,24 +5,21 @@
 #   application replay  run the whole application N times, once per group. Every dispatch ends up
 #                       with every group, at the cost of N application runs. This is the thing
 #                       kernel replay is meant to replace.
-#   multiplexed         run the application once and rotate the group every few dispatches, which
-#                       is what rocprofv3 does with several --pmc flags and no replay. Cheap,
-#                       because it does not collect more than one group's worth of counters, and
-#                       no dispatch carries every group.
+#   multiplexed         run the application once and rotate groups across dispatches using the
+#                       input-file pmc_groups / pmc_group_interval options. No dispatch carries
+#                       every group.
 #   kernel replay       run the application once and re-execute each dispatch N times,
 #                       snapshotting and restoring the agent's tracked device memory around each
 #                       pass. Every dispatch ends up with every group, from one run.
 #
 # Only application replay and kernel replay produce the same data, so only those two are a
-# like-for-like comparison; multiplexed collection is measured as the floor. Which of the two is
-# cheaper is entirely a property of the workload, and this configuration is built to measure where
-# the crossover is rather than to assert a number.
+# like-for-like comparison. Which of the two is cheaper is entirely a property of the workload, and
+# this configuration is built to measure where the crossover is rather than to assert a number.
 #
-# A benchmark job is one rocprofv3 invocation, so application replay cannot be written down as a
-# job: it is N runs whose costs add up. The single-group job below stands in for one of those runs,
-# and the benchmark_replay_* views multiply it by the group count to project what the full
-# application replay would have cost. scripts/replay_perf.py measures it directly instead, for when
-# the projection is not good enough.
+# One benchmark job is one rocprofv3 invocation, and multiple CLI --pmc groups make that invocation
+# run the application once per group. application_replay_4_groups below measures that cost directly.
+# The single-group job is also retained as a reference: benchmark_replay_* projects its cost across
+# the group count when that estimate is useful.
 #
 # The cost model the jobs are laid out against is:
 #
@@ -39,16 +36,15 @@
 #
 # Run with:
 #   rocprofv3-benchmark.py -i kernel-replay.yaml
-#   rocprofv3-benchmark.py -i kernel-replay.yaml --filter-rocprofv3 replay_4_groups counters_only
+#   rocprofv3-benchmark.py -i kernel-replay.yaml --filter-rocprofv3 replay_4_groups application_replay_4_groups counters_only
 #
 # See docs/conceptual/kernel_replay/kernel_replay_performance.md for what the numbers mean.
 
 defaults:
   rocprofv3:
     # The comparison that matters. replay_4_groups collects four groups on every dispatch in one
-    # application run; counters_only below collects one group in one run and is what an application
-    # replay of the same four groups would repeat four times. Filter to those two for the headline
-    # number.
+    # application run; application_replay_4_groups runs the application once per group. The
+    # counters_only reference also lets the view project application replay from a single-group run.
     replay_4_groups:
       [
         --replay-mode,
@@ -63,10 +59,9 @@ defaults:
         --pmc,
         SQ_BUSY_CYCLES,
       ]
-    # The same four groups without replay, which rotates them across dispatches instead of
-    # collecting them all everywhere. Not comparable to replay_4_groups on data collected, only on
-    # what the group machinery costs when nothing is replayed.
-    multiplex_4_groups:
+    # The same four groups without kernel replay: rocprofv3's default application-replay mode runs
+    # the application once per group.
+    application_replay_4_groups:
       [--pmc, SQ_WAVES, --pmc, GRBM_COUNT, --pmc, SQ_INSTS_VALU, --pmc, SQ_BUSY_CYCLES]
 
     # Pass-count sweep at fixed footprint and dispatch count. Wall time should grow roughly

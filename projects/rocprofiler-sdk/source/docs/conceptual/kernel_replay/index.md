@@ -11,12 +11,13 @@ application run, restoring device memory between executions so every pass sees i
 |---|---|---|---|
 | Application replay | whole application, re-run per group | none needed; each run is a fresh process | `O(N ×` app runtime`)` |
 | **Kernel replay** | one dispatch, re-executed in place | device memory snapshot and restore between passes | `O(N ×` kernel time `+ N ×` snap/restore`)` |
-| Counter group rotation (multiple `--pmc` groups) | amortized across dispatches | none; different dispatches sample different groups | `O(1 ×` app runtime`)` |
+| Counter group rotation (`pmc_groups` / `pmc_group_interval` in an input file) | amortized across dispatches | none; different dispatches sample different groups | `O(1 ×` app runtime`)` |
 
 Only the first two collect every group on every dispatch, so only those two are comparable on the
-data they produce. Group rotation is cheaper because it collects less: passing several `--pmc` flags
-without enabling replay rotates the group every few dispatches rather than running the application
-again. See [Benchmarking](kernel_replay_benchmarking.md).
+data they produce. Multiple CLI `--pmc` groups without kernel replay use application replay by
+default, running the application once per group. Counter group rotation is configured separately
+through input-file `pmc_groups` and `pmc_group_interval`; it is cheaper because it collects less.
+See [Benchmarking](kernel_replay_benchmarking.md).
 
 Kernel replay is **experimental**. The public header lives under
 `rocprofiler-sdk/experimental/`. Both the API and any later command-line flag are expected to

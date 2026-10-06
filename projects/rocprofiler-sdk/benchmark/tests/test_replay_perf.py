@@ -31,6 +31,7 @@ failed test, and nothing on a machine with a GPU would notice.
 
 import os
 import csv
+import json
 import sys
 import argparse
 import importlib.util
@@ -62,11 +63,15 @@ def python_cmd(statement):
 
 class TestCommandConstruction(unittest.TestCase):
     def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
         self.args = argparse.Namespace(
             rocprofv3="rocprofv3",
             app_cmd=["./kernel-replay", "1048576"],
-            workdir="/tmp/work",
+            workdir=self.directory.name,
         )
+
+    def tearDown(self):
+        self.directory.cleanup()
 
     def test_one_pmc_flag_per_group(self):
         args = harness._pmc_args(["GRBM_COUNT", "SQ_INSTS_SALU"])
@@ -96,8 +101,25 @@ class TestCommandConstruction(unittest.TestCase):
     def test_output_directory_is_per_measurement(self):
         first = harness._profile_cmd(self.args, ["GRBM_COUNT"], "p1-replay")
         second = harness._profile_cmd(self.args, ["GRBM_COUNT"], "p2-3")
-        self.assertIn("/tmp/work/p1-replay", first)
-        self.assertIn("/tmp/work/p2-3", second)
+        self.assertIn(os.path.join(self.args.workdir, "p1-replay"), first)
+        self.assertIn(os.path.join(self.args.workdir, "p2-3"), second)
+
+    def test_multiplexing_uses_input_file_group_rotation(self):
+        groups = ["GRBM_COUNT", "SQ_INSTS_SALU"]
+        cmd = harness._profile_cmd(self.args, groups, "p1-multiplexed", multiplex=True)
+        config_path = cmd[cmd.index("-i") + 1]
+        with open(config_path, encoding="utf-8") as handle:
+            config = json.load(handle)
+
+        self.assertNotIn("--pmc", cmd)
+        self.assertEqual(
+            config["jobs"][0]["pmc_groups"],
+            [
+                ["SQ_WAVES", "SQ_INSTS_VALU", "GRBM_COUNT"],
+                ["SQ_WAVES", "SQ_INSTS_VALU", "SQ_INSTS_SALU"],
+            ],
+        )
+        self.assertEqual(config["jobs"][0]["pmc_group_interval"], 1)
 
 
 class TestRun(unittest.TestCase):
@@ -279,7 +301,7 @@ class TestModeVocabulary(unittest.TestCase):
 
         for args, mode in (
             (["--pmc", "SQ_WAVES"], harness.MODE_SINGLE_PASS),
-            (["--pmc", "A", "--pmc", "B"], harness.MODE_MULTIPLEXED),
+            (["--pmc", "A", "--pmc", "B"], harness.MODE_APPLICATION_REPLAY),
             (
                 ["--pmc", "A", "--pmc", "B", harness.REPLAY_FLAG],
                 harness.MODE_KERNEL_REPLAY,

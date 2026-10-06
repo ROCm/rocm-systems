@@ -105,12 +105,12 @@ class TestDeriveReplayConfig(unittest.TestCase):
         self.assertEqual(data["counter_collection_mode"], "single-pass")
         self.assertNotIn("kernel_replay", data)
 
-    def test_several_pmc_groups_without_replay_are_multiplexed(self):
+    def test_several_pmc_groups_without_replay_are_application_replay(self):
         data = benchmark.derive_replay_config(
             ["--pmc", "SQ_WAVES", "--pmc", "GRBM_COUNT", "--pmc", "FETCH_SIZE"]
         )
         self.assertEqual(data["counter_group_count"], 3)
-        self.assertEqual(data["counter_collection_mode"], "multiplexed")
+        self.assertEqual(data["counter_collection_mode"], "application-replay")
 
     def test_replay_flag_without_value(self):
         data = benchmark.derive_replay_config(
@@ -135,7 +135,9 @@ class TestDeriveReplayConfig(unittest.TestCase):
                 + ["--kernel-replay-beta-enabled", value]
             )
             self.assertEqual(data["kernel_replay"], 0, msg=value)
-            self.assertEqual(data["counter_collection_mode"], "multiplexed", msg=value)
+            self.assertEqual(
+                data["counter_collection_mode"], "application-replay", msg=value
+            )
 
     def test_replay_flag_with_inline_value(self):
         enabled = benchmark.derive_replay_config(
@@ -194,12 +196,12 @@ class TestConfigRows(unittest.TestCase):
             self.cursor, None, dict(self.config_record), self.args, rocprofv3_args
         )
 
-    def test_replay_and_multiplexed_runs_are_distinct_configs(self):
+    def test_application_replay_and_kernel_replay_are_distinct_configs(self):
         groups = ["--pmc", "SQ_WAVES", "--pmc", "GRBM_COUNT"]
-        multiplexed = self.insert(groups)
+        application_replay = self.insert(groups)
         replay = self.insert(groups + ["--kernel-replay-beta-enabled"])
 
-        self.assertNotEqual(multiplexed, replay)
+        self.assertNotEqual(application_replay, replay)
 
         self.cursor.execute(
             "SELECT id, kernel_replay, counter_group_count, counter_collection_mode "
@@ -207,7 +209,7 @@ class TestConfigRows(unittest.TestCase):
         )
         rows = self.cursor.fetchall()
         self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[0][1:], (None, 2, "multiplexed"))
+        self.assertEqual(rows[0][1:], (None, 2, "application-replay"))
         self.assertEqual(rows[1][1:], (1, 2, "kernel-replay"))
 
     def test_group_count_separates_otherwise_identical_runs(self):
@@ -361,22 +363,30 @@ class TestReplayView(unittest.TestCase):
     def tearDown(self):
         self.connection.close()
 
-    def add_config(self, cfg_id, label, mode, groups, kernel_replay):
+    def add_config(
+        self,
+        cfg_id,
+        label,
+        mode,
+        groups,
+        kernel_replay,
+        benchmark_mode="tool-runtime-overhead",
+    ):
         self.cursor.execute(
             "INSERT INTO benchmark_config "
             "(id, hash_id, sdk_id, label, benchmark_mode, counter_collection_mode, "
             " counter_group_count, kernel_replay) "
-            "VALUES (?, ?, 1, ?, 'tool-runtime-overhead', ?, ?, ?)",
-            (cfg_id, f"hash{cfg_id}", label, mode, groups, kernel_replay),
+            "VALUES (?, ?, 1, ?, ?, ?, ?, ?)",
+            (cfg_id, f"hash{cfg_id}", label, benchmark_mode, mode, groups, kernel_replay),
         )
 
-    def add_statistic(self, cfg_id, mean):
+    def add_statistic(self, cfg_id, mean, metric="wall_time"):
         self.cursor.execute(
             "INSERT INTO benchmark_statistics "
             "(app_id, cfg_id, sdk_id, metric_name, metric_unit, count, sum, mean, "
             " min, max, std_dev) "
-            "VALUES (1, ?, 1, 'wall_time', 'sec', 3, ?, ?, ?, ?, 0.0)",
-            (cfg_id, mean * 3, mean, mean, mean),
+            "VALUES (1, ?, 1, ?, 'sec', 3, ?, ?, ?, ?, 0.0)",
+            (cfg_id, metric, mean * 3, mean, mean, mean),
         )
 
     def test_projection_and_speedup(self):
@@ -420,6 +430,55 @@ class TestReplayView(unittest.TestCase):
             "SELECT COUNT(*) FROM benchmark_replay_wall_time WHERE cfg_id = 3"
         )
         self.assertEqual(self.cursor.fetchone()[0], 1)
+
+    def test_projection_only_applies_to_additive_metrics(self):
+        self.add_config(1, "one group", "single-pass", 1, None)
+        self.add_config(2, "four groups, replay", "kernel-replay", 4, 1)
+        self.add_statistic(1, 100.0, metric="peak_rss")
+        self.add_statistic(2, 150.0, metric="peak_rss")
+
+        self.cursor.execute(
+            "SELECT measured, application_replay_projected, "
+            '"speedup vs application replay" FROM benchmark_replay_peak_rss '
+            "ORDER BY cfg_id"
+        )
+        rows = self.cursor.fetchall()
+        self.assertEqual(rows, [(100.0, None, None), (150.0, None, None)])
+
+    def test_reference_is_scoped_to_benchmark_mode(self):
+        self.add_config(1, "one group runtime", "single-pass", 1, None)
+        self.add_config(
+            2,
+            "one group callbacks",
+            "single-pass",
+            1,
+            None,
+            benchmark_mode="sdk-callback-overhead",
+        )
+        self.add_config(3, "four groups runtime", "kernel-replay", 4, 1)
+        self.add_config(
+            4,
+            "four groups callbacks",
+            "kernel-replay",
+            4,
+            1,
+            benchmark_mode="sdk-callback-overhead",
+        )
+        for cfg_id, mean in ((1, 10.0), (2, 30.0), (3, 20.0), (4, 30.0)):
+            self.add_statistic(cfg_id, mean)
+
+        self.cursor.execute(
+            "SELECT benchmark_mode, application_replay_projected, "
+            '"speedup vs application replay" FROM benchmark_replay_wall_time '
+            "WHERE counter_collection_mode = 'kernel-replay' ORDER BY cfg_id"
+        )
+        self.assertEqual(
+            self.cursor.fetchall(),
+            [
+                ("tool-runtime-overhead", 40.0, 2.0),
+                ("sdk-callback-overhead", 120.0, 4.0),
+            ],
+        )
 
     def test_runs_without_counters_are_excluded(self):
         self.add_config(1, "trace only", None, None, None)
