@@ -30,6 +30,7 @@
 #include "diagnostics_log.h"
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/diagnostics_fakes.h"
+#include "fakes/hip_fakes.h"
 #include "fakes/libc_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/topo_stubs.h"
@@ -157,6 +158,8 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
     g_ibNetDevices = nullptr;
     g_ibNetGetProperties = nullptr;
     ResetDevRuntimeMicroFakes();
+    ResetHipFakes();
+    ResetNcclFakes();
     ResetDiagnosticsFakes();
     ResetLibcFakes();
     ResetTopoStubs();
@@ -437,8 +440,7 @@ TEST_F(DiagIbWriteBwMicrotest, PluginSupportsIb_ExactOrDelimitedKnownNames) {
 
 TEST_F(DiagIbWriteBwMicrotest, ResolveDeviceName_CopiesSegmentAndCutsDmaSuffixSysfsDoesNotKnow) {
   char out[IB_BW_NAME_SIZE];
-  const char merged[] = "mlx5_1+mlx5_0";
-  EXPECT_TRUE(resolveDeviceName(merged, 6, out));
+  EXPECT_TRUE(resolveDeviceName("mlx5_1+mlx5_0", 6, out));
   EXPECT_STREQ(out, "mlx5_1");
   EXPECT_EQ(accessed_, (std::vector<std::string>{SysPath("mlx5_1")}));
   accessed_.clear();
@@ -589,15 +591,13 @@ TEST_F(DiagIbWriteBwMicrotest, BuildCommand_ServerOmitsHostClientAppendsItAndTru
   const LocalInfo local = Info("me", "mlx5_1");
   const LocalInfo server = Info("srv", "mlx5_0");
   char out[IB_BW_COMMAND_BYTES];
-  ASSERT_TRUE(buildCommand(out, sizeof(out), true, local, server, false, true, 5, 12345, 4));
-  EXPECT_STREQ(out, "ib_write_bw -d mlx5_1 -i 1 -s 65536 --report_gbits -q 4 -p 12345 -n 1000");
-  ASSERT_TRUE(buildCommand(out, sizeof(out), false, local, server, true, false, 5, 12345, 4));
-  EXPECT_STREQ(out, "ib_write_bw -d mlx5_1 -i 1 -s 65536 --report_gbits -q 4 -p 12345 -n 1000 --use_cuda=5 srv");
-  ASSERT_TRUE(buildCommand(out, sizeof(out), true, local, server, true, true, 5, 12345, 4));
-  EXPECT_STREQ(out,
-               "ib_write_bw -d mlx5_1 -i 1 -s 65536 --report_gbits -q 4 -p 12345 -n 1000 --use_cuda=5 "
-               "--use_cuda_dmabuf");
   const std::string fits = "ib_write_bw -d mlx5_1 -i 1 -s 65536 --report_gbits -q 4 -p 12345 -n 1000";
+  ASSERT_TRUE(buildCommand(out, sizeof(out), true, local, server, false, true, 5, 12345, 4));
+  EXPECT_EQ(out, fits);
+  ASSERT_TRUE(buildCommand(out, sizeof(out), false, local, server, true, false, 5, 12345, 4));
+  EXPECT_EQ(out, fits + " --use_cuda=5 srv");
+  ASSERT_TRUE(buildCommand(out, sizeof(out), true, local, server, true, true, 5, 12345, 4));
+  EXPECT_EQ(out, fits + " --use_cuda=5 --use_cuda_dmabuf");
   EXPECT_TRUE(buildCommand(out, static_cast<int>(fits.size()) + 1, true, local, server, false, false, 5, 12345, 4));
   EXPECT_FALSE(buildCommand(out, static_cast<int>(fits.size()), true, local, server, false, false, 5, 12345, 4));
   EXPECT_FALSE(buildCommand(out, static_cast<int>(fits.size()) + 4, false, local, server, false, false, 5, 12345, 4));
