@@ -3619,6 +3619,7 @@ function(rj_add_consan_hip_tests)
                 Gfx950VgprScratchRoundTrip
                 Gfx950PartialExecVgprScratchRoundTrip
                 Gfx950RepeatedScratchRoundTrips
+                Gfx950PersistentLdsReuseWithSkewedWaves
         )
             rj_add_consan_hip_case(
                 NAME "ConSanSpillGfx950Sim.${_spill_case}"
@@ -3628,6 +3629,24 @@ function(rj_add_consan_hip_tests)
                 LABELS consan consan-device gfx950 simulator
             )
         endforeach()
+        set(_rj_gfx950_persistent_lds_environment
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "HSA_TOOLS_DISABLE_REGISTER=1"
+            "RJ_CONSAN_MODE=default"
+            "RJ_CONSAN_TRACK_BARRIERS=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+            "RJ_CONSAN_LOG=1"
+        )
+        rj_add_consan_hip_case(
+            NAME "ConSanSpillGfx950Sim.PersistentLdsReuseDefault"
+            TARGET hip_consan_spill_gfx950_test
+            FILTER "ConSanSpillHipTest.Gfx950PersistentLdsReuseWithSkewedWaves"
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json"
+            LABELS consan consan-device gfx950 simulator
+            PASS_REGEX "ConSan analysis verdict.*analysis_complete=true.*visible_evidence=[1-9]"
+            FAIL_REGEX "ConSan conflict"
+            ENVIRONMENT ${_rj_gfx950_persistent_lds_environment}
+        )
         add_dependencies(hip_consan_lds_gfx950_test_target rocjitsu_dbi_hooks)
         add_dependencies(hip_consan_gfx950_test_target rocjitsu_dbi_hooks)
         rj_add_consan_cdna_sim_cases(
@@ -3665,6 +3684,7 @@ function(rj_add_consan_hip_tests)
                     Gfx950VgprScratchRoundTrip
                     Gfx950PartialExecVgprScratchRoundTrip
                     Gfx950RepeatedScratchRoundTrips
+                    Gfx950PersistentLdsReuseWithSkewedWaves
             )
                 rj_add_consan_hip_case(
                     NAME "ConSanSpillHipTest.${_spill_case}"
@@ -3675,6 +3695,18 @@ function(rj_add_consan_hip_tests)
                     RUN_SERIAL
                 )
             endforeach()
+
+            rj_add_consan_hip_case(
+                NAME "ConSanSpillHipTest.PersistentLdsReuseDefault"
+                TARGET hip_consan_spill_gfx950_test
+                FILTER "ConSanSpillHipTest.Gfx950PersistentLdsReuseWithSkewedWaves"
+                LABELS consan consan-device gfx950 physical
+                RESOURCE_LOCK consan_physical_gfx950
+                RUN_SERIAL
+                PASS_REGEX "ConSan analysis verdict.*analysis_complete=true.*visible_evidence=[1-9]"
+                FAIL_REGEX "ConSan conflict"
+                ENVIRONMENT ${_rj_gfx950_persistent_lds_environment}
+            )
 
             rj_add_consan_hip_case(
                 NAME "ConSanCdnaTest.DbiForcedSpill"

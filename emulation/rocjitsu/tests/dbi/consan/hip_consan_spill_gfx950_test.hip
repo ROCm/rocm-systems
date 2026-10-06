@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file hip_consan_spill_gfx950_test.hip
-/// @brief Native gfx950 validation of ConSan's CDNA4 VGPR spill contract.
+/// @brief Native gfx950 validation of ConSan's VGPR spills and persistent LDS reuse.
 
 #include <hip/hip_runtime.h>
 
@@ -48,6 +48,31 @@ __global__ __launch_bounds__(64) void gfx950_partial_exec_scratch_roundtrip(uint
   out[tid] = value;
 }
 
+// Model the matrix-to-epilogue LDS reuse in a persistent hipBLASLt tile loop.
+// A wave which finishes the epilogue first must wait before refilling LDS for
+// the next tile, even when instrumentation changes progress between waves.
+__global__ __launch_bounds__(256) void gfx950_persistent_lds_reuse_for_consan(float *out) {
+  __shared__ volatile float storage[256];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+#pragma unroll 1
+  for (uint32_t iteration = 0; iteration < 4; ++iteration) {
+    storage[tid] = __int_as_float(0x3f803f80u);
+    __syncthreads();
+    storage[tid] = 0.0f;
+    __syncthreads();
+    if (tid >= 64) {
+#pragma unroll 1
+      for (uint32_t delay = 0; delay < 16; ++delay)
+        asm volatile("s_sleep 127" ::: "memory");
+    }
+    out[iteration * 1024u + blockIdx.x * 256u + tid] =
+        256.0f + storage[(tid + 64u) & 255u];
+    // Joining only before the epilogue reads leaves a cross-iteration race:
+    // the fast wave can overwrite values still being read by the slow waves.
+    __syncthreads();
+  }
+}
+
 template <bool PartialExec> void run_roundtrip(uint32_t expected_prefix) {
   constexpr uint32_t kThreads = 64;
   uint32_t *device_out = nullptr;
@@ -80,6 +105,20 @@ TEST(ConSanSpillHipTest, Gfx950RepeatedScratchRoundTrips) {
     run_roundtrip<false>(0x95000000u);
     run_roundtrip<true>(0x95010000u);
   }
+}
+
+TEST(ConSanSpillHipTest, Gfx950PersistentLdsReuseWithSkewedWaves) {
+  constexpr uint32_t kElements = 4u * 1024u;
+  float *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, kElements * sizeof(float)));
+  gfx950_persistent_lds_reuse_for_consan<<<4, 256>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<float> out(kElements);
+  HIP_ASSERT(hipMemcpy(out.data(), device_out, kElements * sizeof(float), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  for (uint32_t i = 0; i < kElements; ++i)
+    EXPECT_EQ(out[i], 256.0f) << "iteration=" << i / 1024u << " thread=" << i % 1024u;
 }
 
 } // namespace

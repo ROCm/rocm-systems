@@ -96,6 +96,19 @@ Read diagnostics together with static coverage, dynamic completeness,
 overflow/saturation, report trust, and the program's own correctness result.
 A timeout, signal, bad output, or GPU reset is not by itself a ConSan diagnostic.
 
+[Issue 12470](https://github.com/ROCm/rocm-systems/issues/12470) illustrates this
+boundary on gfx950. A hipBLASLt static StreamK tile loop could refill matrix LDS
+while another wave still read the preceding tile's epilogue bias/scale data.
+Probe delays exposed that cross-iteration race. Retiring the epilogue LDS reads
+and joining the workgroup before persistent re-entry eliminated the numerical
+corruption. This synchronization belongs in the native hipBLASLt kernel
+generator. Immutable first-publisher banks can retain earlier iterations and
+omit the later conflicting pair, even with complete static coverage and usable
+reports. The
+[gfx950 persistent LDS regression](../../tests/dbi/consan/hip_consan_spill_gfx950_test.hip)
+checks the synchronized loop with deliberately skewed wave progress, both
+natively and under default-mode instrumentation.
+
 ## Choosing a mode
 
 Use **ConSan** for causal diagnostics and repeated statistical campaigns;
