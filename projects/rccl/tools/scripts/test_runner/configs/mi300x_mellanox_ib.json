@@ -372,6 +372,14 @@
           "name": "MultiSegment_CAST_RMA_PostPath",
           "description": "Post-path fixture under IB-CAST: WR chains, aggregation, rejected-op slot accounting, registration churn and send-queue credits",
           "test_filter": "RmaMultiSegmentPostMPITest.*"
+        },
+        {
+          "name": "MultiSegment_CAST_RMA_SendQueueOversubscribe",
+          "description": "Twice the RMA send queue's worth of putSignals without test() under IB-CAST: the post path waits for send-queue credits, so no post is rejected or fails, and context 1 still delivers",
+          "test_filter": "RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
+          "env_variables": {
+            "RCCL_MSEG_SQ_STRESS": "1"
+          }
         }
       ]
     },

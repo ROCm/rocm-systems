@@ -136,6 +136,11 @@ static inline void IbCastQpCreateAttrInitSharing(struct ncclIbQpCreateAttr* attr
   attr->cqDepthMultiplier = 1;
 }
 
+// Loopback flush QPs post only RDMA_READs, so non-RMA comms keep the flush depth, not the CTS depth.
+static inline int IbCastFlushQpSendDepth(const struct ncclIbNetCommBase* base) {
+  return base->isRma ? NCCL_IB_RMA_MAX_FLUSH_WRS : NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS;
+}
+
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
 void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out);
 ncclResult_t IbCastQpInit(struct ncclIbQp* qp);

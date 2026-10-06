@@ -92,15 +92,6 @@ static inline int ncclRmaSegOffTableValid(const size_t* segOff, int nSegments) {
   return 1;
 }
 
-static inline int ncclRmaLayoutsMatch(int lhsSegments, const size_t* lhsOffsets, int rhsSegments,
-                                      const size_t* rhsOffsets) {
-  if (!ncclRmaSegmentCountsMatch(lhsSegments, rhsSegments)) return 0;
-  for (int s = 0; s <= lhsSegments; s++) {
-    if (lhsOffsets[s] != rhsOffsets[s]) return 0;
-  }
-  return 1;
-}
-
 // Per-rank segOff table from registration allgather; falls back to the local map.
 static inline const size_t* ncclRmaPeerSegOff(const size_t* rankSegOff, const size_t* localSegOff, int rank) {
   if (rankSegOff == NULL || rank < 0) return localSegOff;
@@ -109,12 +100,12 @@ static inline const size_t* ncclRmaPeerSegOff(const size_t* rankSegOff, const si
 
 // Map offset to the covering [segOff[s], segOff[s+1]) bucket. Offsets at or
 // past the terminal size clamp to the last segment, matching the CAST wrappers.
-static inline int ncclRmaSegIndexOf(int nSegments, const size_t* segOff, uint64_t off) {
-  if (nSegments < 1 || segOff == NULL) return 0;
-  for (int s = 0; s < nSegments; s++) {
+static inline int ncclRmaSegIndexOf(const size_t* segOff, int nSeg, uint64_t off) {
+  if (nSeg < 1 || segOff == NULL) return 0;
+  for (int s = 0; s < nSeg; s++) {
     if (off < segOff[s + 1]) return s;
   }
-  return nSegments - 1;
+  return nSeg - 1;
 }
 
 static inline int ncclRmaOffsetRangeOk(int nSegments, const size_t* segOff, uint64_t off, size_t size) {
@@ -146,13 +137,6 @@ static inline int ncclRmaRegistrationHandleReady(const void* handle, int nSeg) {
   return handle != NULL && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS;
 }
 
-static inline int ncclRmaSegIndexOf(const size_t* segOff, int nSeg, uint64_t off) {
-  for (int s = 0; s < nSeg; s++) {
-    if (off < segOff[s + 1]) return s;
-  }
-  return nSeg - 1;
-}
-
 // Count WRs for explicit local/remote segOff tables. Returns maxWr+1 if the chain does not fit.
 static inline int ncclRmaCountLayoutDataWrs(const size_t* localOff, int nLocal, const size_t* remoteOff, int nRemote,
                                             uint64_t lOff, uint64_t rOff, size_t size, int maxWr) {
@@ -177,6 +161,19 @@ static inline int ncclRmaCountLayoutDataWrs(const size_t* localOff, int nLocal, 
 static inline ncclResult_t ncclRmaPostedRequestStatus(ncclResult_t postRet, int posted) {
   if (postRet != ncclSuccess && posted > 0) return ncclSuccess;
   return postRet;
+}
+
+// Keep-or-free after ibv_post_send. posted==0 and error: free the slot.
+// Otherwise keep *request so Test() drains; mark FAILED if the signaled tail
+// was lost. Each backend applies the IB side effects from these flags.
+static inline ncclResult_t ncclRmaCompletePostedRequest(ncclResult_t postRet, int posted, int nWr, int* keepRequest,
+                                                        int* markFailed) {
+  if (keepRequest) *keepRequest = 0;
+  if (markFailed) *markFailed = 0;
+  if (postRet != ncclSuccess && posted == 0) return postRet;
+  if (keepRequest) *keepRequest = 1;
+  if (markFailed) *markFailed = ncclRmaPrefixPostLostSignaledTail(posted, nWr);
+  return ncclRmaPostedRequestStatus(postRet, posted);
 }
 
 // Registration stores MRs/rkeys in recvComm device-slot order. Posts use a

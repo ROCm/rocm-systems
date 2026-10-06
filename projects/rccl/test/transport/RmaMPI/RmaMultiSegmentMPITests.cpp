@@ -2398,6 +2398,9 @@ TEST_F(RmaMultiSegmentPostMPITest, IPutSignalSendQueueOversubscribe)
     }
     TEST_INFO("send-queue flood: %zu accepted, %d rejected, %d ended in an error",
               reqs.size(), rejected, failed);
+    // IB-CAST waits for send-queue credits instead of overflowing the QP.
+    if (rma_ == &IbCastRmaIbProxy)
+        EXPECT_EQ(rejected + failed, 0) << "IB-CAST rejected or failed posts instead of waiting for credits";
 
     EXPECT_TRUE(MPIHelpers::allRanksTrue(!HasFailure())) << "flood hung or misreported on some rank";
     if (HasFailure()) return;

@@ -11,19 +11,6 @@
 #include "nccl.h"
 #include "rma_multiseg.h"
 
-// Keep-or-free after ibv_post_send. posted==0 and error: free the slot.
-// Otherwise keep *request so Test() drains; mark FAILED if the signaled tail
-// was lost. gin.cc applies the IB side effects from these flags.
-static inline ncclResult_t ncclRmaCompletePostedRequest(ncclResult_t postRet, int posted, int nWr, int* keepRequest,
-                                                        int* markFailed) {
-  if (keepRequest) *keepRequest = 0;
-  if (markFailed) *markFailed = 0;
-  if (postRet != ncclSuccess && posted == 0) return postRet;
-  if (keepRequest) *keepRequest = 1;
-  if (markFailed) *markFailed = ncclRmaPrefixPostLostSignaledTail(posted, nWr);
-  return ncclRmaPostedRequestStatus(postRet, posted);
-}
-
 // A freed request returns its sequence id only if no later request took one.
 static inline void ncclRmaReleaseSeqId(uint64_t id, uint64_t* postedSeq) {
   if (id == *postedSeq) (*postedSeq)--;

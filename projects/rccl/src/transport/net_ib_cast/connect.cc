@@ -1869,6 +1869,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       struct ncclIbQpCreateAttr qpCreateAttrs;
       IbCastBuildDataQpCreateAttr(&rComm->base, i, &qpCreateAttrs);
       qpCreateAttrs.maxRecvWorkRequest = 0;
+      qpCreateAttrs.maxSendWorkRequest = IbCastFlushQpSendDepth(&rComm->base);
       qpCreateAttrs.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
       qpCreateAttrs.isCtsEnabled = rComm->useCtsOffload;
       qpCreateAttrs.isDataQp = true;
