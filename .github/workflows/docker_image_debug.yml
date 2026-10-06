@@ -23,6 +23,11 @@ on:
           - gfx950
           - gfx110X
           - gfx120X
+  push:
+    branches:
+      - users/lamikr/rocprofiler_sdk_docker_debug
+    paths:
+      - '.github/workflows/docker_image_debug.yml'
 
 jobs:
   export-image:
@@ -36,13 +41,17 @@ jobs:
 
       - name: Pull the private image
         run: |
-          IMAGE="docker.io/rocm/rocprofiler-private:${{ inputs.os }}-${{ inputs.gpu }}-latest"
-          echo "Pulling image: $IMAGE"
+          OS="${{ inputs.os || 'ubuntu-22.04' }}"
+          GPU="${{ inputs.gpu || 'gfx94X' }}"
+          IMAGE="docker.io/rocm/rocprofiler-private:${OS}-${GPU}-latest"
+          echo "Pulling image: $IMAGE (OS: $OS, GPU: $GPU)"
           docker pull "$IMAGE"
 
       - name: Inspect image (quick check)
         run: |
-          IMAGE="docker.io/rocm/rocprofiler-private:${{ inputs.os }}-${{ inputs.gpu }}-latest"
+          OS="${{ inputs.os || 'ubuntu-22.04' }}"
+          GPU="${{ inputs.gpu || 'gfx94X' }}"
+          IMAGE="docker.io/rocm/rocprofiler-private:${OS}-${GPU}-latest"
           echo "=== Running quick inspection ==="
           docker run --rm "$IMAGE" /bin/bash -c '
             echo "=== /usr/local/bin contents ===";
@@ -65,8 +74,10 @@ jobs:
 
       - name: Save image to tar file
         run: |
-          IMAGE="docker.io/rocm/rocprofiler-private:${{ inputs.os }}-${{ inputs.gpu }}-latest"
-          OUTPUT="rocprofiler-${{ inputs.os }}-${{ inputs.gpu }}.tar"
+          OS="${{ inputs.os || 'ubuntu-22.04' }}"
+          GPU="${{ inputs.gpu || 'gfx94X' }}"
+          IMAGE="docker.io/rocm/rocprofiler-private:${OS}-${GPU}-latest"
+          OUTPUT="rocprofiler-${OS}-${GPU}.tar"
 
           echo "Saving image to tar file..."
           docker save "$IMAGE" -o "$OUTPUT"
@@ -80,16 +91,20 @@ jobs:
       - name: Upload image as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rocprofiler-image-${{ inputs.os }}-${{ inputs.gpu }}-run-${{ github.run_id }}
-          path: rocprofiler-${{ inputs.os }}-${{ inputs.gpu }}.tar.gz
+          name: rocprofiler-image-${{ inputs.os || 'ubuntu-22.04' }}-${{ inputs.gpu || 'gfx94X' }}-run-${{ github.run_id }}
+          path: rocprofiler-${{ inputs.os || 'ubuntu-22.04' }}-${{ inputs.gpu || 'gfx94X' }}.tar.gz
           retention-days: 7
           compression-level: 0
 
       - name: Output download instructions
         run: |
+          OS="${{ inputs.os || 'ubuntu-22.04' }}"
+          GPU="${{ inputs.gpu || 'gfx94X' }}"
           echo "================================================"
           echo "Image exported successfully!"
           echo "================================================"
+          echo ""
+          echo "Image: docker.io/rocm/rocprofiler-private:${OS}-${GPU}-latest"
           echo ""
           echo "To download this artifact:"
           echo ""
@@ -102,10 +117,10 @@ jobs:
           echo "  gh run download ${{ github.run_id }} --repo ${{ github.repository }}"
           echo ""
           echo "To load the image locally:"
-          echo "  gunzip rocprofiler-${{ inputs.os }}-${{ inputs.gpu }}.tar.gz"
-          echo "  docker load -i rocprofiler-${{ inputs.os }}-${{ inputs.gpu }}.tar"
+          echo "  gunzip rocprofiler-${OS}-${GPU}.tar.gz"
+          echo "  docker load -i rocprofiler-${OS}-${GPU}.tar"
           echo ""
           echo "To run the image:"
-          echo "  docker run -it --rm docker.io/rocm/rocprofiler-private:${{ inputs.os }}-${{ inputs.gpu }}-latest /bin/bash"
+          echo "  docker run -it --rm docker.io/rocm/rocprofiler-private:${OS}-${GPU}-latest /bin/bash"
           echo ""
           echo "================================================"
