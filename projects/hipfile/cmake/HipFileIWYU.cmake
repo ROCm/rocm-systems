@@ -9,9 +9,9 @@ include_guard(GLOBAL)
 #
 # When this option is enabled, compilation will emit IWYU suggestions.
 #-----------------------------------------------------------------------------
-option(AIS_USE_IWYU "Run include-what-you-use when compiling" OFF)
+option(HIPFILE_USE_IWYU "Run include-what-you-use when compiling" OFF)
 
-if(AIS_USE_IWYU)
+if(HIPFILE_USE_IWYU)
     find_program(IWYU_EXE NAMES include-what-you-use REQUIRED)
 
     # GoogleTest/GoogleMock expose their public API through umbrella headers

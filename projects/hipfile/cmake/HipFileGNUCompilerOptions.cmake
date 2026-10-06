@@ -6,7 +6,7 @@
 #
 # https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html
 
-function(get_ais_gnu_warning_flags outvar compiler_version)
+function(get_hipfile_gnu_warning_flags outvar compiler_version)
 
     # Warning flags for g++ 9 and earlier
     set(flags

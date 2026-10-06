@@ -7827,10 +7827,10 @@ TEST(AqlDispatchTest, WorkerExceptionPropagatesThroughEngineStep) {
 }
 
 TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
-  constexpr uint32_t kSSetvskip = 0xBF100000u;
+  constexpr uint32_t kSCbranchIFork = 0xB8000000u;
   VmFixture f("cdna4", /*num_cus=*/2);
   f.cp()->set_dispatch_threads(2);
-  uint64_t kernel = f.write_kernel(0x1000, &kSSetvskip, sizeof(kSSetvskip));
+  uint64_t kernel = f.write_kernel(0x1000, &kSCbranchIFork, sizeof(kSCbranchIFork));
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
 
@@ -7839,7 +7839,7 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
   const auto &exit = f.engine->last_exit();
   EXPECT_EQ(exit.reason, simdojo::ExitReason::EXIT_REQUEST);
   EXPECT_EQ(exit.code, 1);
-  EXPECT_NE(exit.message.find("s_setvskip"), std::string::npos);
+  EXPECT_NE(exit.message.find("s_cbranch_i_fork"), std::string::npos);
   EXPECT_NE(exit.message.find("pc=0x1040"), std::string::npos);
   EXPECT_NE(exit.message.find("unimplemented instruction"), std::string::npos);
   EXPECT_TRUE(f.cu(0)->is_idle());
@@ -7878,7 +7878,7 @@ TEST(AqlDispatchTest, ThrowingIssueHooksReclaimDecodedInstruction) {
     ASSERT_TRUE(group->add(std::make_unique<ThrowingIssuePlugin>(hook)));
     f.soc_ptr->set_plugin_group(group);
     // Halt after rejection, so the hook runs outside execute_instruction().
-    const uint32_t code = hook == ThrowingIssuePlugin::Halt ? 0xBF100000u : 0xBE800000u;
+    const uint32_t code = hook == ThrowingIssuePlugin::Halt ? 0xB8000000u : 0xBE800000u;
     f.write_kernel(0x1000, &code, sizeof(code));
     ASSERT_NE(f.dispatch_scratch_wf(), nullptr);
 

@@ -2,23 +2,23 @@
 #
 # SPDX-License-Identifier: MIT
 
-include(AISCompilerOptions)
+include(HipFileCompilerOptions)
 
-# Add an executable program using AIS build conventions
+# Add an executable program using hipFile build conventions
 #
 # Parameters:
 #   NAME     <name>                             The name of the executable program to create
-#   DEPS     [dependency1 [dependency2 ...]]    List of AIS target library dependencies
+#   DEPS     [dependency1 [dependency2 ...]]    List of hipFile target library dependencies
 #   SRCS     [src1 [src2 ...]]                  The source files
 #   SYSINCLS [path1 [path2 ...]]                Paths to include dirs
 #
-# NOTE: Assumes AIS target libraries are named <foo>_(static|shared)
+# NOTE: Assumes hipFile target libraries are named <foo>_(static|shared)
 #
 # NOTE: This isn't the most robust function. It's mainly intended
 #       to reduce code duplication. For example, DEPS is for passing
 #       the hipFile shared/static dependency and won't work for passing
 #       general library dependencies.
-function(ais_add_executable)
+function(hipfile_add_executable)
 
     # Parse arguments
     set(options) # None at this time
@@ -27,10 +27,10 @@ function(ais_add_executable)
     cmake_parse_arguments(arg "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     add_executable(${arg_NAME} ${arg_SRCS})
-    ais_set_compiler_flags(${arg_NAME})
+    hipfile_set_compiler_flags(${arg_NAME})
 
     # Set C++ standard
-    target_compile_features(${arg_NAME} PRIVATE cxx_std_${AIS_CXX_STANDARD})
+    target_compile_features(${arg_NAME} PRIVATE cxx_std_${HIPFILE_CXX_STANDARD})
     set_target_properties(${arg_NAME} PROPERTIES CXX_EXTENSIONS OFF)
 
     # Set position-independent code
@@ -71,17 +71,17 @@ function(ais_add_executable)
     target_include_directories(${arg_NAME} PRIVATE "${HIPFILE_ROOT_PATH}/shared")
 endfunction()
 
-# Add an executable test program using AIS build conventions
+# Add an executable test program using hipFile build conventions
 #
 # Parameters:
 #   NAME     <name>                             The name of the executable program to create
-#   DEPS     [dependency1 [dependency2 ...]]    List of AIS target library dependencies
+#   DEPS     [dependency1 [dependency2 ...]]    List of hipFile target library dependencies
 #   SRCS     [src1 [src2 ...]]                  The source files
 #   SYSINCLS [path1 [path2 ...]]                Paths to include dirs
 #
 # NOTE: Simply a pass-through to add -UNDEBUG to test programs so they
 #       always have assert() available.
-function(ais_add_test_executable)
+function(hipfile_add_test_executable)
 
     # Parse arguments
     set(options) # None at this time
@@ -89,7 +89,7 @@ function(ais_add_test_executable)
     set(multiValueArgs SRCS DEPS SYSINCLS)
     cmake_parse_arguments(arg "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
-    ais_add_executable(
+    hipfile_add_executable(
         NAME     ${arg_NAME}
         DEPS     ${arg_DEPS}
         SRCS     ${arg_SRCS}
