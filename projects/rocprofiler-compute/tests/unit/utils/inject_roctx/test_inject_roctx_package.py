@@ -435,3 +435,19 @@ def test_launch_parses_frameworks_and_runs_target(tmp_path, monkeypatch):
     runpy.run_path(str(launch))
     assert recorded == [["torch", "triton"]]
     assert ok_path.read_text() == "ok"
+
+
+def test_launch_exits_2_without_target(monkeypatch, capsys):
+    import runpy
+    import sys
+    from pathlib import Path
+
+    from utils.inject_roctx import core
+
+    launch = Path(core.__file__).resolve().parent / "launch.py"
+    monkeypatch.setattr(sys, "argv", [str(launch), "--frameworks", "torch"])
+    with pytest.raises(SystemExit) as excinfo:
+        runpy.run_path(str(launch))
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "usage:" in captured.err
