@@ -791,10 +791,13 @@ PyTorch operator analysis
 and counter CSV pair and full-outer-join on ``Correlation_ID`` (plus ``GUID``
 when both files have that column). Matching operator calls are then
 consolidated across passes using a stitch key that keeps ``seqNr``, ``tid``,
-and ``ftid`` and omits ``ltid``, plus ``function_ordinal``. Analyze parses
+and ``ftid`` and omits ``ltid``, plus ``function_ordinal``. Collapsed GPU time
+and kernel lists come from pass 0. Analyze parses
 Function, then nests marker intervals per ``Thread_Id``. Plain ``analyze -p``
 without those flags does not join markers and does not report
-``UnaccountedKernelError``.
+``UnaccountedKernelError``. Analyze does not write
+``ml_api_trace/consolidated.csv``. Missing or null marker columns make
+analyze exit.
 
 Operator analyze reports after the call tree:
 
@@ -804,6 +807,10 @@ Operator analyze reports after the call tree:
   call disagree across passes.
 * ``OverlappingMarkerRangeError`` when two markers on the same ``Thread_Id``
   overlap in time (neither nested nor adjacent).
+* ``MissingSourceLocationError`` when a torch or triton worker root has empty
+  file/line and no ancestor with a source location.
+
+Those recorded errors are warnings printed after the tree and do not exit.
 
 ``Thread_Id`` is the rocprofiler thread. ``T_Tid`` is PyTorch
 ``currentThreadId()`` and ``F_Tid`` is ``forwardThreadId()``; both are parsed
@@ -847,7 +854,9 @@ Display all PyTorch operators captured during profiling:
    │ nn.Module.Net.forward/torch.nn.functional.relu   │      40 │           30 │  0.31 ms │      0.72 │     7.70 us │ 0.01 ms │ 0.01 ms │ 0.02 ms │
    ╘══════════════════════════════════════════════════╧═════════╧══════════════╧══════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
 
-The printed call tree is sorted by GPU duration. Source location is shown on
+The printed call tree is sorted by GPU duration. Identical sibling subtrees
+are folded for display only; the forest and operator summary are not folded.
+Source location is shown on
 each node that recorded a file and line. Kernel stats appear under the
 operators that launched them. See :ref:`torch-operator-profiling` for how
 markers are captured.
@@ -881,7 +890,8 @@ Filtering by Operator
 ---------------------
 
 ``--torch-operator`` uses shell-style glob patterns (``fnmatch``) to select
-nodes whose backend is torch. Ancestors of any backend stay in the path
+nodes whose backend is torch. Metric kernel ids come only from nodes whose
+backend is in the requested list. Ancestors of any backend stay in the path
 string, so ``user/.../aten::addmm`` still matches. Hierarchies are
 ``/``-separated; ``*``, ``?``, and ``[seq]`` cross path components, and
 matching is case-sensitive:
@@ -889,6 +899,9 @@ matching is case-sensitive:
 * **Wildcard** — ``*relu*`` (contains relu), ``*/aten::addmm`` (addmm leaf)
 * **Exact** — ``aten::addmm``
 * **Match all** — no arguments, ``all``, ``*``, or ``**``
+
+``--torch-operator`` / ``--triton-operator`` intersect analyze ``-k/--kernel``.
+Analyze ``-d/--dispatch`` is applied to kernel-top first.
 
 .. code-block:: shell-session
 
@@ -955,8 +968,3 @@ Filter the Triton kernels
    # Filter multiple kernels (space or comma separated)
    $ rocprof-compute analyze --experimental \
        --triton-operator "*matmul*,*softmax*" --path ./workload
-
-.. note::
-
-   ``--torch-operator`` and ``--triton-operator`` are mutually exclusive; use
-   one operator filter per analysis run.
