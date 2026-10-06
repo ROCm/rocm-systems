@@ -130,6 +130,7 @@ protected:
       queue.faulted = true;
       status = Pm4TestStatus::Faulted;
     };
+    context.wake = [] {};
     context.flush_caches = [] {};
     context.dispatch = [this](const std::array<uint32_t, 4> &dimensions) {
       dispatches.push_back(dimensions);

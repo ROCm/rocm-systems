@@ -122,6 +122,14 @@ static void hrr_trace_h2d(const char* api, const void* dst, size_t sz) {
                   sz);
 }
 
+// Wait for an async D2H copy before its host buffer is snapshotted. Once the
+// writer has closed, for instance after capture stopped for lack of space, the
+// snapshot would be dropped, so the copy is left asynchronous as the app asked.
+static hipError_t sync_for_d2h_snapshot(hipStream_t stream) {
+  if (!hrr_cap::writer::is_open()) return hipSuccess;
+  return g_real_table.hipStreamSynchronize_fn(stream);
+}
+
 // Parse the extra[] sentinel format for packed kernarg buffers.
 static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_size) {
   if (!extra) return false;
@@ -324,7 +332,11 @@ static void serialize_kernel_launch(
   // raw stream handle as first payload field after header (for replay stream routing)
   push_u64(reinterpret_cast<uint64_t>(stream));
 
-  uint16_t name_len = static_cast<uint16_t>(std::strlen(kernel_name));
+  // name_len is a uint16_t on the wire; a longer name is dropped loudly below
+  // rather than recorded truncated.
+  const size_t kernel_name_len = std::strlen(kernel_name);
+  const bool name_oversized = kernel_name_len > UINT16_MAX;
+  uint16_t name_len = name_oversized ? 0 : static_cast<uint16_t>(kernel_name_len);
   push_u16(name_len);
   push_bytes(kernel_name, name_len);
   push_u64(co_hash.lo); push_u64(co_hash.hi);  // code object identity (0 = unknown)
@@ -447,15 +459,18 @@ static void serialize_kernel_launch(
   // case the launch cannot be recorded faithfully: drop it LOUDLY and mark the
   // whole archive incomplete so replay/validation can never silently treat a
   // capture missing a GPU launch (and its downstream writes) as faithful.
-  if (arg_oversized || payload.size() > UINT32_MAX) {
-    LogPrintfError("[HRR capture] Kernel launch for '%s' cannot be serialized "
-                   "(payload=%zu bytes, oversized_by_value_arg=%s) — dropping the "
-                   "event and marking the capture INCOMPLETE. Replay of this "
-                   "archive will be unfaithful (this launch and its effects are "
-                   "absent).",
-                   kernel_name, payload.size(), arg_oversized ? "yes" : "no");
-    hrr_cap::writer::mark_incomplete(
-        "kernel launch payload exceeds wire-format limits");
+  if (arg_oversized || name_oversized || payload.size() > UINT32_MAX) {
+    // log_printf truncates at 4 KiB, so the name goes last and is capped.
+    LogPrintfError(
+        "[HRR capture] Kernel launch cannot be serialized "
+        "(name_len=%zu, payload=%zu bytes, oversized_by_value_arg=%s): dropping "
+        "the event and marking the capture INCOMPLETE. Replay of this "
+        "archive will be unfaithful (this launch and its effects are "
+        "absent). Kernel: '%.1024s'",
+        kernel_name_len, payload.size(), arg_oversized ? "yes" : "no", kernel_name);
+    const char* reason = name_oversized ? "kernel name exceeds the uint16 wire-format length"
+                                        : "kernel launch payload exceeds wire-format limits";
+    hrr_cap::writer::mark_incomplete(reason);
     return;
   }
   hrr_cap::writer::write_event_raw(api_id,
@@ -651,7 +666,7 @@ hipError_t capture_hipMemcpyAsync(void* dst, const void* src,
       hrr_trace_h2d("hipMemcpyAsync", dst, sizeBytes);
     } else if (kind == hipMemcpyDeviceToHost && dst && sizeBytes > 0) {
       // Sync the stream so host dst is valid before we snapshot it.
-      hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+      hipError_t sync_r = sync_for_d2h_snapshot(stream);
       if (sync_r == hipSuccess)
         h = hrr_cap::writer::write_blob(dst, sizeBytes);
       else
@@ -735,7 +750,7 @@ hipError_t capture_hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src,
     hrr_cap::Hash128 h{0, 0};
     if (dst && sizeBytes > 0) {
       // Sync the stream so host dst is valid before we snapshot it.
-      hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+      hipError_t sync_r = sync_for_d2h_snapshot(stream);
       if (sync_r == hipSuccess)
         h = hrr_cap::writer::write_blob(dst, sizeBytes);
       else
@@ -1512,19 +1527,24 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
 }
 
 // ---------------------------------------------------------------------------
-// hipMemPoolSetAttribute — value is void* to a scalar; copy 8 bytes inline.
+// hipMemPoolSetAttribute: value is void* to a scalar, stored inline in the low
+// bytes of value_u64 (an int32_t for the three reuse policies, uint64_t otherwise).
 // ---------------------------------------------------------------------------
 
 hipError_t capture_hipMemPoolSetAttribute(hipMemPool_t mem_pool,
                                           hipMemPoolAttr attr,
                                           void* value) {
   hipError_t r = g_real_table.hipMemPoolSetAttribute_fn(mem_pool, attr, value);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemPoolSetAttribute a{};
   a.ret      = static_cast<int32_t>(r);
   a.mem_pool = reinterpret_cast<uint64_t>(mem_pool);
   a.attr     = static_cast<int32_t>(attr);
   a.value    = reinterpret_cast<uint64_t>(value);
-  if (value) std::memcpy(&a.value_u64, value, sizeof(a.value_u64));
+  const bool int_valued = attr == hipMemPoolReuseFollowEventDependencies ||
+                          attr == hipMemPoolReuseAllowOpportunistic ||
+                          attr == hipMemPoolReuseAllowInternalDependencies;
+  if (value) std::memcpy(&a.value_u64, value, int_valued ? sizeof(int32_t) : sizeof(a.value_u64));
   hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPOOLSETATTRIBUTE, &a.hdr, sizeof(a));
   return r;
 }
@@ -1536,9 +1556,10 @@ hipError_t capture_hipMemPoolSetAttribute(hipMemPool_t mem_pool,
 hipError_t capture_hipMemPoolCreate(hipMemPool_t* mem_pool,
                                     const hipMemPoolProps* pool_props) {
   hipError_t r = g_real_table.hipMemPoolCreate_fn(mem_pool, pool_props);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemPoolCreate a{};
   a.ret      = static_cast<int32_t>(r);
-  a.mem_pool = reinterpret_cast<uint64_t>(r == hipSuccess ? *mem_pool : nullptr);
+  a.mem_pool = reinterpret_cast<uint64_t>(*mem_pool);
   if (pool_props)
     std::memcpy(a.pool_props_bytes, pool_props, sizeof(a.pool_props_bytes));
   hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPOOLCREATE, &a.hdr, sizeof(a));
@@ -1549,9 +1570,15 @@ hipError_t capture_hipMemPoolCreate(hipMemPool_t* mem_pool,
 // hipMemcpy3D / hipMemcpy3DAsync — inline parms + H2D blob + D2H expected blob
 // ---------------------------------------------------------------------------
 
-// Helper: compute byte count from 3D extent
-static size_t memcpy3d_byte_count(const struct hipMemcpy3DParms* p) {
-  return p->extent.width * p->extent.height * p->extent.depth;
+// Helper: compute byte count from 3D extent into *bytes (0 for a zero extent).
+// Returns false when the product overflows size_t.
+static bool memcpy3d_byte_count(const struct hipMemcpy3DParms* p, size_t* bytes) {
+  const size_t w = p->extent.width, h = p->extent.height, d = p->extent.depth;
+  *bytes = 0;
+  if (w == 0 || h == 0 || d == 0) return true;
+  if (h > SIZE_MAX / w || d > SIZE_MAX / (w * h)) return false;
+  *bytes = w * h * d;
+  return true;
 }
 
 // Helper shared by all four 3D variants.
@@ -1566,7 +1593,20 @@ static void capture_memcpy3d_impl(
     return;
   }
   std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
-  size_t byte_count = memcpy3d_byte_count(p);
+  size_t byte_count = 0;
+  const bool sized = memcpy3d_byte_count(p, &byte_count);
+  const bool host_side = (p->kind == hipMemcpyHostToDevice && p->srcPtr.ptr) ||
+                         (p->kind == hipMemcpyDeviceToHost && p->dstPtr.ptr);
+  // The runtime validates with the same wrapping product, so it can accept an
+  // extent that overflows. Without a blob, replay cannot perform a host-side copy.
+  if (!sized && host_side) {
+    LogPrintfError(
+        "[HRR capture] 3D copy extent %zux%zux%zu overflows size_t, so no blob can be "
+        "sized for it: dropping the event and marking the capture INCOMPLETE.",
+        p->extent.width, p->extent.height, p->extent.depth);
+    hrr_cap::writer::mark_incomplete("3D copy extent overflows size_t");
+    return;
+  }
 
   if (p->kind == hipMemcpyHostToDevice && p->srcPtr.ptr && byte_count > 0) {
     // H2D: host source is valid at call time — no stream sync needed.
@@ -1577,7 +1617,7 @@ static void capture_memcpy3d_impl(
     // D2H: real call already completed (sync API) or stream sync done below;
     // host buffer now holds GPU result — capture it as the expected output.
     if (is_async && stream) {
-      hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+      hipError_t sync_r = sync_for_d2h_snapshot(stream);
       if (sync_r != hipSuccess) {
         LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — D2H 3D blob skipped",
                          sync_r);
@@ -1592,8 +1632,12 @@ static void capture_memcpy3d_impl(
   hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
 }
 
+// Success-gated like the 2D and driver-style copies below. A copy the runtime
+// rejected has an extent nothing validated, so blobbing w*h*d bytes of its host
+// side would read past the caller's buffer.
 hipError_t capture_hipMemcpy3D(const struct hipMemcpy3DParms* p) {
   hipError_t r = g_real_table.hipMemcpy3D_fn(p);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemcpy3D a{};
   a.ret = static_cast<int32_t>(r);
   capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3D, p, nullptr, false);
@@ -1602,6 +1646,7 @@ hipError_t capture_hipMemcpy3D(const struct hipMemcpy3DParms* p) {
 
 hipError_t capture_hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_t stream) {
   hipError_t r = g_real_table.hipMemcpy3DAsync_fn(p, stream);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemcpy3DAsync a{};
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
@@ -1611,6 +1656,7 @@ hipError_t capture_hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_
 
 hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p) {
   hipError_t r = g_real_table.hipMemcpy3D_spt_fn(p);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemcpy3D_spt a{};
   a.ret = static_cast<int32_t>(r);
   capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3D_SPT, p, nullptr, false);
@@ -1619,6 +1665,7 @@ hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p) {
 
 hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStream_t stream) {
   hipError_t r = g_real_table.hipMemcpy3DAsync_spt_fn(p, stream);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemcpy3DAsync_spt a{};
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
@@ -1691,7 +1738,7 @@ static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
       // is valid and waits on the blocking streams, which is what the app itself
       // would have to do before reading dstHost.
       if (is_async) {
-        hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+        hipError_t sync_r = sync_for_d2h_snapshot(stream);
         if (sync_r != hipSuccess) {
           LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d): D2H drv blob skipped",
                            sync_r);
@@ -1787,7 +1834,7 @@ hipError_t capture_hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy,
   // A D2H blob taken before the copy lands would record a stale expected
   // output, the same reason the async 3D spelling synchronises first.
   if (pCopy && pCopy->dstMemoryType == hipMemoryTypeHost && stream)
-    (void)g_real_table.hipStreamSynchronize_fn(stream);
+    (void)sync_for_d2h_snapshot(stream);
   capture_drvmemcpy2d_impl(a, HRR_API_HIPMEMCPYPARAM2DASYNC, pCopy);
   return r;
 }
@@ -1827,7 +1874,7 @@ static void capture_memcpy2d_impl(
     size_t n = memcpy2d_host_byte_count(dpitch, width, height);
     if (n > 0) {
       if (is_async && stream) {
-        hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+        hipError_t sync_r = sync_for_d2h_snapshot(stream);
         if (sync_r != hipSuccess) {
           LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — D2H 2D blob skipped",
                            sync_r);
@@ -1890,9 +1937,10 @@ hipError_t capture_hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
 hipError_t capture_hipArrayCreate(hipArray_t* pHandle,
                                   const HIP_ARRAY_DESCRIPTOR* pAllocateArray) {
   hipError_t r = g_real_table.hipArrayCreate_fn(pHandle, pAllocateArray);
+  if (r != hipSuccess) return r;
   hrr_args_hipArrayCreate a{};
   a.ret     = static_cast<int32_t>(r);
-  a.pHandle = reinterpret_cast<uint64_t>(r == hipSuccess ? *pHandle : nullptr);
+  a.pHandle = reinterpret_cast<uint64_t>(*pHandle);
   if (pAllocateArray)
     std::memcpy(a.array_desc_bytes, pAllocateArray, sizeof(a.array_desc_bytes));
   hrr_cap::writer::write_event_raw(HRR_API_HIPARRAYCREATE, &a.hdr, sizeof(a));
@@ -1902,9 +1950,10 @@ hipError_t capture_hipArrayCreate(hipArray_t* pHandle,
 hipError_t capture_hipArray3DCreate(hipArray_t* array,
                                     const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray) {
   hipError_t r = g_real_table.hipArray3DCreate_fn(array, pAllocateArray);
+  if (r != hipSuccess) return r;
   hrr_args_hipArray3DCreate a{};
   a.ret   = static_cast<int32_t>(r);
-  a.array = reinterpret_cast<uint64_t>(r == hipSuccess ? *array : nullptr);
+  a.array = reinterpret_cast<uint64_t>(*array);
   if (pAllocateArray)
     std::memcpy(a.array3d_desc_bytes, pAllocateArray, sizeof(a.array3d_desc_bytes));
   hrr_cap::writer::write_event_raw(HRR_API_HIPARRAY3DCREATE, &a.hdr, sizeof(a));
@@ -1918,6 +1967,7 @@ hipError_t capture_hipArray3DCreate(hipArray_t* array,
 hipError_t capture_hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
                                          const hipStreamAttrValue* value) {
   hipError_t r = g_real_table.hipStreamSetAttribute_fn(stream, attr, value);
+  if (r != hipSuccess) return r;
   hrr_args_hipStreamSetAttribute a{};
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
@@ -1935,6 +1985,7 @@ hipError_t capture_hipMemGetAllocationGranularity(size_t* granularity,
                                                    const hipMemAllocationProp* prop,
                                                    hipMemAllocationGranularity_flags option) {
   hipError_t r = g_real_table.hipMemGetAllocationGranularity_fn(granularity, prop, option);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemGetAllocationGranularity a{};
   a.ret         = static_cast<int32_t>(r);
   a.granularity = reinterpret_cast<uint64_t>(granularity);
@@ -1951,6 +2002,7 @@ hipError_t capture_hipMemGetAllocationGranularity(size_t* granularity,
 hipError_t capture_hipMemPoolSetAccess(hipMemPool_t mem_pool,
                                        const hipMemAccessDesc* desc_list, size_t count) {
   hipError_t r = g_real_table.hipMemPoolSetAccess_fn(mem_pool, desc_list, count);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemPoolSetAccess a{};
   a.ret      = static_cast<int32_t>(r);
   a.mem_pool = reinterpret_cast<uint64_t>(mem_pool);
@@ -1964,6 +2016,7 @@ hipError_t capture_hipMemPoolSetAccess(hipMemPool_t mem_pool,
 hipError_t capture_hipMemSetAccess(void* ptr, size_t size,
                                    const hipMemAccessDesc* desc, size_t count) {
   hipError_t r = g_real_table.hipMemSetAccess_fn(ptr, size, desc, count);
+  if (r != hipSuccess) return r;
   hrr_args_hipMemSetAccess a{};
   a.ret   = static_cast<int32_t>(r);
   a.ptr   = reinterpret_cast<uint64_t>(ptr);
@@ -2462,7 +2515,12 @@ void hip_capture_init() {
     }
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
-    if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
+    // A refused open leaves capture off, so take the shims out of the dispatch
+    // table too rather than leave every call going through them for nothing.
+    if (!hrr_cap::writer::open(hip_capture_output_dir())) {
+      hip_capture_uninstall();
+      return;
+    }
 
     hrr_cap::writer::set_capture_metadata_json(
         hrr_cap::metadata::collect_json());
