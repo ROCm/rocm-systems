@@ -126,11 +126,49 @@ def read_kpack_ref_marker(binary_path: Path) -> dict | None:
         return coff_impl(binary_path)
 
 
+def is_kpack_processed(binary_path: Path) -> bool:
+    """Check if a binary already carries a kpack marker section.
+
+    A marker (.rocm_kpack_ref for ELF, .kpackrf for COFF) is added by
+    kpack_offload_binary(), so its presence means the device code has already
+    been moved out into a .kpack archive. The .hip_fatbin/.hip_fat section
+    header is left behind by that transformation, so callers must not use the
+    section name alone to decide there is still something to split.
+
+    Fast-path: reads only headers, not the full binary.
+
+    Args:
+        binary_path: Path to binary
+
+    Returns:
+        True if the binary has already been kpack-processed, False otherwise
+        (including non-ELF/non-PE files).
+    """
+    try:
+        fmt = detect_binary_format(binary_path)
+    except UnsupportedBinaryFormat:
+        return False
+
+    if fmt == "elf":
+        from .elf.surgery import ElfSurgery
+
+        return ElfSurgery.has_kpack_ref_section(binary_path)
+    else:
+        from .coff.surgery import CoffSurgery
+
+        return CoffSurgery.has_kpack_ref_section(binary_path)
+
+
 def is_fat_binary(binary_path: Path) -> bool:
     """Check if a binary contains HIP fat binary sections.
 
     Fast-path: reads only headers (ELF section header table or PE section
     headers), not the full binary. Works for both ELF and PE/COFF.
+
+    An already kpack-processed binary reports False: it keeps its
+    .hip_fatbin/.hip_fat section header, but the device code has moved to a
+    .kpack archive and re-processing it would fail with
+    "Section '.rocm_kpack_ref' already exists".
 
     Args:
         binary_path: Path to binary
@@ -147,8 +185,12 @@ def is_fat_binary(binary_path: Path) -> bool:
     if fmt == "elf":
         from .elf.surgery import ElfSurgery
 
+        if ElfSurgery.has_kpack_ref_section(binary_path):
+            return False
         return ElfSurgery.has_fatbin_section(binary_path)
     else:
         from .coff.surgery import CoffSurgery
 
+        if CoffSurgery.has_kpack_ref_section(binary_path):
+            return False
         return CoffSurgery.has_fatbin_section(binary_path)

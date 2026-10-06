@@ -52,8 +52,10 @@ void Kernel::setWorkGroupInfo(const uint32_t privateSegmentSize,
     workGroupInfo_.availableVGPRs_ = 256;
     workGroupInfo_.preferredSizeMultiple_ = workGroupInfo_.wavefrontPerSIMD_ = 64;
   }
-  workGroupInfo_.maxDynamicSharedSizeBytes_ =
+  const int maxDynamicSharedSizeBytes =
       static_cast<int>(workGroupInfo_.availableLDSSize_ - workGroupInfo_.localMemSize_);
+  workGroupInfo_.maxDynamicSharedSizeBytes_ = maxDynamicSharedSizeBytes;
+  workGroupInfo_.kernelMaxDynamicSharedSizeBytes_ = maxDynamicSharedSizeBytes;
 }
 
 bool Kernel::setKernelCode(amd::hsa::loader::Symbol* sym, amd_kernel_code_t* akc) {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Teardown must retain the session while abandoned native owners still depend
 //! on its caller allocator. The raw resource owners below model native-failure
 //! retention, with test-only recovery so every callback allocation is reclaimed.
@@ -65,8 +67,8 @@ fn controller(allocator: Allocator) -> LinuxKfdDriver {
         allocator,
     )
     .unwrap();
-    assert!(controller.kfd.set(kfd).is_ok());
-    let bindings = controller.bindings.bindings.get_mut().unwrap();
+    assert!(controller.local.kfd.set(kfd).is_ok());
+    let bindings = controller.local.bindings.bindings.get_mut().unwrap();
     bindings.loss = Some(loss);
     bindings.devices.try_push(vm).unwrap();
     controller
@@ -78,7 +80,7 @@ fn forgotten_callback_resource_keeps_its_vm_and_instance_alive() {
     // SAFETY: Callback state remains stationary until all owners are reclaimed.
     let allocator = unsafe { callbacks.allocator() };
     let mut driver = controller(allocator);
-    let vm = driver.bindings.bindings.get_mut().unwrap().devices[0].clone();
+    let vm = driver.local.bindings.bindings.get_mut().unwrap().devices[0].clone();
     // This callback-owned resource has the same retained VM dependency as a
     // forgotten allocation or queue backing. No normal destructor owns it now.
     let abandoned = Owned::new(vm, allocator).unwrap().into_raw();
@@ -90,7 +92,7 @@ fn forgotten_callback_resource_keeps_its_vm_and_instance_alive() {
             ErrorKind::DriverContract
         );
         assert!(driver.closing);
-        let bindings = driver.bindings.bindings.get_mut().unwrap();
+        let bindings = driver.local.bindings.bindings.get_mut().unwrap();
         assert_eq!(bindings.devices.len(), 1);
         assert_eq!(Shared::strong_count(&bindings.devices[0]), 2);
         assert!(bindings.devices[0].render.is_some());
@@ -112,7 +114,7 @@ fn forgotten_callback_resource_keeps_its_vm_and_instance_alive() {
                 .load(Ordering::Relaxed),
             20
         );
-        assert!(driver.kfd.get().is_some());
+        assert!(driver.local.kfd.get().is_some());
         assert_eq!(callbacks.allocations.load(Ordering::Relaxed), allocations);
         assert_eq!(callbacks.frees.load(Ordering::Relaxed), frees);
     }
@@ -122,9 +124,10 @@ fn forgotten_callback_resource_keeps_its_vm_and_instance_alive() {
         drop(Owned::<Shared<DeviceVm>>::from_raw(abandoned));
     }
     driver.shutdown().unwrap();
-    assert!(driver.kfd.get().is_none());
+    assert!(driver.local.kfd.get().is_none());
     assert!(
         driver
+            .local
             .bindings
             .bindings
             .get_mut()
@@ -146,6 +149,7 @@ fn retained_loss_owner_preserves_the_remaining_shutdown_records() {
     let allocator = unsafe { callbacks.allocator() };
     let mut driver = controller(allocator);
     let loss = driver
+        .local
         .bindings
         .bindings
         .get_mut()
@@ -159,7 +163,7 @@ fn retained_loss_owner_preserves_the_remaining_shutdown_records() {
         driver.shutdown().unwrap_err().kind(),
         ErrorKind::DriverContract
     );
-    let bindings = driver.bindings.bindings.get_mut().unwrap();
+    let bindings = driver.local.bindings.bindings.get_mut().unwrap();
     assert!(bindings.devices.is_empty());
     assert_eq!(Shared::strong_count(bindings.loss.as_ref().unwrap()), 2);
     assert_eq!(
@@ -180,7 +184,7 @@ fn retained_loss_owner_preserves_the_remaining_shutdown_records() {
             .load(Ordering::Relaxed),
         20
     );
-    assert!(driver.kfd.get().is_some());
+    assert!(driver.local.kfd.get().is_some());
     let frees = callbacks.frees.load(Ordering::Relaxed);
     assert_eq!(
         driver.shutdown().unwrap_err().kind(),
@@ -205,27 +209,36 @@ fn retained_kfd_owner_prevents_success_after_other_cleanup_finishes() {
     // SAFETY: Callback state outlives the controller and recovered resource.
     let allocator = unsafe { callbacks.allocator() };
     let mut driver = controller(allocator);
-    let kfd = driver.kfd.get().unwrap().clone();
+    let kfd = driver.local.kfd.get().unwrap().clone();
     let abandoned = Owned::new(kfd, allocator).unwrap().into_raw();
     assert_eq!(
         driver.shutdown().unwrap_err().kind(),
         ErrorKind::DriverContract
     );
-    assert!(driver.bindings.bindings.get_mut().unwrap().loss.is_none());
-    assert_eq!(Shared::strong_count(driver.kfd.get().unwrap()), 2);
+    assert!(
+        driver
+            .local
+            .bindings
+            .bindings
+            .get_mut()
+            .unwrap()
+            .loss
+            .is_none()
+    );
+    assert_eq!(Shared::strong_count(driver.local.kfd.get().unwrap()), 2);
     let frees = callbacks.frees.load(Ordering::Relaxed);
     assert_eq!(
         driver.shutdown().unwrap_err().kind(),
         ErrorKind::DriverContract
     );
     assert_eq!(callbacks.frees.load(Ordering::Relaxed), frees);
-    assert!(driver.kfd.get().is_some());
+    assert!(driver.local.kfd.get().is_some());
     // SAFETY: This pointer still denotes the sole unconsumed raw resource owner.
     unsafe {
         drop(Owned::<Shared<sys::Kfd>>::from_raw(abandoned));
     }
     driver.shutdown().unwrap();
-    assert!(driver.kfd.get().is_none());
+    assert!(driver.local.kfd.get().is_none());
     drop(driver);
     assert_eq!(
         callbacks.allocations.load(Ordering::Relaxed),

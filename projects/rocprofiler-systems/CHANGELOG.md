@@ -13,6 +13,15 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   `ROCPROFSYS_HIPFILE_METRICS`. See
   [hipFile Infinity Storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
 
+### Resolved issues
+
+- Fixed a crash (`SIGSEGV`) in `rocprof-sys-instrument` when instrumenting Fortran+HIP
+  programs compiled with `gfortran -g` or `-g -O0`. gfortran encodes assumed-shape and
+  allocatable array bounds as DWARF location expression blocks rather than integer
+  constants at debug optimization levels; DynInst was treating these block-form
+  attributes as errors and dereferencing a null pointer in `parseSubrange()`.
+  Fixed in [ROCm/dyninst#33](https://github.com/ROCm/dyninst/pull/33).
+
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
 ### Changed

@@ -1,17 +1,82 @@
+// SPDX-License-Identifier: MIT
+
 //! Linux DMA-BUF import and export.
 //!
 //! DMA-BUF is a Linux file-descriptor transport, not a portable memory kind.
 //! This module keeps descriptor ownership, duplication, physical-identity
 //! checks, and KFD/DRM interop outside rocddi's platform-neutral memory model.
 
+use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd, RawFd};
 
 use crate::device::Device;
+use crate::driver::ProviderDriver;
 use crate::driver::linux_interop::LinuxMemoryInteropDriver;
 use crate::host_storage::{Buffer, Shared};
 use crate::memory::{Allocation, DeviceAccess, VirtualMemory};
 use crate::session::Session;
 use crate::{Error, ErrorKind};
+
+/// Closes a descriptor whose ownership the caller has transferred.
+///
+/// # Safety
+/// If `descriptor` names an open file, the caller must own it and must not
+/// use it after this call, including when close reports an error. An invalid
+/// descriptor is permitted and reported by the kernel.
+///
+/// # Errors
+/// Preserves the Linux close error, if any.
+#[allow(unsafe_code)]
+pub unsafe fn close_owned_descriptor(descriptor: RawFd) -> io::Result<()> {
+    // SAFETY: The caller transfers descriptor ownership to this operation.
+    unsafe { crate::driver::PlatformDriver::close_owned_descriptor(descriptor) }
+}
+
+/// Validates and duplicates a caller descriptor before constructing a Rust
+/// borrowed descriptor. The returned owner is independent of the caller's fd.
+///
+/// # Errors
+/// Reports an invalid or closed descriptor, or native descriptor exhaustion.
+pub fn duplicate_descriptor(descriptor: RawFd) -> Result<OwnedFd, Error> {
+    crate::driver::PlatformDriver::duplicate_descriptor(descriptor)
+}
+
+/// Returns the length of a borrowed descriptor without taking its ownership.
+///
+/// # Errors
+/// Reports an invalid descriptor or native metadata failure.
+pub fn descriptor_length(descriptor: RawFd) -> io::Result<u64> {
+    crate::driver::PlatformDriver::descriptor_length(descriptor)
+}
+
+/// Reads an entire fixed range from a borrowed descriptor without changing its
+/// shared file position.
+///
+/// # Errors
+/// Reports an invalid descriptor, short read, or native read failure.
+pub fn read_descriptor_exact_at(
+    descriptor: RawFd,
+    buffer: &mut [u8],
+    offset: u64,
+) -> io::Result<()> {
+    crate::driver::PlatformDriver::read_descriptor_exact_at(descriptor, buffer, offset)
+}
+
+/// Reads from a borrowed descriptor at a fixed offset.
+///
+/// # Errors
+/// Preserves the Linux read error, including its errno.
+pub fn read_descriptor_at(descriptor: RawFd, buffer: &mut [u8], offset: i64) -> io::Result<usize> {
+    crate::driver::PlatformDriver::read_descriptor_at(descriptor, buffer, offset)
+}
+
+/// Writes to a borrowed descriptor at a fixed offset.
+///
+/// # Errors
+/// Preserves the Linux write error, including its errno.
+pub fn write_descriptor_at(descriptor: RawFd, buffer: &[u8], offset: i64) -> io::Result<usize> {
+    crate::driver::PlatformDriver::write_descriptor_at(descriptor, buffer, offset)
+}
 
 /// Opaque 256-bit KFD IPC identifier for one shareable allocation.
 ///
@@ -136,11 +201,11 @@ pub fn import_virtual_memory(
 ) -> Result<VirtualMemory, Error> {
     let owner = crate::host_storage::Shared::try_new_uninit(session.driver().allocator())?;
     let inner = session.driver().import_virtual_memory(descriptor)?;
-    let info = inner.info();
     Ok(VirtualMemory {
-        driver: session.driver().clone(),
-        inner: owner.write(inner),
-        info,
+        inner: crate::memory::ProviderVirtualMemory::new(
+            session.driver().clone(),
+            owner.write(inner),
+        ),
     })
 }
 
@@ -149,7 +214,7 @@ pub fn import_virtual_memory(
 /// # Errors
 /// Reports descriptor duplication or backing-validation failures.
 pub fn export_virtual_memory(memory: &VirtualMemory) -> Result<DmaBuf, Error> {
-    crate::driver::PlatformDriver::export_virtual_memory(&memory.inner)
+    crate::driver::PlatformDriver::export_virtual_memory(memory.inner.native())
 }
 
 /// Imports one same-provider system allocation from a borrowed DMA-BUF.
@@ -178,8 +243,10 @@ pub fn import_dma_buf(
         alignment,
         permissions,
     )?;
-    let info = inner.cached_info();
-    Ok(Allocation { inner, info })
+    Ok(Allocation::from_native(
+        inner,
+        device.endpoint.provider_instance,
+    ))
 }
 
 /// Whether an activated Linux GPU can attach a qualified same-device GTT
@@ -233,8 +300,10 @@ pub fn import_system_dma_buf(
         alignment,
         permissions,
     )?;
-    let info = inner.cached_info();
-    Ok(Allocation { inner, info })
+    Ok(Allocation::from_native(
+        inner,
+        session.driver().provider_instance(),
+    ))
 }
 
 /// Imports a Linux graphics DMA-BUF into the common address range of `devices`.
@@ -273,8 +342,10 @@ pub fn import_graphics_dma_buf(
         session
             .driver()
             .import_graphics_dma_buf(states.as_slice(), descriptor, size_hint)?;
-    let info = inner.cached_info();
-    Ok(Allocation { inner, info })
+    Ok(Allocation::from_native(
+        inner,
+        session.driver().provider_instance(),
+    ))
 }
 
 /// Exports a live allocation as an independently owned DMA-BUF.
@@ -283,7 +354,7 @@ pub fn import_graphics_dma_buf(
 /// Returns a native error if Linux cannot export the allocation, or a driver
 /// contract error if the resulting file does not describe the same backing.
 pub fn export_dma_buf(allocation: &Allocation) -> Result<DmaBuf, Error> {
-    crate::driver::PlatformDriver::export_dma_buf(&allocation.inner)
+    crate::driver::PlatformDriver::export_dma_buf(allocation.inner.native())
 }
 
 /// Imports one KFD IPC allocation and maps it to the requested GPU devices.
@@ -331,8 +402,10 @@ pub fn import_kfd_ipc_memory(
         handle,
         size,
     )?;
-    let info = inner.cached_info();
-    Ok(Allocation { inner, info })
+    Ok(Allocation::from_native(
+        inner,
+        session.driver().provider_instance(),
+    ))
 }
 
 /// Exports a live native allocation as a process-independent KFD IPC handle.
@@ -342,7 +415,7 @@ pub fn import_kfd_ipc_memory(
 /// Rejects unsupported backing or an unavailable allocation and reports the
 /// native export failure without changing ownership.
 pub fn export_kfd_ipc_memory(allocation: &Allocation) -> Result<KfdIpcMemoryHandle, Error> {
-    crate::driver::PlatformDriver::export_kfd_ipc_memory(&allocation.inner)
+    crate::driver::PlatformDriver::export_kfd_ipc_memory(allocation.inner.native())
 }
 
 /// Applies Linux KFD SVM attributes to a process virtual-address range.
@@ -377,10 +450,25 @@ pub fn get_kfd_svm_attributes(
         .get_kfd_svm_attributes(address, size, attributes)
 }
 
-/// Transfers an installed KFD signal-event page to process-lifetime ownership.
-///
-/// # Errors
-/// Rejects an allocation that is not a live, host-visible KFD event page.
-pub fn retain_kfd_signal_event_page_for_process(mut allocation: Allocation) -> Result<(), Error> {
-    crate::driver::PlatformDriver::retain_kfd_signal_event_page(&mut allocation.inner)
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod descriptor_tests {
+    use super::*;
+    use std::os::fd::AsRawFd;
+
+    #[test]
+    fn duplicate_rejects_closed_descriptors_and_retains_its_own_owner() {
+        assert_eq!(
+            duplicate_descriptor(-1).unwrap_err().kind(),
+            ErrorKind::InvalidArgument
+        );
+        let source = std::fs::File::open("/dev/null").unwrap();
+        let duplicate = duplicate_descriptor(source.as_raw_fd()).unwrap();
+        drop(source);
+        assert_eq!(
+            duplicate_descriptor(i32::MAX).unwrap_err().kind(),
+            ErrorKind::InvalidArgument
+        );
+        assert!(std::fs::File::from(duplicate).metadata().is_ok());
+    }
 }

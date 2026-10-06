@@ -37,7 +37,7 @@ namespace kfd
 // expose the stream-ABI dispatch-log contract (dispatch_log_stream_format).
 // Pure filesystem scan, parameterized on the root for testability. CPU-only
 // nodes (gpu_id == 0) and nodes exposing only the legacy GFX9 dispatch_log_format
-// are excluded -- the stream reader speaks stream ABI v3 and must not treat the
+// are excluded -- the stream reader speaks stream ABI v4 and must not treat the
 // retired per-record format selector as support.
 std::unordered_set<uint32_t>
 discover_stream_dispatch_log_gpus(const char* nodes_path);
