@@ -363,13 +363,15 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           throw std::runtime_error("PM4 COPY_DATA write failed");
         break;
       }
-      case Pm4Opcode::WaitRegMem: {
-        require(6);
+      case Pm4Opcode::WaitRegMem:
+      case Pm4Opcode::WaitRegMem64: {
+        const bool wide = opcode == uint32_t(Pm4Opcode::WaitRegMem64);
+        require(wide ? 8 : 6);
         context.flush_caches();
-        uint32_t value = 0;
+        uint64_t value = 0;
         const uint32_t space = (words[0] >> 4) & 3;
         const uint32_t operation = (words[0] >> 6) & 3;
-        if (space == 0 && operation == 1 &&
+        if (!wide && space == 0 && operation == 1 &&
             (context.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
              context.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
              context.arch == ROCJITSU_CODE_ARCH_CDNA3 || context.arch == ROCJITSU_CODE_ARCH_CDNA4 ||
@@ -383,7 +385,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           value = words[3];
         } else if (space == 1 && (operation == 0 || operation == 3)) {
           const auto loaded =
-              access->read(address(1), {reinterpret_cast<std::byte *>(&value), sizeof(value)});
+              access->read(address(1), {reinterpret_cast<std::byte *>(&value), wide ? 8u : 4u});
           if (loaded == VmAccessOutcome::Unavailable) {
             ib.address -= count * 4;
             ib.dwords += count;
@@ -395,8 +397,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         } else {
           throw std::runtime_error("unsupported WAIT_REG_MEM register space or operation");
         }
-        value &= words[4];
-        uint32_t reference = words[3] & words[4];
+        const uint64_t mask = wide ? address(5) : words[4];
+        value &= mask;
+        const uint64_t reference = (wide ? address(3) : words[3]) & mask;
         bool ready;
         switch (words[0] & 7) {
         case 0:
