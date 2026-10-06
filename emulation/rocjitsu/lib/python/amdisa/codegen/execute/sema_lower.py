@@ -127,6 +127,9 @@ class LoweringContext:
     true16_dst_select: str | None = None
     true16_src_selects: dict[int, str] = field(default_factory=dict)
     true16_vop3_opsel: str | None = None
+    # 32-bit-lane format (F16 or F32) whose sign bit ABS/NEG modify in
+    # integer-typed source reads. None ignores them, as integer operations do.
+    source_modifier_bits: str | None = None
     fp8_byte_select: str | None = None
     fp8_decode_e5m3_select: str | None = None
     arch_name: str = ''
@@ -2373,8 +2376,15 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
 
     src_child = node.children[1]
     src_ty = src_child.ty
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    neg_field = 'inst_.neg' if has_neg else '0u'
     if src_ty and src_ty.base in ('I', 'U'):
-        return src_expr
+        if ctx.source_modifier_bits is None:
+            return src_expr
+        return (
+            f'amdgpu::source_modifier::apply<amdgpu::fp_format::{ctx.source_modifier_bits}>('
+            f'static_cast<uint32_t>({src_expr}), {src_idx}, {abs_field}, {neg_field})'
+        )
 
     is_64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_64 else 'float'
@@ -2390,8 +2400,6 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
         init = f'std::bit_cast<{fp_type}>({src_expr})'
     else:
         init = src_expr
-    abs_field = 'inst_.abs' if has_abs else '0u'
-    neg_field = 'inst_.neg' if has_neg else '0u'
     return (
         f'[&]() {{ {fp_type} sv = {init};'
         f' return amdgpu::source_modifier::apply_to_float(sv, {src_idx}, '

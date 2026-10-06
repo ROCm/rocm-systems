@@ -1807,7 +1807,8 @@ template <typename Inst> [[nodiscard]] bool try_execute_cndmask_vop3_simd(Inst &
 /// dst (and each source) is the low 16 bits of the 32-bit VGPR; the high 16
 /// are zeroed (matching the scalar body's `uint32_t(uint16_t(...))` pattern).
 /// The select shape is identical to the b32 form — the only addition is a
-/// `& 0xFFFFu` mask before the masked store. RDNA3+; CDNA4 does not decode.
+/// `& 0xFFFFu` mask before the masked store. ABS/NEG modify each half's sign
+/// bit. RDNA3+; CDNA4 does not decode.
 template <typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_cndmask_b16_vop3_simd(Inst &inst, Wavefront &wf) {
@@ -1827,8 +1828,10 @@ template <typename Inst>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = src0.template load_native<T>(base);
-    const auto b = src1.template load_native<T>(base);
+    const auto a = source_modifier::apply<fp_format::F16>(src0.template load_native<T>(base), 0,
+                                                          inst.inst_.abs, inst.inst_.neg);
+    const auto b = source_modifier::apply<fp_format::F16>(src1.template load_native<T>(base), 1,
+                                                          inst.inst_.abs, inst.inst_.neg);
     const uint64_t sel_bits = (sel64 >> base) & chunk_full;
     auto r = a;
     util::stdx::where(util::simd_mask_from_bits<util::native<T>>(sel_bits), r) = b;

@@ -14,6 +14,7 @@ from amdisa.sema_ast import (
     SemaNodeKind,
     SemaType,
 )
+from amdisa.sema_enrich import enrich_block
 from amdisa.codegen.execute.sema_lower import (
     _INLINE_BINARY_OPS,
     _INLINE_TERNARY_OPS,
@@ -609,6 +610,49 @@ class TestLowerVectorAdd:
             'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, src_half, true);'
             in result
         )
+
+    @pytest.mark.parametrize('modifier_bits', [None, 'F16'])
+    def test_cndmask_b16_source_modifiers_flip_half_sign_bits(self, modifier_bits):
+        u16 = SemaType('U', 16)
+        cond = SemaNode(
+            SemaNodeKind.ARRAYDEREF,
+            ty=SemaType.U1,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='VCC', ty=SemaType.U64),
+                SemaNode(SemaNodeKind.ID, id_name='laneId', ty=SemaType.U32),
+            ),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), u16),
+                SemaNode(
+                    SemaNodeKind.TERNARY,
+                    ty=u16,
+                    children=(cond, _cast(_src(1), u16), _cast(_src(0), u16)),
+                ),
+            ),
+        )
+        block = enrich_block(
+            SemaBlock('V_CNDMASK_B16', ExecModel.VECTOR, body),
+            enc_field_names=frozenset({'neg', 'abs'}),
+        )
+        ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR, source_modifier_bits=modifier_bits
+        )
+
+        result = lower_sema_block(block, ctx)
+
+        # Integer selects ignore ABS/NEG unless the generator names the format
+        # whose sign bit they modify. No float conversion is involved.
+        helper = 'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+        assert 'apply_to_float' not in result
+        if modifier_bits is None:
+            assert helper not in result
+        else:
+            assert result.count(helper) == 2
+            assert ', 0, inst_.abs, inst_.neg)' in result
+            assert ', 1, inst_.abs, inst_.neg)' in result
 
     def test_true16_bf16_destination_converts_float_result(self):
         body = SemaNode(

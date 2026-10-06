@@ -3453,6 +3453,8 @@ def _local_coverage_probe(
                 True,
                 3,
                 '[&](auto a, auto b, uint32_t base) { '
+                'a = amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(a, 0, inst.inst_.abs, inst.inst_.neg); '
+                'b = amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(b, 1, inst.inst_.abs, inst.inst_.neg); '
                 'const uint64_t mask = amdgpu::read_wave_mask_scalar(inst.src2, wf); '
                 'util::native<uint32_t> choose([&](auto i) { return uint32_t((mask >> (base + i)) & 1u); }); '
                 'util::stdx::where(choose != 0u, a) = b; return a; }',

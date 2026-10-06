@@ -7866,6 +7866,10 @@ void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<2, false, true, 3>(
           inst, wf, [&](auto a, auto b, uint32_t base) {
+            a = amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(a, 0, inst.inst_.abs,
+                                                                       inst.inst_.neg);
+            b = amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(b, 1, inst.inst_.abs,
+                                                                       inst.inst_.neg);
             const uint64_t mask = amdgpu::read_wave_mask_scalar(inst.src2, wf);
             util::native<uint32_t> choose(
                 [&](auto i) { return uint32_t((mask >> (base + i)) & 1u); });
@@ -7882,10 +7886,14 @@ void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
               ((amdgpu::read_wave_mask_scalar(src2, wf) >> lane) & 1)
-                  ? static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))
-                  : static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))))));
+                  ? amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(
+                        static_cast<uint32_t>(static_cast<uint16_t>(
+                            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))),
+                        1, inst_.abs, inst_.neg)
+                  : amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(
+                        static_cast<uint32_t>(static_cast<uint16_t>(
+                            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))),
+                        0, inst_.abs, inst_.neg)))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -7912,6 +7920,10 @@ RJ_NOINLINE void VCndmaskB16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<2, false, true, 3>(
           inst, wf, [&](auto a, auto b, uint32_t base) {
+            a = amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(a, 0, inst.inst_.abs,
+                                                                       inst.inst_.neg);
+            b = amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(b, 1, inst.inst_.abs,
+                                                                       inst.inst_.neg);
             const uint64_t mask = amdgpu::read_wave_mask_scalar(inst.src2, wf);
             util::native<uint32_t> choose(
                 [&](auto i) { return uint32_t((mask >> (base + i)) & 1u); });
@@ -7928,10 +7940,14 @@ RJ_NOINLINE void VCndmaskB16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
               ((amdgpu::read_wave_mask_scalar(src2, wf) >> lane) & 1)
-                  ? static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))
-                  : static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))))));
+                  ? amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(
+                        static_cast<uint32_t>(static_cast<uint16_t>(
+                            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))),
+                        1, inst_.abs, inst_.neg)
+                  : amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(
+                        static_cast<uint32_t>(static_cast<uint16_t>(
+                            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))),
+                        0, inst_.abs, inst_.neg)))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }

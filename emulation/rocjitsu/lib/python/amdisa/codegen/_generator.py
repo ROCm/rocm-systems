@@ -6414,6 +6414,12 @@ class CodeGenerator:
                     if 'omod' in inst_fields and not is_f32_to_integer:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
+                elif is_vop3 and cls == 'vector_cndmask':
+                    from amdisa.sema_enrich import enrich_block
+
+                    # The select has source modifiers but no output modifiers.
+                    ef = {'neg', 'abs'} if has_abs else {'neg'}
+                    sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand
                 # bit widths (op_widths) subsume the old src_width/dst_width name
                 # heuristics: mixed-width instructions (e.g. the f64<->32-bit
@@ -6529,6 +6535,8 @@ class CodeGenerator:
                             f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, (({selector_read} >> lane) & 1) ? src1_value : src0_value);\n'
                             '  }\n'
                         )
+                    # ABS/NEG modify the selected half's sign bit, as for F16.
+                    lctx.source_modifier_bits = 'F16'
                 true16_special_vop3_ops = {
                     'V_ASHRREV_I16': (
                         2,
