@@ -1172,6 +1172,56 @@
           "env_variables": {
             "NCCL_RMA_IB_WR_BATCHSIZE": "2"
           }
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_SendQueueOversubscribe",
+          "description": "Twice the RMA send queue's worth of 32-WR putSignals without test(): overflow is fatal for the context, so rejected posts must return no request and every accepted request must end in success or an error rather than hang",
+          "test_filter": "RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
+          "env_variables": {
+            "RCCL_MSEG_SQ_STRESS": "1"
+          }
+        }
+      ]
+    },
+    "net_ib_rma_multisegment_scale_1x2": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "description": "Post-path RMA multi-segment tests with 2 ranks on one node. The tests take any rank count, so more scale points only need another config with different num_nodes/num_ranks.",
+      "env_variables": {
+        "NCCL_NET": "ib",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DEBUG_SUBSYS": "ALL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_RMA_MultiSeg_PostPath_1x2",
+          "description": "Post-path, all-pairs and many-to-one tests on 2 ranks of one node",
+          "test_filter": "RmaMultiSegmentPostMPITest.*"
+        }
+      ]
+    },
+    "net_ib_rma_multisegment_scale_2x4": {
+      "extends": "net_ib_base",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4,
+      "timeout": 600,
+      "description": "Post-path RMA multi-segment tests with 4 ranks on each of 2 nodes: 7 queue pairs per rank in the all-pairs test and 7 sources in the many-to-one test.",
+      "env_variables": {
+        "NCCL_NET": "ib",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DEBUG_SUBSYS": "ALL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_RMA_MultiSeg_PostPath_2x4",
+          "description": "Post-path, all-pairs and many-to-one tests on 8 ranks across 2 nodes",
+          "test_filter": "RmaMultiSegmentPostMPITest.*"
         }
       ]
     },
@@ -1823,6 +1873,18 @@
       "name": "NET IB - RMA Multi-Segment DeepEP Hybrid (8-rank)",
       "description": "DeepEP hybrid elastic windows with one imported CPU segment per local rank; needs 4 ranks on each of 2 nodes",
       "config": "net_ib_rma_multisegment_hybrid",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - RMA Multi-Segment Post Path (1 node x 2 ranks)",
+      "description": "Multi-segment RMA post-path tests on 2 ranks sharing one node",
+      "config": "net_ib_rma_multisegment_scale_1x2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - RMA Multi-Segment Post Path (2 nodes x 4 ranks)",
+      "description": "Multi-segment RMA post-path tests on 8 ranks across 2 nodes",
+      "config": "net_ib_rma_multisegment_scale_2x4",
       "enabled": true
     },
     {

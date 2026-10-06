@@ -1718,6 +1718,8 @@ protected:
         bool     aggregate = false;
         void*    sigMh     = nullptr;  // nullptr selects sig_
         uint64_t sigOff    = 0;
+        uint64_t sigAdd    = 0;        // 0 selects NCCL_NET_SIGNAL_OP_INC
+        int      peer      = -1;       // -1 selects SendPeer()
     };
 
     struct Region
@@ -1725,6 +1727,7 @@ protected:
         uint64_t dstOff = 0;
         size_t   size   = 0;
         uint64_t srcOff = 0;
+        int      seed   = -1;  // -1 selects Expect::seed
     };
 
     // Window bytes expected after a round: `regions` copied from a source filled
@@ -1737,7 +1740,10 @@ protected:
         int                 seed   = 0;
     };
 
-    static constexpr uint8_t kSentinel = 0xD3;
+    static constexpr uint8_t kSentinel       = 0xD3;
+    static constexpr int     kIbRequestSlots = 256;  // NET_IB_MAX_REQUESTS
+    // Send-queue depth of an RMA queue pair (connect.cc).
+    static constexpr int     kSendQueueWrs   = 2 * kIbRequestSlots + NCCL_RMA_MAX_SIGNAL_WRS;
 
     int numContexts_ = 1;
     int GetNumContexts() const override { return numContexts_; }
@@ -1839,25 +1845,25 @@ protected:
         return op;
     }
 
-    // Puts and signals go to SendPeer(); gets read from it.
     ncclResult_t Post(const Op& op, void** req)
     {
         const uint32_t flags = op.aggregate ? ncclRmaOptFlagsAggregateRequests : ncclRmaOptFlagsDefault;
         const Chain& c = op.chain;
+        const uint32_t peer = op.peer < 0 ? SendPeer() : op.peer;
         *req = nullptr;
         switch (op.kind)
         {
         case OpKind::Put:
             return rma_->iput(rmaCtx_, op.ctx, c.localOff, op.localMh, c.size,
-                              c.remoteOff, op.remoteMh, SendPeer(), flags, req);
+                              c.remoteOff, op.remoteMh, peer, flags, req);
         case OpKind::Get:
             return rma_->iget(rmaCtx_, op.ctx, c.remoteOff, op.remoteMh, c.size,
-                              c.localOff, op.localMh, SendPeer(), flags, req);
+                              c.localOff, op.localMh, peer, flags, req);
         case OpKind::PutSignal:
             return rma_->iputSignal(rmaCtx_, op.ctx, c.localOff, op.localMh, c.size,
-                                    c.remoteOff, op.remoteMh, SendPeer(), op.sigOff,
-                                    op.sigMh ? op.sigMh : sigMh_,
-                                    /*signalValue=*/0, NCCL_NET_SIGNAL_OP_INC,
+                                    c.remoteOff, op.remoteMh, peer, op.sigOff,
+                                    op.sigMh ? op.sigMh : sigMh_, op.sigAdd,
+                                    op.sigAdd ? NCCL_NET_SIGNAL_OP_ADD : NCCL_NET_SIGNAL_OP_INC,
                                     /*isStrongSignal=*/false, flags, req);
         }
         return ncclInternalError;
@@ -1896,6 +1902,20 @@ protected:
         return false;
     }
 
+    // Like PollUntilDone, but returns test()'s error, or ncclInProgress on timeout.
+    ncclResult_t PollStatus(void* req, int timeoutMs)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+        for (;;)
+        {
+            int done = 0;
+            const ncclResult_t r = rma_->test(collComm_, req, &done);
+            if (r != ncclSuccess || done) return r;
+            if (std::chrono::steady_clock::now() >= deadline) return ncclInProgress;
+            std::this_thread::sleep_for(std::chrono::microseconds(kPollSleepUs));
+        }
+    }
+
     // Deregisters now rather than in TearDown.
     ncclResult_t DeregMr(void* mh)
     {
@@ -1909,8 +1929,11 @@ protected:
     {
         std::vector<uint8_t> want(e.total, kSentinel), got(e.total);
         for (const Region& r : e.regions)
+        {
+            const int seed = r.seed < 0 ? e.seed : r.seed;
             for (size_t i = 0; i < r.size; i++)
-                want[r.dstOff + i] = static_cast<uint8_t>((e.seed + r.srcOff + i) % 256);
+                want[r.dstOff + i] = static_cast<uint8_t>((seed + r.srcOff + i) % 256);
+        }
         ASSERT_EQ(hipSuccess, hipMemcpy(got.data(), e.window, e.total, hipMemcpyDeviceToHost));
         const auto diff = std::mismatch(want.begin(), want.end(), got.begin());
         EXPECT_TRUE(diff.first == want.end())
@@ -2211,7 +2234,6 @@ TEST_F(RmaMultiSegmentPostMPITest, RejectedOpsLeaveNoSlotOrSequenceGap)
     if (HasFailure()) return;
     if (!skip.empty()) GTEST_SKIP() << skip;
 
-    constexpr int kIbRequestSlots = 256;  // NET_IB_MAX_REQUESTS
     constexpr int kBurst          = 64;
     const bool    rejecter        = worldRank_ % 2 == 0;
     const size_t  total           = src_->totalSize;
@@ -2303,6 +2325,189 @@ TEST_F(RmaMultiSegmentPostMPITest, RegistrationChurnKeepsTransfersIntact)
         EXPECT_EQ(ncclSuccess, DeregMr(dstMh));
         if (HasFailure()) return;
     }
+}
+
+// Only a chain's last WR is signaled, so its WRs hold send-queue slots until a
+// test() polls the CQ. Max-length putSignals filling the queue must all land.
+TEST_F(RmaMultiSegmentPostMPITest, IPutSignalFillsSendQueueWithoutTest)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const int maxWrs = 2 * src_->nSegments - 1;
+    const std::vector<Chain> chains = PlanChains(*src_, {maxWrs});
+    ASSERT_EQ(chains.size(), 1u);
+    const int inflight = kSendQueueWrs / (maxWrs + 1);
+    const std::vector<Op> ops(inflight, MakeOp(OpKind::PutSignal, srcMh_, dstMh_, chains[0], 0, false));
+    RunAndVerify(ops, WaitOrderFor(ops.size(), WaitOrder::Reversed), {IntoDst(chains)},
+                 static_cast<uint64_t>(inflight));
+}
+
+// Opt-in (RCCL_MSEG_SQ_STRESS=1): twice the send queue's worth of putSignals
+// without test(). Overflow is fatal for the context, as upstream: posts fail
+// without a request and every accepted request ends, in success or an error.
+TEST_F(RmaMultiSegmentPostMPITest, IPutSignalSendQueueOversubscribe)
+{
+    if (SyncSkip(MPIHelpers::getEnvParam<int>("RCCL_MSEG_SQ_STRESS", 0) == 0))
+        GTEST_SKIP() << "set RCCL_MSEG_SQ_STRESS=1 to flood the RMA send queue";
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    constexpr int kWaitMs = 15000;
+    const int maxWrs = 2 * src_->nSegments - 1;
+    const std::vector<Chain> chains = PlanChains(*src_, {maxWrs});
+    ASSERT_EQ(chains.size(), 1u);
+    const Op op = MakeOp(OpKind::PutSignal, srcMh_, dstMh_, chains[0], 0, false);
+    Barrier();
+
+    int rejected = 0, failed = 0;
+    std::vector<void*> reqs;
+    for (int i = 0; i < 2 * kSendQueueWrs / (maxWrs + 1); i++)
+    {
+        void* req = nullptr;
+        if (Post(op, &req) == ncclSuccess)
+        {
+            if (req) reqs.push_back(req);
+            else ADD_FAILURE() << "accepted post " << i << " returned no request";
+            continue;
+        }
+        rejected++;
+        if (req) ADD_FAILURE() << "rejected post " << i << " returned a request";
+    }
+    for (size_t i = 0; i < reqs.size(); i++)
+    {
+        const ncclResult_t r = PollStatus(reqs[i], kWaitMs);
+        if (r == ncclInProgress) ADD_FAILURE() << "request " << i << " hung after the flood";
+        failed += r != ncclSuccess && r != ncclInProgress;
+    }
+    TEST_INFO("send-queue flood: %zu accepted, %d rejected, %d ended in an error",
+              reqs.size(), rejected, failed);
+
+    EXPECT_TRUE(MPIHelpers::allRanksTrue(!HasFailure())) << "flood hung or misreported on some rank";
+    Barrier();
+}
+
+// Every rank puts its slot into every peer and gets every peer's slot, driving
+// N-1 queue pairs at once. Slots of total/N bytes cut segments at N-dependent offsets.
+TEST_F(RmaMultiSegmentPostMPITest, AllPairsPutAndGetLandInOwnSlots)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+    MultiSegmentVmmBuffer* getBuf = AllocSym(NCCL_RMA_MAX_SEGMENTS, kSegRequestBytes);
+    if (SyncSkip(getBuf == nullptr)) GTEST_SKIP() << "get window allocation unavailable";
+    void* getMh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(getBuf->ptr, getBuf->totalSize, &getMh));
+
+    const size_t slot = src_->totalSize / worldSize_ / 8 * 8;
+    auto slotOf = [&](int r) { return Chain{r * slot, r * slot, slot}; };
+    for (bool aggregate : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate);
+        std::vector<Op> ops;
+        Expect intoDst{dst_->ptr, dst_->totalSize, {}, 0};
+        Expect intoGet{getBuf->ptr, getBuf->totalSize, {}, 0};
+        for (int k = 1; k < worldSize_; k++)
+        {
+            const int to   = (worldRank_ + k) % worldSize_;
+            const int from = (worldRank_ + worldSize_ - k) % worldSize_;
+            Op put = MakeOp(OpKind::Put, srcMh_, dstMh_, slotOf(worldRank_), 0, aggregate);
+            Op get = MakeOp(OpKind::Get, getMh, srcMh_, slotOf(to), 0, aggregate);
+            put.peer = get.peer = to;
+            ops.push_back(put);
+            ops.push_back(get);
+            Region in = PutRegion(slotOf(from));
+            in.seed = SeedOf(from);
+            intoDst.regions.push_back(in);
+            Region got = GetRegion(slotOf(to));
+            got.seed = SeedOf(to);
+            intoGet.regions.push_back(got);
+        }
+        RunAndVerify(ops, WaitOrderFor(ops.size(), WaitOrder::Shuffled), {intoDst, intoGet}, 0);
+        if (HasFailure()) return;
+    }
+}
+
+// Every other rank signals one root through a multi-segment signal window: its
+// own word in segment (rank % nSeg) and one word all of them add to.
+TEST_F(RmaMultiSegmentPostMPITest, ManyToOneSignalsIntoMultiSegmentWindow)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+    MultiSegmentVmmBuffer* sw = AllocSym(4, kSegRequestBytes);
+    if (SyncSkip(sw == nullptr)) GTEST_SKIP() << "multi-segment signal window allocation unavailable";
+    FillSentinel(sw->ptr, sw->totalSize, 0);
+    void* swMh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(sw->ptr, sw->totalSize, &swMh));
+
+    constexpr int    kRounds = 8;
+    constexpr int    kRoot   = 0;
+    const size_t     seg     = sw->segSize;
+    const uint64_t   shared  = seg + seg / 2;
+    const size_t     slot    = src_->totalSize / worldSize_ / 8 * 8;
+    auto ownOff = [&](int r) { return static_cast<uint64_t>(r % sw->nSegments) * seg + 8 * r; };
+    auto slotOf = [&](int r) { return Chain{r * slot, r * slot, slot}; };
+    FillSentinel(dst_->ptr, dst_->totalSize, kSentinel);
+    Barrier();
+
+    bool ok = true;
+    if (worldRank_ != kRoot)
+    {
+        std::vector<void*> reqs;
+        for (int i = 0; i < kRounds; i++)
+        {
+            Op own = MakeOp(OpKind::PutSignal, srcMh_, dstMh_, slotOf(worldRank_), 0, i % 2 == 1);
+            own.peer   = kRoot;
+            own.sigMh  = swMh;
+            own.sigOff = ownOff(worldRank_);
+            Op add = MakeOp(OpKind::PutSignal, srcMh_, dstMh_, Chain{}, 0, i % 2 == 1);
+            add.peer   = kRoot;
+            add.sigMh  = swMh;
+            add.sigOff = shared;
+            add.sigAdd = static_cast<uint64_t>(worldRank_ + 1);
+            for (const Op& op : {own, add})
+            {
+                void* req = nullptr;
+                ok = Post(op, &req) == ncclSuccess && req && ok;
+                if (req) reqs.push_back(req);
+            }
+        }
+        for (size_t i : WaitOrderFor(reqs.size(), WaitOrder::Shuffled))
+            ok = PollUntilDone(reqs[i]) && ok;
+    }
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(ok)) << "post or wait failed on at least one rank";
+    Barrier();
+
+    if (worldRank_ == kRoot)
+    {
+        Expect payload{dst_->ptr, dst_->totalSize, {}, 0};
+        uint64_t sum = 0;
+        std::vector<uint64_t> words(sw->totalSize / sizeof(uint64_t));
+        ASSERT_EQ(hipSuccess, hipMemcpy(words.data(), sw->ptr, sw->totalSize, hipMemcpyDeviceToHost));
+        for (int r = 0; r < worldSize_; r++)
+        {
+            if (r == kRoot) continue;
+            Region in = PutRegion(slotOf(r));
+            in.seed = SeedOf(r);
+            payload.regions.push_back(in);
+            sum += static_cast<uint64_t>(r + 1);
+            EXPECT_EQ(words[ownOff(r) / sizeof(uint64_t)], uint64_t{kRounds}) << "signals from rank " << r;
+            words[ownOff(r) / sizeof(uint64_t)] = 0;
+        }
+        EXPECT_EQ(words[shared / sizeof(uint64_t)], kRounds * sum) << "shared signal word";
+        words[shared / sizeof(uint64_t)] = 0;
+        EXPECT_EQ(std::count(words.begin(), words.end(), uint64_t{0}), static_cast<long>(words.size()))
+            << "stray signal writes in the multi-segment signal window";
+        ExpectRegions(payload);
+    }
+    Barrier();
 }
 
 } // namespace RCCLRmaTests
