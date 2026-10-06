@@ -550,8 +550,9 @@ Examples:
         feature_label="Triton trace",
         help=(
             "\t\t\tTriton Trace, maps Triton kernels to performance counters.\n"
-            "\t\t\tUse when profiling Triton kernels, including those generated\n"
-            "\t\t\tby torch.compile / Inductor.\n"
+            "\t\t\tUse when profiling Triton kernels launched through Triton's\n"
+            "\t\t\tPython runtime. torch.compile / Inductor static launches are\n"
+            "\t\t\tnot covered; use --torch-trace.\n"
             "\t\t\tCan be combined with --torch-trace."
         ),
     )

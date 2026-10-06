@@ -22,6 +22,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* `--triton-trace` no longer emits `|triton` ranges for `torch.compile` / Inductor fused kernels. Inductor now launches those kernels through PyTorch's static launcher, not Triton's Python runtime. Use `--torch-trace`; the GPU kernels nest under `torch.compile.<fn>`. `--triton-trace` still marks `@triton.jit` launches.
+
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
 
 * The roofline benchmark now reports the peak measured sample across runs instead of the mean.
