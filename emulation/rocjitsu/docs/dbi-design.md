@@ -301,10 +301,12 @@ public:
 
 ### RegisterRef / RegisterSet [shared with DBT]
 
-**Files:** `isa/register_set.h`, `isa/register_set.cpp`
+**File:** `isa/register_set.h`
 **Used by:** DBT semantic translator, DBI SpillManager and liveness
 
 ISA-independent register-file model. `RegisterRef` is `(RegClass, uint16_t index, uint8_t width)` measured in 32-bit lanes. `RegisterSet` is three disjoint bitsets (SGPR / VGPR / ACC_VGPR) sized to the union of CDNA and RDNA hardware bounds (`REGISTER_SET_MAX_*`). For scratch selection across both families, `REGISTER_SET_ALLOCATABLE_SGPRS` gives the conservative `min(CDNA, RDNA)` bound.
+
+`RegisterSet` aliases the header-only `RegisterSetT`, selecting `RegisterSetWordType::Avx2M256` on AVX2 targets and `RegisterSetWordType::StandardUint64` otherwise. The enum selects an internal storage type (`__m256i` or a scalar unsigned integer) without passing vector types as template arguments. The register-set unit tests instantiate both storage types in AVX2 builds so the scalar fallback remains compiled and tested.
 
 `RegisterSet` exposes `expand` / `erase` / `contains` / `none` / `size` / `intersects`, the standard set operators (`|=`, `&=`, `-=`), and a `for_each` visitor that yields tracked single-lane `RegisterRef`s in (SGPR, VGPR, AccVGPR) ascending-index order.
 

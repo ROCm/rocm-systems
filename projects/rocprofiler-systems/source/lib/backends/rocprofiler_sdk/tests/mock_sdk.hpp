@@ -511,6 +511,41 @@ struct mock_sdk
     static constexpr callback_tracing_kind CALLBACK_TRACING_MARKER_CORE_API      = 8;
     static constexpr callback_tracing_kind CALLBACK_TRACING_RCCL_API             = 9;
 
+    // ── RCCL / NCCL types and constants ───────────────────────────────────────
+    // Minimal stand-ins so backend<Sdk>'s unconditional RCCL forwarding aliases and
+    // rccl_type_size() type-check; no test in this TU exercises RCCL behavior.
+    struct rccl_api_data
+    {};
+    using rccl_api_id_t    = int;
+    using nccl_data_type_t = int;
+    using nccl_comm_t      = void*;
+    using nccl_result_t    = int;
+
+    static constexpr nccl_result_t NCCL_SUCCESS = 0;
+
+    static constexpr nccl_data_type_t NCCL_INT8     = 0;
+    static constexpr nccl_data_type_t NCCL_UINT8    = 1;
+    static constexpr nccl_data_type_t NCCL_FLOAT16  = 2;
+    static constexpr nccl_data_type_t NCCL_BFLOAT16 = 3;
+    static constexpr nccl_data_type_t NCCL_INT32    = 4;
+    static constexpr nccl_data_type_t NCCL_UINT32   = 5;
+    static constexpr nccl_data_type_t NCCL_FLOAT32  = 6;
+    static constexpr nccl_data_type_t NCCL_INT64    = 7;
+    static constexpr nccl_data_type_t NCCL_UINT64   = 8;
+    static constexpr nccl_data_type_t NCCL_FLOAT64  = 9;
+
+    static constexpr bool k_are_nccl_fp8_types_available = false;
+
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather     = 0;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllToAll      = 1;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllReduce     = 2;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclGather        = 3;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclRecv          = 4;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduce        = 5;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclBroadcast     = 6;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduceScatter = 7;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclSend          = 8;
+
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API         = 1;
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_AMD_EXT_API      = 2;
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_IMAGE_EXT_API    = 3;

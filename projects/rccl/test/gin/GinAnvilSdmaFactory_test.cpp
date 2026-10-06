@@ -24,7 +24,7 @@
 // Stubs: gin_anvil_sdma_factory.cc uses WARN() which references these.
 // Self-contained test — no librccl.so link — so provide no-op fallbacks.
 #include "debug.h"
-int ncclDebugLevel = 0;
+uint32_t ncclDebugLevelMask = 0;
 uint64_t ncclDebugMask = 0;
 thread_local int ncclDebugNoWarn = 0;
 void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}

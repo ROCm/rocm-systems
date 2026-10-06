@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Linux allocation owner selected by the native backing mechanism.
 //!
 //! The core sees one allocation contract. KFD and DRM retain separate
@@ -51,7 +53,11 @@ impl NativeAllocation {
         )?)
     }
 
-    pub(super) fn create_registered_host(
+    /// # Safety
+    /// The caller retains and synchronizes the entire borrowed host page cover
+    /// through successful cleanup or process teardown.
+    #[allow(unsafe_code)]
+    pub(super) unsafe fn create_registered_host(
         vm: Shared<DeviceVm>,
         peers: impl ExactSizeIterator<Item = Shared<DeviceVm>>,
         desc: AllocationDesc,
@@ -61,8 +67,9 @@ impl NativeAllocation {
     ) -> Result<Owned<Self>, Error> {
         let allocator = vm.allocator();
         let owner = Owned::try_new_uninit(allocator)?;
+        // SAFETY: The caller of this function owns the retained-page contract.
         let registration =
-            DrmRegisteredHost::create(vm, peers, desc, address, permissions, uncached)?;
+            unsafe { DrmRegisteredHost::create(vm, peers, desc, address, permissions, uncached)? };
         Ok(owner.write(Self::DrmRegisteredHost(registration)))
     }
 
@@ -145,6 +152,23 @@ impl NativeAllocation {
             Self::Kfd(allocation) => allocation.check(),
             Self::DrmRegisteredHost(allocation) => allocation.check(),
             Self::DrmImportedSystem(allocation) => allocation.check(),
+        }
+    }
+
+    pub(super) fn is_device_local(&self) -> bool {
+        match self {
+            Self::Kfd(allocation) => allocation.is_device_local(),
+            Self::DrmRegisteredHost(_) | Self::DrmImportedSystem(_) => false,
+        }
+    }
+
+    pub(super) fn set_access(&mut self, devices: &[&Shared<DeviceVm>]) -> Result<(), Error> {
+        match self {
+            Self::Kfd(allocation) => allocation.set_access(devices),
+            Self::DrmRegisteredHost(_) | Self::DrmImportedSystem(_) => Err(error(
+                ErrorKind::Unsupported,
+                "this allocation cannot change its native device mappings",
+            )),
         }
     }
 
