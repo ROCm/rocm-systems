@@ -72,7 +72,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include "halt_snapshot_plugin.h"
@@ -1246,7 +1246,7 @@ struct PluginFixture {
   uint64_t write_kernel(uint64_t addr, const uint32_t *code, size_t num_words,
                         uint32_t granulated_sgpr_count = 12,
                         uint32_t group_segment_fixed_size = 0) {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
@@ -7442,7 +7442,7 @@ std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descriptor_of
   auto *hash = reinterpret_cast<uint32_t *>(image.data() + hash_offset);
   hash[1] = 2; // nchain: null symbol + kernel descriptor symbol.
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = text_offset - kernel_descriptor_offset;
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);

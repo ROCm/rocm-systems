@@ -34,7 +34,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <cstdint>
@@ -90,7 +90,7 @@ public:
   /// @note The descriptor is synthesized, not the patched object's -- see the
   ///   file-level warning.
   uint64_t write_kernel(uint64_t addr, const std::vector<uint32_t> &code, uint32_t private_bytes) {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,

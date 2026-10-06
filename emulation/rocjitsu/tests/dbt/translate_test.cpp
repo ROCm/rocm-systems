@@ -57,8 +57,8 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/hsa.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -2599,7 +2599,7 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
 // Equally, a GFX12 word must survive intact on a GFX12 target, including the GFX125-only
 // NAMED_BAR_CNT and an INST_PREF_SIZE above the 63 that GFX11's narrower field can hold.
 TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
   AmdGpuCodeObject probe(image.data(), image.size());
@@ -2721,7 +2721,7 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
 // leaves room for them is refused rather than clamped: clamping would keep the body's demand
 // while shrinking what the descriptor reserves for it.
 TEST(CodeObjectPatcher, SharedVgprCountIsReconciledWithTheTargetAllocation) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
 
@@ -2808,7 +2808,7 @@ TEST(CodeObjectPatcher, SharedVgprCountIsReconciledWithTheTargetAllocation) {
 }
 
 TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
   AmdGpuCodeObject co(image.data(), image.size());
@@ -2880,7 +2880,7 @@ TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
 }
 
 TEST(CodeObjectPatcher, PreservesPrivateEnableForZeroFixedDynamicStack) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
   AmdGpuCodeObject source_layout(image.data(), image.size());
@@ -3755,10 +3755,10 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
   ASSERT_FALSE(source_layout.text_sections().empty());
   const auto *source_rodata = find_section(source_layout, ".rodata");
   ASSERT_NE(source_rodata, nullptr);
-  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  ASSERT_GE(source_rodata->size(), sizeof(rocjitsu::amdhsa::kernel_descriptor_t));
 
   auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
   write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(), source_kd);
 
   const auto *source_text = source_layout.text_sections()[0];
@@ -3798,7 +3798,7 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
 
   const auto *target_rodata = find_section(translated, ".rodata");
   ASSERT_NE(target_rodata, nullptr);
-  ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  ASSERT_GE(target_rodata->size(), sizeof(rocjitsu::amdhsa::kernel_descriptor_t));
   const auto target_kd =
       read_kernel_descriptor_for_test(translated.image_data() + target_rodata->sectionOffset());
   EXPECT_EQ(target_kd.kernel_code_entry_byte_offset, source_kd.kernel_code_entry_byte_offset)
@@ -3829,10 +3829,10 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
   const auto *source_text = source_layout.text_sections()[0];
   const auto *source_rodata = find_section(source_layout, ".rodata");
   ASSERT_NE(source_rodata, nullptr);
-  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  ASSERT_GE(source_rodata->size(), sizeof(rocjitsu::amdhsa::kernel_descriptor_t));
 
   auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
   source_kd.kernel_code_entry_byte_offset =
       static_cast<int64_t>(source_text->vaddr() + kSourceEntryBytes) -
       static_cast<int64_t>(source_rodata->vaddr());
@@ -3877,7 +3877,7 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
 
   const auto *target_rodata = find_section(translated, ".rodata");
   ASSERT_NE(target_rodata, nullptr);
-  ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  ASSERT_GE(target_rodata->size(), sizeof(rocjitsu::amdhsa::kernel_descriptor_t));
   const auto target_kd =
       read_kernel_descriptor_for_test(translated.image_data() + target_rodata->sectionOffset());
   const int64_t target_entry_text_offset = static_cast<int64_t>(target_rodata->vaddr()) +
@@ -4151,7 +4151,7 @@ TEST(BinaryTranslatorE2E, IncompleteConsumerFailsClosedAtKernargPreloadFirmwareE
   const auto *source_rodata = find_section(source_layout, ".rodata");
   ASSERT_NE(source_rodata, nullptr);
   auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
   write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(), source_kd);
 
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -4237,13 +4237,13 @@ make_shared_address_taken_helper_image(bool oversized_kernel0_lds) {
   // The sidecar descriptor owns a wrapper ABI that needs an initialized workgroup id and room in
   // the User SGPRs, so the source descriptor has to declare both for the variant to be computable.
   uint32_t rsrc2 = 0;
-  AMDHSA_BITS_SET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
-  AMDHSA_BITS_SET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  AMDHSA_BITS_SET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  AMDHSA_BITS_SET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
   write_value_for_test<uint32_t>(
       image, rodata->sectionOffset() + offsetof(TestKernelDescriptor, compute_pgm_rsrc2), rsrc2);
   uint16_t properties = 0;
   AMDHSA_BITS_SET(properties,
-                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+                  rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
   write_value_for_test<uint16_t>(
       image, rodata->sectionOffset() + offsetof(TestKernelDescriptor, kernel_code_properties),
       properties);

@@ -61,8 +61,8 @@
 #endif
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/hsa.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
@@ -535,7 +535,7 @@ private:
 
   struct KernelDescriptorReadResult {
     VmAccessOutcome outcome;
-    rocr::llvm::amdhsa::kernel_descriptor_t descriptor{};
+    rocjitsu::amdhsa::kernel_descriptor_t descriptor{};
   };
 
   class ClusterWorkgroupPlacement;

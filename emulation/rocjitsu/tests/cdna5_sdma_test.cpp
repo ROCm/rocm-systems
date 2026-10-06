@@ -336,7 +336,7 @@ public:
     backing_->store(kSignalValueVa, value);
   }
   void set_kernel_dispatch() {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t descriptor{};
     descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,

@@ -194,9 +194,9 @@ struct KernelVgprBounds {
 
 // Decode @p desc's VGPR allocation for @p arch.
 KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
-                                    const rocr::llvm::amdhsa::kernel_descriptor_t &desc) {
+                                    const rocjitsu::amdhsa::kernel_descriptor_t &desc) {
   const uint32_t granulated = AMDHSA_BITS_GET(
-      desc.compute_pgm_rsrc1, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+      desc.compute_pgm_rsrc1, rocjitsu::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   // The descriptor encoding granule is wave-size dependent on RDNA (8 for
   // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
   // overcount the allocation and let the SGPR bridge scan pick an unallocated
@@ -210,7 +210,7 @@ KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
   const uint32_t accum_base =
       arch_has_unified_vgpr_allocation(arch)
           ? (AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
-                             rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+                             rocjitsu::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
              1) *
                 4
           : total;

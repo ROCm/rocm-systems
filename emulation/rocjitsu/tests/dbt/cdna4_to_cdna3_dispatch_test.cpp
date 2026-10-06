@@ -7,7 +7,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
@@ -174,7 +174,7 @@ std::vector<uint8_t> load_gfx950_code_object(const char *name) {
   return bytes;
 }
 
-using TestKernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
+using TestKernelDescriptor = rocjitsu::amdhsa::kernel_descriptor_t;
 
 template <typename T>
 T read_elf_struct_for_test(const std::vector<uint8_t> &image, uint64_t offset) {
@@ -927,7 +927,7 @@ void translate_hip_fixture(const char *name, uint32_t mach, std::vector<uint8_t>
 }
 
 void translate_cvt_pk_bf16_spill_fixture(uint32_t mach, std::vector<uint8_t> &elf_bytes) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   Executable exec(kernel_path("cvt_pk_bf16_f32"));
   ASSERT_TRUE(exec.is_valid());
@@ -1883,7 +1883,7 @@ TEST(Cdna4ToCdna3DispatchTest, VCvtPkBf16F32Translates) {
   ASSERT_TRUE(descriptor.has_value());
   EXPECT_GE(descriptor->private_segment_fixed_size, sizeof(uint32_t));
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor->compute_pgm_rsrc2,
-                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
+                            rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
             1u);
 }
 

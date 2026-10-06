@@ -40,7 +40,8 @@ checkout to download only the rocJITsu project:
 git clone --filter=blob:none --sparse \
     https://github.com/ROCm/rocm-systems.git
 cd rocm-systems
-git sparse-checkout set projects/rocjitsu
+git sparse-checkout set emulation/rocjitsu runtimes/api-headers
+cd emulation/rocjitsu
 ```
 
 ### Build commands

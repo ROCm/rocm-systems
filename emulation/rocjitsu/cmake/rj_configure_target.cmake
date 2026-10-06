@@ -66,9 +66,8 @@ function(rj_configure_target target)
             PRIVATE
                 ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
                 ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src
-                ${HSA_INCLUDE_DIR}
         )
-        target_link_libraries(${target} PRIVATE rocjitsu_drm_headers)
+        target_link_libraries(${target} PRIVATE rocm_runtime::runtime_headers)
     endif()
     if(ARG_GENERATED)
         target_include_directories(${target} PRIVATE ${GENERATED_DIR})

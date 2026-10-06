@@ -18,7 +18,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 #include "rocjitsu/vm/soc.h"
 
@@ -53,7 +53,7 @@ static constexpr uint64_t B_ADDR = 0x200000;
 static constexpr uint64_t C_ADDR = 0x300000;
 static constexpr uint64_t KERNARG_ADDR = 0x400000;
 
-using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
 KD read_kd(const CodeObject &co) {
   for (const auto *sec : co.rodata_sections())

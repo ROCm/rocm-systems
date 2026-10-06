@@ -41,9 +41,9 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
-#include "linux/uapi/kfd_ioctl.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "uapi/linux/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -252,7 +252,7 @@ struct VmFixture {
                         uint32_t group_segment_fixed_size = 0, bool wgp_mode = false,
                         uint32_t enable_vgpr_workitem_id = 0, uint32_t extra_compute_pgm_rsrc1 = 0,
                         bool wave32 = true) {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
@@ -467,7 +467,7 @@ hsa_kernel_dispatch_packet_t make_dispatch_packet(uint64_t kernel_object, uint64
 
 uint64_t write_test_kernel(amdgpu::GpuMemory *memory, uint64_t addr,
                            std::span<const uint32_t> code) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t descriptor{};
   descriptor.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
@@ -577,7 +577,7 @@ TEST(RdnaDispatchTest, DescriptorSelectsCoherentWaveWidthAndVgprGranule) {
         0x1000, &kRdnaEndpgm, sizeof(kRdnaEndpgm), /*sgprs=*/104, expected_vgprs,
         /*user_sgprs=*/2, /*group_segment_fixed_size=*/0, /*wgp_mode=*/false,
         /*enable_vgpr_workitem_id=*/0, /*extra_compute_pgm_rsrc1=*/0, wave32);
-    rocr::llvm::amdhsa::kernel_descriptor_t stored_descriptor{};
+    rocjitsu::amdhsa::kernel_descriptor_t stored_descriptor{};
     fixture.mem()->read_block(kernel_object, {reinterpret_cast<uint8_t *>(&stored_descriptor),
                                               sizeof(stored_descriptor)});
     ASSERT_EQ(kernel_wavefront_size(fixture.cu()->arch(), stored_descriptor), expected_wave_size);
@@ -929,7 +929,7 @@ TEST(RdnaDispatchTest, WgpLdsContentsSurviveWorkgroupAllocationReuse) {
 }
 
 TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   uint32_t rsrc1 = 0;
   AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_32, FLOAT_ROUND_MODE_ZERO);
@@ -1121,7 +1121,7 @@ TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
   std::vector<uint32_t> code(kNopCount, SOPP_S_NOP);
   code.push_back(kCdna5Endpgm);
   const uint64_t kernel = fixture.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
-  const uint64_t entry_pc = kernel + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t);
+  const uint64_t entry_pc = kernel + sizeof(rocjitsu::amdhsa::kernel_descriptor_t);
 
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<InvalidateAfterFirstInstruction>(
@@ -1151,7 +1151,7 @@ TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
 }
 
 TEST(AqlDispatchTest, RevokedWaveSetupRecoversBeforeExecution) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   constexpr uint32_t kProcessId = 77;
   constexpr uint32_t kQueueId = 1;
   constexpr uint32_t kExceptionEvent = 19;
@@ -1489,7 +1489,7 @@ TEST(AqlDispatchTest, ConcurrentRootReplacementPreservesAdmittedDispatchSnapshot
   }
 
   const uint64_t second_instruction =
-      kernel + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t) + sizeof(uint32_t);
+      kernel + sizeof(rocjitsu::amdhsa::kernel_descriptor_t) + sizeof(uint32_t);
   auto replacement_a = std::make_shared<amdgpu::GpuMemory>("replacement_a");
   auto replacement_b = std::make_shared<amdgpu::GpuMemory>("replacement_b");
   replacement_a->write32(second_instruction, kCdna5Endpgm);
@@ -4547,7 +4547,7 @@ TEST(DispatchEntryTest, InitialExecMaskHandles3DTailWithWorkgroupOffset) {
 }
 
 TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBeforeConsumingPacket) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 19;
@@ -4704,7 +4704,7 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
 }
 
 TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 20;
@@ -4799,7 +4799,7 @@ TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) 
 }
 
 TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 23;
@@ -5466,12 +5466,12 @@ TEST_P(IsaTest, VendorSpecificBarrierValueConditionsWaitAndResume) {
     f.mem()->write64(kCompletionSignal + kSignalValueOffset, 1);
 
     amdgpu::AmdBarrierValuePacket barrier{};
-    barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
-    barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+    barrier.header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+    barrier.header.AmdFormat = amdgpu::kHsaAmdPacketTypeBarrierValue;
     barrier.signal.handle = kDepSignal;
     barrier.value = test_case.value;
     barrier.mask = test_case.mask;
-    barrier.condition = test_case.condition;
+    barrier.cond = test_case.condition;
     barrier.completion_signal.handle = kCompletionSignal;
 
     test::AqlQueue queue(f.mem(), f.cp());
@@ -5497,9 +5497,9 @@ TEST_P(IsaTest, VendorSpecificBarrierValueAllowsNullSignals) {
   f.mem()->write64(kCompletionSignal + kSignalValueOffset, 1);
 
   amdgpu::AmdBarrierValuePacket barrier{};
-  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
-  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
-  barrier.condition = HSA_SIGNAL_CONDITION_EQ;
+  barrier.header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.header.AmdFormat = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.cond = HSA_SIGNAL_CONDITION_EQ;
   barrier.completion_signal.handle = kCompletionSignal;
 
   test::AqlQueue queue(f.mem(), f.cp());
@@ -5520,11 +5520,11 @@ TEST_P(IsaTest, VendorSpecificBarrierValueRejectsInvalidCondition) {
   f.mem()->write64(kDepSignal + kSignalValueOffset, 1);
 
   amdgpu::AmdBarrierValuePacket barrier{};
-  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
-  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.header.AmdFormat = amdgpu::kHsaAmdPacketTypeBarrierValue;
   barrier.signal.handle = kDepSignal;
   barrier.mask = std::numeric_limits<int64_t>::max();
-  barrier.condition = 99;
+  barrier.cond = 99;
 
   test::AqlQueue invalid_queue(f.mem(), f.cp());
   test::AqlQueue independent_queue(f.mem(), f.cp(), 0xF0100000, 4096, 0xF0110000, 0xF0110008,
@@ -5562,8 +5562,8 @@ TEST_P(IsaTest, VendorSpecificBarrierValueOrdersQueueEntries) {
   dispatch.kernel_object = ko;
 
   amdgpu::AmdBarrierValuePacket barrier{};
-  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
-  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.header.AmdFormat = amdgpu::kHsaAmdPacketTypeBarrierValue;
   barrier.completion_signal.handle = kBarrierCompletionSignal;
 
   test::AqlQueue queue(f.mem(), f.cp());
@@ -6495,7 +6495,7 @@ constexpr uint32_t S_ENDPGM = sopp(1, 0);
 } // namespace enc
 
 TEST(AqlDispatchTest, Fp16OvflDescriptorControlsFp8ConversionResult) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   using namespace enc;
 
   auto run_case = [](bool fp16_ovfl, uint32_t expected_v2) {

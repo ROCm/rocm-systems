@@ -41,9 +41,9 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
 #include "hsa/hsa.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -273,7 +273,7 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
 
   // The premise of the whole test: without a private segment the dispatch never
   // reaches the scratch path at all.
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   std::memcpy(&kd, reinterpret_cast<const void *>(kernel_object), sizeof(kd));
   ASSERT_GT(kd.private_segment_fixed_size, 0u)

@@ -36,7 +36,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gmock/gmock.h>
@@ -207,7 +207,7 @@ std::pair<uint32_t, uint32_t> run_two_spi_dispatch() {
   rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
   soc->set_plugin_group(rocjitsu::test::make_dispatch_count_group(&dispatch_count));
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
@@ -1882,7 +1882,7 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   soc->set_plugin_group(plugin_group);
 
   // Write a kernel descriptor + invalid instruction so wavefronts halt immediately.
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   // CDNA3 (GFX940+) uses VGPR granularity 8 (not 4).
@@ -2963,7 +2963,7 @@ TEST(CApiTest, ClockedDispatchStaysEventDriven) {
   EXPECT_EQ(handle->soc->dispatch_threads(), 1u);
   EXPECT_EQ(cp->dispatch_threads(), 1u);
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,

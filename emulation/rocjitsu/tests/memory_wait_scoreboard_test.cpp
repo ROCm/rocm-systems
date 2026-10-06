@@ -988,7 +988,7 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
 }
 
 TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComplete) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (bool zero_exec : {false, true}) {
     for (unsigned threshold : {0u, 1u, 2u}) {
       SCOPED_TRACE(zero_exec);
@@ -1027,7 +1027,7 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComp
 }
 
 TEST(MemoryWaitExecutionTest, ScalarMissingWaitWarnsWithoutChangingTheResult) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (bool wait : {false, true}) {
     SCOPED_TRACE(wait);
     std::vector<uint32_t> code;
@@ -1208,7 +1208,7 @@ TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionCla
 }
 
 TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   class BarrierSnapshot final : public ExecutionPlugin {
   public:
     BarrierSnapshot() : ExecutionPlugin("barrier_snapshot") {}
@@ -1382,7 +1382,7 @@ TEST(MemoryWaitExecutionTest, Wave64MaskReadChecksPendingVccHighWord) {
 }
 
 TEST(MemoryWaitExecutionTest, ScalarVccLoadChecksOnlyTheConsumedOrWrittenWords) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (unsigned destination : {106u, 107u}) {
     for (unsigned consumer : {0u, 1u, 2u, 3u, 4u}) {
       for (bool wait : {false, true}) {
@@ -1691,7 +1691,7 @@ TEST(MemoryWaitExecutionTest, NarrowStoresCheckOnlyConsumedBytes) {
 }
 
 TEST(MemoryWaitExecutionTest, GlobalFlatResultNeedsOnlyItsLoadCounter) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (unsigned waits : {0u, 1u, 2u, 3u}) {
     SCOPED_TRACE(waits);
     std::vector<uint32_t> code;
@@ -1721,7 +1721,7 @@ TEST(MemoryWaitExecutionTest, GlobalFlatResultNeedsOnlyItsLoadCounter) {
 }
 
 TEST(MemoryWaitExecutionTest, VectorWaitDiagnosticsCanBeSilenced) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (unsigned mode = 0; mode < 5; ++mode) {
     SCOPED_TRACE(mode);
     std::vector<uint32_t> code;
@@ -1925,7 +1925,7 @@ void enable_multi_group_replay(std::vector<uint32_t> &code) {
 
 std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code,
                                         std::string_view setting = "warn", unsigned vgprs = 32) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   append_instruction(code, S_WAIT_KMCNT_0_GFX12);
   append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
   append_instruction(code, cdna5::build_sopp(cdna5::kSWaitStorecntSopp, {.simm16 = 0}));

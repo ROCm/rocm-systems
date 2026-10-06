@@ -10,7 +10,7 @@
 #include "rocjitsu/code/rj_code.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <cstddef>
@@ -27,7 +27,7 @@ struct KernelDescriptorInfo {
   uint64_t descriptor_file_offset = 0; ///< File offset of the 64-byte descriptor (pre-growth).
   std::string kernel_name;             ///< Symbol name minus the ".kd" suffix.
   uint64_t entry_text_offset = 0;      ///< .text-relative kernel entry.
-  rocr::llvm::amdhsa::kernel_descriptor_t descriptor{}; ///< Raw descriptor bytes.
+  rocjitsu::amdhsa::kernel_descriptor_t descriptor{}; ///< Raw descriptor bytes.
 };
 
 /// @brief Locate every ".kd" descriptor whose entry lands in .text.
@@ -46,7 +46,7 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
 /// descriptor's ENABLE_WAVEFRONT_SIZE32 (a clear bit means Wave64). Shared by DBT
 /// resource accounting and DBI descriptor decoding.
 [[nodiscard]] uint8_t kernel_wavefront_size(rj_code_arch_t arch,
-                                            const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+                                            const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief AMDHSA descriptor encoding granule for GRANULATED_WORKITEM_VGPR_COUNT.
 ///
@@ -60,11 +60,11 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
 /// @brief Decode COMPUTE_PGM_RSRC2.USER_SGPR_COUNT using the layout for @p arch.
 [[nodiscard]] uint32_t
 kernel_descriptor_user_sgpr_count(rj_code_arch_t arch,
-                                  const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+                                  const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief Encode COMPUTE_PGM_RSRC2.USER_SGPR_COUNT using the layout for @p arch.
 void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch,
-                                           rocr::llvm::amdhsa::kernel_descriptor_t &desc,
+                                           rocjitsu::amdhsa::kernel_descriptor_t &desc,
                                            uint32_t user_sgpr_count);
 
 /// @brief USER_SGPR_COUNT plus the dense system SGPRs the hardware initializes
@@ -81,10 +81,10 @@ void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch,
 /// so on CDNA1/CDNA2 the result may understate the block by two.
 [[nodiscard]] uint32_t
 kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch,
-                                     const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+                                     const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief Does @p desc request a kernarg segment pointer in its user SGPRs?
-[[nodiscard]] bool has_kernarg_segment_ptr(const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+[[nodiscard]] bool has_kernarg_segment_ptr(const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief User-SGPR index the kernarg segment pointer would occupy in @p desc,
 ///        whether or not the descriptor enables it.
@@ -92,8 +92,7 @@ kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch,
 /// @note Answering for a descriptor that has not enabled the pointer is the
 /// point: a caller inserting one needs the slot before setting the bit. Use
 /// @ref kernarg_segment_ptr_sgpr to ask about a descriptor as it stands.
-[[nodiscard]] uint16_t
-kernarg_segment_ptr_slot(const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+[[nodiscard]] uint16_t kernarg_segment_ptr_slot(const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief User-SGPR index of @p desc's kernarg segment pointer, if it has one.
 ///
@@ -101,13 +100,13 @@ kernarg_segment_ptr_slot(const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
 /// pair after its last use. A consumer that needs the value later must capture
 /// it at entry.
 [[nodiscard]] std::optional<uint16_t>
-kernarg_segment_ptr_sgpr(const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+kernarg_segment_ptr_sgpr(const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief KERNARG_PRELOAD_SPEC_LENGTH: user SGPRs preloaded with kernarg dwords,
 ///        zero when the kernel does not use preloading.
-[[nodiscard]] uint32_t kernarg_preload_length(const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+[[nodiscard]] uint32_t kernarg_preload_length(const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief KERNARG_PRELOAD_SPEC_OFFSET: first preloaded kernarg dword index.
-[[nodiscard]] uint32_t kernarg_preload_offset(const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+[[nodiscard]] uint32_t kernarg_preload_offset(const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 } // namespace rocjitsu

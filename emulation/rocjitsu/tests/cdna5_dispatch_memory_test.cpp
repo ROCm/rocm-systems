@@ -222,7 +222,7 @@ TEST(Gfx1250SimulationTest, Partial2DGridTailMasksNonContiguousExecLanes) {
 }
 
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -254,7 +254,7 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
 }
 
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -282,7 +282,7 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
 }
 
 TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -313,7 +313,7 @@ TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload)
 }
 
 TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -342,7 +342,7 @@ TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
 }
 
 TEST(Gfx1250SimulationTest, SLoadB32WritesVccHalves) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -383,7 +383,7 @@ TEST(Gfx1250SimulationTest, SLoadB32WritesVccHalves) {
 }
 
 TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -416,7 +416,7 @@ TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
 }
 
 TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;

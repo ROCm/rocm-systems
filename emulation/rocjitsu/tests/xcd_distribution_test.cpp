@@ -24,8 +24,8 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -109,7 +109,7 @@ struct XcdDistributionFixture {
       ADD_FAILURE() << "multi-threaded topology requires per-XCD partitioning";
     engine->create();
 
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
@@ -141,7 +141,7 @@ struct Cdna5ScratchTopologyFixture {
     loaded.wire_links(engine->topology());
     engine->create();
 
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     kd.private_segment_fixed_size = 64;
@@ -157,7 +157,7 @@ struct Cdna5ScratchTopologyFixture {
 
 void install_scratch_kernel(amdgpu::GpuMemory &memory, uint32_t private_bytes,
                             rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   const uint32_t vgpr_granule = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 16 : 8;
@@ -1398,7 +1398,7 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
     });
   }
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   struct alignas(64) Kernel {
     kernel_descriptor_t kd{};
     uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);

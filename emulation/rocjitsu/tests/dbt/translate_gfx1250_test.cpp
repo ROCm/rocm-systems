@@ -49,8 +49,8 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/hsa.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -101,7 +101,7 @@ make_gfx1250_image_with_live_sgprs(const std::array<uint32_t, N> &instruction_wo
 }
 
 void enable_kernarg_segment_ptr_sgpr(std::vector<uint8_t> &image, uint32_t kernarg_size = 16) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
   AmdGpuCodeObject layout(image.data(), image.size());
   ASSERT_TRUE(layout.is_valid());
@@ -111,9 +111,9 @@ void enable_kernarg_segment_ptr_sgpr(std::vector<uint8_t> &image, uint32_t kerna
 
   KD kd{};
   std::memcpy(&kd, image.data() + rodata->sectionOffset(), sizeof(kd));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
   AMDHSA_BITS_SET(kd.kernel_code_properties,
-                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+                  rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
   kd.kernarg_size = kernarg_size;
   std::memcpy(image.data() + rodata->sectionOffset(), &kd, sizeof(kd));
 }
@@ -1588,7 +1588,7 @@ uint32_t cdna3_descriptor_vgpr_allocation_count(
     const rocjitsu::test_support::TestKernelDescriptor &descriptor) {
   const uint32_t granulated =
       AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
-                      rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+                      rocjitsu::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   return (granulated + 1u) * 8u;
 }
 
@@ -1596,7 +1596,7 @@ uint32_t
 cdna3_descriptor_sgpr_count(const rocjitsu::test_support::TestKernelDescriptor &descriptor) {
   const uint32_t granulated =
       AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
-                      rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+                      rocjitsu::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
   return (granulated + 1u) * 8u;
 }
 
@@ -2015,15 +2015,13 @@ TEST(BinaryTranslatorE2E, OversizedTargetLdsDescriptorEmitsVirtualVariantInstead
           offsetof(rocjitsu::test_support::TestKernelDescriptor, kernarg_size),
       16u);
   uint32_t source_rsrc2 = 0;
-  AMDHSA_BITS_SET(source_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
-                  1);
-  AMDHSA_BITS_SET(source_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
-                  1);
-  AMDHSA_BITS_SET(source_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  AMDHSA_BITS_SET(source_rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  AMDHSA_BITS_SET(source_rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
+  AMDHSA_BITS_SET(source_rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
   // COMPUTE_PGM_RSRC2.LDS_SIZE is programmed by CP from the dispatch packet, not
   // by the code-object descriptor. Seed a stale guest value here so the test
   // proves translated normal and virtual descriptors do not preserve it.
-  AMDHSA_BITS_SET(source_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, 22);
+  AMDHSA_BITS_SET(source_rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, 22);
   rocjitsu::test_support::write_value_for_test<uint32_t>(
       image,
       rodata->sectionOffset() +
@@ -2031,7 +2029,7 @@ TEST(BinaryTranslatorE2E, OversizedTargetLdsDescriptorEmitsVirtualVariantInstead
       source_rsrc2);
   uint16_t source_properties = 0;
   AMDHSA_BITS_SET(source_properties,
-                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+                  rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
   rocjitsu::test_support::write_value_for_test<uint16_t>(
       image,
       rodata->sectionOffset() +
@@ -2060,7 +2058,7 @@ TEST(BinaryTranslatorE2E, OversizedTargetLdsDescriptorEmitsVirtualVariantInstead
   EXPECT_EQ(normal_kd.group_segment_fixed_size, 105600u);
   EXPECT_EQ(normal_kd.kernarg_size, 16u);
   EXPECT_EQ(AMDHSA_BITS_GET(normal_kd.compute_pgm_rsrc2,
-                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE),
+                            rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE),
             0u);
 
   const auto *metadata_section =
@@ -2098,7 +2096,7 @@ TEST(BinaryTranslatorE2E, OversizedTargetLdsDescriptorEmitsVirtualVariantInstead
   EXPECT_EQ(virtual_kd.group_segment_fixed_size, 0u);
   EXPECT_EQ(virtual_kd.kernarg_size, 48u);
   EXPECT_EQ(AMDHSA_BITS_GET(virtual_kd.compute_pgm_rsrc2,
-                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE),
+                            rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE),
             0u);
 }
 
@@ -2377,7 +2375,7 @@ TEST(BinaryTranslatorE2E, Gfx1250LongDirectBranchGrowthIsIdempotent) {
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250LongBranchReportsSgprExhaustionAfterSemanticExpansion) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr size_t kTargetWord = 0x8000;
   constexpr uint16_t kLiveSgprs = 104;
@@ -3437,7 +3435,7 @@ TEST(BinaryTranslatorE2E, PatchesOutOfRangeConditionalThroughIslandSlotWithoutSg
 }
 
 TEST(BinaryTranslatorE2E, FullSgprConditionalPreservesPoolAfterUnconditionalBranch) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr size_t kExpansionCount = 16000;
   const auto cvt = make_cdna4_cvt_f32_bf16_words(cdna4::encoding::kVop1);
@@ -4108,7 +4106,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersMubufDwordLdsToFlatGlobalStore)
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarReservesFreshSgprsBelowCdnaSpecialTail) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds = make_cdna4_ds_read_b32_words();
@@ -4159,7 +4157,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarReservesFreshSgprsBelowCdnaSpecialTai
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarKeepsDescriptorSpecialTailFree) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds = make_cdna4_ds_read_b32_words();
@@ -4224,7 +4222,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarKeepsDescriptorSpecialTailFree) {
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillsTouchedHighSgprPairWhenDescriptorSgprsAreFull) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds = make_cdna4_ds_read_b32_words();
@@ -4283,7 +4281,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillsTouchedHighSgprPairWhenDescript
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsMubufSemanticRuleUsesSpillPerUseAccessEmitter) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto mubuf = make_cdna4_buffer_load_lds_words(/*op=*/20);
@@ -4321,7 +4319,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsMubufSemanticRuleUsesSpillPerUseAccessEmitte
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsTransposeSemanticRuleUsesSpillPerUseAccessEmitter) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds = make_cdna4_ds_read_b64_tr_b16_words();
@@ -4359,7 +4357,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsTransposeSemanticRuleUsesSpillPerUseAccessEm
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillPerUseGrowsDescriptorForBorrowedHighSgprs) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds = make_cdna4_ds_read_b32_words();
@@ -4406,7 +4404,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillPerUseGrowsDescriptorForBorrowed
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillPerUseCanGrowTinyNoAgprKernelsPastAccumOffset) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds = make_cdna4_ds_write_b32_words(/*addr=*/0, /*data=*/1);
@@ -4460,7 +4458,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillPerUseCanGrowTinyNoAgprKernelsPa
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarRaisesDescriptorForExplicitHighDsVgprs) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds_write = make_cdna4_ds_write_b32_words(/*addr=*/62, /*data=*/0, /*byte_offset=*/256);
@@ -4504,7 +4502,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarRaisesDescriptorForExplicitHighDsVgpr
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillPerUseCapturesWrapperBeforeGuestClobber) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds = make_cdna4_ds_read_b32_words();
@@ -4562,7 +4560,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillPerUseCapturesWrapperBeforeGuest
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarSpillPerUseKeepsEntryPrologueStableAfterVgprGrowth) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds = make_cdna4_ds_read_b32_words();
@@ -4685,7 +4683,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarEmitsRuntimeMetadataSection) {
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarZeroKernargUsesWrapperKernarg) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto ds = make_cdna4_ds_read_b32_words();
@@ -5677,7 +5675,7 @@ TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsRead2st64B64ToFlatGlobalLoads
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarUsesDistinctSpillSlotsForTwoAddressTemps) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   // vdst aliases addr, so the replacement must preserve the original address
@@ -6019,7 +6017,7 @@ TEST(BinaryTranslatorE2E, SkipFailedVirtualLdsSidecarStubsOversizedNormalDescrip
 }
 
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3KernargPreloadFirmwareEntryKeepsMaskedDefLive) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   constexpr uint16_t kScratchFloor = 120;
 
   auto image = rocjitsu::test_support::make_large_amdgpu_elf_with_waitcnt_entry();
@@ -6115,7 +6113,7 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3Bitop3ScratchGrowsDescriptor) {
 }
 
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3Bitop3UsesSpillBackedScratchWhenVgprsAreFull) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   const auto words = make_cdna4_bitop3_words(cdna4::kVBitop3B32Vop3, 16);
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
@@ -6167,7 +6165,7 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3Bitop3UsesSpillBackedScratchWhenVgprsAreFu
 }
 
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3CvtPkBf16SpillScratchAvoidsVgprSources) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   const auto words = make_cdna4_cvt_pk_bf16_f32_words(/*vdst=*/0, /*src0=*/256 + 4,
                                                       /*src1=*/256 + 1);
@@ -6311,7 +6309,7 @@ TEST(BinaryTranslatorE2E, Rdna4ScratchAllocationDoesNotWrapPastV255) {
 }
 
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3PermlaneRejectsDescriptorFullExecSave) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   const auto permlane =
       make_cdna4_permlane32_swap_b32_words(/*encoding_id=*/cdna4::encoding::kVop1);
@@ -6351,7 +6349,7 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3PermlaneRejectsDescriptorFullExecSave) {
 }
 
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3PermlaneExecSaveReservesSpecialSgprTail) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   const auto permlane =
@@ -6540,10 +6538,10 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBlocksAfterEntry) {
   ASSERT_TRUE(source_layout.is_valid());
   const auto *source_rodata = rocjitsu::test_support::find_section(source_layout, ".rodata");
   ASSERT_NE(source_rodata, nullptr);
-  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  ASSERT_GE(source_rodata->size(), sizeof(rocjitsu::amdhsa::kernel_descriptor_t));
   auto source_kd = rocjitsu::test_support::read_kernel_descriptor_for_test(
       image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
   rocjitsu::test_support::write_kernel_descriptor_for_test(
       image.data() + source_rodata->sectionOffset(), source_kd);
 
@@ -7444,8 +7442,8 @@ TEST(BinaryTranslatorE2E, Gfx1250KernargPreloadUsesSingleDescriptorEntry) {
   ASSERT_NE(source_rodata, nullptr);
   auto source_kd = rocjitsu::test_support::read_kernel_descriptor_for_test(
       image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
-  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 2);
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 2);
   rocjitsu::test_support::write_kernel_descriptor_for_test(
       image.data() + source_rodata->sectionOffset(), source_kd);
 
@@ -9446,7 +9444,7 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaUsesCarrierUnderSgprPressure) {
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaUsesSpillBackedScratchWhenVgprsAreFull) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr auto source_wmma =
       cdna5::build_vop3p(cdna5::kVWmmaF1616x16x128Fp8Fp8Vop3p,
@@ -11056,7 +11054,7 @@ TEST(BinaryTranslatorE2E, Gfx1250GeneratedVgprMsbTransitionsCarryPreviousState) 
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250AddtidStoreUsesSpillBackedScratchWhenVgprsAreFull) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr auto addtid = cdna5::build_vds(cdna5::kDsStoreAddtidB32Vds, {.offset0 = 4, .data0 = 8});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
@@ -11147,7 +11145,7 @@ TEST(BinaryTranslatorE2E, Gfx1250AddtidStoreUsesSpillBackedScratchWhenVgprsAreFu
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250SpillBackedRulesFailClosedForDynamicStackKernel) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   const auto expect_failure = [&](std::vector<uint32_t> words, std::string_view diagnostic) {
@@ -11203,7 +11201,7 @@ TEST(BinaryTranslatorE2E, Gfx1250SpillBackedRulesFailClosedForDynamicStackKernel
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250SpillWaitsForOutstandingVgprProducer) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr auto pending_load = cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 4, .vdst = 0});
   constexpr auto addtid = cdna5::build_vds(cdna5::kDsStoreAddtidB32Vds, {.offset0 = 4, .data0 = 8});
@@ -12683,7 +12681,7 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesNativeM16Scale16ForA0) {
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250Scale16M32DoesNotNeedScratchWhenVgprsAreFull) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr auto scale16 =
       cdna5::build_vop3p(0x3a, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 256});
@@ -12767,7 +12765,7 @@ TEST(BinaryTranslatorE2E, Gfx1250Scale16M32DoesNotNeedScratchWhenVgprsAreFull) {
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250Scale16M32IgnoresUnavailableScratchSpillSpace) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr auto scale16 =
       cdna5::build_vop3p(0x3a, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 256});
@@ -13787,7 +13785,7 @@ TEST(BinaryTranslatorE2E, MatchedSemanticExpandRuleFailureIsDiagnostic) {
 // TDM-pipelined MXFP GEMM kernels into intermittent MEMORY_APERTURE_VIOLATION aborts on real
 // gfx1250 parts, so a nonzero source request must survive translation untouched.
 TEST(BinaryTranslatorE2E, Gfx1250PreservesSourceInstPrefSize) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   // 107 exceeds the 6-bit GFX11 field: GFX12+ widened INST_PREF_SIZE to 8 bits, and reading it
@@ -13836,7 +13834,7 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesSourceInstPrefSize) {
 // default is reserved for sources whose RSRC3 is not in the GFX10+ layout at all (GFX90A-family,
 // where those bits are ACCUM_OFFSET) and therefore has to be rebuilt.
 TEST(BinaryTranslatorE2E, Gfx1250PreservesDisabledInstPrefSizeFromGfx10PlusSource) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image =
@@ -13871,7 +13869,7 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesDisabledInstPrefSizeFromGfx10PlusSourc
 }
 
 TEST(KernelDescriptorTranslator, Gfx1250UsesWave32SixteenVgprGranularity) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text();
   rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
@@ -13918,7 +13916,7 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesSixBitUserSgprCount) {
 
   auto descriptor = rocjitsu::test_support::read_kernel_descriptor_for_test(rodata->data());
   AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
-                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, kUserSgprCount);
+                  rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, kUserSgprCount);
   rocjitsu::test_support::write_kernel_descriptor_for_test(image.data() + rodata->sectionOffset(),
                                                            descriptor);
 
@@ -13939,7 +13937,7 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesSixBitUserSgprCount) {
   const auto target =
       rocjitsu::test_support::read_kernel_descriptor_for_test(target_rodata->data());
   EXPECT_EQ(AMDHSA_BITS_GET(target.compute_pgm_rsrc2,
-                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT),
+                            rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT),
             kUserSgprCount);
 }
 
@@ -14023,7 +14021,7 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaVirtualizesOversizedStaticLdsDescript
   auto source_descriptor = rocjitsu::test_support::read_elf_struct_for_test<
       rocjitsu::test_support::TestKernelDescriptor>(image, rodata->sectionOffset());
   uint32_t source_rsrc2 = source_descriptor.compute_pgm_rsrc2;
-  AMDHSA_BITS_SET(source_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, 22);
+  AMDHSA_BITS_SET(source_rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, 22);
   rocjitsu::test_support::write_value_for_test<uint32_t>(
       image,
       rodata->sectionOffset() +
@@ -14060,7 +14058,7 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaVirtualizesOversizedStaticLdsDescript
   EXPECT_EQ(patched_kd.group_segment_fixed_size, 0u);
   EXPECT_EQ(patched_kd.kernarg_size, 48u);
   EXPECT_EQ(AMDHSA_BITS_GET(patched_kd.compute_pgm_rsrc2,
-                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE),
+                            rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE),
             0u);
 }
 
@@ -14082,9 +14080,9 @@ TEST(KernelDescriptorTranslator, SharedVgprBlocksAreReservedFromTheTargetVgprBud
       image.data() + rodata->sectionOffset());
   // Wave64 is what gives shared VGPR blocks any meaning.
   AMDHSA_BITS_SET(source_kd->kernel_code_properties,
-                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 0);
+                  rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 0);
   AMDHSA_BITS_SET(source_kd->compute_pgm_rsrc3,
-                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT, 9);
+                  rocjitsu::amdhsa::COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT, 9);
 
   auto plan = [&](uint32_t minimum_vgprs) {
     rocjitsu::KernelDescriptorTranslationOptions options;
@@ -14118,8 +14116,8 @@ TEST(KernelDescriptorTranslator, VirtualLdsPreservesKernargPreloadRangeWhenSizeI
 
   auto *source_kd = reinterpret_cast<rocjitsu::test_support::TestKernelDescriptor *>(
       image.data() + rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 2);
-  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 6);
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 2);
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 6);
 
   rocjitsu::KernelDescriptorTranslationOptions options;
   options.virtualize_lds = true;
@@ -14148,8 +14146,8 @@ TEST(KernelDescriptorTranslator, VirtualLdsKeepsOddKernargPreloadCopyExtentExact
 
   auto *source_kd = reinterpret_cast<rocjitsu::test_support::TestKernelDescriptor *>(
       image.data() + rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 0);
-  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 11);
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 0);
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 11);
 
   rocjitsu::KernelDescriptorTranslationOptions options;
   options.virtualize_lds = true;
@@ -14198,7 +14196,7 @@ TEST(KernelDescriptorTranslator, VirtualLdsAcceptsZeroKernargSizeWithWrapper) {
 }
 
 TEST(KernelDescriptorTranslator, VirtualLdsAddsKernargSegmentPointerWhenMissing) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text();
   rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
@@ -14248,7 +14246,7 @@ TEST(KernelDescriptorTranslator, VirtualLdsAddsKernargSegmentPointerWhenMissing)
 }
 
 TEST(KernelDescriptorTranslator, VirtualLdsRejectsMissingKernargSegmentPointerWithFullUserSgprs) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text();
   rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());

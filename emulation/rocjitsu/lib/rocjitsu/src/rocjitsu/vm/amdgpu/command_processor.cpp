@@ -388,7 +388,7 @@ bool compute_pgm_rsrc1_mode_has_debug_field(rj_code_arch_t arch) {
 }
 
 uint32_t initial_mode_from_compute_pgm_rsrc1(uint32_t rsrc1, rj_code_arch_t arch) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   uint32_t mode = 0;
   mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_32) << 0;
@@ -491,7 +491,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
                                                       const DispatchEntry &pkt,
                                                       uint32_t global_wg_id,
                                                       uint32_t wf_index_in_wg) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   uint32_t sbase = wf->sgpr_alloc().base;
   uint32_t kcp = pkt.kernel_code_properties;
 
@@ -3120,7 +3120,7 @@ void CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4Dispatch
                                     const std::array<uint32_t, 4> &dimensions) {
   if (!queue.commands.submissions.front().allow_dispatch)
     throw std::runtime_error("shader dispatch inside an AQL PM4 IB is unsupported");
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   const auto &regs = queue.commands.sh_registers;
   const uint32_t initiator = dimensions[3];
   if (!(initiator & 1))
@@ -3323,7 +3323,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
 CommandProcessor::KernelDescriptorReadResult
 CommandProcessor::read_kernel_descriptor(const GpuVmAccess &transaction_access,
                                          uint64_t kernel_object) const {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   const VmAccessOutcome outcome =
       read_gpu_block(transaction_access, kernel_object, &kd, sizeof(kd));
@@ -3657,7 +3657,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
     const GpuVmAccess &transaction_access, uint64_t pkt_addr, uint32_t queue_packet_id,
     uint64_t aql_packet_id, ClusterDispatchShape cluster_shape) {
   const bool uses_kfd_queue_abi = queue.uses_kfd_queue_abi;
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   const KernelDescriptorReadResult descriptor =
       read_kernel_descriptor(transaction_access, pkt.kernel_object);
   if (descriptor.outcome != VmAccessOutcome::Complete)

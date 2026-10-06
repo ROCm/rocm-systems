@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "hsa/hsa_api_trace_minimal.h"
+#include "hsa/hsa_api_trace.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"

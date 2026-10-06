@@ -2703,6 +2703,8 @@ int SimulatedKfd::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
 
 int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_create_queue_args *>(arg);
+  if (args->metadata_ring_size != 0)
+    return -EINVAL;
   const uint32_t scheduling_percentage = args->queue_percentage & 0xff;
   if (scheduling_percentage > 100)
     return -EINVAL;

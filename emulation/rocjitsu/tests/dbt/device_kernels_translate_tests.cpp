@@ -23,7 +23,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -85,14 +85,14 @@ MutableKernelDescriptorImage mutable_vector_add_descriptor(rj_code_arch_t guest_
 
   fixture.kd_file_off = translations[0].descriptor_file_offset;
   fixture.valid =
-      fixture.kd_file_off + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t) <= fixture.image.size();
+      fixture.kd_file_off + sizeof(rocjitsu::amdhsa::kernel_descriptor_t) <= fixture.image.size();
   return fixture;
 }
 
-rocr::llvm::amdhsa::kernel_descriptor_t *
+rocjitsu::amdhsa::kernel_descriptor_t *
 mutable_kernel_descriptor(MutableKernelDescriptorImage &fixture) {
-  return reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(fixture.image.data() +
-                                                                     fixture.kd_file_off);
+  return reinterpret_cast<rocjitsu::amdhsa::kernel_descriptor_t *>(fixture.image.data() +
+                                                                   fixture.kd_file_off);
 }
 
 std::vector<rocjitsu::KdTranslation>
@@ -208,7 +208,7 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
 }
 
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGridPayload) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid());
@@ -270,7 +270,7 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGri
 }
 
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesXOnlyWorkgroupId) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(fixture.valid);
@@ -296,7 +296,7 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesXOnlyWorkgroupId) {
 }
 
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4SkipsPrologueWhenNoWorkgroupIdsAreEnabled) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(fixture.valid);
@@ -329,7 +329,7 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4SkipsPrologueWhenNoWorkgroupIdsAreE
 }
 
 TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationForRdna4) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   for (rj_code_arch_t guest_arch :
        {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
@@ -360,7 +360,7 @@ TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationF
 }
 
 TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseAboveSemanticScratch) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(fixture.valid);
@@ -402,7 +402,7 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseAboveSemanticScratch)
 }
 
 TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseWithoutReportedAccVgprs) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(fixture.valid);
@@ -439,7 +439,7 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseWithoutReportedAccVgp
 }
 
 TEST(KernelDescriptorTranslator, CdnaToCdnaAllowsFullVgprAndAccVgprDescriptorAllocation) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(fixture.valid);
@@ -464,7 +464,7 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaAllowsFullVgprAndAccVgprDescriptorAll
 }
 
 TEST(KernelDescriptorTranslator, CdnaDescriptorAllowsReservedSgprAllocationRounding) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(fixture.valid);
@@ -486,7 +486,7 @@ TEST(KernelDescriptorTranslator, CdnaDescriptorAllowsReservedSgprAllocationRound
 }
 
 TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid());
@@ -628,7 +628,7 @@ TEST(CodeObjectPatcher, RejectsOutOfRangeKernelDescriptorUpdates) {
   ASSERT_NE(co, nullptr);
 
   rocjitsu::CodeObjectPatcher patcher(*co);
-  std::array<uint8_t, sizeof(rocr::llvm::amdhsa::kernel_descriptor_t)> descriptor{};
+  std::array<uint8_t, sizeof(rocjitsu::amdhsa::kernel_descriptor_t)> descriptor{};
   const uint64_t image_size = static_cast<uint64_t>(co->image_size());
 
   EXPECT_FALSE(patcher.patch_kernel_descriptor(image_size, descriptor));

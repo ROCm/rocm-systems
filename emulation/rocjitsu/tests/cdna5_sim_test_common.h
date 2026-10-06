@@ -47,7 +47,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -163,7 +163,7 @@ struct Gfx1250Sim {
                         uint32_t kernarg_size = 0, uint32_t kernarg_preload_length = 0,
                         uint32_t kernarg_preload_offset = 0, uint32_t enable_vgpr_workitem_id = 0,
                         uint32_t named_barrier_blocks = 0) {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     kd.kernarg_size = kernarg_size;
