@@ -2162,6 +2162,10 @@ def _input_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
     widened. Flushing keeps the sign, so it commutes with ABS/NEG. Return None
     when ``node`` is not a direct floating register read.
     """
+    if node.kind == SemaNodeKind.UMINUS:
+        # A negated source (SUB's subtrahend) is flushed like a NEG modifier.
+        source = _input_flushed_source(node.children[0], ctx)
+        return None if source is None else f'(-{source})'
     modifiers = None
     if node.kind == SemaNodeKind.CALL and node.call_name == 'apply_src_mod':
         if len(node.children) < 5:

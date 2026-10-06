@@ -15,6 +15,7 @@
 #include <array>
 #include <bit>
 #include <cfenv>
+#include <format>
 #include <gtest/gtest.h>
 #include <memory>
 #include <ostream>
@@ -2585,6 +2586,96 @@ std::vector<ArithmeticCase> integral_rounding_input_flush_cases() {
   return cases;
 }
 
+// SUB and SUBREV add the negated subtrahend, keeping the sources in operand
+// order: a NaN subtrahend comes out quieted with its sign flipped, and with two
+// NaNs src0's NaN wins. Lanes and MODE values are gfx1201 captures. F16
+// sources keep their captured high halves; the destination's high half stays.
+std::vector<ArithmeticCase> subtraction_nan_cases() {
+  struct Lane {
+    const char *name;
+    uint32_t src0;
+    uint32_t src1;
+    uint32_t result;
+  };
+  struct Form {
+    const char *name;
+    std::array<uint32_t, 2> words;
+    std::array<uint32_t, 2> modes;
+    std::vector<Lane> lanes;
+  };
+  const auto vop2 = [](uint16_t op) {
+    return std::array<uint32_t, 2>{rdna4::build_vop2(op, {.src0 = 256, .vsrc1 = 1, .vdst = 6})[0],
+                                   0u};
+  };
+  const auto vop3 = [](uint16_t op, uint8_t neg) {
+    return rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257, .neg = neg});
+  };
+  // The E32 captures cover MODE 0x30 and 0xc0; the E64 ones cover 0x00 and 0xf0.
+  const std::array<Form, 8> forms = {{
+      {"SubF32E32",
+       vop2(rdna4::kVSubF32Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0x80000000u, 0x7fc00000u, 0xffc00000u},
+        {"SignalingSubtrahend", 0x00000000u, 0x7f800001u, 0xffc00001u},
+        {"TwoNans", 0x7fc00000u, 0x7fc00000u, 0x7fc00000u}}},
+      {"SubrevF32E32",
+       vop2(rdna4::kVSubrevF32Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0x7fc00000u, 0x80000000u, 0xffc00000u},
+        {"SignalingSubtrahend", 0x7f800001u, 0x00000000u, 0xffc00001u},
+        {"TwoNans", 0x7fc00000u, 0x7fc00000u, 0xffc00000u}}},
+      {"SubF16E32",
+       vop2(rdna4::kVSubF16Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0xedc48000u, 0x1b937e00u, 0xa5a5fe00u},
+        {"SignalingSubtrahend", 0x7a990000u, 0x0e867c01u, 0xa5a5fe01u},
+        {"TwoNans", 0x034c7e00u, 0x4ec77e00u, 0xa5a57e00u}}},
+      {"SubrevF16E32",
+       vop2(rdna4::kVSubrevF16Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0x6fb27e00u, 0xd04c8000u, 0xa5a5fe00u},
+        {"SignalingSubtrahend", 0xa4e67c01u, 0x42b40000u, 0xa5a5fe01u},
+        {"TwoNans", 0xbc067e00u, 0x926d7e00u, 0xa5a5fe00u}}},
+      // NEG on the subtrahend cancels the subtraction's sign flip.
+      {"SubF32E64Neg1",
+       vop3(rdna4::kVSubF32Vop3, 2),
+       {0x00u, 0xf0u},
+       {{"NanSubtrahend", 0x80000000u, 0x7fc00000u, 0x7fc00000u}}},
+      {"SubrevF32E64Neg0",
+       vop3(rdna4::kVSubrevF32Vop3, 1),
+       {0x00u, 0xf0u},
+       {{"NanSubtrahend", 0x7fc00000u, 0x80000000u, 0x7fc00000u}}},
+      {"SubF16E64Neg1",
+       vop3(rdna4::kVSubF16Vop3, 2),
+       {0x00u, 0xf0u},
+       {{"NanSubtrahend", 0x913b8000u, 0x72617e00u, 0xa5a57e00u}}},
+      {"SubrevF16E64Neg0",
+       vop3(rdna4::kVSubrevF16Vop3, 1),
+       {0x00u, 0xf0u},
+       {{"NanSubtrahend", 0x6c027e00u, 0x840c8000u, 0xa5a57e00u}}},
+  }};
+  constexpr uint32_t kHigh = 0xa5a50000u;
+  std::vector<ArithmeticCase> cases;
+  for (const Form &form : forms) {
+    const bool half = std::string_view(form.name).find("F16") != std::string_view::npos;
+    for (const Lane &lane : form.lanes) {
+      for (const uint32_t mode : form.modes) {
+        std::vector<std::pair<uint32_t, uint32_t>> sources{{0, lane.src0}, {1, lane.src1}};
+        if (half)
+          sources.emplace_back(6, kHigh);
+        cases.push_back({std::format("{}{}Mode{:02X}", form.name, lane.name, mode),
+                         ROCJITSU_CODE_ARCH_RDNA4,
+                         {form.words[0], form.words[1], 0u},
+                         std::move(sources),
+                         {{6, lane.result}},
+                         mode,
+                         FE_TONEAREST});
+      }
+    }
+  }
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2715,6 +2806,23 @@ TEST_P(ValuRoundedResultModifierTest, MatchesGfx1201OnScalarAndSimdPaths) {
 
 INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
                          testing::ValuesIn(rounded_result_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuSubtractionNanTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuSubtractionNanTest, MatchesGfx1201OnScalarAndSimdPaths) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuSubtractionNanTest,
+                         testing::ValuesIn(subtraction_nan_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

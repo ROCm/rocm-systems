@@ -854,32 +854,13 @@ inline util::native<float> fma_f32_simd(util::native<float> a, util::native<floa
   return flush_output ? denormal::flush_value(result) : result;
 }
 
-/// ADD and MUL share FMA's NaN and pre-packing tininess policy. SUB retains
-/// direct host subtraction's policy. The caller establishes guest rounding.
+/// ADD and MUL share FMA's NaN and pre-packing tininess policy. Callers pass
+/// SUB as ADD of the negated subtrahend. The caller establishes guest rounding.
 template <fp_mode::Arithmetic operation>
 inline util::native<float> binary_f32_simd(util::native<float> a, util::native<float> b,
                                            const Wavefront &wf, uint32_t omod = 0) {
-  static_assert(operation == fp_mode::Arithmetic::ADD || operation == fp_mode::Arithmetic::SUB ||
-                operation == fp_mode::Arithmetic::MUL);
-  if constexpr (operation == fp_mode::Arithmetic::SUB) {
-    // Preserve direct subtraction's existing host NaN policy. Rewriting this as
-    // architectural ADD with a negated input would select different NaN bits.
-    using U = util::native<uint32_t>;
-    const uint32_t denorm_mode = wf.fp_denorm_mode_f32();
-    if (!(denorm_mode & 1u)) {
-      a = denormal::flush_value(a);
-      b = denormal::flush_value(b);
-    }
-    auto result = a - b;
-    const auto nan_input = (std::bit_cast<U>(a) & U(0x7fffffffu)) > U(0x7f800000u) ||
-                           (std::bit_cast<U>(b) & U(0x7fffffffu)) > U(0x7f800000u);
-    if (util::stdx::any_of(nan_input))
-      for (std::size_t i = 0; i < U::size(); ++i)
-        if (nan_input[i])
-          result[i] = fp_mode::detail::evaluate_arithmetic<fp_mode::Arithmetic::SUB, float>(
-              a[i], b[i], 0.0f);
-    return (denorm_mode & 2u) ? result : denormal::flush_value(result);
-  } else if constexpr (operation == fp_mode::Arithmetic::ADD)
+  static_assert(operation == fp_mode::Arithmetic::ADD || operation == fp_mode::Arithmetic::MUL);
+  if constexpr (operation == fp_mode::Arithmetic::ADD)
     return fma_f32_simd(a, util::native<float>(1.0f), b, wf, omod);
   else {
     using U = util::native<uint32_t>;
