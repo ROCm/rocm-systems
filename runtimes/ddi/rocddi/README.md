@@ -38,9 +38,9 @@ The peer frontends and shared package are:
   HSA library names. It is the workspace's only shared release artifact.
 
 Build the shared runtime with CMake from `runtimes` as shown below. Its
-`libamdf.so` and `libhsa_runtime64.so` aliases resolve to the same
-`libhsa-runtime64.so.1` image and one rocddi process context. The package
-retains its exact KFD and DRM file owners through process exit, so its
+`libamdf.so`, `libamdf.so.0`, and `libhsa_runtime64.so` aliases resolve to
+the same `libhsa-runtime64.so.1` image and one rocddi process context. The
+package retains its exact KFD and DRM file owners through process exit, so its
 shared object uses `NODELETE`. The last active frontend
 session disables KFD runtime enablement without closing the retained VM.
 The AMDF static library remains a separate build with its own process context.

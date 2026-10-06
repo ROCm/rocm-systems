@@ -67,6 +67,9 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           cmake --build "$RUNNER_TEMP/rocddi-cmake"
           library_dir="$RUNNER_TEMP/rocddi-cmake/lib"
+          test "$(readlink "$library_dir/libamdf.so")" = libamdf.so.0
+          test "$library_dir/libamdf.so.0" -ef \
+            "$library_dir/libhsa-runtime64.so.1"
           test "$library_dir/libamdf.so" -ef \
             "$library_dir/libhsa_runtime64.so"
           test "$library_dir/libhsa-runtime64.so" -ef \

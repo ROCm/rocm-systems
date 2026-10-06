@@ -18,9 +18,15 @@ target_link_libraries(
     runtime_shared_image
     INTERFACE rocm_runtime::runtime_headers
 )
+# Older AMDF binaries request the former libamdf.so.0 SONAME.
 set_property(GLOBAL APPEND PROPERTY _runtime_link_commands
     COMMAND "${CMAKE_COMMAND}" -E create_symlink
     "libhsa-runtime64.so.${_runtime_hsa_abi_major}"
+    "${_runtime_library_dir}/libamdf.so.0"
+)
+set_property(GLOBAL APPEND PROPERTY _runtime_link_commands
+    COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    "libamdf.so.0"
     "${_runtime_library_dir}/libamdf.so"
 )
 set_property(GLOBAL APPEND PROPERTY _runtime_link_commands
@@ -29,6 +35,7 @@ set_property(GLOBAL APPEND PROPERTY _runtime_link_commands
     "${_runtime_library_dir}/libhsa_runtime64.so"
 )
 set_property(GLOBAL APPEND PROPERTY _runtime_byproducts
+    "${_runtime_library_dir}/libamdf.so.0"
     "${_runtime_library_dir}/libamdf.so"
     "${_runtime_library_dir}/libhsa_runtime64.so"
 )
