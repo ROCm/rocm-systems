@@ -277,6 +277,29 @@ def test_dot2_half_forms_narrow_inline_float_constants():
                 )
 
 
+def test_float_dot2_accumulator_takes_neg_hi_as_abs():
+    for accumulation in (FloatDotAccumulation.GFX11, FloatDotAccumulation.GFX12):
+        for cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+            cpp = gen_dot2(
+                ['vdst'],
+                ['src0', 'src1', 'src2'],
+                cls,
+                opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+                dot_accumulation=accumulation,
+            )
+            assert (
+                'acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, '
+                'inst_.neg_hi, inst_.neg);' in cpp
+            )
+            assert 'acc ^= 0x80000000u' not in cpp
+            if accumulation is FloatDotAccumulation.GFX11:
+                # The host-float fallback for other targets follows the same rule.
+                assert (
+                    'acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.neg_hi, inst_.neg);'
+                    in cpp
+                )
+
+
 def test_rdna4_dot2_uses_exact_policy_and_encoding_specific_inline_halves():
     for cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
         cpp = gen_dot2(

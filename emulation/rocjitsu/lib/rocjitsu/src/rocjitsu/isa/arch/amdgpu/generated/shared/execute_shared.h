@@ -10317,8 +10317,8 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
       if (inst.inst_.neg_hi & 2)
         b1 ^= 0x8000u;
       uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-      if (inst.inst_.neg & 4)
-        acc ^= 0x80000000u;
+      acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst.inst_.neg_hi,
+                                                                   inst.inst_.neg);
       uint32_t result = amdgpu::gfx11_dot2_f32<true>(a0, b0, a1, b1, acc);
       sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
       continue;
@@ -10336,8 +10336,7 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
     if (inst.inst_.neg_hi & 2)
       b1 = -b1;
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-    if (inst.inst_.neg & 4)
-      acc = -acc;
+    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst.inst_.neg_hi, inst.inst_.neg);
     float result = a0 * b0 + a1 * b1 + acc;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
                                                        std::bit_cast<uint32_t>(result));
@@ -10376,8 +10375,8 @@ inline void execute_v_dot2_f32_f16_vop3p([[maybe_unused]] Inst &inst,
       if (inst.inst_.neg_hi & 2)
         b1 ^= 0x8000u;
       uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-      if (inst.inst_.neg & 4)
-        acc ^= 0x80000000u;
+      acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst.inst_.neg_hi,
+                                                                   inst.inst_.neg);
       uint32_t result = amdgpu::gfx11_dot2_f32<false>(a0, b0, a1, b1, acc);
       sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
       continue;
@@ -10395,8 +10394,7 @@ inline void execute_v_dot2_f32_f16_vop3p([[maybe_unused]] Inst &inst,
     if (inst.inst_.neg_hi & 2)
       b1 = -b1;
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-    if (inst.inst_.neg & 4)
-      acc = -acc;
+    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst.inst_.neg_hi, inst.inst_.neg);
     float result = a0 * b0 + a1 * b1 + acc;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
                                                        std::bit_cast<uint32_t>(result));

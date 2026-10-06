@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <gtest/gtest.h>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <utility>
@@ -2841,6 +2842,89 @@ std::vector<ArithmeticCase> dot2_packed16_cases() {
   return cases;
 }
 
+// VOP3P modifier fields; op_sel_hi defaults to the assembler's [1,1,1].
+struct DotModifiers {
+  uint8_t neg = 0;
+  uint8_t neg_hi = 0;
+  uint8_t opsel = 0;
+  uint8_t opsel_hi = 7;
+  uint8_t clamp = 0;
+};
+
+// VOP3P DOT lanes captured on gfx1201 and, for the instructions RDNA3 has, on
+// gfx1100 (the RDNA3.5 rows reuse the gfx1100 values without a capture). MODE
+// 0x30 and 0xc0 swap the F32 and F16 denormal fields; 0xff rounds toward zero.
+struct DotLane {
+  const char *name;
+  uint16_t opcode;
+  DotModifiers modifiers;
+  std::array<uint32_t, 3> sources;
+  uint32_t gfx1201;
+  std::optional<uint32_t> gfx1100; // Empty when RDNA3 lacks the instruction.
+  std::vector<uint32_t> modes;
+};
+
+std::vector<DotLane> dot_family_lanes() {
+  constexpr uint8_t kSrc2 = 4;
+  const uint16_t f16 = rdna4::kVDot2F32F16Vop3p;
+  const uint16_t bf16 = rdna4::kVDot2F32Bf16Vop3p;
+  std::vector<DotLane> lanes;
+  const auto add = [&](const char *name, uint16_t opcode, DotModifiers modifiers, uint32_t a,
+                       uint32_t b, uint32_t c, uint32_t gfx1201, std::optional<uint32_t> gfx1100,
+                       std::vector<uint32_t> modes) {
+    lanes.push_back({name, opcode, modifiers, {a, b, c}, gfx1201, gfx1100, std::move(modes)});
+  };
+  // NEG_HI on the F32 accumulator is ABS.
+  add("F32F16AbsAccumulator", f16, {.neg_hi = kSrc2}, 0x039e5408u, 0x518056e6u, 0xc0e9ac5cu,
+      0x45deb3f0u, 0x45deb3f0u, {0x30u, 0xc0u, 0xffu});
+  add("F32F16AbsNegativeZero", f16, {.neg_hi = kSrc2}, 0x020083ffu, 0xbc008000u, 0x80000000u,
+      0xb8000000u, 0xb8000001u, {0x30u, 0xc0u});
+  add("F32Bf16AbsAccumulator", bf16, {.neg_hi = kSrc2}, 0x00c83f74u, 0xb4b1c3f9u, 0xc3edc000u,
+      0x3f57ff80u, 0x3f57ff00u, {0x30u, 0xc0u, 0xffu});
+  add("F32Bf16AbsNegativeZero", bf16, {.neg_hi = kSrc2}, 0xbf803f00u, 0xbf808000u, 0x80000000u,
+      0x3f800000u, 0x3f7fffffu, {0x30u, 0xc0u});
+  return lanes;
+}
+
+std::vector<ArithmeticCase> dot_family_cases() {
+  constexpr uint32_t kUntouched = 0xa5a5a5a5u;
+  std::vector<ArithmeticCase> cases;
+  for (const auto &[arch, prefix] : {std::pair{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201"},
+                                     std::pair{ROCJITSU_CODE_ARCH_RDNA3, "Gfx1100"},
+                                     std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, "Rdna3_5"}}) {
+    for (const DotLane &lane : dot_family_lanes()) {
+      if (arch != ROCJITSU_CODE_ARCH_RDNA4 && !lane.gfx1100)
+        continue;
+      const DotModifiers &m = lane.modifiers;
+      const auto words =
+          rdna4::build_vop3p(lane.opcode, {.vdst = 6,
+                                           .neg_hi = m.neg_hi,
+                                           .opsel = m.opsel,
+                                           .opsel_hi_2 = static_cast<uint8_t>(m.opsel_hi >> 2),
+                                           .clamp = m.clamp,
+                                           .src0 = 256,
+                                           .src1 = 257,
+                                           .src2 = 258,
+                                           .opsel_hi = static_cast<uint8_t>(m.opsel_hi & 3),
+                                           .neg = m.neg});
+      const uint32_t expected = arch == ROCJITSU_CODE_ARCH_RDNA4 ? lane.gfx1201 : *lane.gfx1100;
+      for (const uint32_t mode : lane.modes) {
+        char suffix[16];
+        std::snprintf(suffix, sizeof(suffix), "Mode%X", mode);
+        cases.push_back(
+            {std::string(prefix) + lane.name + suffix,
+             arch,
+             {words[0], words[1], 0u},
+             {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}, {6, kUntouched}},
+             {{6, expected}},
+             mode,
+             FE_TONEAREST});
+      }
+    }
+  }
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2987,6 +3071,22 @@ TEST_P(ValuDot2Packed16Test, MatchesCapturesOnScalarAndSimdPaths) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Captured, ValuDot2Packed16Test, testing::ValuesIn(dot2_packed16_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuDotFamilyTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuDotFamilyTest, MatchesCapturesOnScalarAndSimdPaths) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Captured, ValuDotFamilyTest, testing::ValuesIn(dot_family_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

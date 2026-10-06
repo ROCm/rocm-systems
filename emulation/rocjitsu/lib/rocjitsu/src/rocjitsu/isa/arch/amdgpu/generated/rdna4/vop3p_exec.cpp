@@ -628,8 +628,7 @@ void VDot2F32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     if (inst_.neg_hi & 2)
       b1 ^= 0x8000u;
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
-    if (inst_.neg & 4)
-      acc ^= 0x80000000u;
+    acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);
     uint32_t result = amdgpu::gfx12_dot2_f32<false>(a0, b0, a1, b1, acc);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }
@@ -781,8 +780,7 @@ void VDot2F32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     if (inst_.neg_hi & 2)
       b1 ^= 0x8000u;
     uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
-    if (inst_.neg & 4)
-      acc ^= 0x80000000u;
+    acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);
     uint32_t result = amdgpu::gfx12_dot2_f32<true>(a0, b0, a1, b1, acc);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
   }

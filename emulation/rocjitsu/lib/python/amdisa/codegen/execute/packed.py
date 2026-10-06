@@ -1242,7 +1242,11 @@ def gen_dot2(
         L.append(
             f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
         )
-        L.append('    if (inst_.neg & 4) acc ^= 0x80000000u;')
+        # The F32 accumulator takes NEG_HI as ABS, like the MAD_MIX F32
+        # sources; gfx1201 and gfx1100 both return |C| for neg_hi:[0,0,1].
+        L.append(
+            '    acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);'
+        )
         bf16 = str(cls == 'dot2_f32_bf16').lower()
         L.append(
             f'    uint32_t result = amdgpu::{dot_arch}_dot2_f32<{bf16}>(a0, b0, a1, b1, acc);'
@@ -1277,7 +1281,9 @@ def gen_dot2(
         L.append(
             f'    float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({s2}, lane));'
         )
-        L.append('    if (inst_.neg & 4) acc = -acc;')
+        L.append(
+            '    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.neg_hi, inst_.neg);'
+        )
         L.append('    float result = a0 * b0 + a1 * b1 + acc;')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
