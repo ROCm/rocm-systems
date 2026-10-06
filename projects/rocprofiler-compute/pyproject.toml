@@ -101,5 +101,6 @@ markers = [
     "torch_ops",
     "torch_trace",
     "triton_trace",
+    "ml_api_trace",
     "experimental_feature",
 ]
