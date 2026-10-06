@@ -1687,6 +1687,20 @@ int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg, i
 
 int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
                                  int *target_mem_fd, int target_proc_fd) {
+  // kfd_ioctl() accepts older CREATE_QUEUE payloads by zero-extending them to
+  // the current kernel structure. In particular, older 88-byte payloads omit
+  // the sdma_engine_id tail. Copy back only bytes supplied by the caller.
+  // https://github.com/torvalds/linux/blob/d24e8ac715de2e16a53c144005b1863660a5fbea/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
+  if (ioctl_without_size(request) == ioctl_without_size(AMDKFD_IOC_CREATE_QUEUE) &&
+      request != AMDKFD_IOC_CREATE_QUEUE) {
+    kfd_ioctl_create_queue_args args{};
+    const size_t bytes = std::min(ioctl_arg_size(request), sizeof(args));
+    std::memcpy(&args, arg, bytes);
+    const int result =
+        dispatch_ioctl(proc, AMDKFD_IOC_CREATE_QUEUE, &args, target_mem_fd, target_proc_fd);
+    std::memcpy(arg, &args, bytes);
+    return result;
+  }
   util::Logger::driver("IOCTL pid=", proc.process_id(), " ", LinuxKfd::ioctl_name(request));
 
   unsigned long dispatch_request = canonical_ioctl_request(request);
