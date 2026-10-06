@@ -495,6 +495,23 @@
           "name": "NetIB_MultiSeg_ConcurrentPairs",
           "description": "Rank r receives from r + N/2 while every other pair transfers too: chunks straddle each interior boundary of a 4-segment window, and the bytes before each chunk stay untouched",
           "test_filter": "NetIbMultiSegmentMPITest.ConcurrentPairsMoveEverySegmentBoundary"
+        },
+        {
+          "name": "NetIB_MultiSeg_SendQueueFatChainOversubscribe",
+          "description": "Three 8-recv groups of 16-segment chains (~249 WQEs each) posted on one send QP without test(): all must fit the enlarged send queue and complete",
+          "test_filter": "NetIbMultiSegmentMPITest.SendQueueFatChainOversubscribe",
+          "env_variables": {
+            "RCCL_MSEG_SQ_STRESS": "1",
+            "NCCL_IB_QPS_PER_CONNECTION": "1"
+          }
+        },
+        {
+          "name": "NetIB_MultiSeg_ReceiverSideMatchingById",
+          "description": "Boundary-crossing transfers with ID-based receiver matching: a single receive whose chunk straddles a boundary must report the full size, not only the last slice carrying the imm",
+          "test_filter": "NetIbMultiSegmentMPITest.CrossBoundaryTransferSucceeds:NetIbMultiSegmentMPITest.WholeBufferSingleTransfer:NetIbMultiSegmentMPITest.DeepEP_AsymmetricOffsetTransfer:NetIbMultiSegmentMPITest.ConcurrentPairsMoveEverySegmentBoundary",
+          "env_variables": {
+            "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "1"
+          }
         }
       ]
     },

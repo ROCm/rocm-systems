@@ -1556,14 +1556,11 @@ TEST_F(UBR_MultiSegment, NetProxyPartialFinalSegment)
 
     struct ncclReg* reg = nullptr;
     ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, registeredBytes, &reg);
-    ASSERT_NE(reg, nullptr) << "ncclCommRegister did not publish a cache entry for the clipped range";
+    ASSERT_MPI_NE(reg, nullptr);
     const bool netDone = (reg->state & NET_REG_COMPLETE) != 0;
-    {
-        const std::string why = mpiCoordinatedSkipReason(
-            !MPIHelpers::anyRankTrue(netDone),
-            "NET path not taken on any rank (no inter-node NIC MR)");
-        if (!why.empty()) GTEST_SKIP() << why;
-    }
+    // Two nodes are required above, so no NET registration on any rank is a regression.
+    ASSERT_TRUE(MPIHelpers::anyRankTrue(netDone))
+        << "NET proxy registration did not complete on any rank across two nodes";
     if (netDone) {
         ASSERT_NE(reg->netHandleHead, nullptr);
         ASSERT_EQ(reg->rcclNet.nSegments, kMappedSegments)
