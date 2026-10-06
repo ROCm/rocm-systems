@@ -158,30 +158,6 @@ protected:
         return vmmBuffers_.back().get();
     }
 
-    RCCLHybridVmmTests::HybridVmmBuffer* AllocHybrid(
-        size_t gpuBytes, size_t localCpuBytes, std::string* reason)
-    {
-        int dev = 0;
-        if (hipGetDevice(&dev) != hipSuccess)
-            return nullptr;
-        if (!RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason))
-            return nullptr;
-        auto buf = std::make_unique<RCCLHybridVmmTests::HybridVmmBuffer>();
-        if (!RCCLHybridVmmTests::AllocHybridVmm(
-                dev, gpuBytes, localCpuBytes, buf.get(), reason))
-            return nullptr;
-        // Plugin registration has no window, so the importer publishes the owner's DMA-BUF fds.
-        uintptr_t va = reinterpret_cast<uintptr_t>(buf->ptr);
-        for (size_t s = 0; s < buf->segSizes.size(); ++s)
-        {
-            if (buf->segFds[s] >= 0)
-                rcclHostSegmentFdRegister(reinterpret_cast<void*>(va), buf->segSizes[s], buf->segFds[s]);
-            va += buf->segSizes[s];
-        }
-        hybridBuffers_.push_back(std::move(buf));
-        return hybridBuffers_.back().get();
-    }
-
     bool AllocHybridForLocalRanks(
         size_t gpuBytes, size_t localCpuBytes, int expectedLocalRanks,
         RCCLHybridVmmTests::HybridVmmBuffer** out, std::string* reason)
@@ -189,8 +165,9 @@ protected:
         *out = nullptr;
         int dev = 0;
         std::string localReason;
-        bool supported = hipGetDevice(&dev) == hipSuccess &&
-            RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason);
+        // The support check runs collectives; call it even if hipGetDevice failed.
+        const bool haveDev = hipGetDevice(&dev) == hipSuccess;
+        bool supported = RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason) && haveDev;
         if (SyncSkip(!supported)) {
             if (reason && reason->empty())
                 *reason = "hybrid VMM runtime support is unavailable on another rank";
@@ -203,7 +180,16 @@ protected:
             *reason = localReason;
         // TearDown is the only FreeHybridVmm for a successful alloc. A peer skip
         // after this rank succeeded used to destroy the unique_ptr without that call.
-        if (ok) hybridBuffers_.push_back(std::move(buf));
+        if (ok) {
+            // Plugin registration has no window, so the importer publishes the owner's DMA-BUF fds.
+            uintptr_t va = reinterpret_cast<uintptr_t>(buf->ptr);
+            for (size_t s = 0; s < buf->segSizes.size(); ++s) {
+                if (buf->segFds[s] >= 0)
+                    rcclHostSegmentFdRegister(reinterpret_cast<void*>(va), buf->segSizes[s], buf->segFds[s]);
+                va += buf->segSizes[s];
+            }
+            hybridBuffers_.push_back(std::move(buf));
+        }
         if (SyncSkip(!ok)) {
             if (reason && reason->empty())
                 *reason = "hybrid VMM allocation failed on another rank";
