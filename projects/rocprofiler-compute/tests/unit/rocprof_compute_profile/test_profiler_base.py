@@ -100,7 +100,6 @@ def test_partition_warning_messages(
 # ---------------------------------------------------------------------------
 # sanitize() with --torch-trace
 # ---------------------------------------------------------------------------
-@pytest.mark.torch_trace
 @pytest.mark.parametrize(
     "remaining, expected_exception, setup",
     [

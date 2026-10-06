@@ -887,7 +887,6 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.torch_trace
 def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute, capsys):
     """Test --list-torch-operators fails gracefully without --path"""
     code = binary_handler_analyze_rocprof_compute([
@@ -902,7 +901,6 @@ def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute, ca
     assert "-p/--path" in error_output or "required" in error_output.lower()
 
 
-@pytest.mark.torch_trace
 def test_list_torch_operators_no_trace_data(
     binary_handler_analyze_rocprof_compute, capsys
 ):

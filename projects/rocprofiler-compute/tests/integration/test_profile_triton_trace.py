@@ -14,6 +14,8 @@ import pytest
 from tests.integration.common import config, require_triton
 from utils import csv_compression
 
+pytestmark = pytest.mark.triton_trace
+
 
 @pytest.fixture(scope="module")
 def triton_trace_workload_state():
@@ -53,7 +55,6 @@ def triton_trace_profiled_workload(
     return triton_trace_workload_state["dir"]
 
 
-@pytest.mark.triton_trace
 def test_triton_trace_profile_csvs(triton_trace_profiled_workload):
     workload_dir = triton_trace_profiled_workload
     marker_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv.gz"))
@@ -73,7 +74,6 @@ def test_triton_trace_profile_csvs(triton_trace_profiled_workload):
     assert any("triton.JITFunction.matmul_kernel" in fn for fn in functions)
 
 
-@pytest.mark.triton_trace
 def test_list_triton_operators_prints_call_tree(
     triton_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -91,7 +91,6 @@ def test_list_triton_operators_prints_call_tree(
     assert "triton.JITFunction.matmul_kernel" in out
 
 
-@pytest.mark.triton_trace
 def test_triton_operator_matmul_selects_kernels(
     triton_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -110,7 +109,6 @@ def test_triton_operator_matmul_selects_kernels(
     assert "triton.JITFunction.matmul_kernel" in out
 
 
-@pytest.mark.triton_trace
 def test_triton_operator_intersects_kernel_id(
     triton_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):

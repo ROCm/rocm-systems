@@ -16,6 +16,8 @@ from tests.integration.common import config, require_triton
 from utils import csv_compression
 from utils.utils_analysis import simplify_kernel_name
 
+pytestmark = pytest.mark.ml_api_trace
+
 
 @pytest.fixture(scope="module")
 def ml_api_trace_workload_state():
@@ -55,7 +57,6 @@ def ml_api_trace_profiled_workload(
     return ml_api_trace_workload_state["dir"]
 
 
-@pytest.mark.ml_api_trace
 def test_ml_api_trace_profile_csvs(ml_api_trace_profiled_workload):
     marker_files = list(
         Path(ml_api_trace_profiled_workload).glob("**/*marker_api_trace.csv.gz")
@@ -70,7 +71,6 @@ def test_ml_api_trace_profile_csvs(ml_api_trace_profiled_workload):
     assert any("|triton" in fn for fn in functions)
 
 
-@pytest.mark.ml_api_trace
 def test_list_both_operators(
     ml_api_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -90,7 +90,6 @@ def test_list_both_operators(
     assert "triton.JITFunction" in out
 
 
-@pytest.mark.ml_api_trace
 def test_list_torch_only_confines_tree_and_kernels(
     ml_api_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -109,7 +108,6 @@ def test_list_torch_only_confines_tree_and_kernels(
     assert "triton.JITFunction" not in out
 
 
-@pytest.mark.ml_api_trace
 def test_list_triton_only_confines_tree_and_kernels(
     ml_api_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -133,7 +131,6 @@ def test_list_triton_only_confines_tree_and_kernels(
     assert "(id " in out[triton_idx:]
 
 
-@pytest.mark.ml_api_trace
 def test_filter_triton_confines_metric_kernel_ids(
     ml_api_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -168,7 +165,6 @@ def test_filter_triton_confines_metric_kernel_ids(
     assert not any("aten::" in str(name) for name in kernel_top["Kernel_Name"])
 
 
-@pytest.mark.ml_api_trace
 def test_filter_torch_confines_metric_kernel_ids(
     ml_api_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -205,7 +201,6 @@ def test_filter_torch_confines_metric_kernel_ids(
     )
 
 
-@pytest.mark.ml_api_trace
 def test_filter_torch_and_triton_together(
     ml_api_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
