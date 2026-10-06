@@ -5,6 +5,7 @@
 
 import csv
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -663,3 +664,38 @@ def test_list_torch_operators_wins_over_filter(
     assert "Defaulting to listing" in out
     assert "PyTorch Operator Call Tree:" in out
     assert "Matched PyTorch Operators:" not in out
+
+
+@pytest.mark.torch_trace
+def test_torch_operator_intersects_kernel_id(
+    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    list_code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-torch-operators",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert list_code == 0
+    captured = capsys.readouterr()
+    list_out = captured.out + captured.err
+    addmm_idx = list_out.find("aten::addmm")
+    assert addmm_idx >= 0
+    match = re.search(r"\(id (\d+)\)", list_out[addmm_idx:])
+    assert match is not None
+    kernel_id = match.group(1)
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--torch-operator",
+        "*addmm*",
+        "--kernel",
+        kernel_id,
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "operator filter selected 1 kernel" in out
