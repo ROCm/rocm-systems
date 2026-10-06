@@ -52,7 +52,6 @@ static inline int ncclRmaCountPairedDataWrs(size_t size, int maxWr) {
   return n;
 }
 
-// Count WRs for explicit local/remote segOff tables. Returns maxWr+1 if the chain does not fit.
 static inline int ncclRmaSegIndexOf(const size_t* segOff, int nSeg, uint64_t off) {
   for (int s = 0; s < nSeg; s++) {
     if (off < segOff[s + 1]) return s;
@@ -60,6 +59,7 @@ static inline int ncclRmaSegIndexOf(const size_t* segOff, int nSeg, uint64_t off
   return nSeg - 1;
 }
 
+// Count WRs for explicit local/remote segOff tables. Returns maxWr+1 if the chain does not fit.
 static inline int ncclRmaCountLayoutDataWrs(const size_t* localOff, int nLocal, const size_t* remoteOff, int nRemote,
                                             uint64_t lOff, uint64_t rOff, size_t size, int maxWr) {
   int n = 0;
