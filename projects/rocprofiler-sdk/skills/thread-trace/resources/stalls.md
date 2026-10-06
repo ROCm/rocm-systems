@@ -24,15 +24,16 @@ Each wave's lifetime is split into states:
 - **WAIT:** the wave was in an immediate instruction: `s_waitcnt` (or `s_wait_*` on gfx12
   and later), but also `s_barrier` ([synchronization.md](synchronization.md)), `s_nop`,
   `s_sleep`, and others. `hotspots` shows which. A barrier can be recorded as two
-  instructions (on gfx9, a short message and then the wait), which doubles its hits.
-- **EXEC:** the wave issued an instruction, and the time until its next one, so EXEC
-  includes the idle gaps between instructions.
+  instructions (on gfx9, a short message and then the wait; on gfx12, `s_barrier_signal` and
+  then `s_barrier_wait`), which doubles its hits.
+- **EXEC:** the wave issued an instruction, and the time until its next one, so on gfx9
+  and gfx12 EXEC includes the idle gaps between instructions.
 - **IDLE:** the time before the wave's first instruction.
 
 ## Waits: `s_waitcnt` and `s_wait_*`
 
 A wait instruction (`s_waitcnt`; on gfx12 and later `s_wait_loadcnt`, `s_wait_dscnt`, and
-the other `s_wait_*` instructions) holds the wave until enough of the memory instructions
+the other `s_wait_*` counter waits) holds the wave until enough of the memory instructions
 it issued earlier have completed for their count to fall to the value in its operand
 (`vmcnt(0)` waits for all of them). A costly wait is time the wave spent waiting for their
 results. The trace does not record which of the earlier instructions it waited for; rocprofv3
@@ -52,10 +53,11 @@ instruction before the data is used.
 
 ## Idle cycles
 
-Arbiter loss means another wave issued; a register dependency means the instruction needed
-the result of an earlier one. Waits the program makes explicit are not idle: `s_waitcnt` and
-`s_wait_*` for memory results, and `s_nop` that the compiler inserts between some dependent
-instructions, show as WAIT. `summary` reports idle as the idle time between instructions,
+Idle time can come from arbiter loss, a source or destination register dependency, or an
+instruction cache miss; the trace does not say which. Waits the program makes explicit are
+not idle: `s_waitcnt`, the `s_wait_*` counter waits, and `s_nop` show as WAIT. The
+ALU-dependency waits `s_wait_alu` and `s_delay_alu` (gfx11 and later) are not recorded, so
+their time appears as idle on the next instruction. `summary` reports idle as the idle time between instructions,
 and `hotspots` per instruction.
 
 ## Hidden cost
@@ -80,12 +82,16 @@ Suggestions, each for a pattern the trace shows:
 
 - **Idle concentrates on instructions that use the previous instruction's result:** put
   independent work between them, for example by processing several elements per thread so
-  their chains overlap.
+  their chains overlap. This helps only if the idle is a dependency, which the trace cannot
+  tell from arbiter loss or an instruction cache miss.
 - **Few waves are resident (`summary`'s `waves_per_simd`):** allow more waves, so other
-  waves issue while one waits for its result ([latency.md](latency.md#few-waves)).
+  waves issue while one waits for its result ([latency.md](latency.md#few-waves)); this
+  helps only if the memory system has headroom, which the trace cannot show.
 
 ## Checking a change
 
 Capture again and run `att_mine.py <old capture> compare <new capture>`: the lines you
-targeted should lose cost. For idle, `hotspots` should show less in the `idle` column on
-those instructions, and `summary`'s idle between instructions should fall.
+targeted should lose cost. `compare` is per wave, so when a change alters the work each wave
+does, compare kernel times, or the cost per unit of work. For idle, `hotspots` may show
+less in the `idle` column on those instructions, and `summary`'s idle between instructions
+may fall.

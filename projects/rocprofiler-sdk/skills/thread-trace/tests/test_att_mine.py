@@ -220,6 +220,12 @@ def timed(time, text, duration, stall=0, category="VALU", addr=None):
 
 
 class PipeTests(unittest.TestCase):
+    def test_a_capture_with_no_waves_reports_no_resident_time(self):
+        result = mine.Capture.from_waves([]).pipes()
+        self.assertEqual(result["waves"], 0)
+        self.assertEqual(result["resident_cycles"], 0)
+        self.assertEqual(result["valu_busy"], 0.0)
+
     def test_classes_split_valu_and_name_waits_and_barriers(self):
         self.assertEqual(mine.inst_class(timed(0, "v_exp_f32_e32 v1, v1", 16)), "VALU")
         self.assertEqual(
@@ -421,6 +427,12 @@ class IdleRoutingTests(unittest.TestCase):
         }
         self.assertIn("resources/stalls.md", mine.next_read_from_stats(rows))
 
+    def test_the_idle_time_of_s_endpgm_is_the_wave_completing_not_a_stall(self):
+        rows = {"instructions": [{"text": "s_endpgm", "latency": 10, "idle": 90}]}
+        hint = mine.next_read_from_stats(rows)
+        self.assertNotIn("stalls.md", hint)
+        self.assertIn("wave completing", hint)
+
 
 class BarrierTests(unittest.TestCase):
     def workgroup(self, begin, leader_simd):
@@ -617,6 +629,12 @@ class OccupancyTests(unittest.TestCase):
             workgroup_id=0,
             start=start,
         )
+
+    def test_a_wave_ends_even_when_its_workgroup_id_changed(self):
+        start, end = self.occ(10, 0, 1), self.occ(20, 0, 0)
+        end.workgroup_id = 7
+        cap = mine.Capture.from_waves([], dispatches=[], occupancy=[start, end])
+        self.assertEqual([r["active_waves"] for r in cap.occupancy_rows()], [1, 0])
 
     def test_active_waves_and_registers_follow_the_occupancy_sample(self):
         dispatch = SimpleNamespace(
@@ -938,6 +956,85 @@ class DispatchKeyTests(unittest.TestCase):
         w1 = wave([inst(600, "v_add_f32 v0, v0, v1")])
         mine.assign_dispatches([w0, w1], [a, b], ("53377", "1"))
         self.assertNotEqual(w0.dispatch_key, w1.dispatch_key)
+
+
+class PageListTests(unittest.TestCase):
+    def test_a_page_named_with_a_section_is_read_from_that_section(self):
+        anchored = mine.page_lists("compute.md#ceiling-check")
+        self.assertTrue(anchored.startswith(", starting there; the page lists"))
+        self.assertTrue(mine.page_lists("latency.md").startswith(": it lists"))
+
+
+@unittest.skipUnless(
+    importlib.util.find_spec("rocprof_trace_decoder"),
+    "needs the decoder's Python package",
+)
+class UnresolvedRecordTests(unittest.TestCase):
+    """Records with no pc: only those that are not context or cut-off records are unresolved."""
+
+    @staticmethod
+    def load(category):
+        pc = SimpleNamespace(address=0, code_object_id=0)
+        record = SimpleNamespace(
+            pc=pc, category=int(category), time=10, duration=4, stall=0
+        )
+        wave = SimpleNamespace(
+            cu=0,
+            simd=0,
+            wave_id=0,
+            workgroup_id=0,
+            begin_time=0,
+            end_time=100,
+            contexts=0,
+            instructions=[record],
+            timeline=[],
+        )
+        cap = object.__new__(mine.Capture)
+        cap.code_index = SimpleNamespace(entries={})
+        cap.unresolved = 0
+        return cap, cap._wave(0, wave)
+
+    def test_a_wave_cut_off_by_the_end_of_the_trace_loads(self):
+        cap, trace = self.load(
+            14
+        )  # the decoder's WAVE_NOT_FINISHED, past InstCategory.LAST
+        self.assertEqual(cap.unresolved, 0)
+        self.assertEqual(trace.insts, [])
+
+    def test_context_records_are_not_unresolved(self):
+        from rocprof_trace_decoder import InstCategory
+
+        cap, trace = self.load(InstCategory.CONTEXT)
+        self.assertEqual(cap.unresolved, 0)
+        self.assertEqual(trace.insts, [])
+
+    def test_other_records_without_a_pc_are_unresolved(self):
+        from rocprof_trace_decoder import InstCategory
+
+        cap, trace = self.load(InstCategory.VMEM)
+        self.assertEqual(cap.unresolved, 1)
+        self.assertEqual(trace.insts, [])
+
+
+@unittest.skipUnless(
+    importlib.util.find_spec("rocprof_trace_decoder"),
+    "needs the decoder's Python package",
+)
+class ReusedDirectoryTests(unittest.TestCase):
+    def test_code_objects_of_two_runs_say_to_use_a_new_directory(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for pid in ("100", "200"):
+                (Path(tmp) / f"{pid}_gfx942_code_object_id_1.out").write_bytes(
+                    b"\x7fELF" + bytes(60)
+                )
+            (Path(tmp) / "100_7_shader_engine_0_1.att").write_bytes(b"")
+            with self.assertRaises(SystemExit) as caught:
+                mine.Capture(tmp)
+        message = str(caught.exception)
+        self.assertIn("Code object id 1 is used by both", message)
+        self.assertIn("new directory", message)
 
 
 if __name__ == "__main__":

@@ -45,7 +45,8 @@ source = lambda pc: code.entries[pc].source if pc in code.entries else "?"
 ```
 
 - A directory with several kernels or GPUs mixes them ([capture.md](capture.md#output)
-  says what each `.att` file holds), so use a new directory for each capture, with one
+  says what each `.att` file holds), and `generate_code_artifacts` raises `ValueError` when
+  two runs' code objects share an id, so use a new directory for each capture, with one
   kernel in it, or pick the files you decode.
 - Decoder warnings are explained in [capture.md](capture.md#troubleshooting).
 
@@ -59,9 +60,9 @@ source = lambda pc: code.entries[pc].source if pc in code.entries else "?"
 | `code.accumulate_wave(wave)` | Adds a wave to `code.entries[pc]`'s `hitcount`, `latency`, `stall`, and `idle`, the same counts as rocprofv3's stats CSV |
 | `analyze_hidden_latency({se: records}, code_index=code).by_pc[pc]` | A `HiddenLatency`: the instruction's `idle`, `stall`, and `issue` cycles that issue on related pipes overlapped ([stalls.md](stalls.md#hidden-cost)) |
 
-Pass one `.att` file per `analyze_hidden_latency` call and add up the results, as the first
-example does: its argument is keyed by shader engine, so two files from the same engine
-cannot share a call.
+Pass at most one `.att` file per shader engine to each `analyze_hidden_latency` call (its
+argument is keyed by shader engine, so two files from the same engine cannot share a call),
+and add up the results, as the first example does.
 
 ## Records
 
@@ -80,7 +81,7 @@ shader clock cycles.
 | `Instruction` | `time` | When the wave first tried to issue it |
 | | `stall` | Cycles until it issued |
 | | `duration` | Stall plus issue cycles (gfx9), or stall plus execution (gfx10 and later) |
-| | `category` | An `InstCategory`: `VALU` (matrix instructions included), `SALU`, `VMEM`, `SMEM`, `FLAT`, `LDS`, `IMMED` (`s_waitcnt`, `s_nop`, ...), `MESSAGE` (on gfx9, `s_endpgm` and similar), `JUMP` and `NEXT` (branch taken and not), and others |
+| | `category` | An `InstCategory`: `VALU` (matrix instructions included), `SALU`, `VMEM`, `SMEM`, `FLAT`, `LDS`, `IMMED` (`s_waitcnt`, `s_nop`, ...), `MESSAGE` (`s_endpgm`, `s_ttracedata`, `s_sendmsg`, `s_barrier`, and similar), `JUMP` and `NEXT` (branch taken and not), and others |
 | | `pc` | The key into `code.entries` |
 | `WaveState` | `type`, `duration` | A `WaveStateType` (`IDLE`, `EXEC`, `WAIT`, `STALL`) and its length; [stalls.md](stalls.md#wave-states) says what each counts |
 | `Occupancy` | `time`, `start`, `cu`, `simd`, `wave_id` | A wave starting (`start` 1) or ending (0); these can cover more compute units than the traced one |
@@ -88,10 +89,13 @@ shader clock cycles.
 
 The idle time before an instruction is not a field; compute it as the second example does,
 which matches the stats CSV. Like the CSV, leave out instructions whose `pc` has address 0
-and code object 0: instructions the decoder could not resolve, and trap or context records
-(category `CONTEXT`). `InstCategory(c).name` and
-`WaveStateType(t).name` give names. A barrier can be recorded as two instructions (on gfx9,
-a `MESSAGE` and then an `IMMED`); the barrier examples below merge them.
+and code object 0: instructions the decoder could not resolve, trap or context records
+(category `CONTEXT`), and the record that ends a wave still running when the trace ended
+(on gfx9, category 14, which `InstCategory` does not name). `InstCategory(c).name` and
+`WaveStateType(t).name` give names. A barrier can be recorded as two instructions (on gfx9, `s_barrier` as a
+`MESSAGE` and then an `IMMED`; on gfx12, `s_barrier_signal` as a `MESSAGE` and then
+`s_barrier_wait` as an `IMMED`; on gfx10 and gfx11, one `MESSAGE`); the barrier examples
+below merge them.
 
 ## Examples
 
@@ -189,16 +193,17 @@ A wave's time in each state:
 
 ```python
 totals = defaultdict(int)
-for s in waves[0].timeline:
+for s in waves[0].timeline if waves else []:
     totals[WaveStateType(s.type).name] += s.duration
 ```
 
 Gaps when no traced wave was resident on any traced compute unit, for example between
-kernels in a capture with `--att-consecutive-kernels`:
+kernels in a capture with `--att-consecutive-kernels` (this merges the waves of all shader
+engines; to look at one, build `spans` from that engine's records):
 
 ```python
 spans = sorted((w.begin_time, w.end_time) for w in waves)
-end, idle_gaps = spans[0][1], []
+end, idle_gaps = (spans[0][1] if spans else 0), []
 for begin, finish in spans[1:]:
     if begin > end:
         idle_gaps.append((end, begin - end))     # (when, how many cycles)
@@ -242,7 +247,7 @@ frequency over the capture, which turns cycle counts into time:
 ```python
 for se, records in records_by_file:
     rt, hz = records.realtime, records.realtime_frequency   # or the agent's timestamp frequency
-    if len(rt) >= 2 and hz:
+    if len(rt) >= 2 and hz and records.waves:
         seconds = (rt[-1].realtime_clock - rt[0].realtime_clock) / hz
         mhz = (rt[-1].shader_clock - rt[0].shader_clock) / seconds / 1e6
         span = max(w.end_time for w in records.waves) - min(w.begin_time for w in records.waves)
@@ -253,11 +258,12 @@ for se, records in records_by_file:
 
 A kernel can write values into the trace: `__builtin_amdgcn_s_ttracedata(value)` writes a
 32-bit value (`s_ttracedata`, through M0), and on gfx10 and later
-`__builtin_amdgcn_s_ttracedata_imm(value)` writes an 8-bit immediate. Each becomes a
+`__builtin_amdgcn_s_ttracedata_imm(constant)` writes an 8-bit immediate. Each becomes a
 `ShaderData` record in `records.shaderdata` with its `time`, `value`, and the wave slot
 (`cu`, `simd`, `wave_id`) that wrote it, so markers can label loop iterations or phases in
-each wave. On gfx10 and later, `flags` is a bitmask: 1 marks a value from `s_ttracedata_imm`,
-and 2 a record the trap handler wrote rather than the kernel; on gfx9 it is always 0. Records can also come from compute units that were not traced, and a record's time can
+each wave. `flags` is a bitmask: 1 marks a value from `s_ttracedata_imm` (gfx11 and later),
+and, on gfx12, 2 a record the trap handler wrote rather than the kernel; on gfx9 it is
+always 0. Records can also come from compute units that were not traced, and a record's time can
 fall after its wave's `end_time`. Each marker adds instructions, so time the kernel without
 them.
 
@@ -271,7 +277,7 @@ for _, records in records_by_file:
     for w in sorted(records.waves, key=lambda w: w.begin_time):
         by_slot[(w.cu, w.simd, w.wave_id)].append(w)
     for s in records.shaderdata:
-        if s.flags & 2:              # gfx10 and later: written by the trap handler
+        if s.flags & 2:              # gfx12: written by the trap handler
             continue
         began = [w for w in by_slot.get((s.cu, s.simd, s.wave_id), []) if w.begin_time <= s.time]
         if began:

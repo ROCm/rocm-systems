@@ -1,15 +1,16 @@
 # Barriers and Atomics
 
 Waves of a workgroup wait for each other at `s_barrier`, and wait instructions after
-atomic instructions hold the wave until the atomics they wait for complete. ATT shows how long each wave spent on these instructions.
+atomic instructions that return a value hold the wave until those atomics complete. ATT shows how long each wave spent on these instructions.
 
 ## What the trace shows
 
 - `stats`, `hotspots`, and `lines`: `s_barrier` or the wait instruction right after an
-  atomic holds the time (in `wait`), or atomic instructions (`global_atomic_*`, `ds_*`
-  atomics) do (in `stall` and issue cycles).
-- `barriers`: in each workgroup, one wave spends little of its time at `s_barrier` and the
-  others much of theirs; that wave is often, not always, the one the others wait for
+  atomic that returns a value holds the time (in `wait`), or `global_atomic_*` instructions
+  do (in `stall`).
+- `barriers`: names, in each workgroup, the wave that spent the least of its time at
+  `s_barrier`; when the others spent much more, that wave is often, not always, the one the
+  others wait for
   ([reading-the-trace.md](reading-the-trace.md#commands) describes the report). When the same
   wave waits least in every workgroup and the others' barrier shares are much higher, that
   points to work only that wave does (for example code under `if (threadIdx.x == 0)`); the

@@ -24,11 +24,14 @@ shows how much of the time each class was issuing.
 
 `pipes` ends with the share of the SIMDs' resident time during which vector instructions
 (all VALU classes) were issuing. Instructions that issued in the same cycles count once, so
-it is at most 100%.
+it is at most 100%. With `--att-simd-select` on gfx9, the other SIMDs' waves still count as
+resident and lower it.
 
 - **Near 100%:** vector issue is the likely limit on the traced SIMDs. Fewer or cheaper
   vector instructions are the change most likely to shorten the kernel (time it);
-  scheduling or extra independent work cannot add issue cycles.
+  scheduling or extra independent work cannot add issue cycles. A high share also results
+  when one wave issues while the others wait, for example at a barrier (`barriers`); then
+  that wave's serial work, not issue, limits the kernel.
 - **Well below 100%, with STALL still the largest state:** go by the class that holds the
   stall (above).
 - **Well below 100% in any case:** this measures the instructions the kernel uses now. It
@@ -50,7 +53,8 @@ Suggestions, each for a pattern the trace shows:
   that class. `hotspots` and `lines` name the lines; look there for work repeated per output
   or per iteration that could be done once, or values recomputed that could be reused.
 - **Some instructions of the stalled class take many more cycles each to issue** (per
-  instruction, `duration - stall` in the decoded records; [python-api.md](python-api.md)):
+  instruction, `duration - stall` in the decoded records, which is issue cycles on gfx9 and
+  execution cycles on gfx10 and later; [python-api.md](python-api.md)):
   where the result allows, use fewer of them on the hot lines.
 - **None of these fits, for example a fixed number of matrix instructions:** the trace does
   not settle what would help. Try changes to how the work is divided (work per wave, waves
@@ -58,6 +62,7 @@ Suggestions, each for a pattern the trace shows:
 
 ## Checking a change
 
-Capture again: `compare` should show the lines you targeted losing cost, `pipes` should
-show the class that held the stall issuing for less of the time, and STALL's share of wave
-time should fall.
+Capture again: `compare` should show the lines you targeted losing cost, per unit of work
+(it is per wave), and `pipes` should show fewer instructions of that class per wave
+(`per_wave`). The class's `busy_share` falls only if the class was not the limit, and stays
+near 100% if it was, so time the kernel.

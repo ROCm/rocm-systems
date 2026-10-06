@@ -5,9 +5,10 @@ description: Diagnoses why a compute kernel on an AMD GPU is slow, instruction b
 
 # Advanced Thread Trace (ATT)
 
-ATT records every instruction that the traced waves of a kernel executed, in order: when the
-wave first tried to issue it, how many cycles it stalled before it issued, and its
-duration, from which the idle time before the next instruction follows. By default
+ATT records the instructions that the traced waves of a kernel executed, in order (fewer
+when trace data is lost or the buffer fills): when the wave first tried to issue it, how
+many cycles it stalled before it issued, and its duration, from which the idle time before
+the next instruction follows. By default
 it covers the waves of one compute unit per traced shader engine (on RDNA GPUs, one SIMD of
 a WGP), for the dispatches you select. Timing says how slow a kernel is; the trace says
 which instructions the time went to.
@@ -31,9 +32,10 @@ rocprofv3 --att --kernel-include-regex '<kernel name regex>' -d capture -- ./app
 - Only the first dispatch of each matching kernel is traced. To skip warm-up, run the kernel
   in a loop and add `--kernel-iteration-range N-N` to trace the Nth dispatch.
 - Use a new directory for each capture, with one kernel in it: `att_mine.py` decodes every
-  `.att` file under a directory together, so a reused directory can mix the old and new
-  captures. Unknown kernel names and the other options (which compute unit, SIMDs, and
-  shader engines to trace, the buffer size, consecutive kernels) are in
+  `.att` file under a directory together, so several kernels from one run are mixed, and a
+  second run in the same directory stops it, because each run numbers its code objects
+  from 1. Unknown kernel names and the other options (which compute unit, SIMDs, and shader
+  engines to trace, the buffer size, consecutive kernels) are in
   [capture.md](resources/capture.md#capture).
 
 ## What the trace shows, and where to read
@@ -44,7 +46,7 @@ covers them. A capture can match several rows; read each page that applies.
 | What you see | Possible causes | Read |
 | --- | --- | --- |
 | Wait instructions (`s_waitcnt`, or `s_wait_*` on gfx12 and later) hold the time (the `wait` column of `hotspots` and `lines`); WAIT is a large wave state | Latency of memory or LDS instructions not covered by other work, or bandwidth (the trace cannot tell which) | [latency.md](resources/latency.md) |
-| `s_barrier` or atomic instructions hold the time | Waves reaching a barrier at different times, many barriers, or long waits on atomics | [synchronization.md](resources/synchronization.md) |
+| `s_barrier`, `global_atomic_*`, or the waits after atomics that return a value hold the time | Waves reaching a barrier at different times, many barriers, or atomics that take long to complete | [synchronization.md](resources/synchronization.md) |
 | STALL is the largest wave state; VALU, matrix, LDS, or memory instructions hold the stall, or VALU instructions (matrix included) are issuing most of the time | Instructions their pipe did not accept, usually because the unit was busy with earlier instructions or its queue was full | [compute.md](resources/compute.md) |
 | The idle column dominates the top instructions, or `summary`'s idle between instructions is large | A source or destination register dependency (waiting for an earlier result), arbiter loss, or instruction cache misses | [stalls.md](resources/stalls.md#idle-cycles) |
 | Few waves are resident for most of the kernel (`summary`'s `waves_per_simd` against its `max`) | Registers per wave, LDS per workgroup (which limits how many workgroups fit, so few waves in each leaves few resident), or too few workgroups | [latency.md](resources/latency.md#few-waves) |
@@ -88,13 +90,13 @@ the lines that hold it, read against the source. Adapt it to the task.
 2. **Capture and check the capture.** `python3 <skill dir>/scripts/att_mine.py capture
    summary` (rather than reading the stats CSV, which sums over waves). Decoder warnings (data lost, incomplete waves, incomplete stitching) and
    unresolved instructions mark parts of the trace whose totals are incomplete; zero waves
-   means nothing ran on the traced compute unit (on RDNA, or with `--att-simd-select`, on
-   the traced SIMDs)
+   means nothing ran on the traced compute unit (on RDNA, on the traced SIMD; on gfx9 with
+   `--att-simd-select`, waves of the other SIMDs are still counted, without instructions)
    ([capture.md](resources/capture.md#troubleshooting)).
 3. **Broad: what kind of time it is.** Each command decodes the capture again, which takes
-   longer as the trace grows (about 20 s for a 17 MB `.att` file):
+   longer as the trace grows (time the first one to see what each will cost):
    - `summary`: the share of wave time in EXEC, WAIT, STALL, and IDLE, and the idle time
-     between instructions (counted inside EXEC);
+     between instructions (counted inside EXEC on gfx9 and gfx12);
    - `pipes`: issue and stall cycles by instruction class (VALU, matrix, LDS, memory,
      waits, barriers), the opcodes that stalled most, and the ceiling check
      ([compute.md](resources/compute.md#ceiling-check));
@@ -104,7 +106,7 @@ the lines that hold it, read against the source. Adapt it to the task.
    instructions by the cost no issue on related pipes on the SIMD overlapped
    ([stalls.md](resources/stalls.md#hidden-cost)); `stats` ranks the stats CSV; `barriers`
    shows which wave, by launch order, waited least at `s_barrier` (often, not always, the
-   one the others wait for), and in what share of the workgroups. When no line stands out, the cost is spread over many
+   one the others wait for), and in what share of the workgroups (estimated). When no line stands out, the cost is spread over many
    instructions: go back to `pipes`, which shows which classes hold it. When a question is
    narrower than these reports (one instruction across waves, one loop iteration, the time
    between a load and its wait, one barrier), query the decoded records with the Python
@@ -113,7 +115,7 @@ the lines that hold it, read against the source. Adapt it to the task.
    ([What the trace shows, and where to read](#what-the-trace-shows-and-where-to-read)).
    Each page says what each cause looks like in the trace, changes that address it, and
    how to confirm them. `stats`, `summary`, `pipes`, `hotspots`, and `lines` end with a
-   `next:` line; read each page it names.
+   `next:` line (a capture with no waves gets none); read each page it names.
 
 6. **Change, verify, and repeat.** Build the change, check its output, and time it without
    the profiler. Take figures from the tools rather than from memory: the trace has measured

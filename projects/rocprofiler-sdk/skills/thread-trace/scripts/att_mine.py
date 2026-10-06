@@ -209,6 +209,8 @@ def short_source(source: str) -> str:
 RESOURCES = Path(__file__).resolve().parents[1] / "resources"
 # The prefixes the decoder's hidden-latency analysis treats as matrix instructions.
 MATRIX_OPS = ("v_mfma", "v_smfma", "v_wmma", "v_swmma")
+# The decoder's category past InstCategory.LAST: the record that ends a wave cut off.
+WAVE_NOT_FINISHED = 14
 FLAT_PROFILE_SHARE = 5.0  # heuristic: below this share, no single row stands out
 WAIT_CLASSES = ("wait (s_waitcnt, s_wait_*)", "barrier (s_barrier)", "IMMED")
 VALU_BUSY_ROUTE = 80.0  # heuristic: route to the ceiling check at this vector-busy share
@@ -246,6 +248,15 @@ def page_ref(page: str) -> str:
     name, _, anchor = page.partition("#")
     return f"{RESOURCES / name}" + (
         f" (section {anchor.replace('-', ' ').capitalize()!r})" if anchor else ""
+    )
+
+
+def page_lists(page: str) -> str:
+    """What the page holds; a page named with a section is read from that section."""
+    start = ", starting there; the page" if "#" in page else ": it"
+    return (
+        f"{start} lists possible causes, what each looks like in the trace, suggested "
+        "changes, and how to confirm them."
     )
 
 
@@ -371,10 +382,7 @@ def next_read(
             )
         )
     also = [(p, w) for p, w in also if p != page]
-    text = (
-        f"{why}. Before changing the kernel, read {page_ref(page)}: it lists possible causes, "
-        "what each looks like in the trace, suggested changes, and how to confirm them."
-    )
+    text = f"{why}. Before changing the kernel, read {page_ref(page)}{page_lists(page)}"
     same = [(p, w) for p, w in also if p.partition("#")[0] == page.partition("#")[0]]
     other = [(p, w) for p, w in also if (p, w) not in same]
     for p, w in same:
@@ -396,6 +404,12 @@ def next_read_from_stats(stats: dict) -> str:
             f"no instruction holds more than {rows[0]['share']}% of the cost in the CSV; "
             f"`summary` and `pipes` show where the time goes. {GUARD}"
         )
+    if op.startswith("s_endpgm"):
+        # The decoder counts the time the wave takes to complete as the idle time of s_endpgm.
+        return (
+            f"{op} holds the most time, as the idle time of the wave completing, which is not "
+            f"a stall; `summary` and `pipes` show where the time goes. {GUARD}"
+        )
     if rows[0].get("idle", 0) > rows[0].get("latency", 0):
         page, why = (
             "stalls.md#idle-cycles",
@@ -415,10 +429,7 @@ def next_read_from_stats(stats: dict) -> str:
             "compute.md",
             f"{op} holds the most time; `pipes` shows how busy its class was",
         )
-    return (
-        f"{why}. Before changing the kernel, read {page_ref(page)}: it lists possible causes, "
-        f"what each looks like in the trace, suggested changes, and how to confirm them. {GUARD}"
-    )
+    return f"{why}. Before changing the kernel, read {page_ref(page)}{page_lists(page)} {GUARD}"
 
 
 def mean_and_peak_per_simd(rows: list[dict], simds: int) -> dict:
@@ -482,6 +493,13 @@ class Capture:
             if "elftools" in str(err) or err.name == "elftools":
                 raise SystemExit(
                     "the decoder's Python package needs pyelftools: pip install pyelftools"
+                ) from None
+            raise
+        except ValueError as err:
+            if "is used by both" in str(err):
+                raise SystemExit(
+                    f"{err} Each run numbers its code objects from 1: capture each run "
+                    "into a new directory."
                 ) from None
             raise
         self.gpu = gpu_properties(self.path)
@@ -567,9 +585,14 @@ class Capture:
         prev_end = w.begin_time
         for i in w.instructions:
             # Records with no pc are skipped the way CodeIndex.accumulate_wave skips them; trap
-            # and context records (category CONTEXT) have none either, but are not unresolved.
+            # and context records (category CONTEXT) have none either, nor has the record that
+            # ends a wave still running when the trace ended (category WAVE_NOT_FINISHED, which
+            # InstCategory does not name); none of them is unresolved.
             if i.pc.code_object_id == 0 and i.pc.address == 0:
-                self.unresolved += InstCategory(i.category).name != "CONTEXT"
+                self.unresolved += i.category not in (
+                    InstCategory.CONTEXT,
+                    WAVE_NOT_FINISHED,
+                )
                 continue
             entry = self.code_index.entries.get(i.pc)
             inst = Inst(
@@ -606,10 +629,9 @@ class Capture:
             warnings.add(
                 f"the traced waves belong to {len(traced)} dispatches (from a kernel regex that matches "
                 "several kernels or no regex, --att-consecutive-kernels, an iteration range, "
-                "--selected-regions, several GPUs (limit them with --att-gpu-index), or earlier "
-                "captures left in this directory); these figures "
-                "mix them (dispatch: the one with the most waves). For one kernel, capture into a "
-                "new directory"
+                "--selected-regions, or several GPUs (limit them with --att-gpu-index)); these "
+                "figures mix them (dispatch: the one with the most waves). For one kernel, "
+                "capture into a new directory"
             )
         rows = self.occupancy_rows()
         simds = len({(se, o.cu, o.simd) for se, o in self.occupancy})
@@ -767,7 +789,7 @@ class Capture:
                     waited[c] += i.latency
                 stalled_ops[c][i.text.split(" ", 1)[0]] += i.stall
                 issuing[(c, simd)].append((i.time + i.stall, i.time + i.duration))
-        resident = sum(union_length(v) for v in lifetimes.values()) or 1
+        resident = sum(union_length(v) for v in lifetimes.values())
         busy = Counter()
         valu: dict[tuple, list] = defaultdict(list)
         for (c, simd), spans in issuing.items():
@@ -784,7 +806,7 @@ class Capture:
                 "class": c,
                 "per_wave": round(count[c] / waves, 1),
                 "cycles_each": round(issue[c] / count[c], 1),
-                "busy_share": round(100 * busy[c] / resident, 1),
+                "busy_share": round(100 * busy[c] / (resident or 1), 1),
                 "stall_share": (
                     0.0 if c in WAIT_CLASSES else round(100 * stall[c] / total_stall, 1)
                 ),
@@ -807,7 +829,7 @@ class Capture:
             "simds": len(lifetimes),
             "resident_cycles": resident,
             "valu_busy": round(
-                100 * sum(union_length(v) for v in valu.values()) / resident, 1
+                100 * sum(union_length(v) for v in valu.values()) / (resident or 1), 1
             ),
             "classes": classes,
             **self.scratch(),
@@ -946,7 +968,9 @@ class Capture:
 
     def occupancy_rows(self) -> list[dict]:
         """Active waves and SGPR/VGPR allocation after each occupancy record, as the decoder's
-        plot_occupancy_resources sample computes them."""
+        plot_occupancy_resources sample computes them, except that a wave's start and end are
+        matched by its slot alone: workgroup_id is not reliable on gfx9, and a mismatch left
+        waves active for good."""
         events = [(d.time, 0, se, d) for se, d in self.dispatch_records]
         events += [(o.time, 1, se, o) for se, o in self.occupancy]
         events.sort(key=lambda e: (e[0], e[1]))
@@ -968,7 +992,6 @@ class Capture:
                 record.wave_id,
                 record.me_id,
                 record.pipe_id,
-                record.workgroup_id,
             )
             wave_sgprs, wave_vgprs = resources.get(
                 (se, record.me_id, record.pipe_id), (0, 0)
@@ -1258,11 +1281,11 @@ def main() -> int:
             "instruction type rather than measured); stall_share: share of the "
             "stall cycles of all classes but wait, barrier, and IMMED, the cycles the pipe did not accept the "
             "class's instructions, usually "
-            "because the unit was busy or its queue full; wait_share: share of the time wait, "
-            "barrier, and other immediate instructions waited."
+            "because the unit was busy or its queue full; wait_share: share of the latency of "
+            "wait, barrier, and other immediate instructions."
             + (
-                ""  # the next: line below already gives it
-                if "VALU instructions were issuing" in hint
+                ""  # the next: line below already gives it, or there are no waves
+                if "VALU instructions were issuing" in hint or not result["waves"]
                 else " VALU instructions (matrix included) were issuing during "
                 f"{result['valu_busy']}% of the resident time "
                 f"({page_ref('compute.md#ceiling-check')})."
@@ -1274,7 +1297,8 @@ def main() -> int:
             print(
                 f"scratch_* instructions (scratch memory: register spills or private arrays) "
                 f"ran: {sc['per_wave']} per wave ({sc['opcodes']}), {sc['share_of_cost']}% of "
-                "the instruction cost."
+                "the instruction cost (the waits for scratch loads count with the wait "
+                "instructions)."
             )
     elif args.command == "barriers":
         for k, v in result.items():

@@ -21,9 +21,9 @@
 
   Pass the library's directory to rocprofv3 with
   `--att-library-path $PWD/decoder-build/lib`. Some rocprofv3 releases do not honour the
-  `ROCPROF_ATT_LIBRARY_PATH` variable and search the whole filesystem for a decoder instead;
-  the option works in all of them. The two variables are for `att_mine.py`, which also needs
-  Python 3.10 or later, `pyelftools` 0.31 or later, and `llvm-objdump` (from ROCm or on
+  `ROCPROF_ATT_LIBRARY_PATH` variable and search the whole filesystem for a decoder instead, so use
+  the option. `ROCPROF_TRACE_DECODER_LIB` and `PYTHONPATH` are for `att_mine.py`, which
+  also needs Python 3.10 or later, `pyelftools` 0.31 or later, and `llvm-objdump` (from ROCm or on
   `PATH`).
 - The kernel built as you run it, with its optimization flags, plus line tables so
   instructions map to source lines: add `-gline-tables-only`, which does not change the
@@ -41,9 +41,9 @@ Add these to the command in [SKILL.md](../SKILL.md#how-to-use-att):
 | Several consecutive kernels in one trace | `--att-consecutive-kernels N` |
 | A different compute unit (a WGP on RDNA; default 1) | `--att-target-cu N` |
 | More shader engines (default only the first) | `--att-shader-engine-mask 0x...` |
-| Only some SIMDs | `--att-simd-select` (a SIMD bitmask on gfx9; on RDNA, the one SIMD to trace) |
+| Only some SIMDs | `--att-simd-select` (a SIMD bitmask on gfx9, where the other SIMDs' waves are still listed, without instructions; on RDNA, the one SIMD to trace) |
 | A larger trace buffer, when rocprofv3 warns that the buffer is full | `--att-buffer-size N` |
-| Only some GPUs | `--att-gpu-index N,...` |
+| Only some GPUs | `--att-gpu-index N,...` (system GPU indices: `HIP_VISIBLE_DEVICES` does not renumber them) |
 
 Run `rocprofv3 --help` for the full list.
 
@@ -53,8 +53,9 @@ demangled name (for example `gemm_kernel(int, ...)`): a distinctive part is enou
 regex characters such as parentheses escaped. Then capture the kernel you want into a new
 directory. rocprofv3 does not clear the output directory and by default names each run's
 files by its process ID, so a reused directory keeps the earlier capture's `.att` files
-beside the new ones, and `att_mine.py` decodes them all together. `summary` reports how many
-dispatches the traced waves came from.
+beside the new ones. `att_mine.py` decodes every file in a directory together, and stops with
+`Code object id 1 is used by both ...` when two runs' code objects share an id (each run
+numbers them from 1). `summary` reports how many dispatches the traced waves came from.
 
 ## Output
 
@@ -70,7 +71,7 @@ dispatches the traced waves came from.
 
 | File | What it holds |
 | --- | --- |
-| `se*_sm*_sl*_wv*.json` | One traced wave: `instructions` (`[time, category, stall, duration, line]`, where `line` is the instruction's row in `code.json`), `timeline` (`[state, duration]`), and `waitcnt`: for executed waits, per counter, the earlier memory instructions each required to complete (`[wait line, [[line, 0], ...]]`). rocprofv3 works these out from the wave's instruction sequence, assuming each counter's memory instructions complete in order; scalar and flat memory instructions can complete out of order, so after one, waits on the counters it uses are listed only when they wait for zero, until one does. Only `s_load` and `s_store` count as scalar memory instructions, so in a kernel with others (such as `s_buffer_load`) the list can name the wrong instructions. Waits matched to no instruction are left out, and the list stops at the first instruction rocprofv3 cannot resolve |
+| `se*_sm*_sl*_wv*.json` | One traced wave, under its `wave` key: `instructions` (`[time, category, stall, duration, line]`, where `line` is the instruction's row in `code.json`), `timeline` (`[state, duration]`), and `waitcnt`: for executed waits, per counter, the earlier memory instructions each required to complete (`[wait line, [[line, 0], ...]]`). rocprofv3 works these out from the wave's instruction sequence, assuming each counter's memory instructions complete in order; scalar and flat memory instructions can complete out of order, so after one, waits on the counters it uses are listed only when they wait for zero, until one does. Only `s_load` and `s_store` count as scalar memory instructions, so in a kernel with others (such as `s_buffer_load`) the list can name the wrong instructions. Waits matched to no instruction are left out, and the list stops at the first instruction rocprofv3 cannot resolve |
 | `code.json` | The disassembly: one row per instruction with its source line and totals over the traced waves, plus a `; <kernel>` row before each kernel; `header` names the columns |
 | `wstates<k>.json` | How many traced waves were in wave state `k` over time (`time`, `state`); `k` is the state's `WaveStateType` value (1 IDLE, 2 EXEC, 3 WAIT, 4 STALL) |
 | `occupancy.json` | Wave starts and ends on the traced shader engines (`occupancy_fields` names the fields), dispatches and other trace events per shader engine (`events`), and kernel names by `kernel_id` (`dispatches`) |
@@ -90,9 +91,9 @@ except the buffer-full warning, which rocprofv3 prints during the capture.
 | --- | --- |
 | `Data Lost` | The profiler dropped part of the trace because of bandwidth limits. The rest is still decoded, but the totals miss what was dropped. When counters are streamed into the trace, a low `--att-perfcounter-ctrl` can cause it; raise it, or capture without counters. |
 | `Thread trace buffer full!` (rocprofv3) | The trace buffer filled before the kernel ended. Raise `--att-buffer-size`, or trace a smaller problem that keeps the per-wave work unchanged. |
-| `Wave incomplete` | The trace ended before some waves did; their lifetimes and totals are cut short. |
+| `Wave incomplete` | The trace ended before some waves did; their lifetimes and totals are cut short. A full buffer can show only as this warning and fewer waves than expected. |
 | `Stitch Incomplete` or unresolved instructions | Some trace tokens could not be matched to the disassembly, and instructions that could not be resolved are left out of the per-instruction totals. Check that the capture's code objects belong to the binary that ran. |
-| Zero waves | No work landed on the traced compute unit (on RDNA, or with `--att-simd-select`, the traced SIMDs); it does not mean the kernel is fast. Launch more workgroups, or trace another compute unit or SIMD. |
+| Zero waves | No work landed on the traced compute unit (on RDNA, the traced SIMD; on gfx9 with `--att-simd-select`, the other SIMDs' waves are still counted, without instructions); it does not mean the kernel is fast. Launch more workgroups, or trace another compute unit or SIMD. |
 | Waves with a context switch | The wave was switched out and back during the trace; treat its timing with care, or capture again. |
 
 ## Further reading
