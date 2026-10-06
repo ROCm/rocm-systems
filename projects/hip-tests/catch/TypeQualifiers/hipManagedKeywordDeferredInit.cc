@@ -59,6 +59,35 @@ static __global__ void ReadManagedInitialized(int* value) {
   *value = g_managed_initialized[0];
 }
 
+// Proves the device-side pointer slot of a managed symbol was filled: a kernel reads
+// the symbol by name and reports what it found through ordinary device memory.
+//
+// Deliberately omits CHECK_MANAGED_MEMORY_SUPPORT. Windows reports
+// hipDeviceAttributeManagedMemory as false because the KMD has no managed memory, but
+// __hipRegisterManagedVar still allocates plain sysmem there for applications ported
+// from CUDA that never check the capability, and the runtime still has to fill each
+// variable's slot through Device::writeDeviceGlobal. Every other test here skips on
+// that attribute, which leaves that write uncovered on the PAL backend.
+//
+// Do not add the capability check: it would remove the only coverage that path has.
+//
+// The managed symbol is only ever read by the device, and only the separate hipMalloc
+// buffer is copied back. A kernel writing the symbol for the host to read would also
+// require the device's store to become visible to the host, which is migration the
+// Windows shim does not promise -- that would fail for reasons unrelated to the slot.
+HIP_TEST_CASE(Unit_hipManagedKeyword_KernelReadsManagedSymbol) {
+  LinearAllocGuard<int> observed(LinearAllocs::hipMalloc, sizeof(int));
+
+  ReadManagedInitialized<<<1, 1>>>(observed.ptr());
+  HIP_CHECK(hipGetLastError());
+
+  int result = 0;
+  HIP_CHECK(hipMemcpy(&result, observed.ptr(), sizeof(result), hipMemcpyDeviceToHost));
+  // Against the static initializer, not a host read of the symbol: a host read would
+  // pass even if both sides observed the same wrong storage.
+  REQUIRE(result == 1);
+}
+
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy) {
   CHECK_MANAGED_MEMORY_SUPPORT
 

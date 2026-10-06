@@ -5,6 +5,9 @@ TypeQualifiers:
     <<: *level_2
     # SWDEV-396615 mGPUs not considered correctly
     disabled: [amd_windows, amd_wsl]
+  # Intentionally enabled on Windows: it is the only coverage of the managed
+  # device-slot write on PAL, where every capability-gated test skips.
+  Unit_hipManagedKeyword_KernelReadsManagedSymbol: *level_2
   Unit_hipManagedKeyword_hipMemcpy: *level_2
   Unit_hipManagedKeyword_hipMemcpyHtoD: *level_2
   Unit_hipManagedKeyword_hipMemcpyDtoH: *level_2
