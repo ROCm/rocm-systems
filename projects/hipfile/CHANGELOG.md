@@ -5,8 +5,8 @@
 ### Added
 
 * MD software RAID arrays  running pass-through personalities  whose member devices are all local NVMe are now fastpath capable, and `ais-check` reports them as such.
-* `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one. It is raw bytes, not a NUL-terminated string.
-* Added a batch API example, `batch-roundtrip`, installed with the other examples when `AIS_INSTALL_EXAMPLES` is `ON`, and a matching batch I/O tutorial.
+* `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one.
+* Added a batch API example, `batch-roundtrip`.
 * Added reference documentation for the Stats API.
 
 ### Changed
@@ -14,15 +14,14 @@
 * The hipFile CMake options have been renamed from `AIS_*` to `HIPFILE_*` (e.g., `AIS_CXX_STANDARD` is now `HIPFILE_CXX_STANDARD`). The old `AIS_*` names still work but are deprecated and emit a CMake deprecation warning.
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now defaults to `OFF` .
 * LVM logical volumes are now eligible for the fastpath when every layer of the device-mapper stack is an LVM target and all underlying physical volumes are local NVMe. Any other interposing layer still forces compatibility mode.
-* `ais-check` now reports those volumes correctly. Earlier versions reported every `lvm` mount as `no`, so re-run it — mounts previously reported as unsupported may now be eligible.
 
 ### Fixed
 
-* Asynchronous fastpath operations now fail over to the fallback backend on `ENODEV` or `EREMOTEIO`, matching the synchronous and batch paths. This resolves the 0.5.0 known issue where such operations failed outright.
-* hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors; `hipFileHandleRegister()` and `hipFileDriverOpen()` can return it. Budget about two descriptors per registered file and raise the soft limit with `ulimit -n` if you register many files. See the limitations page.
+* Asynchronous fastpath operations now fail over to the fallback backend on `ENODEV` or `EREMOTEIO`, matching the synchronous and batch paths.
+* hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
 * `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now applies the clang `-Wunsafe-buffer-usage` and `-fsafe-buffer-usage-suggestions` flags to C++ sources. Previously, the flags were never passed to the compiler.
-* hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
+* `ais-check` now reports LVM volumes compatibility correctly.
 
 ### Removed
 
