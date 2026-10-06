@@ -1158,6 +1158,11 @@
           "test_filter": "RmaMultiSegmentMPITest.PartialFinalSegmentRegistrationAndTransfer"
         },
         {
+          "name": "NetIB_RMA_MultiSeg_SubPageBounds",
+          "description": "Window starting and ending inside a page: each per-segment DMA-BUF export covers the whole pages its MR spans",
+          "test_filter": "RmaMultiSegmentMPITest.SubPageBoundsRegistrationAndTransfer"
+        },
+        {
           "name": "NetIB_RMA_MultiSeg_IPutCrossBoundaryAtOffset",
           "description": "IPut starting and ending mid-segment, so the WR builder splits on a non-zero per-segment offset on both sides",
           "test_filter": "RmaMultiSegmentMPITest.IPutCrossSegmentBoundaryAtOffset"
@@ -1203,6 +1208,11 @@
           "test_filter": "RmaMultiSegmentMPITest.IPutSignalMultiSegment"
         },
         {
+          "name": "NetIB_RMA_MultiSeg_IPutSignalInLaterSegment",
+          "description": "Signal in a 3-segment window: straddling, misaligned and out-of-window atomics are rejected without writes; atomics in segments 0, 1 and 2 land only at their offsets",
+          "test_filter": "RmaMultiSegmentMPITest.IPutSignalInLaterSegment"
+        },
+        {
           "name": "NetIB_RMA_MultiSeg_IPutSizeSweepFromZero",
           "description": "IPut sweep from 0 to the full window over byte, word, page, 64K and segment-boundary sizes, checking nothing past the payload was touched",
           "test_filter": "RmaMultiSegmentMPITest.IPutSizeSweepFromZero"
@@ -1238,6 +1248,11 @@
           "test_filter": "RmaMultiSegmentMPITest.RankLocalRegistrationFailureRejectedCollectively"
         },
         {
+          "name": "NetIB_RMA_MultiSeg_RegistrationAfterCollectiveRejection",
+          "description": "After a collectively rejected registration, 4-, 2- and 3-segment registrations on the same comm reuse the consensus buffer and each transfer intact",
+          "test_filter": "RmaMultiSegmentMPITest.RegistrationAfterCollectiveRejectionTransfers"
+        },
+        {
           "name": "NetIB_RMA_MultiSeg_IPutOutOfRangeRejected",
           "description": "Negative: out-of-range iput offsets and sizes are rejected with ncclInvalidArgument, nothing is posted and the destination window is byte-for-byte intact",
           "test_filter": "RmaMultiSegmentMPITest.IPutOutOfRangeRejectedNoCorruption"
@@ -1261,6 +1276,82 @@
           "name": "NetIB_RMA_MultiSeg_MultiNodeAsymmetricIGetStress",
           "description": "32 IGets, each crossing a different remote and local boundary, exercising rkey and lkey selection; skips unless there is exactly one rank on each of two nodes",
           "test_filter": "RmaMultiSegmentMPITest.MultiNodeAsymmetricIGetBoundaryStress"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_FindRemotePeerTopology",
+          "description": "findRemotePeerForLocalRank returns a rank on another node with the same local rank, or -1 when none exists",
+          "test_filter": "RmaMultiSegmentMPITest.FindRemotePeerForLocalRankTopology"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_PostPath",
+          "description": "Post path at the default WR batch size (64): chains up to 31 WRs, aggregated and unaggregated requests in any wait order, interleaved single/multi-segment puts and gets, zero-size ops, per-context batches, rejected ops that must not leak request slots or sequence ids, and 100 registration cycles (RCCL_TEST_RMA_REG_CYCLES)",
+          "test_filter": "RmaMultiSegmentPostMPITest.*"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_PostPath_WrBatch8",
+          "description": "Post path with NCCL_RMA_IB_WR_BATCHSIZE=8, so chains of 9+ WRs drain the batch and post directly",
+          "test_filter": "RmaMultiSegmentPostMPITest.*",
+          "env_variables": {
+            "NCCL_RMA_IB_WR_BATCHSIZE": "8"
+          }
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_PostPath_WrBatch2",
+          "description": "Post path with NCCL_RMA_IB_WR_BATCHSIZE=2 (the minimum): any multi-segment chain posts directly and every aggregated batch holds one op",
+          "test_filter": "RmaMultiSegmentPostMPITest.*",
+          "env_variables": {
+            "NCCL_RMA_IB_WR_BATCHSIZE": "2"
+          }
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_SendQueueOversubscribe",
+          "description": "Twice the RMA send queue's worth of 32-WR putSignals without test() on context 0: overflow is fatal for that context, so rejected posts must return no request, every accepted request must end in success or an error rather than hang, and context 1 must still deliver a multi-segment put",
+          "test_filter": "RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
+          "env_variables": {
+            "RCCL_MSEG_SQ_STRESS": "1"
+          }
+        }
+      ]
+    },
+    "net_ib_rma_multisegment_scale_1x2": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "description": "Post-path RMA multi-segment tests with 2 ranks on one node. The tests take any rank count, so more scale points only need another config with different num_nodes/num_ranks.",
+      "env_variables": {
+        "NCCL_NET": "ib",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DEBUG_SUBSYS": "ALL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_RMA_MultiSeg_PostPath_1x2",
+          "description": "Post-path, all-pairs and many-to-one tests on 2 ranks of one node",
+          "test_filter": "RmaMultiSegmentPostMPITest.*"
+        }
+      ]
+    },
+    "net_ib_rma_multisegment_scale_2x4": {
+      "extends": "net_ib_base",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4,
+      "timeout": 600,
+      "description": "Post-path RMA multi-segment tests with 4 ranks on each of 2 nodes: 7 queue pairs per rank in the all-pairs test and 7 sources in the many-to-one test.",
+      "env_variables": {
+        "NCCL_NET": "ib",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DEBUG_SUBSYS": "ALL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_RMA_MultiSeg_PostPath_2x4",
+          "description": "Post-path, all-pairs and many-to-one tests on 8 ranks across 2 nodes",
+          "test_filter": "RmaMultiSegmentPostMPITest.*"
         }
       ]
     },
@@ -2062,6 +2153,18 @@
       "name": "NET IB - RMA Multi-Segment DeepEP Hybrid (8-rank)",
       "description": "DeepEP hybrid elastic windows with one imported CPU segment per local rank; needs 4 ranks on each of 2 nodes",
       "config": "net_ib_rma_multisegment_hybrid",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - RMA Multi-Segment Post Path (1 node x 2 ranks)",
+      "description": "Multi-segment RMA post-path tests on 2 ranks sharing one node",
+      "config": "net_ib_rma_multisegment_scale_1x2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - RMA Multi-Segment Post Path (2 nodes x 4 ranks)",
+      "description": "Multi-segment RMA post-path tests on 8 ranks across 2 nodes",
+      "config": "net_ib_rma_multisegment_scale_2x4",
       "enabled": true
     },
     {
