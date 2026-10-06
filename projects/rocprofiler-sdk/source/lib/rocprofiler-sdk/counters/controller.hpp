@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include "lib/common/filesystem.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
@@ -96,6 +97,14 @@ public:
     // Warns if an agent with gfx_target_version in [gfx1100, gfx1250) has
     // power_dpm_force_performance_level set to 'auto' instead of a stable value.
     static void check_power_performance_level();
+
+    // Core of check_power_performance_level() for a single, already-resolved
+    // power_dpm_force_performance_level sysfs path. Factored out so it can be
+    // exercised in unit tests against a fake file without requiring a real
+    // GPU/agent. node_id/drm_render_minor are only used to format the warning
+    // text.
+    static void check_power_performance_level_for_path(
+        const common::filesystem::path& perf_path, uint64_t node_id, uint32_t drm_render_minor);
 
 private:
     common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<counter_config>>> _configs;

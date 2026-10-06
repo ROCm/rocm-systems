@@ -44,6 +44,43 @@ namespace rocprofiler
 namespace counters
 {
 void
+CounterController::check_power_performance_level_for_path(
+    const common::filesystem::path& perf_path, uint64_t node_id, uint32_t drm_render_minor)
+{
+    if(!common::filesystem::exists(perf_path)) return;
+
+    std::ifstream perf_file(perf_path.string());
+    if(!perf_file.is_open())
+    {
+        ROCP_WARNING << fmt::format(
+            "Could not open path {} to get power_dpm_force_performance_level.",
+            perf_path.string());
+        return;
+    }
+
+    std::string perf_level{};
+    std::getline(perf_file, perf_level);
+    ROCP_WARNING_IF(perf_level.empty())
+        << fmt::format("Could not get power_dpm_force_performance_level for Agent {} "
+                       "(renderD{}). Set it to 'profile_standard' (e.g. via rocm-smi) for "
+                       "stable GPU counter collection. Please refer to the rocprofv3 "
+                       "documentation, 'Setting GPU performance level for PMC profiling' "
+                       "section, for more information.",
+                       node_id,
+                       drm_render_minor);
+
+    ROCP_WARNING_IF(!perf_level.empty() && perf_level != "profile_standard")
+        << fmt::format("Agent {} (renderD{}) has power_dpm_force_performance_level='{}'. Set "
+                       "it to 'profile_standard' (e.g. via rocm-smi) for stable GPU counter "
+                       "collection. Please refer to the rocprofv3 documentation, 'Setting "
+                       "GPU performance level for PMC profiling' section, for more "
+                       "information.",
+                       node_id,
+                       drm_render_minor,
+                       perf_level);
+}
+
+void
 CounterController::check_power_performance_level()
 {
     // Check if power_dpm_force_performance_level is set to profile_standard
@@ -65,37 +102,7 @@ CounterController::check_power_performance_level()
                          fmt::format("renderD{}", agent->drm_render_minor) / "device" /
                          "power_dpm_force_performance_level";
 
-        if(!common::filesystem::exists(perf_path)) continue;
-
-        std::ifstream perf_file(perf_path.string());
-        if(!perf_file.is_open())
-        {
-            ROCP_WARNING << fmt::format(
-                "Could not open path {} to get power_dpm_force_performance_level.",
-                perf_path.string());
-            continue;
-        }
-
-        std::string perf_level{};
-        std::getline(perf_file, perf_level);
-        ROCP_WARNING_IF(perf_level.empty())
-            << fmt::format("Could not get power_dpm_force_performance_level for Agent {} "
-                           "(renderD{}). Set it to 'profile_standard' (e.g. via rocm-smi) for "
-                           "stable GPU counter collection. Please refer to the rocprofv3 "
-                           "documentation, 'Setting GPU performance level for PMC profiling' "
-                           "section, for more information.",
-                           agent->node_id,
-                           agent->drm_render_minor);
-
-        ROCP_WARNING_IF(!perf_level.empty() && perf_level != "profile_standard")
-            << fmt::format("Agent {} (renderD{}) has power_dpm_force_performance_level='{}'. Set "
-                           "it to 'profile_standard' (e.g. via rocm-smi) for stable GPU counter "
-                           "collection. Please refer to the rocprofv3 documentation, 'Setting "
-                           "GPU performance level for PMC profiling' section, for more "
-                           "information.",
-                           agent->node_id,
-                           agent->drm_render_minor,
-                           perf_level);
+        check_power_performance_level_for_path(perf_path, agent->node_id, agent->drm_render_minor);
     }
 }
 
