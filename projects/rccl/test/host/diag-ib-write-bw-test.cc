@@ -147,9 +147,11 @@ int Port(int serverRank) {
   return IB_BW_PORT_BASE + static_cast<unsigned int>(kCommHash + kNvmlBase + serverRank) % IB_BW_PORT_SPAN;
 }
 
-std::string Command(const char* device, int port, const char* cuda, const char* serverHost) {
-  std::string command = "ib_write_bw -d " + std::string(device) + " -i 1 -s 65536 --report_gbits -q 1 -p " +
-                        std::to_string(port) + " -n 1000" + cuda;
+std::string Command(const char* device, int port, const char* cuda, const char* serverHost, int ibPort = 1,
+                    int qps = 1) {
+  std::string command = "ib_write_bw -d " + std::string(device) + " -i " + std::to_string(ibPort) +
+                        " -s 65536 --report_gbits -q " + std::to_string(qps) + " -p " + std::to_string(port) +
+                        " -n 1000" + cuda;
   if (serverHost != nullptr) {
     command += std::string(" ") + serverHost;
   }
@@ -399,6 +401,11 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
     gatherFailAt_ = 0;
     params_.clear();
     g_ibCallocCalls = 0;
+    serverOutput_ = kServerOutput;
+    serverExit_ = 0;
+    sendFailTag_ = 0;
+    peerVetoRank_ = -1;
+    g_ibCallocFailAt = 0;
   }
 
   bool RunSchedule(bool useCrossNic, bool allPairsRanPoison) {
@@ -487,6 +494,7 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
   std::vector<IbMsg> log_;
   std::map<int, std::deque<std::string>> inbox_;
   int sendFailTag_ = 0;
+  // Allgathers per Run(), in order: 1 rankInfo, 2-3 the per-phase votes, 4 the closing vote, 5 the summary.
   int gathers_ = 0;
   int gatherFailAt_ = 0;
   int peerVetoRank_ = -1;
@@ -1040,9 +1048,7 @@ TEST_F(DiagIbWriteBwMicrotest, RunPair_ServerAnnouncesThenReturnsClientMeasureme
   std::string out;
   EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), 88.5);
   EXPECT_EQ(out, "");
-  std::string command = Command("mlx5_0", Port(0), " --use_cuda=3", nullptr);
-  command.replace(command.find("-q 1"), 4, "-q 3");
-  EXPECT_EQ(serverCommands_, (std::vector<std::string>{command}));
+  EXPECT_EQ(serverCommands_, (std::vector<std::string>{Command("mlx5_0", Port(0), " --use_cuda=3", nullptr, 1, 3)}));
   EXPECT_TRUE(clientCommands_.empty());
   EXPECT_EQ(log_, (std::vector<IbMsg>{{'S', 2, kReady, Bytes(true)}, {'R', 2, kSync, Bytes(88.5)},
                                       {'S', 2, kSync, Bytes(88.5)}}));
@@ -1100,9 +1106,7 @@ TEST_F(DiagIbWriteBwMicrotest, RunPair_CrossClientRunsItsOwnDeviceAndPortAgainst
   std::string out;
   EXPECT_DOUBLE_EQ(RunPair(0, 3, true, &out), 61.0);
   EXPECT_EQ(out, "");
-  std::string command = Command("mlx5_1", Port(0), kCudaFlags, kSelfHost);
-  command.replace(command.find("-i 1"), 4, "-i 2");
-  EXPECT_EQ(clientCommands_, (std::vector<std::string>{command}));
+  EXPECT_EQ(clientCommands_, (std::vector<std::string>{Command("mlx5_1", Port(0), kCudaFlags, kSelfHost, 2)}));
   clientExit_ = 1;
   EXPECT_DOUBLE_EQ(RunPair(0, 3, true, &out), -1);
   EXPECT_EQ(out, PairLine("cross", 0, 3, "memory=cuda+dmabuf tool run failed"));
@@ -1120,6 +1124,12 @@ TEST_F(DiagIbWriteBwMicrotest, RunPair_ClientFailuresReportWithMemoryKind) {
       {[this] {
          inbox_[kReady] = {Bytes(true)};
          clientExit_ = 127;
+       },
+       "memory=cuda+dmabuf tool missing", true},
+      {[this] {
+         inbox_[kReady] = {Bytes(true)};
+         clientExit_ = 127;
+         clientOutput_ = "no rows\n";
        },
        "memory=cuda+dmabuf tool missing", true},
       {[this] {
@@ -1148,9 +1158,10 @@ TEST_F(DiagIbWriteBwMicrotest, RunPair_ClientFailuresReportWithMemoryKind) {
     std::string out;
     EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), -1);
     EXPECT_EQ(clientCommands_.size(), cases[i].reached ? 1u : 0u);
-    ASSERT_FALSE(log_.empty());
+    ASSERT_EQ(log_.size(), 3u);
     EXPECT_EQ(log_.front().kind, 'R');
     EXPECT_EQ(log_.front().tag, kReady);
+    EXPECT_EQ(log_[1], (IbMsg{'S', 0, kSync, Bytes(-1.0)}));
     EXPECT_EQ(log_.back(), (IbMsg{'R', 0, kSync, Bytes(-1.0)}));
     EXPECT_EQ(out, PairLine("same", 0, 2, cases[i].line));
   }
