@@ -10,6 +10,7 @@
 #include "connect_cast.h" // For IbCastQpCreate()
 #include "p2p_resiliency_recovery_cast.h"
 #include "qp_sharing.h"
+#include "capability_cast.h"
 
 NCCL_PARAM(IbCastResiliencyPortFailover, "IB_RESILIENCY_PORT_FAILOVER", 0);
 NCCL_PARAM(IbCastResiliencyPortFailoverMaxAttempts, "IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS", 1);
@@ -681,6 +682,21 @@ ncclResult_t IbCastResiliencyDevInit(struct ncclIbResiliency* resCtx, uint devIn
   INFO(NCCL_NET, "NET/IB: %s: Created probing CQ (cq=%p) on device %d for resiliency context (%s comm=%p, cq_size=%d)",
        __func__, resDev->probingCq, devIndex, resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm, cqSize);
 
+  // Recovery keep-alive needs a UD QP. Check every device before the first recovery CQ is created.
+  if (resCtx->recoveryEnabled && devIndex == 0) {
+    struct ncclIbNetCommBase* base = resCtx->baseComm;
+    for (int i = 0; i < base->vProps.ndevs; i++) {
+      int phys = base->vProps.devs[i];
+      if (!IbCastCapUdSupported(&IbCastDevs[phys])) {
+        INFO(NCCL_NET, "NET/IB-CAST: device %s has no UD; port recovery off for comm %p", IbCastDevs[phys].devName,
+             base);
+        resCtx->recoveryEnabled = false;
+        resCtx->nPortRecoveryQps = 0;
+        break;
+      }
+    }
+  }
+
   if (resCtx->recoveryEnabled) {
     NCCLCHECK(IbCastPortRecoveryDevInit(resCtx, devIndex, ibDev));
   }
@@ -849,6 +865,23 @@ ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx,
   return ncclSuccess;
 }
 
+// A peer without port recovery leaves its recovery QPNs zeroed. QPN 0 is never a user QP.
+static bool IbCastResiliencyPeerHasRecovery(struct ncclIbConnectionMetadata* remInfo) {
+  return remInfo->resiliencyInfo.portRecoveryQpsInfo[0].qpn != 0;
+}
+
+// Undo what DevInit (and, on the sender, QP creation) allocated for recovery.
+static ncclResult_t IbCastResiliencyRecoveryDisable(struct ncclIbResiliency* resCtx, int nCreatedQps) {
+  WARN("NET/IB-CAST: peer has no port recovery; port recovery off for %s comm %p",
+       resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm);
+  NCCLCHECK(IbCastPortRecoveryQpsDestroy(resCtx, nCreatedQps));
+  for (int i = 0; i < nCreatedQps; i++) resCtx->portRecoveryQps[i].qp = NULL;
+  for (int i = 0; i < resCtx->ndevs; i++) NCCLCHECK(IbCastPortRecoveryDevDestroy(resCtx, i));
+  resCtx->recoveryEnabled = false;
+  resCtx->nPortRecoveryQps = 0;
+  return ncclSuccess;
+}
+
 ncclResult_t IbCastResiliencySenderQpsToRts(struct ncclIbResiliency* resCtx, struct ncclIbConnectionMetadata* remInfo) {
   ncclIbSendComm* sendComm = (ncclIbSendComm*)resCtx->baseComm;
   ncclIbQp* localQp = NULL;
@@ -888,6 +921,9 @@ ncclResult_t IbCastResiliencySenderQpsToRts(struct ncclIbResiliency* resCtx, str
          __func__, localQpIndex, localQp->qp->qp_num, rtrAttr->remoteQpNum, localDevIndex, resCtx->baseComm);
   }
 
+  if (resCtx->recoveryEnabled && !IbCastResiliencyPeerHasRecovery(remInfo)) {
+    NCCLCHECK(IbCastResiliencyRecoveryDisable(resCtx, resCtx->nPortRecoveryQps));
+  }
   if (resCtx->recoveryEnabled) {
     NCCLCHECK(IbCastPortRecoverySenderQpsToRts(resCtx, remInfo, resCtx->nPortRecoveryQps));
   }
@@ -957,6 +993,9 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
          __func__, localQpIndex, localQp->qp->qp_num, rtrAttr->remoteQpNum, localDevIndex, resCtx->baseComm);
   }
 
+  if (resCtx->recoveryEnabled && !IbCastResiliencyPeerHasRecovery(remInfo)) {
+    NCCLCHECK(IbCastResiliencyRecoveryDisable(resCtx, 0));
+  }
   if (resCtx->recoveryEnabled) {
     NCCLCHECK(IbCastPortRecoveryReceiverQpsCreateToRts(resCtx, remInfo, localResiliencyInfo->portRecoveryQpsInfo,
                                                        resCtx->nPortRecoveryQps));
