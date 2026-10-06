@@ -15,7 +15,8 @@
 #include "diagnostics.h"
 
 extern std::function<int(const char*, int, char*, int, bool*)> g_ncclDiagChildRun;
-extern std::function<int(const char*, int, char*, int, ncclDiagChildLineFn, void*, bool*)> g_ncclDiagChildRunStream;
+extern std::function<int(const char*, int, char*, int, ncclDiagChildLineFn, void*, bool*)>
+    g_ncclDiagChildRunStream;  // UNDRIVEN
 
 // Hands `text` over as the real runner does: onLine per fgets line, output NUL-terminated and clamped to outputSize-1.
 void DeliverChildOutput(const std::string& text, char* output, int outputSize, ncclDiagChildLineFn onLine, void* ctx,
