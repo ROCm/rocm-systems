@@ -168,7 +168,7 @@ PlantedRun capture_after_planting(const fs::path& base, const fs::path& script,
   hrr::test::SpawnProc proc("/bin/sh", /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", base.string());
   proc.setEnv("HRR_TEST_BASE", base.string());
-  proc.setEnv("HRR_TEST_WORKLOAD", HRR_TEST_EXE);
+  proc.setEnv("HRR_TEST_WORKLOAD", hrr_test_exe());
   set_proc_search_path(proc);
   const int ret = proc.runWithTimeout(script.string(), kCaptureTimeoutSeconds);
   return {ret, proc.getOutput()};
@@ -187,7 +187,7 @@ std::uintmax_t events_bytes(const fs::path& base) {
 
 // Runs a workload with capture into base, stdout and stderr captured.
 PlantedRun capture_workload(const fs::path& base, const std::string& workload) {
-  hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+  hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", base.string());
   set_proc_search_path(proc);
   const int ret = proc.runWithTimeout(workload, kCaptureTimeoutSeconds);
