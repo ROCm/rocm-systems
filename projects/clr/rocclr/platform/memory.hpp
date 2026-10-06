@@ -151,6 +151,13 @@ class Memory : public amd::RuntimeObject {
       kHandleFabric    = 0x8
   };
 
+  //! Backend-neutral device create() status carried on UserData. Backends map
+  //! their native failure to one of these before it crosses into the HIP layer.
+  enum DeviceCreateStatus : uint32_t {
+    kDeviceCreateSuccess               = 0,  //!< No device-create failure recorded (default).
+    kDeviceCreateImagePitchUnsupported = 1,  //!< Image row pitch rejected by the backend.
+  };
+
   struct UserData {
     int deviceId = 0;  //!< Device ID memory is allocated on
     int locationType =
@@ -174,6 +181,9 @@ class Memory : public amd::RuntimeObject {
     size_t depth_ = 0;   //!< Depth value
 
     bool sync_mem_ops_ = false;  //!< Memops sync, when set synchronize all mem operations.
+
+    //! Backend-neutral status from the last failed device create(); see DeviceCreateStatus.
+    uint32_t device_create_status_ = kDeviceCreateSuccess;
   };
 
  protected:
