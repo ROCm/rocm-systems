@@ -2635,6 +2635,63 @@ std::vector<ArithmeticCase> conversion_source_modifier_cases() {
   return cases;
 }
 
+// V_CVT_FLOOR_I32_F32 and V_CVT_NEAREST_I32_F32 saturate a NaN by its sign
+// bit, after ABS/NEG, and flush a subnormal source under MODE first, so
+// floor(-tiny) is 0 when F32 input denormals are disabled. Results are
+// gfx1201 captures. MODE 0x30 keeps F32 input denormals and flushes F16/F64;
+// 0xc0 does the reverse, so reading the wrong field fails.
+std::vector<ArithmeticCase> float_to_integer_nan_and_flush_cases() {
+  struct Form {
+    const char *name;
+    uint16_t vop1;
+    uint16_t vop3;
+  };
+  constexpr std::array<Form, 2> forms = {{
+      {"Floor", rdna4::kVCvtFloorI32F32Vop1, rdna4::kVCvtFloorI32F32Vop3},
+      {"Nearest", rdna4::kVCvtNearestI32F32Vop1, rdna4::kVCvtNearestI32F32Vop3},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Form &form : forms) {
+    const auto add = [&](const std::string &name, std::array<uint32_t, 2> words, uint32_t input,
+                         uint32_t result, uint32_t mode) {
+      cases.push_back({std::string(form.name) + name,
+                       ROCJITSU_CODE_ARCH_RDNA4,
+                       {words[0], words[1], 0u},
+                       {{0, input}},
+                       {{6, result}},
+                       mode,
+                       FE_TONEAREST});
+    };
+    const auto vop1 = rdna4::build_vop1(form.vop1, {.src0 = 256, .vdst = 6});
+    const auto vop3 = rdna4::build_vop3(form.vop3, {.vdst = 6, .src0 = 256});
+    const auto vop3_abs = rdna4::build_vop3(form.vop3, {.vdst = 6, .abs = 1, .src0 = 256});
+    const auto vop3_neg = rdna4::build_vop3(form.vop3, {.vdst = 6, .src0 = 256, .neg = 1});
+    add("QuietNan", {vop1[0], 0u}, 0x7fc00000u, 0x7fffffffu, 0xc0u);
+    add("NegativeQuietNan", {vop1[0], 0u}, 0xffc00000u, 0x80000000u, 0x30u);
+    add("SignalingNan", vop3, 0x7f800001u, 0x7fffffffu, 0x30u);
+    add("AbsNegativeNan", vop3_abs, 0xffc00000u, 0x7fffffffu, 0xf0u);
+    add("NegNan", vop3_neg, 0x7fc00000u, 0x80000000u, 0xf0u);
+  }
+  const auto floor_vop1 = rdna4::build_vop1(rdna4::kVCvtFloorI32F32Vop1, {.src0 = 256, .vdst = 6});
+  const auto floor_vop3_neg =
+      rdna4::build_vop3(rdna4::kVCvtFloorI32F32Vop3, {.vdst = 6, .src0 = 256, .neg = 1});
+  const auto add_floor = [&](const char *name, std::array<uint32_t, 2> words, uint32_t input,
+                             uint32_t result, uint32_t mode) {
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     {{0, input}},
+                     {{6, result}},
+                     mode,
+                     FE_TONEAREST});
+  };
+  add_floor("FloorTinyMode30", {floor_vop1[0], 0u}, 0x80000001u, 0xffffffffu, 0x30u);
+  add_floor("FloorTinyModeC0", {floor_vop1[0], 0u}, 0x80000001u, 0u, 0xc0u);
+  add_floor("FloorNegTinyModeF0", floor_vop3_neg, 0x00000001u, 0xffffffffu, 0xf0u);
+  add_floor("FloorNegTinyMode0", floor_vop3_neg, 0x00000001u, 0u, 0u);
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2893,6 +2950,12 @@ TEST_P(ValuConversionTest, MatchesGfx1201OnScalarAndSimdPaths) {
 
 INSTANTIATE_TEST_SUITE_P(SourceModifiers, ValuConversionTest,
                          testing::ValuesIn(conversion_source_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(FloatToIntegerNanAndFlush, ValuConversionTest,
+                         testing::ValuesIn(float_to_integer_nan_and_flush_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

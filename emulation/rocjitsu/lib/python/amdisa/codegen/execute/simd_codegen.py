@@ -372,6 +372,13 @@ def _flush_input_then(fmt: str, functor: str) -> str:
 _INPUT_FLUSHED_ROUNDING = frozenset({'ceil', 'floor'})
 
 
+# Raw-bit F32 floor / nearest conversions from shared/conversion.h, with the
+# instruction's F32 input-flush policy.
+_F32_INPUT_POLICY = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32())'
+FLOOR_I32_F32 = f'amdgpu::conversion::FloorI32{{{_F32_INPUT_POLICY}}}'
+NEAREST_I32_F32 = f'amdgpu::conversion::NearestI32{{{_F32_INPUT_POLICY}}}'
+
+
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # --- bitwise / move (uint32, bit-identical) ---
     'v_mov_b32_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return a; }'),
@@ -395,25 +402,11 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         '[](auto a) { return a & 0xFFFFu; }',
     ),
-    # RDNA f32->i32 floor / nearest conversions (CDNA4 uses flr / rpi).
-    # Nearest ties round toward positive infinity. Compare the fractional part
-    # instead of adding 0.5, which can round an adjacent non-tie to an integer.
-    # Out-of-range saturates to INT32_MIN/MAX and NaN -> 0, matching the scalar.
-    'v_cvt_floor_i32_f32_vop1': (
-        'float32_t',
-        'int32_t',
-        '[](auto s) {'
-        ' auto r = util::stdx::floor(s);'
-        ' return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r); }',
-    ),
-    'v_cvt_nearest_i32_f32_vop1': (
-        'float32_t',
-        'int32_t',
-        '[](auto s) {'
-        ' auto r = util::stdx::floor(s);'
-        ' util::stdx::where(s - r >= util::native<float32_t>(0.5f), r) += 1.0f;'
-        ' return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r); }',
-    ),
+    # RDNA f32->i32 floor / nearest conversions (CDNA4 uses flr / rpi). The
+    # shared raw-bit operations flush MODE input denormals and saturate a NaN
+    # by its sign; see shared/conversion.h.
+    'v_cvt_floor_i32_f32_vop1': ('uint32_t', 'uint32_t', FLOOR_I32_F32),
+    'v_cvt_nearest_i32_f32_vop1': ('uint32_t', 'uint32_t', NEAREST_I32_F32),
     # --- bit-scan (SWAR, no stdx primitive) -----------------------------------
     # All return uint32_t. Most special-case the zero input to 0xFFFFFFFF,
     # matching the scalar bodies (std::countl_zero / countr_zero / popcount);
@@ -668,21 +661,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         '[](auto s) { return ::rocjitsu::amdgpu::simd_cvt_u32_f32(s); }',
     ),
-    'v_cvt_flr_i32_f32_vop1': (
-        'float32_t',
-        'int32_t',
-        '[](auto s) {'
-        ' auto r = util::stdx::floor(s);'
-        ' return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r); }',
-    ),
-    'v_cvt_rpi_i32_f32_vop1': (
-        'float32_t',
-        'int32_t',
-        '[](auto s) {'
-        ' auto r = util::stdx::floor(s);'
-        ' util::stdx::where(s - r >= util::native<float32_t>(0.5f), r) += 1.0f;'
-        ' return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r); }',
-    ),
+    'v_cvt_flr_i32_f32_vop1': ('uint32_t', 'uint32_t', FLOOR_I32_F32),
+    'v_cvt_rpi_i32_f32_vop1': ('uint32_t', 'uint32_t', NEAREST_I32_F32),
     # --- f16 (half) ops. Scalar bodies route through an f32 intermediate with a
     # single final round, so the SIMD path (f16_to_f32_simd -> f32 op ->
     # f32_to_f16_simd) is bit-identical. The conversions are bit-exact (see
@@ -3136,12 +3116,23 @@ def _simd_probe_line(
                 cpp_op = _modified_conversion_op(cpp_op, bits=16, arity=1)
             probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
             if base in (
-                'v_cvt_i32_f32',
-                'v_cvt_u32_f32',
                 'v_cvt_rpi_i32_f32',
                 'v_cvt_flr_i32_f32',
                 'v_cvt_nearest_i32_f32',
                 'v_cvt_floor_i32_f32',
+            ):
+                # The raw-bit operation takes the source after ABS/NEG.
+                cpp_op = (
+                    f'[&inst, convert = {cpp_op}](auto a) {{ return convert('
+                    'amdgpu::source_modifier::apply<amdgpu::fp_format::F32>('
+                    'a, 0, inst.inst_.abs, inst.inst_.neg)); }'
+                )
+                return (
+                    f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
+                )
+            if base in (
+                'v_cvt_i32_f32',
+                'v_cvt_u32_f32',
             ):
                 # The VOP1 shortcut does not apply floating source modifiers.
                 # Modified F32 inputs use the scalar conversion body.

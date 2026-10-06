@@ -932,6 +932,26 @@ class TestDeriveVectorUnary:
         assert ('inst_.abs' in cpp) == has_abs
         assert 'inst_.neg' in cpp
 
+    @pytest.mark.parametrize(
+        ('name', 'operation'),
+        [
+            ('V_CVT_FLOOR_I32_F32', 'FloorI32'),
+            ('V_CVT_NEAREST_I32_F32', 'NearestI32'),
+        ],
+    )
+    def test_cvt_floor_nearest_lower_to_shared_conversion(self, name, operation):
+        sem = derive_semantics(name, 'ENC_VOP3')
+        fields = frozenset({'neg', 'abs'})
+        block = enrich_block(derive_sema_block(sem), enc_field_names=fields)
+        cpp = lower_sema_block(block)
+        call = (
+            f'amdgpu::conversion::{operation}{{'
+            'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32())}('
+        )
+        assert call in cpp
+        assert cpp.index(call) < cpp.index('source_modifier::apply_to_float(sv, 0')
+        assert 'std::floor' not in cpp
+
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):
         sem = derive_semantics('V_COS_BF16', enc)

@@ -214,8 +214,9 @@ TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInp
     uint32_t bits;
     int32_t expected;
   };
-  // Ties and adjacent representable values match physical gfx1100/gfx1201.
-  // The same rounding rule is specified for RPI on earlier RDNA and CDNA.
+  // Ties, adjacent representable values and NaNs match physical gfx1100/gfx1201.
+  // A NaN saturates by its sign bit. The same rules are applied to RPI on
+  // earlier RDNA and CDNA without hardware verification.
   constexpr Case cases[] = {
       {0xc0200001, -3},          {0xc0200000, -2},        {0xc01fffff, -2},
       {0xbfc00001, -2},          {0xbfc00000, -1},        {0xbfbfffff, -1},
@@ -228,8 +229,8 @@ TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInp
       {0x4b800000, 16777216},    {0xcb800000, -16777216}, {0x4effffff, 2147483520},
       {0xceffffff, -2147483520}, {0x4f000000, INT32_MAX}, {0xcf000000, INT32_MIN},
       {0x4f000001, INT32_MAX},   {0xcf000001, INT32_MIN}, {0x7f800000, INT32_MAX},
-      {0xff800000, INT32_MIN},   {0x7fc00000, 0},         {0xffc00000, 0},
-      {0x7f800001, 0},
+      {0xff800000, INT32_MIN},   {0x7fc00000, INT32_MAX}, {0xffc00000, INT32_MIN},
+      {0x7f800001, INT32_MAX},
   };
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);

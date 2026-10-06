@@ -647,6 +647,32 @@ def test_f64_to_integer_simd_applies_source_modifiers(name):
     assert 'inst_.abs' not in simd_probe_line(f'{name}_vop1')
 
 
+@pytest.mark.parametrize(
+    ('name', 'operation'),
+    [
+        ('v_cvt_floor_i32_f32', 'FloorI32'),
+        ('v_cvt_flr_i32_f32', 'FloorI32'),
+        ('v_cvt_nearest_i32_f32', 'NearestI32'),
+        ('v_cvt_rpi_i32_f32', 'NearestI32'),
+    ],
+)
+def test_floor_nearest_simd_uses_shared_raw_bit_conversion(name, operation):
+    policy = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32())'
+    vop1 = simd_probe_line(f'{name}_vop1')
+    vop3 = simd_probe_line(f'{name}_vop3')
+    for probe in (vop1, vop3):
+        assert probe.startswith('  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t,')
+        assert f'amdgpu::conversion::{operation}{{{policy}}}' in probe
+        assert 'util::stdx::floor' not in probe
+    # The VOP3 form stays on the SIMD path and applies ABS/NEG to the raw bits.
+    assert 'if (!inst.inst_.abs' not in vop3
+    assert (
+        'source_modifier::apply<amdgpu::fp_format::F32>(a, 0, inst.inst_.abs, inst.inst_.neg)'
+        in vop3
+    )
+    assert 'inst_.abs' not in vop1
+
+
 @pytest.mark.parametrize('dtype', ['f32', 'f16'])
 @pytest.mark.parametrize('op', ['u16', 'i16'])
 @pytest.mark.parametrize('has_abs', [False, True])
