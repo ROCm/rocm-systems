@@ -17,6 +17,8 @@ on:
       - "projects/hrr/**"
       - "!projects/hrr/skills/**"
       - "projects/clr/hipamd/src/hrr/**"
+      - "projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp"
+      - "projects/hip/include/hip/hip_runtime_api.h"
       - ".github/workflows/hrr-ci.yml"
       - ".github/actions/rocprofiler-sdk-util/resolve-ci-config/**"
   workflow_dispatch:
@@ -78,6 +80,8 @@ jobs:
           INCLUDE = (
               "projects/hrr/",
               "projects/clr/hipamd/src/hrr/",
+              "projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp",
+              "projects/hip/include/hip/hip_runtime_api.h",
               ".github/workflows/hrr-ci.yml",
               ".github/actions/rocprofiler-sdk-util/resolve-ci-config/",
           )
@@ -96,6 +100,70 @@ jobs:
           fi
           echo "run=${run}" >> "$GITHUB_OUTPUT"
           echo "HRR CI: run=${run} (${reason})" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Generated-source and wire-compatibility gate. This is intentionally
+  # host-only and separate from the CLR build: an API-header PR must get a fast
+  # result even when no GPU job runs.
+  # ---------------------------------------------------------------------------
+  codegen:
+    name: "Generated sources"
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            projects/hrr
+            projects/hip/include
+            projects/clr/hipamd/include
+            projects/clr/hipamd/src/hrr
+          set-safe-directory: true
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Generate and compare
+        run: |
+          mkdir -p build/hrr-codegen/include/hrr
+          python3 projects/hrr/tools/gen_hrr_api_args.py \
+            --input projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp \
+            --public-header projects/hip/include/hip/hip_runtime_api.h \
+            --output-header build/hrr-codegen/include/hrr/hrr_api_args.h \
+            --output-capture build/hrr-codegen/hip_capture_generated.cpp \
+            --output-playback build/hrr-codegen/hip_playback_generated.cpp \
+            --check-hrr-coverage \
+            --manual-capture-source projects/clr/hipamd/src/hrr/hip_capture.cpp \
+            --silent
+
+          failed=0
+          diff -u projects/hrr/include/hrr/hrr_api_args.h \
+            build/hrr-codegen/include/hrr/hrr_api_args.h || failed=1
+          diff -u projects/clr/hipamd/src/hrr/hip_capture_generated.cpp \
+            build/hrr-codegen/hip_capture_generated.cpp || failed=1
+          diff -u projects/hrr/playback/hip_playback_generated.cpp \
+            build/hrr-codegen/hip_playback_generated.cpp || failed=1
+          if [ "${failed}" -ne 0 ]; then
+            echo "::error::checked-in HRR generated sources are stale; run projects/hrr/tools/gen_hrr_api_args.py --check-hrr-coverage"
+            exit 1
+          fi
+
+      - name: Check API ID compatibility
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "${BASE_SHA}" ] || [[ "${BASE_SHA}" =~ ^0+$ ]]; then
+            BASE_SHA="$(git rev-parse HEAD^)"
+          fi
+          git show "${BASE_SHA}:projects/hrr/include/hrr/hrr_api_args.h" \
+            > build/hrr-codegen/base_hrr_api_args.h
+          python3 projects/hrr/tools/check_hrr_api_compat.py \
+            --base-header build/hrr-codegen/base_hrr_api_args.h \
+            --current-header build/hrr-codegen/include/hrr/hrr_api_args.h
 
   # ---------------------------------------------------------------------------
   # Host-only unit suite. These 23 cases link nothing but libstdc++/libc: they
@@ -681,7 +749,7 @@ jobs:
   hrr_ci_summary:
     name: "HRR CI Summary"
     if: always()
-    needs: [gate, unit, ci_config, build, integration, report]
+    needs: [gate, codegen, unit, ci_config, build, integration, report]
     runs-on: ubuntu-24.04
     steps:
       - name: Evaluate
