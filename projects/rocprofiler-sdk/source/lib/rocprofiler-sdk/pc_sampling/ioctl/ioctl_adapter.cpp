@@ -22,7 +22,6 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -31,6 +30,8 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <cerrno>
+#include <cstring>
 #include <mutex>
 #include <shared_mutex>
 #include <stdexcept>
@@ -98,7 +99,15 @@ kfd_open()
 
     if(fd == -1)
     {
-        ROCP_CI_LOG(WARNING) << fmt::format("Cannot open {} for pc sampling", kfd_device_name);
+        auto err = errno;
+        // ENOENT: no KFD device node on this platform (e.g. WSL2/DXG)
+        if(err != ENOENT)
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format("Cannot open {} for pc sampling (errno {}: {})",
+                                                kfd_device_name,
+                                                err,
+                                                std::strerror(err));
+        }
         return -1;
     }
 
@@ -467,8 +476,7 @@ is_pc_sampling_method_supported(rocprofiler_ioctl_pc_sampling_method_kind_t ioct
 int
 get_kfd_fd()
 {
-    // Skip the open (and its CI-fatal warning) when the KFD device node is absent
-    static auto _v = ::rocprofiler::agent::kfd_device_available() ? kfd_open() : -1;
+    static auto _v = kfd_open();
     return _v;
 }
 

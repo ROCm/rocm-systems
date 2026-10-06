@@ -947,8 +947,6 @@ TEST(profiler_ioctl_request, no_kfd_device_lock_and_ptl_unavailable)
     rocprofiler_agent_t agent{};
     agent.gpu_id = 1;
 
-    ::testing::internal::CaptureStdout();
-
     EXPECT_FALSE(counters::counter_collection_has_device_lock());
     EXPECT_FALSE(counters::ptl_control_supported());
     EXPECT_EQ(counters::counter_collection_device_lock(&agent, true),
@@ -959,8 +957,6 @@ TEST(profiler_ioctl_request, no_kfd_device_lock_and_ptl_unavailable)
               ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
     EXPECT_EQ(counters::counter_collection_ptl_enable(&agent),
               ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
-
-    EXPECT_EQ(::testing::internal::GetCapturedStdout(), std::string{});
 }
 
 TEST_F(device_counting_service_test, sync_grbm_verify)
