@@ -36,7 +36,10 @@ rank_from_env() noexcept
           "OMPI_COMM_WORLD_RANK", "SLURM_PROCID" })
     {
         const auto value = get_env<std::int64_t>(env_name, -1);
-        if(value >= 0) return static_cast<std::uint32_t>(value);
+        if(value >= 0)
+        {
+            return static_cast<std::uint32_t>(value);
+        }
     }
     return 0;
 }
@@ -46,7 +49,8 @@ make_merged_append_sink(output_file_registry& registry, std::size_t source_count
 {
     const auto base_filename = config::get_perfetto_output_filename();
     const auto merged_path =
-        (std::filesystem::path{ base_filename }.parent_path() / "merged.proto").string();
+        (std::filesystem::path{ base_filename }.parent_path() / "merged.pftrace")
+            .string();
     auto       sink        = std::make_unique<single_file_sink>(registry, merged_path);
     const auto env_rank    = rank_from_env();
     const auto seq_id_base = append_seq_id_base_for_rank(env_rank);

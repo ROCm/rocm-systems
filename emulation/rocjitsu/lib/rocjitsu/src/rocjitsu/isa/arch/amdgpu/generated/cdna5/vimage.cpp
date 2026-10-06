@@ -24,6 +24,7 @@ TensorLoadToLdsVimage::TensorLoadToLdsVimage(const MachineInst *inst)
   src_operands_[3] = &vaddr3;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -50,6 +51,7 @@ TensorStoreFromLdsVimage::TensorStoreFromLdsVimage(const MachineInst *inst)
   src_operands_[3] = &vaddr3;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

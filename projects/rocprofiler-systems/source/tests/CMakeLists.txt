@@ -6,7 +6,12 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-common-units-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
     $<TARGET_OBJECTS:demangler-tests>
+    $<TARGET_OBJECTS:containers-tests>
     $<TARGET_OBJECTS:tracing-config-tests>
+    $<TARGET_OBJECTS:control-posix-clock-tests>
+    $<TARGET_OBJECTS:control-steady-clock-tests>
+    $<TARGET_OBJECTS:control-session-scope-tests>
+    $<TARGET_OBJECTS:trace-period-config-tests>
     $<TARGET_OBJECTS:track-registry-tests>
     $<TARGET_OBJECTS:packet-framing-tests>
     $<TARGET_OBJECTS:perfetto-engine-tests>
@@ -33,6 +38,8 @@ list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-gpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-nic-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-cpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:procfs-backend-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:hipfile-backend-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-hipfile-collector-tests>)
 list(
     APPEND UNIT_TEST_OBJECTS
     $<$<TARGET_EXISTS:rocprofiler-sdk-backend-tests>:$<TARGET_OBJECTS:rocprofiler-sdk-backend-tests>>

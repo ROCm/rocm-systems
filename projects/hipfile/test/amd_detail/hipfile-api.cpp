@@ -36,6 +36,7 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cstring>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
@@ -1006,10 +1007,12 @@ TEST_F(HipFileGetStatsL2, SizeHistogramsAreZeroFilled)
 struct HipFileGetStatsL3 : public HipFileUnopened {
     Stats                    stats{};
     StrictMock<MStatsServer> mstats{};
+    StrictMock<MHip>         mhip{};
 
     void SetUp() override
     {
         EXPECT_CALL(mstats, getStats).WillRepeatedly(testing::Return(&stats));
+        EXPECT_CALL(mhip, hipDeviceGetUuid).WillRepeatedly(testing::Return(hipUUID{}));
         stats.setLevel(StatsLevel::Basic);
     }
 };
@@ -1087,6 +1090,33 @@ TEST_F(HipFileGetStatsL3, FastpathMapsToNvfsAndFallbackMapsToPosix)
     EXPECT_EQ(out.per_gpu_stats[0].n_nvfs_reads, 3u);
     EXPECT_EQ(out.per_gpu_stats[0].n_posix_reads, 7u);
     EXPECT_EQ(out.per_gpu_stats[0].n_total_reads, 10u);
+}
+
+TEST_F(HipFileGetStatsL3, PerGpuUuidPopulated)
+{
+    hipUUID uuid{};
+    for (int i{}; i < HIPFILE_GPU_UUID_LEN; ++i) {
+        uuid.bytes[i] = static_cast<char>(i + 1);
+    }
+    EXPECT_CALL(mhip, hipDeviceGetUuid(2)).WillOnce(testing::Return(uuid));
+
+    stats.getPerGpuStats(2, StatsBackend::Fastpath)->inUse = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(std::memcmp(out.per_gpu_stats[2].uuid, uuid.bytes, HIPFILE_GPU_UUID_LEN), 0);
+}
+
+TEST_F(HipFileGetStatsL3, PerGpuUuidZeroFilledOnHipError)
+{
+    EXPECT_CALL(mhip, hipDeviceGetUuid(0)).WillOnce(testing::Throw(Hip::RuntimeError{hipErrorInvalidDevice}));
+
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    const char zero[HIPFILE_GPU_UUID_LEN]{};
+    EXPECT_EQ(std::memcmp(out.per_gpu_stats[0].uuid, zero, HIPFILE_GPU_UUID_LEN), 0);
 }
 
 TEST_F(HipFileGetStatsL3, PerGpuUnalignedCountsPopulated)

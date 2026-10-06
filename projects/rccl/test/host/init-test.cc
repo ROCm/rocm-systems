@@ -21,10 +21,18 @@
 #include <memory>
 #include <new>
 #include <string>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
+#include <sys/resource.h>
+#include <tuple>
 #include <utility>
+#include <atomic>
+#include <thread>
 #include <vector>
 
 #include "fakes/init_fakes.h"
+#include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
@@ -64,7 +72,15 @@ static int g_trCollNetDeviceCount = 0;
 #include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before init.cc includes it
 
 // Pulled in ahead of the redirects below so those macros cannot mangle the declarations they redirect.
+#if defined(__x86_64__) || defined(_M_X64)
 #include <cpuid.h>
+#else
+static inline int __get_cpuid(unsigned int __leaf, unsigned int* __eax,
+                              unsigned int* __ebx, unsigned int* __ecx,
+                              unsigned int* __edx) {
+  return 0;
+}
+#endif
 
 #include "kernel_config.h"
 #include "os.h"
@@ -181,6 +197,26 @@ class DeleteWatch {
 #define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
 #endif
 
+// These tests deliberately raise fatal signals. Some CI environments enable core dumps, and a
+// shuffled death test can inherit a large address space from an earlier test. Dumping that address
+// space turns a millisecond assertion into a multi-second test. PR_SET_DUMPABLE covers both regular
+// core files and piped collectors (for which Linux ignores RLIMIT_CORE); retain the limit as defense
+// in depth. Apply both inside the death statement so only gtest's child is affected and unexpected
+// parent-process crashes remain dumpable.
+static void DisableCoreDumpsForExpectedCrash() {
+#if defined(__linux__)
+  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
+    std::perror("prctl(PR_SET_DUMPABLE) failed");
+    _exit(1);
+  }
+#endif
+  const struct rlimit noCore = {0, 0};
+  if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
+    std::perror("setrlimit(RLIMIT_CORE) failed");
+    _exit(1);
+  }
+}
+
 class InitMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -293,6 +329,41 @@ class HostPattern {
   std::unique_ptr<ncclComm> comm_;
 };
 }  // namespace
+
+// ScopedHook's counter is incremented from every thread that reaches the seam:
+// commReclaim runs commDestroySync on one std::thread per rank, so a hook over
+// ncclProxyStop is entered concurrently. A plain int loses updates there, and
+// the suite test that notices (CommReclaim_LastIntraRank_...) only undercounts
+// in a small fraction of runs -- too rare to guard the header on its own.
+TEST(ScopedHookMicrotest, CallsCounterIsExactUnderConcurrentInvocation) {
+  static std::function<void()> seam = [] {};
+  constexpr int kThreads   = 8;
+  constexpr int kPerThread = 50000;
+
+  ScopedHook hook(seam, [] {});
+
+  // Release every worker at once. Without the gate the early threads can finish
+  // before the last one starts, and the increments barely overlap.
+  static std::atomic<int>  ready{0};
+  static std::atomic<bool> go{false};
+  ready.store(0);
+  go.store(false);
+
+  std::vector<std::thread> workers;
+  workers.reserve(kThreads);
+  for (int i = 0; i < kThreads; ++i) {
+    workers.emplace_back([] {
+      ready.fetch_add(1, std::memory_order_acq_rel);
+      while (!go.load(std::memory_order_acquire)) { /* spin */ }
+      for (int j = 0; j < kPerThread; ++j) seam();
+    });
+  }
+  while (ready.load(std::memory_order_acquire) < kThreads) { /* spin */ }
+  go.store(true, std::memory_order_release);
+  for (auto& w : workers) w.join();
+
+  EXPECT_EQ(hook.calls, kThreads * kPerThread);
+}
 
 TEST_F(InitMicrotest, UniformRanksPerHost_TwoHostsTwoRanksEach_ReturnsTrue) {
   HostPattern p{1, 1, 2, 2};
@@ -819,7 +890,12 @@ TEST_F(InitMicrotest, P2pSchedule_ZeroGroupSizeParam_DiesOnDivideByZero) {
   P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
                     /*maxLocalRanks=*/4, {4, 4});
   // Pin the signal: EXPECT_DEATH("") would also accept ::abort(), _exit(1) or a null deref at the same spot.
-  EXPECT_EXIT(ncclP2pSchedule(c.get()), ::testing::KilledBySignal(SIGFPE), "");
+  EXPECT_EXIT(
+      {
+        DisableCoreDumpsForExpectedCrash();
+        (void)ncclP2pSchedule(c.get());
+      },
+      ::testing::KilledBySignal(SIGFPE), "");
 }
 
 TEST_F(InitMicrotest, P2pSchedule_SingleNode_BuildsFullSchedule) {
@@ -1226,9 +1302,13 @@ TEST_F(InitMicrotest, CommShrink_NullNewcomm_DiesOnNullDeref) {
   ReadyComm rc;
   int exclude[1] = {0};
   // Match the message too: the signal alone would also accept a crash arriving BEFORE the newcomm validation.
-  EXPECT_EXIT(ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
-                                  /*config=*/nullptr, /*shrinkFlags=*/0),
-              DEATH_BY_SEGV, "newcomm argument is NULL");
+  EXPECT_EXIT(
+      {
+        DisableCoreDumpsForExpectedCrash();
+        (void)ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
+                                  /*config=*/nullptr, /*shrinkFlags=*/0);
+      },
+      DEATH_BY_SEGV, "newcomm argument is NULL");
 }
 
 // Full strings, not substrings: a prefix check cannot see a changed NCCL_DEBUG level or a dropped "(run with)" hint.
@@ -1344,6 +1424,7 @@ void FillParentConfig(ncclConfig_t& c) {
   c.numRmaSig = 6;
   c.rmaEagerInit = 1;
   c.hostCftMode = ncclHostCftEnable;
+  c.nvlsHostMode = ncclNvlsHostModeDisableTransport;
 }
 
 void FillChildConfig(ncclConfig_t& c) {
@@ -1372,11 +1453,12 @@ void FillChildConfig(ncclConfig_t& c) {
   c.numRmaSig = 7;
   c.rmaEagerInit = 0;
   c.hostCftMode = ncclHostCftFallback;
+  c.nvlsHostMode = ncclNvlsHostModeDisableSymmetricMultimem;
 }
 
 // TRIPWIRE: a new ncclConfig_t field must be added to both fills and to ExpectConfigFieldsEqual, or a
 // memcpy truncated just before it would go unnoticed. Update all four sites together.
-static_assert(sizeof(ncclConfig_t) == 112, "ncclConfig_t layout changed -- extend the copyCommConfig field checks");
+static_assert(sizeof(ncclConfig_t) == 120, "ncclConfig_t layout changed -- extend the copyCommConfig field checks");
 
 // Field-by-field so a failure names the field. netName by content: envConfigOverride re-mallocs it.
 void ExpectConfigFieldsEqual(const ncclConfig_t& want, const ncclConfig_t& got) {
@@ -1406,6 +1488,7 @@ void ExpectConfigFieldsEqual(const ncclConfig_t& want, const ncclConfig_t& got) 
   EXPECT_EQ(want.numRmaSig, got.numRmaSig);
   EXPECT_EQ(want.rmaEagerInit, got.rmaEagerInit);
   EXPECT_EQ(want.hostCftMode, got.hostCftMode);
+  EXPECT_EQ(want.nvlsHostMode, got.nvlsHostMode);
 }
 
 // envConfigOverride always replaces config.netName with a fresh malloc; free it so the copy tests do not leak.
@@ -2052,6 +2135,66 @@ TEST_F(InitMicrotest, CommFree_AfterCommAlloc_ReturnsSuccessAndFrees) {
   comm->abortFlagRefCount = &abortRef;
   EXPECT_EQ(ncclSuccess, commFree(comm));          // frees comm; do not touch it afterwards
   EXPECT_EQ(1, abortRef);
+}
+
+// See the comment at the ncclProfilerThreadDestroy call site in src/init.cc.
+TEST_F(InitMicrotest, CommFree_StopsProfilerThreadBeforeFreeingTheBuffersItPolls) {
+  InstallCommAllocSuccess();
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));
+  ASSERT_EQ(ncclSuccess, commAlloc(comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  uint32_t abortFlag = 0;
+  int abortRef = 2;  // >1 so commFree skips the abortFlag free-branch
+  comm->abortFlag = &abortFlag;
+  comm->abortFlagRefCount = &abortRef;
+
+  // Stands in for comm->profiler.workStarted/workCompleted/workPhases: a
+  // host-pinned allocation released by the destructor loop, exactly as
+  // ncclCommPushCudaHostFree does for the real ones.
+  int pinnedProfilerBuffer = 0;
+  ncclCommPushCudaHostFree(comm, &pinnedProfilerBuffer);
+
+  std::vector<std::string> order;
+  ScopedHook threadDestroy(g_ncclProfilerThreadDestroy, [&](struct ncclComm*) {
+    order.push_back("profilerThreadDestroy");
+    return ncclSuccess;
+  });
+  ScopedHook hostFree(g_hipHostFree, [&](void* p) {
+    if (p == &pinnedProfilerBuffer) order.push_back("freePinnedProfilerBuffer");
+    return hipSuccess;
+  });
+  ScopedHook pluginFinalize(g_ncclProfilerPluginFinalize, [&](struct ncclComm*) {
+    order.push_back("profilerPluginFinalize");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));  // frees comm; do not touch it afterwards
+  EXPECT_EQ(1, abortRef);
+
+  // Each step has to have happened at all -- an ordering assertion over a
+  // missing step would pass vacuously.
+  ASSERT_EQ(1, threadDestroy.calls) << "commFree never stopped the profiler thread";
+  ASSERT_EQ(1, pluginFinalize.calls) << "commFree never finalized the profiler plugin";
+  auto indexOf = [&](const std::string& name) -> std::ptrdiff_t {
+    auto it = std::find(order.begin(), order.end(), name);
+    return it == order.end() ? -1 : std::distance(order.begin(), it);
+  };
+  ASSERT_NE(-1, indexOf("freePinnedProfilerBuffer"))
+      << "the destructor loop never released the pinned buffer; this test is no longer "
+         "exercising the window it exists to guard";
+
+  EXPECT_LT(indexOf("profilerThreadDestroy"), indexOf("freePinnedProfilerBuffer"))
+      << "commFree freed the host-pinned profiler buffers while the profiler thread was "
+         "still polling them. The thread must be stopped and joined BEFORE the "
+         "comm->destructorHead loop runs, or profilerProgressOps() dereferences an "
+         "unmapped mapping and the process takes SIGSEGV. Observed order: "
+      << ::testing::PrintToString(order);
+
+  EXPECT_LT(indexOf("profilerThreadDestroy"), indexOf("profilerPluginFinalize"))
+      << "ncclProfilerThreadDestroy must precede ncclProfilerPluginFinalize: it purges this "
+         "comm's queued ops, and the plugin's profilerContext is gone after finalize. "
+         "Observed order: "
+      << ::testing::PrintToString(order);
 }
 
 // ===========================================================================
@@ -3492,6 +3635,34 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx1151_ZeroInitChannelsIsTreatedAsUnse
   EXPECT_EQ(6, c.get()->graphs[NCCL_ALGO_RING].nChannels);
 }
 
+TEST_F(InitMicrotest, InitTransportsRank_Gfx110xP2pDisabledUses56RingChannels) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1100");
+  SetParams({{"P2P_DISABLE", 1}});
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(8));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  const ncclTopoGraph& ring = c.get()->graphs[NCCL_ALGO_RING];
+  EXPECT_EQ(56, ring.nChannels);
+  EXPECT_EQ(56, ring.maxChannels);
+  EXPECT_EQ(56, c.get()->graphs[NCCL_ALGO_TREE].minChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx120xP2pDisabledHonorsExplicitChannelCount) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1201");
+  SetParams({{"P2P_DISABLE", 1}, {"RCCL_INIT_CHANNELS", 12}});
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(8));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  const ncclTopoGraph& ring = c.get()->graphs[NCCL_ALGO_RING];
+  EXPECT_EQ(12, ring.nChannels);
+  EXPECT_EQ(12, ring.maxChannels);
+  EXPECT_EQ(12, c.get()->graphs[NCCL_ALGO_TREE].minChannels);
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_NonGfx1151_KeepsTheComputedRingChannelCount) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();  // gcn stays empty, so IsArchMatch is false
@@ -3687,6 +3858,7 @@ TEST_F(InitMicrotest, SetCommAbortFlags_LargePositiveValue_StoredVerbatim) {
 TEST_F(InitMicrotest, SetCommAbortFlags_NullChildDevUnderNonNullChildFlag_DiesOnNullDeref) {
   EXPECT_EXIT(
       {
+        DisableCoreDumpsForExpectedCrash();
         AbortFlagsComm c;
         c.get()->childAbortFlagDev = nullptr;
         fprintf(stderr, "setCommAbortFlags-reached-with-null-childAbortFlagDev\n");
@@ -5314,7 +5486,8 @@ TEST_F(InitMicrotest, CommDestroySync_ProxyStopFails_WarnsAndReturnsThatError) {
   ncclResult_t ret = ncclSuccess;
   const std::string log = CaptureInfoLog([&] { ret = Teardown_RunDestroySync(c.get()); });
   EXPECT_EQ(ncclInternalError, ret);
-  EXPECT_TRUE(LogHas(log, "commDestroySync: comm")) << "actual log:\n" << log;
+  // NCCL 2.32 reworded this INFO without the "commDestroySync:" prefix.
+  EXPECT_TRUE(LogHas(log, "proxy stop error")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, CommDestroySync_PersistentRefsOutstanding_PollsUntilCallbacksClearThem) {
@@ -5369,7 +5542,8 @@ TEST_F(InitMicrotest, CommDestroySync_LegacyCleanupCallbackFails_WarnsAndDrainsR
   const std::string log =
       CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get())); });
   EXPECT_EQ(2, ran);
-  EXPECT_TRUE(LogHas(log, "Legacy IPC cleanup callback failed comm")) << "actual log:\n" << log;
+  // NCCL 2.32 wording: "... failed for comm 0x<hash> rank <r>".
+  EXPECT_TRUE(LogHas(log, "Legacy IPC cleanup callback failed for comm")) << "actual log:\n" << log;
   EXPECT_TRUE(ncclIntruQueueEmpty(&c.get()->legacyRegCleanupQueue));
 }
 
@@ -5482,8 +5656,8 @@ TEST_F(InitMicrotest, CommReclaim_DestroySyncFails_WarnsAndStillCleansTheChain) 
 
   const std::string log =
       CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
-  EXPECT_TRUE(LogHas(log, "commReclaim: comm")) << "actual log:\n" << log;
-  EXPECT_TRUE(LogHas(log, "in commDestroySync, error")) << "actual log:\n" << log;
+  // NCCL 2.32 raised this to ATTN and reworded it: "comm 0x<hash> rank <r> commDestroySync error <e>".
+  EXPECT_TRUE(LogHas(log, "commDestroySync error")) << "actual log:\n" << log;
   for (int i = 0; i < kChainLength; ++i) EXPECT_EQ(1, members[i].rec.finalizeCalls);
 }
 
@@ -5956,6 +6130,180 @@ TEST_F(InitMicrotest, CommFree_HierarchicalSubComms_DestroysIntraThenInter) {
   EXPECT_EQ(std::vector<ncclComm*>({intra.get(), inter.get()}), destroyed);
 }
 
+namespace {
+// Eligible parent at rank 11 of 64, on node 1 as local rank 3. It points into
+// the caller's rank maps, which must outlive it.
+std::unique_ptr<ncclComm> Hier_MakeEligibleParent(int (&rankToNode)[64], int (&rankToLocalRank)[64]) {
+  auto parent = std::make_unique<ncclComm>();
+  const ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+  parent->config = config;
+  parent->config.blocking = 0;
+  parent->hierarchicalEligible = true;
+  parent->nNodes = 8;
+  parent->nRanks = 64;
+  parent->rank = 11;
+  rankToNode[parent->rank] = 1;
+  rankToLocalRank[parent->rank] = 3;
+  parent->rankToNode = rankToNode;
+  parent->rankToLocalRank = rankToLocalRank;
+  return parent;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, EnsureHierarchicalComms_BuildsResourcesSynchronouslyAndRestoresParentState) {
+  ScopedHook loadParam(g_loadParam, [](const char* name, int64_t deft) {
+    if (std::strcmp(name, "CUMEM_ENABLE") == 0) return int64_t{0};
+    return deft;
+  });
+  g_rcclParamHierarchicalAllGather = 1;
+  g_rcclParamHierarchicalReduceScatter = 0;
+  int rankToNode[64]{};
+  int rankToLocalRank[64]{};
+  auto parent = Hier_MakeEligibleParent(rankToNode, rankToLocalRank);
+  parent->pxnDisable = 7;
+
+  auto intra = std::make_unique<ncclComm>();
+  auto inter = std::make_unique<ncclComm>();
+  intra->nRanks = 8;
+  inter->nRanks = 8;
+  constexpr size_t kTempBufferBytes = size_t{3} << 20;
+  std::tuple<int, bool, bool> tempBufferArgs{};
+  ScopedHook tempBufferSize(g_rcclHierarchicalTempBufferSize, [&](int nNodes, bool allGather, bool reduceScatter) {
+    tempBufferArgs = std::make_tuple(nNodes, allGather, reduceScatter);
+    return kTempBufferBytes;
+  });
+  size_t allocatedBytes = 0;
+  ScopedHook allocation(g_hipExtMallocWithFlags, [&](void** ptr, size_t bytes, unsigned) {
+    allocatedBytes = bytes;
+    *ptr = std::malloc(bytes);
+    return *ptr == nullptr ? hipErrorOutOfMemory : hipSuccess;
+  });
+  ScopedHook captureMode(g_hipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
+  int splitCalls = 0;
+  std::vector<std::pair<int, int>> splitArgs;
+  std::vector<bool> forcePatStates;
+  ScopedHook split(g_ncclCommSplit, [&](ncclComm_t comm, int color, int key, ncclComm_t* child, ncclConfig_t* config) {
+    EXPECT_EQ(parent.get(), comm);
+    EXPECT_EQ(1, parent->config.blocking);
+    EXPECT_EQ(nullptr, config);
+    splitArgs.emplace_back(color, key);
+    forcePatStates.push_back(parent->forcePatEnable);
+    *child = splitCalls++ == 0 ? intra.get() : inter.get();
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(ncclSuccess, rcclEnsureHierarchicalComms(parent.get()));
+  EXPECT_EQ(2, splitCalls);
+  EXPECT_EQ((std::vector<std::pair<int, int>>{{1, 3}, {3, 1}}), splitArgs);
+  EXPECT_EQ((std::vector<bool>{false, true}), forcePatStates);
+  EXPECT_EQ(intra.get(), parent->hierarchicalIntraComm);
+  EXPECT_EQ(inter.get(), parent->hierarchicalInterComm);
+  EXPECT_EQ(parent->pxnDisable, inter->pxnDisable);
+  EXPECT_NE(nullptr, parent->hierarchicalTempBuffer);
+  EXPECT_EQ(1, tempBufferSize.calls);
+  EXPECT_EQ(std::make_tuple(8, true, false), tempBufferArgs);
+  EXPECT_EQ(kTempBufferBytes, allocatedBytes);
+  EXPECT_TRUE(parent->hierarchicalCommsInitialized);
+  EXPECT_EQ(0, parent->config.blocking);
+  EXPECT_FALSE(parent->forcePatEnable);
+
+  EXPECT_EQ(ncclSuccess, rcclEnsureHierarchicalComms(parent.get()));
+  EXPECT_EQ(2, splitCalls) << "an initialized hierarchy is not rebuilt";
+  EXPECT_EQ(hipSuccess, hipFree(parent->hierarchicalTempBuffer));
+}
+
+TEST_F(InitMicrotest, EnsureHierarchicalComms_FailureIsNotRetried) {
+  int rankToNode[64]{};
+  int rankToLocalRank[64]{};
+  auto parent = Hier_MakeEligibleParent(rankToNode, rankToLocalRank);
+
+  auto intra = std::make_unique<ncclComm>();
+  int splitCalls = 0;
+  ScopedHook split(g_ncclCommSplit, [&](ncclComm_t, int, int, ncclComm_t* child, ncclConfig_t*) {
+    EXPECT_EQ(1, parent->config.blocking);
+    if (splitCalls++ == 0) {
+      *child = intra.get();
+      return ncclSuccess;
+    }
+    return ncclSystemError;
+  });
+
+  EXPECT_EQ(ncclSystemError, rcclEnsureHierarchicalComms(parent.get()));
+  EXPECT_EQ(2, splitCalls);
+  EXPECT_FALSE(parent->hierarchicalCommsInitialized);
+  EXPECT_FALSE(parent->hierarchicalEligible);
+  EXPECT_EQ(0, parent->config.blocking);
+  EXPECT_FALSE(parent->forcePatEnable);
+
+  EXPECT_EQ(ncclSuccess, rcclEnsureHierarchicalComms(parent.get()));
+  EXPECT_EQ(2, splitCalls) << "the failed collective split must not be retried";
+}
+
+TEST_F(InitMicrotest, EnsureHierarchicalComms_AllocationFailureLeavesTheHierarchyUninitialized) {
+  ScopedHook loadParam(g_loadParam, [](const char* name, int64_t deft) {
+    if (std::strcmp(name, "CUMEM_ENABLE") == 0) return int64_t{0};
+    return deft;
+  });
+  int rankToNode[64]{};
+  int rankToLocalRank[64]{};
+  auto parent = Hier_MakeEligibleParent(rankToNode, rankToLocalRank);
+  auto intra = std::make_unique<ncclComm>();
+  auto inter = std::make_unique<ncclComm>();
+  int splitCalls = 0;
+  ScopedHook split(g_ncclCommSplit, [&](ncclComm_t, int, int, ncclComm_t* child, ncclConfig_t*) {
+    *child = splitCalls++ == 0 ? intra.get() : inter.get();
+    return ncclSuccess;
+  });
+  ScopedHook allocation(g_hipExtMallocWithFlags, [](void** ptr, size_t, unsigned) {
+    *ptr = nullptr;
+    return hipErrorOutOfMemory;
+  });
+  ScopedHook captureMode(g_hipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
+
+  EXPECT_NE(ncclSuccess, rcclEnsureHierarchicalComms(parent.get()));
+  EXPECT_EQ(2, splitCalls);
+  EXPECT_EQ(1, allocation.calls);
+  EXPECT_EQ(nullptr, parent->hierarchicalTempBuffer);
+  EXPECT_FALSE(parent->hierarchicalCommsInitialized);
+  EXPECT_FALSE(parent->hierarchicalEligible);
+}
+
+// Lazy setup reserves the temp buffer before its readiness vote; the build keeps it.
+TEST_F(InitMicrotest, EnsureHierarchicalComms_KeepsAReservedTempBuffer) {
+  ScopedHook loadParam(g_loadParam, [](const char* name, int64_t deft) {
+    if (std::strcmp(name, "CUMEM_ENABLE") == 0) return int64_t{0};
+    return deft;
+  });
+  int rankToNode[64]{};
+  int rankToLocalRank[64]{};
+  auto parent = Hier_MakeEligibleParent(rankToNode, rankToLocalRank);
+  auto intra = std::make_unique<ncclComm>();
+  auto inter = std::make_unique<ncclComm>();
+  int splitCalls = 0;
+  ScopedHook split(g_ncclCommSplit, [&](ncclComm_t, int, int, ncclComm_t* child, ncclConfig_t*) {
+    *child = splitCalls++ == 0 ? intra.get() : inter.get();
+    return ncclSuccess;
+  });
+  ScopedHook allocation(g_hipExtMallocWithFlags, [](void** ptr, size_t bytes, unsigned) {
+    *ptr = std::malloc(bytes);
+    return *ptr == nullptr ? hipErrorOutOfMemory : hipSuccess;
+  });
+  ScopedHook captureMode(g_hipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
+
+  ASSERT_EQ(ncclSuccess, rcclReserveHierarchicalTempBuffer(parent.get()));
+  ASSERT_EQ(ncclSuccess, rcclReserveHierarchicalTempBuffer(parent.get()));
+  void* reserved = parent->hierarchicalTempBuffer;
+  EXPECT_NE(nullptr, reserved);
+  EXPECT_EQ(0, splitCalls) << "reserving the buffer is local to the rank";
+
+  ASSERT_EQ(ncclSuccess, rcclEnsureHierarchicalComms(parent.get()));
+  EXPECT_EQ(2, splitCalls);
+  EXPECT_EQ(1, allocation.calls);
+  EXPECT_EQ(reserved, parent->hierarchicalTempBuffer);
+  EXPECT_TRUE(parent->hierarchicalCommsInitialized);
+  EXPECT_EQ(hipSuccess, hipFree(parent->hierarchicalTempBuffer));
+}
+
 TEST_F(InitMicrotest, CommFree_SymmetricSupport_FinalizesSymmetricResources) {
   ncclComm* comm = nullptr;
   uint32_t abortFlag = 0;
@@ -5963,7 +6311,7 @@ TEST_F(InitMicrotest, CommFree_SymmetricSupport_FinalizesSymmetricResources) {
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->symmetricSupport = true;
   ncclComm* finalized = nullptr;
-  ScopedHook symk(g_ncclSymkFinalize, [&](ncclComm* c) {
+  ScopedHook symk(g_symkFinalize, [&](ncclComm* c) {
     finalized = c;
     return ncclSuccess;
   });
@@ -5979,7 +6327,7 @@ TEST_F(InitMicrotest, CommFree_NoSymmetricSupport_SkipsSymmetricFinalize) {
   int abortRef = 2;
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->symmetricSupport = false;
-  ScopedHook symk(g_ncclSymkFinalize, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook symk(g_symkFinalize, [](ncclComm*) { return ncclSuccess; });
 
   EXPECT_EQ(ncclSuccess, commFree(comm));
   EXPECT_EQ(0, symk.calls);
@@ -5991,7 +6339,7 @@ TEST_F(InitMicrotest, CommFree_SymmetricFinalizeFails_PropagatesAndStopsTeardown
   int abortRef = 2;
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->symmetricSupport = true;
-  ScopedHook symk(g_ncclSymkFinalize, [](ncclComm*) { return ncclInternalError; });
+  ScopedHook symk(g_symkFinalize, [](ncclComm*) { return ncclInternalError; });
 
   EXPECT_EQ(ncclInternalError, commFree(comm));
   EXPECT_EQ(1, symk.calls);
@@ -6122,7 +6470,8 @@ TEST_F(InitMicrotest, CommReclaim_CommCleanupFails_WarnsAndStillCleansTheRestOfT
 
   const std::string log =
       CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
-  EXPECT_TRUE(LogHas(log, "commReclaim: cleanup comm")) << "actual log:\n" << log;
+  // NCCL 2.32 raised this to ATTN and dropped the "commReclaim: " prefix.
+  EXPECT_TRUE(LogHas(log, "cleanup comm")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "failed in destroy/abort, error")) << "actual log:\n" << log;
   EXPECT_EQ(1, members[1].rec.finalizeCalls);
   members[0].comm->tuner = nullptr;
@@ -6451,7 +6800,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigSet_OverwritesA
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 6}});
   EXPECT_EQ(6, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "Comm config maxP2pPeers reset to NCCL_MAX_P2P_PEERS=6")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Comm config maxP2pPeers reset to NCCL_P2P_MAX_PEERS=6")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow) {
@@ -6459,7 +6808,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 0}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "NCCL_MAX_P2P_PEERS 0 is too low, leaving it set at 2")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "NCCL_P2P_MAX_PEERS 0 is too low, leaving it set at 2")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTooLow) {
@@ -6467,7 +6816,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTo
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", -4}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "NCCL_MAX_P2P_PEERS -4 is too low, leaving it set at 2")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "NCCL_P2P_MAX_PEERS -4 is too low, leaving it set at 2")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingParamUndefined_LeavesConfigUntouched) {
@@ -7005,8 +7354,9 @@ TEST_F(InitMicrotest, CommInitRankFunc_DevicePropertiesFail_ReturnsBeforeKernelI
   EXPECT_EQ(0, s.comm()->cuCount);
 }
 
-// LATENT BUG (init.cc:2669): a bare NCCLCHECK returns past the fail: free, leaking the archName strdup'd at :2661.
-TEST_F(InitMicrotest, CommInitRankFunc_KernelInitFails_ForwardsArchAndSharedMemThenReturnsWithoutPublishing) {
+// NCCL 2.32 fixed the former latent bug here: kernel-init failure now goes through NCCLCHECKGOTO to fail:,
+// which records the error in initState and still publishes via exit:, instead of returning past both.
+TEST_F(InitMicrotest, CommInitRankFunc_KernelInitFails_ForwardsArchAndSharedMemThenFailsThroughExit) {
   Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
   ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
   int seenArch = -1;
@@ -7024,8 +7374,8 @@ TEST_F(InitMicrotest, CommInitRankFunc_KernelInitFails_ForwardsArchAndSharedMemT
   EXPECT_EQ(Rank_kCudaArch, seenArch);
   EXPECT_EQ(Rank_kMaxSharedMem, seenSharedMem);
   EXPECT_EQ(1, kernels.calls);
-  EXPECT_EQ(nullptr, s.published()) << "a bare NCCLCHECK returns directly, skipping the exit: publish";
-  EXPECT_EQ(ncclSuccess, s.comm()->initState) << "and skipping the fail: initState store";
+  EXPECT_NE(nullptr, s.published()) << "NCCLCHECKGOTO reaches the exit: publish";
+  EXPECT_EQ(ncclInternalError, s.comm()->initState) << "and the fail: initState store";
 }
 
 TEST_F(InitMicrotest, CommInitRankFunc_KernelsWantStackSpace_RaisesTheDeviceStackLimitToThatSize) {
@@ -7282,6 +7632,7 @@ TEST_F(InitMicrotest, CommInitRankFunc_TransportInitFails_StampsTheArchFieldsAnd
   EXPECT_STREQ(Rank_kGcnArchName, s.comm()->archName);
   EXPECT_EQ(rcclLL128LineElemsFromArch(Rank_kGcnArchName), s.comm()->ll128LineElems);
   EXPECT_EQ(rcclLL128DataElemsFromArch(Rank_kGcnArchName), s.comm()->ll128DataElems);
+  EXPECT_EQ(rcclLL128ShmemElemsPerThreadFromArch(Rank_kGcnArchName), s.comm()->ll128ShmemElemsPerThread);
   EXPECT_EQ(res, s.comm()->initState);
 }
 
@@ -8449,7 +8800,7 @@ TEST_F(InitMicrotest, InitChildComm_Split_AllocatesChildAndLaunchesOnTheParent) 
   EXPECT_FALSE(r.isGrow);
   EXPECT_EQ(NCCL_MAGIC, child->startMagic);
   EXPECT_EQ(NCCL_MAGIC, child->endMagic);
-  EXPECT_EQ(ncclInternalError, child->initState);
+  EXPECT_EQ(ncclInProgress, child->initState);  // NCCL 2.32: was ncclInternalError until init succeeded
   EXPECT_FALSE(parent->shareResources);
   ASSERT_NE(nullptr, child->abortFlag);
   EXPECT_NE(parent->abortFlag, child->abortFlag);
@@ -8971,6 +9322,66 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx1250_TakesTheFullChannelPool) {
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(MAXCHANNELS, g_ncclTopoPostsetNc);
   EXPECT_TRUE(c.get()->topo->ll128Enabled);  // :1944 default-enables LL128 on this arch
+}
+
+// Host-only coverage for the gfx1250 SendRecv helpers used by init.cc and enqueue.cc.
+// These catch ENABLE=1 0-to-cap protocol, missing-staging fallback, and ALLOC formula
+// without a GPU. ncclParamP2pLL128Enable() is the enqueue-owned symbol whose missing
+// fake broke MicroInit linking (initTransportsRank).
+TEST_F(InitMicrotest, Gfx1250SendRecvHelpers_EnableProtocolAllocAndParamDefault) {
+  constexpr ssize_t hi4 = 1 << 20;
+  EXPECT_EQ(NCCL_PROTO_LL128, rcclGfx1250SendRecvEnableProtocol(2048, hi4, true));
+  EXPECT_EQ(NCCL_PROTO_LL128, rcclGfx1250SendRecvEnableProtocol(8192, hi4, true));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGfx1250SendRecvEnableProtocol(hi4 + 1, hi4, true));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGfx1250SendRecvEnableProtocol(8192, hi4, false));
+  EXPECT_FALSE(rcclP2pLlFamilyMix(NCCL_PROTO_LL128, NCCL_PROTO_LL128));
+  EXPECT_TRUE(rcclP2pLlFamilyMix(NCCL_PROTO_LL, NCCL_PROTO_LL128));
+  EXPECT_EQ(0, rcclAllocP2pNetLLBuffers(1250, 1, 4, -1, 0));
+  EXPECT_EQ(0, rcclAllocP2pNetLLBuffers(1250, 1, 8, -1, 0));
+  EXPECT_EQ(0, rcclAllocP2pNetLLBuffers(1250, 1, 16, -1, 0));
+  EXPECT_EQ(0, rcclAllocP2pNetLLBuffers(1250, 1, 8, 0, 0));
+  EXPECT_EQ(1, rcclAllocP2pNetLLBuffers(1250, 1, 2, 1, 0));
+  EXPECT_EQ(1, rcclAllocP2pNetLLBuffers(1250, 1, 4, 0, 1));
+  EXPECT_EQ(0, rcclAllocP2pNetLLBuffers(950, 1, 8, -1, 0));
+  EXPECT_EQ(-1, ncclParamP2pLL128Enable());
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1250FourRanksAuto_DoesNotAllocP2pNetLlBuffers) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.get()->cudaArch = 1250;
+  Tr_ReachAllGather3(c, "gfx1250");
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->allocP2pNetLLBuffers);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1250EightRanksAuto_DoesNotAllocP2pNetLlBuffers) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  c.get()->cudaArch = 1250;
+  Tr_ReachAllGather3(c, "gfx1250");
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->allocP2pNetLLBuffers);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1250EnableOff_DoesNotAllocEvenAtEightRanks) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  c.get()->cudaArch = 1250;
+  Tr_ReachAllGather3(c, "gfx1250");
+  SetParams({{"P2P_LL128_ENABLE", 0}});
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->allocP2pNetLLBuffers);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1250EnableOn_AllocatesAtAnyRankCount) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  c.get()->cudaArch = 1250;
+  Tr_ReachAllGather3(c, "gfx1250");
+  SetParams({{"P2P_LL128_ENABLE", 1}});
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->allocP2pNetLLBuffers);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_NonGfx1250_LeavesLl128Disabled) {

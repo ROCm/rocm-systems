@@ -152,7 +152,6 @@ run_wrapper_prefix=(
   env
   -u LD_PRELOAD
   -u HSA_HOTSWAP_ENABLE
-  "HSA_HOTSWAP_DISABLE=1"
 )
 
 if ! rocjitsu_launcher="$(command -v rocjitsu)"; then

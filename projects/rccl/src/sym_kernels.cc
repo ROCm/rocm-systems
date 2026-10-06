@@ -6,11 +6,15 @@
  ************************************************************************/
 
 #include "sym_kernels.h"
+#include "archinfo.h"
 #include "comm.h"
 #include "device.h"
 #include "nccl_device/core_tmp.h"
 #include "transport.h"
 #include "tuning.h"
+#if defined(__HIP_PLATFORM_AMD__)
+#include "tdm/tdmCopy.h" // TDM_TOOLCHAIN_AVAILABLE, for ncclSymkTmaAvailable()
+#endif
 #include <cmath>
 #include <cfloat>
 
@@ -95,7 +99,7 @@ bool ncclSymkTmaDeepEligible(struct ncclComm* comm, ncclSymkKernelId k, size_t n
   switch (k) {
   case ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST:
   case ncclSymkKernelId_ReduceScatter_TmaLD:
-    bytePerChunk = ncclSymkDeepBytePerChunk;
+    bytePerChunk = ncclSymkDeepMaxBytePerChunk;
     chunkMod = comm->nRanks * nBlocks;
     break;
   case ncclSymkKernelId_AllGather_TmaST:
@@ -130,11 +134,29 @@ static uint32_t kernelMask_coll(ncclFunc_t coll) {
 
 NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
 NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
-// [RCCL] TMA is an NVIDIA-only hardware feature; keep the symmetric TMA kernels off by default.
+// [RCCL] These kernels stage tiles through a DMA engine: TMA on NVIDIA, the Tensor
+// Data Mover on gfx1250. Still opt-in while the gfx1250 path is being brought up.
+// 0 off, 1 offer to the tuner, 2 force (skips the cost model and the deep-loop size bar; for A/B
+// measurement). NCCL_SYM_KERNEL forces one named kernel, 2 forces whichever the collective has.
 NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)
 
 bool ncclSymkTmaAvailable(struct ncclComm* comm) {
-  return comm->minCompCap >= 100 && ncclParamSymTmaEnable();
+  if (!ncclParamSymTmaEnable()) return false;
+#if defined(__HIP_PLATFORM_AMD__)
+  return TDM_TOOLCHAIN_AVAILABLE && comm->archName && IsArchMatch(comm->archName, "gfx1250");
+#else
+  // TMA requires up to (8KB data + 8B mbarrier + alignment) x 16 warps SMEM.
+  // SMEM is partitioned across the 16 warps such that each warp gets ncclTmaShmemScratchWarpSize() bytes.
+  if (comm->maxSharedMemOptin < ncclTmaShmemScratchWarpSize() * 16) {
+    return false;
+  }
+  return comm->minCompCap >= 100;
+#endif
+}
+
+bool ncclSymkTmaForced(struct ncclComm* comm) {
+  // Availability still gates it: an arch that emitted no Tma kernels has none to force to.
+  return ncclParamSymTmaEnable() >= 2 && ncclSymkTmaAvailable(comm);
 }
 
 static constexpr size_t ncclSymkRsGinDefaultChunkBytes = 128 << 10;
@@ -187,7 +209,8 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     symk->initialized = true;
     struct ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     // Disable LSA multicast for cross-clique since NVLS isn't available across cliques
-    symk->hasLsaMultimem = comm->nvlsSupport && ncclTeamLsa(comm).nRanks > 2 && !comm->p2pCrossClique;
+    symk->hasLsaMultimem =
+      ncclNvlsSymmetricMultimemEnabled(comm) && ncclTeamLsa(comm).nRanks > 2 && !comm->p2pCrossClique;
     reqs.lsaMultimem = symk->hasLsaMultimem;
     reqs.lsaBarrierCount = ncclSymkMaxBlocks;
     reqs.ginStrongSignalsRequired = false;
@@ -344,6 +367,9 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
 
   if (!ncclSymkTmaAvailable(comm)) kmask &= ~kernelMask_Tma;
   if (!symAligned16B) kmask &= ~kernelMask_Tma;
+  // Force leaves the tuner nothing else to pick. Conditional so that a collective with no surviving
+  // Tma kernel degrades to normal selection instead of ending up with an empty mask.
+  if (ncclSymkTmaForced(comm) && (kmask & kernelMask_Tma) != 0) kmask &= kernelMask_Tma;
 
   bool hasGin = ncclParamSymGinKernelsEnable() != 0;
   if (!hasGin) kmask &= ~kernelMask_Gin;
@@ -354,6 +380,7 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
 
 bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                        size_t nElts) {
+  if (!comm->symmetricSupport) return false;
   if (!comm->isAllDirectNvlink) return false;
   if (!ncclSymkImplemented(coll, red, ty)) return false;
 

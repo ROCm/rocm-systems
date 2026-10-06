@@ -13,6 +13,7 @@ from rocm_kpack import (
     kpack_offload_binary,
     read_kpack_ref_marker,
     is_fat_binary,
+    is_kpack_processed,
     detect_binary_format,
     NotFatBinaryError,
 )
@@ -34,6 +35,34 @@ class TestFormatDetection:
     def test_is_fat_binary_false(self, host_only_exe: Path):
         """Test that host-only binaries are not fat binaries."""
         assert is_fat_binary(host_only_exe) is False
+
+    def test_is_kpack_processed_false_before_transform(self, single_arch_exe: Path):
+        """An untouched fat binary carries no kpack marker."""
+        assert is_kpack_processed(single_arch_exe) is False
+
+    def test_is_kpack_processed_false_for_host_only(self, host_only_exe: Path):
+        """A host-only binary carries no kpack marker."""
+        assert is_kpack_processed(host_only_exe) is False
+
+    def test_kpack_processed_binary_is_not_a_fat_binary(
+        self, single_arch_exe: Path, tmp_path: Path
+    ):
+        """Detection must be idempotent across a kpack_offload_binary() pass.
+
+        The transform leaves the .hip_fatbin/.hip_fat section header behind, so
+        a name-only check keeps reporting the output as splittable and a second
+        pass fails with "Section '.rocm_kpack_ref' already exists".
+        """
+        output = tmp_path / "processed.exe"
+        kpack_offload_binary(
+            input_path=single_arch_exe,
+            output_path=output,
+            kpack_search_paths=["kernels.kpack"],
+            kernel_name="test_kernel",
+        )
+
+        assert is_kpack_processed(output) is True
+        assert is_fat_binary(output) is False
 
 
 class TestKpackOffloadBinary:

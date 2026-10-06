@@ -45,9 +45,15 @@ struct CeAlltoAllvMockComm
         comm.rank              = 0;
         comm.symmetricSupport  = true;
         comm.config.CTAPolicy  = NCCL_CTA_POLICY_ZERO;
+        // Keep mock LSA state initialized so eligibility does not inspect absent topology.
+        comm.devrState.bigSize = 1;
+        comm.devrState.lsaSize = comm.nRanks;
+        comm.devrState.lsaSelf = comm.rank;
     }
 
     // Multi-node local-only LSA so ncclHierCeAvailable can pass (bigSize skips CUDA init).
+    // Hierarchical CE does not use hierarchicalIntra/Inter sub-comms, so this
+    // mock stays at nNodes=2 and does not set hierarchicalCommsInitialized.
     void configureHierEligible(int nNodes = 2, int localRanks = 4)
     {
         comm.nNodes           = nNodes;
@@ -57,8 +63,13 @@ struct CeAlltoAllvMockComm
         comm.node             = 0;
         comm.symmetricSupport = true;
         comm.hostRmaSupport   = true;
+        // On a multi-clique comm init.cc derives hostRmaSupport from
+        // globalRmaProxySupport, and ncclRmaProxyEnabled reads it directly, so
+        // setting only hostRmaSupport would describe a comm that cannot exist.
+        comm.globalRmaProxySupport = true;
         comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         comm.config.numRmaCtx = 1;
+        comm.maxLocalRanks    = localRanks;
         comm.devrState.bigSize = 1;
         comm.devrState.lsaSize = localRanks;
         comm.devrState.lsaSelf = 0;

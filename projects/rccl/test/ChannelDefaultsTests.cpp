@@ -52,8 +52,12 @@ struct ResolvedChannels
 // (`nodes[GPU].count == topo->nRanks`) so p2pnChannelsPerPeer passes through as
 // kInputChannelsPerPeer and the saturate expectations stay easy to derive. Pass
 // allRanksLocal to exercise the doubling instead.
+//
+// maxP2pPeers is the saturate divisor, seeded to nRanks by CreateMockComm. It has to be a
+// parameter because this helper deletes the comm before returning.
 ResolvedChannels ResolveP2pChannels(const char* arch, int nRanks, int collChannels = kDefaultCollChannels,
-                                    int nNodes = 1, bool allRanksLocal = false)
+                                    int nNodes = 1, bool allRanksLocal = false,
+                                    int maxP2pPeers = 0 /* 0 = leave at the nRanks default */)
 {
     // Heap, not stack: ncclTopoSystem is ~13 MiB and the default stack is 8 MB.
     ncclComm_t comm      = nullptr;
@@ -68,6 +72,7 @@ ResolvedChannels ResolveP2pChannels(const char* arch, int nRanks, int collChanne
     else if (allRanksLocal) SetMockNodes(comm, 1, comm->topo->nodes[GPU].count);
     comm->nChannels           = collChannels;
     comm->p2pnChannelsPerPeer = kInputChannelsPerPeer;
+    if (maxP2pPeers) comm->p2pMaxPeers = maxP2pPeers;
 
     EXPECT_EQ(ncclTopoComputeP2pChannels(comm), ncclSuccess);
     ResolvedChannels resolved{comm->p2pnChannels, comm->p2pnChannelsPerPeer};
@@ -326,6 +331,65 @@ TEST(ChannelDefaults, Gfx950_SaturateCanBeEnabled)
             ExpectPoolInvariant(r);
         },
         {{"RCCL_SATURATE_P2P_NCHANNELS", "1"}});
+}
+
+// ---------------------------------------------------------------------------
+// maxP2pPeers as the saturate divisor: the pool is split among declared peers,
+// not among every rank.
+// ---------------------------------------------------------------------------
+
+TEST(ChannelDefaults, Gfx1250_SaturateDividesByMaxP2pPeers)
+{
+    const ResolvedChannels r = ResolveP2pChannels("gfx1250", /*nRanks=*/8, kDefaultCollChannels,
+                                                  /*nNodes=*/1, /*allRanksLocal=*/false, /*maxP2pPeers=*/2);
+    EXPECT_EQ(r.p2pnChannelsPerPeer, pow2Down(r.p2pnChannels / 2));
+    EXPECT_GT(r.p2pnChannelsPerPeer, pow2Down(r.p2pnChannels / 8)) << "must not divide by nRanks";
+    ExpectPoolInvariant(r);
+}
+
+// Anchor: the unset path resolves maxP2pPeers to nRanks, so it must match the legacy result.
+TEST(ChannelDefaults, Gfx1250_MaxP2pPeersEqualsNRanks_MatchesLegacy)
+{
+    const ResolvedChannels r = ResolveP2pChannels("gfx1250", /*nRanks=*/8, kDefaultCollChannels,
+                                                  /*nNodes=*/1, /*allRanksLocal=*/false, /*maxP2pPeers=*/8);
+    EXPECT_EQ(r.p2pnChannelsPerPeer, pow2Down(r.p2pnChannels / 8));
+    ExpectPoolInvariant(r);
+}
+
+// One peer takes the whole pool. The pool invariant still has to hold at the extreme.
+TEST(ChannelDefaults, Gfx1250_MaxP2pPeersOne_TakesWholePoolPerPeer)
+{
+    const ResolvedChannels r = ResolveP2pChannels("gfx1250", /*nRanks=*/8, kDefaultCollChannels,
+                                                  /*nNodes=*/1, /*allRanksLocal=*/false, /*maxP2pPeers=*/1);
+    EXPECT_EQ(r.p2pnChannelsPerPeer, r.p2pnChannels);
+    ExpectPoolInvariant(r);
+}
+
+// The divisor is not a gfx1250 special case: it applies wherever saturate is on.
+TEST(ChannelDefaults, Gfx950_SaturateOnWithMaxP2pPeers)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "ChannelDefaults_Gfx950_SaturateOnMaxP2pPeers4",
+        []()
+        {
+            // pow2Down(64 / 4 peers) = 16; the nRanks divisor would give 8.
+            const ResolvedChannels r = ResolveP2pChannels("gfx950", /*nRanks=*/8, kDefaultCollChannels,
+                                                          /*nNodes=*/1, /*allRanksLocal=*/false,
+                                                          /*maxP2pPeers=*/4);
+            EXPECT_EQ(r.p2pnChannels, kNonGfx1250Default);
+            EXPECT_EQ(r.p2pnChannelsPerPeer, 16);
+            ExpectPoolInvariant(r);
+        },
+        {{"RCCL_SATURATE_P2P_NCHANNELS", "1"}});
+}
+
+// Negative control: with saturate off, maxP2pPeers must not leak into the per-peer count.
+TEST(ChannelDefaults, Gfx950_SaturateOff_MaxP2pPeersIgnored)
+{
+    const ResolvedChannels r = ResolveP2pChannels("gfx950", /*nRanks=*/4, kDefaultCollChannels,
+                                                  /*nNodes=*/1, /*allRanksLocal=*/false, /*maxP2pPeers=*/1);
+    EXPECT_EQ(r.p2pnChannelsPerPeer, kInputChannelsPerPeer);
+    ExpectPoolInvariant(r);
 }
 
 } // namespace RcclUnitTesting

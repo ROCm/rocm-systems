@@ -410,6 +410,7 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t s
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm* comm, void* rmaHostWins[NCCL_RMA_MAX_CONNECTIONS]) {
   struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
   for (int n = 0; n < rmaProxyState->rmaCommCount; n++) {
+    if (rmaHostWins[n] == nullptr) continue;
     NCCLCHECK(rmaProxyState->ncclRma->deregMrSym(rmaProxyState->rmaComms[n], rmaHostWins[n]));
   }
   return ncclSuccess;
@@ -455,11 +456,16 @@ void* ncclRmaProxyProgressThread(struct ncclRmaProxyState* rmaProxyState_) {
 }
 
 // Internal RMA contexts back the hierarchical CE collectives' inter-node rail.
-// Provision them only on the path that actually uses them: the zero-CTA policy,
-// a multi-clique comm (LSA does not span the comm), and more than one node --
-// the same conditions under which the hierarchical CE collective is selected.
+// Provision them only on the path that actually uses them: the zero-CTA policy
+// and more than one node, plus whatever it takes for the proxy to come up at
+// all. Deferring that second half to ncclRmaProxyEnabled is load-bearing rather
+// than tidiness: ncclHierCeAvailable gates on this predicate, and the contexts
+// it promises are allocated by ncclRmaProxyConnectOnce, which only runs when
+// ncclRmaProxyEnabled holds (symMemoryRegisterRma). Re-deriving the terms here
+// let NCCL_RMA_DISABLE=1 clear one side and not the other, so the comm admitted
+// the hierarchical path and then dereferenced a NULL rmaProxyCtxs at launch.
 bool ncclRmaWantInternalCtx(struct ncclComm* comm) {
-  return (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !ncclDevrIsOneLsaTeam(comm) && comm->nNodes > 1;
+  return (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && comm->nNodes > 1 && ncclRmaProxyEnabled(comm);
 }
 
 ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) {
@@ -553,7 +559,7 @@ ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) {
   // Start / wake up the progress thread.
   rmaProxyState->rmaProgress = 1;
   rmaProxyState->thread = std::thread(ncclRmaProxyProgressThread, rmaProxyState);
-  ncclSetThreadName(rmaProxyState->thread, "NCCL RMA Proxy Progress%2d", comm->cudaDev);
+  ncclSetThreadName(rmaProxyState->thread, "NCCL RMA PPrg%2d", comm->cudaDev);
 
   INFO(NCCL_INIT, "Rank %d ncclRmaProxyConnectOnce: rmaCommCount %d rmaProxyCtxCount:%d", comm->rank, rmaCommCount,
        rmaProxyState->rmaProxyCtxCount);
