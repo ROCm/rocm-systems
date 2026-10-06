@@ -1691,6 +1691,14 @@ configure_settings(bool _init)
     auto const _proc      = mproc::get_concurrent_processes(_ppid);
     const bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
+    // Exit here so every caller (launcher, avail, and the preloaded library)
+    // fails the same way. Do not throw: an exception that leaves
+    // rocprofsys_init_library_hidden aborts the profiled process.
+    auto fail_config_file = [](std::string message) {
+        LOG_CRITICAL("Failed to configure settings: {}", message);
+        std::exit(EXIT_FAILURE);
+    };
+
     for(auto&& filename : rocprofsys::delimit(
             _config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
     {
@@ -1704,12 +1712,11 @@ configure_settings(bool _init)
            path::is_regular_file(expanded_filename) &&
            !json_has_project_name_root(expanded_filename))
         {
-            LOG_WARNING(
+            fail_config_file(fmt::format(
                 "Config file '{}' is missing the expected '{}' root object and cannot "
-                "be loaded via -c. If this is hierarchical preset JSON (e.g. from "
-                "--export-config), pass it via --preset instead.",
-                expanded_filename, TIMEMORY_PROJECT_NAME);
-            continue;
+                "be loaded. If this is a hierarchical preset configuration, pass it via "
+                "--preset instead.",
+                expanded_filename, TIMEMORY_PROJECT_NAME));
         }
 
         // Timemory parses config files during static init before main() (see
@@ -1728,12 +1735,12 @@ configure_settings(bool _init)
         validate_config_file_values(filename, _config->get_tag(), _config);
         if(!_config->read(filename))
         {
-            LOG_WARNING("Unable to apply configuration file '{}'.The file does not "
-                        "contain valid key/value formatting. If this file is intended to "
-                        "be used as a preset configuration, specify it with '--preset' "
-                        "instead. Otherwise, correct the file structure and try again.",
-                        expanded_filename);
-            continue;
+            fail_config_file(fmt::format(
+                "Unable to apply configuration file '{}'. The file does not contain "
+                "valid key/value formatting. If this file is intended to be used as a "
+                "preset configuration, specify it with '--preset' instead. Otherwise, "
+                "correct the file structure and try again.",
+                expanded_filename));
         }
         if(_main_proc && ((_config->get<bool>(std::string{ env_vars::CI }) &&
                            settings::verbose() >= 0) ||

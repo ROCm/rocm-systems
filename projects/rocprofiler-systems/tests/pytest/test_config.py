@@ -332,6 +332,14 @@ class TestConfig(RocprofsysTest):
 
 CONFIG_READ_ERROR_REGEX = r"Exception reading|Error reading configuration"
 CONFIG_SIGABRT_REGEX = r"terminate called"
+CONFIG_FAILURE_REGEX = r"Failed to configure settings:"
+
+
+def _assert_exit_code(result, code=1):
+    assert (
+        result.returncode == code
+    ), f"expected exit {code}, got {result.returncode}\n{result.test_output}"
+
 
 BAD_XML_VIA_C_CASES = [
     pytest.param(
@@ -358,7 +366,7 @@ def _true_cmd() -> str:
 @pytest.mark.timeout(120)
 @pytest.mark.class_name("config-xml-via-c")
 class TestConfigXmlViaC(RocprofsysTest):
-    """Unreadable XML via -c is logged and skipped without aborting the run."""
+    """Unreadable XML via -c exits 1 with a config error and does not abort."""
 
     @pytest.mark.parametrize("filename, content", BAD_XML_VIA_C_CASES)
     def test_unreadable(self, config_target, test_output_dir, filename, content):
@@ -369,10 +377,12 @@ class TestConfigXmlViaC(RocprofsysTest):
             target=config_target,
             env=MINIMAL_RUNTIME_ENV,
             sys_run_args=["-c", str(xml_path)],
+            fail_on_pass=True,
         )
+        _assert_exit_code(result)
         self.assert_regex(
             result,
-            pass_regex=[CONFIG_READ_ERROR_REGEX],
+            pass_regex=[CONFIG_READ_ERROR_REGEX, CONFIG_FAILURE_REGEX],
             fail_regex=[CONFIG_SIGABRT_REGEX],
             use_abort_fail_regex=False,
         )
@@ -396,10 +406,13 @@ class TestConfigXmlViaC(RocprofsysTest):
             target=config_target,
             env=MINIMAL_RUNTIME_ENV,
             sys_run_args=["-c", str(exported)],
+            fail_on_pass=True,
         )
+        _assert_exit_code(result)
         self.assert_regex(
             result,
             pass_regex=[
+                CONFIG_FAILURE_REGEX,
                 r"Unable to apply configuration file",
                 r"specify it with '--preset' instead",
             ],
@@ -412,28 +425,31 @@ class TestConfigXmlViaC(RocprofsysTest):
 @pytest.mark.timeout(120)
 @pytest.mark.class_name("json-via-c")
 class TestJsonViaC(RocprofsysTest):
-    """JSON without a rocprofiler-systems root via -c warns and continues."""
+    """JSON without a rocprofiler-systems root via -c exits 1 and does not abort."""
 
-    def _assert_missing_root_warns(self, config_target, json_path: Path):
+    def _assert_missing_root_fails(self, config_target, json_path: Path):
         result = self.run_test(
             "sys_run",
             target=config_target,
             env=MINIMAL_RUNTIME_ENV,
             sys_run_args=["-c", str(json_path)],
+            fail_on_pass=True,
         )
+        _assert_exit_code(result)
         self.assert_regex(
             result,
             pass_regex=[
-                r"[Ww]arning.*missing the expected.*rocprofiler-systems",
+                r"Failed to configure settings:.*missing the expected.*rocprofiler-systems",
                 r"pass it via --preset instead",
             ],
             fail_regex=[CONFIG_SIGABRT_REGEX],
+            use_abort_fail_regex=False,
         )
 
     def test_missing_root(self, config_target, test_output_dir):
         json_path = test_output_dir / "wrong_root.json"
         json_path.write_text('{"not-rocprofiler-systems": {}}')
-        self._assert_missing_root_warns(config_target, json_path)
+        self._assert_missing_root_fails(config_target, json_path)
 
     def test_exported_preset(self, config_target, test_output_dir):
         exported = test_output_dir / "cfg.json"
@@ -449,4 +465,38 @@ class TestJsonViaC(RocprofsysTest):
             fail_on_not_found=True,
         )
         self.assert_file_exists(exported, description="exported preset JSON")
-        self._assert_missing_root_warns(config_target, exported)
+        self._assert_missing_root_fails(config_target, exported)
+
+    def test_config_file_env(self, config_target, test_output_dir):
+        """Preset JSON in ROCPROFSYS_CONFIG_FILE fails without -c."""
+        exported = test_output_dir / "cfg_env.json"
+        self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=[
+                f"--export-config={exported}",
+                "--preset=balanced",
+                "--",
+                _true_cmd(),
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_file_exists(exported, description="exported preset JSON")
+        env = MINIMAL_RUNTIME_ENV.copy()
+        env["ROCPROFSYS_CONFIG_FILE"] = str(exported)
+        result = self.run_test(
+            "sys_run",
+            target=config_target,
+            env=env,
+            fail_on_pass=True,
+        )
+        _assert_exit_code(result)
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"Failed to configure settings:.*missing the expected.*rocprofiler-systems",
+                r"pass it via --preset instead",
+            ],
+            fail_regex=[CONFIG_SIGABRT_REGEX],
+            use_abort_fail_regex=False,
+        )
