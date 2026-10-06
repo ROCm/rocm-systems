@@ -121,6 +121,58 @@ TEST_F(SimulatedKfdTest, OpenAndClose) {
   EXPECT_EQ(ret, 0);
 }
 
+TEST_F(SimulatedKfdTest, VramBackingSurvivesGpuRemapAndCpuAliasUnmap) {
+  auto fixture = create_test_vm();
+  auto *driver = fixture.driver();
+  ASSERT_GE(driver->open(), 0);
+  constexpr size_t bytes = 8192;
+  void *reservation = ::mmap(nullptr, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(reservation, MAP_FAILED);
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(reservation);
+  alloc.size = bytes;
+  alloc.gpu_id = driver->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&alloc.gpu_id);
+  map.n_devices = 1;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  auto access = fixture.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+  ASSERT_TRUE(access);
+  const uint64_t value = 0x123456789abcdef0ull;
+  ASSERT_EQ(access->write(alloc.va_addr + 4093, std::as_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = alloc.handle;
+  unmap.device_ids_array_ptr = map.device_ids_array_ptr;
+  unmap.n_devices = 1;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  void *alias = driver->mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.mmap_offset);
+  ASSERT_NE(alias, MAP_FAILED);
+  uint64_t observed = 0;
+  std::memcpy(&observed, static_cast<char *>(alias) + 4093, sizeof(observed));
+  EXPECT_EQ(observed, value);
+  ASSERT_EQ(::munmap(alias, bytes), 0);
+  ASSERT_EQ(access->read(alloc.va_addr + 4093, std::as_writable_bytes(std::span(&observed, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, value);
+  auto process = driver->find_process(driver->local_process_id());
+  void *backing = process->allocations_.at(alloc.handle).host_ptr;
+  ASSERT_NE(backing, reservation);
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = alloc.handle;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  unsigned char resident = 0;
+  EXPECT_EQ(::mincore(backing, 4096, &resident), -1);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_EQ(::munmap(reservation, bytes), 0);
+  EXPECT_EQ(driver->close(), 0);
+}
+
 TEST_F(SimulatedKfdTest, DoorbellClientRemapKeepsDriverAliasStableWhenOffsetRecycles) {
   auto t = create_test_vm();
   auto *driver = t.driver();
