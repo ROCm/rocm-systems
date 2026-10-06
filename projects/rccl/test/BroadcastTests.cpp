@@ -5,8 +5,34 @@
  ************************************************************************/
 #include "TestBed.hpp"
 
+#include <cstdio>
+#include <string>
+#include <unistd.h>
+
 namespace RcclUnitTesting
 {
+  // Keyed by the test process pid: every TestBed worker is its direct child.
+  static std::string ExplicitPrepMarker(pid_t testPid)
+  {
+    return "/dev/shm/rccl_ut_explicit_prep_" + std::to_string(testPid);
+  }
+
+  // Runs in the worker. The marker proves the decoded offset reached this function rather
+  // than the default dispatcher, which also ends in DefaultPrepData_Broadcast.
+  static ErrCode MarkedPrepData_Broadcast(CollectiveArgs& collArgs)
+  {
+    if (FILE* f = fopen(ExplicitPrepMarker(getppid()).c_str(), "w")) fclose(f);
+    return DefaultPrepData_Broadcast(collArgs);
+  }
+
+  // Owned by the test process: removes any stale marker up front and the marker on every exit.
+  struct ExplicitPrepMarkerFile
+  {
+    std::string const path = ExplicitPrepMarker(getpid());
+    ExplicitPrepMarkerFile()  { std::remove(path.c_str()); }
+    ~ExplicitPrepMarkerFile() { std::remove(path.c_str()); }
+  };
+
   TEST(Broadcast, OutOfPlace)
   {
     TestBed testBed;
@@ -132,8 +158,11 @@ namespace RcclUnitTesting
       GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
 
     EXPECT_EQ(CollFuncPtrFromOffset(CollFuncPtrToOffset(nullptr)), &DefaultPrepareDataFunc);
-    EXPECT_EQ(CollFuncPtrFromOffset(CollFuncPtrToOffset(&DefaultPrepData_Broadcast)),
-              &DefaultPrepData_Broadcast);
+    EXPECT_EQ(CollFuncPtrFromOffset(CollFuncPtrToOffset(&MarkedPrepData_Broadcast)),
+              &MarkedPrepData_Broadcast);
+
+    ExplicitPrepMarkerFile const markerFile;
+    std::string const& marker = markerFile.path;
 
     int const totalRanks = testBed.ev.maxGpus;
     OptionalColArgs options;
@@ -148,7 +177,10 @@ namespace RcclUnitTesting
                                                   testBed.ev.GetGpuPriorityOrder()));
       testBed.SetCollectiveArgs(ncclCollBroadcast, dataTypes[0], 4096, 4096, options);
       testBed.AllocateMem();
-      testBed.PrepareData(-1, -1, -1, DefaultPrepData_Broadcast);
+      testBed.PrepareData(-1, -1, -1, MarkedPrepData_Broadcast);
+      EXPECT_EQ(access(marker.c_str(), F_OK), 0)
+        << "Workers did not run the explicit prepDataFunc (" << (isMultiProcess ? "MP" : "SP") << ")";
+      std::remove(marker.c_str());
       testBed.ExecuteCollectives();
       testBed.ValidateResults(isCorrect);
       testBed.DeallocateMem();
