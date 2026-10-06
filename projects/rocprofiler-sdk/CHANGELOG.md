@@ -14,6 +14,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Removed
 
+  - Kernel replay (beta) localized context toggles: `replay_start_context` and `replay_stop_context` are removed from `rocprofiler_callback_tracing_kernel_replay_data_t`, together with the `rocprofiler_kernel_replay_context_cb_t` typedef. A tool selects what each pass collects in each dispatch-scoped service's own dispatch callback (dispatch counting, SPM, dispatch thread trace), which runs once per pass on the replaying thread; see `samples/kernel_replay/att_client.cpp`. PC sampling and device counting are agent-wide and collect on every pass, as before.
+
 ## ROCprofiler-SDK 1.4.1 for ROCm release 10.0.1
 
 ### Added

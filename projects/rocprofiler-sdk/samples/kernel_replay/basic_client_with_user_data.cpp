@@ -115,15 +115,11 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record,
         // gone: user_data.ptr is the CONFIG pointer again.
         KR_REQUIRE(user_data->ptr == callback_data, "PASS ENTER should re-seed the CONFIG value");
 
-        // Config-only callbacks read as null during a PASS; the pass-scoped context toggles are
-        // live only for the duration of this callback.
+        // Config-only callbacks read as null during a PASS.
         KR_REQUIRE(payload->replay_pass_count == nullptr,
                    "config fields must read as null during a PASS");
         KR_REQUIRE(payload->replay_continue == nullptr,
                    "config fields must read as null during a PASS");
-        KR_REQUIRE(
-            payload->replay_start_context != nullptr && payload->replay_stop_context != nullptr,
-            "PASS ENTER should expose the localized context toggles");
 
         fprintf(stderr,
                 "[basic-user-data] pass %lu / %lu user_data.ptr=%p\n",
@@ -134,10 +130,6 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record,
     }
     else
     {
-        KR_REQUIRE(
-            payload->replay_start_context == nullptr && payload->replay_stop_context == nullptr,
-            "context toggles are only valid during PASS ENTER");
-
         // Decide whether another pass should follow and hand that decision to replay_continue
         // through the pass-scoped user_data. This write is visible to this pass's replay_continue
         // only; the next pass is re-seeded from the CONFIG value. (replay_continue is not consulted

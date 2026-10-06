@@ -37,6 +37,7 @@ rocprofiler_context_id_t g_att_ctx{0};
 rocprofiler_context_id_t g_spm_ctx{0};
 rocprofiler_buffer_id_t  g_pcs_buffer{0};
 rocprofiler_kernel_id_t  g_target_kernel = UINT64_MAX;
+thread_local uint64_t    tl_pass         = 0;
 
 std::atomic<int> g_counter_records{0};
 std::atomic<int> g_pcs_samples{0};
@@ -81,14 +82,12 @@ uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_
     return kPasses;
 }
 
-void
-set_context_for_pass(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
-                     rocprofiler_context_id_t                           context,
-                     bool                                               enabled)
+// Whether `kind` owns the pass running on this thread. The dispatch callbacks below ask this for
+// the replayed kernel, so each dispatch-scoped service collects only on its own pass.
+bool
+selected_on_this_pass(service_kind kind)
 {
-    if(context.handle == 0) return;
-    auto callback = enabled ? payload->replay_start_context : payload->replay_stop_context;
-    KR_CHECK(callback(context));
+    return pass_sequence().at(tl_pass) == kind;
 }
 
 void
@@ -110,21 +109,18 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
        record.phase != ROCPROFILER_CALLBACK_PHASE_ENTER)
         return;
 
-    const auto sequence = pass_sequence();
-    const auto selected = sequence.at(payload->current_pass);
-
     // These services are intentionally exclusive. ATT+SPM both inject AQL instrumentation;
     // SPM+PC sampling share SQ/performance-monitor resources; counters+PC sampling have the
-    // MI2xx/MI3xx clock-gating conflict. Give each non-counter service its own pass.
-    set_context_for_pass(payload, g_counters_ctx, selected == service_kind::counters);
-    set_context_for_pass(payload, g_pcs_ctx, selected == service_kind::pc_sampling);
-    set_context_for_pass(payload, g_att_ctx, selected == service_kind::att);
-    set_context_for_pass(payload, g_spm_ctx, selected == service_kind::spm);
+    // MI2xx/MI3xx clock-gating conflict. Give each non-counter service its own pass. Each pass is
+    // submitted on this thread right after this callback, so the dispatch callbacks read the pass
+    // from here. PC sampling has no dispatch callback: it is agent-wide and samples every pass, so
+    // its pass is the one on which no dispatch-scoped service instruments the kernel.
+    tl_pass = payload->current_pass;
 
     fprintf(stderr,
             "[service-sequence] pass=%lu service=%s\n",
             static_cast<unsigned long>(payload->current_pass),
-            service_name(selected));
+            service_name(pass_sequence().at(payload->current_pass)));
 }
 
 void
@@ -133,7 +129,8 @@ counter_dispatch_cb(rocprofiler_dispatch_counting_service_data_t data,
                     rocprofiler_user_data_t*,
                     void*)
 {
-    if(data.dispatch_info.kernel_id != g_target_kernel)
+    if(data.dispatch_info.kernel_id != g_target_kernel ||
+       !selected_on_this_pass(service_kind::counters))
     {
         *config = rocprofiler_counter_config_id_t{.handle = 0};
         return;
@@ -175,8 +172,9 @@ att_dispatch_cb(rocprofiler_agent_id_t,
                 void*,
                 rocprofiler_user_data_t*)
 {
-    return (kernel_id == g_target_kernel) ? ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP
-                                          : ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+    return (kernel_id == g_target_kernel && selected_on_this_pass(service_kind::att))
+               ? ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP
+               : ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
 
 void att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
@@ -190,7 +188,8 @@ spm_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* data,
                 rocprofiler_user_data_t*,
                 void*)
 {
-    if(!data || data->dispatch_info.kernel_id != g_target_kernel)
+    if(!data || data->dispatch_info.kernel_id != g_target_kernel ||
+       !selected_on_this_pass(service_kind::spm))
     {
         *config = rocprofiler_counter_config_id_t{.handle = 0};
         return;

@@ -40,7 +40,6 @@
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
@@ -721,22 +720,6 @@ WriteInterceptor(const void* packets,
             // make a copy of the tracing data
             _packet_data.tracing_data = tracing_data_v;
 
-            // Kernel-replay localized context control: when a replay pass has toggled contexts,
-            // drop the disabled ones so their timestamp records are skipped. Gated on a single
-            // thread-local check so normal dispatches pay ~nothing. See
-            // kernel_replay/local_context.hpp.
-            if(kernel_replay::local_context_has_overrides())
-            {
-                auto disabled = [](const auto& e) {
-                    auto ov = kernel_replay::local_context_override({.handle = e.ctx->context_idx});
-                    return ov.has_value() && !*ov;
-                };
-                auto& cbc = _packet_data.tracing_data.callback_contexts;
-                auto& bfc = _packet_data.tracing_data.buffered_contexts;
-                cbc.erase(std::remove_if(cbc.begin(), cbc.end(), disabled), cbc.end());
-                bfc.erase(std::remove_if(bfc.begin(), bfc.end(), disabled), bfc.end());
-            }
-
             tracing::populate_external_correlation_ids(
                 _packet_data.tracing_data.external_correlation_ids,
                 thr_id,
@@ -1202,19 +1185,10 @@ WriteInterceptor(const void* packets,
                 return;
             }
 
-            // Localized context control for this replay loop. This guard installs the thread-local
-            // routing that connects the tool's PASS toggle callbacks (writers, via
-            // replay_local_enable/disable_context) to the services that read it at dispatch (via
-            // kernel_replay::local_context_override). It lives for the whole loop and is torn down
-            // when the guard exits; global context state is never touched. It captures the contexts
-            // active now (loop start) as the toggle mask, so a tool may only enable/disable one of
-            // those and a local start cannot promote a globally-stopped context
-            // (local_context.hpp).
-            auto local_ctx_tls_guard =
-                kernel_replay::scoped_local_context_control{context::get_active_contexts()};
-
             // Per-pass loop: PASS enter -> submit -> drain the async handler -> PASS exit -> ask
-            // the tool whether to continue -> restore device memory before the next pass.
+            // the tool whether to continue -> restore device memory before the next pass. The
+            // submit runs every service's enter hook on this thread, so each dispatch-scoped
+            // service asks the tool's own dispatch callback what to collect on this pass.
             for(uint64_t pass = 0;; ++pass)
             {
                 const bool is_final =

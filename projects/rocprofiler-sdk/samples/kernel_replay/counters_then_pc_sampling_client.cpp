@@ -27,6 +27,7 @@ rocprofiler_buffer_id_t  g_pcs_buffer{0};
 std::atomic<int>         g_counter_records{0};
 std::atomic<int>         g_pcs_samples{0};
 bool                     g_pcs_available = false;
+thread_local uint64_t    tl_pass         = 0;
 
 uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
@@ -47,31 +48,24 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
         return;
     }
 
-    if(record.operation != ROCPROFILER_KERNEL_REPLAY_PASS ||
-       record.phase != ROCPROFILER_CALLBACK_PHASE_ENTER)
-        return;
-
-    // Illustrates the intended per-pass toggle pattern, but PC sampling ignores localized
-    // overrides today, so this sample must not run under ctest while counters are also enabled.
-    // See kernel_replay_callback_api.md (service combination limits).
-    if(p->current_pass == kPcsPass)
-    {
-        if(g_counters_ctx.handle != 0 && p->replay_stop_context)
-            KR_CHECK(p->replay_stop_context(g_counters_ctx));
-        if(g_pcs_available && p->replay_start_context) KR_CHECK(p->replay_start_context(g_pcs_ctx));
-    }
-    else if(g_pcs_available && p->replay_stop_context)
-    {
-        KR_CHECK(p->replay_stop_context(g_pcs_ctx));
-    }
+    // Each pass is submitted on this thread right after this callback, so the counter dispatch
+    // callback reads the pass from here.
+    if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        tl_pass = p->current_pass;
 }
 
+// Leaves the last pass free of counter instrumentation for PC sampling. PC sampling itself has no
+// dispatch callback: it is agent-wide and samples every pass, so counters still run alongside it on
+// the earlier passes and this sample must not run under ctest. See kernel_replay_callback_api.md
+// (service combination limits).
 void
 counter_dispatch_cb(rocprofiler_dispatch_counting_service_data_t d,
                     rocprofiler_counter_config_id_t*             config,
                     rocprofiler_user_data_t*,
                     void*)
 {
+    if(d.dispatch_info.workgroup_size.x == kReplayBlockX && tl_pass == kPcsPass) return;
     *config = sq_waves_config(d.dispatch_info.agent_id);
 }
 
@@ -133,8 +127,6 @@ configure_pcs()
             g_pcs_ctx, id, cfg.method, cfg.unit, cfg.min_interval, g_pcs_buffer, 0);
         if(st == ROCPROFILER_STATUS_SUCCESS) any = true;
     }
-    // Started here so the agent sessions and buffer stay live for the whole run; which passes
-    // actually sample is decided by the per-pass overrides in kernel_replay_cb.
     if(any) KR_CHECK(rocprofiler_start_context(g_pcs_ctx));
     return any;
 }

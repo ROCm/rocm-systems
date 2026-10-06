@@ -20,8 +20,8 @@ Without ``--replay-mode kernel``, multiple ``--pmc`` groups use *application rep
 application is re-run from start to finish once per group. Kernel replay is useful when those full
 re-runs are expensive or non-deterministic.
 
-This page is the command-line how-to. The SDK callback domain, ``replay_pass_count``, and localized
-context control are documented in :ref:`using-kernel-replay`.
+This page is the command-line how-to. The SDK callback domain, ``replay_pass_count``, and
+selecting services per pass are documented in :ref:`using-kernel-replay`.
 
 .. warning::
 
@@ -103,8 +103,8 @@ number of counter groups collectable on **that dispatch's GPU agent**. Pass ``i`
 many times as it has groups, so pass and group stay aligned.
 
 There is no ``--kernel-replay-passes`` flag and no pass-count environment variable. The CLI does
-not wire ``replay_continue`` or the localized start/stop context callbacks; those remain SDK
-tool APIs (:ref:`using-kernel-replay`).
+not wire ``replay_continue``; early exit and open-ended replay remain SDK tool features
+(:ref:`using-kernel-replay`).
 
 Output
 ======
@@ -159,12 +159,12 @@ Limitations (CLI)
   a general "replay my kernel N times" switch.
 * **Each** ``--pmc`` **group must fit one hardware pass.**
 * **Fixed pass count** equal to the number of collectable groups on that agent. No
-  ``replay_continue`` and no per-pass local-context toggles from the CLI.
+  ``replay_continue`` from the CLI.
 * **Counters only.** ``--att``, PC sampling, and ``--spm`` are rejected alongside
-  ``--replay-mode kernel``. Because the CLI has no per-pass toggles, any other service
+  ``--replay-mode kernel``. The CLI selects only counter groups per pass, so any other service
   would remain enabled for every pass and report each kernel once per pass, all under the single
   dispatch ID that replay reuses. The SDK itself is not restricted this way -- a custom tool can
-  enable and disable services per pass through the local-context API (see
+  choose per pass in each dispatch-scoped service's own dispatch callback (see
   :ref:`using-kernel-replay`) -- so this is a CLI limitation, not a hardware or SDK one.
 * **HIP graph launches are not replayed.** A graph seen while replay is active warns once and
   runs un-replayed (not a hard error).

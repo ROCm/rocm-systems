@@ -37,8 +37,7 @@
 // execute_phase_exit_callbacks) -- the actual mechanism that hands &user_data to the tool and lets
 // a write persist in the caller's context vector -- against a hand-built callback context. The
 // per-pass seed/reset around those calls mirrors the replay loop exactly (see the line references
-// above). No GPU / HSA / runtime registration is involved, so the test runs unconditionally, like
-// kernel_replay/tests/local_context.cpp.
+// above). No GPU / HSA / runtime registration is involved, so the test runs unconditionally.
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
