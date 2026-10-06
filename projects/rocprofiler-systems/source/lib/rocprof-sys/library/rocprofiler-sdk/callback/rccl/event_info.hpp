@@ -51,8 +51,8 @@ extract_event_info(const typename SdkBackend::callback_tracing_record_t& record)
         return {};
     }
 
-    auto operation = static_cast<SdkBackend::rccl_api_id_t>(record.operation);
-    auto payload   = *static_cast<SdkBackend::rccl_api_data*>(record.payload);
+    auto        operation = static_cast<SdkBackend::rccl_api_id_t>(record.operation);
+    const auto& payload = *static_cast<const SdkBackend::rccl_api_data*>(record.payload);
 
     // <rocprofiler-sdk/rccl/api_args.h> <- source of truth for nccl types
     switch(operation)
