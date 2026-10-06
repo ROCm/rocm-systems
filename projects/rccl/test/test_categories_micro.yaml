@@ -36,6 +36,8 @@ test_categories:
       - "RasMicrotest.*"
       # ras/diagnostics_checks_common.cc
       - "RasDiagnosticsCommonMicrotest.*"
+      # ras/collectives.cc
+      - "RasCollectivesMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
       # ras/ras_param.cc

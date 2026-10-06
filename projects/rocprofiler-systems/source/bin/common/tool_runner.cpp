@@ -15,6 +15,7 @@
 
 #include <fmt/ranges.h>
 
+#include <algorithm>
 #include <timemory/log/macros.hpp>
 #include <timemory/signals/signal_handlers.hpp>
 #include <timemory/utility/argparse.hpp>
@@ -229,8 +230,7 @@ help_requested(const parser_t& parser, int argc, char* const* argv)
     {
         return false;
     }
-    return std::find(help_args.begin(), help_args.end(), std::string_view{ argv[1] }) !=
-           help_args.end();
+    return std::ranges::find(help_args, std::string_view{ argv[1] }) != help_args.end();
 }
 
 class tool_runner

@@ -110,7 +110,7 @@ inline std::string
 get_args_string(const function_args_t& args)
 {
     std::string args_str;
-    std::for_each(args.begin(), args.end(), [&args_str](const argument_info& arg) {
+    std::ranges::for_each(args, [&args_str](const argument_info& arg) {
         // arg_number is a uint32 and never contains an escapable character
         args_str.append(std::to_string(arg.arg_number)).append(ARG_DELIMITER);
         append_escaped_field(args_str, arg.arg_type);
