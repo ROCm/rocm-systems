@@ -10,10 +10,9 @@
 // there is no flag lane and no register shuffle to move data out of it. A slice
 // has arrived once none of its elements read back as NaN.
 //
-// Scopes split by direction: a store lands in the peer's buffer (or has to beat
-// the peer's next write, in the case of the sentinel restore) and goes out at
-// system scope, while a load only reads this GPU's own FIFO and stays at agent
-// scope.
+// The receiver polls its own FIFO with nontemporal loads, so a stale cached line
+// cannot satisfy a poll. FIFO stores, including the sentinel restore, are plain,
+// as LL128's are on gfx9.
 //
 // Two consequences follow from dropping the flag.
 //
@@ -36,78 +35,67 @@
 
 #include "rccl_ptr.h"
 
-// Exponent/mantissa masks per floating-point type, used to test an element for
-// NaN straight out of the wire word without any type punning. Deliberately left
-// undefined for every other type: generate.py only emits NaN-protocol kernels for
-// these four, and a missing specialization should be a compile error rather than
-// a silent wrong answer.
+// Element-sized integer per floating-point type, for the sub-pack tail of a
+// slice. Deliberately left undefined for every other type: generate.py only
+// emits NaN-protocol kernels for these four, and a missing specialization should
+// be a compile error rather than a silent wrong answer.
 template <typename U>
 struct ncclNanBits;
 template <>
 struct ncclNanBits<float> {
   using Bits = uint32_t;
-  static constexpr Bits Exp = 0x7F800000u;
-  static constexpr Bits Mant = 0x007FFFFFu;
 };
 template <>
 struct ncclNanBits<double> {
   using Bits = uint64_t;
-  static constexpr Bits Exp = 0x7FF0000000000000ull;
-  static constexpr Bits Mant = 0x000FFFFFFFFFFFFFull;
 };
 template <>
 struct ncclNanBits<half> {
   using Bits = uint16_t;
-  static constexpr Bits Exp = 0x7C00u;
-  static constexpr Bits Mant = 0x03FFu;
 };
 template <>
 struct ncclNanBits<hip_bfloat16> {
   using Bits = uint16_t;
-  static constexpr Bits Exp = 0x7F80u;
-  static constexpr Bits Mant = 0x007Fu;
 };
 
-// 128-bit FIFO load and store, one per lane. The store goes out at system scope
-// and the load at agent scope, which puts sc0/sc1 on the store and sc1 on the
-// load.
+// 128-bit FIFO load and store, one per lane.
 //
-// These bits are load-bearing, and the failure mode if you drop them is nasty:
-// plain accesses still produce *correct* results, because the protocol is
-// tearing-tolerant and the receiver simply keeps spinning until it sees the
-// data. They just arrive whenever the writer's cache gets around to it, which
-// measured ~2 GB/s against ~290 at 1 GiB -- a 100x slowdown with a clean
-// correctness check. It is also intermittent: one early run of the plain
-// variant happened to come in at full speed. Do not "simplify" these away on
-// the strength of the FIFO being allocated uncached.
-inline __device__ void loadNanLine(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)ptr, RCCL_AGENT_SYNCSCOPE);
-#else
-  u.u64[0] = __builtin_nontemporal_load((u64_gptr)ptr);
-  u.u64[1] = __builtin_nontemporal_load((u64_gptr)ptr + 1);
-#endif
-  v0 = u.u64[0];
-  v1 = u.u64[1];
+// The receiver's poll must be a nontemporal load (or be followed by an acquire
+// fence): a plain load can be served from a stale L1 line and spin on old data.
+// The store is a plain one, as LL128's FIFO store is on gfx9.
+inline __device__ v4u loadNanPack(v4u_gptr ptr) {
+  return __builtin_nontemporal_load(ptr);
 }
 
-inline __device__ void storeNanLine(uint64_t* ptr, uint64_t v0, uint64_t v1) {
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-  u.u64[0] = v0;
-  u.u64[1] = v1;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  __builtin_amdgcn_global_store_b128((v4u_gptr)ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
-#else
-  *((v4u_gptr)ptr) = u.v;
-#endif
+template <typename P>
+inline __device__ v4u nanUserLoad(P ptr) {
+  return __builtin_nontemporal_load(ptr);
 }
+
+inline __device__ void storeNanPack(v4u_gptr ptr, v4u v) {
+  *ptr = v;
+}
+
+// 16-byte user-buffer vector that promises only the element's alignment, so a
+// load or store through it is still a single dwordx4 on gfx9 (which accepts
+// any alignment there) without asserting an alignment the buffer may lack.
+typedef v4u ncclNanVecA2 __attribute__((aligned(2)));
+typedef v4u ncclNanVecA4 __attribute__((aligned(4)));
+typedef v4u ncclNanVecA8 __attribute__((aligned(8)));
+template <int Align>
+struct ncclNanUserVec;
+template <>
+struct ncclNanUserVec<2> {
+  typedef __attribute__((address_space(1))) ncclNanVecA2* Ptr;
+};
+template <>
+struct ncclNanUserVec<4> {
+  typedef __attribute__((address_space(1))) ncclNanVecA4* Ptr;
+};
+template <>
+struct ncclNanUserVec<8> {
+  typedef __attribute__((address_space(1))) ncclNanVecA8* Ptr;
+};
 
 template <typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload, int Metadata, int Pipeline,
           int useAcc, int UserRegMode>
@@ -115,11 +103,19 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   : public PrimitivesWithoutDirect<
       Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>> {
   static constexpr int MaxRecv = Fan::MaxRecv, MaxSend = Fan::MaxSend;
+  // Local FIFO pointer arrays need at least one slot: a send-only or recv-only
+  // fan has a zero bound, which HIP device code rejects.
+  static constexpr int RecvSlots = MaxRecv > 0 ? MaxRecv : 1, SendSlots = MaxSend > 0 ? MaxSend : 1;
   static constexpr int Input = 0, Output = 1, Acc = 2;
-  // Elements of T carried by one 64-bit wire word. sizeof(T) <= 8 for every type
-  // this protocol supports, so this is at least 1.
-  static constexpr int EltPerWord = sizeof(uint64_t) / sizeof(T);
-  static constexpr int WordPerThread = NCCL_NAN_ELEMS_PER_THREAD;
+  // The unit of everything below is a 16-byte pack: one dwordx4 on the wire, in
+  // the user buffer and in registers. LL128 is held to 64-bit words because its
+  // flag is one; with no flag, nothing here is narrower than a pack. Pack p of a
+  // lane sits at p * WARP_SIZE + lane within its warp's slice, on the wire and in
+  // the user buffer alike, so a row of packs is 1 KiB of contiguous memory.
+  static constexpr int EltPerPack = 16 / sizeof(T);
+  static constexpr int PackPerThread = NCCL_NAN_ELEMS_PER_THREAD * sizeof(uint64_t) / 16;
+  static constexpr int PackPerSlice = WARP_SIZE * PackPerThread;
+  static constexpr int DataEltPerSlice = PackPerSlice * EltPerPack;
 
   RedOp redOp;
   const int tid;
@@ -182,7 +178,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 
   __device__ inline int checkAbort(int& abortCache, const int abortValue, int& spins) {
     if (abortCache == 0 && ++spins == NCCL_SPINS_BEFORE_CHECK_ABORT) {
-      int abort = __atomic_load_n((ncclShmem.comm.abortFlag), __ATOMIC_SEQ_CST);
+      int abort = __builtin_amdgcn_readfirstlane(
+        __scoped_atomic_load_n((__attribute__((address_space(1))) uint32_t*)ncclShmem.comm.abortFlag,
+                               __ATOMIC_SEQ_CST, __MEMORY_SCOPE_SYSTEM));
       spins = 0;
       if (abort) {
         __atomic_store_n(&ncclShmem.aborted, abort, __ATOMIC_SEQ_CST);
@@ -200,11 +198,12 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       // re-clear and the receiver could read our data back as empty.
       while (sendConnHeadCache + NCCL_STEPS < sendConnHead + 1) {
         __builtin_amdgcn_s_sleep(1);
-        sendConnHeadCache = __atomic_load_n(sendConnHeadPtr, __ATOMIC_RELAXED);
+        sendConnHeadCache = __scoped_atomic_load_n((u64_gptr)sendConnHeadPtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
         if (checkAbort(abort, 1, spins)) break;
       }
       if (sendConnFifo) {
-        sendConnFifo[sendStep[wid] % NCCL_STEPS].size = nbytes;
+        __scoped_atomic_store_n((__attribute__((address_space(1))) int64_t*)&sendConnFifo[sendStep[wid] % NCCL_STEPS].size,
+                                (int64_t)nbytes, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
       }
       sendConnHead += 1;
     }
@@ -225,122 +224,162 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
   }
 
-  // True if this wire word has not been written yet, wholly or in part.
-  __device__ __forceinline__ static bool anyNan(uint64_t word) {
-    if constexpr (sizeof(T) <= 4) {
-      // Dword granularity is the right unit for these dtypes. Stores land
-      // dword-atomically, so a half-landed 16-byte line always leaves whole
-      // dwords at the sentinel, and every element fits inside one dword. An
-      // all-ones dword is NaN read as f16, bf16 or f32 alike, and NaN input is
-      // forbidden, so this never fires on real data. Two compares replace the
-      // per-element exponent/mantissa decode.
-      return (uint32_t)word == 0xFFFFFFFFu || (uint32_t)(word >> 32) == 0xFFFFFFFFu;
-    } else {
-      // f64 spans both dwords and a finite double can legitimately carry an
-      // all-ones low half, so it keeps the exponent/mantissa test. A torn store
-      // leaves the high dword at the sentinel, which reads as NaN.
-      using Bits = typename ncclNanBits<T>::Bits;
-      Bits bits = (Bits)word;
-      return ((bits & ncclNanBits<T>::Exp) == ncclNanBits<T>::Exp) && ((bits & ncclNanBits<T>::Mant) != 0);
-    }
-  }
-
-  // Element <-> wire-word conversion is written with shifts and memcpy rather
-  // than a `union { uint64_t; T[] }`, because an *indexed* write into such a
-  // union makes it addressable and clang sinks the whole thing to scratch. With
-  // the union this loop alone emitted ~70 scratch ops and pushed the kernel to
-  // 260 VGPRs / 1 wave per SIMD; shifts keep it in registers.
+  // True if any of this lane's packs has not been written yet, wholly or in
+  // part. Stores land at least dword-atomically, so a half-landed pack leaves
+  // whole dwords at the all-ones sentinel.
   //
-  // memcpy rather than a reinterpret_cast load: the user buffer is only
-  // guaranteed aligned to sizeof(T), so an 8-byte access off it can be
-  // misaligned. memcpy lets the compiler split it when it cannot prove
-  // alignment, instead of us emitting a wrong-but-fast access.
-
-  // Gather the EltPerWord slice elements starting at eltBase into one wire word.
-  // Slots past eltN are zero-filled rather than read from src: reading past the
-  // caller's buffer could pull in a NaN, which would strand the receiver on a word
-  // it can never see complete. Zero is finite in every supported dtype.
-  __device__ __forceinline__ uint64_t packWord(T const* src, int eltBase, int eltN) {
-    uint64_t word;
-    if (eltBase + EltPerWord <= eltN) {
-      __builtin_memcpy(&word, src + eltBase, sizeof(uint64_t));
-      return word;
-    }
-    word = 0;
+  // For f16, bf16 and f32 every element sits inside one dword, and an all-ones
+  // dword is NaN under all three. NaN input is forbidden, so no dword of real
+  // data is all-ones. For f64 only the high dword decides: it is all-ones
+  // exactly when the double is a NaN with the sign set, which real data never
+  // is, whereas a finite double can carry an all-ones low dword.
+  //
+  // "Some dword is all-ones" is "the unsigned max is all-ones", so the whole
+  // test folds into a max3 tree and one compare instead of a compare per dword.
+  template <int NR>
+  __device__ __forceinline__ static bool anyNan(const v4u (&x)[NR]) {
+    uint32_t m = 0;
 #pragma unroll
-    for (int i = 0; i < EltPerWord; i++) {
-      if (eltBase + i < eltN) {
-        uint64_t bits = 0;
-        __builtin_memcpy(&bits, src + eltBase + i, sizeof(T));
-        word |= bits << (i * 8 * sizeof(T));
+    for (int p = 0; p < NR; p++) {
+      if constexpr (sizeof(T) <= 4) {
+        m = max(m, max(max(x[p][0], x[p][1]), max(x[p][2], x[p][3])));
+      } else {
+        m = max(m, max(x[p][1], x[p][3]));
       }
     }
-    return word;
+    return m == 0xFFFFFFFFu;
   }
 
-  // Scatter one wire word back out to dst, dropping the zero-filled tail.
-  __device__ __forceinline__ void unpackWord(T* dst, uint64_t word, int eltBase, int eltN) {
-    if (eltBase + EltPerWord <= eltN) {
-      __builtin_memcpy(dst + eltBase, &word, sizeof(uint64_t));
+  // First element of the user buffer that pack p of this lane carries.
+  __device__ __forceinline__ static int eltOf(int p, int lane) {
+    return (p * WARP_SIZE + lane) * EltPerPack;
+  }
+
+  using UserVecPtr = typename ncclNanUserVec<alignof(T)>::Ptr;
+  using EltBits = typename ncclNanBits<T>::Bits;
+  typedef __attribute__((address_space(1))) EltBits* EltBitsPtr;
+
+  // The FIFO and the user buffer are both handled in rows: row p is the p-th
+  // pack of every lane, 1 KiB of contiguous memory. A slice is NR rows, with NR
+  // a compile-time constant picked per slice by GenericOp(), so every loop
+  // below is straight-line code with the full exec mask and no per-row test.
+  // Within the last row the sender zero-fills past eltN; the whole row goes out
+  // on the wire and the receiver polls and restores exactly the rows sent.
+  static constexpr int EltPerRow = WARP_SIZE * EltPerPack;
+
+  // A full slice is the steady state and takes one uniform branch to straight
+  // dwordx4 loads with no per-lane predication. Everything else is the cold
+  // tail of an op.
+  //
+  // In the tail a pack that straddles eltN cannot be read at its own offset:
+  // those 16 bytes run past the slice and possibly into an unmapped page. It
+  // reads the 16 bytes that end exactly at eltN instead, and alignTail() later
+  // shifts them down into place, which also zero-fills the slots past eltN. That
+  // keeps it one dwordx4 like every other pack. Elements past eltN must end up
+  // zero rather than whatever the buffer holds: they go out on the wire, and a
+  // NaN there would strand the receiver.
+  //
+  // Only a slice shorter than one pack has no such window; it falls back to
+  // element-wide loads.
+  template <int NR>
+  __device__ __forceinline__ void loadRegs(v4u (&regs)[PackPerThread], T const* src, int eltN, int lane) {
+    if (eltN == NR * EltPerRow) {
+#pragma unroll
+      for (int p = 0; p < NR; p++) regs[p] = nanUserLoad((UserVecPtr)(src + eltOf(p, lane)));
+    } else if (eltN >= EltPerPack) {
+#pragma unroll
+      for (int p = 0; p < NR; p++) {
+        int e0 = eltOf(p, lane);
+        v4u x = {0, 0, 0, 0};
+        if (e0 < eltN) x = nanUserLoad((UserVecPtr)(src + min(e0, eltN - EltPerPack)));
+        regs[p] = x;
+      }
+    } else {
+#pragma unroll
+      for (int p = 0; p < NR; p++) {
+        int e0 = eltOf(p, lane);
+        union {
+          v4u v;
+          EltBits b[EltPerPack];
+        } x;
+        x.v = v4u{0, 0, 0, 0};
+#pragma unroll
+        for (int e = 0; e < EltPerPack; e++) {
+          if (e0 + e < eltN) x.b[e] = *((EltBitsPtr)(src + e0 + e));
+        }
+        regs[p] = x.v;
+      }
+    }
+  }
+
+  // Shift a straddling pack loaded by loadRegs() down into place. Kept apart
+  // from the load so the caller can run it after the spin: touching the loaded
+  // values any earlier makes the compiler wait for the user buffer before it
+  // starts polling the FIFO. A no-op on every pack that is not the straddler.
+  template <int NR>
+  __device__ __forceinline__ static void alignTail(v4u (&regs)[PackPerThread], int eltN, int lane) {
+    if (eltN == NR * EltPerRow || eltN < EltPerPack) return;
+#pragma unroll
+    for (int p = 0; p < NR; p++) {
+      int d = max(0, eltOf(p, lane) - (eltN - EltPerPack)) * (int)sizeof(T);
+      uint64_t lo = (uint64_t)regs[p][0] | ((uint64_t)regs[p][1] << 32);
+      uint64_t hi = (uint64_t)regs[p][2] | ((uint64_t)regs[p][3] << 32);
+      int b = 8 * (d & 7);
+      uint64_t loS = b ? (lo >> b) | (hi << (64 - b)) : lo;
+      uint64_t hiS = hi >> b;
+      lo = d >= 16 ? 0 : d >= 8 ? hiS : loS;
+      hi = d >= 8 ? 0 : hiS;
+      regs[p] = v4u{(uint32_t)lo, (uint32_t)(lo >> 32), (uint32_t)hi, (uint32_t)(hi >> 32)};
+    }
+  }
+
+  template <int NR>
+  __device__ __forceinline__ void storeRegs(T* dst, v4u (&regs)[PackPerThread], int eltN, int lane) {
+    if (eltN == NR * EltPerRow) {
+#pragma unroll
+      for (int p = 0; p < NR; p++) *((UserVecPtr)(dst + eltOf(p, lane))) = regs[p];
       return;
     }
 #pragma unroll
-    for (int i = 0; i < EltPerWord; i++) {
-      if (eltBase + i < eltN) {
-        uint64_t bits = word >> (i * 8 * sizeof(T));
-        __builtin_memcpy(dst + eltBase + i, &bits, sizeof(T));
+    for (int p = 0; p < NR; p++) {
+      int e0 = eltOf(p, lane);
+      if (e0 + EltPerPack <= eltN) {
+        *((UserVecPtr)(dst + e0)) = regs[p];
+      } else if (e0 < eltN) {
+        union {
+          v4u v;
+          EltBits b[EltPerPack];
+        } x;
+        x.v = regs[p];
+#pragma unroll
+        for (int e = 0; e < EltPerPack; e++) {
+          if (e0 + e < eltN) *((EltBitsPtr)(dst + e0 + e)) = x.b[e];
+        }
       }
     }
   }
 
-  // Wire words needed to carry eltN elements of this slice.
-  __device__ __forceinline__ static int wordsForElts(int eltN) {
-    return divUp(eltN, EltPerWord);
-  }
-
-  // Wire word inside the warp's slice that register u maps to. A lane owns two
-  // consecutive words per register pair so the pair is one 16-byte access.
-  __device__ __forceinline__ int wordOf(int u) const {
-    return (u & ~1) * WARP_SIZE + 2 * wid + (u & 1);
-  }
-
-  // The pair holding register u is driven whole whenever its first word carries
-  // data. The second word may sit past eltN; it rides the same 16-byte access,
-  // and both sides hold zero there so the receiver's NaN test still terminates.
-  __device__ __forceinline__ bool pairLive(int u, int nWords) const {
-    return wordOf(u & ~1) < nWords;
-  }
-
-  __device__ __forceinline__ void loadRegs(uint64_t (&regs)[WordPerThread], T const* src, int eltN) {
-    int nWords = wordsForElts(eltN);
+  // Source registers are only touched once the first peer's data is in (or
+  // straight away when there is nothing to receive), so the user-buffer load
+  // overlaps the spin instead of being waited on ahead of it.
+  template <int NR, int SrcBuf>
+  __device__ __forceinline__ void finishSrc(v4u (&v)[PackPerThread], int eltN, int lane) {
+    alignTail<NR>(v, eltN, lane);
+    if (SrcBuf == Input) {
 #pragma unroll
-    for (int u = 0; u < WordPerThread; u++) {
-      int w = wordOf(u);
-      regs[u] = w < nWords ? packWord(src, w * EltPerWord, eltN) : 0;
+      for (int p = 0; p < NR; p++) v[p] = applyPreOp(redOp, v[p]);
     }
   }
 
-  __device__ __forceinline__ void storeRegs(T* dst, uint64_t (&regs)[WordPerThread], int eltN) {
-    int nWords = wordsForElts(eltN);
-#pragma unroll
-    for (int u = 0; u < WordPerThread; u++) {
-      int w = wordOf(u);
-      if (w < nWords) unpackWord(dst, regs[u], w * EltPerWord, eltN);
-    }
-  }
-
-  // Spin until every live word this lane owns has left the sentinel, then reduce
-  // and forward. Unlike LL128 there is no reload after the spin: each lane
-  // validates exactly the words it keeps, so the values that ended the loop are
-  // the values it goes on to use.
-  template <int RECV, int SEND, int SrcBuf, int DstBuf>
-  __device__ __forceinline__ void recvReduceSendCopy(uint64_t (&v)[WordPerThread], int wireOffset, int eltN,
-                                                     bool postOp) {
+  // Spin until every pack this lane owns has left the sentinel, then reduce and
+  // forward. Unlike LL128 there is no reload after the spin: each lane validates
+  // exactly the packs it keeps, so the values that ended the loop are the values
+  // it goes on to use.
+  template <int NR, int RECV, int SEND, int SrcBuf, int DstBuf>
+  __device__ __forceinline__ void recvReduceSendCopy(v4u (&v)[PackPerThread], v4u_gptr const (&recvFifo)[RecvSlots],
+                                                     v4u_gptr const (&sendFifo)[SendSlots], int nrecv, int nsend,
+                                                     int lane, int& abortCache, int eltN, bool postOp) {
     constexpr int SRC = SrcBuf != -1 ? 1 : 0;
-    uint64_t vr[WordPerThread];
-    int nWords = wordsForElts(eltN);
-
-    __syncwarp();
 
     // Sparse readiness was tried here and removed. The sender drained with an
     // s_waitcnt before writing a marker pair so the receiver could poll one line
@@ -350,95 +389,110 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     // receiver's open-loop reads gain. Worth knowing before anyone tries it
     // again -- the value dependency is not the ceiling.
     if (RECV) {
-      for (int i = 0; i < MaxRecv && i < fan.nrecv(); i++) {
-        uint64_t* ptr = recvPtr(i) + wireOffset;
-        int spins = 0;
-        // A pair that has already landed is never re-read: without this, one
-        // straggling line makes the whole warp re-fetch its entire slice on every
-        // spin iteration. The warp still leaves the spin together -- letting lanes
-        // exit independently was measurably worse below ~32 MiB.
-        //
-        // Held as a bitmask rather than a bool[]: an array indexed inside the
-        // loop is addressable, so clang keeps it in scratch and reloads it every
-        // spin iteration. A mask stays in one VGPR.
-        uint32_t pending = 0;
 #pragma unroll
-        for (int u = 0; u < WordPerThread; u += 2)
-          if (pairLive(u, nWords)) pending |= 1u << (u >> 1);
-        // Measured: an s_sleep backoff between re-reads makes no difference at
-        // 1 GiB, so the spin is not costing bandwidth through read
-        // amplification. Left as a tight loop.
+      for (int i = 0; i < MaxRecv; i++) {
+        if (i >= nrecv) break;
+        v4u_gptr ptr = recvFifo[i];
+        v4u vr[NR];
+        int spins = 0;
+        bool pending;
+        // The warp leaves the spin together; letting lanes exit independently
+        // was measurably worse below ~32 MiB. An s_sleep backoff between
+        // re-reads makes no difference at 1 GiB, so the loop stays tight.
         do {
 #pragma unroll
-          for (int u = 0; u < WordPerThread; u += 2) {
-            if (pending & (1u << (u >> 1))) {
-              loadNanLine(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
-              if (!(anyNan(vr[u]) || anyNan(vr[u + 1]))) pending &= ~(1u << (u >> 1));
-            }
-          }
-          if (checkAbort(abort, 1, spins)) break;
-        } while (__any(pending != 0));
+          for (int p = 0; p < NR; p++) vr[p] = loadNanPack(ptr + p * WARP_SIZE);
+          pending = anyNan<NR>(vr);
+          if (checkAbort(abortCache, 1, spins)) break;
+        } while (__any(pending));
 
-        // Hand the slot back to the sentinel while the lines are still hot --
-        // measurably better than deferring it past the forward store. The credit
-        // published by postRecv() is what makes this safe here: the peer cannot
-        // touch this slot again until it sees that credit.
-        //
-        // Every live pair is restored because every live pair is inspected. This
-        // costs nothing worth reclaiming: compiling the restore out entirely
-        // measures 289.8 against 291.0 GB/s at 1 GiB, medians of 4 runs.
+        if (SRC && i == 0) finishSrc<NR, SrcBuf>(v, eltN, lane);
+        // The first peer seeds v[] when there is no local source to reduce
+        // against; every peer after that accumulates.
 #pragma unroll
-        for (int u = 0; u < WordPerThread; u += 2) {
-          if (pairLive(u, nWords)) storeNanLine(ptr + u * WARP_SIZE, NCCL_NAN_SENTINEL64, NCCL_NAN_SENTINEL64);
-        }
-
-#pragma unroll
-        for (int u = 0; u < WordPerThread; u++) {
-          // The first peer seeds v[] when there is no local source to reduce
-          // against; every peer after that accumulates.
-          if (pairLive(u, nWords)) v[u] = (SRC || i > 0) ? applyReduce(redOp, vr[u], v[u]) : vr[u];
-        }
+        for (int p = 0; p < NR; p++) v[p] = (SRC || i > 0) ? applyReduce(redOp, vr[p], v[p]) : vr[p];
       }
     }
+
+    if (SRC && !RECV) finishSrc<NR, SrcBuf>(v, eltN, lane);
 
     if (postOp) {
 #pragma unroll
-      for (int u = 0; u < WordPerThread; u++) {
-        if (pairLive(u, nWords)) v[u] = applyPostOp(redOp, v[u]);
-      }
+      for (int p = 0; p < NR; p++) v[p] = applyPostOp(redOp, v[p]);
     }
 
     if (SEND) {
-      for (int i = 1; i < MaxSend && i < fan.nsend(); i++) {
-        uint64_t* ptr = sendPtr(i) + wireOffset;
 #pragma unroll
-        for (int u = 0; u < WordPerThread; u += 2) {
-          if (pairLive(u, nWords)) storeNanLine(ptr + u * WARP_SIZE, v[u], v[u + 1]);
-        }
+      for (int i = 1; i < MaxSend; i++) {
+        if (i >= nsend) break;
+#pragma unroll
+        for (int p = 0; p < NR; p++) storeNanPack(sendFifo[i] + p * WARP_SIZE, v[p]);
       }
-      uint64_t* ptr = sendPtr(0) + wireOffset;
 #pragma unroll
-      for (int u = 0; u < WordPerThread; u += 2) {
-        if (pairLive(u, nWords)) storeNanLine(ptr + u * WARP_SIZE, v[u], v[u + 1]);
+      for (int p = 0; p < NR; p++) storeNanPack(sendFifo[0] + p * WARP_SIZE, v[p]);
+    }
+
+    // Hand the consumed slots back to the sentinel only once everything that
+    // depends on them is out. gfx9 counts stores in vmcnt alongside loads, so a
+    // restore issued ahead of the reduce makes the wait on the user-buffer load
+    // a wait for the restore too, and the forward store leaves late. The credit
+    // published by postRecv() is what makes the restore safe at all: the peer
+    // cannot touch this slot again until it sees that credit.
+    if (RECV) {
+      const v4u sentinel = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+#pragma unroll
+      for (int i = 0; i < MaxRecv; i++) {
+        if (i >= nrecv) break;
+#pragma unroll
+        for (int p = 0; p < NR; p++) storeNanPack(recvFifo[i] + p * WARP_SIZE, sentinel);
       }
     }
   }
 
-  static constexpr int WireWordPerSlice = WARP_SIZE * WordPerThread;
-  static constexpr int DataEltPerSlice = WireWordPerSlice * EltPerWord;
+  // One slice of eltN elements, carried in NR rows.
+  template <int NR, int RECV, int SEND, int SrcBuf, int DstBuf>
+  __device__ __forceinline__ void runSlice(T const* srcPtr, T* dstPtr, T const* accPtr,
+                                           v4u_gptr const (&recvFifo)[RecvSlots], v4u_gptr const (&sendFifo)[SendSlots],
+                                           int nrecv, int nsend, int lane, int& abortCache, int eltN,
+                                           bool postOp) {
+    constexpr int SRC = SrcBuf != -1 ? 1 : 0;
+    constexpr int DST = DstBuf != -1 ? 1 : 0;
+    v4u regs[PackPerThread];
+    if (SRC) loadRegs<NR>(regs, srcPtr, eltN, lane);
+    recvReduceSendCopy<NR, RECV, SEND, SrcBuf, DstBuf>(regs, recvFifo, sendFifo, nrecv, nsend, lane, abortCache, eltN,
+                                                       postOp);
+    if (DST) {
+      if (accPtr != nullptr) {
+        v4u accRegs[PackPerThread];
+        loadRegs<NR>(accRegs, accPtr, eltN, lane);
+        alignTail<NR>(accRegs, eltN, lane);
+#pragma unroll
+        for (int p = 0; p < NR; p++) regs[p] = applyReduce(redOp, accRegs[p], regs[p]);
+      }
+      storeRegs<NR>(dstPtr, regs, eltN, lane);
+    }
+  }
 
   template <int RECV, int SEND, int SrcBuf, int DstBuf>
   __device__ __forceinline__ void GenericOp(intptr_t srcIx, intptr_t dstIx, int nelem, bool postOp) {
-    constexpr int SRC = SrcBuf != -1 ? 1 : 0;
-    constexpr int DST = DstBuf != -1 ? 1 : 0;
     T const* srcPtr = SrcBuf == -1 ? nullptr : userBufs[SrcBuf] + srcIx;
     T* dstPtr = DstBuf == -1 ? nullptr : userBufs[DstBuf] + dstIx;
     T* accPtr = (DstBuf == -1 || !useAcc) ? nullptr : userBufs[Acc] + dstIx;
-    int wireOffset = WireWordPerSlice * warp + 2 * wid;
+    const int lane = wid;
     const int nwarps = nthreads / WARP_SIZE;
     nelem = nelem < 0 ? 0 : nelem;
+    const int nrecv = fan.nrecv(), nsend = fan.nsend();
+    v4u_gptr recvFifo[RecvSlots];
+    v4u_gptr sendFifo[SendSlots];
+#pragma unroll
+    for (int i = 0; i < MaxRecv; i++)
+      recvFifo[i] = RECV && i < nrecv ? (v4u_gptr)recvPtr(i) + PackPerSlice * warp + lane : nullptr;
+#pragma unroll
+    for (int i = 0; i < MaxSend; i++)
+      sendFifo[i] = SEND && i < nsend ? (v4u_gptr)sendPtr(i) + PackPerSlice * warp + lane : nullptr;
+    int abortCache = __builtin_amdgcn_readfirstlane(abort);
 
-    if (SEND) waitSend(divUp(nelem, DataEltPerSlice) * WireWordPerSlice * sizeof(uint64_t));
+    if (SEND) waitSend(divUp(nelem, DataEltPerSlice) * PackPerSlice * 16);
     barrier();
 
     sqtt_marker_enter("PRIM_NAN_DATA_PROCESS");
@@ -446,40 +500,32 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     srcPtr += DataEltPerSlice * warp;
     dstPtr += DataEltPerSlice * warp;
     if (accPtr != nullptr) accPtr += DataEltPerSlice * warp;
+    // warp is wave-uniform, so this loop and the row dispatch are scalar
+    // branches. A slice that fits in one row -- every slice of a small op --
+    // moves 1 KiB instead of a full slice of padding.
     while (nelem > 0) {
       const int eltInSlice = min(nelem, DataEltPerSlice);
-      uint64_t regs[WordPerThread];
-      if (SRC) {
-        loadRegs(regs, srcPtr, eltInSlice);
-        if (SrcBuf == Input) {
-          int nWords = wordsForElts(eltInSlice);
-#pragma unroll
-          for (int u = 0; u < WordPerThread; u++) {
-            if (pairLive(u, nWords)) regs[u] = applyPreOp(redOp, regs[u]);
-          }
-        }
+      if (PackPerThread > 1 && eltInSlice <= EltPerRow) {
+        runSlice<1, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv, nsend, lane,
+                                                abortCache, eltInSlice, postOp);
+      } else if (PackPerThread > 2 && eltInSlice <= 2 * EltPerRow) {
+        runSlice<2, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv, nsend, lane,
+                                                abortCache, eltInSlice, postOp);
+      } else {
+        runSlice<PackPerThread, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv, nsend,
+                                                            lane, abortCache, eltInSlice, postOp);
       }
-      recvReduceSendCopy<RECV, SEND, SrcBuf, DstBuf>(regs, wireOffset, eltInSlice, postOp);
-      if (DST) {
-        if (accPtr != nullptr) {
-          uint64_t accRegs[WordPerThread];
-          loadRegs(accRegs, accPtr, eltInSlice);
-          accPtr += DataEltPerSlice * nwarps;
-          int nWords = wordsForElts(eltInSlice);
 #pragma unroll
-          for (int u = 0; u < WordPerThread; u++) {
-            if (wordOf(u) < nWords) regs[u] = applyReduce(redOp, accRegs[u], regs[u]);
-          }
-        }
-        storeRegs(dstPtr, regs, eltInSlice);
-      }
-
-      wireOffset += WireWordPerSlice * nwarps;
+      for (int i = 0; i < MaxRecv; i++) recvFifo[i] += PackPerSlice * nwarps;
+#pragma unroll
+      for (int i = 0; i < MaxSend; i++) sendFifo[i] += PackPerSlice * nwarps;
       srcPtr += DataEltPerSlice * nwarps;
       dstPtr += DataEltPerSlice * nwarps;
+      if (accPtr != nullptr) accPtr += DataEltPerSlice * nwarps;
       nelem -= DataEltPerSlice * nwarps;
     }
 
+    abort = abortCache;
     barrier();
 
     sqtt_marker_exit("PRIM_NAN_DATA_PROCESS");
@@ -530,7 +576,7 @@ public:
                         uint8_t connIndexRecv = 0, uint8_t connIndexSend = 0, struct ncclDevWorkColl* e = nullptr,
                         bool ipcReg = false, bool netReg = false, int stepSize_ = 0)
     : redOp(redOpArg), tid(tid), nthreads(nthreads), wid(tid % WARP_SIZE),
-      stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_NAN] / NCCL_STEPS / sizeof(uint64_t)), warp(tid / WARP_SIZE),
+      stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_NAN] / NCCL_STEPS / sizeof(uint64_t)), warp(__builtin_amdgcn_readfirstlane(tid / WARP_SIZE)),
       warpInBlock(threadIdx.x / WARP_SIZE), group(group), threadsPerBlock(blockDim.x) {
 #ifdef ENABLE_WARP_SPEED
     auto* channel = ncclShmem.warpComm ? &ncclShmem.warpChannel[warpInBlock] : &ncclShmem.channel;

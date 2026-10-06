@@ -229,8 +229,7 @@ float treeCorrectionFactor[NCCL_NUM_PROTOCOLS][24] = {
   {1.0, 1.0, 1.0, 1.0, .9, .8, .7, .7, .7, .7, .6, .5, .4, .4, .5, .6, .7, .8, .9, 1.0, 1.0, 1.0, 1.0, 1.0},
   {1.0, 1.0, 1.0, 1.0, 1.0, .9, .8, .8, .8, .7, .6, .6, .6, .6, .6, .6, .8, .9, .9, .9, .9, 1.0, 1.0, 1.0},
   {.9, .9, .9, .9, .9, .9, .9, .8, .7, .6, .6, .5, .5, .5, .5, .6, .7, .8, .7, .7, .8, .9, .9, .9},
-  // NaN: mirrors LL128. Unused today (the protocol is ring-only) but a zero row
-  // would silently drive the modelled bandwidth to zero if that ever changes.
+  // NaN: mirrors LL128.
   {1.0, 1.0, 1.0, 1.0, 1.0, .9, .8, .8, .8, .7, .6, .6, .6, .6, .6, .6, .8, .9, .9, .9, .9, 1.0, 1.0, 1.0}
 };
 
@@ -244,11 +243,11 @@ Enable order: Broadcast, Reduce, AllGather, ReduceScatter, AllReduce
   {ncclTuningTreeModelInit, ncclTuningTreeModelSim, nullptr, {0, 0, 0, 0, 1}},       // Tree/LL
   {ncclTuningTreeModelInit, ncclTuningTreeModelSim, nullptr, {0, 0, 0, 0, 1}},       // Tree/LL128
   {ncclTuningTreeModelInit, ncclTuningTreeModelSim, nullptr, {0, 0, 0, 0, 1}},       // Tree/Simple
-  {nullptr, nullptr, nullptr, {0}}, // Tree/NaN, disabled as there is no implementation
+  {ncclTuningTreeModelInit, ncclTuningTreeModelSim, nullptr, {0, 0, 0, 0, 1}},       // Tree/NaN
   {ncclTuningRingModelInit, ncclTuningRingModelSim, nullptr, {1, 1, 1, 1, 1}},       // Ring/LL
   {ncclTuningRingModelInit, ncclTuningRingModelSim, nullptr, {1, 1, 1, 1, 1}},       // Ring/LL128
   {ncclTuningRingModelInit, ncclTuningRingModelSim, nullptr, {1, 1, 1, 1, 1}},       // Ring/Simple
-  {ncclTuningRingModelInit, ncclTuningRingModelSim, nullptr, {0, 0, 0, 0, 1}},       // Ring/NaN
+  {ncclTuningRingModelInit, ncclTuningRingModelSim, nullptr, {0, 0, 1, 1, 1}},       // Ring/NaN: AG, RS, AR
   {nullptr, nullptr, nullptr, {0}}, // CollNetDirect/LL, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}}, // CollNetDirect/LL128, disabled as there is no implementation
   {ncclTuningCollnetModelInit, ncclTuningCollnetModelSim, nullptr, {0, 0, 1, 1, 1}}, // CollNetDirect/Simple
@@ -358,7 +357,7 @@ ncclResult_t ncclTuningCostModelInit(struct ncclComm* comm) {
       symKernelIdEnable[f * ncclSymkKernelId_Count + k] = 1;
     }
   }
-  const char* protoStr = ncclGetEnv("NCCL_PROTO");
+  const char* protoStr = rcclTunerProtoEnv();
   const char* algoStr = ncclGetEnv("NCCL_ALGO");
   const char* symKernelIdStr = ncclGetEnv("NCCL_SYM_KERNEL");
   if ((algoStr && strlen(algoStr) > 0) || (symKernelIdStr && strlen(symKernelIdStr) > 0)) {
@@ -516,6 +515,16 @@ ncclResult_t ncclTuningCostModelSimModel(int id, struct ncclTuningInput_t* const
   }
   if (input->comm->tuningContext.enabled[id][input->func] == 0) {
     goto not_valid;
+  }
+  {
+    int algo = NCCL_ALGO_UNDEF, proto = NCCL_PROTO_UNDEF;
+    if (ncclTuningExpandId(id, &algo, &proto, nullptr, nullptr) == ncclSuccess) {
+      const bool nanOnly = rcclNanProtoForcedFor(input->comm->nNodes, input->comm->nRanks, input->datatype) &&
+                           rcclNanProtoFunc(input->func);
+      if (proto == NCCL_PROTO_NAN ? !(nanOnly && rcclNanProtoKernel(input->func, algo)) : nanOnly) {
+        goto not_valid;
+      }
+    }
   }
   if (model->model != nullptr) {
     NCCLCHECKGOTO(model->model(input, result), ret, not_valid);

@@ -33,7 +33,7 @@ ncclResult_t ncclTuningTreeModelInit(struct ncclComm* comm, int id, int enabled[
     if (proto == NCCL_PROTO_LL) {
       busBw = std::min(busBw * 1.0 / 3.8, llMaxBw);
     }
-    if (proto == NCCL_PROTO_LL128)
+    if (proto == NCCL_PROTO_LL128 || proto == NCCL_PROTO_NAN)
       busBw = std::min(busBw * (comm->nNodes == 1 ? 7.0 / 9.0 : 120.0 / 128.0),
                        comm->graphs[algo].nChannels * perChMaxTreeLL128Bw);
     if (comm->maxTreePattern == NCCL_TOPO_PATTERN_TREE) busBw *= .85;

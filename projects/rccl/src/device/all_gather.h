@@ -165,6 +165,15 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128
   }
 };
 
+// NaN-flag protocol. direct* falls through to send/recv. Host keeps the float
+// dtype (no int8 collapse) only when NCCL_PROTO is exactly "NaN".
+template <typename T, typename RedOp>
+struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_NAN> {
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+    runRing<T, RedOp, ProtoNaN>(tid, nthreads, work);
+  }
+};
+
 template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {

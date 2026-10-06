@@ -33,6 +33,7 @@ THE SOFTWARE.
 #include "amdsmi_wrap.h"
 #include "include/graph.h"
 #include "register.h"
+#include "register_inline.h"
 #include "info.h"
 #include "ce_coll.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
@@ -155,12 +156,8 @@ int32_t rcclGetProtoForGfx110x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
 
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
   // Honor user input for protocol choice
-  static int userProtocolInput = -2;
+  const bool userProtocolInput = rcclProtoPinned(comm->nNodes, comm->nRanks, info->func, info->datatype);
   size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
-  if (userProtocolInput == -2) {
-    const char* protoStr = getenv("NCCL_PROTO");
-    userProtocolInput = !protoStr ? 0 : 1;
-  }
 
   if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 &&
       (info->func == ncclFuncAllGather) && sizePerRank <= 88448) {
@@ -496,7 +493,7 @@ ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, ui
   size_t intraCount = count * nNodes;
   size_t intraMsgSize = intraCount * ncclTypeSize(dataType) * intraComm->nRanks;
   if (isAllGather && rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
-    intraProto = NCCL_PROTO_SIMPLE;
+    intraProto = rcclNanProtoForcedFor(intraComm->nNodes, intraComm->nRanks, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     intraChan = intraComm->p2pnChannels;
   } else {
     struct ncclTaskColl task = {};
@@ -529,7 +526,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   }
   if (coll == ncclFuncAllGather && rcclUseAllGatherDirect(comm, msgSize)) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER;
-    *protocol = NCCL_PROTO_SIMPLE; // TODO: consider LL for small messages
+    *protocol = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
@@ -538,7 +535,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   // answer (DDA / CE / pivot for these operands) comes from rcclGetCollImplInfo().
   if (coll == ncclFuncAlltoAll) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL;
-    *protocol = NCCL_PROTO_SIMPLE;
+    *protocol = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
@@ -1018,6 +1015,29 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
   return funcThresholdFromTable(table->ddaVmmMax, func);
 }
 
+// Under NCCL_PROTO=NaN the NaN-flag DDA kernels stay ahead of the ring and
+// send/recv NaN paths past the copy-based kernels' caps (MI300X, graph mode):
+// AllGather and ReduceScatter up to their 16 MiB scratch, AlltoAll up to 8 MiB.
+// AllReduce keeps its cap. RCCL_DDA_THRESHOLD, when set, still wins.
+// The NaN kernels are IPC only, so the gfx1250 fabric tiers keep their caps.
+// With RCCL_DDA_NAN_REG_MIN set, a registered recv buffer lifts AllGather's and
+// AlltoAll's scratch cap: their registered kernels push straight into it.
+static size_t rcclDdaNanCap(ncclComm* comm, ncclFunc_t func, size_t cap, bool nanForced,
+                            const void* recvbuff = nullptr, size_t recvBytes = 0) {
+  size_t env;
+  if (!nanForced || IsArchMatch(comm->archName, "gfx1250") || ddaThresholdFromEnv(rcclParamDdaThreshold(), &env))
+    return cap;
+  size_t nanMax = 0;
+  if (func == ncclFuncAllGather || func == ncclFuncReduceScatter) nanMax = (size_t)16 << 20;
+  if (func == ncclFuncAlltoAll) nanMax = (size_t)8 << 20;
+  struct ncclReg* reg = nullptr;
+  bool regValid = false;
+  if (rcclDdaNanRegMin() > 0 && recvbuff != nullptr && ncclRegFind(comm, recvbuff, recvBytes, &reg) == ncclSuccess &&
+      reg != nullptr && ncclRegLocalIsValid(reg, &regValid) == ncclSuccess && regValid)
+    nanMax = (size_t)1 << 30;
+  return std::max(cap, nanMax);
+}
+
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
                     bool query, const char* prefix) {
   // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
@@ -1343,13 +1363,16 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     INFO(NCCL_TUNING, "AR CE-2shot/CE-registered disqualified: graph capture active (graphModeSeen=%d ceArGraphAllowed=%d)",
          (int)comm->ceColl.graphModeSeen, (int)rcclCeArGraphSafe(comm));
   const size_t msgBytes = count * ncclTypeSize(datatype);
+  // Under NCCL_PROTO=NaN, DDA, ring and tree each run their NaN-flag variant. GIN,
+  // CE and symk have none, so they are skipped.
+  const bool nanForced = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype);
   if (!rcclNcclAlgoEnvIsSet()) {
   #if defined(ENABLE_ROCSHMEM_GIN)
     // GIN-SDMA scaleup AllReduce. Same gates as the previous early return in
     // ncclAllReduce_impl (group depth 0 + eligibility). Graph-capture-safe: init
     // runs off a private stream in relaxed mode; kernels re-read signal baselines.
     // Must beat CE / DDA / symmetric so rcclGetCollImplInfo names the backend that ran.
-    if (ncclGroupDepth == 0 && ncclAllReduceGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+    if (!nanForced && ncclGroupDepth == 0 && ncclAllReduceGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
       decision->algo = RCCL_GIN_SDMA;
       decision->nMaxChannels = kGinAllReduceLsaCtas;
       return ncclSuccess;
@@ -1386,7 +1409,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     const bool symSuppressedByMax = msgBytes > symMaxR2;
     const bool symSuppressedByMin = symMinR2 > 0 && msgBytes < symMinR2;
     const bool symkRequested =
-      (op == ncclSum) &&
+      !nanForced && (op == ncclSum) &&
       isSymmetricKernelRequestedWin(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendWin, recvWin);
     // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
     const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedByMax;
@@ -1407,7 +1430,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType, sendWin, recvWin);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
-  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
+  const bool ceAllReduceAllowed = !nanForced && ncclGroupDepth == 0 && ceArGraphAllowed &&
                                   rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
 
     // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
@@ -1474,6 +1497,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         if (arDdaVmmMax != 0 && msgBytes <= arDdaVmmMax &&
             ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           decision->algo = RCCL_DDA_IPC;
+          if (nanForced) decision->protocol = NCCL_PROTO_NAN;
           decision->nMaxChannels = ncclAllReduceDdaIpcBlocks(comm, count, datatype);
           return ncclSuccess;
         }
@@ -1489,7 +1513,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
   const bool ceCountDivisible    = (count % (size_t)comm->nRanks == 0);
   const bool ceEnabledByArch     = rcclCeAllReduceEnabledDef(ceArArchDefault);
-  const bool ceAvailable         = ceArGraphAllowed && ceBufferOk && ceAllReduceOpSupported && ceCountDivisible && ceEnabledByArch;
+  const bool ceAvailable         = !nanForced && ceArGraphAllowed && ceBufferOk && ceAllReduceOpSupported && ceCountDivisible && ceEnabledByArch;
   // Tuning cap only: registered CE has no staging allocation, so this does not
   // size a buffer. kThreshUnlimited (or null table) = no upper bound;
   // env var 0 returns 0, making ceRegInWindow false (disables registered CE).
@@ -1545,6 +1569,10 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   decision->protocol = NCCL_PROTO_SIMPLE;
   decision->nMaxChannels = 0;
 
+  // Under NCCL_PROTO=NaN, DDA, Direct and ring each run their NaN-flag variant.
+  // CE and symk have none, so they are skipped.
+  const bool nanForced = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype);
+
   const size_t typeSize = ncclTypeSize(datatype);
   const size_t totalBytes = (size_t)comm->nRanks * sendcount * typeSize;
   size_t msgSize = totalBytes;
@@ -1577,7 +1605,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
     // (1) DDA fast paths. Symmetric-registered buffers defer to the symmetric
     // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
-    const bool agSymkRequested =
+    const bool agSymkRequested = !nanForced &&
       isSymmetricKernelRequestedWin(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendWin, recvWin);
     // symMaxR2[AG] withdraws symk above a size threshold so CE-registered can win
     // (mirrors the AllReduce symSuppressedByMax pattern).
@@ -1598,8 +1626,14 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // the CE-registered check so it loses to CE exactly as dispatch does
     // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
     // symk never reclaims it), mirroring rcclSelectAllReduce.
-    const size_t agDdaVmmMax  = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncAllGather, winRegType, ceCapturing);
-    if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAllGather), query, "AG")) {
+    const size_t agDdaVmmMax =
+      rcclDdaNanCap(comm, ncclFuncAllGather,
+                    rcclDdaVmmThresholdCtxTab(archTable, ncclFuncAllGather, winRegType, ceCapturing), nanForced,
+                    recvbuff, totalBytes);
+    const size_t agDdaEntryMax = rcclDdaNanCap(comm, ncclFuncAllGather,
+                                               rcclDdaEntryThresholdTab(archTable, ncclFuncAllGather), nanForced,
+                                               recvbuff, totalBytes);
+    if (!symEligible && rcclDdaEnabled(comm, totalBytes, agDdaEntryMax, query, "AG")) {
       const bool agFabricArch   = IsArchMatch(comm->archName, "gfx1250");
       if (agFabricArch) {
         const size_t agDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllGather);
@@ -1628,6 +1662,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       } else if (agDdaVmmMax != 0 && totalBytes <= agDdaVmmMax &&
                  ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_IPC;
+        if (nanForced) decision->protocol = NCCL_PROTO_NAN;
         decision->nMaxChannels = ncclAllGatherDdaIpcBlocks(comm, sendcount, datatype);
         return ncclSuccess;
       }
@@ -1666,7 +1701,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         size_t intraCount = sendcount * nNodes;
         size_t intraMsgSize = intraCount * typeSize * intraComm->nRanks;
         if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
-          intraProto = NCCL_PROTO_SIMPLE;
+          intraProto =
+            rcclNanProtoForcedFor(intraComm->nNodes, intraComm->nRanks, datatype) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
           intraChan = intraComm->p2pnChannels;
         } else {
           struct ncclTaskColl task;
@@ -1685,7 +1721,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
 
     // (3) CE AllGather. Outranks Direct, matching taskAppend's CE-before-useDirect
     // order. Live and query share these gates; taskAppend honors the decision.
-    {
+    if (!nanForced) {
       const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
       // Branch #2: CE via DDA scratch (unregistered windows).
       // Fires either via RCCL_FORCE_CE or automatically when totalBytes falls in the
@@ -1762,7 +1798,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // (5) Direct AllGather (per-peer Send/Recv).
   if (rcclUseAllGatherDirect(comm, msgSize)) {
     decision->algo = RCCL_DIRECT_ALLGATHER;
-    decision->protocol = NCCL_PROTO_SIMPLE;
+    decision->protocol = nanForced ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     decision->nMaxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
@@ -1780,6 +1816,11 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   decision->protocol = NCCL_PROTO_SIMPLE;
   decision->nMaxChannels = 0;
 
+  // Under NCCL_PROTO=NaN, DDA and ring each run their NaN-flag variant; symk has none.
+  // Hierarchical and Direct ReduceScatter are multi-node only, where this is false,
+  // and their intra-node legs pick NaN on their own.
+  const bool nanForced = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype);
+
   const size_t typeSize = ncclTypeSize(datatype);
   const size_t totalBytes = (size_t)comm->nRanks * recvcount * typeSize;
 
@@ -1796,7 +1837,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     NCCLCHECK(ncclGetSymRegType(rsSendWin, rsRecvWin, &rsWinRegType));
     const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
     const bool symkRequested =
-      (op == ncclSum || op == ncclAvg) &&
+      !nanForced && (op == ncclSum || op == ncclAvg) &&
       isSymmetricKernelRequestedWin(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
                                     datatype, recvcount, rsSendWin, rsRecvWin);
     const size_t rsSymMinR2 = rcclSymMinR2CapTab(archTable, ncclFuncReduceScatter);
@@ -1813,9 +1854,12 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
 
     // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
     // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
-    const size_t rsDdaVmmMax   = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false);
-    if (!symEligible &&
-        rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter), query, "RS")) {
+    const size_t rsDdaVmmMax = rcclDdaNanCap(
+      comm, ncclFuncReduceScatter,
+      rcclDdaVmmThresholdCtxTab(archTable, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false), nanForced);
+    const size_t rsDdaEntryMax =
+      rcclDdaNanCap(comm, ncclFuncReduceScatter, rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter), nanForced);
+    if (!symEligible && rcclDdaEnabled(comm, totalBytes, rsDdaEntryMax, query, "RS")) {
       const bool ddaFabricArch   = IsArchMatch(comm->archName, "gfx1250");
       if (ddaFabricArch) {
         const size_t rsDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter);
@@ -1842,6 +1886,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
       } else if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
                  ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_IPC;
+        if (nanForced) decision->protocol = NCCL_PROTO_NAN;
         return ncclSuccess;
       }
     }
@@ -1910,13 +1955,18 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   decision->protocol = NCCL_PROTO_SIMPLE;
   decision->nMaxChannels = 0;
 
+  // Under NCCL_PROTO=NaN, DDA runs its NaN-flag kernel on the small sizes it covers
+  // and everything else is per-peer Send/Recv on the NaN-flag protocol. Pivot, GDA,
+  // GIN and CE have no NaN variant.
+  const bool nanForced = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype);
+
   const size_t typeSize = ncclTypeSize(datatype);
   const size_t rankOffset = count * typeSize;           // bytes per peer
   const size_t totalBytes = comm->nRanks * rankOffset;  // total message bytes
 
   // (1) Pivot: large, cache-line-aligned messages on pivot-enabled comms.
   const size_t rankAlign = rankOffset & ((~rankOffset) + 1);
-  if (comm->topo->pivotA2AEnabled && comm->nChannels >= comm->topo->pivotA2ANumBiRings * 2 &&
+  if (!nanForced && comm->topo->pivotA2AEnabled && comm->nChannels >= comm->topo->pivotA2ANumBiRings * 2 &&
       rankOffset >= 744 * 1024 && rankAlign != 4 && rcclParamAlltoAllPivotEnable()) {
     decision->algo = RCCL_A2A_PIVOT;
     // Pivot is a ring kernel over the collective channels, not p2p Send/Recv, so
@@ -1942,7 +1992,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
 #ifdef ENABLE_ROCSHMEM
   {
     size_t msgSize = totalBytes;
-    if (rcclUseAlltoAllGda(comm) && msgSize <= comm->rocshmemThreshold) {
+    if (!nanForced && rcclUseAlltoAllGda(comm) && msgSize <= comm->rocshmemThreshold) {
       decision->algo = RCCL_A2A_GDA;
       decision->nMaxChannels = 1;  // getAlgoInfo() pins the GDA kernels to one channel
       return ncclSuccess;
@@ -1953,7 +2003,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   // GIN LSA/SDMA is checked before DDA so an eligible call takes this path even
   // below the DDA threshold (parity or better on small sizes).
 #if defined(ENABLE_ROCSHMEM_GIN)
-  if (ncclAllToAllGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype)) {
+  if (!nanForced && ncclAllToAllGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype)) {
     decision->algo = RCCL_A2A_GIN_SDMA;
     return ncclSuccess;
   }
@@ -1970,7 +2020,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   // symMaxR2[A2A] withdraws symk above threshold so CE-registered can win.
   // a2aRecvRegistered dropped: isSymmetricKernelRequestedWin requires both windows
   // to carry NCCL_WIN_COLL_SYMMETRIC, so a2aSymkRequested=true implies recv registered.
-  const bool a2aSymkRequested =
+  const bool a2aSymkRequested = !nanForced &&
     isSymmetricKernelRequestedWin(comm, ncclFuncAlltoAll, (int)ncclDevSum, datatype, count, a2aSendWin, a2aRecvWin);
   const size_t a2aSymMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncAlltoAll, /*graphMode=*/false);
   const bool a2aSymSuppressedBySize = a2aSymkRequested && totalBytes > a2aSymMaxR2;
@@ -1980,8 +2030,11 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
 
   // (3) DDA fast paths. gfx1250 uses fabric tiers; other archs use IPC.
   // Symmetric-registered buffers defer to the symmetric kernel; DDA gated on !a2aSymEligible.
-  const size_t a2aDdaMax    = rcclDdaVmmThresholdTab(archTable, ncclFuncAlltoAll);
-  if (!a2aSymEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAlltoAll), query, "A2A")) {
+  const size_t a2aDdaMax = rcclDdaNanCap(comm, ncclFuncAlltoAll, rcclDdaVmmThresholdTab(archTable, ncclFuncAlltoAll),
+                                         nanForced, recvbuff, totalBytes);
+  const size_t a2aDdaEntryMax = rcclDdaNanCap(
+    comm, ncclFuncAlltoAll, rcclDdaEntryThresholdTab(archTable, ncclFuncAlltoAll), nanForced, recvbuff, totalBytes);
+  if (!a2aSymEligible && rcclDdaEnabled(comm, totalBytes, a2aDdaEntryMax, query, "A2A")) {
     const bool a2aFabricArch  = IsArchMatch(comm->archName, "gfx1250");
     if (a2aFabricArch) {
       const size_t llThresh    = rcclDdaLLThresholdTab(archTable, ncclFuncAlltoAll);
@@ -2010,12 +2063,20 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     } else if (a2aDdaMax != 0 && totalBytes <= a2aDdaMax &&
                ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
       decision->algo = RCCL_DDA_IPC;
+      if (nanForced) decision->protocol = NCCL_PROTO_NAN;
       decision->nMaxChannels = ncclAllToAllDdaIpcBlocks(comm, count, datatype);
       return ncclSuccess;
     }
   }
 
   if (!query && a2aSymEligible) INFO(NCCL_TUNING, "A2A DDA disqualified: symk eligible");
+
+  if (nanForced) {
+    decision->algo = RCCL_DIRECT_ALLTOALL;
+    decision->protocol = NCCL_PROTO_NAN;
+    decision->nMaxChannels = comm->p2pnChannels;
+    return ncclSuccess;
+  }
   // CE is graph-unsafe. Live probes the stream; reporting uses graphCapturingHint.
   // taskAppend honors this decision, so capture must be recorded here rather than
   // re-probed at enqueue.

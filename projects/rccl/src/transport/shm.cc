@@ -222,7 +222,7 @@ static ncclResult_t shmRecvConnect(struct ncclComm* comm, struct ncclConnect* co
   }
   // See p2pRecvConnect: the NaN protocol needs a free slot to read back as NaN.
   if (comm->buffSizes[NCCL_PROTO_NAN] > 0) {
-    CUDACHECK(cudaMemset(recv->conn.buffs[NCCL_PROTO_NAN], 0xFF, comm->buffSizes[NCCL_PROTO_NAN]));
+    NCCLCHECK(ncclCudaMemsetSync(recv->conn.buffs[NCCL_PROTO_NAN], 0xFF, comm->buffSizes[NCCL_PROTO_NAN]));
   }
   recv->conn.head = &resources->devRemHostMem->head;
   recv->conn.tail = &resources->devHostMem->tail;

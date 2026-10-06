@@ -1661,7 +1661,7 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
     }
   }
 
-  const char* protoStr = ncclGetEnv("NCCL_PROTO");
+  const char* protoStr = rcclTunerProtoEnv();
   if (protoStr) {
     INFO(NCCL_ENV, "NCCL_PROTO set by environment to %s", protoStr);
     NCCLCHECK(parseList(protoStr, ncclFuncStr, NCCL_NUM_FUNCTIONS, ncclProtoStr, NCCL_NUM_PROTOCOLS, protoEnable));
@@ -1877,10 +1877,13 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
   int logSize = log2i(nBytes >> 6);
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   logSize = std::max(0, std::min(RCCL_FACTOR_TABLE_MAX_INDEX, logSize));
+  // The tuning models only fill LL/LL128/Simple. NaN is seeded from LL128, so it
+  // has to use that row; the NaN row is zero and would make the cost infinite.
+  int corrProto = protocol == NCCL_PROTO_NAN ? NCCL_PROTO_LL128 : protocol;
   if (algorithm == NCCL_ALGO_TREE) {
-    bw *= rcclTuningModel[comm->topo->tuning].treeCorrectionFactor[protocol][logSize];
+    bw *= rcclTuningModel[comm->topo->tuning].treeCorrectionFactor[corrProto][logSize];
   } else if (algorithm == NCCL_ALGO_RING && comm->nNodes > 1) {
-    bw *= rcclTuningModel[comm->topo->tuning].ringCorrectionFactor[protocol][logSize];
+    bw *= rcclTuningModel[comm->topo->tuning].ringCorrectionFactor[corrProto][logSize];
   }
 
 #else

@@ -8,6 +8,7 @@
 
 #include "algorithms/dda/device/CollCommon.h"
 #include "algorithms/dda/reduce_scatter/reduce_scatter_dda.h"
+#include "algorithms/dda/dda_nan.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -65,6 +66,19 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
   return ncclSuccess;
 }
 
+template <typename T>
+static ncclResult_t ncclReduceScatterDdaNan(const void* sendbuff, void* recvbuff, size_t recvcount, ncclComm* comm,
+                                            cudaStream_t stream) {
+  const size_t units = recvcount * sizeof(T) / 16;
+  const auto gridBlock = rcclDdaNanGeometry(units);
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  hipExtLaunchKernelGGL((dda::nan::ddaNanReduceScatter<T>), gridBlock.first, gridBlock.second, 0, stream,
+                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
+                        static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, comm->rank);
+  CUDACHECK(cudaGetLastError());
+  return ncclSuccess;
+}
+
 } // namespace
 
 bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
@@ -91,6 +105,9 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return false;
   }
+  if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
+    return rcclDdaNanFits(comm, recvcount * ncclTypeSize(datatype));
+  }
 
   size_t totalCount = recvcount * comm->nRanks;
   size_t need = totalCount * ncclTypeSize(datatype);
@@ -114,6 +131,18 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
 ncclResult_t ncclReduceScatterDdaIpc(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;
+  if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
+    switch (datatype) {
+    case ncclFloat32:
+      return ncclReduceScatterDdaNan<float>(sendbuff, recvbuff, recvcount, comm, stream);
+    case ncclFloat16:
+      return ncclReduceScatterDdaNan<half>(sendbuff, recvbuff, recvcount, comm, stream);
+    case ncclBfloat16:
+      return ncclReduceScatterDdaNan<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
+    default:
+      return ncclInvalidArgument;
+    }
+  }
   switch (datatype) {
   case ncclFloat32:
     return ncclReduceScatterDdaIpcTyped<float>(sendbuff, recvbuff, recvcount, comm, stream);

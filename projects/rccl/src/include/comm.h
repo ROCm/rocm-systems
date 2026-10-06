@@ -719,6 +719,13 @@ struct ncclComm {
   // Device-resident per-block epoch cells for the LL-protocol DDA collectives,
   uint32_t* ddaLLEpochDev;
   int ddaLLEpochLen;
+  // NaN-flag DDA (NCCL_PROTO=NaN, IPC path only): a sentinel-filled scratch every
+  // peer pushes into, each peer's mapping of it, and the per-block epoch cells
+  // whose parity picks the bank.
+  ncclIpcMemHandler* ddaNanMemHandler;
+  void* ddaNanScratch;
+  void** ddaNanPeers;
+  uint32_t* ddaNanEpochDev;
 
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;

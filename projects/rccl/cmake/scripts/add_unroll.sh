@@ -28,7 +28,8 @@ if [[ "$HIP_FILE" =~ .*/src/device/.*\.h ]]; then
   perl -pi -e 's/(runTreeUpDown<T.*?)>\(/\1, USE_ACC, COLL_UNROLL>(/' "$HIP_FILE"
   perl -pi -e 's/(runTreeSplit<T.*?)>\(/\1, USE_ACC, COLL_UNROLL>(/' "$HIP_FILE"
 
-  perl -pi -e 's/(runTreeSplit<T, RedOp, (ProtoLL|ProtoLL128), USE_ACC, COLL_UNROLL.*?)>/\1, 0>/' "$HIP_FILE"
+  # ProtoNaN is pinned to pipeline 0, matching the runRing rule above.
+  perl -pi -e 's/(runTreeSplit<T, RedOp, (ProtoLL|ProtoLL128|ProtoNaN), USE_ACC, COLL_UNROLL.*?)>/\1, 0>/' "$HIP_FILE"
   perl -pi -e 's/(runTreeUpDown<T, RedOp, (ProtoLL|ProtoLL128), USE_ACC, COLL_UNROLL.*?)>/\1, 0>/' "$HIP_FILE"
   # ProtoNaN belongs with the latency protocols here: generate.py never emits a
   # pipelined NaN kernel, so its runRing call sites pin Pipeline to 0 too.

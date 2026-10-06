@@ -38,7 +38,7 @@ ncclResult_t ncclTuningRingModelInit(struct ncclComm* comm, int id, int* /*enabl
     if (proto == NCCL_PROTO_LL) {
       busBw = std::min(llMaxBw, busBw * .5);
     }
-    if (proto == NCCL_PROTO_LL128)
+    if (proto == NCCL_PROTO_LL128 || proto == NCCL_PROTO_NAN)
       busBw = std::min(busBw * (0.92 /*120.0/128.0*/), comm->graphs[algo].nChannels * perChMaxRingLL128Bw);
 
     comm->tuningContext.generalLatencies[c][algo][proto] =

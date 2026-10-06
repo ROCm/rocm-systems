@@ -715,7 +715,7 @@ ncclResult_t p2pRecvConnect(struct ncclComm* comm, struct ncclConnect* connectIn
   // sentinel. Seed it here; from then on the receiver restores it over each slice
   // it consumes, before releasing the slot's credit (src/device/prims_nan.h).
   if (comm->buffSizes[NCCL_PROTO_NAN] > 0) {
-    CUDACHECK(cudaMemset(recv->conn.buffs[NCCL_PROTO_NAN], 0xFF, comm->buffSizes[NCCL_PROTO_NAN]));
+    NCCLCHECK(ncclCudaMemsetSync(recv->conn.buffs[NCCL_PROTO_NAN], 0xFF, comm->buffSizes[NCCL_PROTO_NAN]));
   }
   return ncclSuccess;
 }

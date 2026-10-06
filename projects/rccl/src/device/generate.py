@@ -101,14 +101,16 @@ ll128_reg_variant_colls = {"AllReduce", "AllGather", "Broadcast"}
 def reg_values_of(coll, proto):
   if proto == "LL128" and coll in ll128_reg_variant_colls:
     return ["1", "2"]
-  # SendRecv is generated as two latency-protocol kernel variants, selected on the
-  # host by ncclDevFuncId_P2p(useLL128) (see src/enqueue.cc / src/include/device.h):
+  # SendRecv is generated as three latency-protocol kernel variants, selected on the
+  # host by ncclDevFuncId_P2p(useLL128, useNaN) (see src/enqueue.cc / src/include/device.h):
   #   reg "0" = legacy LL latency path (built on every arch; the default)
   #   reg "1" = LL128 latency path (gfx942/gfx950 via NCCL_ALLOC_P2P_NET_LL_BUFFERS,
   #             gfx1250 via NCCL_P2P_LL128_ENABLE). The reg value is threaded into the
   #             SendRecv RunWorkBatch specialization as UserRegMode to pick LL vs LL128.
+  #   reg "2" = NaN-flag path for float AlltoAll under NCCL_PROTO=NaN, with legacy LL
+  #             for any other latency-bound op sharing the batch.
   if coll == "SendRecv":
-    return ["0", "1"]
+    return ["0", "1", "2"]
   return ["0"]
 
 ################################################################################
@@ -200,11 +202,12 @@ algos_of_coll = {
   "SendRecv":              ["RING"]
 }
 
-# Every protocol except the NaN one, which so far is only wired up for AllReduce.
+# Every protocol except the NaN one. NaN is opt-in and only generated for the
+# float ring/tree paths listed in func_validate.
 classic_protos = [p for p in all_protos if p != "NAN"]
 
 protos_of_coll = {
-  "AllGather":              classic_protos,
+  "AllGather":              all_protos,
   "AllGatherV":             classic_protos,
   "AllReduce":              all_protos,
   "AlltoAllPivot":          ["SIMPLE"],
@@ -212,7 +215,7 @@ protos_of_coll = {
   "AlltoAllvGda":           ["SIMPLE"],
   "Broadcast":              classic_protos,
   "Reduce":                 classic_protos,
-  "ReduceScatter":          classic_protos,
+  "ReduceScatter":          all_protos,
   "SendRecv":               ["SIMPLE"]
 }
 
@@ -230,7 +233,8 @@ redops_of_coll = {
 }
 
 tys_of_coll = {
-  "AllGather":             ["i8"],
+  # Float entries are NaN-only; func_validate rejects them for LL/LL128/SIMPLE.
+  "AllGather":             ["i8"] + nan_tys,
   "AllGatherV":            ["i8"],
   "AllReduce":             all_tys,
   "AlltoAllPivot":         ["i8"],
@@ -364,9 +368,22 @@ def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
     return False
   if coll == "" or algo == "":
     return False
-  # The NaN-flag protocol only has a ring implementation (RunWorkColl in
-  # all_reduce.h) and only means anything for floating-point types.
-  if proto == "NAN" and (algo != "RING" or ty not in nan_tys):
+  # NaN-flag protocol: float dtypes only. AllReduce is ring and tree;
+  # AllGather and ReduceScatter are ring. No byte-level NaN kernel.
+  if proto == "NAN":
+    if ty not in nan_tys:
+      return False
+    if coll == "AllReduce":
+      if algo not in ("RING", "TREE"):
+        return False
+    elif coll in ("AllGather", "ReduceScatter"):
+      if algo != "RING":
+        return False
+    else:
+      return False
+  # AllGather's classic kernels stay int8. The float entries above exist only
+  # so NCCL_PROTO=NaN can launch a typed ring.
+  if coll == "AllGather" and proto != "NAN" and ty != "i8":
     return False
   if not is_rocshmem and coll in gda_colls:
     return False
@@ -694,7 +711,7 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       if fn.coll == "Broadcast":
         key = ((coll_idx & 0x3F) | ((proto_idx & 0x3F) << 8) | ((reg_idx & 0xF) << 28))
       if fn.coll == "SendRecv":
-        # SendRecv has two latency-protocol variants distinguished by reg (0=LL, 1=LL128).
+        # SendRecv has three latency-protocol variants distinguished by reg (0=LL, 1=LL128, 2=NaN).
         # reg=0 keeps the historical coll-only key for backward compatibility.
         key = ((coll_idx & 0x3F) | ((reg_idx & 0xF) << 28))
       if fn.coll in ["AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:

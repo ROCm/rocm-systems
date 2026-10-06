@@ -27,6 +27,81 @@ THE SOFTWARE.
 #include "core.h"
 #include "rccl_decision.h"
 #include "sym_kernels.h"
+#include <cstdlib>
+#include <cstring>
+
+// NaN-flag protocol (prims_nan.h). Readiness is "no element is NaN", so it is
+// only meaningful for these dtypes. Keep the list in sync with nan_tys in
+// device/generate.py. fp8 is excluded: gfx942 fnuz all-ones is finite.
+static inline bool rcclNanProtoDtype(ncclDataType_t datatype) {
+  switch (datatype) {
+  case ncclFloat16:
+  case ncclBfloat16:
+  case ncclFloat32:
+  case ncclFloat64:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// Exact match. NCCL_PROTO=LL,NaN must not skip the AllGather int8 collapse or
+// move AlltoAll's send/recv onto the NaN-flag protocol.
+static inline bool rcclNanProtoForced() {
+  const char* proto = ncclGetEnv("NCCL_PROTO");
+  return proto != nullptr && strcmp(proto, "NaN") == 0;
+}
+
+// Intra-node, more than one rank, float dtype, and the user named NaN.
+static inline bool rcclNanProtoForcedFor(int nNodes, int nRanks, ncclDataType_t datatype) {
+  return nNodes == 1 && nRanks > 1 && rcclNanProtoForced() && rcclNanProtoDtype(datatype);
+}
+
+// Collectives with a NaN kernel: AllReduce (ring and tree), ring AllGather and
+// ring ReduceScatter. AlltoAll takes NaN on the send/recv path instead.
+static inline bool rcclNanProtoKernel(ncclFunc_t func, int algo) {
+  switch (func) {
+  case ncclFuncAllReduce:
+    return algo == NCCL_ALGO_RING || algo == NCCL_ALGO_TREE;
+  case ncclFuncAllGather:
+  case ncclFuncReduceScatter:
+    return algo == NCCL_ALGO_RING;
+  default:
+    return false;
+  }
+}
+
+static inline bool rcclNanProtoFunc(ncclFunc_t func) {
+  return func == ncclFuncAllReduce || func == ncclFuncAllGather || func == ncclFuncReduceScatter;
+}
+
+// NCCL_PROTO=NaN forces NaN only where a NaN kernel can run; everything else
+// (other collectives, other dtypes, multi-node comms) keeps the default protocol
+// set. So the protocol tuners parse NCCL_PROTO only when it names something else.
+static inline const char* rcclTunerProtoEnv() {
+  return rcclNanProtoForced() ? nullptr : ncclGetEnv("NCCL_PROTO");
+}
+
+// Whether NCCL_PROTO decides this collective's protocol: the user named a
+// protocol list, or NCCL_PROTO=NaN and a NaN kernel serves it. Heuristics that
+// hardcode a protocol must stand down when it does.
+static inline bool rcclProtoPinned(int nNodes, int nRanks, ncclFunc_t func, ncclDataType_t datatype) {
+  static const bool named = rcclTunerProtoEnv() != nullptr;
+  return named || (rcclNanProtoForcedFor(nNodes, nRanks, datatype) && rcclNanProtoFunc(func));
+}
+
+// Per-source block size from which a registered recv buffer takes the NaN-flag
+// DDA AllGather and AlltoAll kernels that push straight into it
+// (algorithms/dda/dda_nan.h). RCCL_DDA_NAN_REG_MIN sets it; unset or 0 disables
+// them: on MI300X they trail the scratch kernels up to the 16 MiB scratch cap and
+// the ring beyond it.
+static inline size_t rcclDdaNanRegMin() {
+  static const size_t v = [] {
+    const char* s = ncclGetEnv("RCCL_DDA_NAN_REG_MIN");
+    return s ? (size_t)strtoull(s, nullptr, 0) : (size_t)0;
+  }();
+  return v;
+}
 
 typedef enum RcclTunableColls {
   RCCL_UNSUPPORTED_TUNABLE = -1,

@@ -433,12 +433,17 @@ struct alignas(16) ncclDevWorkP2p {
 
   // Set when the send/recv is latency-bound and should use the LL-family latency
   // protocol instead of SIMPLE. Which one (legacy LL or LL128) is fixed by the kernel
-  // variant selected on the host via ncclDevFuncId_P2p(useLL128).
+  // variant selected on the host via ncclDevFuncId_P2p(useLL128, useNaN).
   uint8_t sendProtoLL:1, recvProtoLL:1;
   uint8_t sendNetReg:1, recvNetReg:1;
   uint8_t sendIpcReg:1, recvIpcReg:1;
 
   uint8_t profilerEnabled:1;
+  // NaN kernel variant only. With ProtoLL set, Nan picks the NaN-flag protocol
+  // over legacy LL; NanF64 says the payload is f64, so only each element's high
+  // dword marks arrival.
+  uint8_t sendNan:1, recvNan:1;
+  uint8_t sendNanF64:1, recvNanF64:1;
 
   uint8_t sendConnIndex:2, recvConnIndex:2;
 };
@@ -995,8 +1000,8 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
           ((uint64_t)(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT) |
           ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
   } else if (coll == ncclFuncSendRecv) {
-    // SendRecv has two latency-protocol kernel variants distinguished by reg
-    // (0 = legacy LL, 1 = LL128). reg=0 preserves the historical coll-only key.
+    // SendRecv has three latency-protocol kernel variants distinguished by reg
+    // (0 = legacy LL, 1 = LL128, 2 = NaN). reg=0 preserves the historical coll-only key.
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
           ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
   } else if (coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
@@ -1024,16 +1029,21 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
   return row;
 }
 
-// Selects the SendRecv kernel variant: useLL128 -> the LL128 latency kernel (reg=1,
-// gfx942/gfx950 via NCCL_ALLOC_P2P_NET_LL_BUFFERS, gfx1250 via NCCL_P2P_LL128_ENABLE=1),
-// otherwise the legacy LL kernel (reg=0). Keep in sync with reg_values_of("SendRecv")
-// otherwise the legacy LL kernel (reg=0). Keep in sync with reg_values_of("SendRecv")
-// in the device codegen.
-inline int ncclDevFuncId_P2p(bool useLL128 = false) {
+// Selects the SendRecv kernel variant: useNaN -> the NaN-flag kernel (reg=2,
+// NCCL_PROTO=NaN intra-node float payloads); useLL128 -> the LL128 latency kernel
+// (reg=1, gfx942/gfx950 via NCCL_ALLOC_P2P_NET_LL_BUFFERS, gfx1250 via
+// NCCL_P2P_LL128_ENABLE=1); otherwise the legacy LL kernel (reg=0). Keep in sync
+// with reg_values_of("SendRecv") in the device codegen.
+inline int ncclDevFuncId_P2p(bool useLL128 = false, bool useNaN = false) {
   static int ncclDevFuncIdP2pLL =
     ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF, 0, 0, /*reg=*/0);
   static int ncclDevFuncIdP2pLL128 =
     ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF, 0, 0, /*reg=*/1);
+  if (useNaN) {
+    static int ncclDevFuncIdP2pNaN =
+      ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF, 0, 0, /*reg=*/2);
+    return ncclDevFuncIdP2pNaN;
+  }
   return useLL128 ? ncclDevFuncIdP2pLL128 : ncclDevFuncIdP2pLL;
 }
 

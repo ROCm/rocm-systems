@@ -12,7 +12,9 @@
 #include "comm.h"
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/device/CollCommon_nan.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
 
@@ -28,6 +30,60 @@ using nccl_dda_detail::kDdaNranks;
                 << __FILE__ << "\n"; \
     } \
   } while (0)
+
+static void ddaNanIpcFini(ncclComm* comm) {
+  delete comm->ddaNanMemHandler;
+  comm->ddaNanMemHandler = nullptr;
+  free(comm->ddaNanPeers);
+  comm->ddaNanPeers = nullptr;
+  CUDACHECKIGNORE(cudaFree(comm->ddaNanScratch));
+  comm->ddaNanScratch = nullptr;
+  CUDACHECKIGNORE(cudaFree(comm->ddaNanEpochDev));
+  comm->ddaNanEpochDev = nullptr;
+}
+
+// The NaN-flag DDA scratch exists only under NCCL_PROTO=NaN. Failure just leaves
+// the NaN-flag DDA kernels ineligible.
+static void ddaNanIpcInit(ncclComm* comm) {
+  if (!rcclNanProtoForced()) return;
+  const size_t bytes = dda::nan::kScratchBytes;
+#if defined(HIP_UNCACHED_MEMORY)
+  hipError_t err = hipExtMallocWithFlags(&comm->ddaNanScratch, bytes, hipDeviceMallocUncached);
+#else
+  hipError_t err = hipExtMallocWithFlags(&comm->ddaNanScratch, bytes, hipDeviceMallocFinegrained);
+#endif
+  if (err != hipSuccess) {
+    (void)hipGetLastError();
+    comm->ddaNanScratch = nullptr;
+    WARN("ncclDdaIpcCommInit: cannot allocate the %zu-byte NaN-flag scratch", bytes);
+    return;
+  }
+  if (hipMemset(comm->ddaNanScratch, 0xFF, bytes) != hipSuccess ||
+      hipMalloc(&comm->ddaNanEpochDev, dda::nan::kEpochCells * sizeof(uint32_t)) != hipSuccess ||
+      hipMemset(comm->ddaNanEpochDev, 0, dda::nan::kEpochCells * sizeof(uint32_t)) != hipSuccess ||
+      hipDeviceSynchronize() != hipSuccess) {
+    (void)hipGetLastError();
+    WARN("ncclDdaIpcCommInit: cannot initialize the NaN-flag scratch");
+    ddaNanIpcFini(comm);
+    return;
+  }
+  comm->ddaNanMemHandler = new (std::nothrow) ncclIpcMemHandler(comm->bootstrap, comm->rank, comm->nRanks);
+  if (comm->ddaNanMemHandler == nullptr || ncclCalloc(&comm->ddaNanPeers, kDdaNranks) != ncclSuccess ||
+      comm->ddaNanMemHandler->addSelfDeviceMemPtr(comm->ddaNanScratch) != ncclSuccess ||
+      comm->ddaNanMemHandler->exchangeMemPtrs() != ncclSuccess) {
+    WARN("ncclDdaIpcCommInit: NaN-flag scratch exchange failed");
+    ddaNanIpcFini(comm);
+    return;
+  }
+  for (int i = 0; i < kDdaNranks; ++i) {
+    if (comm->ddaNanMemHandler->getPeerDeviceMemPtr(i, &comm->ddaNanPeers[i]) != ncclSuccess) {
+      WARN("ncclDdaIpcCommInit: NaN-flag scratch peer %d lookup failed", i);
+      ddaNanIpcFini(comm);
+      return;
+    }
+  }
+  INFO(NCCL_INIT, "ncclDdaIpcCommInit: NaN-flag scratch %zu bytes", bytes);
+}
 
 ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   if (comm == nullptr) {
@@ -193,6 +249,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   comm->ddaIpcBarrierState = barrierState;
   INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
        nBlocksMax);
+  ddaNanIpcInit(comm);
   return ncclSuccess;
 }
 
@@ -200,6 +257,7 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
   }
+  ddaNanIpcFini(comm);
   if (comm->ddaIpcBarrierState != nullptr) {
     delete static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
     comm->ddaIpcBarrierState = nullptr;
