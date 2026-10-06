@@ -392,27 +392,34 @@ std::optional<uint16_t> SmiInfiniBandPort::active_mtu() const {
   return get_sysfs_data<uint16_t>(sysfs_path_ + "/active_mtu");
 }
 
-void SmiInfiniBandPort::collect_hw_counters() {
+namespace {
+// hw_counters/lifespan is the kernel's stats refresh interval (ms), not a counter.
+const std::string kHwCountersLifespanFile = "lifespan";
+}  // namespace
+
+void SmiInfiniBandPort::collect_hw_counters() const {
+  // Built fresh and assigned wholesale so a counter the driver stops reporting disappears.
+  std::map<std::string, uint64_t> collected;
   std::string hw_counters_path = sysfs_path_ + "/hw_counters";
 
-  if (!std::filesystem::exists(hw_counters_path) ||
-      !std::filesystem::is_directory(hw_counters_path)) {
-    return;
-  }
-
-  std::error_code ec;
-  // Manual increment(ec): operator++ on directory_iterator throws on a
-  // mid-scan read error; the non-throwing form only guards construction.
-  for (auto it = std::filesystem::directory_iterator(hw_counters_path, ec);
-       (!ec && (it != std::filesystem::directory_iterator())); it.increment(ec)) {
-    if (it->is_regular_file()) {
+  if (std::filesystem::exists(hw_counters_path) &&
+      std::filesystem::is_directory(hw_counters_path)) {
+    std::error_code ec;
+    // Manual increment(ec): operator++ on directory_iterator throws on a
+    // mid-scan read error; the non-throwing form only guards construction.
+    for (auto it = std::filesystem::directory_iterator(hw_counters_path, ec);
+         (!ec && (it != std::filesystem::directory_iterator())); it.increment(ec)) {
       std::string counter_name = it->path().filename().string();
-      auto counter_value = get_sysfs_data<uint64_t>(it->path().string());
-      if (counter_value.has_value()) {
-        hw_counters_map_[counter_name] = counter_value.value();
+      if (it->is_regular_file() && (counter_name != kHwCountersLifespanFile)) {
+        auto counter_value = get_sysfs_data<uint64_t>(it->path().string());
+        if (counter_value.has_value()) {
+          collected[counter_name] = counter_value.value();
+        }
       }
     }
   }
+
+  hw_counters_map_ = std::move(collected);
 }
 
 const std::map<std::string, uint64_t>& SmiInfiniBandPort::get_hw_counters_map() const {
