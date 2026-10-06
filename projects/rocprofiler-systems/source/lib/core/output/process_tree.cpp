@@ -4,8 +4,7 @@
 #include "core/output/output_summary.hpp"
 
 #include <algorithm>
-#include <iterator>
-#include <ranges>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -15,159 +14,112 @@ namespace rocprofsys::output
 
 namespace
 {
-void
-sort_rows_desc_by_size(process_node& node)
+process_node
+make_node(process_metadata meta, std::vector<artifact> rows)
 {
+    process_node node{};
+    node.meta = std::move(meta);
+    node.rows = std::move(rows);
     std::ranges::sort(node.rows, [](const artifact& a, const artifact& b) {
         return a.size_bytes > b.size_bytes;
     });
-}
-
-process_node
-make_node(const process_metadata& meta, std::vector<artifact> rows)
-{
-    process_node node{};
-    node.meta = meta;
-    node.rows = std::move(rows);
-    sort_rows_desc_by_size(node);
     return node;
 }
 
-process_node
-build_subtree(pid_t pid, std::unordered_map<pid_t, process_node>& nodes,
-              const std::unordered_map<pid_t, std::vector<pid_t>>& children_by_ppid)
-{
-    process_node node = std::move(nodes.extract(pid).mapped());
-    auto         it   = children_by_ppid.find(pid);
-    if(it != children_by_ppid.end())
-    {
-        for(pid_t child_pid : it->second)
-            node.children.push_back(build_subtree(child_pid, nodes, children_by_ppid));
-    }
-    return node;
-}
-
-[[nodiscard]] std::unordered_map<pid_t, process_metadata>
-build_metadata_index(std::span<const process_metadata> processes)
+// One ordered map, filled directly from rows/metadata — no separate
+// meta/rows index structures, no explicit pid sort (the map is already
+// ordered by pid).
+[[nodiscard]] std::map<pid_t, process_node>
+build_nodes(std::span<const artifact> rows, std::span<const process_metadata> processes,
+            process_tree_diagnostics& diagnostics)
 {
     std::unordered_map<pid_t, process_metadata> meta_by_pid;
-    meta_by_pid.reserve(processes.size());
     for(const auto& p : processes)
         meta_by_pid.emplace(p.pid, p);
-    return meta_by_pid;
-}
 
-[[nodiscard]] std::unordered_map<pid_t, std::vector<artifact>>
-build_rows_index(std::span<const artifact> rows)
-{
-    std::unordered_map<pid_t, std::vector<artifact>> rows_by_pid;
+    std::map<pid_t, std::vector<artifact>> rows_by_pid;
     for(const auto& r : rows)
         rows_by_pid[r.pid].push_back(r);
-    return rows_by_pid;
-}
 
-[[nodiscard]] std::unordered_map<pid_t, process_node>
-build_all_nodes(std::span<const artifact>                          rows,
-                const std::unordered_map<pid_t, process_metadata>& meta_by_pid,
-                std::unordered_map<pid_t, std::vector<artifact>>&  rows_by_pid,
-                process_tree_diagnostics&                          diagnostics)
-{
-    std::unordered_set<pid_t> pids_in_rows;
-    for(const auto& r : rows)
-        pids_in_rows.insert(r.pid);
-
-    std::unordered_map<pid_t, process_node> nodes;
-    nodes.reserve(pids_in_rows.size());
-    for(pid_t pid : pids_in_rows)
+    std::map<pid_t, process_node> nodes;
+    for(auto& [pid, pid_rows] : rows_by_pid)
     {
-        auto meta_it      = meta_by_pid.find(pid);
-        auto rows_it      = rows_by_pid.find(pid);
-        auto rows_for_pid = (rows_it != rows_by_pid.end()) ? std::move(rows_it->second)
-                                                           : std::vector<artifact>{};
-
+        auto meta_it = meta_by_pid.find(pid);
         if(meta_it == meta_by_pid.end())
         {
-            process_metadata stub{};
-            stub.pid = pid;
-            nodes.emplace(pid, make_node(stub, std::move(rows_for_pid)));
             diagnostics.missing_metadata_pids.push_back(pid);
+            nodes.emplace(pid,
+                          make_node(process_metadata{ .pid = pid }, std::move(pid_rows)));
         }
         else
         {
-            nodes.emplace(pid, make_node(meta_it->second, std::move(rows_for_pid)));
+            nodes.emplace(pid, make_node(meta_it->second, std::move(pid_rows)));
         }
     }
     return nodes;
 }
 
-[[nodiscard]] std::vector<pid_t>
-sorted_node_pids(const std::unordered_map<pid_t, process_node>& nodes)
+// A node and everything nested under it is unreachable from any real root
+// (it only got there via a ppid chain that cycles back on itself); record
+// every pid in the subtree as excluded rather than just the one we happened
+// to stop iterating on.
+void
+mark_cyclic(const process_node& node, process_tree_diagnostics& diagnostics)
 {
-    std::vector<pid_t> sorted_pids;
-    sorted_pids.reserve(nodes.size());
-    std::ranges::copy(nodes | std::views::keys, std::back_inserter(sorted_pids));
-    std::ranges::sort(sorted_pids);
-    return sorted_pids;
-}
-
-[[nodiscard]] std::unordered_map<pid_t, std::vector<pid_t>>
-build_children_index(std::span<const pid_t>                         sorted_pids,
-                     const std::unordered_map<pid_t, process_node>& nodes)
-{
-    std::unordered_map<pid_t, std::vector<pid_t>> children_by_ppid;
-    children_by_ppid.reserve(nodes.size());
-    for(pid_t pid : sorted_pids)
-    {
-        const auto& meta = nodes.at(pid).meta;
-        if(meta.ppid != NO_PID && nodes.contains(meta.ppid))
-            children_by_ppid[meta.ppid].push_back(pid);
-    }
-    for(auto& [_, vec] : children_by_ppid)
-        std::ranges::sort(vec);
-    return children_by_ppid;
-}
-
-[[nodiscard]] std::vector<pid_t>
-find_root_pids(std::span<const pid_t>                         sorted_pids,
-               const std::unordered_map<pid_t, process_node>& nodes)
-{
-    std::vector<pid_t> root_pids;
-    for(pid_t pid : sorted_pids)
-    {
-        const auto& meta = nodes.at(pid).meta;
-        if(meta.ppid == NO_PID || !nodes.contains(meta.ppid)) root_pids.push_back(pid);
-    }
-    return root_pids;
-}
-
-// Anything still left in `nodes` after every root's subtree has been
-// extracted was never reachable from a root — the only way that happens is
-// a ppid cycle
-[[nodiscard]] std::vector<pid_t>
-collect_unreachable_pids(const std::unordered_map<pid_t, process_node>& nodes)
-{
-    std::vector<pid_t> unreachable;
-    std::ranges::copy(nodes | std::views::keys, std::back_inserter(unreachable));
-    return unreachable;
+    diagnostics.cyclic_ppid_pids.push_back(node.meta.pid);
+    for(const auto& child : node.children)
+        mark_cyclic(child, diagnostics);
 }
 }  // namespace
 
 process_tree::process_tree(std::span<const artifact>         rows,
                            std::span<const process_metadata> processes)
 {
-    const auto meta_by_pid = build_metadata_index(processes);
-    auto       rows_by_pid = build_rows_index(rows);
-    auto       nodes = build_all_nodes(rows, meta_by_pid, rows_by_pid, m_diagnostics);
+    auto nodes = build_nodes(rows, processes, m_diagnostics);
 
-    const auto sorted_pids      = sorted_node_pids(nodes);
-    const auto children_by_ppid = build_children_index(sorted_pids, nodes);
-    const auto root_pids        = find_root_pids(sorted_pids, nodes);
+    std::unordered_set<pid_t> known_pids;
+    for(const auto& [pid, node] : nodes)
+    {
+        known_pids.insert(pid);
+    }
 
-    m_roots.reserve(root_pids.size());
-    for(pid_t pid : root_pids)
-        m_roots.push_back(build_subtree(pid, nodes, children_by_ppid));
+    std::unordered_set<pid_t> attached_pids;
+    for(auto it = nodes.rbegin(); it != nodes.rend(); ++it)
+    {
+        const pid_t pid  = it->first;
+        const pid_t ppid = it->second.meta.ppid;
+        if(ppid == NO_PID)
+        {
+            continue;
+        }
 
-    m_diagnostics.cyclic_ppid_pids = collect_unreachable_pids(nodes);
+        auto parent_it = nodes.find(ppid);
+        if(parent_it == nodes.end() || attached_pids.contains(ppid))
+        {
+            continue;
+        }
+
+        parent_it->second.children.insert(parent_it->second.children.begin(),
+                                          std::move(it->second));
+        attached_pids.insert(pid);
+    }
+
+    for(auto& [pid, node] : nodes)
+    {
+        if(attached_pids.contains(pid))
+        {
+            continue;
+        }  // moved into a parent above
+
+        if(node.meta.ppid != NO_PID && known_pids.contains(node.meta.ppid))
+        {
+            mark_cyclic(node, m_diagnostics);
+        }
+        else
+        {
+            m_roots.push_back(std::move(node));
+        }
+    }
 
     std::ranges::sort(m_diagnostics.missing_metadata_pids);
     std::ranges::sort(m_diagnostics.cyclic_ppid_pids);

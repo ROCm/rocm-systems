@@ -14,7 +14,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -51,16 +50,6 @@ TEST_F(RegistryTest, default_pid_resolves_to_getpid)
     const auto rows = registry::instance().rows();
     ASSERT_EQ(rows.size(), 1u);
     EXPECT_EQ(rows.front().pid, getpid());
-}
-
-TEST_F(RegistryTest, explicit_pid_is_preserved)
-{
-    constexpr pid_t CHILD_PID = 4242;
-    registry::instance().register_file("/tmp/rocprofsys-test/perfetto-trace.proto",
-                                       output_format::perfetto, CHILD_PID);
-    const auto rows = registry::instance().rows();
-    ASSERT_EQ(rows.size(), 1u);
-    EXPECT_EQ(rows.front().pid, CHILD_PID);
 }
 
 TEST_F(RegistryTest, start_new_session_clears_prior_rows)
@@ -371,7 +360,7 @@ render(const std::vector<artifact>& rows, const std::vector<process_metadata>& p
     process_tree                     tree{ rows, processes };
     rocprofsys::output::run_metadata meta{};
     std::ostringstream               oss;
-    rocprofsys::output::write_summary(oss, tree, meta);
+    rocprofsys::output::write_summary(oss, tree, meta, rows, processes.size());
     return oss.str();
 }
 }  // namespace

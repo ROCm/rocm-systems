@@ -1523,11 +1523,11 @@ rocprofsys_finalize_hidden(void)
         output::registry::instance().record_process(output::process_metadata{
             .pid = getpid(), .ppid = getppid(), .command = config::get_exe_name() });
 
-        const auto tree =
-            output::process_tree{ output::registry::instance().rows(),
-                                  output::registry::instance().processes() };
-        const auto meta = output::run_metadata::capture(library_load_time);
-        output::write_summary(std::cout, tree, meta);
+        const auto rows      = output::registry::instance().rows();
+        const auto processes = output::registry::instance().processes();
+        const auto tree      = output::process_tree{ rows, processes };
+        const auto meta      = output::run_metadata::capture(library_load_time);
+        output::write_summary(std::cout, tree, meta, rows, processes.size());
     }
 
     categories::shutdown();

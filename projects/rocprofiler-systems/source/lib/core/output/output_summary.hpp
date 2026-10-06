@@ -6,11 +6,10 @@
 #include <sys/types.h>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <iosfwd>
 #include <mutex>
-#include <numeric>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -46,14 +45,6 @@ struct artifact
     std::uint64_t size_bytes{ 0 };
     output_format format{ output_format::perfetto };
 };
-
-[[nodiscard]] inline std::uint64_t
-sum_sizes(std::span<const artifact> items)
-{
-    return std::accumulate(
-        items.begin(), items.end(), std::uint64_t{ 0 },
-        [](std::uint64_t acc, const artifact& item) { return acc + item.size_bytes; });
-}
 
 struct process_node
 {
@@ -105,10 +96,7 @@ class registry
 public:
     [[nodiscard]] static registry& instance();
 
-    // `pid` defaults to the calling process's own pid (via getpid()) when
-    // not specified.
-    void register_file(std::string path, output_format format,
-                       std::optional<pid_t> pid = std::nullopt);
+    void register_file(std::string path, output_format format);
 
     void record_process(process_metadata meta);
 
@@ -131,7 +119,6 @@ struct run_metadata
 {
     std::string              run_label;
     std::chrono::nanoseconds duration{ 0 };
-    std::string              output_dir_abs;
 
     [[nodiscard]] static run_metadata capture(
         std::chrono::steady_clock::time_point load_baseline);
@@ -140,8 +127,9 @@ struct run_metadata
 [[nodiscard]] std::string
 summarize_command(std::string_view command);
 
-// Writes nothing at all if `tree` has no rows — there is no output to summarize.
+// Writes nothing at all if `rows` is empty — there is no output to summarize.
 void
-write_summary(std::ostream& os, const process_tree& tree, const run_metadata& meta);
+write_summary(std::ostream& os, const process_tree& tree, const run_metadata& meta,
+              std::span<const artifact> rows, std::size_t process_count);
 
 }  // namespace rocprofsys::output
