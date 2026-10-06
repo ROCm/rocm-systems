@@ -6,6 +6,7 @@ add_library(
     OBJECT
     test_nic_device.cpp
     test_nic_perfetto_policy.cpp
+    test_nic_traits_register_agents.cpp
 )
 
 target_link_libraries(

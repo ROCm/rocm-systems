@@ -14,8 +14,10 @@ from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
+from amdisa.codegen.execute import float_compare
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
+from amdisa.sema_derive import FLOAT_COMPARE_CALL
 from amdisa.sema_ast import (
     ExecModel,
     SemaBlock,
@@ -1834,6 +1836,8 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         return _lower_apply_omod(node, ctx)
     if callee == 'apply_clamp':
         return _lower_apply_clamp(node, ctx)
+    if callee.startswith(FLOAT_COMPARE_CALL):
+        return _lower_float_compare(node, ctx)
 
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
@@ -2027,6 +2031,40 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         return f'/* recursive: {callee}({args_str}) */'
 
     return f'{callee}({args_str})'
+
+
+def _lower_float_compare(node: SemaNode, ctx: LoweringContext) -> str:
+    """Lower a floating VOPC relation to comparison::evaluate on raw encodings.
+
+    CALL children: [ID(name), src0, src1], each a typed cast of a register
+    read, possibly wrapped in apply_src_mod by enrichment. The relation applies
+    ABS/NEG to the encoding itself, so the wrappers are reduced to the
+    instruction's modifier fields.
+    """
+    op = (node.call_name or '').removeprefix(FLOAT_COMPARE_CALL)
+    has_abs = has_neg = False
+    dtype = None
+    reads = []
+    for src in node.children[1:3]:
+        if src.kind == SemaNodeKind.CALL and src.call_name == 'apply_src_mod':
+            has_neg |= src.children[3].lit_value == '1'
+            has_abs |= src.children[4].lit_value == '1'
+            src = src.children[1]
+        if src.ty and src.ty.base == 'F':
+            dtype = f'f{src.ty.size}'
+        while src.kind == SemaNodeKind.CAST:
+            src = src.children[0]
+        if dtype is None or src.kind != SemaNodeKind.INSTOPERAND:
+            raise ValueError(f'unexpected {node.call_name} source: {src}')
+        lane = float_compare.lane_type(dtype)
+        reads.append(f'static_cast<{lane}>({_lower_expr(src, ctx)})')
+    declaration = float_compare.policy_decl(dtype)
+    if declaration not in ctx.vector_preamble:
+        ctx.vector_preamble.append(declaration)
+    modifiers = None
+    if has_abs or has_neg:
+        modifiers = ('inst_.abs' if has_abs else '0u', 'inst_.neg' if has_neg else '0u')
+    return float_compare.evaluate_expr(dtype, op, *reads, modifiers=modifiers)
 
 
 def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:

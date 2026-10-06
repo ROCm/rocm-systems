@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /* KFD MEMORY-event qualification through a valid SDMA write to read-only GPU
  * memory. This process intentionally leaves faulted resources to OS teardown. */
 #define _POSIX_C_SOURCE 200809L

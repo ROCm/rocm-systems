@@ -10,6 +10,7 @@ set(TEST_SRC
     library_get_global_co.cc
     library_invariants.cc
     hipKernelGetAttribute.cc
+    hipKernelSetAttributeForDevice.cc
     lib_attribute.cc
 )
 

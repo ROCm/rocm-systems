@@ -9,6 +9,9 @@ texture:
   Unit_hipCreateTextureObject_Pitch2DResource:
     <<: *level_2
     tags: [texobj, image]
+  Unit_hipCreateTextureObject_Pitch2D_NormalizedCoordsLinearFilter:
+    <<: *level_2
+    tags: [texobj, image]
   Unit_hipCreateTextureObject_ArrayResource:
     <<: *level_2
     tags: [texobj, image]
