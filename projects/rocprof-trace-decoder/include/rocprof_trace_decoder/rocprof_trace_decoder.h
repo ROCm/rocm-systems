@@ -113,6 +113,30 @@ ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_status_string(
 );
 
 /**
+ * @brief Version of the decoder library.
+ */
+typedef struct
+{
+    uint64_t size; ///< Size of this struct
+    uint32_t major;
+    uint32_t minor;
+    uint32_t patch;
+} rocprof_trace_decoder_version_t;
+
+/**
+ * @brief Returns the version of this decoder library.
+ *
+ * Added in 0.2.2. Callers loading the decoder dynamically should treat absence of this
+ * symbol as a decoder older than 0.2.2.
+ *
+ * @param[out] version Where the version is written.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT if version is NULL.
+ */
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_get_version(rocprof_trace_decoder_version_t* version);
+
+/**
  * @brief Parses thread trace data using callbacks (V1 API).
  *
  * Stateless 4-arg parse function with no handle management.

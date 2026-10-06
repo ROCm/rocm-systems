@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "launch_preload.h"
+#include "scoped_temp.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -88,13 +89,28 @@ TEST(LaunchPreloadTest, EnvpCacheRebuildsAfterSet) {
   environment.set(name, "before");
 
   const std::vector<std::string> initial = copy_environment(environment.envp());
-  EXPECT_NE(initial.end(), std::find(initial.begin(), initial.end(), before));
+  EXPECT_NE(initial.end(), std::ranges::find(initial, before));
 
   environment.set(name, "after");
 
   const std::vector<std::string> rebuilt = copy_environment(environment.envp());
-  EXPECT_EQ(rebuilt.end(), std::find(rebuilt.begin(), rebuilt.end(), before));
-  EXPECT_NE(rebuilt.end(), std::find(rebuilt.begin(), rebuilt.end(), after));
+  EXPECT_EQ(rebuilt.end(), std::ranges::find(rebuilt, before));
+  EXPECT_NE(rebuilt.end(), std::ranges::find(rebuilt, after));
+}
+
+TEST(LaunchPreloadTest, DbtGuestToolsDisableAutomaticHotswapLoading) {
+  rocjitsu::cli::LaunchEnvironment environment;
+  environment.set("HSA_HOTSWAP_ENABLE", "1");
+  environment.set("HSA_HOTSWAP_DISABLE", "0");
+  environment.set("HSA_TOOLS_DISABLE_REGISTER", "0");
+  environment.set("HSA_TOOLS_LIB", "/tmp/libother-tool.so");
+
+  rocjitsu::cli::configure_dbt_guest_tool_environment(environment, "/tmp/librocjitsu_hooks.so");
+
+  EXPECT_STREQ("0", environment.get("HSA_HOTSWAP_ENABLE"));
+  EXPECT_STREQ("1", environment.get("HSA_HOTSWAP_DISABLE"));
+  EXPECT_STREQ("1", environment.get("HSA_TOOLS_DISABLE_REGISTER"));
+  EXPECT_STREQ("/tmp/librocjitsu_hooks.so", environment.get("HSA_TOOLS_LIB"));
 }
 
 TEST(LaunchPreloadTest, NoAsanPrependsInterposerBeforeExistingPreload) {
@@ -149,19 +165,13 @@ TEST(LaunchPreloadTest, SanitizerNamedExecutableAliasDoesNotPreloadExecutable) {
   const std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
   ASSERT_FALSE(ec) << ec.message();
 
-  const std::filesystem::path temp_dir =
-      std::filesystem::temp_directory_path() /
-      ("rocjitsu_launch_preload_test_" + std::to_string(getpid()));
-  ASSERT_TRUE(std::filesystem::create_directories(temp_dir, ec) ||
-              std::filesystem::exists(temp_dir))
-      << ec.message();
+  const rocjitsu::test::ScopedTempDirectory temp_dir_owner("rocjitsu-launch-preload-");
+  const std::filesystem::path temp_dir(temp_dir_owner.path());
 
   static constexpr const char *alias_names[] = {"launch-asan-preload-test",
                                                 "launch-tsan-preload-test"};
   for (const char *alias_name : alias_names) {
     const std::filesystem::path alias = temp_dir / alias_name;
-    std::filesystem::remove(alias, ec);
-    ec.clear();
     std::filesystem::create_symlink(exe, alias, ec);
     ASSERT_FALSE(ec) << ec.message();
 
@@ -182,7 +192,6 @@ TEST(LaunchPreloadTest, SanitizerNamedExecutableAliasDoesNotPreloadExecutable) {
     ASSERT_TRUE(WIFEXITED(status));
     EXPECT_EQ(0, WEXITSTATUS(status));
   }
-  std::filesystem::remove_all(temp_dir, ec);
 #endif
 }
 

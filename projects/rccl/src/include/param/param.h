@@ -14,7 +14,8 @@
 // param/utils.h vs include/utils.h, param/param.h vs include/param.h). Source
 // keeps the plain names; includes must use the staged _tmp names.
 #include "param/common_tmp.h"
-#include "param/utils_tmp.h"
+// param/utils.h is listed before include/utils.h, so it keeps the plain name.
+#include "param/utils.h"
 #include "param/parsers.h"
 #include "param/param_registry.h"
 
@@ -154,7 +155,9 @@ private:
 
   // Load value from environment variable via EnvPlugin chain
   void loadValue() {
-    const char* envPluginValue = ncclParamEnvPluginGet(info.key);
+    // Special params with NO_ENVPLUGIN_INIT flag do not try init EnvPlugin
+    bool tryEnvPluginInit = !(info.flags & NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT);
+    const char* envPluginValue = ncclParamEnvPluginGet(info.key, tryEnvPluginInit);
     if (envPluginValue != nullptr) {
       T resolvedValue;
       ncclResult_t resolved = parser.resolve(envPluginValue, resolvedValue);
@@ -186,7 +189,9 @@ inline const char* ncclParam<const char*>::operator()() {
 
 template <>
 inline void ncclParam<const char*>::loadValue() {
-  const char* envPluginValue = ncclParamEnvPluginGet(info.key);
+  // Special params with NO_ENVPLUGIN_INIT flag do not try init EnvPlugin
+  bool tryEnvPluginInit = !(info.flags & NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT);
+  const char* envPluginValue = ncclParamEnvPluginGet(info.key, tryEnvPluginInit);
   if (envPluginValue != nullptr) {
     cstrData = envPluginValue;
     value = cstrData.c_str();

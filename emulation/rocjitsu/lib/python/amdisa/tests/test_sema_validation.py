@@ -63,7 +63,7 @@ def _extract_properties(cpp: str) -> dict:
         'writes_scalar': 'write_scalar' in cpp,
         'writes_lane': 'write_lane' in cpp,
         'uses_fabs': 'fabs' in cpp,
-        'uses_fma': 'fma' in cpp or 'std::fma' in cpp,
+        'uses_fma': 'fma' in cpp or 'Arithmetic::FMA' in cpp,
         'operand_names': set(re.findall(r'\b(ssrc\d|sdst|src\d|vsrc\d|vdst)\b', cpp)),
     }
 
@@ -211,8 +211,8 @@ class TestSaveexecValidation:
         sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         old = gen_scalar_saveexec(['sdst'], ['ssrc0'], 'and')
         new = _new_output(sem, ['ssrc0'], ['sdst'])
-        assert 'set_exec' in old or 'set_exec' in old
-        assert 'set_exec' in new
+        assert 'wf.set_exec(' in old
+        assert 'wf.write_exec(' in new
         assert 'write_scc' in new
 
     def test_saveexec_b32_uses_32_bit_operand_access(self):
@@ -243,6 +243,7 @@ class TestAllClassesLowerWithOperandMap:
         }
         for cls_name in sorted(_DERIVE_REGISTRY.keys()):
             operation = {
+                'pseudo_scalar_unary': 'sqrt',
                 'scalar_saveexec': 'and',
                 'scalar_wrexec': 'andn1',
             }.get(cls_name, 'add')

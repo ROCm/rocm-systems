@@ -136,7 +136,7 @@ public:
   hsa_status_t RegisterMemory(void* ptr, uint64_t size, HsaMemFlags mem_flags) const override;
   hsa_status_t DeregisterMemory(void* ptr) const override;
   hsa_status_t MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
-                                  const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
+                                  const HsaMemFlags* mem_flags, uint32_t num_nodes,
                                   const uint32_t* nodes) const override;
   hsa_status_t MakeMemoryUnresident(const void* mem) const override;
 
@@ -157,6 +157,8 @@ public:
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
+
+  hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override;
 
  private:
   /// @brief Flags for @ref ExportMemoryHandleImpl.
@@ -187,6 +189,19 @@ public:
   /// It is legal for a system with Xnack ON to have devices that do not support
   /// Xnack functionality.
   static bool BindXnackMode();
+
+  /// @brief Take the one topology snapshot reference this driver owns.
+  hsa_status_t AcquireTopologySnapshot() const;
+
+  /// @brief Release this driver's topology snapshot reference, if held.
+  hsa_status_t ReleaseTopologySnapshot();
+
+  /// @brief Disable the KFD runtime if Init() enabled it.
+  hsa_status_t DisableRuntime();
+
+  mutable bool topology_snapshot_acquired_ = false;
+  bool runtime_enabled_ = false;
+  mutable HsaSystemProperties sys_props_{};
 
   // Minimum acceptable KFD version numbers.
   static const uint32_t kfd_version_major_min = 0;

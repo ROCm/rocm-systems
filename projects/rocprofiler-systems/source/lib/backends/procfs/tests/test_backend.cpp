@@ -19,7 +19,7 @@ TEST_F(procfs_backend_test, reads_proc_stat)
 {
     backend drv(cpu_count);
 
-    auto jiffies = drv.read_proc_stat();
+    auto const jiffies = drv.read_proc_stat();
 
     EXPECT_FALSE(jiffies.empty());
     for(const auto& [cpu_id, data] : jiffies)
@@ -32,7 +32,7 @@ TEST_F(procfs_backend_test, reads_rusage)
 {
     backend drv(cpu_count);
 
-    auto snap = drv.read_rusage();
+    auto const snap = drv.read_rusage();
 
     EXPECT_GT(snap.page_rss, 0);
     EXPECT_GT(snap.virt_mem, 0);
@@ -40,7 +40,7 @@ TEST_F(procfs_backend_test, reads_rusage)
 
 TEST_F(procfs_backend_test, socket_topology_nonempty)
 {
-    backend drv(cpu_count);
+    const backend drv(cpu_count);
 
     const auto& topology = drv.get_socket_topology();
 
@@ -59,8 +59,8 @@ TEST_F(procfs_backend_test, repeated_reads_return_valid_data)
 {
     backend drv(cpu_count);
 
-    auto first  = drv.read_proc_stat();
-    auto second = drv.read_proc_stat();
+    auto       first  = drv.read_proc_stat();
+    auto const second = drv.read_proc_stat();
 
     EXPECT_FALSE(first.empty());
     EXPECT_FALSE(second.empty());

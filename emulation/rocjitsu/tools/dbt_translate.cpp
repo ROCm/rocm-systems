@@ -5,12 +5,17 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/code_object_identity.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 
+#include <algorithm>
+#include <cassert>
 #include <exception>
+#include <format>
 #include <iomanip>
 #include <memory>
 #include <span>
@@ -34,6 +39,19 @@ struct CodeObjectInspection {
   std::string disassembly;
 };
 
+[[nodiscard]] std::unique_ptr<Decoder> create_inspection_decoder(rj_code_target_id_t target,
+                                                                 rj_code_arch_t fallback_arch) {
+  if (target != ROCJITSU_CODE_TARGET_INVALID)
+    return Decoder::create(default_isa_target_registry(), target);
+  return Decoder::create(fallback_arch);
+}
+
+[[nodiscard]] rj_code_target_id_t target_for_machine(uint32_t machine) {
+  const IsaGpuTargetDescription *target =
+      default_isa_target_registry().find_gpu_target_by_elf_machine(machine & EF_AMDGPU_MACH);
+  return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
+}
+
 void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset,
                            std::string message) {
   ++section_report.decode_failure_count;
@@ -45,7 +63,8 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
 }
 
 [[nodiscard]] CodeObjectInspection inspect_code_object(const AmdGpuCodeObject &obj,
-                                                       rj_code_arch_t arch,
+                                                       rj_code_target_id_t target,
+                                                       rj_code_arch_t fallback_arch,
                                                        const std::string &label,
                                                        bool include_disassembly) {
   CodeObjectInspection inspection;
@@ -55,7 +74,7 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
   if (include_disassembly)
     os << "--- " << label << " ---\n";
 
-  auto decoder = Decoder::create(arch);
+  auto decoder = create_inspection_decoder(target, fallback_arch);
   inspection.report.decoder_available = decoder != nullptr;
   if (!decoder) {
     if (include_disassembly)
@@ -83,18 +102,27 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
     size_t pc = 0;
 
     while (pc < word_count) {
+      // Linked gfx1250 objects use zero-filled holes between independently
+      // aligned function bodies. BasicBlock::build() treats these words as
+      // padding rather than instructions, so host validation must do the same.
+      if (fallback_arch == ROCJITSU_CODE_ARCH_CDNA5 && words[pc] == 0) {
+        ++pc;
+        continue;
+      }
       try {
-        std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
-        if (!inst) {
-          record_decode_failure(section_report, pc * sizeof(uint32_t), "decode returned null");
+        util::StringDiagnostic decode_error;
+        DecodeResult decoded = decoder->decode(&words[pc], decode_error.emitter());
+        if (decoded.failed()) {
+          record_decode_failure(section_report, pc * sizeof(uint32_t), decode_error.message());
           if (include_disassembly) {
             os << "  0x" << std::hex << std::setw(4) << std::setfill('0') << pc * 4
-               << ": <decode returned null>\n"
+               << ": <decode error: " << decode_error.message() << ">\n"
                << std::dec << std::setfill(' ');
           }
           ++pc;
           continue;
         }
+        std::unique_ptr<Instruction> inst = std::move(decoded).value();
 
         const uint32_t inst_words = inst->size() / sizeof(uint32_t);
         ++section_report.instruction_count;
@@ -170,9 +198,127 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
   return true;
 }
 
+[[nodiscard]] BinaryTranslatorOptions
+make_binary_translator_options(const TranslateOptions &options) {
+  BinaryTranslatorOptions translator_options;
+  translator_options.debug_min_free_vgpr = options.debug_min_free_vgpr;
+  translator_options.debug_continue_after_failure = options.debug_continue_after_failure;
+  translator_options.skip_failed_kernels = options.skip_failed_kernels;
+  translator_options.verify_rewrite_discharge = options.verify_rewrite_discharge;
+  translator_options.input_revision = options.input_revision;
+  translator_options.output_revision = options.output_revision;
+  return translator_options;
+}
+
+} // namespace
+
+namespace detail {
+
+std::string describe_byte_difference(std::span<const uint8_t> first,
+                                     std::span<const uint8_t> second, std::string_view location) {
+  assert(!std::ranges::equal(first, second));
+
+  const size_t common_size = std::min(first.size(), second.size());
+  size_t offset = 0;
+  while (offset < common_size && first[offset] == second[offset])
+    ++offset;
+
+  if (offset < common_size) {
+    const std::string size_change =
+        first.size() == second.size()
+            ? ""
+            : std::format("; size {} -> {} bytes", first.size(), second.size());
+    return std::format("{} first differs at 0x{:x} (first=0x{:02x}, second=0x{:02x}){}", location,
+                       offset, static_cast<unsigned>(first[offset]),
+                       static_cast<unsigned>(second[offset]), size_change);
+  }
+
+  return std::format("{} size changed from {} to {} bytes", location, first.size(), second.size());
+}
+
+std::string find_idempotence_difference(std::span<const ExecutableSectionBytes> first_sections,
+                                        std::span<const ExecutableSectionBytes> second_sections,
+                                        std::span<const uint8_t> first_elf,
+                                        std::span<const uint8_t> second_elf) {
+  const auto count_named = [](std::span<const ExecutableSectionBytes> sections,
+                              std::string_view name) {
+    return std::ranges::count_if(
+        sections, [name](const ExecutableSectionBytes &section) { return section.name == name; });
+  };
+
+  std::optional<std::string_view> removed;
+  for (const ExecutableSectionBytes &section : first_sections) {
+    if (count_named(first_sections, section.name) > count_named(second_sections, section.name)) {
+      removed = section.name;
+      break;
+    }
+  }
+
+  std::optional<std::string_view> added;
+  for (const ExecutableSectionBytes &section : second_sections) {
+    if (count_named(second_sections, section.name) > count_named(first_sections, section.name)) {
+      added = section.name;
+      break;
+    }
+  }
+
+  if (removed && added) {
+    return std::format("executable sections changed: removed '{}', added '{}'", *removed, *added);
+  }
+  if (removed)
+    return std::format("executable section '{}' was removed", *removed);
+  if (added)
+    return std::format("executable section '{}' was added", *added);
+
+  for (size_t index = 0; index < first_sections.size(); ++index) {
+    if (first_sections[index].name != second_sections[index].name) {
+      return std::format("executable sections were reordered at index {}: first='{}', second='{}'",
+                         index, first_sections[index].name, second_sections[index].name);
+    }
+  }
+
+  for (size_t index = 0; index < first_sections.size(); ++index) {
+    const ExecutableSectionBytes &first_section = first_sections[index];
+    const ExecutableSectionBytes &second_section = second_sections[index];
+    if (!std::ranges::equal(first_section.bytes, second_section.bytes)) {
+      return describe_byte_difference(first_section.bytes, second_section.bytes,
+                                      std::format("section '{}'", first_section.name));
+    }
+  }
+
+  return describe_byte_difference(first_elf, second_elf, "ELF image");
+}
+
+} // namespace detail
+
+namespace {
+
+[[nodiscard]] std::vector<detail::ExecutableSectionBytes>
+collect_executable_sections(const AmdGpuCodeObject &object) {
+  std::vector<detail::ExecutableSectionBytes> sections;
+  for (const std::unique_ptr<Section> &section : object.all_sections()) {
+    if ((section->flags() & SHF_EXECINSTR) == 0)
+      continue;
+    sections.push_back(
+        {section->name(), {reinterpret_cast<const uint8_t *>(section->data()), section->size()}});
+  }
+  return sections;
+}
+
+[[nodiscard]] std::string find_idempotence_difference(const AmdGpuCodeObject &first_obj,
+                                                      const AmdGpuCodeObject &second_obj,
+                                                      std::span<const uint8_t> first_elf,
+                                                      std::span<const uint8_t> second_elf) {
+  return detail::find_idempotence_difference(collect_executable_sections(first_obj),
+                                             collect_executable_sections(second_obj), first_elf,
+                                             second_elf);
+}
+
 [[nodiscard]] std::string disassemble_source_instruction(const AmdGpuCodeObject &obj,
-                                                         uint64_t offset, rj_code_arch_t arch) {
-  auto decoder = Decoder::create(arch);
+                                                         uint64_t offset,
+                                                         rj_code_target_id_t target,
+                                                         rj_code_arch_t fallback_arch) {
+  auto decoder = create_inspection_decoder(target, fallback_arch);
   if (!decoder)
     return "<decoder unavailable>";
 
@@ -190,20 +336,18 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
     return "<source offset out of range>";
 
   const auto *words = reinterpret_cast<const uint32_t *>(text->data());
-  try {
-    std::unique_ptr<Instruction> inst(decoder->decode(&words[offset / sizeof(uint32_t)]));
-    if (!inst)
-      return "<decode returned null>";
-    return inst->disassemble();
-  } catch (const std::exception &e) {
-    return std::string("<decode error: ") + e.what() + ">";
-  }
+  util::StringDiagnostic decode_error;
+  DecodeResult decoded = decoder->decode(&words[offset / sizeof(uint32_t)], decode_error.emitter());
+  if (decoded.failed())
+    return std::string("<decode error: ") + decode_error.message() + ">";
+  return decoded.value()->disassemble();
 }
 
 [[nodiscard]] std::vector<std::string> disassemble_words(std::span<const uint32_t> words,
-                                                         rj_code_arch_t arch) {
+                                                         rj_code_target_id_t target,
+                                                         rj_code_arch_t fallback_arch) {
   std::vector<std::string> lines;
-  auto decoder = Decoder::create(arch);
+  auto decoder = create_inspection_decoder(target, fallback_arch);
   if (!decoder) {
     lines.push_back("<decoder unavailable>");
     return lines;
@@ -211,21 +355,18 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
 
   size_t pc = 0;
   while (pc < words.size()) {
-    try {
-      std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
-      if (!inst) {
-        lines.push_back("<decode returned null>");
-        ++pc;
-        continue;
-      }
-
-      lines.push_back(inst->disassemble());
-      const uint32_t inst_words = inst->size() / sizeof(uint32_t);
-      pc += inst_words == 0 ? 1 : inst_words;
-    } catch (const std::exception &e) {
-      lines.push_back(std::string("<decode error: ") + e.what() + ">");
+    util::StringDiagnostic decode_error;
+    DecodeResult decoded = decoder->decode(&words[pc], decode_error.emitter());
+    if (decoded.failed()) {
+      lines.push_back(std::string("<decode error: ") + decode_error.message() + ">");
       ++pc;
+      continue;
     }
+
+    const std::unique_ptr<Instruction> &inst = decoded.value();
+    lines.push_back(inst->disassemble());
+    const uint32_t inst_words = inst->size() / sizeof(uint32_t);
+    pc += inst_words == 0 ? 1 : inst_words;
   }
 
   return lines;
@@ -233,13 +374,14 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
 
 [[nodiscard]] InstructionTranslationReport
 build_instruction_report(const TranslationTraceEvent &trace, const AmdGpuCodeObject &source,
-                         rj_code_arch_t guest_arch, rj_code_arch_t host_arch) {
+                         rj_code_target_id_t guest_target, rj_code_arch_t guest_arch,
+                         rj_code_target_id_t host_target, rj_code_arch_t host_arch) {
   InstructionTranslationReport report;
   report.source_offset = trace.source_offset;
   report.source_size = trace.source_size;
   report.source_words.assign(trace.source_words.begin(), trace.source_words.end());
   report.source_instruction =
-      disassemble_source_instruction(source, trace.source_offset, guest_arch);
+      disassemble_source_instruction(source, trace.source_offset, guest_target, guest_arch);
   report.has_legalization = trace.legalization != nullptr;
   report.action = trace.legalization ? trace.legalization->action : Action::Identity;
   report.copied_original = trace.copied_original;
@@ -248,7 +390,7 @@ build_instruction_report(const TranslationTraceEvent &trace, const AmdGpuCodeObj
   report.emitted_in_cave = trace.emitted_in_cave;
   report.target_offset = trace.target_offset;
   report.target_words.assign(trace.target_words.begin(), trace.target_words.end());
-  report.target_instructions = disassemble_words(report.target_words, host_arch);
+  report.target_instructions = disassemble_words(report.target_words, host_target, host_arch);
   return report;
 }
 
@@ -274,6 +416,19 @@ struct SelectedInput {
     if (selected.code_object != nullptr)
       return selected;
 
+    // A standalone code object is also a valid one-object Executable. On a
+    // failed selection, distinguish concrete metadata disagreement from an
+    // out-of-range executable selection so the target-boundary failure is
+    // actionable.
+    AmdGpuCodeObject direct_object(options.input_path);
+    if (direct_object.is_valid() && direct_object.target_id() != ROCJITSU_CODE_TARGET_INVALID &&
+        options.input_target != ROCJITSU_CODE_TARGET_INVALID &&
+        direct_object.target_id() != options.input_target) {
+      error = "input target does not match standalone code-object target metadata";
+      selected.executable.reset();
+      return selected;
+    }
+
     error = "failed to select requested code object from executable: " + options.input_path;
     selected.executable.reset();
     return selected;
@@ -290,11 +445,58 @@ struct SelectedInput {
     return selected;
   }
 
+  const rj_code_target_id_t object_target = selected.direct_code_object->target_id();
+  if (object_target != ROCJITSU_CODE_TARGET_INVALID &&
+      options.input_target != ROCJITSU_CODE_TARGET_INVALID &&
+      object_target != options.input_target) {
+    error = "input target does not match standalone code-object target metadata";
+    selected.direct_code_object.reset();
+    return selected;
+  }
+
   selected.code_object = selected.direct_code_object.get();
   return selected;
 }
 
 } // namespace
+
+std::optional<std::string_view> translation_request_error(const TranslateOptions &options) {
+  const bool input_is_gfx1250 = options.input_target == ROCJITSU_CODE_TARGET_GFX1250;
+  const uint32_t output_machine =
+      options.target_mach ? options.target_mach : elf_mach_for_arch(options.host_arch);
+  const bool output_is_gfx1250 = (output_machine & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1250;
+
+  if (input_is_gfx1250 && options.input_revision == ProcessorRevision::Unspecified) {
+    return "--input-revision is required when --input-target is gfx1250";
+  }
+  if (!input_is_gfx1250 && options.input_revision != ProcessorRevision::Unspecified) {
+    return "--input-revision is only valid when --input-target is gfx1250";
+  }
+  if (output_is_gfx1250 && options.output_revision == ProcessorRevision::Unspecified) {
+    return "--output-revision is required when --output-target is gfx1250";
+  }
+  if (!output_is_gfx1250 && options.output_revision != ProcessorRevision::Unspecified) {
+    return "--output-revision is only valid when --output-target is gfx1250";
+  }
+  if (input_is_gfx1250 && output_is_gfx1250 &&
+      options.input_revision == ProcessorRevision::Gfx1250A0 &&
+      options.output_revision == ProcessorRevision::Gfx1250B0) {
+    return "gfx1250 A0-to-B0 translation is not supported";
+  }
+  if (options.verify_idempotence && options.guest_arch != options.host_arch)
+    return "--verify-idempotence requires matching input and output architectures";
+  if (options.verify_idempotence && options.skip_failed_kernels)
+    return "--verify-idempotence cannot be combined with --skip-failed-kernels";
+  if (options.verify_rewrite_discharge &&
+      !(input_is_gfx1250 && output_is_gfx1250 &&
+        options.input_revision == ProcessorRevision::Gfx1250B0 &&
+        options.output_revision == ProcessorRevision::Gfx1250A0)) {
+    return "--verify-rewrite-discharge requires gfx1250 b0-to-a0 translation";
+  }
+  if (options.verify_rewrite_discharge && options.skip_failed_kernels)
+    return "--verify-rewrite-discharge cannot be combined with --skip-failed-kernels";
+  return std::nullopt;
+}
 
 ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &options) {
   ToolResult<TranslateOutput> output;
@@ -304,33 +506,8 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
   output.value.input_revision = options.input_revision;
   output.value.output_revision = options.output_revision;
 
-  // A0 and B0 share gfx1250's ELF machine ID, so the tool API requires the
-  // separate input and output revisions before it can choose a direction.
-  if (options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.input_revision == ProcessorRevision::Unspecified) {
-    add_error(output, kInputError, "input revision is required for gfx1250");
-    return output;
-  }
-  if (options.guest_arch != ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.input_revision != ProcessorRevision::Unspecified) {
-    add_error(output, kInputError, "input revision is only supported for gfx1250");
-    return output;
-  }
-  if (options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.output_revision == ProcessorRevision::Unspecified) {
-    add_error(output, kInputError, "output revision is required for gfx1250");
-    return output;
-  }
-  if (options.host_arch != ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.output_revision != ProcessorRevision::Unspecified) {
-    add_error(output, kInputError, "output revision is only supported for gfx1250");
-    return output;
-  }
-  if (options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.input_revision == ProcessorRevision::Gfx1250A0 &&
-      options.output_revision == ProcessorRevision::Gfx1250B0) {
-    add_error(output, kInputError, "gfx1250 A0-to-B0 translation is not supported");
+  if (const std::optional<std::string_view> request_error = translation_request_error(options)) {
+    add_error(output, kInputError, std::string(*request_error));
     return output;
   }
 
@@ -345,34 +522,35 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     add_error(output, kInputError, error.empty() ? "failed to load input" : error);
     return output;
   }
+  output.value.source_code_object_id =
+      stable_code_object_id(input.code_object->image_data(), input.code_object->image_size());
 
   const bool need_report = options.collect_diagnostics;
   const bool need_source_disassembly = options.disassembly == DisassemblyMode::Source ||
                                        options.disassembly == DisassemblyMode::Both;
   const bool need_translated_disassembly = options.disassembly == DisassemblyMode::Translated ||
                                            options.disassembly == DisassemblyMode::Both;
+  const uint32_t output_machine =
+      options.target_mach ? options.target_mach : elf_mach_for_arch(options.host_arch);
+  const rj_code_target_id_t output_target = target_for_machine(output_machine);
 
   if (need_report || need_source_disassembly) {
-    auto source_inspection = inspect_code_object(*input.code_object, options.guest_arch, "source",
-                                                 need_source_disassembly);
+    auto source_inspection =
+        inspect_code_object(*input.code_object, options.input_target, options.guest_arch, "source",
+                            need_source_disassembly);
     output.value.source_report = std::move(source_inspection.report);
     output.value.disassembly += source_inspection.disassembly;
   }
 
   try {
-    BinaryTranslatorOptions translator_options;
-    translator_options.debug_min_free_vgpr = options.debug_min_free_vgpr;
-    translator_options.debug_continue_after_failure = options.debug_continue_after_failure;
-    translator_options.skip_failed_kernels = options.skip_failed_kernels;
-    translator_options.input_revision = options.input_revision;
-    translator_options.output_revision = options.output_revision;
     BinaryTranslator translator(options.guest_arch, options.host_arch, options.target_mach,
-                                translator_options);
+                                make_binary_translator_options(options));
     if (need_report) {
       output.value.instruction_translations.clear();
       translator.set_trace_callback([&](const TranslationTraceEvent &trace) {
-        output.value.instruction_translations.push_back(build_instruction_report(
-            trace, *input.code_object, options.guest_arch, options.host_arch));
+        output.value.instruction_translations.push_back(
+            build_instruction_report(trace, *input.code_object, options.input_target,
+                                     options.guest_arch, output_target, options.host_arch));
       });
     }
     auto translated = translator.translate(*input.code_object);
@@ -381,6 +559,8 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     output.value.target_mach =
         options.target_mach ? options.target_mach : elf_mach_for_arch(output.value.host_arch);
     output.value.diagnostics = std::move(translated.diagnostics);
+    output.value.rewrite_discharge_checked = translated.rewrite_discharge_checked;
+    output.value.rewrite_discharge_verified = translated.rewrite_discharge_verified;
   } catch (const std::exception &e) {
     add_error(output, kTranslationError, std::string("translation threw exception: ") + e.what());
     return output;
@@ -403,15 +583,57 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
   }
 
   {
-    auto translated_inspection = inspect_code_object(translated_obj, options.host_arch,
-                                                     "translated", need_translated_disassembly);
+    auto translated_inspection =
+        inspect_code_object(translated_obj, translated_obj.target_id(), options.host_arch,
+                            "translated", need_translated_disassembly);
     output.value.translated_report = std::move(translated_inspection.report);
     output.value.disassembly += translated_inspection.disassembly;
   }
 
-  if (!validate_host_decode(output.value.translated_report, error)) {
+  const bool data_only = has_diagnostic_kind(output.value.diagnostics, DiagnosticKind::DataOnly);
+  if (!data_only && !validate_host_decode(output.value.translated_report, error)) {
     add_error(output, kValidationError, error);
     return output;
+  }
+
+  if (options.verify_idempotence) {
+    output.value.idempotence_checked = true;
+    try {
+      auto verifier_options = make_binary_translator_options(options);
+      // The first translation already audited the authoritative output. The
+      // idempotence pass only needs to prove that translating those bytes again
+      // does not change them; auditing its temporary output would duplicate the
+      // final-stream scan and raise peak memory on large code objects.
+      verifier_options.verify_rewrite_discharge = false;
+      BinaryTranslator verifier(options.guest_arch, options.host_arch, options.target_mach,
+                                verifier_options);
+      TranslatedCodeObject second = verifier.translate(translated_obj);
+      const bool second_ok = second.ok();
+      output.value.idempotence_diagnostics = std::move(second.diagnostics);
+      if (!second_ok) {
+        add_error(output, kValidationError, "idempotence verification second translation failed");
+        return output;
+      }
+      if (second.elf_bytes != output.value.elf_bytes) {
+        AmdGpuCodeObject second_obj(second.elf_bytes.data(), second.elf_bytes.size());
+        if (!second_obj.is_valid()) {
+          add_error(output, kValidationError,
+                    "idempotence verification produced an invalid AMDGPU code object");
+          return output;
+        }
+        add_error(output, kValidationError,
+                  "translation output is not byte-idempotent: " +
+                      find_idempotence_difference(translated_obj, second_obj,
+                                                  output.value.elf_bytes, second.elf_bytes));
+        return output;
+      }
+      output.value.idempotence_verified = true;
+    } catch (const std::exception &e) {
+      add_error(output, kTranslationError,
+                std::string("idempotence verification second translation threw exception: ") +
+                    e.what());
+      return output;
+    }
   }
 
   return output;

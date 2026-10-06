@@ -1,7 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(pmc-nic-collector-tests OBJECT test_nic_device.cpp)
+add_library(
+    pmc-nic-collector-tests
+    OBJECT
+    test_nic_device.cpp
+    test_nic_perfetto_policy.cpp
+    test_nic_traits_register_agents.cpp
+)
 
 target_link_libraries(
     pmc-nic-collector-tests
@@ -11,6 +17,8 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-headers
         rocprofiler-systems::rocprofiler-systems-rocm
         rocprofiler-systems::rocprofiler-systems-compile-definitions
+        # perfetto_policy.hpp pulls in core/perfetto.hpp -> perfetto.h
+        rocprofiler-systems::rocprofiler-systems-interface-library
 )
 
 if(ROCPROFSYS_BUILD_AINIC)

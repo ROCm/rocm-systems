@@ -179,7 +179,7 @@ protected:
 
 TEST_F(ucx_gotcha_test, test_static_labels)
 {
-    ucx_gotcha_under_test_t g;
+    const ucx_gotcha_under_test_t g;
     EXPECT_EQ(g.label(), "ucx_gotcha");
     EXPECT_EQ(g.gotcha_capacity, GOTCHA_CAPACITY);
 }
@@ -259,16 +259,12 @@ TEST_F(ucx_gotcha_test, test_configure_function_names)
 
     ASSERT_EQ(configured_names.size(), static_cast<size_t>(NUMBER_OF_FUNCTIONS));
     // A representative sample of the wrapped UCX symbols.
-    EXPECT_NE(
-        configured_names.end(),
-        std::find(configured_names.begin(), configured_names.end(), "ucp_tag_send_nbx"));
-    EXPECT_NE(
-        configured_names.end(),
-        std::find(configured_names.begin(), configured_names.end(), "ucp_tag_recv_nbx"));
     EXPECT_NE(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(), "ucp_put_nbx"));
+              std::ranges::find(configured_names, "ucp_tag_send_nbx"));
     EXPECT_NE(configured_names.end(),
-              std::find(configured_names.begin(), configured_names.end(), "ucp_get_nbx"));
+              std::ranges::find(configured_names, "ucp_tag_recv_nbx"));
+    EXPECT_NE(configured_names.end(), std::ranges::find(configured_names, "ucp_put_nbx"));
+    EXPECT_NE(configured_names.end(), std::ranges::find(configured_names, "ucp_get_nbx"));
 }
 
 TEST_F(ucx_gotcha_test, test_audit_incoming_generic)
@@ -318,7 +314,7 @@ TEST_F(ucx_gotcha_test, test_audit_outgoing_int)
     MockedGotchaData data;
     data.tool_id = "ucp_put";
 
-    int ret = 7;
+    const int ret = 7;
 
     EXPECT_CALL(*test_globals::g_category_region_gmock, stop_int)
         .Times(1)
@@ -336,7 +332,7 @@ TEST_F(ucx_gotcha_test, test_audit_outgoing_unsigned)
     data.tool_id = "ucp_worker_progress";
 
     // Progress APIs (e.g. ucp_worker_progress, uct_iface_progress) return unsigned
-    unsigned ret = 3;
+    const unsigned ret = 3;
 
     EXPECT_CALL(*test_globals::g_category_region_gmock, stop_unsigned)
         .Times(1)
@@ -354,7 +350,7 @@ TEST_F(ucx_gotcha_test, test_audit_outgoing_long)
     data.tool_id = "uct_ep_am_bcopy";
 
     // ssize_t-returning UCT APIs decay to long; the value must not be truncated to int.
-    long ret = 5000000000L;
+    const long ret = 5000000000L;
 
     EXPECT_CALL(*test_globals::g_category_region_gmock, stop_long)
         .Times(1)
@@ -420,7 +416,7 @@ TEST_F(ucx_gotcha_test, test_audit_incoming_rma_put)
 
 TEST_F(ucx_gotcha_test, test_different_gotcha_tool_ids)
 {
-    auto test_incoming = [](const std::string& tool_id) {
+    auto const test_incoming = [](const std::string& tool_id) {
         MockedGotchaData data;
         data.tool_id = tool_id;
         EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)

@@ -104,15 +104,15 @@ class BlitSdmaBase : public core::Blit {
   /// @brief Maximum byte count a single linear copy packet can describe
   /// (the 30-bit count field, ~1 GiB).  Larger copies are split into multiple
   /// chunked packets; both the plain (BuildCopyCommand) and fused WaitSignal
-  /// builders chunk internally.  The indirect WaitSignal packet is the lone
+  /// WaitSignal builders chunk internally. The indirect WaitSignal packet is the lone
   /// exception - it has no offset field, so callers must reject indirect copies
   /// larger than this limit.
   virtual size_t MaxSingleLinearCopySize() const = 0;
 
-  /// @brief Single-doorbell fused WaitSignal copy for gfx125+ single copies.
-  /// Emits GCR invalidate + dep polls + N fused WaitSignal+Copy packets +
+  /// @brief Single-doorbell WaitSignal copy for gfx125+ single copies.
+  /// Emits GCR invalidate + dep polls + N WaitSignal copy packets +
   /// GCR writeback + mailbox/trap — all in one ring reservation.
-  /// Each chunk carries wait+copy+signal dec inline; no prologue signal needed.
+  /// Only the first packet waits and only the final packet signals.
   /// When profiling is enabled, start/end SDMA timestamp commands are emitted
   /// around the copy packets (after dep polls and after copies respectively).
   virtual hsa_status_t SubmitLinearCopyBodyWaitSignal(
@@ -124,9 +124,10 @@ class BlitSdmaBase : public core::Blit {
   /// @brief Unified prologue: dep polls, HDP flush, start timestamp, GCR
   /// invalidate, and prologue_signal decrement — emitted conditionally based on
   /// @p fused_bodies and the internal profiling_enabled() state.
-  ///   fused + !profiling: only GCR invalidate + prologue_signal dec (bodies WAIT
-  ///     on deps themselves).
-  ///   !fused or profiling: dep polls + HDP flush + [start timestamp] + GCR + dec.
+  ///   WaitSignal + !profiling: only GCR invalidate + prologue_signal dec
+  ///     (bodies WAIT on deps themselves).
+  ///   Classic packets or profiling: dep polls + HDP flush +
+  ///     [start timestamp] + GCR + dec.
   virtual hsa_status_t SubmitPrologue(
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
@@ -156,7 +157,6 @@ class BlitSdmaBase : public core::Blit {
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
       core::Signal* prologue_signal,
-      bool fused_bodies,
       hsa_amd_memory_copy_op_type_t op,
       const std::vector<void*>& dsts,
       const std::vector<const void*>& srcs,
@@ -167,10 +167,9 @@ class BlitSdmaBase : public core::Blit {
 
   /// @brief Unified body submission: one ring reservation (one doorbell) for all
   /// entries in an engine group.  Dispatches internally to copy / swap / indirect
-  /// packet builders based on @p op.  Every chunk waits on dep_signals[0] and
-  /// decrements out_signal via fused WaitSignal packets; dep_signals[1..] are
-  /// leading 64b polls.  Arms out_signal for chunk extras:
-  /// AddRelaxed(total_chunks - num_entries).
+  /// packet builders based on @p op. The first packet waits on dep_signals[0],
+  /// the final packet decrements out_signal, and middle packets carry neither
+  /// WAIT nor SIGNAL; dep_signals[1..] are leading 64b polls.
   ///
   /// Entries are gathered directly from the caller's master @p dst_list /
   /// @p src_list / @p size_list arrays via @p indices, avoiding per-engine
@@ -316,7 +315,6 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
       core::Signal* prologue_signal,
-      bool fused_bodies,
       hsa_amd_memory_copy_op_type_t op,
       const std::vector<void*>& dsts,
       const std::vector<const void*>& srcs,
@@ -422,7 +420,8 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   void BuildWaitSignalCopyCommand(char* cmd_addr, uint32_t num_copy_command,
                                   void* dst, const void* src, size_t size,
                                   const core::Signal* wait_signal,
-                                  core::Signal* signal_signal);
+                                  core::Signal* signal_signal,
+                                  bool boundary_wait_signal);
 
   void BuildWaitSignalSwapCommand(char* cmd_addr, uint32_t num_copy_command,
                                   void* addr_a, void* addr_b,

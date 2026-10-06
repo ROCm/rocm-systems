@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <algorithm>
+#include <numeric>
 #include "avc_parser.h"
 
 AvcVideoParser::AvcVideoParser() {
@@ -497,7 +498,7 @@ ParserResult AvcVideoParser::NotifyNewSps(AvcSeqParameterSet *p_sps) {
     }
     int disp_width = (video_format_params_.display_area.right - video_format_params_.display_area.left) * sar.numerator;
     int disp_height = (video_format_params_.display_area.bottom - video_format_params_.display_area.top) * sar.denominator;
-    int gcd = std::__gcd(disp_width, disp_height); // greatest common divisor
+    int gcd = std::gcd(disp_width, disp_height); // greatest common divisor
     if (gcd) {
         video_format_params_.display_aspect_ratio.x = disp_width / gcd;
         video_format_params_.display_aspect_ratio.y = disp_height / gcd;
@@ -1498,6 +1499,8 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
         if (p_slice_header->ref_pic_list.ref_pic_list_modification_flag_l0 == 1) {
             i = 0;
             do {
+                // The terminating entry can be at most at index num_ref_idx_l0_active_minus1 + 1.
+                CHECK_ALLOWED_MAX("ref_pic_list_modification_l0 entry count", i, static_cast<int>(p_slice_header->num_ref_idx_l0_active_minus1) + 1);
                 modification_of_pic_nums_idc = Parser::ExpGolomb::ReadUe(p_stream, offset);
                 CHECK_ALLOWED_RANGE("modification_of_pic_nums_idc", modification_of_pic_nums_idc, 0, 3);
                 p_slice_header->ref_pic_list.modification_l0[i].modification_of_pic_nums_idc = modification_of_pic_nums_idc;
@@ -1517,6 +1520,8 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
         if (p_slice_header->ref_pic_list.ref_pic_list_modification_flag_l1 == 1) {
             i = 0;
             do {
+                // The terminating entry can be at most at index num_ref_idx_l1_active_minus1 + 1.
+                CHECK_ALLOWED_MAX("ref_pic_list_modification_l1 entry count", i, static_cast<int>(p_slice_header->num_ref_idx_l1_active_minus1) + 1);
                 modification_of_pic_nums_idc = Parser::ExpGolomb::ReadUe(p_stream, offset);
                 CHECK_ALLOWED_RANGE("modification_of_pic_nums_idc", modification_of_pic_nums_idc, 0, 3);
                 p_slice_header->ref_pic_list.modification_l1[i].modification_of_pic_nums_idc = modification_of_pic_nums_idc;
@@ -1620,6 +1625,7 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
             if (p_slice_header->dec_ref_pic_marking.adaptive_ref_pic_marking_mode_flag == 1) {
                 i = 0;
                 do {
+                    CHECK_ALLOWED_MAX("mmco entry count", i, AVC_MAX_MMCO_NUM - 1);
                     memory_management_control_operation = Parser::ExpGolomb::ReadUe(p_stream, offset);
                     CHECK_ALLOWED_RANGE("memory_management_control_operation", memory_management_control_operation, 0, 6);
                     p_slice_header->dec_ref_pic_marking.mmco[i].memory_management_control_operation = memory_management_control_operation;
@@ -2728,6 +2734,7 @@ ParserResult AvcVideoParser::ModifiyRefList(AvcPicture *ref_pic_list_x, AvcListM
     int num_short_term_pics = curr_pic_.pic_structure == kFrame ? dpb_buffer_.num_short_term : dpb_buffer_.num_short_term_ref_fields;
     int num_long_term_pics = curr_pic_.pic_structure == kFrame ? dpb_buffer_.num_long_term : dpb_buffer_.num_long_term_ref_fields;
     AvcPicture ref_pic_list_mod[AVC_MAX_REF_PICTURE_NUM + 1];
+    AvcListMod *p_list_mod_base = p_list_mod; // modification_l0 or modification_l1 of the current slice
     int i, c_idx, n_idx;
 
     memcpy(ref_pic_list_mod, ref_pic_list_x, sizeof(AvcPicture) * num_ref_idx_lx_active);
@@ -2811,7 +2818,7 @@ ParserResult AvcVideoParser::ModifiyRefList(AvcPicture *ref_pic_list_x, AvcListM
                 }
             }
         }
-        p_list_mod = &p_slice_header->ref_pic_list.modification_l0[ref_idx_lx];
+        p_list_mod = &p_list_mod_base[ref_idx_lx];
     }
 
     memcpy(ref_pic_list_x, ref_pic_list_mod, sizeof(AvcPicture) * num_ref_idx_lx_active);
@@ -3605,16 +3612,22 @@ void AvcVideoParser::PrintSliceHeader(AvcSliceHeader *p_slice_header) {
     MSG("ref_pic_list_modification_flag_l0 = " << p_slice_header->ref_pic_list.ref_pic_list_modification_flag_l0);
     if ( p_slice_header->ref_pic_list.ref_pic_list_modification_flag_l0 ){
         MSG("Modification operations for list 0: ");
-        for (j = 0; j < AVC_MAX_REF_PICTURE_NUM; j++) {
+        for (j = 0; j < AVC_MAX_REF_LIST_MOD_NUM; j++) {
             MSG_NO_NEWLINE("(" << p_slice_header->ref_pic_list.modification_l0[j].modification_of_pic_nums_idc << ", " << p_slice_header->ref_pic_list.modification_l0[j].abs_diff_pic_num_minus1 << ", " << p_slice_header->ref_pic_list.modification_l0[j].long_term_pic_num << ") ");
+            if (p_slice_header->ref_pic_list.modification_l0[j].modification_of_pic_nums_idc == 3) {
+                break;
+            }
         }
         MSG("");
     }
     MSG("ref_pic_list_modification_flag_l1 = " << p_slice_header->ref_pic_list.ref_pic_list_modification_flag_l1);
     if ( p_slice_header->ref_pic_list.ref_pic_list_modification_flag_l1 ) {
         MSG("Modification operations for list 1: ");
-        for (j = 0; j < AVC_MAX_REF_PICTURE_NUM; j++) {
+        for (j = 0; j < AVC_MAX_REF_LIST_MOD_NUM; j++) {
             MSG_NO_NEWLINE("(" << p_slice_header->ref_pic_list.modification_l1[j].modification_of_pic_nums_idc << ", " << p_slice_header->ref_pic_list.modification_l1[j].abs_diff_pic_num_minus1 << ", " << p_slice_header->ref_pic_list.modification_l1[j].long_term_pic_num << ") ");
+            if (p_slice_header->ref_pic_list.modification_l1[j].modification_of_pic_nums_idc == 3) {
+                break;
+            }
         }
         MSG("");
     }
@@ -3628,7 +3641,7 @@ void AvcVideoParser::PrintSliceHeader(AvcSliceHeader *p_slice_header) {
     MSG("adaptive_ref_pic_marking_mode_flag = " << refMarking->adaptive_ref_pic_marking_mode_flag);
     if ( refMarking->adaptive_ref_pic_marking_mode_flag ) {
         MSG("mmco_count = " << refMarking->mmco_count);
-        for (j = 0; j < AVC_MAX_REF_PICTURE_NUM; j++) {
+        for (j = 0; j < refMarking->mmco_count; j++) {
             MSG_NO_NEWLINE("(" << refMarking->mmco[j].memory_management_control_operation << ", " << refMarking->mmco[j].difference_of_pic_nums_minus1 << ", " << refMarking->mmco[j].long_term_pic_num << ", " << refMarking->mmco[j].long_term_frame_idx << ", " << refMarking->mmco[j].max_long_term_frame_idx_plus1 << ") ");
         }
         MSG("");

@@ -72,6 +72,7 @@ ncclTopoSystem* makeSystemWithNets(const std::vector<NetSpec>& nics)
         node.net.asic  = nics[i].asic;
         node.net.port  = nics[i].port;
         node.net.pciId = nics[i].pciId;
+        node.net.railId = NCCL_TOPO_UNDEF;
     }
     return sys;
 }

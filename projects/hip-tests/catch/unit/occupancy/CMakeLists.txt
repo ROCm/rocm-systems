@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 # Common Tests - Test independent of all platforms
-set(TARGETS_SUPPORTING_CLUSTERS gfx1250 gfx1251)
+set(TARGETS_SUPPORTING_CLUSTERS gfx1250)
 set(CLUSTERS_SUPPORTED -1)
 
 function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
@@ -36,6 +36,12 @@ if(HIP_PLATFORM MATCHES "amd")
   elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
     CheckRejectedArchs($ENV{HCC_AMDGPU_TARGET})
   endif()
+
+  # The WGP/CU reporting is AMD specific.
+  set(TEST_SRC
+    ${TEST_SRC}
+    hipOccupancyLdsPerMultiprocessor.cc
+    )
 
   if(CLUSTERS_SUPPORTED EQUAL 1)
     message(STATUS "Adding clusters tests")

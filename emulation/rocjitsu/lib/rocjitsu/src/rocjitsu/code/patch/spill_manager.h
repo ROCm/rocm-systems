@@ -114,10 +114,12 @@ public:
   ///       partially-completed allocation never becomes visible.
   [[nodiscard]] std::optional<uint32_t> allocate_slots(RegisterRef reg, unsigned width);
 
-  /// @brief Allocate slots for every register in @p set.
+  /// @brief Allocate slots for every ordinary register in @p set.
   /// @returns true on success. On failure the manager is unchanged — the
   ///          capacity check runs upfront across all new registers, so no
   ///          partial commit is possible.
+  /// @note A set containing any special singleton (EXEC/VCC/...) fails cleanly
+  ///       and reserves nothing: special registers have no scratch slot.
   /// @note An empty set or a set whose registers are all already cached
   ///       returns true even on an over-limit manager — no new bytes are
   ///       requested, so no capacity check fires.

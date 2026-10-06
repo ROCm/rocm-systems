@@ -14,6 +14,7 @@
 #include "hip_graph_capture.hpp"
 
 #include <atomic>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <thread>
@@ -104,10 +105,16 @@ const char* ihipGetErrorName(hipError_t hip_error);
 } // namespace hip
 
 #if defined(__GNUC__) || defined(__clang__)
-extern "C" __attribute__((visibility("default"))) void __hipOnError(const void *err_info);
+#define HIP_PUBLIC_API extern "C" __attribute__((visibility("default")))
+#define HIP_INTERNAL_EXPORTED_API extern "C" __attribute__((visibility("default")))
 #else
-extern "C" void __hipOnError(const void *err_info);
+// MSVC could have use __declspec(dllexport), but we'll see a redeclaration
+// warning. Let's just rely on the .def file under MSVC.
+#define HIP_PUBLIC_API extern "C"
+#define HIP_INTERNAL_EXPORTED_API extern "C"
 #endif
+
+HIP_PUBLIC_API void __hipOnError(const void *err_info);
 
 // Helper: set up TLS device pointer on first use.
 #define HIP_INIT_TLS_DEVICE()                                                                      \
@@ -250,7 +257,7 @@ extern "C" void __hipOnError(const void *err_info);
       hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {                               \
     if (!hip::tls.capture_streams_.empty()) {                                                      \
       for (auto stream : hip::tls.capture_streams_) {                                              \
-        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                               \
+        stream->InvalidateCapture();                                                               \
       }                                                                                            \
       HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                \
     }                                                                                              \
@@ -258,7 +265,7 @@ extern "C" void __hipOnError(const void *err_info);
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal &&                               \
       !g_captureStreams.empty()) {                                                                 \
     for (auto stream : g_captureStreams) {                                                         \
-      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                                 \
+      stream->InvalidateCapture();                                                                 \
     }                                                                                              \
     HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                  \
   }
@@ -267,7 +274,7 @@ extern "C" void __hipOnError(const void *err_info);
 #define INVALIDATE_ALL_CAPTURING_AND_RETURN(err)                                                   \
   if (!g_allCapturingStreams.empty()) {                                                            \
     for (auto stream : g_allCapturingStreams) {                                                    \
-      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                                 \
+      stream->InvalidateCapture();                                                                 \
     }                                                                                              \
     return err;                                                                                    \
   }
@@ -366,8 +373,7 @@ namespace hip {
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
 
     Stream(Device* dev, Priority p = Priority::Normal, unsigned int f = 0, bool null_stream = false,
-           const std::vector<uint32_t>& cuMask = {},
-           hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone);
+           const std::vector<uint32_t>& cuMask = {});
 
     // --- Core stream operations ---
 
@@ -390,6 +396,19 @@ namespace hip {
     /// Fetch the stream Id
     uint64_t GetStreamId() const { return stream_id_; }
 
+    void SetAsyncError(hipError_t err) {
+      hipError_t expected = hipSuccess;
+      async_error_.compare_exchange_strong(expected, err,
+          std::memory_order_release, std::memory_order_relaxed);
+    }
+    hipError_t GetAndClearAsyncError() {
+      // Fast path: no error, skip the locked RMW.
+      if (async_error_.load(std::memory_order_acquire) == hipSuccess) {
+        return hipSuccess;
+      }
+      return async_error_.exchange(hipSuccess, std::memory_order_acq_rel);
+    }
+
     static void Destroy(hip::Stream* stream, bool forceDestroy = false);
     virtual bool terminate();
 
@@ -399,56 +418,48 @@ namespace hip {
     static bool StreamCaptureBlocking();
     /// Check Stream Capture status to make sure it is done
     static bool StreamCaptureOngoing(hipStream_t hStream);
-    /// Generate ID for stream capture unique over the lifetime of the process
-    static uint64_t GenerateCaptureID() {
-      static std::atomic<uint64_t> uid(0);
-      return ++uid;
-    }
-
     /// Returns capture status of the current stream
-    hipStreamCaptureStatus GetCaptureStatus() const { return captureStatus_; }
+    hipStreamCaptureStatus GetCaptureStatus() const {
+      return captureStatus_.load(std::memory_order_acquire);
+    }
     /// Returns capture mode of the current stream
     hipStreamCaptureMode GetCaptureMode() const { return captureMode_; }
     /// Returns if stream is origin stream
     bool IsOriginStream() const { return originStream_; }
-    /// Mark this stream as the origin of a capture
-    void SetOriginStream() { originStream_ = true; }
-    /// Returns captured graph
-    hip::Graph* GetCaptureGraph() const { return pCaptureGraph_; }
+    /// Returns the graph being recorded by the capture this stream takes part in, or null when
+    /// it is not capturing. The graph lives on the origin.
+    hip::Graph* GetCaptureGraph() const {
+      return captureOwner_ != nullptr ? captureOwner_->captureGraph_.get() : nullptr;
+    }
     /// Returns last captured graph node
     const std::vector<hip::GraphNode*>& GetLastCapturedNodes() const { return lastCapturedNodes_; }
-    /// Set last captured graph node
-    void SetLastCapturedNode(hip::GraphNode* graphNode) { lastCapturedNodes_ = {graphNode}; }
+    /// Set last captured graph node; copies stream priority onto kernel nodes.
+    void SetLastCapturedNode(hip::GraphNode* graphNode);
     /// Returns dependencies removed during capture
     const std::vector<hip::GraphNode*>& GetRemovedDependencies() const {
       return removedDependencies_;
     }
     /// Append captured node via the wait event cross stream
-    void AddCrossCapturedNode(const std::vector<hip::GraphNode*>& graphNodes,
-                              bool replace = false);
-    /// Set graph that is being captured
-    void SetCaptureGraph(hip::Graph* pGraph) {
-      pCaptureGraph_ = pGraph;
-      captureStatus_ = hipStreamCaptureStatusActive;
-    }
-    /// Release graph when capture is invalidated
-    void ReleaseCaptureGraph();
-    /// Drop the capture-graph pointer without freeing it (forks alias the origin's graph).
-    void ClearCaptureGraph() { pCaptureGraph_ = nullptr; }
-    /// Generate and assign a new capture ID (used at BeginCapture)
-    void SetCaptureID() { captureID_ = GenerateCaptureID(); }
-    /// Inherit capture ID from the parent stream
-    void SetCaptureID(uint64_t captureId) { captureID_ = captureId; }
+    hipError_t AddCrossCapturedNode(const std::vector<hip::GraphNode*>& graphNodes,
+                                    bool replace = false);
+    /// Begin a capture with this stream as its origin, and its only member until others join.
+    /// The origin owns the graph for the life of the capture.
+    void StartCapture(std::unique_ptr<hip::Graph> graph, hipStreamCaptureMode mode);
+    /// Enroll this stream in the capture that `member` takes part in. Membership is tracked on
+    /// the capture's origin, so this publishes into the origin's set, not into `member`'s.
+    void JoinCapture(hip::Stream* member);
     /// Reset capture parameters, optionally keeping an invalidated status observable.
-    hipError_t EndCapture(bool preserveInvalidated = false);
+    /// The single entry point for capture teardown, on the origin and on participants alike,
+    /// and the only place the captured graph is disposed of.
+    ///
+    /// Returns the graph, which the caller then owns, when the origin ends a capture that is
+    /// still valid. Returns null for a participant, whose departure leaves the capture running,
+    /// and for an invalidated capture, whose graph is destroyed here instead.
+    [[nodiscard]] hip::Graph* EndCapture(bool preserveInvalidated = false);
     /// Set capture status
-    void SetCaptureStatus(hipStreamCaptureStatus captureStatus) { captureStatus_ = captureStatus; }
-    /// Set capture mode
-    void SetCaptureMode(hipStreamCaptureMode captureMode) { captureMode_ = captureMode; }
-    /// Set parent stream
-    void SetParentStream(hipStream_t parentStream) { parentStream_ = parentStream; }
-    /// Get parent stream
-    hipStream_t GetParentStream() const { return parentStream_; }
+    void SetCaptureStatus(hipStreamCaptureStatus captureStatus) {
+      captureStatus_.store(captureStatus, std::memory_order_release);
+    }
     /// Get capture ID
     uint64_t GetCaptureID() const { return captureID_; }
     /// Associate an event with the current capture
@@ -466,10 +477,10 @@ namespace hip {
       std::scoped_lock lock(lock_);
       captureEvents_.erase(e);
     }
-    /// Register a parallel (forked) capture stream
-    void SetParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.insert(s); }
-    /// Remove a parallel capture stream
-    void EraseParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.erase(s); }
+    /// Mark the whole capture that this stream belongs to as invalidated: the origin and
+    /// every stream enrolled in it. Callable from the origin or from any participant, and a
+    /// no-op on a stream that is not taking part in a capture.
+    void InvalidateCapture();
 
     // --- Execution context (green context) lifecycle ---
     /// Marks the stream as detached: its owning ExecutionCtx has been
@@ -487,9 +498,19 @@ namespace hip {
     }
 
   private:
-    ~Stream() = default;
+    ~Stream();
 
-    mutable std::recursive_mutex lock_;      //!< Guards captureEvents_ bookkeeping
+    /// Generate ID for stream capture unique over the lifetime of the process
+    static uint64_t GenerateCaptureID() {
+      static std::atomic<uint64_t> uid(0);
+      return ++uid;
+    }
+
+    /// Return this stream's capture fields to defaults. Requires lock_ to be held, since
+    /// EndCapture applies it to a participant while holding the origin's lock too.
+    void ResetCaptureStateLocked(bool preserveInvalidated);
+
+    mutable std::recursive_mutex lock_;      //!< Guards captureEvents_ and captureStreams_
     Device* device_;                         //!< Device that owns this stream
     Priority priority_;                      //!< Scheduling priority (High / Normal / Low)
     unsigned int flags_;                     //!< Creation flags (e.g. hipStreamNonBlocking)
@@ -497,15 +518,24 @@ namespace hip {
     const std::vector<uint32_t> cuMask_;     //!< CU mask restricting which CUs may be used
     uint64_t stream_id_;                     //!< Process-unique monotonic stream identifier
 
+    // Per-stream async error from fire-and-forget commands; cleared on read.
+    std::atomic<hipError_t> async_error_{hipSuccess};
+
     // ----- Stream capture state -----
-    hipStreamCaptureStatus captureStatus_{hipStreamCaptureStatusNone}; //!< Current capture status
-    hip::Graph* pCaptureGraph_ = nullptr;                 //!< Graph being constructed by capture
+    //!< Current capture status. Atomic because every capture API reads it without taking lock_.
+    std::atomic<hipStreamCaptureStatus> captureStatus_{hipStreamCaptureStatusNone};
+    /// Graph being constructed by the capture this stream started, and set on no other
+    /// stream. EndCapture hands it to the caller, or destroys it if the capture was
+    /// invalidated.
+    std::unique_ptr<hip::Graph> captureGraph_;
     hipStreamCaptureMode captureMode_{hipStreamCaptureModeGlobal}; //!< API restriction mode
     bool originStream_ = false;                           //!< True if this stream started capture
-    hipStream_t parentStream_ = nullptr;                  //!< Parent stream (null for origin)
+    hip::Stream* captureOwner_ = nullptr;                 //!< Origin owning this capture; the
+                                                          //!< origin points at itself
     std::vector<hip::GraphNode*> lastCapturedNodes_;      //!< Last graph node(s) captured
     std::vector<hip::GraphNode*> removedDependencies_;    //!< Deps removed via UpdateCaptureDeps
-    std::unordered_set<hipStream_t> parallelCaptureStreams_; //!< Forked parallel capture branches
+    std::unordered_set<hip::Stream*> captureStreams_;     //!< Streams enrolled in this capture,
+                                                          //!< excluding the origin. Origin only.
     std::unordered_set<hipEvent_t> captureEvents_;        //!< Events tied to this capture
     uint64_t captureID_ = 0;                              //!< Unique ID for this capture sequence
 
@@ -599,10 +629,13 @@ namespace hip {
     bool StreamExists(const Stream* stream);
     /// Synchronize all streams (optionally only blocking ones)
     void SyncAllStreams(bool cpu_wait = true, bool wait_blocking_streams_only = false);
+    /// Returns and clears an async error from blocking streams on this device
+    hipError_t GetAndClearBlockingStreamsAsyncError();
     /// Returns true if any stream on this device is in capture mode
     bool StreamCaptureBlocking();
-    /// Wait all active streams on the blocking queue. The method enqueues a wait command and
-    /// doesn't stall the current thread.
+    /// Enqueue a barrier on blocking_stream that waits for all active blocking streams
+    /// (or just the null stream) of this device. This doesn't stall the current thread.
+    /// blocking_stream can be on the same or a different device.
     void WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream = false);
 
     // Destroying a recorded IPC event must wait for the GPU barrier that decrements the
@@ -729,6 +762,18 @@ namespace hip {
   extern Device* getCurrentDevice();
 
   extern void setCurrentDevice(unsigned int index);
+
+  /// If we have the flush register set, we return the option
+  inline unsigned int ihipRdmaFlushWritesOptions(const uint32_t* hdpMemFlushCntl) {
+    return (hdpMemFlushCntl != nullptr)
+        ? static_cast<unsigned int>(hipFlushGPUDirectRDMAWritesOptionHost)
+        : 0u;
+  }
+
+  /// The hardware does not make the writes visible on its own. Hence it's none here
+  inline int ihipRdmaWritesOrdering() {
+    return static_cast<int>(hipGPUDirectRDMAWritesOrderingNone);  // i.e. 0
+  }
 
   /// Get ROCclr queue associated with hipStream
   /// Note: This follows the CUDA spec to sync with default streams

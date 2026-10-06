@@ -33,3 +33,6 @@ The following environment variables affect the hipFile runtime.
        | ``true``: Fastpath is used with any file system without validation.
        | ``false``: Fastpath is only used with supported file systems. (default)
        | Must be set to ``true`` when using NFSoRDMA on Linux
+   * - ``HIPFILE_ASYNC_BUFFER_SIZE``
+     - | Controls the size of the host bounce buffer allocated for asynchronous fallback I/O.
+       | Default size is 16 MiB. Setting to 0 will use the default size.

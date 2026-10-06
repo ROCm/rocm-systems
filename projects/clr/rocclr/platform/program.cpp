@@ -19,21 +19,26 @@
 
 namespace amd {
 
-static void remove_g_option(std::string& option) {
-  // Remove " -g " option from application.
-  // People can still add -g in AMD_OCL_BUILD_OPTIONS_APPEND, if it is so desired.
-  std::string g_str("-g");
-  std::size_t g_pos = 0;
-  while ((g_pos = option.find(g_str, g_pos)) != std::string::npos) {
-    if ((g_pos == 0 || option[g_pos - 1] == ' ') &&
-        (g_pos + 2 == option.size() || option[g_pos + 2] == ' ')) {
-      option.erase(g_pos, g_str.size());
+static void remove_token(std::string& option, const std::string& token) {
+  std::size_t pos = 0;
+  while ((pos = option.find(token, pos)) != std::string::npos) {
+    if ((pos == 0 || option[pos - 1] == ' ') &&
+        (pos + token.size() == option.size() || option[pos + token.size()] == ' ')) {
+      option.erase(pos, token.size());
     } else {
-      g_pos += g_str.size();
+      pos += token.size();
     }
   }
+}
 
-  return;
+static void sanitize_options(std::string& option) {
+  // Remove " -g " option from application.
+  // People can still add -g in AMD_OCL_BUILD_OPTIONS_APPEND, if it is so desired.
+  remove_token(option, "-g");
+
+  // Remove obsolete AMDIL binary options no longer recognized by the parser.
+  remove_token(option, "-fbin-amdil");
+  remove_token(option, "-fno-bin-amdil");
 }
 
 Program::~Program() {
@@ -166,7 +171,7 @@ static bool adjustOptionsOnIgnoreEnv(std::string& cppstr) {
       cppstr = cppstr.substr(pos + sizeof(ignore_env));
       optionChangable = false;
     }
-    remove_g_option(cppstr);
+    sanitize_options(cppstr);
   }
   return optionChangable;
 }
@@ -504,8 +509,9 @@ bool Program::load(const std::vector<Device*>& devices) {
   for (const auto& it : devicePrograms_) {
     const Device& device = *(it.first);
 
-    // If devices is specified, only load code object for those devices
-    if (std::find(devices.begin(), devices.end(), &device) != devices.end()) {
+    // Skip loading for unspecified devices. Empty devices means load for all devices
+    if (!devices.empty() &&
+        std::find(devices.begin(), devices.end(), &device) == devices.end()) {
       continue;
     }
 
@@ -593,9 +599,10 @@ bool Program::ParseAllOptions(const std::string& options, option::Options& parse
         allOpts.append(" ");
         allOpts.append(AMD_OCL_BUILD_OPTIONS);
       }
-      if (!Device::appProfile()->GetBuildOptsAppend().empty()) {
+      const std::string& buildOptsAppend = Device::appProfile()->GetBuildOptsAppend();
+      if (!buildOptsAppend.empty()) {
         allOpts.append(" ");
-        allOpts.append(Device::appProfile()->GetBuildOptsAppend());
+        allOpts.append(buildOptsAppend);
       }
       if (AMD_OCL_BUILD_OPTIONS_APPEND != NULL) {
         allOpts.append(" ");
@@ -603,7 +610,21 @@ bool Program::ParseAllOptions(const std::string& options, option::Options& parse
       }
     }
   }
-  return amd::option::parseAllOptions(allOpts, parsedOptions, linkOptsOnly);
+
+  bool result = amd::option::parseAllOptions(allOpts, parsedOptions, linkOptsOnly);
+
+  if (!result) {
+    // Sanitize newlines in both strings to keep the log output on a single line.
+    auto sanitize = [](std::string s) {
+      for (char& c : s)
+        if (c == '\n' || c == '\r') c = ' ';
+      return s;
+    };
+    LogPrintfError("ParseAllOptions failed: options=\"%s\", optionsLog=\"%s\"",
+                   sanitize(allOpts).c_str(), sanitize(parsedOptions.optionsLog()).c_str());
+  }
+
+  return result;
 }
 
 bool Symbol::setDeviceKernel(const Device& device, const device::Kernel* func) {

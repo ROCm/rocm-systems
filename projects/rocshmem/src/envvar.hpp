@@ -498,6 +498,7 @@ namespace envvar {
     extern const var<bool> uniqueid_with_mpi;
     extern const var<types::debug_level> debug_level;
     extern const var<size_t> heap_size;
+    extern const var<std::string> heap_allocator_type;
     extern const var<size_t> max_num_teams;
     extern const var<std::string> backend;
     extern const var<bool> disable_mixed_ipc;

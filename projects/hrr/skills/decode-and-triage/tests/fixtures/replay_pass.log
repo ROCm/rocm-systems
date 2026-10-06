@@ -1,0 +1,20 @@
+[HRR] NOOP playback handler called for hipDevicePrimaryCtxGetState — this API is not replayed; results may differ from capture.
+[HRR] NOOP playback handler called for hipGetProcAddress — this API is not replayed; results may differ from capture.
+[HRR] NOOP playback handler called for hipFuncGetAttribute — this API is not replayed; results may differ from capture.
+[HRR] NOOP playback handler called for hipPointerGetAttribute — this API is not replayed; results may differ from capture.
+[HRR] Archive : 185469 events, 13233 kernels, 4458 blobs, 33 code objects
+[HRR] Threads : 2 captured
+[HRR] Device  : AMD Radeon Graphics (gfx950:sramecc+:xnack-)
+[HRR] Mode    : single-threaded
+[HRR] [replay] Device memory: 257418 MB free / 258032 MB total
+[HRR] [replay] Device state OK — beginning replay
+[HRR] Pre-loading 33 code objects...
+[HRR] All code objects pre-loaded OK.
+
+[HRR] -- Replay summary ------------------------------
+[HRR]   Wall time      : 39145.5 ms
+[HRR]   Threads used   : 1
+[HRR]   Kernels launched: 13233
+[HRR]   Graphs launched : 0
+[HRR]   D2H checks     : 32 pass (32 exact, 0 within tol), 0 fail, 0 skipped
+[HRR] PASS

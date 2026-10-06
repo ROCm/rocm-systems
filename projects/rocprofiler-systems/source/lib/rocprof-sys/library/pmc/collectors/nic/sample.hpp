@@ -44,9 +44,7 @@ struct sample : trace_cache::cacheable_t
 
 }  // namespace rocprofsys::pmc::collectors::nic
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 /// @brief AINIC PMC sample type alias
@@ -99,5 +97,4 @@ get_size(const pmc::collectors::nic::sample& item)
         item.metric_values.req_rx_impl_nak_seq_err);
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

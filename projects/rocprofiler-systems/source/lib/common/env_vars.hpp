@@ -6,9 +6,7 @@
 #include <cctype>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace env_vars
+namespace rocprofsys::env_vars
 {
 
 // --- General ---
@@ -115,6 +113,15 @@ inline constexpr const char* USE_PROCESS_SAMPLING = "ROCPROFSYS_USE_PROCESS_SAMP
 inline constexpr const char* AMD_SMI_METRICS      = "ROCPROFSYS_AMD_SMI_METRICS";
 inline constexpr const char* AMD_SMI_FREQ         = "ROCPROFSYS_AMD_SMI_FREQ";
 inline constexpr const char* AMD_SMI_DEVICES      = "ROCPROFSYS_AMD_SMI_DEVICES";
+
+// --- Domains: hipFile (AMD Infinity Storage I/O stats) ---
+inline constexpr const char* USE_HIPFILE     = "ROCPROFSYS_USE_HIPFILE";
+inline constexpr const char* HIPFILE_METRICS = "ROCPROFSYS_HIPFILE_METRICS";
+// Registered default for HIPFILE_METRICS.
+inline constexpr const char* HIPFILE_METRICS_DEFAULT =
+    "fastpath, fallback, bandwidth, bytes, errors";
+// The environment variable read by libhipfile itself to enable its stats server.
+inline constexpr const char* HIPFILE_STATS_LEVEL = "HIPFILE_STATS_LEVEL";
 
 // --- Domains: ROCm ---
 inline constexpr const char* ROCM_DOMAINS        = "ROCPROFSYS_ROCM_DOMAINS";
@@ -299,7 +306,7 @@ inline constexpr const char* DEFAULT_MAX_LIBRARY_FUNCTIONS =
 inline constexpr const char* PATH                   = "ROCPROFSYS_PATH";
 inline constexpr const char* PRELOAD                = "ROCPROFSYS_PRELOAD";
 inline constexpr const char* LIBRARY                = "ROCPROFSYS_LIBRARY";
-inline constexpr const char* USER_LIBRARY           = "ROCPROFSYS_USER_LIBRARY";
+inline constexpr const char* CAUSAL_API_LIBRARY     = "ROCPROFSYS_CAUSAL_API_LIBRARY";
 inline constexpr const char* COMMAND_LINE           = "ROCPROFSYS_COMMAND_LINE";
 inline constexpr const char* LAUNCHER               = "ROCPROFSYS_LAUNCHER";
 inline constexpr const char* SCRIPT_DIR             = "ROCPROFSYS_SCRIPT_DIR";
@@ -336,7 +343,6 @@ inline constexpr const char* DEBUG_TIDS            = "ROCPROFSYS_DEBUG_TIDS";
 inline constexpr const char* DEBUG_PUSH            = "ROCPROFSYS_DEBUG_PUSH";
 inline constexpr const char* DEBUG_POP             = "ROCPROFSYS_DEBUG_POP";
 inline constexpr const char* DEBUG_SAMPLING        = "ROCPROFSYS_DEBUG_SAMPLING";
-inline constexpr const char* DEBUG_USER_REGIONS    = "ROCPROFSYS_DEBUG_USER_REGIONS";
 inline constexpr const char* ENABLE_SIGNAL_HANDLER = "ROCPROFSYS_ENABLE_SIGNAL_HANDLER";
 inline constexpr const char* TIMEMORY_COMPONENTS   = "ROCPROFSYS_TIMEMORY_COMPONENTS";
 inline constexpr const char* NETWORK_INTERFACE     = "ROCPROFSYS_NETWORK_INTERFACE";
@@ -353,19 +359,34 @@ inline constexpr const char* USE_SHMEM =
 [[nodiscard]] inline int
 log_level_to_verbose(std::string_view level) noexcept
 {
-    auto iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
-        if(lhs.size() != rhs.size()) return false;
+    auto const iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
+        if(lhs.size() != rhs.size())
+        {
+            return false;
+        }
         for(std::size_t idx = 0; idx < lhs.size(); ++idx)
+        {
             if(std::tolower(static_cast<unsigned char>(lhs[idx])) !=
                std::tolower(static_cast<unsigned char>(rhs[idx])))
+            {
                 return false;
+            }
+        }
         return true;
     };
-    if(iequal(level, "trace")) return 2;
-    if(iequal(level, "debug")) return 1;
-    if(iequal(level, "info")) return 0;
+    if(iequal(level, "trace"))
+    {
+        return 2;
+    }
+    if(iequal(level, "debug"))
+    {
+        return 1;
+    }
+    if(iequal(level, "info"))
+    {
+        return 0;
+    }
     return -1;
 }
 
-}  // namespace env_vars
-}  // namespace rocprofsys
+}  // namespace rocprofsys::env_vars

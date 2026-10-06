@@ -97,7 +97,8 @@ typedef void* amdsmi_processor_handle;
  */
 typedef enum {
     AMDSMI_FABRIC_TYPE_UALOE,
-    AMDSMI_FABRIC_TYPE_UALLINK
+    AMDSMI_FABRIC_TYPE_UALLINK,
+    AMDSMI_FABRIC_TYPE_UNKNOWN
 } amdsmi_fabric_type_t;
 
 /**
@@ -105,7 +106,8 @@ typedef enum {
  */
 typedef enum {
     AMDSMI_FABRIC_NHT_ADDRESS_MODE_SOURCE_ALIASING,
-    AMDSMI_FABRIC_NHT_ADDRESS_MODE_SOURCE_IDENTIFICATION
+    AMDSMI_FABRIC_NHT_ADDRESS_MODE_SOURCE_IDENTIFICATION,
+    AMDSMI_FABRIC_NHT_ADDRESS_MODE_UNKNOWN
 } amdsmi_fabric_nht_address_mode_t;
 
 /**
@@ -116,7 +118,8 @@ typedef enum {
     AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED,
     AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY,
     AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE,
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR
+    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR,
+    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN
 } amdsmi_fabric_accelerator_vpod_state_t;
 
 typedef union {
@@ -135,9 +138,9 @@ typedef union {
     uint64_t as_uint;
 } amdsmi_bdf_t;
 
-// Constants for fabric info arrays
+// Constants for fabric info arrays (amdsmi_fabric_size_constants_t in amd_smi/amdsmi.h)
 #define AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE 32
-#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 8
+#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 16
 
 /**
  * @brief Fabric device configuration information (version 1)
@@ -170,8 +173,17 @@ typedef struct {
 typedef struct {
     amdsmi_bdf_t bdf;      //!< BDF of the Fabric device
     amdsmi_fabric_info_ver_t info;
-    uint32_t reserved[14];
+    uint32_t reserved[15];
 } amdsmi_fabric_info_t;
+
+// amdsmi_get_gpu_fabric_info() writes sizeof(amdsmi_fabric_info_t) bytes into the
+// buffer it is handed, so these local declarations must match the libamd_smi ABI
+// exactly or the caller's stack is overwritten. Sizes are those of the
+// corresponding structs in amd_smi/amdsmi.h.
+static_assert(sizeof(amdsmi_fabric_info_v1_t) == 244,
+              "amdsmi_fabric_info_v1_t does not match the libamd_smi ABI");
+static_assert(sizeof(amdsmi_fabric_info_t) == 320,
+              "amdsmi_fabric_info_t does not match the libamd_smi ABI");
 
 // AMD SMI initialization flags
 typedef enum {
@@ -193,7 +205,7 @@ struct AmdsmiLoader {
   // Function pointers
   amdsmi_status_t (*init)(uint64_t init_flags);
   amdsmi_status_t (*shut_down)();
-  amdsmi_status_t (*get_processor_handle_from_bdf)(const char* bdf, amdsmi_processor_handle* processor_handle);
+  amdsmi_status_t (*get_processor_handle_from_bdf)(amdsmi_bdf_t bdf, amdsmi_processor_handle* processor_handle);
   amdsmi_status_t (*get_gpu_fabric_info)(amdsmi_processor_handle processor_handle, amdsmi_fabric_info_t* fabric_info);
 
   AmdsmiLoader();

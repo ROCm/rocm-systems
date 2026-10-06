@@ -11,7 +11,7 @@
 #include <stddef.h>
 
 #define NCCL_GIN_PROXY_VERSION 100
-#define NCCL_GIN_PROXY_GFD_VERSION 1
+#define NCCL_GIN_PROXY_GFD_VERSION 2
 
 typedef enum {
   ncclGinProxyOpPut = 1 << 0,
@@ -98,7 +98,8 @@ typedef union {
   } __attribute__((packed)) completion;
   struct {
     uint8_t flag:1;
-    uint8_t resv:7;
+    uint8_t isStrongSignal:1;
+    uint8_t resv:6;
     uint16_t signalValLow2;
     uint32_t signalValHigh;
   } __attribute__((packed)) signalVal;
@@ -129,11 +130,17 @@ typedef enum {
   ncclGinProxyGfdQwords = 16,
 } ncclGinProxyGfdQwordIdx_t;
 
-typedef struct __attribute__((packed)) {
+// aligned(16) is required because gin_proxy.h casts (uint4*)&gfd to emit
+// st.global.wt.v4.u32 / ld.local.v4.b32 PTX, which require 16-byte alignment.
+// packed is needed to preserve the no-padding guarantee the inner bitfield layouts depend on.
+typedef struct __attribute__((packed, aligned(16))) {
   ncclGinProxyQword_t qword[ncclGinProxyGfdQwords];
 } ncclGinProxyGfd_t;
 static_assert(sizeof(ncclGinProxyGfd_t) == 128,
               "sizeof(ncclGinProxyGfd_t) != 128 - Backwards compat requires ncclGinProxyGfd to be 128 bytes!");
+static_assert(alignof(ncclGinProxyGfd_t) >= 16, "ncclGinProxyGfd_t must be at least 16-byte aligned: gin_proxy.h "
+                                                "casts to (uint4*) for v4 PTX load/store; lower alignment causes "
+                                                "cudaErrorMisalignedAddress.");
 
 typedef struct {
   int nranks;
@@ -145,6 +152,10 @@ typedef struct {
 
   uint64_t* counters;
   uint64_t* signals;
+  uint64_t* signalOffsets;
+
+  uint32_t* lastIssuedGet; // per-peer index of most recent get
+  uint32_t* lastVisibleGet; // per-peer index of last get for which the payload is guaranteed visible (via flush GFD)
 } ncclGinProxyGpuCtx_t;
 
 #endif

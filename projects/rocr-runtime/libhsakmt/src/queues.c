@@ -25,7 +25,7 @@
 
 #include "libhsakmt.h"
 #include "fmm.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -359,8 +359,8 @@ static void *allocate_exec_aligned_memory_cpu(uint32_t size)
 	 *
 	 * MAP_ANONYMOUS initializes the memory to zero.
 	 */
-	ptr = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
-				MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	ptr = mmap(NULL, size, PROT_READ | PROT_WRITE,
+			MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 
 	if (ptr == MAP_FAILED)
 		return NULL;
@@ -456,10 +456,9 @@ void *hsakmt_allocate_exec_aligned_memory_gpu(HsaKFDContext *ctx,
 
 	if (NodeId != 0) {
 		uint32_t nodes_array[1] = {NodeId};
-		HsaMemMapFlags map_flags = {0};
 		HSAKMT_STATUS result;
 
-		result = hsaKmtMapMemoryToGPUNodesCtx(ctx, mem, size, &gpu_va, map_flags, 1, nodes_array);
+		result = hsaKmtMapMemoryToGPUNodesCtx(ctx, mem, size, &gpu_va, flags, 1, nodes_array);
 		if (result != HSAKMT_STATUS_SUCCESS) {
 			hsaKmtFreeMemoryCtx(ctx, mem, size);
 			return NULL;
@@ -630,10 +629,16 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
 		q->total_mem_alloc_size = (q->ctx_save_restore_size +
 					q->debug_memory_size) * node.NumXcc;
 
+		/* GPU_ALWAYS_MAPPED is rejected in recoverable-fault mode, and
+		 * without it an SVM save area cannot satisfy
+		 * kfd_queue_buffer_svm_get().
+		 */
+		bool svm_save_area = !node.Capability2.ui32.StallOnRetryFault;
+
 		/* Allocate unified memory for context save restore
 		 * area on dGPU.
 		 */
-		if (!q->use_ats && ctx->hsakmt_is_svm_api_supported) {
+		if (!q->use_ats && ctx->hsakmt_is_svm_api_supported && svm_save_area) {
 			uint32_t size = PAGE_ALIGN_UP(q->total_mem_alloc_size);
 
 			pr_info("Allocating GTT for CWSR\n");
@@ -670,7 +675,9 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
 			q->ctx_save_restore = allocate_exec_aligned_memory(ctx,
 							q->total_mem_alloc_size,
 							q->use_ats, gpu_id, NodeId,
-							false, false, false);
+							/* nonPaged */ true,
+							/* DeviceLocal */ false,
+							/* Uncached */ false);
 
 			if (!q->ctx_save_restore)
 				return HSAKMT_STATUS_NO_MEMORY;
@@ -1002,6 +1009,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfoCtx(HsaKFDContext *ctx,
 	QueueInfo->QueueDetailError = 0;
 	QueueInfo->QueueTypeExtended = 0;
 	QueueInfo->SaveAreaHeader = q->ctx_save_restore;
+	QueueInfo->SaveAreaAllocSize = q->ctx_save_restore_size;
 
 	return HSAKMT_STATUS_SUCCESS;
 }

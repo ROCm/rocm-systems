@@ -20,7 +20,7 @@
 /* No GIN backends on Windows */
 #define NCCL_GIN_BACKEND_MASK_ALL 0u
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <unsigned backendMask>
 struct ncclGin_BackendMask {
   ncclDevComm const& comm;
@@ -39,7 +39,6 @@ using ncclGin = ncclGin_BackendMask<NCCL_GIN_BACKEND_MASK_ALL>;
 /* GIN scratch types (mirrors gin_scratch.h / gin_scratch__types.h) */
 struct ncclGinOutboxHandle {
   ncclDevResourceHandle bufHandle;
-  ncclGinCounter_t counter0;
   uint32_t size_log2;
 };
 struct ncclGinInboxA2AHandle {

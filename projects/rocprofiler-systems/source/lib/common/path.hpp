@@ -5,9 +5,7 @@
 
 #include "common/defines.h"
 #include "common/delimit.hpp"
-#include "common/env_vars.hpp"
-#include "common/environment.hpp"
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <cstdint>
 #include <cstdlib>
@@ -15,6 +13,7 @@
 #include <dlfcn.h>
 #include <filesystem>
 #include <fstream>
+#include <ios>
 #include <link.h>
 #include <linux/limits.h>
 #include <string>
@@ -62,11 +61,7 @@
         fflush(stderr);                                                                  \
     }
 
-namespace rocprofsys
-{
-inline namespace common
-{
-namespace path
+namespace rocprofsys::inline common::path
 {
 inline std::vector<std::string>
 get_link_map(const char*, std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) },
@@ -81,19 +76,15 @@ inline std::string
 get_origin(const std::string&,
            std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) }) ROCPROFSYS_INTERNAL_API;
 
-inline bool
-exists(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
-
-template <typename RetT = std::string>
-inline RetT
-get_default_lib_search_paths() ROCPROFSYS_INTERNAL_API;
-
 inline std::string
-find_path(const std::string& _path, int _verbose,
-          const std::string& _search_paths = {}) ROCPROFSYS_INTERNAL_API;
+find_library(const std::string& _path, int _verbose,
+             const std::string& _search_paths) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline std::string
 parent_path(std::string_view fpath, std::uint16_t levels = 1) ROCPROFSYS_INTERNAL_API;
+
+[[nodiscard]] inline std::string
+filename(std::string_view path) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline std::string
 realpath(const std::string& path) ROCPROFSYS_INTERNAL_API;
@@ -103,6 +94,17 @@ is_text_file(const std::string& filename) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline std::string
 read_symlink(const std::string& path) ROCPROFSYS_INTERNAL_API;
+
+[[nodiscard]] inline bool
+is_directory(std::string_view path) ROCPROFSYS_INTERNAL_API;
+
+[[nodiscard]] inline bool
+is_regular_file(std::string_view path) ROCPROFSYS_INTERNAL_API;
+
+[[nodiscard]] inline bool
+create_parent_dirs_and_open_ofstream(
+    std::ofstream& out_fstream, const std::string& filepath,
+    std::ios::openmode mode = std::ios::out) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
@@ -152,47 +154,29 @@ path_type::path_type(const std::string& _fname)
     if(lstat(_fname.c_str(), &_buffer) == 0)
     {
         if(S_ISDIR(_buffer.st_mode) != 0)
+        {
             m_type = directory;
+        }
         else if(S_ISREG(_buffer.st_mode) != 0)
+        {
             m_type = regular;
+        }
         else if(S_ISLNK(_buffer.st_mode) != 0)
+        {
             m_type = link;
+        }
     }
-}
-
-bool
-exists(const std::string& _fname)
-{
-    struct stat _buffer;
-    if(lstat(_fname.c_str(), &_buffer) == 0)
-        return (S_ISDIR(_buffer.st_mode) != 0 || S_ISREG(_buffer.st_mode) != 0 ||
-                S_ISLNK(_buffer.st_mode) != 0);
-    return false;
-}
-
-template <typename RetT>
-RetT
-get_default_lib_search_paths()
-{
-    auto _paths = fmt::format("{}:{}:{}:{}:.", get_env(env_vars::PATH, ""),
-                              get_env("LD_LIBRARY_PATH", ""), get_env("LIBRARY_PATH", ""),
-                              get_env("PWD", ""));
-    if constexpr(std::is_same<RetT, std::string>::value)
-        return _paths;
-    else
-        return delimit(_paths, ":");
 }
 
 std::string
-find_path(const std::string& _path, int _verbose, const std::string& _search_paths)
+find_library(const std::string& _path, int _verbose, const std::string& _search_paths)
 {
-    if(exists(_path) && !_path.empty() && _path.at(0) == '/') return _path;
-
-    auto _paths = delimit(_search_paths, ":");
-    if(_paths.empty())
+    if(!_path.empty() && _path.at(0) == '/' && is_regular_file(_path))
     {
-        _paths = get_default_lib_search_paths<std::vector<std::string>>();
+        return _path;
     }
+
+    auto const _paths = delimit(_search_paths, ":");
 
     constexpr int _verbose_lvl = 2;
     for(const auto& itr : _paths)
@@ -201,7 +185,7 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
         ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
                             "searching for '%s' in '%s' ...\n", _path.c_str(),
                             itr.c_str());
-        if(exists(_f))
+        if(is_regular_file(_f))
         {
             ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl, "found '%s' in '%s' ...\n",
                                 _path.c_str(), itr.c_str());
@@ -211,8 +195,7 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
 
     for(const auto& itr : _paths)
     {
-        if(std::string_view{ ::basename(itr.c_str()) }.find("lib") ==
-               std::string_view::npos &&
+        if(path::filename(itr).find("lib") == std::string::npos &&
            !parent_path(itr).empty())
         {
             for(const auto* sitr : { "lib", "lib64", "../lib", "../lib64" })
@@ -221,7 +204,7 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
                 ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
                                     "searching for '%s' in '%s' ...\n", _path.c_str(),
                                     fmt::format("{}/{}", itr, sitr).c_str());
-                if(exists(_f))
+                if(is_regular_file(_f))
                 {
                     ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl,
                                         "found '%s' in '%s' ...\n", _path.c_str(),
@@ -251,10 +234,28 @@ parent_path(std::string_view fpath, std::uint16_t levels)
     for(std::uint16_t i = 0; i < levels; ++i)
     {
         auto parent = result.parent_path();
-        if(parent == result) break;  // reached root ("/") or relative bottom ("")
+        if(parent == result)
+        {
+            break;  // reached root ("/") or relative bottom ("")
+        }
         result = std::move(parent);
     }
     return result.string();
+}
+
+/**
+ * Get the component of @p path after the last '/'.
+ * Pure lexical operation: no filesystem access, no normalization.
+ * @code filename("/a/b.so") @endcode returns "b.so".
+ * @code filename("/a/b/") @endcode returns "".
+ * @param path the path to take the filename of
+ * @return the filename component, or "" if @p path ends in '/'
+ */
+[[nodiscard]] std::string
+filename(std::string_view path)
+{
+    const auto pos = path.rfind('/');
+    return std::string{ (pos == std::string_view::npos) ? path : path.substr(pos + 1) };
 }
 
 /** @brief Read the symbolic link target.
@@ -266,8 +267,43 @@ parent_path(std::string_view fpath, std::uint16_t levels)
 read_symlink(const std::string& path)
 {
     std::error_code error;
-    auto            target = std::filesystem::read_symlink(path, error);
-    return (error) ? path : target.string();
+    auto const      target = std::filesystem::read_symlink(path, error);
+    return error ? path : target.string();
+}
+
+/**
+ * @brief Check whether a path exists and is a directory.
+ *
+ * Follows symbolic links: a symlink that points at a directory returns true.
+ * Never throws; any filesystem error (missing path, broken symlink,
+ * permission failure) yields false.
+ *
+ * @param path Filesystem path to test.
+ * @return true if @p path resolves to a directory, false otherwise.
+ */
+[[nodiscard]] bool
+is_directory(std::string_view path)
+{
+    std::error_code unused_error_code;
+    return std::filesystem::is_directory(path, unused_error_code);
+}
+
+/**
+ * @brief Check whether a path exists and is a regular file.
+ *
+ * Follows symbolic links: a link that resolves to a regular file returns true,
+ * a broken link returns false. Directories, device nodes, FIFOs and sockets are
+ * not regular files and yield false. Never throws; any filesystem error
+ * (missing path, permission failure) yields false.
+ *
+ * @param path Filesystem path to test.
+ * @return true if @p path resolves to a regular file, false otherwise.
+ */
+[[nodiscard]] bool
+is_regular_file(std::string_view path)
+{
+    std::error_code unused_error_code;
+    return std::filesystem::is_regular_file(path, unused_error_code);
 }
 
 /**
@@ -283,8 +319,8 @@ read_symlink(const std::string& path)
 realpath(const std::string& path)
 {
     std::error_code error;
-    auto            canon = std::filesystem::canonical(path, error);
-    return (error) ? path : canon.string();
+    auto const      canon = std::filesystem::canonical(path, error);
+    return error ? path : canon.string();
 }
 
 bool
@@ -301,9 +337,12 @@ is_text_file(const std::string& filename)
     char             buffer[buffer_size];
     while(_file.read(buffer, sizeof(buffer)))
     {
-        for(char itr : buffer)
+        for(const char itr : buffer)
         {
-            if(itr == '\0') return false;
+            if(itr == '\0')
+            {
+                return false;
+            }
         }
     }
 
@@ -311,11 +350,45 @@ is_text_file(const std::string& filename)
     {
         for(std::streamsize i = 0; i < _file.gcount(); ++i)
         {
-            if(buffer[i] == '\0') return false;
+            if(buffer[i] == '\0')
+            {
+                return false;
+            }
         }
     }
 
     return true;
+}
+
+/**
+ * @brief Create the parent directory of @p filepath, then open @p out_fstream on it.
+ * The parent directory tree is created if absent; an already-existing
+ * directory is not an error. A @p filepath with no directory component (e.g.
+ * "out.txt") creates nothing and is opened relative to the current directory.
+ * @param out_fstream Closed output stream to open. Left closed if the parent directory
+ *                    could not be created.
+ * @param filepath    Path of the file to open.
+ * @param mode        Open mode forwarded to std::ofstream::open. Defaults to
+ *                    std::ios::out (output only, truncating any existing file).
+ * @return true if the parent directory is in place and @p out_fstream is open and good.
+ */
+bool
+create_parent_dirs_and_open_ofstream(std::ofstream&     out_fstream,
+                                     const std::string& filepath, std::ios::openmode mode)
+{
+    const auto parent = parent_path(filepath);
+    if(!parent.empty())
+    {
+        std::error_code error;
+        std::filesystem::create_directories(parent, error);
+        if(error)
+        {
+            return false;
+        }
+    }
+
+    out_fstream.open(filepath, mode);
+    return out_fstream.is_open() && out_fstream.good();
 }
 
 std::vector<std::string>
@@ -323,11 +396,14 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes, bool _include_se
 {
     void* _handle = nullptr;
     bool  _noload = false;
-    for(auto _mode : _open_modes)
+    for(auto const _mode : _open_modes)
     {
         _handle = dlopen(_name, _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle) break;
+        if(_handle)
+        {
+            break;
+        }
     }
 
     auto _chain = std::vector<std::string>{};
@@ -336,17 +412,20 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes, bool _include_se
         struct link_map* _link_map = nullptr;
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         // if include_self is false, start at next library
-        struct link_map* _next = (_include_self) ? _link_map : _link_map->l_next;
-        while(_next)
+        const struct link_map* next = _include_self ? _link_map : _link_map->l_next;
+        while(next)
         {
-            if(_next->l_name != nullptr && !std::string_view{ _next->l_name }.empty())
+            if(next->l_name != nullptr && !std::string_view{ next->l_name }.empty())
             {
-                _chain.emplace_back(_next->l_name);
+                _chain.emplace_back(next->l_name);
             }
-            _next = _next->l_next;
+            next = next->l_next;
         }
 
-        if(_noload == false) dlclose(_handle);
+        if(!_noload)
+        {
+            dlclose(_handle);
+        }
     }
     return _chain;
 }
@@ -362,14 +441,17 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
 {
     void* _handle = nullptr;
     bool  _noload = false;
-    for(auto _mode : _open_modes)
+    for(auto const _mode : _open_modes)
     {
         _handle = dlopen(_filename.c_str(), _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle) break;
+        if(_handle)
+        {
+            break;
+        }
     }
 
-    auto _chain = std::vector<std::string>{};
+    auto const _chain = std::vector<std::string>{};
     if(_handle)
     {
         char _buffer[PATH_MAX];
@@ -377,10 +459,16 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
         if(dlinfo(_handle, RTLD_DI_ORIGIN, &_buffer) == 0)
         {
             auto _origin = std::string{ _buffer };
-            if(exists(_origin)) return _origin;
+            if(is_directory(_origin))
+            {
+                return _origin;
+            }
         }
 
-        if(_noload == false) dlclose(_handle);
+        if(!_noload)
+        {
+            dlclose(_handle);
+        }
     }
 
     return std::string{};
@@ -400,7 +488,10 @@ get_internal_libpath(const std::string& _lib)
     for(const auto* libdir : { "lib", "lib64" })
     {
         auto _candidate = fmt::format("{}/{}/{}", _root, libdir, _lib);
-        if(exists(_candidate)) return _candidate;
+        if(is_regular_file(_candidate))
+        {
+            return _candidate;
+        }
     }
     return fmt::format("{}/lib/{}", _root, _lib);
 }
@@ -408,7 +499,7 @@ get_internal_libpath(const std::string& _lib)
 std::string
 get_internal_script_path()
 {
-    auto _root = get_rocprofsys_root();
+    auto const _root = get_rocprofsys_root();
     return _root + "/libexec/rocprofiler-systems";
 }
 
@@ -418,6 +509,4 @@ get_internal_libdir()
     return get_rocprofsys_root() + "/lib";
 }
 
-}  // namespace path
-}  // namespace common
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline common::path
