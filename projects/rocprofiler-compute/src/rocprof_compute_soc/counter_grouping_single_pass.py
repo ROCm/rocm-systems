@@ -35,17 +35,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from utils.logger import console_debug, console_warning
+from utils.utils_common import is_tcc_channel_counter
 
+from .counter_file import CounterFile, flat_counters_in_perfmon_file
 from .counter_grouping_buckets import (
     _bucket_counter_set,
     _iter_metric_groups,
     counters_fit_one_bucket,
     rebuild_counter_file,
-)
-from .soc_base import (
-    CounterFile,
-    flat_counters_in_perfmon_file,
-    is_tcc_channel_counter,
 )
 
 if TYPE_CHECKING:

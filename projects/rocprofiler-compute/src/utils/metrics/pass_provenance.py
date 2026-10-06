@@ -14,11 +14,11 @@ import re
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Optional
 
 import pandas as pd
 
 from utils.logger import console_debug
+from utils.metrics.expression import build_eval_string
 from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
 
 PASS_COLUMN_SEP = "@pass:"
@@ -61,7 +61,7 @@ def legacy_pass_merge_enabled() -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def natural_pass_sort_key(key: str) -> tuple:
+def natural_pass_sort_key(key: str) -> tuple[int | str, ...]:
     """Sort ``pmc_perf_2`` before ``pmc_perf_10``."""
     parts = _DIGIT_SPLIT_RE.split(key)
     return tuple(int(part) if part.isdigit() else part for part in parts)
@@ -184,7 +184,7 @@ def pass_scoped_builtins(layout: PassLayout, gpu_series: str) -> frozenset[str]:
 def select_pass(
     required: frozenset[str],
     layout: PassLayout,
-) -> Optional[str]:
+) -> str | None:
     """Choose the earliest pass (natural order) that contains every required counter."""
     if not required:
         return None
@@ -194,13 +194,20 @@ def select_pass(
     return candidates[0]
 
 
+_ALREADY_BOUND_BUILTIN_RE = re.compile(rf"{re.escape(PASS_VAR_SEP)}\d+$")
+
+
 def bind_expression(
     expr: str,
     pass_key: str,
     layout: PassLayout,
     scoped_builtins: frozenset[str],
 ) -> str:
-    """Rewrite duplicated counters and pass-scoped built-ins onto ``pass_key``."""
+    """Rewrite duplicated counters and pass-scoped built-ins onto ``pass_key``.
+
+    Idempotent: a name that already ends in ``__passN``, or that merely shares
+    a prefix with a scoped built-in, is left unchanged.
+    """
 
     def _replace_counter(match: re.Match[str]) -> str:
         counter = match.group(1)
@@ -211,14 +218,40 @@ def bind_expression(
             return f"raw_pmc_df['{qualified}']"
         return match.group(0)
 
+    def _replace_builtin(match: re.Match[str]) -> str:
+        var_name = match.group(1)
+        if var_name not in scoped_builtins:
+            return match.group(0)
+        if _ALREADY_BOUND_BUILTIN_RE.search(var_name):
+            return match.group(0)
+        ordinal = layout.ordinal(pass_key)
+        return f"ammolite__{var_name}{PASS_VAR_SEP}{ordinal}"
+
     bound = _COUNTER_COL_RE.sub(_replace_counter, expr)
-    ordinal = layout.ordinal(pass_key)
-    for var_name in scoped_builtins:
-        bound = bound.replace(
-            f"ammolite__{var_name}",
-            f"ammolite__{var_name}{PASS_VAR_SEP}{ordinal}",
+    return _AMMOLITE_VAR_RE.sub(_replace_builtin, bound)
+
+
+def ordered_scoped_builtin_bindings(
+    build_in_vars: Mapping[str, str],
+    pass_key: str,
+    layout: PassLayout,
+    scoped_builtins: frozenset[str],
+) -> list[tuple[str, str]]:
+    """Bind scoped built-in formulas for one pass, ``PER_XCD`` names first."""
+    per_xcd = [key for key in build_in_vars if "PER_XCD" in key]
+    dependents = [key for key in build_in_vars if "PER_XCD" not in key]
+    return [
+        (
+            variable_key,
+            bind_expression(
+                build_eval_string(build_in_vars[variable_key]),
+                pass_key,
+                layout,
+                scoped_builtins,
+            ),
         )
-    return bound
+        for variable_key in per_xcd + dependents
+    ]
 
 
 def bind_metric_tables_to_passes(
@@ -228,7 +261,11 @@ def bind_metric_tables_to_passes(
     gpu_series: str,
     supported_fields: frozenset[str],
 ) -> set[str]:
-    """Rewrite metric table expressions onto a co-located pass.
+    """Rewrite metric-table expression cells onto a co-located pass.
+
+    Mutates ``dfs`` in place. Evaluation then stores numeric results in those
+    same frames, so callers pass the live workload tables. A second bind of a
+    still-string formula is idempotent.
 
     Returns the set of pass keys that were selected for at least one row.
     """
@@ -352,7 +389,7 @@ def resolve_weight_counter_column(
     weight_counter: str,
     sub_metric_name: str,
     df: pd.DataFrame,
-    pass_layout: Optional[PassLayout],
+    pass_layout: PassLayout | None,
 ) -> str:
     """Qualify a WEIGHTED_AVG weight counter to the sub-metric's bound pass."""
     if pass_layout is None or not pass_layout.has_duplicates:

@@ -13,7 +13,7 @@ from utils.utils_common import (
 )
 from utils.utils_counter_defs import extract_counters_and_variables
 
-from .soc_base import CounterFile, flat_counters_in_perfmon_file
+from .counter_file import CounterFile, flat_counters_in_perfmon_file
 
 if TYPE_CHECKING:
     from .soc_base import OmniSoC_Base

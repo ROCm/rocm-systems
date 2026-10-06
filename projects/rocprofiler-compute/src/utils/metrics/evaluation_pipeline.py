@@ -10,7 +10,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from utils.logger import console_error, console_warning, demarcate
+from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
@@ -25,6 +25,8 @@ from utils.metrics.pass_provenance import (
     PassLayout,
     bind_metric_tables_to_passes,
     legacy_pass_merge_enabled,
+    ordered_scoped_builtin_bindings,
+    pass_scoped_builtins,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
@@ -217,11 +219,6 @@ def _calc_pass_scoped_builtins(
     expressions: list[str],
 ) -> dict[str, Optional[str | float | int]]:
     """Compute built-ins with duplicated counters bound to each used pass."""
-    from utils.metrics.pass_provenance import (
-        bind_expression,
-        pass_scoped_builtins,
-    )
-
     gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
     scoped = pass_scoped_builtins(pass_layout, gpu_series)
     if not scoped or not used_passes:
@@ -242,36 +239,9 @@ def _calc_pass_scoped_builtins(
     for pass_key in sorted(used_passes, key=lambda key: pass_layout.ordinal(key)):
         ordinal = pass_layout.ordinal(pass_key)
         pass_locals: dict[str, Optional[str | float | int]] = {}
-        # PER_XCD first, then dependents (same two-pass order as calc_builtin_vars).
-        for variable_key, variable_value in build_in_vars.items():
-            if "PER_XCD" not in variable_key:
-                continue
-            eval_string = bind_expression(
-                build_eval_string(variable_value),
-                pass_key,
-                pass_layout,
-                scoped,
-            )
-            try:
-                temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
-                calculation_result = temporary_evaluator.eval_expression(eval_string)
-                if np.isscalar(calculation_result) and calculation_result == "N/A":
-                    calculation_result = np.nan
-                pass_locals[f"ammolite__{variable_key}__pass{ordinal}"] = (
-                    calculation_result
-                )
-            except (TypeError, NameError, KeyError, AttributeError):
-                pass_locals[f"ammolite__{variable_key}__pass{ordinal}"] = np.nan
-
-        for variable_key, variable_value in build_in_vars.items():
-            if "PER_XCD" in variable_key:
-                continue
-            eval_string = bind_expression(
-                build_eval_string(variable_value),
-                pass_key,
-                pass_layout,
-                scoped,
-            )
+        for variable_key, eval_string in ordered_scoped_builtin_bindings(
+            build_in_vars, pass_key, pass_layout, scoped
+        ):
             try:
                 combined_vars = {**sys_vars, **pass_locals}
                 temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
@@ -281,7 +251,11 @@ def _calc_pass_scoped_builtins(
                 pass_locals[f"ammolite__{variable_key}__pass{ordinal}"] = (
                     calculation_result
                 )
-            except (TypeError, NameError, KeyError, AttributeError):
+            except (TypeError, NameError, KeyError):
+                console_debug(
+                    "pass_provenance",
+                    f"builtin {variable_key!r} pass{ordinal}: eval failed, using nan",
+                )
                 pass_locals[f"ammolite__{variable_key}__pass{ordinal}"] = np.nan
         results.update(pass_locals)
     return results

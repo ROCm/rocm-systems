@@ -6,10 +6,7 @@ import json
 import re
 from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
-
-if TYPE_CHECKING:
-    from utils.metrics.pass_provenance import PassLayout
+from typing import Any, Optional
 
 import pandas as pd
 import yaml
@@ -22,6 +19,12 @@ from utils.logger import (
     console_log,
     console_warning,
     demarcate,
+)
+from utils.metrics.pass_provenance import (
+    PassLayout,
+    build_pass_layout,
+    legacy_pass_merge_enabled,
+    natural_pass_sort_key,
 )
 from utils.utils_common import (
     canonical_config_arch,
@@ -366,20 +369,13 @@ def _pass_key_from_result_file(result_file: Path) -> str:
 def load_df_pmc(
     raw_data_dir: str,
     verbose: int,
-) -> tuple[pd.DataFrame, "PassLayout"]:
+) -> tuple[pd.DataFrame, PassLayout]:
     """
     Read all raw pmc counters into one analysis df plus a ``PassLayout``.
 
     When the same counter appears in multiple passes (SPP duplication), the
     wide frame keeps a base column (first pass) and per-pass shadow columns.
     """
-    from utils.metrics.pass_provenance import (
-        PassLayout,
-        build_pass_layout,
-        legacy_pass_merge_enabled,
-        natural_pass_sort_key,
-    )
-
     result_files = sorted(
         Path(raw_data_dir).glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}"),
         key=lambda path: natural_pass_sort_key(_pass_key_from_result_file(path)),
