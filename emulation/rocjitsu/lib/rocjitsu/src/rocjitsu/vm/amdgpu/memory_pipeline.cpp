@@ -391,6 +391,15 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
 
 VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
+  const auto atomic_mutation = [&](std::span<std::byte> target) {
+    uint32_t old;
+    std::memcpy(&old, target.data(), sizeof(old));
+    const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
+    std::memcpy(target.data(), &value, sizeof(value));
+    d.response_data[0] = old;
+  };
+  if (d.atomic_op != AtomicOp::NONE && (d.elem_size != 4 || d.num_dwords != 1))
+    return VmAccessOutcome::Malformed;
   // Masked loads still write the zero response, without taking a VM snapshot or
   // touching backing memory, including byte and halfword requests.
   if (d.is_load && d.load_dword_mask == 0)
@@ -406,6 +415,8 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       d.translated.initialized = true;
     }
     if (!d.translated.access->info().legacy_cache_compatible) {
+      if (d.atomic_op != AtomicOp::NONE)
+        return d.translated.access->atomic_modify(d.addr, d.elem_size, atomic_mutation);
       if (d.is_load) {
         if (d.elem_size >= 4 && d.load_dword_mask != 0xffff) {
           while (d.translated.request_index < d.num_dwords) {
@@ -451,6 +462,14 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     }
   }
 
+  if (d.atomic_op != AtomicOp::NONE) {
+    return wf.raw_cu().l2()->atomic_rmw(
+        d.addr, d.elem_size,
+        [&](uint8_t *line, uint32_t offset) {
+          atomic_mutation({reinterpret_cast<std::byte *>(line + offset), d.elem_size});
+        },
+        wf.process_id());
+  }
   if (d.is_load) {
     if (d.load_dword_mask == 0) {
       // Descriptor bounds suppress memory access while preserving zero writeback.

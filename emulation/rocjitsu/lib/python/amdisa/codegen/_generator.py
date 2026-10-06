@@ -390,6 +390,7 @@ class CodeGenerator:
     _MEMORY_ISSUE_KINDS = {
         'smem_load': 'scalar',
         'smem_store': 'scalar',
+        'smem_atomic': 'scalar',
         'flat_load': 'flat_load',
         'flat_store': 'flat_store',
         'flat_atomic': 'flat_atomic',
@@ -7527,6 +7528,9 @@ class CodeGenerator:
         if cls == 'smem_store':
             return self._gen_smem_store(dst_ops, src_ops, sem)
 
+        if cls == 'smem_atomic':
+            return self._gen_smem_atomic(sem)
+
         if cls == 'flat_load':
             return self._gen_flat_load(dst_ops, src_ops, sem)
 
@@ -7917,6 +7921,31 @@ class CodeGenerator:
         L.append('  d->addr = *address;')
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
+        L = [
+            '  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);',
+            '  if (!data_register) return;',
+            '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
+            '  d->dst_register = *data_register;',
+            '  d->num_dwords = 1;',
+            '  d->elem_size = 4;',
+            f'  d->atomic_op = amdgpu::AtomicOp::{sem.operation.upper()};',
+            # Scalar atomic GLC selects return data, not cache policy.
+            '  d->is_load = inst_.glc != 0;',
+            '  d->mtype = amdgpu::Mtype::UC;',
+            '  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);',
+        ]
+        self._append_wait_counter_type(L, sem)
+        L.extend(
+            [
+                '  auto address = smem_calculate_address(inst_, wf);',
+                '  if (!address) return;',
+                '  d->addr = *address;',
+                '  set_data(std::move(d));',
+            ]
+        )
         return '\n'.join(L)
 
     def _vop3p_opsel_exprs(self) -> tuple[str, str]:
