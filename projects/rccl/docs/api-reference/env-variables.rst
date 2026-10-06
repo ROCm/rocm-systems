@@ -182,7 +182,7 @@ in the following table.
         | Runs the active P2P diagnostics at every communicator initialization.
           RCCL writes data between every eligible pair of GPUs on each node and
           prints a report with the ``NCCL DIAG`` prefix to ``stdout``.
-          See :ref:`using-rccl-diagnostics` for how to read the report.
+          See :ref:`using-rccl-diagnostics` to learn how to read the report.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 

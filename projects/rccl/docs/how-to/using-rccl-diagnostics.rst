@@ -1,12 +1,12 @@
 .. meta::
-   :description: How to use the RCCL active diagnostics to verify GPU peer-to-peer paths during communicator initialization on AMD GPUs
+   :description: Use the RCCL active diagnostics to verify GPU peer-to-peer paths during communicator initialization on AMD GPUs
    :keywords: RCCL, ROCm, AMD, diagnostics, NCCL_RUN_DIAGNOSTICS, P2P, XGMI, troubleshooting
 
 .. _using-rccl-diagnostics:
 
-*****************************************
-Verifying GPU P2P paths with diagnostics
-*****************************************
+*********************************************
+Verify GPU P2P paths with diagnostics in RCCL
+*********************************************
 
 RCCL can check the GPU peer-to-peer (P2P) paths it intends to use while a
 communicator is being created. The check writes data between every eligible
@@ -16,14 +16,14 @@ container or IPC isolation problems before the application sends any traffic.
 A failing report names the exact GPU pair and path to investigate.
 
 This feature is inherited from NCCL (active diagnostics). Besides the P2P
-check it includes a network bandwidth check that runs only on multi-node
-communicators, see `Network bandwidth check`_. The passive RAS diagnostics
+check, it includes a network bandwidth check that runs only on multi-node
+communicators (see `Network bandwidth check`_ for more info). The passive RAS diagnostics
 (``NCCL_RUN_RAS_DIAGNOSTICS``), which compare configuration across ranks
 without exercising data paths, are a separate feature and are not covered on
 this page.
 
-Enabling diagnostics
-====================
+Enable diagnostics
+==================
 
 Diagnostics are disabled by default. Set ``NCCL_RUN_DIAGNOSTICS=1`` for every
 process of the job:
@@ -46,8 +46,8 @@ communicator.
 Diagnostics are informational. A reported problem does not make communicator
 initialization fail, and the communicator remains usable after the check.
 
-Reading the report
-==================
+Read the report
+===============
 
 The report is printed to standard output, not to ``NCCL_DEBUG_FILE``. Every
 line starts with ``<hostname>:<pid> NCCL DIAG``. The process that hosts rank 0
@@ -84,7 +84,7 @@ Result lines use two tags:
 Which GPU pairs are tested
 --------------------------
 
-The check tests directed edges. For each pair of GPUs A and B it tests both
+The check tests directed edges. For each pair of GPUs, A and B, it tests both
 A to B and B to A. Only GPUs on the same node are tested, and only pairs that
 RCCL's topology detection allows to use P2P. On a node with ``N`` GPUs in the
 communicator, the check tests ``N * (N - 1)`` edges when all pairs are
@@ -130,9 +130,9 @@ enabled. A missing line does not mean that the check did not run.
 
 .. note::
 
-   On ROCm the check cannot map the buffers of other devices of the same
+   On ROCm, the check cannot map the buffers of other devices of the same
    process through cuMem. With cuMem enabled, a single process that drives
-   several GPUs therefore reports every edge between its devices as
+   several GPUs reports every edge between its devices as
    ``peer-memory import failed ... handle=DIRECT reason=import``. cuMem is
    enabled by default on gfx1250. Run such jobs with ``NCCL_CUMEM_ENABLE=0``
    when you use the check.
@@ -168,8 +168,8 @@ Because the check runs at every initialization, enable it while bringing up or
 debugging a system, and leave it disabled for jobs that create many
 communicators.
 
-Troubleshooting failed edges
-============================
+Troubleshoot failed edges
+=========================
 
 Each failed edge is reported on its own ``[INFO] p2p:`` line. The line starts
 with the kind of failure, followed by fields that identify the edge and a
@@ -190,8 +190,8 @@ suggested next step. The table lists the kinds of failure.
    * - ``peer-memory import failed``
      - The source rank could not map the destination buffer. In a multi-process
        job this usually means that the processes cannot share memory handles
-       (HIP IPC or, with cuMem, HIP virtual-memory handles), see
-       :ref:`diagnostics-containers`.
+       (HIP IPC or, with cuMem, HIP virtual-memory handles). See
+       :ref:`diagnostics-containers` for more info.
    * - ``write mismatch``
      - Data written by the source GPU into the destination GPU memory did not
        arrive intact. The ``expected`` and ``got`` fields show the test pattern
@@ -224,7 +224,7 @@ edge fields:
    * - ``p2p: check returned <n>``
      - The P2P check stopped before it completed.
 
-The edge fields have the following meaning:
+This table explains the edge fields:
 
 .. list-table::
    :header-rows: 1
@@ -272,11 +272,11 @@ On AMD GPUs, use the following commands instead:
        ``amd-smi topology -d``, then check the IOMMU mode and the PCIe ACS
        settings of the host.
    * - ``handle=LEGACY_CUDA_IPC``
-     - Check that all processes see the GPUs and can share IPC handles, see
-       :ref:`diagnostics-containers`.
+     - Check that all processes see the GPUs and can share IPC handles. See
+       :ref:`diagnostics-containers` for more info.
    * - ``handle=CUMEM_OTHER``
      - Check that HIP virtual memory is supported and that the processes can
-       share memory handles, see :ref:`diagnostics-containers`.
+       share memory handles. See :ref:`diagnostics-containers` for more info.
    * - ``handle=DIRECT``
      - Look for earlier peer-access errors on the source rank.
 
@@ -296,8 +296,8 @@ for that edge.
 
 .. _diagnostics-containers:
 
-Running in containers
-=====================
+Run in containers
+=================
 
 When the ranks of one node run as separate processes, they share GPU memory
 through HIP IPC handles, or through HIP virtual-memory handles passed as file
@@ -322,8 +322,8 @@ reports depends on the containers:
   the processes pass the memory handles as file descriptors, and the same
   split can pass.
 
-Collecting the report
-=====================
+Collect the report
+==================
 
 The report is written to standard output. When standard output is redirected
 to a file or a pipe, it is buffered, and the report of a process that is killed
@@ -333,9 +333,3 @@ run the application with line-buffered output:
 .. code:: shell
 
    NCCL_RUN_DIAGNOSTICS=1 stdbuf -oL <application> [arguments] > out.log
-
-Related information
-===================
-
-* :ref:`troubleshooting-rccl`
-* :ref:`env-variables`
