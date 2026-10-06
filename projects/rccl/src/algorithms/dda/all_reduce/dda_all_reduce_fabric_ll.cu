@@ -11,7 +11,7 @@
  * all_reduce_dda_ll128.h. They share a scratch layout and epoch counter, so
  * keeping the launchers in one translation unit also keeps the invariants that
  * tie them (the static_assert below) next to the code it constrains. LL128
- * one-shot and two-shot uses the same DDA_LL enable and its own threshold.
+ * LL128 one-shot and two-shot are gated by RCCL_DDA_LL128 (not RCCL_DDA_LL); the two protocols are independently controlled.
  * See LICENSE.txt for license information.
  ************************************************************************/
 
