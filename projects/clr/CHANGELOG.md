@@ -17,7 +17,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Changed
 
-* Stream priority is now disabled by default to avoid known queue-priority-related issues. Applications that require HIP stream priorities can enable hardware queue priority support by setting the `GPU_MAX_HW_QUEUES` environment variable, which allows Kernel Fusion Driver (KFD) to apply priority-based scheduling to hardware queues.
+* Stream priority is now disabled by default to avoid known queue-priority-related issues. Applications that require HIP stream priorities can enable hardware queue priority support by setting the `DEBUG_HIP_IGNORE_STREAM_PRIORITY` environment variable, which allows Kernel Fusion Driver (KFD) to apply priority-based scheduling to hardware queues.
 
 ## HIP 10.1.0 for ROCm 10.1.0
 
