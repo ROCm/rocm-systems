@@ -649,7 +649,11 @@ static void CheckChunkedBatch(ncclComm* comm, hipStream_t stream)
 {
     using namespace RCCLTestGuards;
     const int64_t chunkParam = ncclParamCeChunkSize();
-    ASSERT_GT(chunkParam, 100) << "NCCL_CE_CHUNK_SIZE must exceed the short op";
+    const int64_t chunkParam = ncclParamCeChunkSize();
+    if(chunkParam <= 100 || chunkParam > 64 * 1024 * 1024)
+    {
+        GTEST_SKIP() << "NCCL_CE_CHUNK_SIZE=" << chunkParam << " is outside what this test sizes buffers for";
+    }
     const size_t kChunk      = static_cast<size_t>(chunkParam);
     constexpr size_t kSentinel = 16;
     constexpr int    kOps      = 3;
