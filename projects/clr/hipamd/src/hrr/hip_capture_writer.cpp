@@ -1002,10 +1002,18 @@ bool open(const char* output_dir) {
       ev_count = scan.count;
     }
 
-    if (scan.append_at > 0 && (scan.had_trailer || scan.torn_tail)) {
-      if (hrr_ftruncate_fd(g_events_fd, scan.append_at) != 0) {
-        LogPrintfWarning("[HRR capture] ftruncate resume at %lld failed", (long long)scan.append_at);
-      }
+    // The reader stops at a trailer or a torn tail, so records appended after
+    // one that cannot be cut off would be lost: such an archive is not resumed.
+    if (scan.append_at > 0 && (scan.had_trailer || scan.torn_tail) &&
+        hrr_ftruncate_fd(g_events_fd, scan.append_at) != 0) {
+      const int err = errno;
+      LogPrintfError("[HRR capture] ftruncate resume of %s at %lld failed: %s", events_path.c_str(),
+                     (long long)scan.append_at, strerror(err));
+      fprintf(stderr, "[HRR capture] Capture disabled: cannot trim %s to resume it (%s).\n",
+              events_path.c_str(), strerror(err));
+      HRR_CLOSE(g_events_fd);
+      g_events_fd = -1;
+      return open_failed(created_pid_dir);
     }
     if (hrr_seek_end(g_events_fd) < 0) {
       const int err = errno;

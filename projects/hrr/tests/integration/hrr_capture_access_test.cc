@@ -56,8 +56,10 @@
  *   Unit_HRR_CaptureActiveMarker:
  *     pid-<pid>/active, the file producers read as "capture is on", exists
  *     while the capture runs and is gone after a clean exit; a stale one is
- *     removed when the archive is refused; and a resume that cannot create it
- *     disables the capture and leaves the earlier events.bin as it was (POSIX).
+ *     removed when the archive is refused; and a resume that cannot create it,
+ *     or cannot cut the trailer off the earlier events.bin, disables the
+ *     capture and leaves that events.bin as it was (POSIX; the trailer case
+ *     on Linux).
  */
 
 #include "hrr_test_common.hh"
@@ -79,6 +81,16 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+#include <cerrno>
+#include <cstddef>
+#include <linux/audit.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
+#include <sys/prctl.h>
+#include <sys/syscall.h>
+#define HRR_TEST_HAVE_SECCOMP 1
 #endif
 
 namespace {
@@ -206,6 +218,13 @@ bool refused_active_marker(const std::string& output) {
   return disabled_because(output, "cannot create ", "/active (");
 }
 
+bool refused_trim(const std::string& output) {
+  return disabled_because(output, "cannot trim ", "/events.bin to resume it (");
+}
+
+// Printed by Unit_HRR_CaptureTrimFails_Direct when it cannot install its filter.
+constexpr const char* kNoSeccomp = "[HRR test] no seccomp filter: ";
+
 bool manifest_says_complete(const fs::path& archive, bool complete) {
   return read_text_file(archive / "manifest.json")
              .find(complete ? "\"complete\": true" : "\"complete\": false") != std::string::npos;
@@ -289,6 +308,57 @@ TEST_CASE("Unit_HRR_CaptureActiveMarker_Direct", "[.][hrr-direct]") {
   CHECK((st.st_mode & 07777) == 0600);
   CHECK(st.st_nlink == 1);
   HRR_HIP_CHECK(hipFree(d));
+}
+
+// ---------------------------------------------------------------------------
+// Hidden ([.]) workload for Unit_HRR_CaptureActiveMarker: before its first HIP
+// call, and so before the capture opens its archive, it installs a seccomp
+// filter that fails ftruncate with EIO for the length in
+// HRR_TEST_FAIL_FTRUNCATE_AT, the one a resume cuts its events.bin to. Then it
+// records a few events. Without a filter it says so and makes no HIP call.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_CaptureTrimFails_Direct", "[.][hrr-direct]") {
+#ifdef HRR_TEST_HAVE_SECCOMP
+  const char* at = std::getenv("HRR_TEST_FAIL_FTRUNCATE_AT");
+  REQUIRE(at != nullptr);
+  const std::uint64_t length = std::strtoull(at, nullptr, 10);
+  REQUIRE(length > 0);
+#if defined(__x86_64__)
+  constexpr std::uint32_t kArch = AUDIT_ARCH_X86_64;
+#else
+  constexpr std::uint32_t kArch = AUDIT_ARCH_AARCH64;
+#endif
+  // args[1] is the length; both architectures are little-endian, so its low
+  // half comes first.
+  constexpr std::uint32_t kLengthLo = offsetof(struct seccomp_data, args[1]);
+  struct sock_filter code[] = {
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kArch, 0, 7),
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_ftruncate, 0, 5),
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, kLengthLo),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, static_cast<std::uint32_t>(length), 0, 3),
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, kLengthLo + 4),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, static_cast<std::uint32_t>(length >> 32), 0, 1),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EIO & SECCOMP_RET_DATA)),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+  };
+  struct sock_fprog prog{static_cast<unsigned short>(sizeof(code) / sizeof(code[0])), code};
+  if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 ||
+      ::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) != 0) {
+    std::printf("%s%s\n", kNoSeccomp, std::strerror(errno));
+    return;
+  }
+
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, 256));
+  HRR_HIP_CHECK(hipMemset(d, 0, 256));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  HRR_HIP_CHECK(hipFree(d));
+#else
+  std::printf("%sLinux on x86-64 or AArch64 only\n", kNoSeccomp);
+#endif
 }
 #endif
 
@@ -779,6 +849,12 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
  *     message and nothing is appended to events.bin, which stays without a
  *     marker next to it: the state a resume that fails after opening
  *     events.bin leaves behind.
+ *   - Copies a finished archive into the next run's pid-<pid> and runs
+ *     Unit_HRR_CaptureTrimFails_Direct, whose seccomp filter fails the
+ *     ftruncate that would cut the trailer off. Capture is disabled with a
+ *     message, events.bin is left byte for byte as it was, and no marker is
+ *     created: records appended after the trailer would never be read.
+ *     Skipped where the workload cannot install the filter.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureActiveMarker) {
 #ifdef _WIN32
@@ -834,6 +910,38 @@ HRR_TEST_CASE(Unit_HRR_CaptureActiveMarker) {
     // No larger: the resume may have stripped the trailer, but nothing was
     // appended.
     CHECK(fs::file_size(archives.front() / "events.bin") <= first_bytes);
+    CHECK_FALSE(fs::is_regular_file(fs::symlink_status(archives.front() / "active")));
+  }
+
+  SECTION("resume that cannot trim the trailer") {
+    const fs::path first = work.path / "first";
+    hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
+    const fs::path first_archive = hrr_single_process_archive(first);
+    const std::string first_events = read_text_file(first_archive / "events.bin");
+    // A clean exit ends events.bin with the trailer, which a resume cuts off.
+    REQUIRE(first_events.size() > sizeof(hrr_file_header) + sizeof(hrr_eof_record));
+    const size_t trailer_at = first_events.size() - sizeof(hrr_eof_record);
+    hrr_eof_record trailer{};
+    std::memcpy(&trailer, first_events.data() + trailer_at, sizeof(trailer));
+    REQUIRE(trailer.hdr.event_type == HRR_EOF_MARKER);
+    REQUIRE(trailer.eof_magic == HRR_EOF_MAGIC);
+
+    const PlantedRun run = capture_after_planting(
+        base, work.path / "plant.sh",
+        "mkdir \"$HRR_TEST_BASE/pid-$$\"\n"
+        "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n"
+        "export HRR_TEST_FAIL_FTRUNCATE_AT=" + std::to_string(trailer_at) + "\n",
+        "Unit_HRR_CaptureTrimFails_Direct");
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    if (run.output.find(kNoSeccomp) != std::string::npos)
+      HRR_SKIP("The workload cannot make ftruncate fail without a seccomp filter");
+    CHECK(refused_trim(run.output));
+    const std::vector<fs::path> archives = hrr_process_archives(base);
+    REQUIRE(archives.size() == 1);
+    // Still the earlier run's file, trailer included: nothing was appended
+    // after the trailer, where the reader would never reach it.
+    CHECK(file_holds(archives.front() / "events.bin", first_events));
     CHECK_FALSE(fs::is_regular_file(fs::symlink_status(archives.front() / "active")));
   }
 #endif
