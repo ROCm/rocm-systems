@@ -32,17 +32,17 @@ jobs:
       - name: Authorize writes for the canonical repository
         id: authorize_writes
         shell: bash
+        env:
+          CURRENT_REPOSITORY: ${{ github.repository }}
+          CURRENT_SERVER_URL: ${{ github.server_url }}
         run: |
-          REMOTE_URL="$(git remote get-url origin)"
-          case "${REMOTE_URL}" in
-            https://github.com/ROCm/rocm-systems.git|git@github.com:ROCm/rocm-systems.git)
-              echo "allowed=true" >> "${GITHUB_OUTPUT}"
-              ;;
-            *)
-              echo "allowed=false" >> "${GITHUB_OUTPUT}"
-              echo "::notice::PR comment writes disabled for non-canonical origin: ${REMOTE_URL}"
-              ;;
-          esac
+          if [[ "${CURRENT_SERVER_URL}" == "https://github.com" &&
+                "${CURRENT_REPOSITORY}" == "ROCm/rocm-systems" ]]; then
+            echo "allowed=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "allowed=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::PR comment writes disabled for non-canonical repository: ${CURRENT_SERVER_URL}/${CURRENT_REPOSITORY}"
+          fi
 
       - name: Resolve comparison inputs
         id: plan
