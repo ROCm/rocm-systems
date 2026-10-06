@@ -833,6 +833,35 @@ inline Float evaluate_arithmetic(Float lhs, Float rhs, Float addend) {
     return std::fma(left, right, accumulator);
 }
 
+/// @brief Whether a native result that rounded to the smallest normal is tiny.
+/// @details Tininess is judged after rounding (see rounding.h), but native
+/// rounding into the destination format uses the subnormal grid and can reach
+/// the smallest normal from a value that stays below it at full precision.
+/// Scaling the operands by 2^64 is exact and moves the result into the normal
+/// range, where the guest rounding acts at full precision. Run in the guest
+/// rounding environment. Operands with a result this small are far enough from
+/// the overflow threshold to scale.
+template <Arithmetic operation, typename Float>
+inline bool rounds_below_normal(Float lhs, Float rhs, Float addend) {
+  constexpr int kScale = 64;
+  lhs = std::ldexp(lhs, kScale);
+  addend = std::ldexp(addend, kScale);
+  if constexpr (operation == Arithmetic::ADD || operation == Arithmetic::SUB)
+    rhs = std::ldexp(rhs, kScale);
+  const Float scaled = evaluate_arithmetic<operation, Float>(lhs, rhs, addend);
+  return std::abs(scaled) < std::ldexp(std::numeric_limits<Float>::min(), kScale);
+}
+
+/// @brief Evaluate natively, replacing a result that is tiny after rounding by a signed zero.
+template <Arithmetic operation, typename Float>
+inline Float evaluate_flushing_tiny(Float lhs, Float rhs, Float addend) {
+  const Float result = evaluate_arithmetic<operation, Float>(lhs, rhs, addend);
+  if (std::abs(result) == std::numeric_limits<Float>::min() &&
+      rounds_below_normal<operation>(lhs, rhs, addend))
+    return std::copysign(Float{0}, result);
+  return result;
+}
+
 template <Arithmetic operation, typename Float, typename Evaluate>
 inline Float arithmetic_with_policy(Float lhs, Float rhs, Float addend, uint32_t round_mode,
                                     uint32_t denorm_mode, Evaluate evaluate) {
@@ -849,13 +878,21 @@ inline Float arithmetic_with_policy(Float lhs, Float rhs, Float addend, uint32_t
 } // namespace detail
 
 /// @brief Evaluate F32/F64 arithmetic independently of the caller's host environment.
+/// @details A flushing output flushes results that are tiny after rounding. An
+/// active VOP3 OMOD flushes them even when MODE keeps output denormals
+/// (force_output_flush).
 template <Arithmetic operation, typename Float>
 inline Float arithmetic(Float lhs, Float rhs, Float addend, uint32_t round_mode,
-                        uint32_t denorm_mode) {
+                        uint32_t denorm_mode, bool force_output_flush = false) {
   static_assert(operation != Arithmetic::FMA_DX9_ZERO,
                 "DX9 FMA requires the architectural NaN and underflow policy");
-  return detail::arithmetic_with_policy<operation>(lhs, rhs, addend, round_mode, denorm_mode,
-                                                   detail::evaluate_arithmetic<operation, Float>);
+  if (force_output_flush)
+    denorm_mode &= ~2u;
+  if (denorm_mode & 2u)
+    return detail::arithmetic_with_policy<operation>(lhs, rhs, addend, round_mode, denorm_mode,
+                                                     detail::evaluate_arithmetic<operation, Float>);
+  return detail::arithmetic_with_policy<operation>(
+      lhs, rhs, addend, round_mode, denorm_mode, detail::evaluate_flushing_tiny<operation, Float>);
 }
 
 /// @brief F32 arithmetic combines MODE with architectural NaN and tininess policies.
@@ -1049,23 +1086,29 @@ inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, 
 }
 
 /// @brief Execute an F64 fused multiply-add under MODE.FP_ROUND and MODE.FP_DENORM.
+/// @details A flushing output flushes results that are tiny after rounding. An
+/// active VOP3 OMOD flushes them even when MODE keeps output denormals
+/// (force_output_flush).
 inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t round_mode,
-                        uint32_t denorm_mode) {
+                        uint32_t denorm_mode, bool force_output_flush = false) {
   const auto input = input_denormal::Policy::make(denorm_mode);
   src0 = input_denormal::flush_input<fp_format::F64>(src0, input);
   src1 = input_denormal::flush_input<fp_format::F64>(src1, input);
   src2 = input_denormal::flush_input<fp_format::F64>(src2, input);
+  const auto output = output_denormal::Policy::make(force_output_flush ? 0u : denorm_mode);
 
   uint64_t result;
   {
     detail::ScopedFenv environment(round_mode);
-    // evaluate_arithmetic keeps the FMA inside the guest rounding environment.
-    const double value = detail::evaluate_arithmetic<Arithmetic::FMA>(
-        std::bit_cast<double>(src0), std::bit_cast<double>(src1), std::bit_cast<double>(src2));
+    // These keep the FMA inside the guest rounding environment.
+    const double a = std::bit_cast<double>(src0), b = std::bit_cast<double>(src1),
+                 c = std::bit_cast<double>(src2);
+    const double value = output.flush_outputs
+                             ? detail::evaluate_flushing_tiny<Arithmetic::FMA>(a, b, c)
+                             : detail::evaluate_arithmetic<Arithmetic::FMA>(a, b, c);
     result = std::bit_cast<uint64_t>(value);
   }
-  return output_denormal::flush_output<fp_format::F64>(result,
-                                                       output_denormal::Policy::make(denorm_mode));
+  return output_denormal::flush_output<fp_format::F64>(result, output);
 }
 
 /// @brief Binary F64 operations implemented by the shared MODE-aware helper.

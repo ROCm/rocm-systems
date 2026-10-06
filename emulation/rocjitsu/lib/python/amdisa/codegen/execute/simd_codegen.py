@@ -1954,7 +1954,11 @@ SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
 # The IEEE-2019 min/max forms read raw encodings; see float_minmax.simd_probe.
 SIMD_VOP3_BINARY_FP64: dict[str, str] = {
     'v_add_f64_vop3': '[](auto a, auto b) { return a + b; }',
-    'v_mul_f64_vop3': '[](auto a, auto b) { return a * b; }',
+    # An active OMOD flushes a product that is tiny after rounding.
+    'v_mul_f64_vop3': (
+        '[&inst, &wf](auto a, auto b) { return amdgpu::mul_f64_simd(a, b, wf, '
+        'amdgpu::effective_vop3_omod_f64(wf, inst.inst_.omod) != 0); }'
+    ),
     'v_max_f64_vop3': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
     'v_min_f64_vop3': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
 }

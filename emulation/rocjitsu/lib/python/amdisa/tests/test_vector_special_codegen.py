@@ -660,3 +660,10 @@ def test_dx9_multiply_simd_uses_the_fma_tininess_policy(mnemonic: str):
         assert 'native_arithmetic_matches' not in probe
         assert operation in probe
     assert 'effective_vop3_omod_f32' in simd_probe_line(f'{mnemonic}_vop3')
+
+
+def test_f64_multiply_simd_passes_omod_to_the_tininess_check():
+    probe = simd_probe_line('v_mul_f64_vop3')
+    assert 'amdgpu::mul_f64_simd(a, b, wf,' in probe
+    assert 'effective_vop3_omod_f64(wf, inst.inst_.omod) != 0' in probe
+    assert 'native_arithmetic_matches' in probe

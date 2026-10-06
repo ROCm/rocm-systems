@@ -2658,6 +2658,60 @@ std::vector<ArithmeticCase> tiny_result_cases() {
   // A zero operand gives +0 even with a NaN or infinite partner.
   add_f32("MulDx9F32Vop3NegativeZeroTimesNanModeC0", dx9, 0x80000000u, 0x7fc00000u, 0xc0u, 0u);
   add_f32("MulDx9F32Vop3InfinityTimesZeroModeF0", dx9, 0xff800000u, 0u, 0xf0u, 0u);
+
+  // F64 operands in v[0:1], v[2:3] and v[4:5]; result in v[6:7].
+  const auto add_f64 = [&](const std::string &name, std::array<uint32_t, 2> words,
+                           std::array<uint64_t, 3> sources, uint32_t mode, uint64_t result) {
+    std::vector<std::pair<uint32_t, uint32_t>> registers;
+    for (uint32_t i = 0; i < sources.size(); ++i) {
+      registers.emplace_back(2 * i, uint32_t(sources[i]));
+      registers.emplace_back(2 * i + 1, uint32_t(sources[i] >> 32));
+    }
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     std::move(registers),
+                     {{6, uint32_t(result)}, {7, uint32_t(result >> 32)}},
+                     mode,
+                     FE_TONEAREST});
+  };
+  constexpr uint64_t kMinNormal64 = 0x0010000000000000u;
+  constexpr uint64_t kSign64 = 0x8000000000000000u;
+  constexpr uint64_t kOneMinusUlp64 = 0x3fefffffffffffffu; // 1 - 2^-53
+  const auto mul_f64_vop2 =
+      rdna4::build_vop2(rdna4::kVMulF64Vop2, {.src0 = 256, .vsrc1 = 2, .vdst = 6});
+  const std::array<uint32_t, 2> mul_f64_e32{mul_f64_vop2[0], 0u};
+  const auto mul_f64 =
+      rdna4::build_vop3(rdna4::kVMulF64Vop3, {.vdst = 6, .src0 = 256, .src1 = 258});
+  const auto mul_f64_mul2 =
+      rdna4::build_vop3(rdna4::kVMulF64Vop3, {.vdst = 6, .src0 = 256, .src1 = 258, .omod = 1});
+  add_f64("MulF64Vop2TinyMode30", mul_f64_e32, {kOneMinusUlp64, kMinNormal64, 0}, 0x30u, 0u);
+  add_f64("MulF64Vop2TinyModeC0", mul_f64_e32, {kOneMinusUlp64, kMinNormal64, 0}, 0xc0u,
+          kMinNormal64);
+  add_f64("MulF64Vop2NegativeTinyMode30", mul_f64_e32, {kOneMinusUlp64, kSign64 | kMinNormal64, 0},
+          0x30u, kSign64);
+  // (1 - 2^-104) * 2^-1022 rounds to 2^-1022 at full precision, except
+  // toward -infinity (MODE 0x7a).
+  add_f64("MulF64Vop3RoundsToNormalMode30", mul_f64, {0x3feffffffffffffeu, kMinNormal64 + 1, 0},
+          0x30u, kMinNormal64);
+  add_f64("MulF64Vop3RoundsToNormalTowardNegative", mul_f64,
+          {0x3feffffffffffffeu, kMinNormal64 + 1, 0}, 0x7au, 0u);
+  // MODE 0xf0 is native, so this also covers the SIMD path's OMOD check.
+  add_f64("MulF64Vop3Mul2TinyModeF0", mul_f64_mul2, {kOneMinusUlp64, kMinNormal64, 0}, 0xf0u, 0u);
+
+  const auto fma_f64 =
+      rdna4::build_vop3(rdna4::kVFmaF64Vop3, {.vdst = 6, .src0 = 256, .src1 = 258, .src2 = 260});
+  const auto fma_f64_mul2 = rdna4::build_vop3(
+      rdna4::kVFmaF64Vop3, {.vdst = 6, .src0 = 256, .src1 = 258, .src2 = 260, .omod = 1});
+  add_f64("FmaF64TinyMode30", fma_f64, {kOneMinusUlp64, kMinNormal64, 0}, 0x30u, 0u);
+  add_f64("FmaF64TinyModeC0", fma_f64, {kOneMinusUlp64, kMinNormal64, 0}, 0xc0u, kMinNormal64);
+  // -(2^-1022 - 2^-1074) minus a tiny product rounds toward -infinity to the
+  // smallest normal on the subnormal grid, but stays tiny at full precision.
+  add_f64("FmaF64TinyTowardNegative", fma_f64,
+          {0x800fffffffffffffu, kMinNormal64, 0x800fffffffffffffu}, 0x7au, kSign64);
+  add_f64("FmaF64SubnormalModeF0", fma_f64,
+          {0x800fffffffffffffu, kMinNormal64, 0x800fffffffffffffu}, 0xf0u, 0x800fffffffffffffu);
+  add_f64("FmaF64Mul2TinyModeF0", fma_f64_mul2, {kOneMinusUlp64, kMinNormal64, 0}, 0xf0u, 0u);
   return cases;
 }
 

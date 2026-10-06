@@ -752,6 +752,25 @@ class TestLowerVectorAdd:
         assert 'finish_arithmetic_f16' not in result
         assert force in result
 
+    @pytest.mark.parametrize('modified', [False, True])
+    def test_f64_arithmetic_flushes_tiny_results_under_omod(self, modified: bool):
+        mul = SemaNode(
+            SemaNodeKind.MUL,
+            ty=SemaType.F64,
+            children=(_cast(_src(0), SemaType.F64), _cast(_src(1), SemaType.F64)),
+        )
+        value = self._output_modified(mul) if modified else mul
+        body = SemaNode(
+            SemaNodeKind.ASSIGN, children=(_cast(_dst(0), SemaType.F64), value)
+        )
+        result = lower_sema_block(SemaBlock('V_MUL_F64', ExecModel.VECTOR, body))
+
+        # An active OMOD flushes a tiny product before scaling it.
+        assert (
+            'amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(' in result
+        )
+        assert ('(output_policy.omod != 0))' in result) == modified
+
     def test_vop3_f16_transcendental_overflows_to_nearest(self):
         rcp = SemaNode(
             SemaNodeKind.CALL,

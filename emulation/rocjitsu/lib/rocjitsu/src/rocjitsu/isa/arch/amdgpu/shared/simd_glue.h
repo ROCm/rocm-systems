@@ -905,6 +905,27 @@ inline util::native<float> binary_f32_simd(util::native<float> a, util::native<f
   }
 }
 
+/// @brief F64 multiplication for a wave whose MODE the native arithmetic implements.
+/// @details A flushing output, or an active VOP3 OMOD (force_output_flush), also
+/// flushes a product that reaches the smallest normal only through subnormal
+/// rounding. The scalar helper re-evaluates those lanes.
+inline util::native<double> mul_f64_simd(util::native<double> a, util::native<double> b,
+                                         const Wavefront &wf, bool force_output_flush) {
+  util::native<double> result = a * b;
+  if (!force_output_flush && (wf.fp_denorm_mode_f16_f64() & 2u))
+    return result;
+  using U = util::native<uint64_t>;
+  constexpr std::size_t W = util::native_width64;
+  alignas(U) uint64_t bits[W];
+  std::bit_cast<U>(result).copy_to(bits, util::stdx::vector_aligned);
+  for (std::size_t i = 0; i < W; ++i)
+    if ((bits[i] & 0x7fffffffffffffffULL) == 0x0010000000000000ULL)
+      bits[i] = std::bit_cast<uint64_t>(fp_mode::arithmetic<fp_mode::Arithmetic::MUL>(
+          double(a[i]), double(b[i]), 0.0, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(),
+          force_output_flush));
+  return std::bit_cast<util::native<double>>(U(bits, util::stdx::vector_aligned));
+}
+
 /// DX9 accumulator and three-source forms share the scalar flushing, zero-product,
 /// NaN and underflow policies.
 inline util::native<float> fma_dx9_zero_f32_simd(util::native<float> a, util::native<float> b,
@@ -930,9 +951,9 @@ inline util::native<float> fma_dx9_zero_f32_simd(util::native<float> a, util::na
 // Keep hardware FMA inside the guest rounding environment when GCC inlines it.
 [[gnu::optimize("rounding-math")]]
 #endif
-inline util::native<double> fma_f64_mode_simd(util::native<double> src0, util::native<double> src1,
-                                              util::native<double> src2, uint32_t round_mode,
-                                              uint32_t denorm_mode) {
+inline util::native<double>
+fma_f64_mode_simd(util::native<double> src0, util::native<double> src1, util::native<double> src2,
+                  uint32_t round_mode, uint32_t denorm_mode, bool force_output_flush = false) {
   using U = util::native<uint64_t>;
   const U original0 = std::bit_cast<U>(src0);
   const U original1 = std::bit_cast<U>(src1);
@@ -963,8 +984,6 @@ inline util::native<double> fma_f64_mode_simd(util::native<double> src0, util::n
     fp_mode::ScopedEnvironment environment(round_mode);
     result = util::stdx::fma(src0, src1, src2);
   }
-  if ((denorm_mode & 2u) == 0)
-    result = flush(result);
 
   constexpr std::size_t W = util::native_width64;
   alignas(U) uint64_t a_bits[W];
@@ -975,11 +994,19 @@ inline util::native<double> fma_f64_mode_simd(util::native<double> src0, util::n
   original1.copy_to(b_bits, util::stdx::vector_aligned);
   original2.copy_to(c_bits, util::stdx::vector_aligned);
   std::bit_cast<U>(result).copy_to(result_bits, util::stdx::vector_aligned);
+  // A flushing output also flushes results that reach the smallest normal only
+  // through subnormal rounding; the scalar helper re-evaluates those lanes.
+  const bool flush_output = force_output_flush || (denorm_mode & 2u) == 0;
   for (std::size_t i = 0; i < W; ++i) {
-    if (std::isnan(std::bit_cast<double>(a_bits[i])) ||
+    const bool boundary =
+        flush_output && (result_bits[i] & 0x7fffffffffffffffULL) == 0x0010000000000000ULL;
+    if (boundary || std::isnan(std::bit_cast<double>(a_bits[i])) ||
         std::isnan(std::bit_cast<double>(b_bits[i])) ||
         std::isnan(std::bit_cast<double>(c_bits[i])))
-      result_bits[i] = fp_mode::fma_f64(a_bits[i], b_bits[i], c_bits[i], round_mode, denorm_mode);
+      result_bits[i] = fp_mode::fma_f64(a_bits[i], b_bits[i], c_bits[i], round_mode, denorm_mode,
+                                        force_output_flush);
+    else if (flush_output)
+      result_bits[i] = denormal::flush<fp_format::F64>(result_bits[i]);
   }
   return std::bit_cast<util::native<double>>(U(result_bits, util::stdx::vector_aligned));
 }
@@ -2993,8 +3020,8 @@ template <typename Inst>
                                              inst.inst_.abs, inst.inst_.neg);
     const auto c = apply_vop3_src_mod_f64<2>(src2.template load_native<double>(base),
                                              inst.inst_.abs, inst.inst_.neg);
-    auto result =
-        fma_f64_mode_simd(a, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
+    auto result = fma_f64_mode_simd(a, b, c, wf.fp_round_mode_f16_f64(),
+                                    wf.fp_denorm_mode_f16_f64(), omod != 0);
     result = finish_f64_mode_simd(result, wf.fp_round_mode_f16_f64(), omod, inst.inst_.clamp,
                                   floating_clamp_nan_to_zero(wf));
     dst.template store_native<double>(base, result, chunk);

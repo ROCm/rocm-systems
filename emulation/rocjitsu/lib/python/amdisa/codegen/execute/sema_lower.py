@@ -578,6 +578,8 @@ def _mode_arithmetic(
         arguments += ['wf.cu().arch()', 'wf.ieee_mode()']
         if ctx.arithmetic_flush_output is not None:
             arguments.append(ctx.arithmetic_flush_output)
+    elif width == 64 and ctx.arithmetic_flush_output is not None:
+        arguments.append(ctx.arithmetic_flush_output)
     helper = 'arithmetic_f16' if width == 16 else 'arithmetic'
     return (
         f'amdgpu::fp_mode::{helper}<amdgpu::fp_mode::Arithmetic::{operation}>'

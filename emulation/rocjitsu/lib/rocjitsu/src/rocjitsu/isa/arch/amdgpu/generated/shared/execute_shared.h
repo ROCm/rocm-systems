@@ -3157,7 +3157,8 @@ inline void execute_v_add_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                   return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
                                                                  inst.inst_.neg);
                 }(),
-                0.0, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64())),
+                0.0, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(),
+                (output_policy.omod != 0))),
             output_policy));
   }
 }
@@ -11386,12 +11387,13 @@ inline void execute_v_fma_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
         amdgpu::source_modifier::apply_to_float(src1_value, 1, inst.inst_.abs, inst.inst_.neg);
     src2_value =
         amdgpu::source_modifier::apply_to_float(src2_value, 2, inst.inst_.abs, inst.inst_.neg);
+    uint32_t omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                    wf.ieee_mode(), inst.inst_.omod);
+    // An active OMOD flushes a result that is tiny after rounding.
     uint64_t result = amdgpu::fp_mode::fma_f64(
         std::bit_cast<uint64_t>(src0_value), std::bit_cast<uint64_t>(src1_value),
         std::bit_cast<uint64_t>(src2_value), wf.fp_round_mode_f16_f64(),
-        wf.fp_denorm_mode_f16_f64());
-    uint32_t omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
-                                                    wf.ieee_mode(), inst.inst_.omod);
+        wf.fp_denorm_mode_f16_f64(), omod != 0);
     result = amdgpu::fp_mode::finish_f64(result, wf.fp_round_mode_f16_f64(), omod, inst.inst_.clamp,
                                          amdgpu::floating_clamp_nan_to_zero(wf));
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
@@ -15655,7 +15657,10 @@ template <typename Inst>
 inline void execute_v_mul_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
                                                  wf.fp_denorm_mode_f16_f64())) {
-    ROCJITSU_TRY_SIMD_VOP3_BINARY_ROUNDED_FP64([](auto a, auto b) { return a * b; });
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_ROUNDED_FP64([&inst, &wf](auto a, auto b) {
+      return amdgpu::mul_f64_simd(a, b, wf,
+                                  amdgpu::effective_vop3_omod_f64(wf, inst.inst_.omod) != 0);
+    });
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto output_policy =
@@ -15679,7 +15684,8 @@ inline void execute_v_mul_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                   return amdgpu::source_modifier::apply_to_float(sv, 1, inst.inst_.abs,
                                                                  inst.inst_.neg);
                 }(),
-                0.0, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64())),
+                0.0, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(),
+                (output_policy.omod != 0))),
             output_policy));
   }
 }
