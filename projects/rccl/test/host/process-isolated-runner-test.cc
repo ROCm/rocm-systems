@@ -10,40 +10,18 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <optional>
 #include <string>
 
 #include <gtest/gtest.h>
 
 #include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../common/ScopedEnv.hpp"
 
 namespace {
 
 constexpr const char* kMarkerEnvVar = "RCCL_PIT_TEST_MARKER";
 
-// Sets an environment variable for the scope, then restores the previous value or absence.
-class ScopedEnv {
-public:
-  ScopedEnv(const char* name, const char* value) : name_(name) {
-    if (const char* old = std::getenv(name)) {
-      old_ = old;
-    }
-    setenv(name, value, 1);
-  }
-  ~ScopedEnv() {
-    if (old_) {
-      setenv(name_, old_->c_str(), 1);
-    } else {
-      unsetenv(name_);
-    }
-  }
-  ScopedEnv(const ScopedEnv&) = delete;
-  ScopedEnv& operator=(const ScopedEnv&) = delete;
-
-private:
-  const char* name_;
-  std::optional<std::string> old_;
-};
+using RcclUnitTesting::ScopedEnv;
 
 }  // namespace
 

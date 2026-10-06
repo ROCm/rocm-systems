@@ -133,9 +133,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `transport/net_ib*/reg.cc` copies by configure-time `rccl_assert_source_line`
     checks in `CMakeLists.txt`, so a flag change in `reg.cc` fails the configure
     until the probe and the test are updated to match.
-  - `test/common/ProcessIsolatedTestRunner.cpp` (linked, from
-    `process-isolated-runner-test.cc`); suite `ProcessIsolatedRunnerMicrotest.*`.
-    Pins that an isolated child really runs its body when the parent is sharded.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file

@@ -826,6 +826,7 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
             setenv(kReexecMarkerEnvVar, cfg.name.c_str(), 1);
 
             // The one-test filter maps to shard 0 only; inherited shard vars make the child run 0 tests and exit 0.
+            // GTEST_OUTPUT is kept: the child leaves via _exit(), which skips gtest's report writer.
             unsetenv("GTEST_TOTAL_SHARDS");
             unsetenv("GTEST_SHARD_INDEX");
             unsetenv("GTEST_SHARD_STATUS_FILE");
