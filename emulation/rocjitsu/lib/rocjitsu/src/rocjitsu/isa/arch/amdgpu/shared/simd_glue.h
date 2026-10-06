@@ -714,6 +714,24 @@ transcendental_output_modifier_policy(const Wavefront &wf, uint32_t omod, uint32
   return policy;
 }
 
+/// @brief Flush MODE input denormals in the source, then run a unary operation.
+/// @details Floating lanes are flushed on their encoding, so host DAZ cannot
+/// interfere. F16 sources must still be raw half encodings: a subnormal half
+/// becomes a normal F32 once widened.
+template <typename Fmt, typename Op>
+inline auto flush_input_then(input_denormal::Policy policy, Op operation) {
+  return [policy, operation](auto value) {
+    using V = decltype(value);
+    if constexpr (std::is_floating_point_v<typename V::value_type>) {
+      using Bits = util::native<typename Fmt::Lane>;
+      const Bits bits = std::bit_cast<Bits>(value);
+      return operation(std::bit_cast<V>(input_denormal::flush_input<Fmt>(bits, policy)));
+    } else {
+      return operation(input_denormal::flush_input<Fmt>(value, policy));
+    }
+  };
+}
+
 /// @brief Wrap a raw-bit operation with the instruction's source and output modifiers.
 /// @details Resolve MODE once, before the SIMD lane loop. The operation itself
 /// only needs to implement input flushing and produce destination-format bits.
@@ -2534,11 +2552,14 @@ template <typename Inst, typename UnOp>
 /// half per the ISA's op_sel[3] policy.
 /// The operation's result is rounded to F16 first; the shared OMOD/CLAMP stage
 /// then acts on that half. With rounded_result, the operation is a TRANS-unit
-/// one, whose OMOD overflow rounds to nearest in every MODE.
+/// one, whose OMOD overflow rounds to nearest in every MODE. input_policy flushes
+/// the source half before widening; ABS/NEG only change the sign, so the order
+/// relative to them does not matter.
 template <bool True16, typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op,
-                                                           bool rounded_result = false) {
+[[nodiscard]] inline bool
+try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op, bool rounded_result = false,
+                                 input_denormal::Policy input_policy = {}) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.vdst.simd_capable())
     return false;
@@ -2570,6 +2591,7 @@ template <bool True16, typename Inst, typename UnOp>
         continue;
       auto raw = src0.template load_native<T>(base);
       raw = select_vop3_true16_src(raw, opsel, 0);
+      raw = input_denormal::flush_input<fp_format::F16>(raw, input_policy);
       const auto in = util::f16_to_f32_simd(raw);
       const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
       const auto out_half = modified_half(un_op(a));
@@ -2587,6 +2609,7 @@ template <bool True16, typename Inst, typename UnOp>
       if (chunk == 0)
         continue;
       auto raw = src0.template load_native<T>(base) & util::broadcast<T>(0xffffu);
+      raw = input_denormal::flush_input<fp_format::F16>(raw, input_policy);
       const auto in = util::f16_to_f32_simd(raw);
       const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
       const auto out = modified_half(un_op(a)) & util::broadcast<T>(0xffffu);
@@ -2598,7 +2621,8 @@ template <bool True16, typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the VOP3 f16 unary path; see the binary-path note.
 template <bool True16, typename Inst, typename UnOp>
-[[nodiscard]] bool try_execute_unary_vop3_fp16_simd(Inst &, Wavefront &, UnOp, bool = false) {
+[[nodiscard]] bool try_execute_unary_vop3_fp16_simd(Inst &, Wavefront &, UnOp, bool = false,
+                                                    input_denormal::Policy = {}) {
   return false;
 }
 
