@@ -19,8 +19,7 @@
  * recovers all complete records.
  *
  * Thread-safety: write_event_raw() and write_blob() acquire the file mutex.
- * open() publishes a new archive under it. A forked child's first record opens
- * its archive under g_reopen_mu, which flush() and close() also take.
+ * open()/close()/flush() are called from a single thread (init/shutdown).
  */
 
 #include "hip_capture_writer.h"
@@ -456,11 +455,11 @@ static void save_writer_state_locked() {
   fclose(f);
 }
 
-static void index_existing_blobs_locked(const std::string& output_dir) {
+static void index_existing_blobs_locked() {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   g_written_blobs.clear();
 
-  fs::path blobs_root = output_dir + "/blobs";
+  fs::path blobs_root = g_output_dir + "/blobs";
   if (fs::exists(blobs_root)) {
     for (const auto& ent : fs::recursive_directory_iterator(blobs_root)) {
       if (ent.is_regular_file() && ent.path().extension() == ".blob")
@@ -468,7 +467,7 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
     }
   }
 
-  fs::path co_root = output_dir + "/code_objects";
+  fs::path co_root = g_output_dir + "/code_objects";
   if (fs::exists(co_root)) {
     for (const auto& ent : fs::directory_iterator(co_root)) {
       if (ent.is_regular_file() && ent.path().extension() == ".hsaco")
@@ -697,48 +696,52 @@ static void update_root_manifest() {
 // ---------------------------------------------------------------------------
 
 bool open(const char* output_dir) {
-  if (is_open()) return true;  // already open — guard against double-invocation
+  if (g_events_fd >= 0) return true;  // already open — guard against double-invocation
 #ifndef _WIN32
   install_atfork_handlers_once();
 #endif
-  // The archive is prepared in locals and published below under the writer
-  // mutex and g_buf_busy. A forked child opens its archive while other threads
-  // may checkpoint, crash or finalize, and none of them may see the events fd
-  // before the buffer holds the file header.
-  const std::string base_dir = output_dir;
-  ensure_dir(base_dir);
-  const uint64_t pid = current_process_id();
-  const uint64_t parent_pid = current_parent_process_id();
+  g_base_dir = output_dir;
+  ensure_dir(g_base_dir);
+  g_pid = current_process_id();
+  g_parent_pid = current_parent_process_id();
   char sub[64];
-  snprintf(sub, sizeof(sub), "/pid-%llu", static_cast<unsigned long long>(pid));
-  const std::string out_dir = base_dir + sub;
+  snprintf(sub, sizeof(sub), "/pid-%llu",
+           static_cast<unsigned long long>(g_pid));
+  g_output_dir = g_base_dir + sub;
 
-  ensure_dir(out_dir);
-  ensure_dir(out_dir + "/blobs");
-  ensure_dir(out_dir + "/code_objects");
+  // Buffer/checkpoint state is reset here so it is consistent for this
+  // process's pid-<pid> sub-archive.
+  g_buf_len           = 0;
+  g_events_since_ckpt = 0;
+  g_trailer_written   = false;
 
-  std::string events_path = out_dir + "/events.bin";
-  std::string manifest_path = out_dir + "/manifest.json";
+  ensure_dir(g_output_dir);
+  ensure_dir(g_output_dir + "/blobs");
+  ensure_dir(g_output_dir + "/code_objects");
+
+  std::string events_path = g_output_dir + "/events.bin";
+  std::string manifest_path = g_output_dir + "/manifest.json";
+  snprintf(g_manifest_path, sizeof(g_manifest_path), "%s", manifest_path.c_str());
 
   hrr_stat_t st{};
   bool exists = false;
   exists = (hrr_stat_file(events_path.c_str(), &st) == 0 && hrr_stat_size(st) > 0);
 
-  int fd = -1;
-  uint64_t next_seq = 0, ev_count = 0, bl_count = 0;
-  bool fast = false;
-  ScanResult scan{};
   if (exists) {
-    fd = HRR_OPEN_APPEND(events_path.c_str());
-    if (fd < 0) {
+    if (g_events_fd < 0) {
+      g_events_fd = HRR_OPEN_APPEND(events_path.c_str());
+    }
+    if (g_events_fd < 0) {
       LogPrintfError("[HRR capture] Failed to open %s for append", events_path.c_str());
       return false;
     }
 
-    const std::string state_path = out_dir + "/writer_state.json";
-    fast = try_load_writer_state(state_path, hrr_stat_size(st),
-                                 &next_seq, &ev_count, &bl_count);
+    uint64_t next_seq = 0, ev_count = 0, bl_count = 0;
+    const std::string state_path = g_output_dir + "/writer_state.json";
+    const bool fast = try_load_writer_state(state_path, hrr_stat_size(st),
+                                            &next_seq, &ev_count, &bl_count);
 
+    ScanResult scan{};
     if (!fast) {
       FILE* rf = fopen(events_path.c_str(), "rb");
       if (rf) {
@@ -756,68 +759,55 @@ bool open(const char* output_dir) {
     }
 
     if (scan.append_at > 0 && (scan.had_trailer || scan.torn_tail)) {
-      if (hrr_ftruncate_fd(fd, scan.append_at) != 0) {
+      if (hrr_ftruncate_fd(g_events_fd, scan.append_at) != 0) {
         LogPrintfWarning("[HRR capture] ftruncate resume at %lld failed", (long long)scan.append_at);
       }
     }
-    if (hrr_seek_end(fd) < 0) {
+    if (hrr_seek_end(g_events_fd) < 0) {
       LogPrintfError("[HRR capture] seek end of %s failed", events_path.c_str());
-      HRR_CLOSE(fd);
+      HRR_CLOSE(g_events_fd);
+      g_events_fd = -1;
       return false;
     }
 
-    // g_blob_mu before g_file_mu, as the lock order requires.
-    index_existing_blobs_locked(out_dir);
-  } else {
-    // Fresh per-process archive.
-    {
-      std::lock_guard<std::mutex> lk(g_blob_mu);
-      g_written_blobs.clear();
-    }
-#ifndef _WIN32
-    fd = ::open(events_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
-#else
-    fd = HRR_OPEN(events_path.c_str());
-#endif
-    if (fd < 0) {
-      LogPrintfError("[HRR capture] Failed to open %s for writing", events_path.c_str());
-      return false;
-    }
-  }
-
-  {
-    BufWriteGuard lk;
-    g_base_dir   = base_dir;
-    g_output_dir = out_dir;
-    g_pid        = pid;
-    g_parent_pid = parent_pid;
-    snprintf(g_manifest_path, sizeof(g_manifest_path), "%s", manifest_path.c_str());
-    // Buffer/checkpoint state is reset here so it is consistent for this
-    // process's pid-<pid> sub-archive.
-    g_buf_len           = 0;
-    g_events_since_ckpt = 0;
-    g_trailer_written   = false;
     g_seq_id.store(next_seq, std::memory_order_relaxed);
     g_event_count.store(ev_count, std::memory_order_relaxed);
-    if (!exists)
-      g_blob_count.store(0, std::memory_order_relaxed);
-    else if (fast)
+    if (fast)
       g_blob_count.store(bl_count, std::memory_order_relaxed);
-    g_events_fd = fd;
-    if (!exists) {
-      hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
-      buffer_append_locked(&fh, sizeof(fh));
-    }
-  }
+    index_existing_blobs_locked();
 
-  if (exists) {
     LogPrintfInfo("[HRR capture] Resumed archive at %s (events=%llu next_seq=%llu%s%s)",
                   events_path.c_str(),
                   static_cast<unsigned long long>(ev_count),
                   static_cast<unsigned long long>(next_seq),
                   scan.had_trailer ? ", stripped trailer" : "",
                   scan.torn_tail ? ", trimmed torn tail" : "");
+    return true;
   }
+
+  // Fresh per-process archive.
+  g_seq_id.store(0, std::memory_order_relaxed);
+  g_event_count.store(0, std::memory_order_relaxed);
+  g_blob_count.store(0, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> lk(g_blob_mu);
+    g_written_blobs.clear();
+  }
+
+  if (g_events_fd < 0) {
+#ifndef _WIN32
+    g_events_fd = ::open(events_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+#else
+    g_events_fd = HRR_OPEN(events_path.c_str());
+#endif
+  }
+  if (g_events_fd < 0) {
+    LogPrintfError("[HRR capture] Failed to open %s for writing", events_path.c_str());
+    return false;
+  }
+
+  hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
+  buffer_append_locked(&fh, sizeof(fh));
   return true;
 }
 
@@ -868,12 +858,6 @@ void flush(const char* /*output_dir*/) {
   // Always finalize the *effective* directory this process actually wrote to
   // (g_output_dir), which is always a pid-<pid> sub-archive. The caller passes
   // the base HIP_HRR_CAPTURE_OUTPUT path.
-  //
-  // A forked child opens its archive on its first record, under g_reopen_mu.
-  // Holding it here keeps the trailer and the manifest from landing before
-  // that open has finished, and no archive opens once this one is finalized.
-  std::lock_guard<std::mutex> reopen_lk(g_reopen_mu);
-  g_reopen_after_fork.store(false, std::memory_order_release);
   const bool incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
   std::string out_dir;
   {
