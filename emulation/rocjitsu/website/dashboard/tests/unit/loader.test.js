@@ -472,3 +472,18 @@ test('cancels in-flight requests when the caller aborts', async () => {
   expect(isLoadCancelled(await pending)).toBe(true);
   expect(abortedSignals).toHaveLength(MAX_CONCURRENT_RUN_REQUESTS);
 });
+
+test.each([false, true])('skips legacy catalog fetches and prunes exports (all legacy: %s)', async (allLegacy) => {
+  dataset = createSyntheticDataset(2);
+  const legacy = dataset.bodies.get(`https://dashboard.test/data/${dataset.runFiles[0]}`);
+  delete legacy.threadingMode;
+  legacy.testCatalog = 'test-catalogs/missing-legacy.json';
+  if (allLegacy) {
+    delete dataset.bodies.get(`https://dashboard.test/data/${dataset.runFiles[1]}`).threadingMode;
+  }
+  const { fetchImpl, state } = createFetchDouble();
+  const { data, sourceData } = await loadSynthetic(fetchImpl);
+  expect(data.runs).toHaveLength(allLegacy ? 0 : 1);
+  expect(sourceData.index.runFiles).toEqual(allLegacy ? [] : dataset.runFiles.slice(1));
+  expect(state.urls.filter((url) => url.includes('/test-catalogs/'))).toHaveLength(allLegacy ? 0 : 1);
+});

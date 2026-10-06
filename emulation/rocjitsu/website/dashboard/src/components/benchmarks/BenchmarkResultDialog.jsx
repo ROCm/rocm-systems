@@ -81,6 +81,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
               {hasDisplayValue(provenance.commitMessage) && <DetailItem label="Commit message">{provenance.commitMessage}</DetailItem>}
               {hasDisplayValue(run.plugin?.name) && <DetailItem label="Plugin">{run.plugin.name}</DetailItem>}
               {hasDisplayValue(run.plugin?.version) && <DetailItem label="Plugin version">{run.plugin.version}</DetailItem>}
+              <DetailItem label="Threading">{run.threadingMode === 'single' ? 'Single-thread' : 'Default'}</DetailItem>
             </DetailGrid>
 
           </DialogContent>

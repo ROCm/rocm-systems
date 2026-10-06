@@ -111,20 +111,25 @@ export default function DurationHistory({
           }))
           .filter((point) => Number.isFinite(point.duration));
         if (!usable.length) return '';
-        const run = history.slots[usable[0].dataIndex]?.run;
-        return [
+        const describeRun = (run) => [
           `<strong>Commit date · ${escapeHtml(formatShortDate(commitTimestampFor(run)))}</strong>`,
           `Commit SHA · ${escapeHtml(shortSha(run))}`,
-          `Test catalog · ${escapeHtml(run.catalogId ?? 'unknown')}`,
-          ...usable.map((point) => {
-            const series = history.series.find((candidate) => candidate.target === point.seriesName);
+          `Test catalog · ${escapeHtml(run?.catalogId ?? 'unknown')}`,
+        ];
+        return [
+          ...(!history.modeSummaries ? describeRun(history.slots[usable[0].dataIndex]?.run) : []),
+          ...usable.flatMap((point) => {
+            const series = history.series.find((candidate) => (candidate.name ?? candidate.target) === point.seriesName);
             const duration = point.duration / durationScale;
             const perfChange = Number.isFinite(series?.baseline) && series.baseline !== 0
               ? ((duration - series.baseline) / series.baseline) * 100
               : null;
-            return `${point.marker}${escapeHtml(point.seriesName)}&nbsp;&nbsp;<strong>${formatCompactDuration(duration)}</strong>`
-              + `${Number.isFinite(perfChange) ? ` · Time change ${formatPercent(perfChange)}` : ''}`
-              + `${Number.isFinite(series?.baseline) ? ` · Base time ${formatCompactDuration(series.baseline)}` : ''}`;
+            return [
+              `${point.marker}${escapeHtml(point.seriesName)}&nbsp;&nbsp;<strong>${formatCompactDuration(duration)}</strong>`
+                + `${Number.isFinite(perfChange) ? ` · Time change ${formatPercent(perfChange)}` : ''}`
+                + `${Number.isFinite(series?.baseline) ? ` · Base time ${formatCompactDuration(series.baseline)}` : ''}`,
+              ...(history.modeSummaries ? describeRun(series?.runs?.[point.dataIndex]) : []),
+            ];
           }),
         ].join('<br/>');
       },
@@ -191,7 +196,7 @@ export default function DurationHistory({
       ), -1);
       const latestValue = latestIndex >= 0 ? series.data[latestIndex] : null;
       return {
-        name: series.target,
+        name: series.name ?? series.target,
         type: 'line',
         ...(useContinuousDateAxis ? { encode: { x: 0, y: 1 } } : {}),
         data: useContinuousDateAxis
@@ -204,10 +209,10 @@ export default function DurationHistory({
           )),
         smooth: 0.12,
         showSymbol: false,
-        symbol: 'circle',
+        symbol: series.threadingMode === 'single' ? 'diamond' : 'circle',
         symbolSize: 6,
         connectNulls: true,
-        lineStyle: chartLineStyle(series.color, 2.8),
+        lineStyle: { ...chartLineStyle(series.color, 2.8), type: series.threadingMode === 'single' ? 'dashed' : 'solid' },
         itemStyle: chartPointStyle(series.color, theme.palette.background.paper),
         emphasis: { focus: 'series', scale: 1.55, lineStyle: { width: 3.4 } },
         markLine: Number.isFinite(baselineValue) ? {
@@ -278,7 +283,7 @@ export default function DurationHistory({
     >
       <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'flex-end' }, gap: 1.5, mb: 0.75 }}>
         <Stack direction="row" sx={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: { xs: 2, sm: 2.5 } }}>
-          <Box>
+          {!history.modeSummaries && <Box>
             <Typography variant="overline" sx={{ color: 'text.secondary' }}>
               Range change
             </Typography>
@@ -301,23 +306,33 @@ export default function DurationHistory({
             {hasDelta && (
               <CommitComparison candidate={history.latestRun} baseline={history.firstRun} sx={{ mt: 0.25 }} />
             )}
-          </Box>
-          <Box sx={{ borderLeft: 1, borderColor: 'divider', pl: 2 }}>
+          </Box>}
+          {!history.modeSummaries && <Box sx={{ borderLeft: 1, borderColor: 'divider', pl: 2 }}>
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               Latest selected total
             </Typography>
             <Typography sx={{ fontSize: 20, lineHeight: 1.15, fontWeight: 750, letterSpacing: '-.025em', mt: 0.35 }}>
               {formatDuration(history.currentDuration)}
             </Typography>
-          </Box>
+          </Box>}
+          {history.modeSummaries?.map((summary) => (
+            <Box key={summary.threadingMode}>
+              <Typography variant="overline">{summary.label}</Typography>
+              <Typography fontWeight={750}>{formatDuration(summary.currentDuration)}</Typography>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                {summary.insufficientData ? 'Insufficient history for this range' :
+                  `Range change ${formatPercent(summary.durationDelta)}`}
+              </Typography>
+            </Box>
+          ))}
         </Stack>
         <Box sx={{ textAlign: { sm: 'right' } }}>
           <Stack direction="row" sx={{ flexWrap: 'wrap', justifyContent: { sm: 'flex-end' }, gap: 0.65 }}>
             {history.series.map((series) => (
               <Chip
-                key={series.target}
+                key={series.name ?? series.target}
                 size="small"
-                label={series.target}
+                label={series.name ?? series.target}
                 sx={{ '&::before': { content: '""', width: 7, height: 7, borderRadius: '50%', bgcolor: series.color, ml: 1 } }}
               />
             ))}
@@ -327,6 +342,12 @@ export default function DurationHistory({
           </Typography>
         </Box>
       </Stack>
+      {history.modeSummaries && (
+        <Typography variant="caption" sx={{ color: 'text.secondary', mb: 1 }}>
+          Solid: Default. Dashed: Single-thread. Each mode uses its own workload total and baseline;
+          the trimmed single-thread suite is not a like-for-like total comparison.
+        </Typography>
+      )}
       {history.insufficientData ? (
         <Box
           data-testid="performance-trend-insufficient"
@@ -336,7 +357,7 @@ export default function DurationHistory({
         </Box>
       ) : (
         <Box data-testid="performance-trend-chart" sx={{ mx: -0.75, flex: 1, minHeight: 278 }}>
-          <Chart option={option} height="100%" ariaLabel={`Performance trend for ${range}`} />
+          <Chart option={option} height={history.modeSummaries ? 320 : "100%"} ariaLabel={`Performance trend for ${range}`} />
         </Box>
       )}
       {showNormalizationNote && (

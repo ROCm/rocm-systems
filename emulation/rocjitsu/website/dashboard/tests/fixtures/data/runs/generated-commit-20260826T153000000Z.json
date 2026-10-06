@@ -1,4 +1,5 @@
 {
+  "threadingMode": "default",
   "id": "generated-commit-20260826T153000000Z",
   "comparisonId": "generated-commit-20260826T153000000Z",
   "testCatalog": "test-catalogs/rocjitsu-core-v2.json",

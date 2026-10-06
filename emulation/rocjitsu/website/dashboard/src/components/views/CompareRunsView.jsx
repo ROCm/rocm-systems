@@ -140,6 +140,7 @@ function RunInformation({ label, run, otherRun, filters, accentColor }) {
           <HighlightedValue different={run.catalogId !== otherRun?.catalogId}>{run.catalogId}</HighlightedValue>
         </DetailItem>
         <DetailItem label="Commit time">{formatFullDate(commitTimestampFor(run))}</DetailItem>
+        <DetailItem label="Threading">{run.threadingMode === 'single' ? 'Single-thread' : 'Default'}</DetailItem>
         <DetailItem label="Run time">{formatFullDate(run.timestamp)}</DetailItem>
         <DetailItem label="Machine">
           <HighlightedValue different={run.machineId !== otherRun?.machineId}>{run.machineId}</HighlightedValue>

@@ -20,6 +20,7 @@ import AccessTimeRoundedIcon from '@mui/icons-material/AccessTimeRounded';
 import DashboardHeader from './components/layout/DashboardHeader';
 import FiltersBar from './components/layout/FiltersBar';
 import OverviewView from './components/overview/OverviewView';
+import DurationHistory from './components/overview/DurationHistory';
 import BenchmarksView from './components/views/BenchmarksView';
 import CompareRunsView from './components/views/CompareRunsView';
 import FailuresView from './components/views/FailuresView';
@@ -27,7 +28,8 @@ import PluginComparisonView from './components/views/PluginComparisonView';
 import { isLoadCancelled, loadDashboardDataFiles } from './data/dashboardData';
 import { summarizeDashboardDataError } from './data/dashboardDataError';
 import { resolvePublishedDataUrls } from './data/publishedDataUrls';
-import { selectFailures, selectOverview } from './data/selectors';
+import { selectThreadingModeData } from './data/dashboardValidation';
+import { selectFailures, selectOverview, selectThreadingHistory } from './data/selectors';
 import { useDashboardState } from './hooks/useDashboardState';
 import { visuallyHiddenStyles } from './theme/styles';
 import { createDashboardTheme } from './theme/theme';
@@ -186,10 +188,25 @@ function DashboardHero({ data = null }) {
   );
 }
 
-function Dashboard({ data, dataError = null, onRetry = null }) {
-  const state = useDashboardState(data);
+function ThreadingView({ data, sharedState, showHistory = true }) {
+  const localState = useDashboardState(data);
+  const [explorerNavigation, setExplorerNavigation] = useState(sharedState.navigationVersion);
+  if (explorerNavigation !== sharedState.navigationVersion) {
+    setExplorerNavigation(sharedState.navigationVersion);
+    localState.setExplorerRunIds([]);
+    localState.setBenchmarkMode('single');
+  }
+  const state = {
+    ...localState,
+    filters: sharedState.filters,
+    tab: sharedState.tab,
+    setTab: sharedState.setTab,
+    historyRange: sharedState.historyRange,
+    setHistoryRange: sharedState.setHistoryRange,
+    search: sharedState.search,
+    setSearch: sharedState.setSearch,
+  };
   const hasData = data.runs.length > 0;
-  const dataErrorMessage = dataError ? summarizeDashboardDataError(dataError) : null;
   // Overview derives the whole history, so it stays uncomputed while another tab owns the view.
   const overview = useMemo(
     () => (state.tab === 'overview'
@@ -199,7 +216,6 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
       : null),
     [data, hasData, state.filters, state.historyRange, state.tab],
   );
-  const failureCount = useMemo(() => selectFailures(data, state.filters).length, [data, state.filters]);
   const openRunComparison = (runIds) => {
     const selectedRuns = runIds
       .map((runId) => data.runs.find((run) => run.runId === runId))
@@ -231,6 +247,60 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
 
   return (
     <>
+      {state.tab === 'overview' && (
+        <OverviewView
+          viewModel={overview}
+          showHistory={showHistory}
+          data={data}
+          state={state}
+          onCompareRun={openRunComparison}
+          onExploreRun={openRunInExplorer}
+          onOpenBenchmarks={openBenchmarks}
+        />
+      )}
+      {state.tab === 'benchmarks' && (
+        <BenchmarksView
+          data={data}
+          filters={state.filters}
+          initialMode={state.benchmarkMode}
+          selectedRunIds={state.explorerRunIds}
+          onSelectRun={selectExplorerRun}
+          onClearSelectedRuns={() => state.setExplorerRunIds([])}
+        />
+      )}
+      {state.tab === 'compare' && (
+        <CompareRunsView
+          data={data}
+          filters={state.filters}
+          selectedBaselineId={state.comparisonBaselineId}
+          selectedCandidateId={state.comparisonCandidateId}
+          onBaselineChange={state.setComparisonBaselineId}
+          onCandidateChange={state.setComparisonCandidateId}
+        />
+      )}
+      {state.tab === 'plugins' && <PluginComparisonView data={data} filters={state.filters} />}
+      {state.tab === 'failures' && <FailuresView data={data} filters={state.filters} />}
+    </>
+  );
+}
+
+function Dashboard({ data: allData, dataError = null, onRetry = null }) {
+  const state = useDashboardState(allData);
+  const { data } = state;
+  const hasData = data.runs.length > 0;
+  const sections = useMemo(() => state.threadingModes.map((mode) => ({
+    mode, data: selectThreadingModeData(allData, mode),
+  })), [allData, state.threadingModes]);
+  const combinedHistory = useMemo(() => (
+    state.tab === 'overview' && sections.length > 1
+      ? selectThreadingHistory(sections, state.filters, state.historyRange) : null
+  ), [sections, state.filters, state.historyRange, state.tab]);
+  const dataErrorMessage = dataError ? summarizeDashboardDataError(dataError) : null;
+  const [navigationVersion, setNavigationVersion] = useState(0);
+  const failureCount = useMemo(() => selectFailures(data, state.filters).length, [data, state.filters]);
+
+  return (
+    <>
       <Box component="main" sx={{ minHeight: 'calc(100vh - 140px)' }}>
         <Container maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 2, sm: 3, xl: 4 }, pt: { xs: 2.5, md: 3.5 }, pb: 6 }}>
           <DashboardHero data={data} />
@@ -253,16 +323,19 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
             </Alert>
           )}
 
+          {!dataError && allData.runs.length === 0 && (
+            <Alert severity="info" data-testid="dashboard-data-empty" sx={{ mb: 1.75 }}>
+              No supported benchmark runs yet
+            </Alert>
+          )}
+
           <FiltersBar data={data} state={state} disabled={!hasData} />
 
           <Paper data-testid="dashboard-navigation" variant="outlined" sx={{ mt: 1.75, mb: 1.75, borderRadius: 3, overflow: 'hidden' }}>
             <Tabs
               value={state.tab}
               onChange={(_, value) => {
-                if (value === 'benchmarks') {
-                  state.setExplorerRunIds([]);
-                  state.setBenchmarkMode('single');
-                }
+                if (value === 'benchmarks') setNavigationVersion((current) => current + 1);
                 state.setTab(value);
               }}
               variant="scrollable"
@@ -282,38 +355,33 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
             </Tabs>
           </Paper>
 
-          {state.tab === 'overview' && (
-            <OverviewView
-              viewModel={overview}
-              data={data}
-              state={state}
-              onCompareRun={openRunComparison}
-              onExploreRun={openRunInExplorer}
-              onOpenBenchmarks={openBenchmarks}
-            />
+          {combinedHistory && (
+            <Box sx={{ mb: 3 }}>
+              <DurationHistory
+                history={combinedHistory}
+                range={state.historyRange}
+                onRangeChange={state.setHistoryRange}
+                onOpenBenchmarks={() => state.setTab('benchmarks')}
+                showNormalizationNote={combinedHistory.normalized}
+              />
+            </Box>
           )}
-          {state.tab === 'benchmarks' && (
-            <BenchmarksView
-              data={data}
-              filters={state.filters}
-              initialMode={state.benchmarkMode}
-              selectedRunIds={state.explorerRunIds}
-              onSelectRun={selectExplorerRun}
-              onClearSelectedRuns={() => state.setExplorerRunIds([])}
-            />
+          {sections.map(({ mode, data: sectionData }) => (
+            <Box component="section" aria-label={`${mode === 'single' ? 'Single-thread' : 'Default'} threading results`}
+              key={`${state.threadingModes.join(',')}-${mode}`} sx={{ mb: 3 }}>
+              {state.threadingModes.length > 1 && (
+                <Typography component="h2" variant="h2" sx={{ mb: 2 }}>
+                  {mode === 'single' ? 'Single-thread' : 'Default'}
+                </Typography>
+              )}
+              <ThreadingView data={sectionData} sharedState={{ ...state, navigationVersion }} showHistory={!combinedHistory} />
+            </Box>
+          ))}
+          {state.threadingModes.length === 0 && allData.runs.length > 0 && (
+            <Alert severity="info">Select a threading mode to view benchmark results.</Alert>
           )}
-          {state.tab === 'compare' && (
-            <CompareRunsView
-              data={data}
-              filters={state.filters}
-              selectedBaselineId={state.comparisonBaselineId}
-              selectedCandidateId={state.comparisonCandidateId}
-              onBaselineChange={state.setComparisonBaselineId}
-              onCandidateChange={state.setComparisonCandidateId}
-            />
-          )}
-          {state.tab === 'plugins' && <PluginComparisonView data={data} filters={state.filters} />}
-          {state.tab === 'failures' && <FailuresView data={data} filters={state.filters} />}
+          {state.availableThreadingModes.length === 0 && <ThreadingView data={data} sharedState={{ ...state, navigationVersion }} />}
+
         </Container>
       </Box>
       <Box component="footer" sx={{ borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>

@@ -1,4 +1,5 @@
 {
+  "threadingMode": "default",
   "id": "generated-history-2026-08-10",
   "comparisonId": "generated-history-2026-08-10",
   "testCatalog": "test-catalogs/rocjitsu-core-v2.json",

@@ -320,24 +320,30 @@ test('global filters split the full width evenly and collapse excess labels into
   const filterLayout = await targets.evaluate((element) => {
     const grid = element.parentElement.getBoundingClientRect();
     const targetBounds = element.getBoundingClientRect();
+    const threadingBounds = element.parentElement.querySelector('[data-testid="threading-filter"]').getBoundingClientRect();
     const suiteBounds = element.parentElement.querySelector('[data-testid="suites-filter"]')
       .getBoundingClientRect();
     return {
       gridLeft: grid.left,
       gridRight: grid.right,
+      threadingLeft: threadingBounds.left,
       targetLeft: targetBounds.left,
+      targetRight: targetBounds.right,
+      threadingWidth: threadingBounds.width,
       targetWidth: targetBounds.width,
       suiteRight: suiteBounds.right,
       suiteWidth: suiteBounds.width,
     };
   });
   expect(Math.abs(filterLayout.targetWidth - filterLayout.suiteWidth)).toBeLessThanOrEqual(1);
+  expect(Math.abs(filterLayout.threadingWidth - filterLayout.targetWidth)).toBeLessThanOrEqual(1);
   expect(Math.abs(filterLayout.targetLeft - filterLayout.gridLeft)).toBeLessThanOrEqual(1);
+  expect(filterLayout.threadingLeft).toBeGreaterThan(filterLayout.targetRight);
   expect(Math.abs(filterLayout.suiteRight - filterLayout.gridRight)).toBeLessThanOrEqual(1);
   await expect(suites.locator('[data-responsive-tag]')).toHaveCount(3);
   await expect(suites.locator('[data-overflow-tag]')).toHaveCount(0);
 
-  await page.setViewportSize({ width: 600, height: 900 });
+  await page.setViewportSize({ width: 900, height: 900 });
   await expect(suites.locator('[data-responsive-tag]')).toHaveCount(1);
   await expect(suites.locator('[data-overflow-tag]')).toHaveText('+2');
   const spacing = await suites.evaluate((element) => {

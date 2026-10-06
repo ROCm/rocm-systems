@@ -12,7 +12,12 @@ function hasText(value) {
 }
 
 function isPlainObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  return Boolean(value) && typeof value === 'object'
+    && [Object.prototype, null].includes(Object.getPrototypeOf(value));
+}
+
+export function isLegacyRun(value) {
+  return isPlainObject(value) && !Object.hasOwn(value, 'threadingMode');
 }
 
 function isIsoTimestamp(value) {
@@ -147,6 +152,9 @@ function normalizePublishedRun(run, catalog) {
   const plugin = run?.plugin;
   const targetGroups = run?.targets;
   const runLabel = hasText(run?.id) ? run.id : '(unknown)';
+  if (!['default', 'single'].includes(run?.threadingMode)) {
+    throw new Error(`Run ${runLabel} has invalid threadingMode ${String(run?.threadingMode)}`);
+  }
 
   if (
     !hasText(run?.id)
@@ -218,6 +226,7 @@ function normalizePublishedRun(run, catalog) {
 
   return {
     runId: run.id,
+    threadingMode: run.threadingMode,
     comparisonId: run.comparisonId,
     testCatalog: run.testCatalog,
     catalogId: catalog.id,
@@ -249,6 +258,7 @@ function testDefinitionIdentity(definition) {
 function comparisonIdentity(run) {
   return JSON.stringify({
     testCatalog: run.testCatalog,
+    threadingMode: run.threadingMode,
     branch: run.branch,
     commitTimestamp: run.commitTimestamp,
     trigger: run.trigger,
@@ -281,6 +291,7 @@ function buildDashboardData(raw) {
 
   const invalidRun = allRuns.find((run) => (
     !hasText(run?.runId)
+    || !['default', 'single'].includes(run?.threadingMode)
     || !hasText(run?.comparisonId)
     || !hasText(run?.plugin?.id)
     || !isIsoTimestamp(run.timestamp)
@@ -333,8 +344,25 @@ export function loadDashboardData(raw) {
   return buildDashboardData(raw);
 }
 
+export function selectThreadingModeData(data, selection) {
+  const modes = Array.isArray(selection) ? selection : [selection];
+  if (modes.some((mode) => !['default', 'single'].includes(mode))) {
+    throw new Error(`Invalid threading mode ${selection}`);
+  }
+  // The loading/error screen also uses an empty dataset without publication metadata.
+  if (data.pluginRuns.length === 0) return data;
+  const pluginRuns = data.pluginRuns.filter((run) => modes.includes(run.threadingMode));
+  const testIds = new Set(pluginRuns.flatMap((run) => run.tests.map((test) => test.logicalTestId)));
+  return buildDashboardData({
+    ...data,
+    pluginRuns,
+    testCatalog: data.testCatalog.filter((test) => testIds.has(test.id)),
+  });
+}
+
 export function validatePublicationPolicy(runs) {
   if (!Array.isArray(runs)) throw new Error('Expected published runs to be an array');
+  runs = runs.filter((run) => !isLegacyRun(run));
   const referenceRun = runs[0];
   if (!referenceRun) return [];
 
@@ -389,6 +417,7 @@ export function validatePublishedDashboardData({
 
   const normalizedRuns = [];
   const acceptedSourceRuns = [];
+  const acceptedRunFiles = [];
   const validationFailures = [];
   const seenRunFiles = new Set();
   const seenRunIds = new Set();
@@ -409,6 +438,7 @@ export function validatePublishedDashboardData({
       if (hasText(publishedRun?.id) && runFile !== `runs/${publishedRun.id}.json`) {
         throw new Error(`Run ${publishedRun.id} must be published as runs/${publishedRun.id}.json`);
       }
+      if (isLegacyRun(publishedRun)) return;
       const catalogPath = publishedRun?.testCatalog;
       if (!hasText(catalogPath) || !CATALOG_FILE_PATTERN.test(catalogPath)) {
         throw new Error(`Run ${publishedRun?.id ?? '(unknown)'} references an invalid test catalog`);
@@ -450,6 +480,7 @@ export function validatePublishedDashboardData({
       commitTimestamps.set(commitSha, commitTimestamp);
       normalizedRuns.push(normalizedRun);
       acceptedSourceRuns.push(publishedRun);
+      acceptedRunFiles.push(runFile);
     } catch (runError) {
       validationFailures.push({
         runFile: typeof runFile === 'string' ? runFile : String(runFile),
@@ -495,7 +526,7 @@ export function validatePublishedDashboardData({
 
   const sourceData = {
     metadata,
-    index,
+    index: { ...index, runFiles: acceptedRunFiles },
     catalogs: Object.fromEntries(normalizedCatalogs),
     runs: acceptedSourceRuns,
   };
@@ -506,7 +537,9 @@ export function validatePublishedDashboardData({
     runs: normalizedRuns,
   });
 
-  if (!data.latestRun) throw new Error('The data files do not contain any Vanilla benchmark runs');
+  if (normalizedRuns.length > 0 && !data.latestRun) {
+    throw new Error('The data files do not contain any Vanilla benchmark runs');
+  }
 
   const publicationIssues = validatePublicationPolicy(acceptedSourceRuns);
   if (publicationIssues.length > 0) {

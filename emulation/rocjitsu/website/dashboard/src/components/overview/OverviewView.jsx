@@ -7,6 +7,7 @@ import ResultsTable from './ResultsTable';
 
 export default function OverviewView({
   viewModel,
+  showHistory = true,
   data,
   state,
   onCompareRun,
@@ -16,14 +17,14 @@ export default function OverviewView({
   return (
     <Stack sx={{ gap: 1.75 }}>
       <MetricsGrid metrics={viewModel.metrics} />
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.55fr) minmax(350px, .85fr)' }, gap: 1.75, alignItems: 'stretch' }}>
-        <DurationHistory
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: showHistory ? 'minmax(0, 1.55fr) minmax(350px, .85fr)' : '1fr' }, gap: 1.75, alignItems: 'stretch' }}>
+        {showHistory && <DurationHistory
           history={viewModel.history}
           range={state.historyRange}
           onRangeChange={state.setHistoryRange}
           onOpenBenchmarks={onOpenBenchmarks}
           showNormalizationNote={viewModel.history.normalized || viewModel.metrics.estimatedBaseline}
-        />
+        />}
         <LargestChanges
           changes={viewModel.changes}
           candidate={viewModel.history.latestRun}

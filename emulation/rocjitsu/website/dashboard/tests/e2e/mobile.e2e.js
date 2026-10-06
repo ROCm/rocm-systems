@@ -75,3 +75,21 @@ test('keeps every dashboard view reachable on a phone', async ({ page }) => {
   await page.getByRole('tab', { name: /Failures/ }).click();
   await expect(page.getByText('Run Reliability')).toBeVisible();
 });
+
+test('mobile threading switches scoped data without losing the active tab', async ({ page }) => {
+  const { serveThreadingDataset, switchThreading } = await import('./helpers/threading.js');
+  await serveThreadingDataset(page);
+  await page.goto('/');
+  await switchThreading(page, 'Single-thread');
+  await expect(page.getByTestId('targets-filter')).toContainText('gfx950');
+  for (const tab of ['Benchmarks', 'Run Comparison', 'Plugin Comparison', 'Failures', 'Overview']) {
+    const navigation = page.getByRole('tab', { name: tab, exact: true });
+    await navigation.scrollIntoViewIfNeeded();
+    await navigation.click();
+    await switchThreading(page, 'Default');
+    await expect(navigation).toHaveAttribute('aria-selected', 'true');
+    await switchThreading(page, 'Single-thread');
+    await expect(navigation).toHaveAttribute('aria-selected', 'true');
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});

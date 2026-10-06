@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import {
   CATALOG_FILE_PATTERN,
   RUN_FILE_PATTERN,
+  isLegacyRun,
   validatePublishedDashboardData,
 } from '../src/data/dashboardValidation.js';
 
@@ -41,6 +42,7 @@ export async function validateDashboardDataDirectory(directory) {
   }));
 
   const catalogPaths = [...new Set(runResults
+    .filter((result) => !isLegacyRun(result.run))
     .map((result) => result.run?.testCatalog)
     .filter((catalogPath) => (
       typeof catalogPath === 'string' && CATALOG_FILE_PATTERN.test(catalogPath)

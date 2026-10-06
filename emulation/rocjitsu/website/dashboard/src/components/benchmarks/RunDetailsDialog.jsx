@@ -56,6 +56,7 @@ export default function RunDetailsDialog({ run, filters, repository, onClose }) 
           <DialogContent dividers>
             <DetailSectionHeading>Selected Scope</DetailSectionHeading>
             <DetailGrid>
+              <DetailItem label="Threading">{run.threadingMode === 'single' ? 'Single-thread' : 'Default'}</DetailItem>
               <DetailItem label="Coverage">{completedTests.length}/{totalTestCount} completed</DetailItem>
               <DetailItem label="Total duration">{formatDuration(duration)}</DetailItem>
               <DetailItem label="Run time">{formatFullDate(run.timestamp)}</DetailItem>

@@ -174,8 +174,15 @@ export default function FiltersBar({ data, state, disabled = false }) {
         <TuneRoundedIcon color="primary" sx={{ fontSize: 18 }} />
         <Typography variant="overline" sx={{ color: 'text.secondary' }}>Global filters</Typography>
       </Stack>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' }, gap: 1.25 }}>
         <MultiSelect label="Targets" options={data.targets} value={state.targets} onChange={state.setTargets} disabled={disabled} />
+        <MultiSelect
+          label="Threading"
+          options={state.availableThreadingModes.map((mode) => mode === 'single' ? 'Single-thread' : 'Default')}
+          value={state.threadingModes.map((mode) => mode === 'single' ? 'Single-thread' : 'Default')}
+          onChange={(labels) => state.setThreadingModes(labels.map((label) => label === 'Single-thread' ? 'single' : 'default'))}
+          disabled={state.availableThreadingModes.length === 0}
+        />
         <MultiSelect label="Suites" options={data.suites} value={state.suites} onChange={state.setSuites} disabled={disabled} />
       </Box>
     </Paper>

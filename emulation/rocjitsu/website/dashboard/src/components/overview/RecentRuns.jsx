@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -266,6 +266,7 @@ function MobileRun({ row, selected, onSelectRun, onExploreRun }) {
 }
 
 export default function RecentRuns({ data, filters, onCompareRun, onExploreRun }) {
+  const runLimitLabelId = useId();
   const [runLimit, setRunLimit] = useState(8);
   const [selectedRunId, setSelectedRunId] = useState(null);
   const rows = useMemo(() => selectRecentRuns(data, filters, runLimit), [data, filters, runLimit]);
@@ -291,9 +292,9 @@ export default function RecentRuns({ data, filters, onCompareRun, onExploreRun }
       )}
       action={(
         <FormControl size="small" sx={{ width: { xs: '100%', sm: 128 }, flexShrink: 0 }}>
-          <InputLabel id="run-limit-label">Show runs</InputLabel>
+          <InputLabel id={runLimitLabelId}>Show runs</InputLabel>
           <Select
-            labelId="run-limit-label"
+            labelId={runLimitLabelId}
             label="Show runs"
             value={runLimit}
             SelectDisplayProps={{ 'aria-label': 'Show runs' }}

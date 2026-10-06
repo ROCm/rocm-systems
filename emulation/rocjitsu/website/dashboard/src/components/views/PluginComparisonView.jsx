@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
@@ -196,6 +196,7 @@ function ResultCell({ value, baseline, onOpen }) {
 }
 
 function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
+  const sectionId = useId();
   const theme = useTheme();
   const compact = useMediaQuery(theme.breakpoints.down('sm'));
   const viewModel = useMemo(
@@ -288,7 +289,7 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
   };
 
   return (
-    <Box data-testid={`plugin-target-${target}`} component="section" aria-labelledby={`plugin-target-heading-${target}`} sx={{ display: 'grid', gap: 1.25 }}>
+    <Box data-testid={`plugin-target-${target}`} component="section" aria-labelledby={`${sectionId}-heading`} sx={{ display: 'grid', gap: 1.25 }}>
       <Paper
         variant="outlined"
         sx={(theme) => {
@@ -328,7 +329,7 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
               Target
             </Typography>
             <Typography
-              id={`plugin-target-heading-${target}`}
+              id={`${sectionId}-heading`}
               component="h2"
               variant="h2"
               sx={{ mt: 0.15, color: 'var(--target-color)', fontFamily: 'monospace', fontSize: '1.08rem', fontWeight: 820, letterSpacing: '0.01em' }}
@@ -389,10 +390,10 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
               option={chartOption}
               height={Math.min(650, Math.max(340, viewModel.rows.length * comparisonRuns.length * 24 + 120))}
               ariaLabel={`Plugin runtime overhead for ${target}`}
-              ariaDescribedBy={`plugin-chart-help-${target}`}
+              ariaDescribedBy={`${sectionId}-help`}
               onEvents={{ click: ({ data: point }) => point?.result && onOpen({ run: point.run, test: point.result }) }}
             />
-            <Typography id={`plugin-chart-help-${target}`} variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
+            <Typography id={`${sectionId}-help`} variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
               Every point in this chart is also available as a keyboard-operable button in the Test-by-Plugin Results table below.
             </Typography>
             {viewModel.summaries.some((summary) => summary.estimated) && (

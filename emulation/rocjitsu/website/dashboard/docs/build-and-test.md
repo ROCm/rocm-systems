@@ -100,8 +100,12 @@ npm run preview -- --host 127.0.0.1
 ```
 
 Production preview uses `http://127.0.0.1:4173`. If the published URL is invalid,
-unreachable, or contains no valid data, the application remains available and
+or unreachable, the application remains available and
 displays the same data-unavailable state as a missing local `data/` directory.
+A valid dataset containing only legacy runs without explicit threading modes instead
+shows **No supported benchmark runs yet**. The production smoke test still checks
+index/CORS/run requests and cache reloads, but expects catalog requests only when
+supported runs exist.
 The header's **Reload all data** action fetches a fresh index, then fetches
 every referenced run and catalog directly from the data source without using caches.
 After validation, those files become that browser's cache for later normal refreshes.

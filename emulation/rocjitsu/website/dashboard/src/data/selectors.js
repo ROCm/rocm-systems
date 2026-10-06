@@ -50,6 +50,7 @@ export function previousCompletedRunForFilters(runs, candidate, filters) {
   if (selectedTestIds.length === 0) return null;
 
   return runs.filter((run) => {
+    if (run.threadingMode !== candidate.threadingMode) return false;
     if (compareCommitPosition(run, candidate) >= 0) return false;
     if (!isRunCompletedForFilters(run, filters)) return false;
     const tests = resultMap(run);
@@ -63,7 +64,7 @@ export function previousCompletedRunForFilters(runs, candidate, filters) {
 function previousCompletedTestResult(runs, candidate, testId) {
   if (!candidate || !testId) return null;
   const earlierRuns = runs.filter((run) => (
-    compareCommitPosition(run, candidate) < 0
+    run.threadingMode === candidate.threadingMode && compareCommitPosition(run, candidate) < 0
   )).sort(compareRunsByCommit).reverse();
 
   for (const run of earlierRuns) {
@@ -77,7 +78,7 @@ function previousCompletedTestResult(runs, candidate, testId) {
 
 export function compareRuns(candidate, baseline, filters) {
   if (!candidate) return [];
-  const baselineTests = resultMap(baseline);
+  const baselineTests = resultMap(candidate.threadingMode === baseline?.threadingMode ? baseline : null);
   return candidate.tests.filter((test) => testMatches(test, filters)).map((candidateTest) => {
     const baselineTest = baselineTests.get(candidateTest.testId) ?? null;
     const comparable = candidateTest.status === 'completed'
@@ -277,7 +278,7 @@ function weeklyHistorySlots(runs, dayKeys) {
   });
 }
 
-export function selectOverview(data, filters, range = 'ALL') {
+export function selectOverview(data, filters, range = 'ALL', historyAnchorDay = null) {
   const completedRuns = data.runs.filter((run) => isRunCompletedForFilters(run, filters));
   const candidate = data.latestCommitRun ?? sortRunsByCommit(data.runs).at(-1) ?? data.latestRun;
   const trendRuns = completedRuns;
@@ -291,7 +292,7 @@ export function selectOverview(data, filters, range = 'ALL') {
 
   const isIntraday = range === '1D';
   const isWeekly = range === '1W';
-  const anchorDay = periodKey(commitTimestampFor(candidate), 'daily');
+  const anchorDay = historyAnchorDay ?? periodKey(commitTimestampFor(candidate), 'daily');
   const weekDayKeys = isWeekly
     ? calendarDayKeys(shiftUtcDay(anchorDay, -(HISTORY_RANGE_DAYS['1W'] - 1)), anchorDay)
     : null;
@@ -328,7 +329,7 @@ export function selectOverview(data, filters, range = 'ALL') {
   const historyBaseline = !insufficientData && !baselineIsCandidate
     ? candidateHistoryBaseline
     : null;
-  const displayedDuration = sumDurations(historyCandidate.tests.filter((test) => testMatches(test, filters)));
+  const displayedDuration = sumDurations((historyCandidate?.tests ?? []).filter((test) => testMatches(test, filters)));
   let historyNormalized = false;
   const normalizedSeries = filters.targets.map((target, index) => {
     const canonicalTestIds = historyWorkload(candidate, target, filters.suites);
@@ -454,6 +455,77 @@ export function selectOverview(data, filters, range = 'ALL') {
       estimatedBaseline: Number.isFinite(metricsBaselineDuration) && metricsBaselineEstimated,
     },
     metricsBaseline,
+  };
+}
+
+// Normalize each threading mode independently; only the time axis is shared.
+export function selectThreadingHistory(sections, filters, range = 'ALL') {
+  const latestSelectedRun = sortRunsByCommit(sections.flatMap(({ data }) => data.runs)).at(-1);
+  const anchorDay = latestSelectedRun ? periodKey(commitTimestampFor(latestSelectedRun), 'daily') : null;
+  const histories = sections.map(({ mode, data }) => ({
+    threadingMode: mode,
+    label: mode === 'single' ? 'Single-thread' : 'Default',
+    history: data.runs.length ? selectOverview(data, filters, range, anchorDay).history : null,
+  }));
+  const isIntraday = range === '1D';
+  const isWeekly = range === '1W';
+  const slotKey = (slot) => isIntraday || isWeekly
+    ? `${commitTimestampFor(slot.run)}|${commitShaFor(slot.run)}`
+    : slot.dayKey;
+  const slotsByKey = new Map();
+  for (const { history } of histories) {
+    for (const slot of history?.slots ?? []) {
+      const key = slotKey(slot);
+      // Per-series runs below preserve each mode's source for tooltips on shared days.
+      if (!slotsByKey.has(key) || !slotsByKey.get(key).run) slotsByKey.set(key, slot);
+    }
+  }
+  const slots = [...slotsByKey.values()].sort((a, b) => (
+    isIntraday || isWeekly
+      ? Date.parse(commitTimestampFor(a.run)) - Date.parse(commitTimestampFor(b.run))
+        || commitShaFor(a.run).localeCompare(commitShaFor(b.run))
+      : a.dayKey.localeCompare(b.dayKey)
+  )).map((slot, index) => ({ ...slot, x: isWeekly ? slot.x : index }));
+  const dayKeys = isIntraday ? null : isWeekly
+    ? histories.find(({ history }) => history)?.history.dayKeys ?? []
+    : slots.map((slot) => slot.dayKey);
+  const series = histories.flatMap(({ threadingMode, label, history }) => {
+    const indexByKey = new Map((history?.slots ?? []).map((slot, index) => [slotKey(slot), index]));
+    return (history?.series ?? []).map((entry) => ({
+      ...entry,
+      name: `${entry.target} · ${label}`,
+      threadingMode,
+      insufficientData: Boolean(history.insufficientData),
+      data: slots.map((slot) => entry.data[indexByKey.get(slotKey(slot))] ?? null),
+      runs: slots.map((slot) => history.slots[indexByKey.get(slotKey(slot))]?.run ?? null),
+    }));
+  });
+  const modeSummaries = histories.map(({ threadingMode, label, history }) => ({
+    threadingMode,
+    label,
+    currentDuration: history?.currentDuration ?? null,
+    durationDelta: history?.durationDelta ?? null,
+    latestRun: history?.latestRun ?? null,
+    firstRun: history?.firstRun ?? null,
+    insufficientData: Boolean(history?.insufficientData),
+  }));
+  const onlyHistory = histories.length === 1 ? histories[0].history : null;
+  return {
+    range,
+    mode: isIntraday ? 'intraday' : isWeekly ? 'weekly-by-commit' : 'daily-by-commit',
+    anchorDay,
+    slots,
+    dayKeys,
+    axisMax: isWeekly ? dayKeys.length : Math.max(slots.length - 1, 0),
+    currentDuration: onlyHistory?.currentDuration ?? null,
+    durationDelta: onlyHistory?.durationDelta ?? null,
+    firstRun: onlyHistory?.firstRun ?? null,
+    latestRun: onlyHistory?.latestRun ?? null,
+    summary: `${slots.filter((slot) => slot.run).length} commit slots shown`,
+    normalized: histories.some(({ history }) => history?.normalized),
+    insufficientData: histories.length > 0 && histories.every(({ history }) => !history || history.insufficientData),
+    modeSummaries,
+    series,
   };
 }
 

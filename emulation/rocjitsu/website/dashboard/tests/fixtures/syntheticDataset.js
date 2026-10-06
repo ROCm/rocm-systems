@@ -16,6 +16,7 @@ function syntheticRun(index) {
   return {
     id,
     comparisonId: id,
+    threadingMode: 'default',
     testCatalog: CATALOG_PATH,
     plugin: { id: 'vanilla', name: 'Vanilla' },
     source: {

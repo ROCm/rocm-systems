@@ -17,9 +17,10 @@ function durationTotal(tests) {
 export function selectPluginComparisonGroups(data) {
   const groups = new Map();
   for (const run of data.pluginRuns ?? []) {
-    const group = groups.get(run.comparisonId) ?? [];
+    const groupKey = JSON.stringify([run.comparisonId, run.threadingMode]);
+    const group = groups.get(groupKey) ?? [];
     group.push(run);
-    groups.set(run.comparisonId, group);
+    groups.set(groupKey, group);
   }
 
   return [...groups.entries()]
@@ -27,8 +28,8 @@ export function selectPluginComparisonGroups(data) {
       runs.some((run) => run.plugin.id === 'vanilla')
       && runs.some((run) => run.plugin.id !== 'vanilla')
     ))
-    .map(([comparisonId, runs]) => ({
-      comparisonId,
+    .map(([, runs]) => ({
+      comparisonId: runs[0].comparisonId,
       runs: [...runs].sort((left, right) => (
         Number(right.plugin.id === 'vanilla') - Number(left.plugin.id === 'vanilla')
         || left.plugin.name.localeCompare(right.plugin.name)
@@ -51,7 +52,7 @@ export function selectPluginComparison(group, target, suites, baselinePluginId =
       const result = selectedTests(run, target, suites)
         .find((candidate) => candidate.logicalTestId === test.logicalTestId) ?? null;
       const baseline = baselineById.get(test.logicalTestId);
-      const comparable = completed(result) && completed(baseline) && baseline.durationSeconds !== 0;
+      const comparable = run.threadingMode === baselineRun?.threadingMode && completed(result) && completed(baseline) && baseline.durationSeconds !== 0;
       return {
         run,
         result,

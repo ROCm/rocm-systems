@@ -17,6 +17,8 @@ test('production loads GitHub Raw data and reuses refreshed files from browser c
   const requestUrls = new Map();
   const requestedUrls = [];
   const cachedRequestIds = new Set();
+  const runResponses = [];
+  let collectingInitialRuns = true;
   let initialIndexResponse = null;
 
   cdp.on('Network.requestWillBeSent', ({ requestId, request }) => {
@@ -35,6 +37,7 @@ test('production loads GitHub Raw data and reuses refreshed files from browser c
     if (response.url() === `${RAW_DATA_PREFIX}index.json`) {
       initialIndexResponse = response;
     }
+    if (collectingInitialRuns && isRunUrl(response.url())) runResponses.push(response.json());
   });
 
   await page.goto('/');
@@ -46,8 +49,16 @@ test('production loads GitHub Raw data and reuses refreshed files from browser c
   expect(requestedUrls).toContain(`${RAW_DATA_PREFIX}metadata.json`);
   expect(requestedUrls).toContain(`${RAW_DATA_PREFIX}index.json`);
   expect(requestedUrls.some(isRunUrl)).toBe(true);
+  collectingInitialRuns = false;
+  const initialRuns = await Promise.all(runResponses);
+  const hasSupportedRuns = initialRuns.some((run) => (
+    run?.threadingMode === 'default' || run?.threadingMode === 'single'
+  ));
   expect(requestedUrls.some((url) => url.startsWith(`${RAW_DATA_PREFIX}test-catalogs/`)))
-    .toBe(true);
+    .toBe(hasSupportedRuns);
+  if (!hasSupportedRuns) {
+    await expect(page.getByText('No supported benchmark runs yet', { exact: true })).toBeVisible();
+  }
 
   cachedRequestIds.clear();
   await page.reload();

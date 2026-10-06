@@ -1,4 +1,5 @@
 {
+  "threadingMode": "default",
   "id": "benchmark-202606230530-163b6c23",
   "comparisonId": "benchmark-202606230530-163b6c23",
   "testCatalog": "test-catalogs/rocjitsu-core-v1.json",

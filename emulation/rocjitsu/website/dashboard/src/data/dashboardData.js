@@ -1,6 +1,7 @@
 import {
   CATALOG_FILE_PATTERN,
   RUN_FILE_PATTERN,
+  isLegacyRun,
   validatePublishedDashboardData,
 } from './dashboardValidation.js';
 
@@ -340,6 +341,7 @@ export async function loadDashboardDataFiles({
   });
 
   const catalogPaths = [...new Set(runResults
+    .filter((result) => !isLegacyRun(result.run))
     .map((result) => result.run?.testCatalog)
     .filter((catalogPath) => hasText(catalogPath) && CATALOG_FILE_PATTERN.test(catalogPath)))];
   const catalogResults = await mapWithConcurrency(catalogPaths, concurrency, async (catalogPath) => {

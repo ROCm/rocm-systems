@@ -1,6 +1,6 @@
 # Rocjitsu Simulation Performance Data Contract
 
-Schema version 1 uses plain JSON, immutable test catalogs, and one run file per Rocjitsu plugin execution. A run file contains every target measured by that execution; target groups contain result records that reference the shared catalog.
+Schema version 1 uses plain JSON, immutable test catalogs, and one run file per Rocjitsu plugin execution and threading mode. A run file contains every target measured by that execution; target groups contain result records that reference the shared catalog.
 
 ## Published files
 
@@ -39,7 +39,7 @@ build does not configure HTTP response headers.
 
 The dashboard's **Reload all data** action first requests cache-busted
 metadata and index URLs. It then requests every run named by that fresh index
-and every catalog referenced by those runs with the same per-click cache-busting
+and every catalog referenced by supported runs with the same per-click cache-busting
 token and `cache: 'reload'`. This bypasses both browser and shared CDN cache
 entries and stores the fresh immutable files in a new per-browser cache
 generation. The generation is persisted only after the complete dataset
@@ -95,7 +95,22 @@ Catalogs, targets, plugins, and run filenames do not belong in metadata.
 
 The index contains no catalog, target, plugin, or benchmark data.
 
-Validation fails closed. An invalid, missing, or unreadable run listed in the index rejects the whole dataset instead of being skipped; a missing or invalid catalog rejects every run that references it, and therefore the dataset. Invalid dataset metadata or index structure is equally fatal, as is a dataset containing no valid Vanilla run. That last check requires a Vanilla run to exist, not to have completed every result: a valid Vanilla run whose results are failed or timed out still satisfies it.
+Validation fails closed for supported runs. Invalid paths, duplicate index entries,
+unreadable files, and malformed JSON reject the dataset. A parsed plain run object
+without its own `threadingMode` field is a legacy record: the loader skips it before
+loading its catalog or checking its benchmark definitions, comparison group, or
+publication policy. No mode is inferred from case IDs or worker counts. A present
+but invalid mode, including `null`, an empty string, or an unknown value, is an error.
+
+Missing or invalid catalogs referenced by supported runs reject the dataset. A
+supported plugin comparison must contain its Vanilla baseline; failed or timed-out
+Vanilla results still satisfy that requirement. Zero supported runs is valid and
+shows **No supported benchmark runs yet**, rather than a data-unavailable warning.
+
+Legacy runs and catalogs remain immutable on disk, and new publications preserve
+existing index entries. Downloaded dashboard JSON contains only accepted runs and
+referenced catalogs, with its exported index pruned to match. No migration, deletion,
+or fresh dataset is required for this additive schema-version-1 extension.
 
 ## Test catalog
 
@@ -156,7 +171,7 @@ the dashboard-wide test catalog.
 - Catalog versions may share any number of unchanged tests.
 - Runs referencing a five-test catalog remain 5/5 after a seven-test catalog is introduced.
 
-The browser derives the dashboard-wide picker from the union of referenced catalogs. No separate mutable current catalog exists.
+The browser derives the benchmark picker from catalog tests present in the section's threading mode. No separate mutable current catalog exists.
 
 Because that union is keyed by test ID, a shared test ID must carry an identical `suite`, `name`, and `problem` in every catalog that defines it. There is no authoritative winner when two catalogs disagree, so the dashboard rejects the whole dataset and names both catalogs rather than silently comparing different workloads. Renaming a published test therefore costs its history continuity; that price buys the guarantee that one test ID always means one workload.
 
@@ -167,6 +182,7 @@ A run represents one Rocjitsu plugin execution on one source revision and machin
 ```json
 {
   "id": "comparison-123-asan",
+  "threadingMode": "default",
   "comparisonId": "comparison-123",
   "testCatalog": "test-catalogs/rocjitsu-core-v2.json",
   "plugin": {
@@ -222,18 +238,45 @@ A run represents one Rocjitsu plugin execution on one source revision and machin
 ### Run and comparison identity
 
 - `id`: required unique plugin-execution ID matching `<run-id>` in the run filename.
+- `threadingMode`: required for new runs; exactly `default` or `single`, derived from the runner's named policy.
 - `comparisonId`: required controlled-experiment ID shared by Vanilla, ASan, TSan, UBSan, or other plugin runs.
 - `testCatalog`: required path matching `test-catalogs/<filename>.json`.
 
-Do not give plugin executions the same `id`. For different plugins to share a `comparisonId`, they must have identical catalog, source, trigger, machine, environment, and target sets. Their completion times and result values may differ.
+Do not give plugin executions the same `id`. For different plugins to share a `comparisonId`, they must have identical threading mode, catalog, source, trigger, machine, environment, and target sets. Their completion times and result values may differ.
 
 Validation enforces three rules per `comparisonId`, and a violation of any of them rejects the whole dataset:
 
-- Every run sharing the ID must carry the same catalog path, branch, commit SHA, commit timestamp, commit message, trigger, machine, normalized environment, and target set.
+- Every run sharing the ID must carry the same threading mode, catalog path, branch, commit SHA, commit timestamp, commit message, trigger, machine, normalized environment, and target set.
 - A plugin ID may appear at most once. Publish a rerun under a new `comparisonId` rather than repeating a plugin inside an existing comparison.
 - A comparison containing any non-Vanilla plugin must also contain its `vanilla` run. Publish the instrumented runs together with their baseline, never on their own.
 
 Normal performance history, Overview, Run Comparison, Benchmarks, and Failures use only the `vanilla` plugin. The Plugin Comparison list includes only compatible controlled comparisons containing Vanilla and at least one non-Vanilla plugin, and renders each target selected in the global filter without adding a second target picker.
+
+### Threading histories
+
+The global **Threading** checkbox menu, immediately after **Targets**, selects
+**Default**, **Single-thread**, or both. Default is initially selected when available;
+otherwise Single-thread is selected. When both are selected, the main performance
+trend overlays a series for each target and mode on one time axis (solid for Default,
+dashed for Single-thread). Each mode keeps its own workload total, baseline, and
+normalization; the totals do not represent identical workload sets. Details below
+the graph and other tabs use labeled sections with independent histories, latest
+runs, baselines, totals, and plugin groups.
+Target and suite options come from the selected modes; benchmark options remain
+scoped to each section. Clearing both modes shows a selection prompt. Retries remain attempts
+within their own mode. Missing Single-thread work is never filled from Default runs.
+
+Default measures the native allocation policy, so resolved allocations and target
+configuration hashes may change across source revisions without splitting its history
+or preventing historical comparisons. Those values are context, not regression
+signals by themselves. Single-thread requires one engine, one dispatch worker, and
+zero helpers (one total worker, because dispatch includes the calling thread).
+Published environment details retain the resolved per-target engine, dispatch,
+helper, and total counts under `target.<target>.threadAllocation.<field>`.
+
+Plugin comparisons remain controlled experiments: runs sharing a `comparisonId`
+require the same mode and normalized environment, including allocation details.
+Different modes cannot be directly compared in this dashboard.
 
 ### `plugin`
 
@@ -291,7 +334,7 @@ valid only when the compared executions use the same environment.
 - `id`: target architecture such as `gfx950` or `gfx1250`.
 - `results`: exactly one result for every test ID listed under `catalog.targets[id]`.
 
-The result identity is `(run id, target id, testId)`. Plugin comparison identity is `(comparisonId, target id, testId)`.
+The result identity is `(run id, target id, testId)`. Plugin comparison identity is `(threadingMode, comparisonId, target id, testId)`.
 
 Every result contains:
 
