@@ -186,7 +186,7 @@ TEST_CASE("Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled", "[hrr]") {
 // turned them on. AMD_LOG_MASK=0 keeps the per-API traces out; the dumps log
 // with LOG_ALWAYS, which no mask filters.
 // ---------------------------------------------------------------------------
-TEST_CASE("Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime", "[.][hrr]") {
+HRR_TEST_CASE(Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime) {
   struct Run { bool dumped, noticed; };
   auto capture = [](const char* debug_args) {
     ScopedDir cap(fs::temp_directory_path() / "hrr_kernel_args_debug.hrr");
