@@ -355,7 +355,9 @@ def gen_vector_unary(
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         L.append(
-            '    const int32_t exp = amdgpu::frexp_f32(s, wf.fp_denorm_mode_f32()).exponent;'
+            '    const uint32_t exp = amdgpu::frexp::exponent<amdgpu::fp_format::F32>('
+            'std::bit_cast<uint32_t>(s), '
+            'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()));'
         )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, static_cast<uint32_t>(exp));'
@@ -380,7 +382,9 @@ def gen_vector_unary(
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         L.append(
-            '    float result = amdgpu::frexp_f32(s, wf.fp_denorm_mode_f32()).mantissa;'
+            '    float result = std::bit_cast<float>(amdgpu::frexp::mantissa<amdgpu::fp_format::F32>('
+            'std::bit_cast<uint32_t>(s), '
+            'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32())));'
         )
         if is_vop3:
             L.extend(vop3_dst_mod('result'))

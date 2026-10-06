@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Emit shared/fract.h calls for unary floating operations on raw encodings.
+"""Emit shared/fract.h and frexp.h calls for unary operations on raw encodings.
 
 Scalar bodies and SIMD functors use the same helpers with the same MODE policy,
 resolved once before the lane loop. VOP3 forms use shared/floating_operation.h
@@ -24,9 +24,12 @@ class Form:
     policy: str
     # Name of the policy the scalar body declares before the lane loop.
     policy_name: str
-    # Whether the result is a floating encoding that takes output modifiers.
+    # Whether the result is a floating encoding that takes output modifiers;
+    # otherwise it is an integer that ABS/NEG cannot change.
     float_result: bool = True
 
+
+_INPUT_POLICY = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_{mode}())'
 
 FORMS: dict[str, Form] = {
     'fract': Form(
@@ -35,11 +38,25 @@ FORMS: dict[str, Form] = {
         policy='amdgpu::fract::Policy::make(wf.fp_denorm_mode_{mode}(), wf.fp_round_mode_{mode}())',
         policy_name='fract_policy',
     ),
+    'frexp_mant': Form(
+        evaluate='amdgpu::frexp::mantissa',
+        operation='amdgpu::frexp::Mantissa',
+        policy=_INPUT_POLICY,
+        policy_name='frexp_policy',
+    ),
+    'frexp_exp': Form(
+        evaluate='amdgpu::frexp::exponent',
+        operation='amdgpu::frexp::Exponent',
+        policy=_INPUT_POLICY,
+        policy_name='frexp_policy',
+        float_result=False,
+    ),
 }
 
-# VOP1/VOP3 template names of the supported forms, e.g. v_fract_f32_vop3.
+# VOP1/VOP3 template names of the supported forms, e.g. v_frexp_exp_i32_f64_vop3.
 _TEMPLATE = re.compile(
-    r'v_(?P<form>fract)_(?P<dtype>f16|f32|f64)_(?P<encoding>vop1|vop3)'
+    r'v_(?P<form>fract|frexp_mant|frexp_exp)(?:_i16|_i32)?'
+    r'_(?P<dtype>f16|f32|f64)_(?P<encoding>vop1|vop3)'
 )
 
 
@@ -73,11 +90,15 @@ def unary_expr(
     """Emit the operation on raw source bits, with modifiers when present.
 
     ``modifiers`` holds the (ABS, NEG) fields; ``output_policy`` names a
-    declared output_modifier::Policy.
+    declared output_modifier::Policy. Integer results ignore both, and an F64
+    source's exponent is narrowed to its I32 destination.
     """
     policy = FORMS[form].policy_name
+    evaluate = f'{FORMS[form].evaluate}<{_format(dtype)}>({read}, {policy})'
+    if not FORMS[form].float_result:
+        return f'static_cast<uint32_t>({evaluate})' if dtype == 'f64' else evaluate
     if modifiers is None and output_policy is None:
-        return f'{FORMS[form].evaluate}<{_format(dtype)}>({read}, {policy})'
+        return evaluate
     source_fields = ', '.join(modifiers or ('0u', '0u'))
     args = [
         f'amdgpu::floating_operation::SourceModifiers{{{source_fields}}}',
@@ -94,7 +115,7 @@ def vop1_functor(form: str, dtype: str) -> str:
 
 
 def simd_probe(template_name: str, true16_vop3: bool = False) -> str | None:
-    """Emit the VOP3 or F64 VOP1 SIMD probe, or None for the regular dispatch.
+    """Emit the SIMD probe for VOP3 and F64 forms, or None for the regular dispatch.
 
     F16/F32 VOP1 forms use SIMD_VOP1_UNARY entries built by vop1_functor, so
     true16 e32 bodies select their register halves through the same functor.
@@ -104,6 +125,20 @@ def simd_probe(template_name: str, true16_vop3: bool = False) -> str | None:
         return None
     form, dtype, encoding = match['form'], match['dtype'], match['encoding']
     functor = vop1_functor(form, dtype)
+    if not FORMS[form].float_result:
+        # The exponent ignores ABS/NEG and takes no output modifiers.
+        if dtype == 'f64':
+            narrow = (
+                f'[operation = {functor}](auto s) {{ return util::stdx::static_simd_cast<'
+                'util::narrow32<uint32_t>>(operation(std::bit_cast<util::native<uint64_t>>(s))); }'
+            )
+            return f'  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(uint32_t, {narrow});'
+        if encoding == 'vop1':
+            return None
+        if dtype == 'f16':
+            macro = 'VOP3_UNARY_TRUE16_B16' if true16_vop3 else 'VOP3_UNARY_B16'
+            return f'  ROCJITSU_TRY_SIMD_{macro}({functor});'
+        return f'  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, {functor});'
     if encoding == 'vop1':
         if dtype != 'f64':
             return None

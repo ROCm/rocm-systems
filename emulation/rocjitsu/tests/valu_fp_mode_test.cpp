@@ -2591,10 +2591,12 @@ std::vector<ArithmeticCase> integral_rounding_input_flush_cases() {
 enum class UnaryEncoding { Vop1, Vop1High, Vop3, Vop3High };
 
 struct UnaryForm {
-  const char *name;
+  std::string name;
   uint16_t vop1;
   uint16_t vop3;
   unsigned width;
+  // Destination width when it differs from the source, as for an F64 exponent.
+  unsigned result_width = 0;
 };
 
 struct UnaryLane {
@@ -2639,13 +2641,13 @@ ArithmeticCase unary_case(const UnaryForm &form, const UnaryLane &lane) {
   } else {
     sources = {{0, uint32_t(lane.input)}};
     expected = {{6, uint32_t(lane.expected)}};
-    if (form.width == 64) {
+    if (form.width == 64)
       sources.emplace_back(1, uint32_t(lane.input >> 32));
+    if ((form.result_width ? form.result_width : form.width) == 64)
       expected.emplace_back(7, uint32_t(lane.expected >> 32));
-    }
   }
   static constexpr const char *kEncodingNames[] = {"Vop1", "Vop1High", "Vop3", "Vop3High"};
-  return {std::string(form.name) + kEncodingNames[static_cast<int>(lane.encoding)] + lane.name,
+  return {form.name + kEncodingNames[static_cast<int>(lane.encoding)] + lane.name,
           ROCJITSU_CODE_ARCH_RDNA4,
           words,
           std::move(sources),
@@ -2721,6 +2723,128 @@ std::vector<ArithmeticCase> fract_cases() {
   const UnaryForm f16 = forms[0].form;
   cases.push_back(unary_case(f16, {"NegativeNormal", Vop1High, {}, 0x8ce6u, 0xf0u, 0x3bffu}));
   cases.push_back(unary_case(f16, {"NegativeNormal", Vop3High, {}, 0x9e3fu, 0xf0u, 0x3bf4u}));
+  return cases;
+}
+
+// V_FREXP_MANT and V_FREXP_EXP lanes captured on gfx1201. MODE 0x30 keeps F32
+// subnormals and flushes F16/F64 ones; 0xc0 does the reverse, so reading the
+// wrong field fails. A flushed source gives a signed zero mantissa and a zero
+// exponent; a kept one is normalized. The exponent ignores ABS/NEG.
+std::vector<ArithmeticCase> frexp_cases() {
+  using enum UnaryEncoding;
+  struct Format {
+    const char *name;
+    uint16_t mant_vop1;
+    uint16_t mant_vop3;
+    uint16_t exp_vop1;
+    uint16_t exp_vop3;
+    unsigned width;
+    uint64_t sign;
+    uint64_t fraction;
+    uint64_t infinity;
+    uint64_t one;
+    uint64_t quiet;
+    // Kept -largest subnormal and +smallest subnormal: mantissas, then exponents.
+    std::array<uint64_t, 4> kept;
+    uint64_t half;
+  };
+  const std::array<Format, 3> formats = {{
+      {"F16",
+       rdna4::kVFrexpMantF16Vop1,
+       rdna4::kVFrexpMantF16Vop3,
+       rdna4::kVFrexpExpI16F16Vop1,
+       rdna4::kVFrexpExpI16F16Vop3,
+       16,
+       0x8000u,
+       0x3ffu,
+       0x7c00u,
+       0x3c00u,
+       0x200u,
+       {0xbbfeu, 0x3800u, 0xfff2u, 0xffe9u},
+       0x3800u},
+      {"F32",
+       rdna4::kVFrexpMantF32Vop1,
+       rdna4::kVFrexpMantF32Vop3,
+       rdna4::kVFrexpExpI32F32Vop1,
+       rdna4::kVFrexpExpI32F32Vop3,
+       32,
+       0x80000000u,
+       0x7fffffu,
+       0x7f800000u,
+       0x3f800000u,
+       0x400000u,
+       {0xbf7ffffeu, 0x3f000000u, 0xffffff82u, 0xffffff6cu},
+       0x3f000000u},
+      {"F64",
+       rdna4::kVFrexpMantF64Vop1,
+       rdna4::kVFrexpMantF64Vop3,
+       rdna4::kVFrexpExpI32F64Vop1,
+       rdna4::kVFrexpExpI32F64Vop3,
+       64,
+       0x8000000000000000u,
+       0xfffffffffffffu,
+       0x7ff0000000000000u,
+       0x3ff0000000000000u,
+       0x8000000000000u,
+       {0xbfeffffffffffffeu, 0x3fe0000000000000u, 0xfffffc02u, 0xfffffbcfu},
+       0x3fe0000000000000u},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Format &format : formats) {
+    const uint32_t kept = format.width == 32 ? 0x30u : 0xc0u;
+    const uint32_t flushed = format.width == 32 ? 0xc0u : 0x30u;
+    const uint64_t largest = format.sign | format.fraction;
+    const UnaryForm mant{std::string("FrexpMant") + format.name, format.mant_vop1, format.mant_vop3,
+                         format.width};
+    const UnaryForm exp{std::string("FrexpExp") + format.name, format.exp_vop1, format.exp_vop3,
+                        format.width, format.width == 16 ? 16u : 32u};
+    const auto [kept_largest, kept_smallest, kept_largest_exp, kept_smallest_exp] = format.kept;
+    const std::vector<UnaryLane> mant_lanes = {
+        {"NegativeSubnormalKept", Vop1, {}, largest, kept, kept_largest},
+        {"NegativeSubnormalFlushed", Vop1, {}, largest, flushed, format.sign},
+        {"SmallestSubnormalKept", Vop1, {}, 1, kept, kept_smallest},
+        {"SmallestSubnormalFlushed", Vop1, {}, 1, flushed, 0},
+        {"One", Vop1, {}, format.one, 0xf0u, format.half},
+        {"NegativeInfinity",
+         Vop1,
+         {},
+         format.sign | format.infinity,
+         0xf0u,
+         format.sign | format.infinity},
+        {"QuietsSignalingNan",
+         Vop1,
+         {},
+         format.infinity | 1,
+         0xf0u,
+         format.infinity | format.quiet | 1},
+        {"NegativeZero", Vop1, {}, format.sign, 0xf0u, format.sign},
+        {"NegatedOne", Vop3, {.neg = 1}, format.one, 0xf0u, format.sign | format.half},
+        {"OneThenDoubled", Vop3, {.omod = 1}, format.one, 0xf0u, format.one},
+        {"NegativeOneClamped", Vop3, {.clamp = 1}, format.sign | format.one, 0xf0u, 0},
+    };
+    const std::vector<UnaryLane> exp_lanes = {
+        {"NegativeSubnormalKept", Vop1, {}, largest, kept, kept_largest_exp},
+        {"NegativeSubnormalFlushed", Vop1, {}, largest, flushed, 0},
+        {"SmallestSubnormalKept", Vop1, {}, 1, kept, kept_smallest_exp},
+        {"SmallestSubnormalFlushed", Vop1, {}, 1, flushed, 0},
+        {"One", Vop1, {}, format.one, 0xf0u, 1},
+        {"NegativeInfinity", Vop1, {}, format.sign | format.infinity, 0xf0u, 0},
+        {"SignalingNan", Vop1, {}, format.infinity | 1, 0xf0u, 0},
+        {"NegativeZero", Vop1, {}, format.sign, 0xf0u, 0},
+        {"NegatedOne", Vop3, {.neg = 1}, format.one, 0xf0u, 1},
+    };
+    for (const UnaryLane &lane : mant_lanes)
+      cases.push_back(unary_case(mant, lane));
+    for (const UnaryLane &lane : exp_lanes)
+      cases.push_back(unary_case(exp, lane));
+  }
+  // F16 upper halves, captured with the .h forms.
+  const UnaryForm mant{"FrexpMantF16", rdna4::kVFrexpMantF16Vop1, rdna4::kVFrexpMantF16Vop3, 16};
+  const UnaryForm exp{"FrexpExpF16", rdna4::kVFrexpExpI16F16Vop1, rdna4::kVFrexpExpI16F16Vop3, 16};
+  cases.push_back(unary_case(mant, {"NegativeNormal", Vop1High, {}, 0x8aaau, 0xf0u, 0xbaaau}));
+  cases.push_back(unary_case(mant, {"NegativeNormal", Vop3High, {}, 0x8dcdu, 0xf0u, 0xb9cdu}));
+  cases.push_back(unary_case(exp, {"NegativeNormal", Vop1High, {}, 0x947au, 0xf0u, 0xfff7u}));
+  cases.push_back(unary_case(exp, {"NegativeNormal", Vop3High, {}, 0x96d8u, 0xf0u, 0xfff7u}));
   return cases;
 }
 
@@ -2854,6 +2978,11 @@ TEST_P(ValuCapturedLaneTest, MatchesGfx1201OnScalarAndSimdPaths) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Fract, ValuCapturedLaneTest, testing::ValuesIn(fract_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Frexp, ValuCapturedLaneTest, testing::ValuesIn(frexp_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
@@ -3151,15 +3280,12 @@ TEST(ValuFpModeHelpers, HostFlushControlsDoNotOverrideGpuMode) {
       std::bit_cast<uint32_t>(amdgpu::ldexp(std::bit_cast<float>(1u), 1, 1, 3));
   const uint64_t scaled64 =
       std::bit_cast<uint64_t>(amdgpu::ldexp(std::bit_cast<double>(uint64_t{1}), 1, 1, 3));
-  const amdgpu::FrexpF32Result split = amdgpu::frexp_f32(std::bit_cast<float>(1u), 3);
   const uint32_t restored_mxcsr = _mm_getcsr();
   _mm_setcsr(saved_mxcsr);
   EXPECT_FALSE(native_matches);
   EXPECT_EQ(result, 2u);
   EXPECT_EQ(scaled32, 2u);
   EXPECT_EQ(scaled64, 2u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(split.mantissa), 0x3f000000u);
-  EXPECT_EQ(split.exponent, -148);
   EXPECT_EQ(restored_mxcsr, host_mxcsr);
 #endif
 }

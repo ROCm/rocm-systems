@@ -877,6 +877,52 @@ class TestDeriveVectorUnary:
         assert 'apply_omod' not in cpp and 'clamp_floating_result' not in cpp
 
     @pytest.mark.parametrize(
+        ('dtype', 'mode'), [('F16', 'f16_f64'), ('F32', 'f32'), ('F64', 'f16_f64')]
+    )
+    def test_frexp_mantissa_uses_the_shared_split(self, dtype, mode):
+        sem = derive_semantics(f'V_FREXP_MANT_{dtype}', 'ENC_VOP3')
+        fields = frozenset({'abs', 'neg', 'clamp', 'omod'})
+        cpp = lower_sema_block(
+            enrich_block(derive_sema_block(sem), enc_field_names=fields)
+        )
+        policy = f'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_{mode}())'
+        assert f'const auto frexp_policy = {policy};' in cpp
+        assert (
+            f'amdgpu::frexp::Mantissa<amdgpu::fp_format::{dtype}>{{frexp_policy}}'
+            in cpp
+        )
+        assert (
+            'amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}' in cpp
+        )
+        assert 'std::frexp' not in cpp and 'frexp_f32' not in cpp
+
+    @pytest.mark.parametrize(
+        ('name', 'dtype', 'write'),
+        [
+            ('V_FREXP_EXP_I16_F16', 'F16', 'static_cast<int16_t>('),
+            ('V_FREXP_EXP_I32_F32', 'F32', 'amdgpu::frexp::exponent'),
+            (
+                'V_FREXP_EXP_I32_F64',
+                'F64',
+                'static_cast<uint32_t>(amdgpu::frexp::exponent',
+            ),
+        ],
+    )
+    def test_frexp_exponent_is_an_integer_without_output_modifiers(
+        self, name, dtype, write
+    ):
+        sem = derive_semantics(name, 'ENC_VOP3')
+        fields = frozenset({'abs', 'neg', 'clamp', 'omod'})
+        cpp = lower_sema_block(
+            enrich_block(derive_sema_block(sem), enc_field_names=fields)
+        )
+        assert f'amdgpu::frexp::exponent<amdgpu::fp_format::{dtype}>(' in cpp
+        assert write in cpp
+        # ABS/NEG cannot change the exponent, and OMOD/CLAMP do not apply.
+        assert 'inst_.omod' not in cpp and 'inst_.clamp' not in cpp
+        assert 'f32_to_f16' not in cpp and 'std::frexp' not in cpp
+
+    @pytest.mark.parametrize(
         ('name', 'enc', 'op', 'scale'),
         [
             ('V_CVT_NORM_I16_F16', 'ENC_VOP1', 'cvt_norm_i16_f16', '32767.0'),

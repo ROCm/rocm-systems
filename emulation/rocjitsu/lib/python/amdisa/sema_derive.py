@@ -1105,37 +1105,18 @@ class _VectorUnary(_ScalarDeriver):
             body = _assign(_cast(_dst(0), ty), _float_unary('fract', ty, src0))
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
-        if op == 'frexp_exp_f32' and dtype == 'f32':
-            src0 = _cast(_src(0, SemaType.F32), SemaType.F32)
-            result = SemaNode(
-                SemaNodeKind.CALL,
-                ty=SemaType.U32,
-                call_name='frexp_exp_f32',
-                children=(_id('frexp_exp_f32'), src0),
-            )
-            body = _assign(_cast(_dst(0), SemaType.U32), result)
+        if op == 'frexp_mant_f32' and ty.base == 'F':
+            src0 = _cast(_src(0, ty), ty)
+            body = _assign(_cast(_dst(0), ty), _float_unary('frexp_mant', ty, src0))
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
-        if op == 'frexp_exp_f32' and dtype == 'f64':
-            src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
-            result = SemaNode(
-                SemaNodeKind.CALL,
-                ty=SemaType.U32,
-                call_name='frexp_exp_f64',
-                children=(_id('frexp_exp_f64'), src0),
+        if op in ('frexp_exp_f16', 'frexp_exp_f32') and ty.base == 'F':
+            # V_FREXP_EXP_I16_F16 writes an I16; the F32/F64 forms write an I32.
+            result_ty = SemaType('I', 16) if ty.size == 16 else SemaType.U32
+            src0 = _cast(_src(0, ty), ty)
+            body = _assign(
+                _cast(_dst(0), result_ty), _float_unary('frexp_exp', result_ty, src0)
             )
-            body = _assign(_cast(_dst(0), SemaType.U32), result)
-            return SemaBlock(sem.name, ExecModel.VECTOR, body)
-
-        if op == 'frexp_mant_f32' and dtype == 'f64':
-            src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
-            result = SemaNode(
-                SemaNodeKind.CALL,
-                ty=SemaType.F64,
-                call_name='frexp_mant_f64',
-                children=(_id('frexp_mant_f64'), src0),
-            )
-            body = _assign(_cast(_dst(0, SemaType.F64), SemaType.F64), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
         _f64_transcendentals = {'rcp': 'rcp_f64', 'rsq': 'rsq_f64', 'sqrt': 'sqrt_f64'}

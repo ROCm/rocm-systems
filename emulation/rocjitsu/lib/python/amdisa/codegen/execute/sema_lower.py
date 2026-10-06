@@ -1414,18 +1414,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
     ' return a == 0 ? static_cast<uint32_t>(-1)'
     ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
-    'frexp_exp_f32': 'static_cast<uint32_t>(amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).exponent)',
-    'frexp_exp_f16': '[&]() {{ float s = {0}; int exp = 0;'
-    ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
-    ' return static_cast<uint32_t>(exp); }}()',
-    'frexp_exp_f64': '[&]() {{ double s = {0};'
-    ' int exp = 0;'
-    ' if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
-    ' return static_cast<uint32_t>(exp); }}()',
-    'frexp_mant_f64': '[&]() {{ double s = {0};'
-    ' int exp = 0;'
-    ' return std::frexp(s, &exp); }}()',
-    'frexp_mant_f32': 'amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).mantissa',
     'log2': 'amdgpu::transcendental::log_f32({0})',
     'cvt_f32_i32': 'std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>({0})))',
     'cvt_f32_u32': 'std::bit_cast<uint32_t>(static_cast<float>({0}))',

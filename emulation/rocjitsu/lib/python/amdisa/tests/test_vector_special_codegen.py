@@ -255,6 +255,28 @@ def test_fract_simd_probes_use_the_shared_raw_operation(dtype):
         )
 
 
+def test_frexp_simd_probes_use_the_shared_raw_operations():
+    mant = 'amdgpu::frexp::Mantissa<amdgpu::fp_format::F64>{'
+    assert mant in simd_probe_line('v_frexp_mant_f64_vop1')
+    assert simd_probe_line('v_frexp_mant_f64_vop3').startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_UNARY_RAW_FP64(amdgpu::fp_format::F64, ' + mant
+    )
+    exp = 'amdgpu::frexp::Exponent<amdgpu::fp_format::F16>{'
+    assert simd_probe_line('v_frexp_exp_i16_f16_vop3').startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_UNARY_B16(' + exp
+    )
+    assert simd_probe_line('v_frexp_exp_i16_f16_vop3', true16_vop3=True).startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_B16(' + exp
+    )
+    # The F64 exponent narrows to its I32 destination on both encodings.
+    for encoding in ('vop1', 'vop3'):
+        probe = simd_probe_line(f'v_frexp_exp_i32_f64_{encoding}')
+        assert probe.startswith('  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(uint32_t, ')
+        assert 'amdgpu::frexp::Exponent<amdgpu::fp_format::F64>{' in probe
+    for name in ('v_frexp_mant_f16_vop1', 'v_frexp_exp_i32_f32_vop3'):
+        assert 'util::frexp' not in simd_probe_line(name)
+
+
 def test_vop3_f16_simd_probes_split_true16_from_generic():
     add_generic = simd_probe_line('v_add_f16_vop3')
     add_true16 = simd_probe_line('v_add_f16_vop3', true16_vop3=True)

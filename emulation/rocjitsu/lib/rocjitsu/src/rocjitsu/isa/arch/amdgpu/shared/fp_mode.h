@@ -1158,24 +1158,4 @@ inline Float ldexp(Float value, int32_t adjustment, uint32_t rounding, uint32_t 
                           (bits & Format::sign) != 0, rounding, denorm);
 }
 
-struct FrexpF32Result {
-  float mantissa;
-  int32_t exponent;
-};
-
-/// @brief Split an F32 value without letting host DAZ flush a preserved guest input.
-inline FrexpF32Result frexp_f32(float value, uint32_t denorm) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  const uint32_t magnitude = bits & 0x7fffffffu;
-  const int exponent = static_cast<int>(magnitude >> 23);
-  if (exponent == 255)
-    return {std::bit_cast<float>(bits | (magnitude > 0x7f800000u ? 0x00400000u : 0u)), 0};
-  if (magnitude == 0 || (exponent == 0 && !(denorm & 1u)))
-    return {std::bit_cast<float>(bits & 0x80000000u), 0};
-  const int shift = exponent ? 0 : std::countl_zero(magnitude) - 8;
-  return {std::bit_cast<float>((bits & 0x80000000u) | 0x3f000000u |
-                               ((magnitude << shift) & 0x007fffffu)),
-          exponent ? exponent - 126 : -125 - shift};
-}
-
 } // namespace rocjitsu::amdgpu
