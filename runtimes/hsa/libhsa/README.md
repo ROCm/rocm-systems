@@ -27,6 +27,11 @@ Linux builds require an LLD linker to combine Rust's export map with the
 The CMake build stages this ABI with AMDF in one shared image. The AMDF
 and HSA aliases share one rocddi native process context.
 
+The mirrored AMD extension header includes version 1.33 declarations, but
+this early-access frontend does not yet export `hsa_amd_agent_set_attribute`
+or support the persisting-L2 agent attributes. The header version does not
+describe this frontend's implemented API surface.
+
 Image and sampler support is disabled on every GPU. The image extension is not
 advertised, and its entry points return `HSA_STATUS_ERROR_NOT_SUPPORTED` while
 retaining their public symbols.

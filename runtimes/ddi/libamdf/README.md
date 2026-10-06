@@ -6,9 +6,10 @@ libamdf implements the AMDF native C ABI in Rust. Its sole public contract is
 the seven headers under `api-headers/include/amdf/`, synchronized from
 `hrx-system/libamdf` at `4aa34130de44c45d68a48575cebfd0ff0610c461` with only
 the approved AMD copyright and MIT license preamble substitution.
-The crate builds `libamdf.a`; the workspace-root shared package supplies the shared
-`libamdf.so` alias. `amdf_query_api` is the AMDF C entry point. The shared
-image also exports HSA entry points, but loading AMDF does not initialize HSA.
+The crate builds `libamdf.a`; the workspace-root shared package supplies the
+`libamdf.so` alias and the `libamdf.so.0` compatibility name. `amdf_query_api`
+is the AMDF C entry point. The shared image also exports HSA entry points, but
+loading AMDF does not initialize HSA.
 
 AMDF separates passive endpoint discovery from explicit device activation.
 An instance owns its callback allocator and native session; PROCESS sessions

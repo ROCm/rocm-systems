@@ -5,7 +5,7 @@
 This map describes the implementation in this tree. Hardware results are
 recorded separately in the [validation record](../tests/README.md).
 
-The [vendored headers](../../../../api-headers/README.md) synchronized from
+The [vendored headers](../../../api-headers/README.md) synchronized from
 `hrx-system@4aa34130de44c45d68a48575cebfd0ff0610c461` define the sole public contract.
 This page records implementation support; it does not define another ABI or
 promise every service described by those headers. The libamdf frontend translates
@@ -63,7 +63,7 @@ parents and excludes concurrent destruction. Memory and queue use through raw
 device addresses remains the caller's lifetime responsibility. Internal native
 owners preserve only the dependencies needed to finish their own cleanup.
 
-All native control enters the private [Driver](../../../src/driver.rs).
+All native control enters the private [Driver](../../rocddi/src/driver.rs).
 Cached endpoint, family, scope, device, memory, host-mapping, queue, mapping,
 and address queries read retained state without allocation, locking, lazy
 initialization, or ownership-counter updates. Pair queries compose only the two
@@ -96,5 +96,6 @@ The XDNA extension is absent. Kernel queues on other GPU targets,
 foreign or LOCAL memory import, dynamic AQL scratch growth, and dependency
 bearing AQL barriers remain unsupported. Peer-device queue production,
 multiple GPU execution, live reset and unplug, AArch64 GPU execution, and
-cross-runtime stress need hardware qualification. The current two shared
-libraries cannot share rocddi process state in one process.
+cross-runtime stress need hardware qualification. The AMDF and HSA shared
+aliases use one image and share rocddi process state. The separately linked
+AMDF static archive has its own state.
