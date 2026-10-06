@@ -61,6 +61,7 @@ IMPORT_TIMEOUT = 30
 _IMPORT_MARKER = "@@rocprofv3-doctor-import@@"
 _IMPORT_SCRIPT = (
     "import json, sys\n"
+    "sys.path[:] = json.loads(sys.argv[3])\n"
     "try:\n"
     "    module = __import__(sys.argv[1])\n"
     "    version = getattr(module, '__version__', None) or getattr(module, 'version', None)\n"
@@ -393,18 +394,30 @@ class SystemAccessor(object):
     def _probe_import(self, module_name):
         """Import ``module_name`` in a child interpreter; cached per module.
 
-        The child gets this process's sys.path through PYTHONPATH, so it
-        resolves modules exactly as an in-process import would -- including
-        the rocprofv3 package this tool bootstrapped -- while a crash or hang
-        stays contained in the child.
+        The child runs isolated (-I: no current directory, PYTHONPATH, or
+        user site on its path) and then adopts exactly this process's
+        sys.path, so it resolves modules as an in-process import would --
+        including the rocprofv3 package this tool bootstrapped -- while a
+        crash or hang stays contained in the child. A plain ``python -c``
+        child would put the current directory first, letting a stray
+        ``rocprofv3.py`` or ``pandas.py`` there shadow, and run instead of,
+        the real package.
         """
         if module_name in self._import_cache:
             return self._import_cache[module_name]
 
+        search_path = json.dumps([entry for entry in sys.path if entry])
         returncode, stdout, stderr = self.run(
-            [sys.executable, "-c", _IMPORT_SCRIPT, module_name, _IMPORT_MARKER],
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                _IMPORT_SCRIPT,
+                module_name,
+                _IMPORT_MARKER,
+                search_path,
+            ],
             timeout=IMPORT_TIMEOUT,
-            env={"PYTHONPATH": os.pathsep.join(entry for entry in sys.path if entry)},
         )
         info = None
         if _IMPORT_MARKER in stdout:

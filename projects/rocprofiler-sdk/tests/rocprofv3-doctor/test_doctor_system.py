@@ -192,3 +192,25 @@ def test_doctor_system_temp_dir_is_private_and_removable(accessor):
     finally:
         accessor.remove_tree(path)
     assert not os.path.exists(path)
+
+
+def test_doctor_system_import_ignores_current_directory(
+    accessor, module_dir, tmp_path, monkeypatch
+):
+    """A module file in the directory the doctor is run from must neither
+    shadow the real module nor be executed."""
+    (module_dir / "doctor_test_real.py").write_text("__version__ = 'real'\n")
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    marker = tmp_path / "executed"
+    (cwd / "doctor_test_real.py").write_text(
+        "open({!r}, 'w').close()\n__version__ = 'shadow'\n".format(str(marker))
+    )
+    (cwd / "doctor_test_only_in_cwd.py").write_text(
+        "open({!r}, 'w').close()\n".format(str(marker))
+    )
+    monkeypatch.chdir(str(cwd))
+
+    assert accessor.can_import("doctor_test_real") == (True, "real")
+    assert accessor.can_import("doctor_test_only_in_cwd")[0] is False
+    assert not marker.exists()
