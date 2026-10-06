@@ -55,8 +55,18 @@ configs/                GPU topology JSON files
 schemas/                FlatBuffers schemas
 tests/                  Test suite
 docs/                   Design documents and guides
-website/                React dashboard source and web tests
+website/                Public web applications
+  dashboard/            React dashboard source and web tests
+  handbook/             Markdown documentation and blog site
 ```
+
+When adding a guide under `docs/`, also register it in the handbook navigation.
+See [Adding a guide](website/handbook/README.md#adding-a-guide) for the steps and
+local validation command.
+
+See [website/handbook/README.md](website/handbook/README.md) to build and preview the
+Handbook. The simulation-performance dashboard has its own
+[website/dashboard/README.md](website/dashboard/README.md).
 
 ## Building
 

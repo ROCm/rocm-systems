@@ -395,6 +395,7 @@ Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exe
   if (has_encoded_dpp())
     dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
         *reinterpret_cast<const Vop1VopDppMachineInst *>(inst));
+  flags_ |= VSKIP_AFFECTED;
 }
 
 void Vop1::implicit_uses(RegisterSet &uses) const {
@@ -644,6 +645,7 @@ Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  flags_ |= VSKIP_AFFECTED;
 }
 
 bool Vopc::default_encoding() {
@@ -761,6 +763,7 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
   if (has_encoded_dpp())
     dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
         *reinterpret_cast<const Vop2VopDppMachineInst *>(inst));
+  flags_ |= VSKIP_AFFECTED;
 }
 
 void Vop2::implicit_uses(RegisterSet &uses) const {
@@ -813,6 +816,7 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  flags_ |= VSKIP_AFFECTED;
 }
 
 bool Vop3::displays_vop3_op_sel() const {
@@ -871,6 +875,7 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  flags_ |= VSKIP_AFFECTED;
 }
 
 bool Ds::uses_split_ds_offsets() const {
@@ -884,6 +889,7 @@ Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  flags_ |= VSKIP_AFFECTED;
 }
 
 Mubuf::Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn)
@@ -892,6 +898,7 @@ Mubuf::Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn 
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  flags_ |= VSKIP_AFFECTED;
 }
 
 Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn)
@@ -900,6 +907,7 @@ Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn 
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  flags_ |= VSKIP_AFFECTED;
 }
 
 Flat::Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn)
@@ -910,6 +918,7 @@ Flat::Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  flags_ |= VSKIP_AFFECTED;
 }
 
 void Flat::implicit_uses(RegisterSet &uses) const {
@@ -963,6 +972,7 @@ Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  flags_ |= VSKIP_AFFECTED;
 }
 
 Vop3pMfma::Vop3pMfma(std::string_view mnemonic, const Vop3pMfmaMachineInst *inst, ExecuteFn exec_fn)
@@ -971,6 +981,7 @@ Vop3pMfma::Vop3pMfma(std::string_view mnemonic, const Vop3pMfmaMachineInst *inst
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  flags_ |= VSKIP_AFFECTED;
 }
 
 } // namespace cdna4

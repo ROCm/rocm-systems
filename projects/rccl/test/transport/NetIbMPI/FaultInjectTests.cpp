@@ -812,6 +812,8 @@ TEST_F(NetIbMPITest, FailoverCqeErrorRecovered) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
+    FAILOVER_RDMA_READ_OR_SKIP();
+
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
         GTEST_SKIP() << "Failover requires NIC Fusion (ndevs >= 2). "
@@ -1212,6 +1214,8 @@ TEST_F(NetIbMPITest, FailoverLargeMessageDataIntegrity) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
+    FAILOVER_RDMA_READ_OR_SKIP();
+
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
         GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2). Need at least 2 IB devices.";
@@ -1351,6 +1355,8 @@ TEST_F(NetIbMPITest, FailoverDeviceOneFailure) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
+    FAILOVER_RDMA_READ_OR_SKIP();
+
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
         GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2).";
@@ -1480,6 +1486,8 @@ TEST_F(NetIbMPITest, FailoverMultiRequestInFlight) {
     net_ = &netIbCast;
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
+
+    FAILOVER_RDMA_READ_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -1634,6 +1642,10 @@ TEST_F(NetIbMPITest, RecoveryThreadStartedOnlyWithParam) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    bool recoveryParamSet = (recoveryEnv && strcmp(recoveryEnv, "1") == 0);
+    // The connection below uses device 0 only.
+    bool udOnAllRanks = recoveryParamSet && AllRanksSupportUd(/*dev=*/0);
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
@@ -1661,10 +1673,12 @@ TEST_F(NetIbMPITest, RecoveryThreadStartedOnlyWithParam) {
             << "ncclIbCastGetResiliencyState failed — resiliency context not created; "
             << "is NCCL_IB_RESILIENCY_PORT_FAILOVER=1?";
 
-        bool recoveryParamSet = (recoveryEnv && strcmp(recoveryEnv, "1") == 0);
-        if (recoveryParamSet) {
+        if (recoveryParamSet && udOnAllRanks) {
             EXPECT_EQ(r.recoveryEnabled, 1)
                 << "recoveryEnabled should be true when NCCL_IB_RESILIENCY_PORT_RECOVERY=1";
+        } else if (recoveryParamSet) {
+            EXPECT_EQ(r.recoveryEnabled, 0)
+                << "recoveryEnabled should be false when a NIC cannot create a UD QP";
         } else {
             EXPECT_EQ(r.recoveryEnabled, 0)
                 << "recoveryEnabled should be false when NCCL_IB_RESILIENCY_PORT_RECOVERY is not set";
@@ -1710,6 +1724,9 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
     net_ = &netIbCast;
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
+
+    RECOVERY_UD_OR_SKIP();
+    FAILOVER_RDMA_READ_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -1945,6 +1962,9 @@ TEST_F(NetIbMPITest, RecoveryPendingWhileLinkDown) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
+    RECOVERY_UD_OR_SKIP();
+    FAILOVER_RDMA_READ_OR_SKIP();
+
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
         GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2). Found " << totalDevs << " physical devices.";
@@ -2106,6 +2126,9 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
     net_ = &netIbCast;
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
+
+    RECOVERY_UD_OR_SKIP();
+    FAILOVER_RDMA_READ_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
@@ -2350,6 +2373,9 @@ TEST_F(NetIbMPITest, RecoveryUdTimeoutExhaustsAttempts) {
     net_ = &netIbCast;
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
+
+    RECOVERY_UD_OR_SKIP();
+    FAILOVER_RDMA_READ_OR_SKIP();
 
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {

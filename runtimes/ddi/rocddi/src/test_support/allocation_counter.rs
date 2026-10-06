@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Counts allocations made by one test thread. Tracking is scoped to a warmed
 //! operation so parallel tests, fixture construction, and diagnostics cannot
 //! mask a regression in a supposedly allocation-free query.

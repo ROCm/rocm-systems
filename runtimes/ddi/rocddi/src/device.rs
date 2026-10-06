@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Activated endpoint state and core device lifecycle.
 //!
 //! A `Device` is deliberately distinct from a passive topology endpoint. It
@@ -39,27 +41,20 @@ impl Device {
         self.driver.check(&self.state)
     }
 
-    /// Queries the ASIC family of this activated GPU through its bound render
-    /// node. The passive topology family remains available in `endpoint()`.
-    ///
-    /// # Errors
-    /// Returns the native DRM query error, or a device or session loss error.
-    pub fn asic_family_id(&self) -> Result<u32, Error> {
-        self.driver.asic_family_id(&self.state)
-    }
-
     /// Returns whether a prior native observation latched terminal device loss.
     /// This reads cached process state and performs no system call or wait.
     #[must_use]
     pub fn has_observed_loss(&self) -> bool {
-        self.state.has_observed_loss()
+        driver::DeviceStateInfo::has_observed_loss(&self.state)
     }
 
-    /// Returns whether two activated handles address the same native device VM.
+    /// Returns whether two activated handles address the same native memory
+    /// domain.
     /// This is a cached identity check; it grants no access or lifetime by itself.
     #[must_use]
     pub fn shares_address_domain(&self, other: &Self) -> bool {
-        Shared::ptr_eq(&self.driver, &other.driver) && self.state.shares_vm(&other.state)
+        Shared::ptr_eq(&self.driver, &other.driver)
+            && driver::AddressSpaceInfo::shares_address_domain(&self.state, &other.state)
     }
 
     /// Returns the inclusive device-address bounds captured from the installed
@@ -67,7 +62,7 @@ impl Device {
     /// and does not promise that every address in the interval is allocatable.
     #[must_use]
     pub fn address_range(&self) -> (u64, u64) {
-        self.state.address_range()
+        driver::AddressSpaceInfo::address_range(&self.state)
     }
 
     /// Borrows the GPU-specific capability view when this device was activated
