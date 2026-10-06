@@ -9,7 +9,12 @@
 //! requirements.
 
 use crate::device::Device;
+use crate::driver::{DeviceDriver, QueueDriver};
 use crate::topology::{CacheInfo, GpuInfo};
+use crate::{Error, ErrorKind};
+
+mod copy;
+pub use copy::{CopyFailure, CopyRect};
 
 /// Returns whether a topology cache is a non-instruction GPU compute-unit
 /// cache.
@@ -49,6 +54,40 @@ impl GpuDevice<'_> {
     #[must_use]
     pub const fn device(&self) -> &Device {
         self.device
+    }
+
+    /// Returns whether this GPU and the active native kernel interface can
+    /// use expert queue scheduling.
+    ///
+    /// # Errors
+    /// Returns a native interface or device-lifetime failure.
+    pub fn supports_expert_scheduling(&self) -> Result<bool, Error> {
+        if self.info.gfx_major < 12 {
+            return Ok(false);
+        }
+        self.device
+            .driver
+            .supports_expert_scheduling(&self.device.state)
+    }
+
+    /// Requests a process-VM persisting L2 reservation for this GPU.
+    ///
+    /// The native provider validates the request against its topology limit and
+    /// uses the render file bound to the activated VM. A successful call changes
+    /// native state; callers own any API-specific cached request value.
+    ///
+    /// # Errors
+    /// Rejects values beyond the reported maximum and returns native failures.
+    pub fn set_persisting_l2_cache_size(&self, size_bytes: u32) -> Result<(), Error> {
+        if size_bytes > self.info.persisting_l2_cache_size_max {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "persisting L2 request exceeds the native limit",
+            });
+        }
+        self.device
+            .driver
+            .set_persisting_l2_cache_size(&self.device.state, size_bytes)
     }
 }
 

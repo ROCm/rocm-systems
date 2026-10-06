@@ -78,6 +78,38 @@ publishes only GPU endpoints, but GPU geometry and queue capabilities live in
 the `Gpu` endpoint-kind payload instead of being mandatory universal fields.
 Likewise, Linux identities and sharing mechanisms stay in Linux-specific
 extensions rather than defining the core endpoint or memory contracts.
+GPU topology also carries cache-line and VRAM memory-bank properties, including
+bus width and maximum memory clock, so frontends can report native values
+without duplicating sysfs parsing.
+The Linux driver reads the GPU counter frequency from the render-node device
+info and attaches it to correlated native clock samples.
+
+GPU topology includes the native maximum persisting L2 cache reservation.
+`GpuDevice::set_persisting_l2_cache_size` validates the request against that
+limit and forwards it to the Linux driver. The driver submits
+`DRM_IOCTL_AMDGPU_VM` on the render file bound to the activated KFD VM. rocddi
+owns the native request and device lifetime; API frontends own any public
+attribute values and status translation.
+
+`GpuInfo::maximum_scratch_aperture_bytes` derives the scratch address-space
+bound from the GPU generation and active XCC count. The activated
+`GpuDevice::supports_expert_scheduling` view combines GFX12 capability with
+the bound KFD interface version; KFD 1.20 or newer is required.
+
+`GpuDevice::copy_linear`, `copy_rect`, `copy_rects`, and `fill_u32` provide
+GFX1201 SDMA copies and dword fills through a bounded DRM submission context
+and a rocddi-owned command allocation. The sequence form validates every range
+before submission and reuses one native queue across its entries. rocddi
+encodes OSS5 linear and constant-fill packets with system cache control,
+splits large transfers into bounded packets, and reuses command backing only
+after native retirement. A failed wait that cannot prove retirement keeps the
+queue and command allocation live and reports that operand backing must also
+be retained. Frontends own dependency and completion signals, public pointer
+validation, and operand lifetime. `copy_from_host` and `copy_to_host` use
+rocddi-owned system staging, so the host slice is read before native work or
+written after retirement. An uncertain copy keeps staging live for process
+teardown. `supports_linear_copy` reports whether the native path is enabled
+for the activated GPU.
 
 ### Ambiguous queue creation
 
@@ -134,6 +166,13 @@ python3 hsa/libhsa/tests/abi/check_layout.py
 cmake -S . -B /tmp/rocddi-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/rocddi-cmake
 ```
+
+On a GFX1201 system with KFD and its DRM render node, run the opt-in native
+Rust contract tests with `cargo test -p rocddi --test cts --locked -- --ignored`.
+It copies and fills through ordinary allocations, copies through rocddi-owned
+host staging, and copies through a device virtual-memory mapping. The
+capability case checks expert queue scheduling against KFD 1.20 or newer and
+the GFX1201 scratch aperture against the reported XCC count.
 
 The CMake build from `runtimes/` stages the same combined shared image and
 AMDF static archive. Native allocations, virtual mappings, and frontend pools

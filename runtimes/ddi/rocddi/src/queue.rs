@@ -416,6 +416,10 @@ mod provider_contract_tests {
     }
 
     impl QueueDriver for FakeGpu {
+        fn supports_expert_scheduling(&self, _: &FakeDevice) -> Result<bool, Error> {
+            Ok(false)
+        }
+
         fn check_queue(queue: &FakeQueue) -> Result<(), Error> {
             if queue.released {
                 Err(failure("fake queue released"))

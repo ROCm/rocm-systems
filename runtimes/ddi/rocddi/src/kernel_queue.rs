@@ -64,8 +64,9 @@ impl KernelQueue {
     /// Submits one opaque command range without a library allocation or lock.
     ///
     /// A native outcome that cannot distinguish rejection from acceptance is
-    /// conservatively published as an accepted, failed submission. The caller
-    /// retains command storage until status reports retirement.
+    /// conservatively published as an accepted, failed submission with an
+    /// identity. An error proves rejection. The caller retains command storage
+    /// until status reports retirement.
     ///
     /// # Errors
     /// Reports a proved rejection, unavailable slot, or lost device.
@@ -75,8 +76,8 @@ impl KernelQueue {
     /// unchanged until [`Self::status`] or [`Self::wait`] proves its submission
     /// retired. It must contain valid packets for this queue's format, and the
     /// caller must synchronize writes before submission. An ambiguous native
-    /// outcome can mean the command was accepted even when this call reports
-    /// failure; retain the range until retirement or conclusive teardown.
+    /// outcome is returned as an accepted submission, whose storage must be
+    /// retained until retirement or conclusive teardown.
     #[allow(unsafe_code)]
     pub unsafe fn submit(&self, command: KernelCommand) -> Result<u64, Error> {
         // SAFETY: The public caller retains and synchronizes the command range

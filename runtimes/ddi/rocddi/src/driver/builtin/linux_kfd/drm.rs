@@ -36,6 +36,7 @@ const AMDGPU_GEM_VA: u64 = request(1, 0x48, 64);
 const AMDGPU_CTX: u64 = request(3, 0x42, 16);
 const AMDGPU_CS: u64 = request(3, 0x44, 24);
 const AMDGPU_WAIT_CS: u64 = request(3, 0x49, 32);
+const AMDGPU_VM: u64 = request(3, 0x53, 8);
 const SYNCOBJ_CREATE: u64 = request(3, 0xbf, 8);
 const SYNCOBJ_DESTROY: u64 = request(3, 0xc0, 8);
 const SYNCOBJ_TIMELINE_WAIT: u64 = request(3, 0xca, 48);
@@ -50,6 +51,7 @@ const AMDGPU_GEM_USERPTR_VALIDATE: u32 = 1 << 2;
 const AMDGPU_GEM_USERPTR_REGISTER: u32 = 1 << 3;
 const AMDGPU_GEM_OP_GET_GEM_CREATE_INFO: u32 = 0;
 const AMDGPU_INFO_DEV_INFO: u32 = 0x16;
+const AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE: u32 = 3;
 pub(super) const GEM_DOMAIN_GTT: u64 = 1 << 1;
 pub(super) const GEM_CREATE_NO_CPU_ACCESS: u64 = 1 << 1;
 pub(super) const GEM_CREATE_CPU_GTT_USWC: u64 = 1 << 2;
@@ -105,6 +107,26 @@ struct GemUserptr {
 
 #[repr(C)]
 #[derive(Default)]
+struct VmControl {
+    operation: u32,
+    size_bytes: u32,
+}
+
+/// Sets the native process-VM persisting L2 reservation through the render file
+/// that owns the KFD VM. The request has no user-memory lifetime after return.
+pub(super) fn set_persisting_l2_cache_size(file: &File, size_bytes: u32) -> io::Result<()> {
+    call(
+        file,
+        AMDGPU_VM,
+        &mut VmControl {
+            operation: AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE,
+            size_bytes,
+        },
+    )
+}
+
+#[repr(C)]
+#[derive(Default)]
 struct AmdgpuInfoQuery {
     return_pointer: u64,
     return_size: u32,
@@ -121,6 +143,9 @@ pub(super) struct DeviceInfoPrefix {
     external_revision: u32,
     pci_revision: u32,
     pub(super) family_id: u32,
+    shader_engine_count: u32,
+    shader_arrays_per_engine: u32,
+    pub(super) gpu_counter_frequency_khz: u32,
 }
 
 pub(super) fn device_info_prefix(file: &File) -> io::Result<DeviceInfoPrefix> {
@@ -305,6 +330,7 @@ union CommandWait {
 #[cfg(test)]
 #[derive(Debug)]
 pub(super) enum TestCall {
+    SetPersistingL2CacheSize(u32, Result<(), i32>),
     CreateSyncobj(u32),
     DestroySyncobj,
     FailDestroySyncobj(i32),
@@ -368,6 +394,25 @@ pub(super) fn with_script<R>(
     clippy::expect_used,
     reason = "a mismatched test ioctl is a test failure"
 )]
+fn scripted_vm_control(
+    body: &mut dyn std::any::Any,
+    expected: u32,
+    reply: Result<(), i32>,
+) -> io::Result<()> {
+    let record = body
+        .downcast_ref::<VmControl>()
+        .expect("DRM VM control body");
+    assert_eq!(record.operation, AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE);
+    assert_eq!(record.size_bytes, expected);
+    reply.map_err(io::Error::from_raw_os_error)
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::panic,
+    clippy::expect_used,
+    reason = "a mismatched test ioctl is a test failure"
+)]
 fn scripted_call<T: 'static>(request: u64, body: &mut T) -> Option<io::Result<()>> {
     use std::any::Any;
     SCRIPT.with(|script| {
@@ -378,6 +423,9 @@ fn scripted_call<T: 'static>(request: u64, body: &mut T) -> Option<io::Result<()
             .expect("unexpected DRM ioctl after script");
         let body = body as &mut dyn Any;
         let reply = match (request, step) {
+            (AMDGPU_VM, TestCall::SetPersistingL2CacheSize(expected, reply)) => {
+                scripted_vm_control(body, expected, reply)
+            }
             (SYNCOBJ_CREATE, TestCall::CreateSyncobj(handle)) => {
                 body.downcast_mut::<SyncobjCreate>()
                     .expect("DRM syncobj create body")
@@ -905,6 +953,9 @@ pub(super) fn wait(file: &File, handle: u32, point: u64) -> io::Result<()> {
 }
 
 const _: () = {
+    assert!(std::mem::size_of::<DeviceInfoPrefix>() == 32);
+    assert!(std::mem::offset_of!(DeviceInfoPrefix, gpu_counter_frequency_khz) == 28);
+    assert!(std::mem::size_of::<VmControl>() == 8);
     assert!(std::mem::size_of::<GemClose>() == 8);
     assert!(std::mem::size_of::<PrimeHandle>() == 12);
     assert!(std::mem::size_of::<GemCreateInfo>() == 32);
@@ -934,4 +985,21 @@ const _: () = {
     assert!(AMDGPU_CTX == 0xc010_6442);
     assert!(AMDGPU_CS == 0xc018_6444);
     assert!(AMDGPU_WAIT_CS == 0xc020_6449);
+    assert!(AMDGPU_VM == 0xc008_6453);
 };
+
+#[cfg(test)]
+#[test]
+fn persisting_l2_request_uses_vm_ioctl_layout() -> io::Result<()> {
+    let file = File::open("/dev/null")?;
+    with_script([TestCall::SetPersistingL2CacheSize(4096, Ok(()))], || {
+        assert!(set_persisting_l2_cache_size(&file, 4096).is_ok());
+    });
+    with_script([TestCall::SetPersistingL2CacheSize(8192, Err(22))], || {
+        assert!(matches!(
+            set_persisting_l2_cache_size(&file, 8192),
+            Err(error) if error.raw_os_error() == Some(22)
+        ));
+    });
+    Ok(())
+}

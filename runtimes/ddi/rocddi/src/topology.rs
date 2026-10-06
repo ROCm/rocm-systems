@@ -46,6 +46,7 @@ pub struct PciInfo {
 pub struct CacheInfo {
     pub(crate) level: u32,
     pub(crate) size_bytes: u64,
+    pub(crate) line_size_bytes: u32,
     pub(crate) kind: u32,
 }
 
@@ -60,6 +61,12 @@ impl CacheInfo {
     #[must_use]
     pub const fn size_bytes(&self) -> u64 {
         self.size_bytes
+    }
+
+    /// Returns the native cache-line size in bytes.
+    #[must_use]
+    pub const fn line_size_bytes(&self) -> u32 {
+        self.line_size_bytes
     }
 }
 
@@ -225,6 +232,10 @@ pub struct GpuInfo {
     pub asic_revision: u32,
     /// Maximum compute-engine clock in megahertz.
     pub maximum_engine_clock_mhz: u32,
+    /// VRAM interface width in bits reported by the native memory bank.
+    pub memory_bus_width_bits: u32,
+    /// Maximum VRAM clock in megahertz reported by the native memory bank.
+    pub maximum_memory_clock_mhz: u32,
     /// Hardware wavefront lanes.
     pub wavefront_size: u32,
     /// Active compute units after harvesting.
@@ -257,8 +268,28 @@ pub struct GpuInfo {
     pub packet_processor_firmware_version: u32,
     /// SDMA firmware revision reported by the backend.
     pub sdma_firmware_version: u32,
+    /// Maximum persisting L2 cache reservation in bytes reported by topology.
+    /// Zero means the native provider did not report support.
+    pub persisting_l2_cache_size_max: u32,
     /// GPU queue transports qualified by the current backend.
     pub queues: GpuQueueCapabilities,
+}
+
+impl GpuInfo {
+    pub(crate) const fn scratch_bytes_per_xcc(gfx_major: u32) -> u64 {
+        if gfx_major >= 12 {
+            8_u64 << 30
+        } else {
+            4_u64 << 30
+        }
+    }
+
+    /// Maximum per-device scratch aperture implied by the GPU generation and
+    /// active XCC count. This is an address-space bound, not a reservation.
+    #[must_use]
+    pub const fn maximum_scratch_aperture_bytes(&self) -> u64 {
+        (self.xcc_count as u64).saturating_mul(Self::scratch_bytes_per_xcc(self.gfx_major))
+    }
 }
 
 /// Presentation metadata obtained by the active native provider. This is
@@ -269,6 +300,8 @@ pub struct GpuPresentation {
     pub product_name: Option<String>,
     /// ASIC family from a qualified provider source, falling back to topology.
     pub asic_family_id: u32,
+    /// GPU timestamp frequency in hertz from the DRM render node, if reported.
+    pub gpu_counter_frequency_hz: Option<u64>,
 }
 
 /// Kind-specific capabilities attached to one passive endpoint.
