@@ -120,7 +120,7 @@ Normative sketch:
 3. Cover every selected series from the profile/YAML set; do **not** prune to runtime-nonzero channels.
 4. Do **not** duplicate the same per-channel REQ series into a second pass with a different channel map (orphan REQ copies invite wrong same-pass bind / cross-pass joins).
 
-**Impact:** Enforcing this on gfx942 default SPP is a **layout** harden — offline eval stays at **14** passes / `packable_multi == 0` (not a Phase 2 / SPU concern).
+**Impact:** Enforcing this on gfx942 default SPP is a **layout** harden and does **not** add passes (**14 → 14**). It is not a Phase 2 / SPU concern. Dropping orphan `RDREQ` / `WRREQ` copies means panel **1805** (one union of read, write, and atomic columns) no longer fits one bucket, so offline `packable_multi` would read **1** unless those columns are separate packing groups. The `packable_multi == 0` gate below is the SPP allocator before that grouping follow-up.
 
 **Locked decisions:**
 
@@ -147,19 +147,26 @@ Without this bind, SPP layouts can produce impossible percent averages/maxes (e.
 
 SPU parents cannot fit one bucket even with global repack → decompose into collectables and recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO`.
 
-When \(M = (A+B)/C\) is SPU:
+Pick the operator from the parent algebra:
 
-1. Collect submetrics in separate single-pass replays: \(M_0 = A/C_0\), \(M_1 = B/C_1\).
-2. Recombine in analyze: \(M = (M_0 C_0 + M_1 C_1)/(C_0 + C_1)\) via `WEIGHTED_AVG`, or use `COLLECT_SUM` / `COLLECT_RATIO` where appropriate.
+- `COLLECT_SUM` adds already-single-pass submetrics. HBM bandwidth is read BW + write BW, so `COLLECT_SUM(hbm_read_sub, hbm_write_sub)`.
+- `WEIGHTED_AVG` recombines ratio pieces whose weights were split across passes: \(M = (M_0 C_0 + M_1 C_1)/(C_0 + C_1) = (A+B)/(C_0+C_1)\). That is not the sum of the two ratios (\(A/C_0 + B/C_1\)). Do not use it to add two bandwidths.
+- `COLLECT_RATIO` is a ratio of summed numerator pieces over summed denominator pieces.
 
-YAML sketch:
+YAML sketch (HBM bandwidth):
 
 ```yaml
-avg: WEIGHTED_AVG(hbm_read_sub, hbm_write_sub)
+value: COLLECT_SUM(hbm_read_sub, hbm_write_sub)
+```
+
+Weighted-ratio sketch (not a bandwidth sum):
+
+```yaml
+avg: WEIGHTED_AVG(read_ratio_sub, write_ratio_sub)
 _weighted_avg:
-  hbm_read_sub:
+  read_ratio_sub:
     weight_counter: TCC_EA0_RDREQ_sum
-  hbm_write_sub:
+  write_ratio_sub:
     weight_counter: TCC_EA0_WRREQ_sum
 ```
 
