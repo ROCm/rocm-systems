@@ -4,9 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Async-to-LDS path for the LL128 user source and destination buffers. The FIFO legs
-// are not eligible: they interleave flag words into the payload. Both legs share one
-// per-warp staging window, so each write to it drains first.
+// Tensor-data-mover path for the LL128 user source and destination buffers. The FIFO
+// legs are not eligible: they interleave flag words into the payload. Both legs share
+// one per-warp staging window, so each write to it drains first.
 //
 // Every entry point is gated on tdmEnable, captured from shmem in the Primitives
 // constructor, so the off case costs one register test per slice and no shmem read.
@@ -44,13 +44,13 @@ __device__ __forceinline__ bool tdmLoadBegin(T const* src, int eltN) {
                 "LL128 TDM needs one aligned data slice of per-warp scratch");
   if (!tdmEnable) return false;  // nothing was ever issued, so nothing to drain
   // Drain before any return: loadRegsBegin's fallback also stages through this window.
-  asyncWait<0>();
+  tdm::tdmWait();
   if (!tdmLoadAllowed) return false;
   if (reinterpret_cast<uintptr_t>(src) & (TdmAlign - 1)) return false;
 
   uint8_t* shm = tdmWindow();
   size_t bytes = static_cast<size_t>(eltN) * sizeof(T);
-  asyncLoadToLDS<SyncPolicy::Async, TdmLoadPolicy, true>(reinterpret_cast<const uint8_t*>(src), shm, bytes);
+  tdm::asyncLoadToLDS<SyncPolicy::Async, TdmLoadPolicy, true>(reinterpret_cast<const uint8_t*>(src), shm, bytes);
   tdmLoadPending = true;
   tdmLoadEltN = eltN;
   return true;
@@ -63,7 +63,7 @@ __device__ __forceinline__ bool tdmLoadFinish(uint64_t (&regs)[WordPerThread]) {
   tdmLoadPending = false;
   constexpr int EltPer16B = 16 / sizeof(T);
   uint64_t* shm8 = shmemCvtPtr(reinterpret_cast<uint64_t*>(tdmWindow()));
-  asyncWait<0>();
+  tdm::tdmWait();
 #pragma unroll
   for (int g = 0; g < WordPerThread / 2; g++) {
     int ix = tdmSlotIx(g);
@@ -73,11 +73,11 @@ __device__ __forceinline__ bool tdmLoadFinish(uint64_t (&regs)[WordPerThread]) {
   return true;
 }
 
-// Stages the destination slice in LDS and pushes it out as one async store.
+// Stages the destination slice in LDS and pushes it out as one bulk store.
 template <int WordPerThread>
 __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThread], int eltN) {
   if (!tdmEnable) return false;
-  asyncWait<0>();  // drain the previous slice before overwriting the window
+  tdm::tdmWait();  // drain the previous slice before overwriting the window
   uint64_t* shm8 = shmemCvtPtr(reinterpret_cast<uint64_t*>(tdmWindow()));
 #pragma unroll
   for (int g = 0; g < WordPerThread / 2; g++) {
@@ -88,14 +88,14 @@ __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThr
   const uint8_t* src8 = tdmWindow();
   size_t bytes = static_cast<size_t>(eltN) * sizeof(T);
   if (userBypass()) {
-    asyncStoreFromLDS<SyncPolicy::Async, TdmStoreSysPolicy, false>(src8, reinterpret_cast<uint8_t*>(dst), bytes);
+    tdm::asyncStoreFromLDS<SyncPolicy::Async, TdmStoreSysPolicy, false>(src8, reinterpret_cast<uint8_t*>(dst), bytes);
   } else {
-    asyncStoreFromLDS<SyncPolicy::Async, TdmStoreDevPolicy, false>(src8, reinterpret_cast<uint8_t*>(dst), bytes);
+    tdm::asyncStoreFromLDS<SyncPolicy::Async, TdmStoreDevPolicy, false>(src8, reinterpret_cast<uint8_t*>(dst), bytes);
   }
   return true;
 }
 
 // The last store must land before the barrier that publishes completion.
 __device__ __forceinline__ void tdmDrain() {
-  if (tdmEnable) asyncWait<0>();
+  if (tdmEnable) tdm::tdmWait();
 }

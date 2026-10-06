@@ -6,16 +6,17 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include "tdm/asyncCopy.h"
+#include "tdm/tdmCopy.h"
 
 #define NCCL_LL128_FLAGTHREAD (NCCL_LL128_LINEELEMS - 1)
 
-// gfx1250 async-to-LDS path for the LL128 user buffers; see tdm/ll128Tdm.h.
+// gfx1250 tensor-data-mover path for the LL128 user buffers; see tdm/ll128Tdm.h.
 // Built in with --enable-tdm-prim-ll128, then selected per comm with RCCL_TDM_LL128_ENABLE=1.
 #ifndef ENABLE_TDM_PRIM_LL128
 #define ENABLE_TDM_PRIM_LL128 0
 #endif
-#define TDM_LL128_ON (ASYNC_COPY_SUPPORTED && ENABLE_TDM_PRIM_LL128)
+
+#define TDM_LL128_ON (TDM_SUPPORTED && ENABLE_TDM_PRIM_LL128)
 
 #ifndef RCCL_USE_WBINVL1_VOL
 #if defined(__GFX8__) || defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__)
