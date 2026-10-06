@@ -5510,6 +5510,42 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   EXPECT_EQ(Create(), ncclInvalidArgument);
 }
 
+// ncclGinDevCommSetup allocates GIN contexts/signals and links an
+// ncclGinStateDevComm onto the devComm list. If a later stage of the create
+// fails, the fail path must release them via ncclGinDevCommFree, otherwise they
+// leak. Force the first fallible step after setup -- cudaStreamCreateWithFlags --
+// to fail and assert the free fired exactly once. The setup default records a
+// non-zero ginContextCount, which is the guard the fail path keys on.
+TEST_F(DevrCommCreateInternalTest, LateStageFailureFreesGinDevComm) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->devrState.cftMcSize = 1;  // past the GIN gate idivRcp32(cftMcSize) runs; 0 would divide-by-zero
+
+  ScopedHook streamCreate(g_hipStreamCreateWithFlags,
+                          [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(ginFree.calls, 1);
+}
+
+// Control: GIN not requested, so ncclGinDevCommSetup never runs and
+// ginContextCount stays 0. The same late-stage failure must NOT call
+// ncclGinDevCommFree -- the ginContextCount guard holds it off.
+TEST_F(DevrCommCreateInternalTest, LateStageFailureWithoutGinDoesNotFree) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  comm->devrState.cftMcSize = 1;  // past the GIN gate idivRcp32(cftMcSize) runs; 0 would divide-by-zero
+
+  ScopedHook streamCreate(g_hipStreamCreateWithFlags,
+                          [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(ginFree.calls, 0);
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevCommCopyLsaData copies the LSA-shared span of a devcomm between two
