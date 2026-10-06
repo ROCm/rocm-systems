@@ -193,8 +193,10 @@ TEST(AieElfParse, ParsesVectorScalarAdd) {
 
   const auto& k = kernels.begin()->second;
   EXPECT_EQ(k.ctrl_code, ctrltext);
-  EXPECT_EQ(k.pdi, pdi);
-  EXPECT_NE(k.pdi_patch_offset, 0u);
+  ASSERT_EQ(k.pdis.size(), 1u);
+  EXPECT_EQ(k.pdis[0].bytes, pdi);
+  ASSERT_EQ(k.pdis[0].patch_offsets.size(), 1u);
+  EXPECT_NE(k.pdis[0].patch_offsets[0], 0u);
   EXPECT_GT(k.num_args(), 0u);
 }
 
@@ -218,37 +220,47 @@ TEST(AieElfParse, RejectsTruncated) {
             HSA_STATUS_SUCCESS);
 }
 
-TEST(AieElfParse, RejectsSecondPdiPatchSite) {
-  // A Kernel carries one PDI patch offset. If an ELF asked for two, keeping only one would leave
-  // the other load_pdi pointing at a placeholder and the dispatch would run against a bogus PDI
-  // address -- so the reader has to refuse rather than pick one. Turn the first argument
-  // relocation into a second PDI relocation to provoke it: symbol 1 is .pdi.1, matching the
-  // relocation the ELF already has at index 0.
-  auto image = ReadFile(kElf);
-  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
-
-  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
-  std::string error;
-  // Unmodified, it parses: whatever the mutation below provokes is the mutation's doing.
-  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
-
-  ASSERT_TRUE(MutateRelocation(image, /*index=*/1, /*sym=*/1, kAddress64));
-  // Assert on the reason, not just that it failed: this ELF encodes the patch scheme in r_info,
-  // but an ABI-version-1 ELF encodes it in the addend, where rewriting r_info alone would leave
-  // the scheme unchanged and trip a different check.
-  EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS)
-      << "a second PDI patch site was accepted";
-  EXPECT_NE(error.find("more than one PDI patch site"), std::string::npos)
-      << "rejected for the wrong reason: " << error;
+/**
+ * @brief The r_offset (the patch site) of a .rela.dyn relocation.
+ *
+ * @param image ELF contents
+ * @param index index of the relocation in .rela.dyn
+ * @return the patch site, or UINT32_MAX if there is no .rela.dyn or no relocation at `index`
+ */
+std::uint32_t RelocationOffset(const std::vector<std::uint8_t>& image, std::uint32_t index) {
+  const std::uint32_t rela = FindSection(image, ".rela.dyn");
+  if (rela == 0) return UINT32_MAX;
+  const Elf32_Shdr sh = SectionHeader(image, rela);
+  if ((index + 1) * sizeof(Elf32_Rela) > sh.sh_size) return UINT32_MAX;
+  std::uint32_t offset = 0;
+  std::memcpy(
+      &offset,
+      image.data() + sh.sh_offset + index * sizeof(Elf32_Rela) + offsetof(Elf32_Rela, r_offset),
+      sizeof(offset));
+  return offset;
 }
 
-TEST(AieElfParse, RejectsMoreThanOnePdiPerKernel) {
-  // A kernel loads one PDI. Two would mean the Kernel's single pdi field silently dropped one.
-  // Reaching this needs two *distinct* PDI sections, which the artifact does not have -- with one
-  // section the duplicate-patch-site check above fires first -- so build the second one: rename a
-  // section the reader ignores to ".pdi.2" and point a second PDI relocation at a symbol of that
-  // name. The new symbol name does not fit the existing .dynstr, so .dynstr is relocated to the
-  // end of the image and grown; nothing refers to its file offset but its own section header.
+/**
+ * @brief Renames ".note.xrt.UID", a section the reader ignores, in place.
+ *
+ * @param image ELF contents to modify
+ * @param name new name; must not be longer than the old one, so no other .shstrtab offset moves
+ * @return the renamed section's index, or 0 if the artifact has no such section
+ */
+std::uint32_t RenameSpareSection(std::vector<std::uint8_t>& image, const char* name) {
+  const std::uint32_t spare = FindSection(image, ".note.xrt.UID");
+  if (spare == 0 || std::strlen(name) > std::strlen(".note.xrt.UID")) return 0;
+  const Elf32_Shdr shstrtab = SectionHeader(image, Header(image).e_shstrndx);
+  std::memcpy(image.data() + shstrtab.sh_offset + SectionHeader(image, spare).sh_name, name,
+              std::strlen(name) + 1);
+  return spare;
+}
+
+TEST(AieElfParse, ParsesTwoPatchSitesForOnePdi) {
+  // A control code may load the same PDI more than once (MLIR-AIR's loads its empty PDI before and
+  // after the design runs). Both sites must be kept -- dropping one would leave that load_pdi
+  // pointing at the ELF's placeholder -- and the PDI itself held once. Turn the first argument
+  // relocation into a second relocation of .pdi.1 (symbol 1, as the ELF's relocation 0 already is).
   auto image = ReadFile(kElf);
   if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
 
@@ -256,15 +268,31 @@ TEST(AieElfParse, RejectsMoreThanOnePdiPerKernel) {
   std::string error;
   ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
 
-  // A section the reader never looks at, renamed in place (the new name is shorter, so no other
-  // .shstrtab offset moves).
-  const std::uint32_t spare = FindSection(image, ".note.xrt.UID");
-  ASSERT_NE(spare, 0u) << "no spare section to rename";
-  const Elf32_Ehdr ehdr = Header(image);
-  const Elf32_Shdr shstrtab = SectionHeader(image, ehdr.e_shstrndx);
-  const Elf32_Shdr spare_sh = SectionHeader(image, spare);
-  std::memcpy(image.data() + shstrtab.sh_offset + spare_sh.sh_name, ".pdi.2", sizeof(".pdi.2"));
-  ASSERT_EQ(FindSection(image, ".pdi.2"), spare);
+  // Rewriting r_info changes the scheme only for an ELF that keeps it there rather than in the
+  // addend (ABI version 1); asserting on the resulting sites, not just success, catches that.
+  ASSERT_TRUE(MutateRelocation(image, /*index=*/1, /*sym=*/1, kAddress64));
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  const auto& k = kernels.begin()->second;
+  ASSERT_EQ(k.pdis.size(), 1u);
+  EXPECT_EQ(k.pdis[0].bytes, SectionContents(image, ".pdi.1"));
+  EXPECT_EQ(k.pdis[0].patch_offsets,
+            (std::vector<std::uint32_t>{RelocationOffset(image, 0), RelocationOffset(image, 1)}));
+}
+
+TEST(AieElfParse, ParsesTwoPdisInOneKernel) {
+  // A control code may load two different PDIs. The artifact has one PDI section, so build a
+  // second: rename a section the reader ignores to ".pdi.2" and point a PDI relocation at a symbol
+  // of that name. The new symbol name does not fit the existing .dynstr, so .dynstr is relocated
+  // to the end of the image and grown; nothing refers to its file offset but its own section
+  // header.
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+
+  ASSERT_NE(RenameSpareSection(image, ".pdi.2"), 0u) << "no spare section to rename";
 
   // Relocate and grow .dynstr so it can hold the new symbol name.
   const std::uint32_t dynstr_index = FindSection(image, ".dynstr");
@@ -292,9 +320,57 @@ TEST(AieElfParse, RejectsMoreThanOnePdiPerKernel) {
   // Point the second argument relocation at it, as a PDI address.
   ASSERT_TRUE(MutateRelocation(image, /*index=*/2, /*sym=*/3, kAddress64));
 
-  EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << "a second PDI was accepted";
-  EXPECT_NE(error.find("more than one PDI per kernel"), std::string::npos)
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  const auto& k = kernels.begin()->second;
+  ASSERT_EQ(k.pdis.size(), 2u);
+  EXPECT_EQ(k.pdis[0].bytes, SectionContents(image, ".pdi.1"));
+  EXPECT_EQ(k.pdis[0].patch_offsets, std::vector<std::uint32_t>{RelocationOffset(image, 0)});
+  EXPECT_EQ(k.pdis[1].bytes, SectionContents(image, ".pdi.2"));
+  EXPECT_EQ(k.pdis[1].patch_offsets, std::vector<std::uint32_t>{RelocationOffset(image, 2)});
+}
+
+TEST(AieElfParse, RejectsAmbiguousPdiName) {
+  // PDI sections are not group members, so a relocation names its PDI by section name alone. A
+  // name shared by sections with different contents has no right answer, so it is refused rather
+  // than resolved by section order. Give a spare section the name ".pdi.1".
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+
+  ASSERT_NE(RenameSpareSection(image, ".pdi.1"), 0u) << "no spare section to rename";
+  EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS)
+      << "an ambiguous PDI name was accepted";
+  EXPECT_NE(error.find("ambiguous PDI"), std::string::npos)
       << "rejected for the wrong reason: " << error;
+}
+
+TEST(AieElfParse, AcceptsRepeatedPdiNameWithSameContents) {
+  // A multi-kernel MLIR-AIR ELF repeats .pdi.1.. for each kernel, with the same bytes. That is
+  // unambiguous and has to parse. Give a spare section the name ".pdi.1" and the original's bytes.
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+
+  const std::uint32_t pdi = FindSection(image, ".pdi.1");
+  ASSERT_NE(pdi, 0u);
+  const std::uint32_t spare = RenameSpareSection(image, ".pdi.1");
+  ASSERT_NE(spare, 0u) << "no spare section to rename";
+  Elf32_Shdr spare_sh = SectionHeader(image, spare);
+  const Elf32_Shdr pdi_sh = SectionHeader(image, pdi);
+  spare_sh.sh_offset = pdi_sh.sh_offset;
+  spare_sh.sh_size = pdi_sh.sh_size;
+  SetSectionHeader(image, spare, spare_sh);
+
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  const auto& k = kernels.begin()->second;
+  ASSERT_EQ(k.pdis.size(), 1u);
+  EXPECT_EQ(k.pdis[0].bytes, SectionContents(image, ".pdi.1"));
 }
 
 TEST(AieElfParse, RejectsArgumentPatchSiteOutOfRange) {
@@ -401,8 +477,11 @@ TEST(AieElfParse, FindsStringTablesThroughSymbolTableLinks) {
     const auto it = kernels.find(name);
     ASSERT_NE(it, kernels.end()) << "kernel " << name << " not found";
     EXPECT_EQ(it->second.ctrl_code, k.ctrl_code);
-    EXPECT_EQ(it->second.pdi, k.pdi);
-    EXPECT_EQ(it->second.pdi_patch_offset, k.pdi_patch_offset);
+    ASSERT_EQ(it->second.pdis.size(), k.pdis.size());
+    for (std::size_t p = 0; p < k.pdis.size(); ++p) {
+      EXPECT_EQ(it->second.pdis[p].bytes, k.pdis[p].bytes);
+      EXPECT_EQ(it->second.pdis[p].patch_offsets, k.pdis[p].patch_offsets);
+    }
     EXPECT_EQ(it->second.num_args(), k.num_args());
   }
 }

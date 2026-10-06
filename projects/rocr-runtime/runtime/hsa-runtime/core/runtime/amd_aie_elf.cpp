@@ -8,6 +8,7 @@
 
 #include <elf.h>
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 
@@ -195,7 +196,6 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
   struct Group {
     std::string name;
     uint32_t ctrltext_section = 0;
-    uint32_t pdi_section = 0;
   };
   std::map<uint32_t, Group> groups;      // group section index -> group
   std::map<uint32_t, uint32_t> sec2grp;  // member section index -> group section index
@@ -241,7 +241,33 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
   // Collect relocations. Each names a symbol whose st_shndx is the section being patched and
   // whose name says what address to write: ".pdi.N" for a PDI, a decimal string for an argument.
   std::map<uint32_t, std::map<uint32_t, std::vector<RelocSite>>> group_arg_sites;
-  std::map<uint32_t, RelocSite> group_pdi_site;
+  // group section index -> (PDI section index, patch offset) for each PDI site
+  std::map<uint32_t, std::vector<std::pair<uint32_t, uint32_t>>> group_pdi_sites;
+
+  // PDI sections are not group members, so a relocation names its PDI by section name only, and a
+  // multi-kernel ELF can repeat a name (MLIR-AIR repeats .pdi.1.. for each kernel). A name is
+  // resolved to its first section, and every other section with that name must hold the same
+  // bytes: then the choice cannot matter, and otherwise there is no telling which was meant.
+  auto find_pdi_section = [&](const char* name, uint32_t* found) -> bool {
+    *found = 0;
+    for (uint32_t s = 1; s < ehdr->e_shnum; ++s) {
+      const char* n = section_name(s);
+      if (n == nullptr || std::strcmp(n, name) != 0) continue;
+      if (*found == 0) {
+        *found = s;
+        continue;
+      }
+      const Elf32_Shdr& a = shdrs[*found];
+      const Elf32_Shdr& b = shdrs[s];
+      const uint8_t* a_data = image.At(a.sh_offset, a.sh_size);
+      const uint8_t* b_data = image.At(b.sh_offset, b.sh_size);
+      if (a_data == nullptr || b_data == nullptr || a.sh_size != b.sh_size ||
+          std::memcmp(a_data, b_data, a.sh_size) != 0) {
+        return false;
+      }
+    }
+    return true;
+  };
 
   if (rela != nullptr && dynsym != nullptr && dynstr != nullptr) {
     if (rela->sh_entsize != sizeof(Elf32_Rela) || dynsym->sh_entsize != sizeof(Elf32_Sym)) {
@@ -280,26 +306,12 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
         if (site.scheme != PatchScheme::kAddress64) {
           return fail("unexpected patch scheme for PDI symbol");
         }
-        // Find the PDI section this symbol names.
         uint32_t pdi_section = 0;
-        for (uint32_t s = 0; s < ehdr->e_shnum; ++s) {
-          const char* n = section_name(s);
-          if (n != nullptr && std::strcmp(n, sym_name) == 0) {
-            pdi_section = s;
-            break;
-          }
+        if (!find_pdi_section(sym_name, &pdi_section)) {
+          return fail(std::string("ambiguous PDI: sections named ") + sym_name + " differ");
         }
         if (pdi_section == 0) return fail("PDI section not found");
-        if (group.pdi_section != 0 && group.pdi_section != pdi_section) {
-          return fail("more than one PDI per kernel is not supported");
-        }
-        // A Kernel carries a single PDI patch offset, so a second site would be dropped and its
-        // load_pdi left pointing at whatever placeholder the ELF holds.
-        if (group_pdi_site.count(grp_it->second) != 0) {
-          return fail("more than one PDI patch site per kernel is not supported");
-        }
-        group.pdi_section = pdi_section;
-        group_pdi_site[grp_it->second] = site;
+        group_pdi_sites[grp_it->second].emplace_back(pdi_section, site.offset);
         continue;
       }
 
@@ -330,22 +342,27 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
     }
     if (k.ctrl_code.empty()) return fail("empty control code");
 
-    if (group.pdi_section != 0) {
-      if (!section_bytes(group.pdi_section, &k.pdi)) {
-        return fail("section extends past end of file");
-      }
-      k.pdi_patch_offset = group_pdi_site.at(grp_index).offset;
-      // The runtime writes a 64-bit address here, so it has to lie wholly inside the control code.
-      if (k.pdi_patch_offset + sizeof(uint64_t) > k.ctrl_code.size() ||
-          k.pdi_patch_offset % sizeof(uint32_t) != 0) {
-        return fail("PDI patch site does not fit the control code");
-      }
-      // A real full-ELF control code opens with a 16-byte transaction header, so a legitimate PDI
-      // patch site is never at offset 0. This check no longer disambiguates a packet field (there
-      // is none left to disambiguate) -- it is retained purely as a well-formedness check on the
-      // ELF itself, catching a relocation the parser mis-attributed rather than a legal kernel.
-      if (k.pdi_patch_offset == 0) {
-        return fail("PDI patch site at offset 0 is indistinguishable from no patch");
+    auto pdi_sites_it = group_pdi_sites.find(grp_index);
+    if (pdi_sites_it != group_pdi_sites.end()) {
+      for (const auto& [pdi_section, offset] : pdi_sites_it->second) {
+        // The runtime writes a 64-bit address here, so it has to lie wholly inside the control
+        // code.
+        if (offset + sizeof(uint64_t) > k.ctrl_code.size() || offset % sizeof(uint32_t) != 0) {
+          return fail("PDI patch site does not fit the control code");
+        }
+        // A real full-ELF control code opens with a 16-byte transaction header, so a legitimate
+        // PDI patch site is never at offset 0. Retained as a well-formedness check on the ELF,
+        // catching a relocation the parser mis-attributed rather than a legal kernel.
+        if (offset == 0) {
+          return fail("PDI patch site at offset 0 is indistinguishable from no patch");
+        }
+        std::vector<uint8_t> bytes;
+        if (!section_bytes(pdi_section, &bytes)) return fail("section extends past end of file");
+        // Each distinct PDI is placed in device memory once, however many sites load it.
+        auto pdi = std::find_if(k.pdis.begin(), k.pdis.end(),
+                                [&](const Pdi& p) { return p.bytes == bytes; });
+        if (pdi == k.pdis.end()) pdi = k.pdis.insert(k.pdis.end(), Pdi{std::move(bytes), {}});
+        pdi->patch_offsets.push_back(offset);
       }
     }
 

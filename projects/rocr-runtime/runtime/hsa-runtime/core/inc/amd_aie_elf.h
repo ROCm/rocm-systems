@@ -6,14 +6,13 @@
 
 // Reader for the full-ELF kernel binaries aiecc emits (`aiecc --get-full-elf`).
 //
-// A full ELF carries the PDI and the control code in one file, along with the relocations that
+// A full ELF carries the PDIs and the control code in one file, along with the relocations that
 // say where addresses have to be written into the control code. This reader is used at load time,
 // nested inside a unified hsaco's AIE section: the loader parses it, keeps the control code
-// pristine in host memory, places the PDI in the agent's device memory, and patches the PDI's
-// device address into the pristine copy right away (that address is not known until placement).
-// Application argument addresses are not patched here -- at dispatch time, the driver copies the
-// pristine control code into a per-dispatch device buffer and patches the argument addresses into
-// that copy, so concurrent dispatches of the same kernel never share a patch site.
+// pristine in host memory and places the PDIs in the agent's device memory. No address is patched
+// here -- at dispatch time, the driver copies the pristine control code into a per-dispatch device
+// buffer and patches the PDI and argument addresses into that copy, so concurrent dispatches of
+// the same kernel never share a patch site.
 
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_ELF_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_ELF_H_
@@ -38,18 +37,26 @@ struct PatchSite {
   uint32_t addend = 0;
 };
 
+/// @brief A PDI the control code loads, and where its device address goes.
+struct Pdi {
+  /// @brief PDI bytes.
+  std::vector<uint8_t> bytes;
+  /// @brief Byte offsets in the control code taking this PDI's device address; never empty.
+  /// Parse() rejects a site at offset 0.
+  std::vector<uint32_t> patch_offsets;
+};
+
 /// @brief A parsed full-ELF kernel: the bytes to load and where addresses go.
 struct Kernel {
   /// @brief "<kernel>:<instance>", e.g. "main:sequence".
   std::string name;
-  /// @brief PDI bytes; empty if the kernel has no PDI.
-  std::vector<uint8_t> pdi;
+  /// @brief The PDIs the control code loads; empty if it loads none. A control code may load
+  /// several PDIs, or one more than once (MLIR-AIR's loads an empty PDI before and after the
+  /// design runs). Each distinct PDI appears once: sites naming byte-identical PDIs share an
+  /// entry, so it is placed in device memory once.
+  std::vector<Pdi> pdis;
   /// @brief Control-code bytes.
   std::vector<uint8_t> ctrl_code;
-  /// @brief Byte offset in @ref ctrl_code where the PDI's device address is patched in at load
-  /// time, once the PDI has been placed in device memory.
-  /// Zero when the kernel has no patch site; Parse() rejects a real site at offset 0.
-  uint64_t pdi_patch_offset = 0;
   /// @brief Patch sites per argument index. Entries may be empty for unused arguments.
   std::vector<std::vector<PatchSite>> arg_sites;
 
