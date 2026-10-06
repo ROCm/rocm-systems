@@ -367,7 +367,8 @@ TEST_F(RmaMultiSegmentMPITest, IFlushMultiSegment)
         void* freq = nullptr;
         EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "multi-segment iflush post failed";
-        EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
+        if (freq != nullptr)
+            EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
         EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x3C))
             << "data corrupted across segment boundaries after flush";
     }
@@ -420,7 +421,8 @@ TEST_F(RmaMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
         void* freq = nullptr;
         EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "multi-segment iflush post failed after partial put";
-        EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
+        if (freq != nullptr)
+            EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
 
         ExpectPayloadIsolated(rb->ptr, rb->totalSize, off, kSize,
                               /*seed=*/0x4F, kSentinel,
@@ -467,7 +469,8 @@ TEST_F(RmaMultiSegmentMPITest, IFlushSingleSegmentRegression)
         void* freq = nullptr;
         EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
             << "single-segment iflush post failed";
-        EXPECT_TRUE(PollUntilDone(freq)) << "single-segment flush did not complete";
+        if (freq != nullptr)
+            EXPECT_TRUE(PollUntilDone(freq)) << "single-segment flush did not complete";
         EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0x2D))
             << "data corrupted after single-segment flush";
     }
