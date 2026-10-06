@@ -1338,21 +1338,31 @@ def gen_dot2(
     return '\n'.join(L)
 
 
-def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
+def gen_dot2_true16(
+    dst: list[str],
+    src: list[str],
+    cls: str,
+    dot_accumulation: FloatDotAccumulation,
+) -> str:
     """Generate VOP3 true16 V_DOT2_{F16,BF16}_{F16,BF16}.
 
     These are VOP3 dot instructions, not VOP3P packed instructions. LLVM rejects
     op_sel[0:1] for this family, so src0/src1 are consumed as their packed v2
     half values. op_sel[2] selects the half accumulator and op_sel[3] selects
     the destination half.
+
+    The arithmetic is one packed-output step of the architecture's DOT/WMMA
+    datapath on raw bits. MODE rounding and denormal fields do not apply;
+    FP16_OVFL clamps F16 overflow. ABS/NEG flip sign bits before widening.
     """
-    d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
-    if cls == 'dot2_f16_f16':
-        widen = 'util::f16_to_f32'
-    elif cls == 'dot2_bf16_bf16':
-        widen = 'util::bf16_to_f32'
-    else:
+    if cls not in ('dot2_f16_f16', 'dot2_bf16_bf16'):
         raise ValueError(f'unhandled true16 dot2 class: {cls}')
+    if dot_accumulation is FloatDotAccumulation.HOST_F32:
+        raise ValueError(f'{cls} needs a characterized DOT accumulation model')
+    d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
+    bf16 = cls == 'dot2_bf16_bf16'
+    fmt = 'amdgpu::fp_format::BF16' if bf16 else 'amdgpu::fp_format::F16'
+    dot_arch = 'gfx12' if dot_accumulation is FloatDotAccumulation.GFX12 else 'gfx11'
 
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -1362,34 +1372,29 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     L.append('    uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);')
     # RDNA3/4 inline constants replicate the narrowed low half for src0/src1.
     # Registers and literal constants retain their independent packed halves.
-    _append_pk16_src_reads(
-        L, [s0, s1], {'dot2_f16_f16': 'f16', 'dot2_bf16_bf16': 'bf16'}[cls]
-    )
+    _append_pk16_src_reads(L, [s0, s1], 'bf16' if bf16 else 'f16')
     for i in range(2):
         L.append(f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src{i}))')
         L.append(f'      raw{i} = (raw{i} & 0xffffu) * 0x10001u;')
     L.append(
         f'    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src({s2}, wf, lane, opsel, 2);'
     )
-    L.append(f'    float a0 = {widen}(static_cast<uint16_t>(raw0 & 0xffffu));')
-    L.append(f'    float a1 = {widen}(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));')
-    L.append(f'    float b0 = {widen}(static_cast<uint16_t>(raw1 & 0xffffu));')
-    L.append(f'    float b1 = {widen}(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));')
-    L.append(f'    float acc = {widen}(static_cast<uint16_t>(acc_bits));')
-    L.extend(vop3_src_mod('a0', 0, True))
-    L.extend(vop3_src_mod('a1', 0, True))
-    L.extend(vop3_src_mod('b0', 1, True))
-    L.extend(vop3_src_mod('b1', 1, True))
-    L.extend(vop3_src_mod('acc', 2, True))
-    if cls == 'dot2_f16_f16':
-        L.append(
-            '    uint32_t result_bits = amdgpu::fp_mode::dot2_f16(a0, b0, a1, b1, acc, wf.fp16_ovfl());'
-        )
-    else:
-        # RDNA3 7.2.4 / RDNA4 7.2.4: fixed RNE and no input/output denormals.
-        L.append(
-            '    uint32_t result_bits = amdgpu::fp_mode::dot2_bf16(a0, b0, a1, b1, acc);'
-        )
+    L.append('    const auto half = [&](uint32_t bits, unsigned source) {')
+    L.append(
+        f'      return uint16_t(amdgpu::source_modifier::apply<{fmt}>(bits & 0xffffu, source, inst_.abs, inst_.neg));'
+    )
+    L.append('    };')
+    L.append('    const uint16_t a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);')
+    L.append('    const uint16_t b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);')
+    L.append('    const uint16_t acc = half(acc_bits, 2);')
+    # ISA discrepancy: the ISA (RDNA3/RDNA4 section 7.2.4) expects BF16 DOT2
+    # to round to nearest even and flush denormals, but gfx1201 rounds the sum
+    # to FP32, truncates that to BF16 and keeps BF16 subnormals. gfx1100 also
+    # truncates; it flushes subnormal inputs and results.
+    L.append(
+        f'    const uint16_t result_bits = amdgpu::{dot_arch}_dot2_packed16<{str(bf16).lower()}>('
+        'a0, b0, a1, b1, acc, wf.fp16_ovfl());'
+    )
     L.append(
         f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, opsel, result_bits, true);'
     )

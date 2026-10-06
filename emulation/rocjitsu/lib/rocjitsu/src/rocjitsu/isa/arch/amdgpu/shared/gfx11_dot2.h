@@ -91,7 +91,8 @@ inline uint32_t pack(int64_t units, int grid, bool frame_negative) {
 } // namespace gfx11_dot2_detail
 
 /// @brief GFX11 DOT2 arithmetic with F32 or packed outputs, characterized on gfx1100.
-/// @details Used by VOP3P DOT2, VOP2/VOPD DOT2ACC and F32/packed-output WMMA. See
+/// @details Used by VOP3P DOT2, VOP2/VOPD DOT2ACC, VOP3 DOT2_F16_F16/BF16_BF16 and
+/// F32/packed-output WMMA. See
 /// https://github.com/ROCm/rocm-systems/issues/12056 for the finite arithmetic
 /// model. In S2's sign frame an opposing term contributes ~m, not -m, after
 /// truncation onto the alignment grid. In particular, signed zeros matter.
@@ -177,6 +178,7 @@ inline uint32_t gfx11_dot2_f32(uint16_t a0, uint16_t b0, uint16_t a1, uint16_t b
 }
 
 /// @brief Widen packed C, execute one GFX11 DOT2 step and return packed result bits.
+/// @details This is also the arithmetic of VOP3 V_DOT2_F16_F16 and V_DOT2_BF16_BF16.
 template <bool Bf16>
 inline uint16_t gfx11_dot2_packed16(uint16_t a0, uint16_t b0, uint16_t a1, uint16_t b1,
                                     uint16_t acc, bool fp16_ovfl = false) {

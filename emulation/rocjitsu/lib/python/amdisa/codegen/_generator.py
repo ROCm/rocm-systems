@@ -13631,8 +13631,14 @@ class CodeGenerator:
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
-                'rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h': 'gfx11_dot2_f32',
-                'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': 'gfx12_dot2_f32',
+                'rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h': (
+                    'gfx11_dot2_f32',
+                    'gfx11_dot2_packed16',
+                ),
+                'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': (
+                    'gfx12_dot2_f32',
+                    'gfx12_dot2_packed16',
+                ),
                 'rocjitsu/isa/arch/amdgpu/shared/cube.h': 'cube::',
                 'rocjitsu/isa/arch/amdgpu/shared/division.h': (
                     'div_scale(',

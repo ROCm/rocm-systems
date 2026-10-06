@@ -208,4 +208,13 @@ inline uint32_t gfx12_dot2_f32(uint16_t a0, uint16_t b0, uint16_t a1, uint16_t b
   return gfx12_dot_f32<Bf16>(std::array{a0, a1}, std::array{b0, b1}, acc);
 }
 
+/// @brief Widen packed C, execute one GFX12 DOT2 step and return packed result bits.
+/// @details This is also the arithmetic of VOP3 V_DOT2_F16_F16 and V_DOT2_BF16_BF16.
+template <bool Bf16>
+inline uint16_t gfx12_dot2_packed16(uint16_t a0, uint16_t b0, uint16_t a1, uint16_t b1,
+                                    uint16_t acc, bool fp16_ovfl = false) {
+  return uint16_t(gfx12_dot_bits<Bf16, true>(std::array{a0, a1}, std::array{b0, b1},
+                                             dot_packed16::widen<Bf16>(acc), fp16_ovfl));
+}
+
 } // namespace rocjitsu::amdgpu

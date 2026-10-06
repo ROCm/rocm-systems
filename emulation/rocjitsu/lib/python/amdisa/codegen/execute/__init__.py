@@ -411,8 +411,12 @@ def _register_handlers() -> None:
         opsel_exprs=c.opsel_exprs,
         arch_name=c.arch_name,
     )
-    DISPATCH['dot2_f16_f16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
-    DISPATCH['dot2_bf16_bf16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
+    DISPATCH['dot2_f16_f16'] = lambda c: gen_dot2_true16(
+        c.dst_ops, c.src_ops, c.cls, c.profile.float_dot_accumulation
+    )
+    DISPATCH['dot2_bf16_bf16'] = lambda c: gen_dot2_true16(
+        c.dst_ops, c.src_ops, c.cls, c.profile.float_dot_accumulation
+    )
     DISPATCH['dot4'] = lambda c: gen_dot4(c.dst_ops, c.src_ops, c.cls)
     DISPATCH['dot8'] = lambda c: gen_dot8(c.dst_ops, c.src_ops, c.cls)
 

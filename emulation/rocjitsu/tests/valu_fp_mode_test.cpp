@@ -15,6 +15,7 @@
 #include <array>
 #include <bit>
 #include <cfenv>
+#include <cstdio>
 #include <gtest/gtest.h>
 #include <memory>
 #include <ostream>
@@ -2585,6 +2586,261 @@ std::vector<ArithmeticCase> integral_rounding_input_flush_cases() {
   return cases;
 }
 
+// V_DOT2_F16_F16 and V_DOT2_BF16_BF16 lanes captured on gfx1201 and gfx1100.
+// The cards align and round the products differently and gfx1100 flushes BF16
+// subnormals. Both give +0 for a sum of negative zeros and a fixed payload for
+// a NaN factor, and neither reads the MODE rounding or denormal fields (the F16
+// captures cover 84 MODE values). MODE 0x30 and 0xc0 swap the F32 and F16
+// denormal fields; FP16_OVFL (bit 23) clamps F16 overflow. BF16 was captured at
+// MODE 0xf0 only. RDNA3.5 uses the RDNA3 rule without a hardware capture.
+std::vector<ArithmeticCase> dot2_packed16_cases() {
+  struct Lane {
+    const char *name;
+    bool bf16;
+    uint8_t abs;
+    uint8_t neg;
+    uint8_t opsel;
+    uint32_t a;
+    uint32_t b;
+    uint32_t c;
+    uint32_t gfx1201;
+    uint32_t gfx1100;
+    std::vector<uint32_t> modes;
+  };
+  constexpr uint8_t kNegC = 4;
+  constexpr uint8_t kAbsC = 4;
+  constexpr uint8_t kHighHalves = 0xc; // C from the high half, D to the high half.
+  const std::vector<Lane> lanes{
+      {"F16FactorNan",
+       false,
+       0,
+       0,
+       0,
+       0xffffffffu,
+       0x00000000u,
+       0x9ebf0000u,
+       0xa5a5fe3du,
+       0xa5a5fe3du,
+       {0x30u, 0xc0u}},
+      {"F16NegativeZeroSum",
+       false,
+       0,
+       0,
+       0,
+       0x00008000u,
+       0x80000000u,
+       0xf57d8000u,
+       0xa5a50000u,
+       0xa5a50000u,
+       {0x30u, 0xc0u}},
+      {"F16AccumulatorSignalingNan",
+       false,
+       0,
+       0,
+       0,
+       0x00000000u,
+       0x00000000u,
+       0x9c6a7c01u,
+       0xa5a57e01u,
+       0xa5a57e01u,
+       {0x30u}},
+      {"F16Alignment",
+       false,
+       0,
+       0,
+       0,
+       0x99dce109u,
+       0x00000010u,
+       0xcd430bd3u,
+       0xa5a58e28u,
+       0xa5a58e29u,
+       {0x30u, 0xc0u, 0x35u}},
+      {"F16SubnormalFactor",
+       false,
+       0,
+       0,
+       0,
+       0x000d5834u,
+       0x4059d578u,
+       0xa0dbd068u,
+       0xa5a5f1c4u,
+       0xa5a5f1c3u,
+       {0x30u, 0xc0u, 0x3au}},
+      {"F16Overflow",
+       false,
+       0,
+       0,
+       0,
+       0x5a000904u,
+       0x6e701a4au,
+       0xeb72dfc8u,
+       0xa5a57c00u,
+       0xa5a57c00u,
+       {0x30u}},
+      {"F16OverflowClamp",
+       false,
+       0,
+       0,
+       0,
+       0x5a000904u,
+       0x6e701a4au,
+       0xeb72dfc8u,
+       0xa5a57bffu,
+       0xa5a57bffu,
+       {0x800030u}},
+      {"F16NegAccumulator",
+       false,
+       0,
+       kNegC,
+       0,
+       0x00000006u,
+       0x5ce9d378u,
+       0xe31586b4u,
+       0xa5a5054eu,
+       0xa5a5054du,
+       {0xf0u, 0x00u}},
+      {"F16AbsAccumulator",
+       false,
+       kAbsC,
+       0,
+       0,
+       0x0000001eu,
+       0x0a77f82eu,
+       0x0b752899u,
+       0xa5a5a67au,
+       0xa5a5a67bu,
+       {0xf0u}},
+      {"F16HighHalves",
+       false,
+       0,
+       0,
+       kHighHalves,
+       0x00000040u,
+       0xe2146401u,
+       0x1bf1e7d8u,
+       0x1ffaa5a5u,
+       0x1ff9a5a5u,
+       {0xf0u}},
+      {"F16HighHalvesFactorNan",
+       false,
+       0,
+       0,
+       kHighHalves,
+       0xffffffffu,
+       0x00000000u,
+       0xd7510000u,
+       0xfe3da5a5u,
+       0xfe3da5a5u,
+       {0xf0u}},
+      {"Bf16FactorNan",
+       true,
+       0,
+       0,
+       0,
+       0xffffffffu,
+       0x00000000u,
+       0xee910000u,
+       0xa5a5fffdu,
+       0xa5a5fffdu,
+       {0xf0u}},
+      {"Bf16SubnormalAccumulator",
+       true,
+       0,
+       0,
+       0,
+       0x00000000u,
+       0x00000000u,
+       0xe2c10001u,
+       0xa5a50001u,
+       0xa5a50000u,
+       {0xf0u}},
+      {"Bf16RoundsThroughF32",
+       true,
+       0,
+       0,
+       0,
+       0xbf6a3abeu,
+       0x19c4cdb4u,
+       0x7a14000fu,
+       0xa5a5c905u,
+       0xa5a5c905u,
+       {0xf0u}},
+      {"Bf16SubnormalFactors",
+       true,
+       0,
+       0,
+       0,
+       0x0000000fu,
+       0x000fcf5fu,
+       0x5129000au,
+       0xa5a58ed1u,
+       0xa5a50000u,
+       {0xf0u}},
+      {"Bf16OverflowSign",
+       true,
+       0,
+       0,
+       0,
+       0x5b52fb69u,
+       0xf0ced434u,
+       0x7f2c002eu,
+       0xa5a57f80u,
+       0xa5a57f80u,
+       {0xf0u}},
+      {"Bf16NegativeZeroSum",
+       true,
+       0,
+       0,
+       0,
+       0x00008000u,
+       0x80000000u,
+       0xe50a8000u,
+       0xa5a50000u,
+       0xa5a50000u,
+       {0xf0u}},
+      {"Bf16HighHalves",
+       true,
+       0,
+       0,
+       kHighHalves,
+       0x00008000u,
+       0x00800000u,
+       0x0073ffffu,
+       0x0073a5a5u,
+       0x0000a5a5u,
+       {0xf0u}},
+  };
+  constexpr uint32_t kUntouched = 0xa5a5a5a5u;
+  std::vector<ArithmeticCase> cases;
+  for (const auto &[arch, prefix] : {std::pair{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201"},
+                                     std::pair{ROCJITSU_CODE_ARCH_RDNA3, "Gfx1100"},
+                                     std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, "Rdna3_5"}}) {
+    for (const Lane &lane : lanes) {
+      const auto words = rdna4::build_vop3(
+          lane.bf16 ? rdna4::kVDot2Bf16Bf16Vop3 : rdna4::kVDot2F16F16Vop3, {.vdst = 6,
+                                                                            .abs = lane.abs,
+                                                                            .opsel = lane.opsel,
+                                                                            .src0 = 256,
+                                                                            .src1 = 257,
+                                                                            .src2 = 258,
+                                                                            .neg = lane.neg});
+      const uint32_t expected = arch == ROCJITSU_CODE_ARCH_RDNA4 ? lane.gfx1201 : lane.gfx1100;
+      for (const uint32_t mode : lane.modes) {
+        char suffix[16];
+        std::snprintf(suffix, sizeof(suffix), "Mode%X", mode);
+        cases.push_back({std::string(prefix) + lane.name + suffix,
+                         arch,
+                         {words[0], words[1], 0u},
+                         {{0, lane.a}, {1, lane.b}, {2, lane.c}, {6, kUntouched}},
+                         {{6, expected}},
+                         mode,
+                         FE_TONEAREST});
+      }
+    }
+  }
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2715,6 +2971,22 @@ TEST_P(ValuRoundedResultModifierTest, MatchesGfx1201OnScalarAndSimdPaths) {
 
 INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
                          testing::ValuesIn(rounded_result_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuDot2Packed16Test : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuDot2Packed16Test, MatchesCapturesOnScalarAndSimdPaths) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Captured, ValuDot2Packed16Test, testing::ValuesIn(dot2_packed16_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

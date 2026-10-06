@@ -308,7 +308,9 @@ def test_dot2_true16_narrows_inline_float_constants():
         ('dot2_f16_f16', 'f32_to_f16'),
         ('dot2_bf16_bf16', 'f32_to_bf16'),
     ):
-        cpp = gen_dot2_true16(['vdst'], ['src0', 'src1', 'src2'], cls)
+        cpp = gen_dot2_true16(
+            ['vdst'], ['src0', 'src1', 'src2'], cls, FloatDotAccumulation.GFX12
+        )
 
         assert (
             'if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))' in cpp
@@ -320,6 +322,47 @@ def test_dot2_true16_narrows_inline_float_constants():
         assert f'raw1 = util::{narrow}(std::bit_cast<float>(raw1));' in cpp
         # src2 is read at 16 bits by read_vop3_true16_src, so it is left alone.
         assert 'inst_.src2, src2.size_bits()' not in cpp
+
+
+def test_dot2_true16_uses_the_architecture_packed_dot_step():
+    """V_DOT2_{F16,BF16} run one packed DOT/WMMA step on raw bits, with
+    ABS/NEG applied to the 16-bit halves and no host FP or MODE policy."""
+    for accumulation, arch in (
+        (FloatDotAccumulation.GFX11, 'gfx11'),
+        (FloatDotAccumulation.GFX12, 'gfx12'),
+    ):
+        for cls, bf16, fmt in (
+            ('dot2_f16_f16', 'false', 'F16'),
+            ('dot2_bf16_bf16', 'true', 'BF16'),
+        ):
+            cpp = gen_dot2_true16(['vdst'], ['src0', 'src1', 'src2'], cls, accumulation)
+            assert (
+                f'amdgpu::{arch}_dot2_packed16<{bf16}>(a0, b0, a1, b1, acc, wf.fp16_ovfl())'
+                in cpp
+            )
+            assert (
+                f'source_modifier::apply<amdgpu::fp_format::{fmt}>(bits & 0xffffu, source, '
+                'inst_.abs, inst_.neg)' in cpp
+            )
+            assert 'a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);' in cpp
+            assert 'b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);' in cpp
+            assert 'acc = half(acc_bits, 2);' in cpp
+            # Only an inline constant is converted through a host float.
+            assert '_to_f32' not in cpp
+            assert 'float a' not in cpp
+            assert 'fp_mode::' not in cpp
+
+
+def test_dot2_true16_rejects_host_float_accumulation():
+    import pytest
+
+    with pytest.raises(ValueError, match='characterized DOT accumulation model'):
+        gen_dot2_true16(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            'dot2_f16_f16',
+            FloatDotAccumulation.HOST_F32,
+        )
 
 
 def test_dot2_integer_forms_leave_inline_constants_alone():

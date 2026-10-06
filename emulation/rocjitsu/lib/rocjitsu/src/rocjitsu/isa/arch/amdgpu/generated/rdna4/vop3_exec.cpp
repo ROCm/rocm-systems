@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
@@ -8067,17 +8068,15 @@ void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
     uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(raw1 & 0xffffu));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));
-    float acc = util::f16_to_f32(static_cast<uint16_t>(acc_bits));
-    a0 = amdgpu::source_modifier::apply_to_float(a0, 0, inst_.abs, inst_.neg);
-    a1 = amdgpu::source_modifier::apply_to_float(a1, 0, inst_.abs, inst_.neg);
-    b0 = amdgpu::source_modifier::apply_to_float(b0, 1, inst_.abs, inst_.neg);
-    b1 = amdgpu::source_modifier::apply_to_float(b1, 1, inst_.abs, inst_.neg);
-    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.abs, inst_.neg);
-    uint32_t result_bits = amdgpu::fp_mode::dot2_f16(a0, b0, a1, b1, acc, wf.fp16_ovfl());
+    const auto half = [&](uint32_t bits, unsigned source) {
+      return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(bits & 0xffffu, source,
+                                                                             inst_.abs, inst_.neg));
+    };
+    const uint16_t a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);
+    const uint16_t b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);
+    const uint16_t acc = half(acc_bits, 2);
+    const uint16_t result_bits =
+        amdgpu::gfx12_dot2_packed16<false>(a0, b0, a1, b1, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
 }
@@ -8114,17 +8113,15 @@ RJ_NOINLINE void VDot2F16F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
     uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(raw1 & 0xffffu));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));
-    float acc = util::f16_to_f32(static_cast<uint16_t>(acc_bits));
-    a0 = amdgpu::source_modifier::apply_to_float(a0, 0, inst_.abs, inst_.neg);
-    a1 = amdgpu::source_modifier::apply_to_float(a1, 0, inst_.abs, inst_.neg);
-    b0 = amdgpu::source_modifier::apply_to_float(b0, 1, inst_.abs, inst_.neg);
-    b1 = amdgpu::source_modifier::apply_to_float(b1, 1, inst_.abs, inst_.neg);
-    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.abs, inst_.neg);
-    uint32_t result_bits = amdgpu::fp_mode::dot2_f16(a0, b0, a1, b1, acc, wf.fp16_ovfl());
+    const auto half = [&](uint32_t bits, unsigned source) {
+      return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(bits & 0xffffu, source,
+                                                                             inst_.abs, inst_.neg));
+    };
+    const uint16_t a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);
+    const uint16_t b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);
+    const uint16_t acc = half(acc_bits, 2);
+    const uint16_t result_bits =
+        amdgpu::gfx12_dot2_packed16<false>(a0, b0, a1, b1, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   dpp_write_mask_scope_.restore();
@@ -8151,17 +8148,15 @@ void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
     uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
-    float a0 = util::bf16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
-    float a1 = util::bf16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
-    float b0 = util::bf16_to_f32(static_cast<uint16_t>(raw1 & 0xffffu));
-    float b1 = util::bf16_to_f32(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));
-    float acc = util::bf16_to_f32(static_cast<uint16_t>(acc_bits));
-    a0 = amdgpu::source_modifier::apply_to_float(a0, 0, inst_.abs, inst_.neg);
-    a1 = amdgpu::source_modifier::apply_to_float(a1, 0, inst_.abs, inst_.neg);
-    b0 = amdgpu::source_modifier::apply_to_float(b0, 1, inst_.abs, inst_.neg);
-    b1 = amdgpu::source_modifier::apply_to_float(b1, 1, inst_.abs, inst_.neg);
-    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.abs, inst_.neg);
-    uint32_t result_bits = amdgpu::fp_mode::dot2_bf16(a0, b0, a1, b1, acc);
+    const auto half = [&](uint32_t bits, unsigned source) {
+      return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::BF16>(
+          bits & 0xffffu, source, inst_.abs, inst_.neg));
+    };
+    const uint16_t a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);
+    const uint16_t b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);
+    const uint16_t acc = half(acc_bits, 2);
+    const uint16_t result_bits =
+        amdgpu::gfx12_dot2_packed16<true>(a0, b0, a1, b1, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
 }
@@ -8198,17 +8193,15 @@ RJ_NOINLINE void VDot2Bf16Bf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
     uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
-    float a0 = util::bf16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
-    float a1 = util::bf16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
-    float b0 = util::bf16_to_f32(static_cast<uint16_t>(raw1 & 0xffffu));
-    float b1 = util::bf16_to_f32(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));
-    float acc = util::bf16_to_f32(static_cast<uint16_t>(acc_bits));
-    a0 = amdgpu::source_modifier::apply_to_float(a0, 0, inst_.abs, inst_.neg);
-    a1 = amdgpu::source_modifier::apply_to_float(a1, 0, inst_.abs, inst_.neg);
-    b0 = amdgpu::source_modifier::apply_to_float(b0, 1, inst_.abs, inst_.neg);
-    b1 = amdgpu::source_modifier::apply_to_float(b1, 1, inst_.abs, inst_.neg);
-    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.abs, inst_.neg);
-    uint32_t result_bits = amdgpu::fp_mode::dot2_bf16(a0, b0, a1, b1, acc);
+    const auto half = [&](uint32_t bits, unsigned source) {
+      return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::BF16>(
+          bits & 0xffffu, source, inst_.abs, inst_.neg));
+    };
+    const uint16_t a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);
+    const uint16_t b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);
+    const uint16_t acc = half(acc_bits, 2);
+    const uint16_t result_bits =
+        amdgpu::gfx12_dot2_packed16<true>(a0, b0, a1, b1, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   dpp_write_mask_scope_.restore();
