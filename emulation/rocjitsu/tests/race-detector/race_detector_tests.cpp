@@ -674,6 +674,33 @@ TEST(RaceDetector, LdsSameWave_SharedChunksKeepOtherWaveHazards) {
   }
 }
 
+TEST(RaceDetector, LdsSameWave_SpanningAccessChecksLaterChunks) {
+  for (bool writes : {false, true}) {
+    SCOPED_TRACE(writes ? "RAW" : "WAR");
+    for (int otherAddr : {16, 32, 64}) {
+      SCOPED_TRACE(otherAddr);
+      RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+      if (writes) {
+        b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/8, /*bytes=*/4);
+        b.ldsWrite(/*wave=*/1, /*lane=*/0, otherAddr, /*bytes=*/4);
+      } else {
+        b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/8, /*bytes=*/4, /*vgprDst=*/2);
+        b.ldsRead(/*wave=*/1, /*lane=*/0, otherAddr, /*bytes=*/4, /*vgprDst=*/2);
+      }
+      ASSERT_FALSE(b.hasRace());
+      // The first chunk belongs only to wave 0. Any intervening chunks are
+      // empty, so the query must reach the last chunk to find wave 1's event.
+      for (int overlap : {0, 4}) {
+        if (writes)
+          b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/12, otherAddr + overlap - 12);
+        else
+          b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/12, otherAddr + overlap - 12);
+        EXPECT_EQ(b.raceCount(), overlap == 0 ? 0 : 1);
+      }
+    }
+  }
+}
+
 TEST(RaceDetector, LdsSameWave_MixedOrderingSurvivesPartialRetirement) {
   for (bool writes : {false, true}) {
     SCOPED_TRACE(writes ? "RAW" : "WAR");
