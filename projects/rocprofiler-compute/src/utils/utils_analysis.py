@@ -21,6 +21,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.metrics.pass_provenance import natural_pass_sort_key
 from utils.utils_common import (
     NATIVE_AGENTS_PREFIX,
     NATIVE_COUNTERS_PREFIX,
@@ -957,8 +958,6 @@ def _merge_counters_with_pass_provenance(
     pass_layout: "PassLayout",
 ) -> dict[str, Any]:
     """Build base + shadow counter columns for one dispatch group."""
-    from utils.metrics.pass_provenance import natural_pass_sort_key
-
     merged: dict[str, Any] = {}
     for counter_name, counter_rows in group_df.groupby("Counter_Name", sort=False):
         values_by_pass: dict[str, Any] = {}
