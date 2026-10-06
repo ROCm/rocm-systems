@@ -30,7 +30,9 @@ set(TEST_SRC
 )
 
 # Append it to the list
-set(CLUSTER_SUPPORTING_GPUS "gfx1101" "gfx1250")
+# Only list targets covered by the CLUSTER_DIMS gate in catch/include/hip_test_common.hh;
+# others build the kernels without cluster metadata.
+set(CLUSTER_SUPPORTING_GPUS "gfx1250")
 set(CLUSTER_SUPPORTED OFF)
 
 foreach(CLUSTER_SUPPORTING_GPU IN LISTS CLUSTER_SUPPORTING_GPUS)

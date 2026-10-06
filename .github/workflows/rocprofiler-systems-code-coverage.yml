@@ -48,6 +48,8 @@ jobs:
         echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
+    # libtbb-dev is required by the baseline build below, which compiles the
+    # base branch. It can be dropped once the base branch no longer needs TBB.
     - name: Install Packages
       timeout-minutes: 25
       uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
@@ -152,10 +154,15 @@ jobs:
           --output-dir .codecov \
           --label unit-tests-baseline
 
+    # git checkout updates the gitlink but leaves the submodule work tree at
+    # whatever the baseline build checked out, so sync it explicitly. Otherwise
+    # the PR is measured against the base branch's Dyninst.
     - name: Checkout PR Branch
-      timeout-minutes: 5
+      timeout-minutes: 10
       shell: bash
-      run: git checkout ${{ env.PR_SHA }}
+      run: |
+        git checkout ${{ env.PR_SHA }}
+        git submodule update --init --recursive projects/rocprofiler-systems/external/dyninst
 
     - name: Build
       timeout-minutes: 60

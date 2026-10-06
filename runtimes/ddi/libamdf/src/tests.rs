@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Cross-module AMDF negotiation, allocator, and release-callback tests.
 //!
 //! These fixtures exercise contracts that span more than one implementation

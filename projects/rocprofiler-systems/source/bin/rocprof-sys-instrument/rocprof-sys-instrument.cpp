@@ -15,6 +15,7 @@
 
 #include <fmt/ranges.h>
 
+#include <algorithm>
 #include <timemory/backends/process.hpp>
 #include <timemory/config.hpp>
 #include <timemory/environment/types.hpp>
@@ -347,8 +348,8 @@ main(int argc, char** argv)
 
     const auto libs_regex =
         std::regex{ "lib(dyninstAPI|stackwalk|pcontrol|patchAPI|parseAPI|"
-                    "instructionAPI|symtabAPI|dynDwarf|common|dynElf|tbb|tbbmalloc|"
-                    "tbbmalloc_proxy|gotcha|libunwind|hsa-runtime|amdhip|"
+                    "instructionAPI|symtabAPI|dynDwarf|common|dynElf|"
+                    "gotcha|libunwind|hsa-runtime|amdhip|"
                     "amd_comgr|amd_smi|rocprofiler-register|"
                     "rocprofiler-sdk|rocprofiler-sdk-roctx)\\.(so|a)" };
 
@@ -367,17 +368,16 @@ main(int argc, char** argv)
         }
 
         auto lib_dir = path::parent_path(lib_path);
-        if(std::find(lib_search_paths.begin(), lib_search_paths.end(), lib_dir) ==
-           lib_search_paths.end())
+        if(std::ranges::find(lib_search_paths, lib_dir) == lib_search_paths.end())
         {
             lib_search_paths.emplace_back(std::move(lib_dir));
         }
     }
 
     // DO NOT SORT! Just remove adjacent duplicates
-    bin_search_paths.erase(std::unique(bin_search_paths.begin(), bin_search_paths.end()),
+    bin_search_paths.erase(std::ranges::unique(bin_search_paths).begin(),
                            bin_search_paths.end());
-    lib_search_paths.erase(std::unique(lib_search_paths.begin(), lib_search_paths.end()),
+    lib_search_paths.erase(std::ranges::unique(lib_search_paths).begin(),
                            lib_search_paths.end());
 
     for(const auto& itr : bin_search_paths)
@@ -1137,8 +1137,7 @@ main(int argc, char** argv)
         .min_count(1)
         .action([](parser_t& _p) {
             auto _v = _p.get<strvec_t>("dyninst-rt");
-            std::copy(_dyn_api_rt_paths.begin(), _dyn_api_rt_paths.end(),
-                      std::back_inserter(_v));
+            std::ranges::copy(_dyn_api_rt_paths, std::back_inserter(_v));
             std::swap(_dyn_api_rt_paths, _v);
         });
     parser
@@ -2673,7 +2672,7 @@ main(int argc, char** argv)
             {
                 std::cout << "\n[" << _label << "] " << mitr.first << ":\n";
             }
-            std::sort(mitr.second.begin(), mitr.second.end());
+            std::ranges::sort(mitr.second);
             for(auto const& itr : mitr.second)
             {
                 std::cout << "[" << _label << "]    " << itr << "\n";
@@ -3036,7 +3035,7 @@ canonicalize(std::string _path)
             _tree.emplace_back(itr);
         }
     }
-    std::reverse(_tree.begin(), _tree.end());
+    std::ranges::reverse(_tree);
     auto cpath = std::string{ leading_dash ? "/" : "" };
     for(size_t i = 0; i < _tree.size() - 1; ++i)
     {
@@ -3125,7 +3124,7 @@ get_absolute_filepath(std::string _name)
     if(_base_name.starts_with("lib") || _base_name.find(".so") != std::string::npos ||
        _base_name.find(".a") != std::string::npos)
     {
-        std::reverse(_combine_paths.begin(), _combine_paths.end());
+        std::ranges::reverse(_combine_paths);
     }
     _search_paths.reserve(bin_search_paths.size() + lib_search_paths.size());
     for(const auto& pitr : _combine_paths)

@@ -213,8 +213,8 @@ get_parameter_types(procedure_t* func)
 bool
 regex_match_any(const std::string& _name, const regexvec_t& _res)
 {
-    return std::any_of(_res.begin(), _res.end(),
-                       [&](const auto& _re) { return std::regex_search(_name, _re); });
+    return std::ranges::any_of(
+        _res, [&](const auto& _re) { return std::regex_search(_name, _re); });
 }
 }  // namespace
 
@@ -394,8 +394,9 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
         // compilers (e.g. amdclang++) emit for compiler-generated basic blocks.
         auto const _remove_line_zero = [](std::vector<statement_t>& _lines) {
             _lines.erase(
-                std::remove_if(_lines.begin(), _lines.end(),
-                               [](statement_t& stmt) { return stmt.lineNumber() == 0; }),
+                std::ranges::remove_if(
+                    _lines, [](statement_t& stmt) { return stmt.lineNumber() == 0; })
+                    .begin(),
                 _lines.end());
         };
 
@@ -837,8 +838,8 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
 
     for(const auto& itr : _full_chain)
     {
-        auto const _found = std::any_of(_excl_chain.begin(), _excl_chain.end(),
-                                        [itr](const auto& _v) { return (itr == _v); });
+        auto const _found = std::ranges::any_of(
+            _excl_chain, [itr](const auto& _v) { return (itr == _v); });
         if(!_found)
         {
             if(_exclude_re.empty() || !std::regex_search(itr, std::regex{ _exclude_re }))

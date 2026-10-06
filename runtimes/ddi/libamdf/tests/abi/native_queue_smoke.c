@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /* Opt-in empty native queue qualification. No packet, index, or doorbell is
  * written. AMDF_REQUIRE_GPU=1 requires every advertised native user queue. */
 #include <stdint.h>

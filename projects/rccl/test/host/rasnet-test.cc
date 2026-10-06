@@ -121,7 +121,7 @@ struct EventRecord {
 
 struct RecvStep {
   ncclResult_t result;
-  int closed;
+  bool closed;
   rasMsg* msg;
 };
 
@@ -153,7 +153,7 @@ struct Fakes {
   std::vector<rasConnection*> enqueuedConnections;
   std::vector<bool> enqueuedFront;
   ncclResult_t sendMsgResult = ncclSuccess;
-  int sendMsgClosed = 0;
+  bool sendMsgClosed = false;
   bool sendMsgAllSent = false;
   int sendMsgCalls = 0;
   std::deque<RecvStep> recvSteps;
@@ -540,14 +540,14 @@ void rasConnEnqueueMsg(struct rasConnection* conn, struct rasMsg* msg, size_t ms
   g_enqueuedFront.push_back(front);
 }
 
-ncclResult_t rasConnSendMsg(struct rasConnection*, int* closed, bool* allSent) {
+ncclResult_t rasConnSendMsg(struct rasConnection*, bool* closed, bool* allSent) {
   ++g_sendMsgCalls;
   *closed = g_sendMsgClosed;
   *allSent = g_sendMsgAllSent;
   return g_sendMsgResult;
 }
 
-ncclResult_t rasMsgRecv(struct rasSocket*, struct rasMsg** msg, int* closed) {
+ncclResult_t rasMsgRecv(struct rasSocket*, struct rasMsg** msg, bool* closed) {
   ++g_recvCalls;
   if (g_recvSteps.empty()) {
     *msg = nullptr;

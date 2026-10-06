@@ -12,6 +12,7 @@
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 
+#include <algorithm>
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/data_tracker/components.hpp>
@@ -67,7 +68,7 @@ backtrace::get() const
     }
 
     // put the bottom of the call-stack on top
-    std::reverse(_v.begin(), _v.end());
+    std::ranges::reverse(_v);
     //
     auto _known_excludes =
         std::set<std::string>{ "funlockfile", "killpg", "__restore_rt" };

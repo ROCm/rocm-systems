@@ -6,6 +6,7 @@
 
 #include "logger/debug.hpp"
 
+#include <algorithm>
 #include <exception>
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
@@ -103,8 +104,8 @@ get_agent_counter_info(const tool_agent_vec_t& _agents)
 
             for(auto& citr : agent_it->second)
             {
-                std::sort(
-                    citr.dimension_info.begin(), citr.dimension_info.end(),
+                std::ranges::sort(
+                    citr.dimension_info,
                     [](const auto& lhs, const auto& rhs) { return (lhs.id < rhs.id); });
             }
         }
@@ -175,37 +176,37 @@ client_data::initialize_event_info()
             }
 
             auto _counter_info = agent_info_it->second;
-            std::sort(_counter_info.begin(), _counter_info.end(),
-                      [](const rocprofiler_tool_counter_info_t& lhs,
-                         const rocprofiler_tool_counter_info_t& rhs) {
-                          if(lhs.is_constant && rhs.is_constant)
-                          {
-                              return lhs.id < rhs.id;
-                          }
-                          if(lhs.is_constant)
-                          {
-                              return true;
-                          }
-                          if(rhs.is_constant)
-                          {
-                              return false;
-                          }
+            std::ranges::sort(_counter_info,
+                              [](const rocprofiler_tool_counter_info_t& lhs,
+                                 const rocprofiler_tool_counter_info_t& rhs) {
+                                  if(lhs.is_constant && rhs.is_constant)
+                                  {
+                                      return lhs.id < rhs.id;
+                                  }
+                                  if(lhs.is_constant)
+                                  {
+                                      return true;
+                                  }
+                                  if(rhs.is_constant)
+                                  {
+                                      return false;
+                                  }
 
-                          if(!lhs.is_derived && !rhs.is_derived)
-                          {
-                              return lhs.id < rhs.id;
-                          }
-                          if(!lhs.is_derived)
-                          {
-                              return true;
-                          }
-                          if(!rhs.is_derived)
-                          {
-                              return false;
-                          }
+                                  if(!lhs.is_derived && !rhs.is_derived)
+                                  {
+                                      return lhs.id < rhs.id;
+                                  }
+                                  if(!lhs.is_derived)
+                                  {
+                                      return true;
+                                  }
+                                  if(!rhs.is_derived)
+                                  {
+                                      return false;
+                                  }
 
-                          return lhs.id < rhs.id;
-                      });
+                                  return lhs.id < rhs.id;
+                              });
 
             for(const auto& ditr : _counter_info)
             {
