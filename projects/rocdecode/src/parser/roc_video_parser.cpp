@@ -165,9 +165,11 @@ ParserResult RocVideoParser::GetNalUnit() {
         // No NAL unit in the frame data
         return PARSER_NOT_FOUND;
     }
-    // The subtractions below are unsigned, so an end offset below the start would yield a huge
-    // size rather than a negative one, and the nal_unit_size_ floor the callers apply before
-    // copying out of the NAL unit would not catch it. Check the ordering here instead.
+    // Defensive; not reachable with the current callers, which reset both offsets per picture and
+    // only ever assign them values the scan bound above already constrains. Kept because the
+    // subtractions below are unsigned: an end offset below the start would yield a huge size
+    // rather than a negative one, and the nal_unit_size_ floor the callers apply before copying
+    // out of the NAL unit would not catch that.
     if (curr_start_code_offset_ > pic_data_size_ ||
         (start_code_found && next_start_code_offset_ < curr_start_code_offset_)) {
         ErrorLog(g_rocdec_logger, "Start code offsets are out of order for the current picture.");
@@ -184,15 +186,17 @@ ParserResult RocVideoParser::GetNalUnit() {
 }
 
 ParserResult RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, size_t end_bytepos, size_t *p_rbsp_size) {
-    int count = 0;
+    int count = 0;  // length of the current run of zero bytes, 0 to ZEROBYTES_SHORTSTARTCODE
     *p_rbsp_size = 0;
+    // An end before the start describes no range at all. Reporting end_bytepos as the length and
+    // PARSER_OK was the same mistake this function was changed to stop making, even though all
+    // nine callers pass begin_bytepos of 0 and cannot reach it.
     if (end_bytepos < begin_bytepos) {
-        *p_rbsp_size = end_bytepos;
-        return PARSER_OK;
+        return PARSER_INVALID_ARG;
     }
     uint8_t *streamBuffer_i = streamBuffer + begin_bytepos;
     uint8_t *streamBuffer_end = streamBuffer + end_bytepos;
-    int reduce_count = 0;
+    size_t reduce_count = 0;  // bytes discarded, subtracted from a size_t span below
     for (; streamBuffer_i != streamBuffer_end; ) { 
         //starting from begin_bytepos to avoid header information
         //in NAL unit, 0x000000, 0x000001 or 0x000002 shall not occur at any uint8_t-aligned position
@@ -276,6 +280,9 @@ ParserResult RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
         if((sei_message_count_ + 1) > sei_message_list_.size()) {
             sei_message_list_.resize((sei_message_count_ + 1));
         }
+        // sei_message_type is uint8_t in the public RocdecSeiMessage, so a type above 255
+        // truncates here. payload_type is still accumulated wide so the running total cannot
+        // wrap before the range checks above act on it.
         sei_message_list_[sei_message_count_].sei_message_type = payload_type;
         sei_message_list_[sei_message_count_].sei_message_size = payload_size;
 

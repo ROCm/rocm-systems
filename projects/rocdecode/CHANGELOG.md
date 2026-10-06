@@ -14,6 +14,11 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Fixed decode errors of some AVC interlaced container streams by adding support for the picture data packet from the demuxer which contains multiple pictures.
 * Corrected fake CTest passes.
 * Resolved vendored libva link issue in samples without extra env vars.
+* Bounds checking in the HEVC parser for the VPS and SPS sub-layer counts, the VPS layer sets, the slice header long-term reference picture counts, and the PPS tile counts.
+* Bounds checking in the AVC parser for the reference picture list modification and memory management control operation arrays.
+* Bounds checking in the AV1 parser for the non-uniform tile loops and the OBU header and size fields.
+* Bounds checking in the VP9 parser for the superframe index sizes, the quantizer table indices, the loop filter levels, and every read in the uncompressed header.
+* Bounds checking in the NAL unit and SEI parsing shared by AVC and HEVC, covering the start code scan, the SEI messages, and the reported RBSP length.
 
 ## rocDecode 1.8.0 for ROCm 7.13
 
