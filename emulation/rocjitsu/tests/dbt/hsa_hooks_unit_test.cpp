@@ -4227,7 +4227,7 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
 }
 
 TEST(HsaHooksUnitTest, ConSanTransformRejectionReportsStableTypedCause) {
-  for (const auto [cause, expected] : std::array{
+  for (const auto &[cause, expected] : std::array{
            std::pair{rocjitsu::consan::TransformFailureCause::PatchedImageGrowthLimit,
                      std::string_view{"patched-image-growth-limit"}},
            std::pair{rocjitsu::consan::TransformFailureCause::OverlappingPatchRanges,

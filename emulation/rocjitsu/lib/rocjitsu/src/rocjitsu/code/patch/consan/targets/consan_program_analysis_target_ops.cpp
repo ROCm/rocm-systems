@@ -13,7 +13,8 @@ namespace {
 
 [[nodiscard]] const ProgramAnalysisTargetOperations *operations(rj_code_arch_t arch) {
   const TargetProfile *target = target_profile(arch);
-  return target == nullptr ? nullptr : target->program_analysis;
+  return target == nullptr || !target->program_analysis ? nullptr
+                                                        : &target->program_analysis->get();
 }
 
 template <typename Result, typename... Parameters, typename... Arguments>
