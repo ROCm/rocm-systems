@@ -2,25 +2,13 @@
 virtualMemoryManagement:
   Unit_hipMemGetAllocationGranularity_AllGPUs:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemGetAllocationGranularity_NegativeTests:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemGetAllocationGranularity_Capture: *level_2
   Unit_hipMemRetainAllocationHandle_SetGet:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemRetainAllocationHandle_NegTst:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemRetainAllocationHandle_Capture: *level_2
   Unit_hipMemImportFromShareableHandle_Positive_Basic: *level_2
   Unit_hipMemImportFromShareableHandle_Negative_Parameters: *level_2
@@ -69,65 +57,32 @@ virtualMemoryManagement:
   Unit_hipGetProcAddress_VMM: *level_2
   Unit_hipMemAddressFree_negative:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemAddressFree_Capture: *level_2
   Unit_hipMemAddressReserve_AlignmentTest:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemAddressReserve_Negative:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "=== Patch which removes the typetraits implementation from std namespace in hiprtc is reverted === Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemAddressReserve_Capture: *level_2
   Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemCreate_ChkWithKerLaunch:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemCreate_MapNonContiguousChunks:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemCreate_ChkWithMemset:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemCreate_Negative:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemCreate_Capture: *level_2
   Unit_hipMemCreate_HostNuma_Granularity:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
       reason: "Uses libnuma (Linux-only); unit/virtualMemoryManagement/CMakeLists.txt gates hipMemCreateHostNuma.cc under if(UNIX). Never built or run on native Windows. AIRUNTIME-2744"
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemCreate_HostNuma_BasicAllocDealloc:
     <<: *level_2
     unsupported:
@@ -135,7 +90,7 @@ virtualMemoryManagement:
       reason: "Uses libnuma (Linux-only); unit/virtualMemoryManagement/CMakeLists.txt gates hipMemCreateHostNuma.cc under if(UNIX). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
       targets: [amd_wsl]
-      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1201 (amd_wsl) FAIL: 1/1 variants fail. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemCreate_HostNuma_ChkDev2HstMemcpy:
     <<: *level_2
     unsupported:
@@ -143,7 +98,7 @@ virtualMemoryManagement:
       reason: "Uses libnuma (Linux-only); unit/virtualMemoryManagement/CMakeLists.txt gates hipMemCreateHostNuma.cc under if(UNIX). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
       targets: [amd_wsl]
-      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1201 (amd_wsl) FAIL: 1/1 variants fail. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemCreate_HostNuma_ChkWithKerLaunch:
     <<: *level_2
     unsupported:
@@ -151,7 +106,7 @@ virtualMemoryManagement:
       reason: "Uses libnuma (Linux-only); unit/virtualMemoryManagement/CMakeLists.txt gates hipMemCreateHostNuma.cc under if(UNIX). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
       targets: [amd_wsl]
-      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1201 (amd_wsl) FAIL: 1/1 variants fail. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemCreate_HostNuma_HostAndDeviceAccess:
     <<: *level_2
     unsupported:
@@ -159,7 +114,7 @@ virtualMemoryManagement:
       reason: "Uses libnuma (Linux-only); unit/virtualMemoryManagement/CMakeLists.txt gates hipMemCreateHostNuma.cc under if(UNIX). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
       targets: [amd_wsl]
-      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1201 (amd_wsl) FAIL: 1/1 variants fail. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemCreate_HostNuma_NumaTypedAccess:
     <<: *level_2
     unsupported:
@@ -167,15 +122,12 @@ virtualMemoryManagement:
       reason: "Uses libnuma (Linux-only); unit/virtualMemoryManagement/CMakeLists.txt gates hipMemCreateHostNuma.cc under if(UNIX). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
       targets: [amd_wsl]
-      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1201 (amd_wsl) FAIL: 1/1 variants fail. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemCreate_HostNuma_Negative:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
       reason: "Uses libnuma (Linux-only); unit/virtualMemoryManagement/CMakeLists.txt gates hipMemCreateHostNuma.cc under if(UNIX). Never built or run on native Windows. AIRUNTIME-2744"
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemCreate_HostNuma_ExportImport:
     <<: *level_2
     unsupported:
@@ -183,157 +135,103 @@ virtualMemoryManagement:
       reason: "Uses libnuma (Linux-only); unit/virtualMemoryManagement/CMakeLists.txt gates hipMemCreateHostNuma.cc under if(UNIX). Never built or run on native Windows. AIRUNTIME-2744"
     disabled:
       targets: [amd_wsl]
-      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemSetAccess_SetGet:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemSetAccess_MultDevSetGet:
     <<: *level_2
     tags: [multigpu]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemSetAccess_EntireVMMRangeSetGet:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemGetAccess_NegTst:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemSetAccess_FuncTstOnMultDev:
     <<: *level_2
     tags: [multigpu]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemSetAccess_ChangeAccessProp:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemSetAccess_Vmm2UnifiedMemCpy:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: GPU does not support managed memory. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemSetAccess_Vmm2DevMemCpy:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemSetAccess_Vmm2PeerDevMemCpy:
     <<: *level_2
     tags: [multigpu]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy:
     <<: *level_2
     tags: [multigpu]
     disabled:
       targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemSetAccess_Vmm2VMMMemCpy:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy:
     <<: *level_2
     tags: [multigpu]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemSetAccess_GrowVMM:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemSetAccess_Multithreaded:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemSetAccess_negative:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemSetGetAccess_Capture: *level_2
   Unit_hipMemSetAccessHostDevice_hostalloc:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-555665 gfx1201 (amd_windows) FAIL: {Unknown expression after the reported line} -> {Unknown expression after the reported line}. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "SWDEV-555665 gfx1201 (amd_windows) FAIL: {Unknown expression after the reported line} -> {Unknown expression after the reported line}. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: 1/1 variants fail. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemSetAccessHost_devicealloc:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "gfx1201 (amd_windows) FAIL: crash/abort (access violation) on gfx1201. AIRUNTIME-XXXX Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) FAIL: crash/abort (access violation) on gfx1201. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: 1/1 variants fail. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemGetAllocationPropertiesFromHandle_functional:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemGetAllocationPropertiesFromHandle_Negative:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemGetAllocationPropertiesFromHandle_Capture: *level_2
   Unit_hipMemMap_Positive_APU_LargeAllocSpill: *level_2
   Unit_hipMemMap_SameMemoryReuse:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemMap_PhysicalMemory_Map2MultVMMs:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemMap_UnmapOneAliasOfMultiAliasedHandle:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemMap_PhysicalMemoryReuse_MultiDev:
     <<: *level_2
     tags: [multigpu]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemMap_VMMMemoryReuse_SingleGPU:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemMap_VMMMemoryReuse_MultiGPU:
     <<: *level_2
     tags: [multigpu]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "(amd_windows) SWDEV-396615 mGPUs not considered correctly; (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemMap_MapPartialVMMMem:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemMap_negative:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "(amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
   Unit_hipMemMap_Capture: *level_2
   Unit_hipMemMap_Retrieve_AllocationHandle: *level_2
   Unit_hipMemMap_Retrieve_MultiAllocationHandle: *level_2
@@ -342,15 +240,9 @@ virtualMemoryManagement:
   Unit_hipMemMap_ConcurrentDisjointMapsNoDeadlock: *level_2
   Unit_hipMemRelease_negative:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemRelease_Capture: *level_2
   Unit_hipMemUnmap_negative:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipMemUnmap_Capture: *level_2
   Unit_hipMemUnmap_CrossLinksTornDown: *level_2
   Unit_hipMemUnmap_RemapCrossLinks: *level_2

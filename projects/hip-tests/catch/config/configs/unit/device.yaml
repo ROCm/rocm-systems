@@ -424,13 +424,13 @@ device:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
     tags: [multigpu]
   Unit_hipGetProcAddress_IPC_Event_CrossDevice:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
     tags: [multigpu]
   Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process:
     <<: *level_2

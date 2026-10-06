@@ -439,13 +439,13 @@ texture:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92 gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipTextureMipmapRef2D_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92 gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
     tags: [texref, image]
   Unit_hipMallocMipmappedArray_Negative_Parameters:
     <<: *level_2

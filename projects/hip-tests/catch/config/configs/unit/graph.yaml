@@ -1716,9 +1716,6 @@ graph:
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_WrongNodeType:
     <<: *level_2
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
     tags: [exec]
   Unit_hipGraphAddNodeTypeMemset_Positive_Basic:
     <<: *level_2

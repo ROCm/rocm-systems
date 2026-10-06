@@ -9,7 +9,7 @@ cluster:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "gfx1030 (amd_linux) self-skips on fresh build: cluster launch is not supported on this device. gfx1201 (amd_windows) self-skips: cluster launch is not supported on this device. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) self-skips on fresh build: cluster launch is not supported on this device. gfx1201 (amd_windows) self-skips: cluster launch is not supported on this device. gfx1201 (amd_wsl): cluster launch not supported on this device (cluster tests arch-gated to gfx1101/gfx1250 in unit/cluster/CMakeLists.txt)."
   Unit_hipClusterLaunch_CompilerDirective_Basic:
     <<: *level_2
   Unit_hipClusterLaunch_LaunchApi_Basic:

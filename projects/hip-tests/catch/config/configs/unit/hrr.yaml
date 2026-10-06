@@ -4,7 +4,7 @@ hrr:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
-      reason: "gfx1201 (amd_windows) FAIL: exception: directory_iterator::directory_iterator: The system cannot find the path specified.: 'C:/Users/sruscica/AppData/Local/Temp/hrr_capture_smoke'. AIRUNTIME-XXXX Needs to be re-triaged on amd_linux, amd_wsl, nvidia_linux, nvidia_windows AIRUNTIME-2744"
+      reason: "gfx1201 (amd_windows) FAIL: exception: directory_iterator::directory_iterator: The system cannot find the path specified.: 'C:/Users/sruscica/AppData/Local/Temp/hrr_capture_smoke'. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: 1/2 variants fail. AIRUNTIME-XXXX Needs to be re-triaged on amd_linux, nvidia_linux, nvidia_windows AIRUNTIME-2744"
     tags: [smoke, capture]
   Unit_HRR_CaptureSmoke_Direct:
     <<: *level_2

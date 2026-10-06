@@ -479,9 +479,6 @@ deviceLib:
     unsupported:
       targets: [amd_windows]
       reason: "OCP host-reference packed-bitfield ABI differs on Windows; unit/deviceLib/CMakeLists.txt compiles ext_ocp_fp4/fp6/fp8 only if(NOT WIN32). Never built or run on native Windows. AIRUNTIME-2744"
-    disabled:
-      targets: [amd_wsl]
-      reason: "Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
     tags: [types]
   Unit_ext_ocp_fp6_roundtrip_host:
     <<: *level_2

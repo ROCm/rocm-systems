@@ -296,7 +296,7 @@ cooperativeGrps:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) self-skips: cooperative launch is not supported. Needs to be re-triaged on amd_wsl AIRUNTIME-2744"
+      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) self-skips: cooperative launch is not supported. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
   Unit_Thread_Block_Tile_Scan_Random_boolean:
     <<: *level_2
     disabled:

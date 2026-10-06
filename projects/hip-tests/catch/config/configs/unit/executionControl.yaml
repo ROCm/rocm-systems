@@ -92,9 +92,12 @@ executionControl:
     tags: [attributes, kernel, P1]
   Unit_hipFuncSetSharedMemConfig_Positive_Basic:
     <<: *level_2
+    unsupported:
+      targets: [amd_wsl]
+      reason: "Not built on amd_wsl: hipFuncSetSharedMemConfig tests are compiled only on non-AMD (NVIDIA) platforms per the HIP_PLATFORM gate in unit/executionControl/CMakeLists.txt."
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_windows]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged on amd_windows AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_hipFuncSetSharedMemConfig_Negative_Parameters:
     <<: *level_2
@@ -107,9 +110,12 @@ executionControl:
     tags: [attributes, kernel]
   Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout:
     <<: *level_2
+    unsupported:
+      targets: [amd_wsl]
+      reason: "Not built on amd_wsl: hipFuncSetAttribute tests are compiled only on non-AMD (NVIDIA) platforms per the HIP_PLATFORM gate in unit/executionControl/CMakeLists.txt."
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "Note: intermittent Seg fault failure Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_windows]
+      reason: "Note: intermittent Seg fault failure Needs to be re-triaged on amd_windows AIRUNTIME-2744"
     tags: [attributes, kernel]
   Unit_hipFuncSetAttribute_Positive_Parameters:
     <<: *level_2
