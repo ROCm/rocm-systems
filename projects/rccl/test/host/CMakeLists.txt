@@ -66,8 +66,23 @@ foreach(_entry IN LISTS _rccl_ras_markers)
   endforeach()
   rccl_assert_source_line("${_rccl_ras_tests}" "\"${_marker}\"," "the report lines it marks in src/${_ras_sources}")
 endforeach()
+# The check labels and the report header it parses the report by, which src emits as the start of a literal.
+set(_rccl_ras_labels
+  "ras/diagnostics_gpu.cc|GPU inventory: "
+  "ras/diagnostics_gpu.cc|CUDA driver version: "
+  "ras/diagnostics_gpu.cc|ECC: "
+  "ras/diagnostics_env.cc|NCCL environment: "
+  "ras/ras.cc|NCCL DIAG === RAS Diagnostics ===")
+foreach(_entry IN LISTS _rccl_ras_labels)
+  string(REPLACE "|" ";" _ras_pair "${_entry}")
+  list(GET _ras_pair 0 _ras_cc)
+  list(GET _ras_pair 1 _label)
+  rccl_assert_source_line("${_rccl_src_root}/${_ras_cc}" "\"${_label}" "the RAS labels in test/RasDiagnosticsTests.cpp")
+  rccl_assert_source_line("${_rccl_ras_tests}" "= \"${_label}\"" "the report lines it labels in src/${_ras_cc}")
+endforeach()
 unset(_rccl_ras_tests)
 unset(_rccl_ras_markers)
+unset(_rccl_ras_labels)
 unset(_ras_pair)
 unset(_ras_sources)
 unset(_ras_files)

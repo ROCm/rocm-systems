@@ -130,12 +130,15 @@ the others as incomplete or misses them.
 Running on demand on a shared node
 ----------------------------------
 
-RAS processes of the same user share the client port. If another user's job on
-the same node already listens on the port, the RAS threads of your job cannot
-listen on it, and ``rcclras`` silently connects to the other job instead. This
-can happen when containers use the host network. The only sign of the conflict
-is a ``RAS failed to establish a client listening socket`` message, which is
-printed with ``NCCL_DEBUG=INFO``.
+RAS processes of the same user share the client port, and so do two unrelated
+jobs of the same user: both listen on it, the kernel spreads incoming
+connections between them, and ``rcclras`` reaches either job with no error and
+no log message. If another user's job on the same node already listens on the
+port, the RAS threads of your job cannot listen on it, and ``rcclras`` silently
+connects to the other job instead. This can happen when containers use the host
+network. Only this cross-user conflict leaves a sign: a ``RAS failed to
+establish a client listening socket`` message, which is printed with
+``NCCL_DEBUG=INFO``.
 
 To avoid the conflict, choose a free port for the job and pass the same port to
 the client:

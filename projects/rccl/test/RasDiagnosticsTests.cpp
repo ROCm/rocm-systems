@@ -41,6 +41,7 @@
 #include <thread>
 #include <vector>
 
+#include "common/EnvVars.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "common/ResourceGuards.hpp"
 #include "common/TestChecks.hpp"
@@ -333,12 +334,24 @@ static std::string rasRequest(int port, const std::string& command, const std::s
     return body;
 }
 
+// Called only in a case process. The gtest parent must not initialize HIP: it forks the TestBed children of the
+// tests that run after these, and HIP does not survive a fork().
 static int usableGpus()
 {
     int devCount = 0;
     if(hipGetDeviceCount(&devCount) != hipSuccess)
         return 0;
     return std::min(devCount, kMaxGpus);
+}
+
+// The parent takes the count from the EnvVars probe, which queries HIP in a separate process. A case process, which
+// re-enters the test to find its case, is exec'd and may query HIP itself.
+static int caseGateGpus()
+{
+    if(std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr)
+        return usableGpus();
+    static const int nGpus = std::min(EnvVars().GetNumDetectedGpus(), kMaxGpus);
+    return nGpus;
 }
 
 // Creates nGpus communicators on devices 0..nGpus-1. Callers wrap the call in ASSERT_NO_FATAL_FAILURE so that a
@@ -480,7 +493,7 @@ struct RasCase
 // When no case fits, gtest reports a real skip.
 static void runRasCases(const std::vector<RasCase>& cases)
 {
-    const int nGpus = usableGpus();
+    const int nGpus = caseGateGpus();
     std::string notRun;
     int registered = 0;
     for(const RasCase& c : cases)
