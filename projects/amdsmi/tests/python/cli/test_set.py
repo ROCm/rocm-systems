@@ -132,13 +132,13 @@ class TestSet(TestCliBase):
             # set --soc-pstate defaults
             soc_pstate = self.static_data["gpu_data"][index]["soc_pstate"]
             if soc_pstate != "N/A":
-                current = int(soc_pstate["current"])
+                current = int(soc_pstate["current_id"])
                 cmds.append((f"amd-smi set --soc-pstate {current} --gpu {index}", self.PASS))
 
             # set --xgmi-plpd defaults
             xgmi_plpd = self.static_data["gpu_data"][index]["xgmi_plpd"]
             if xgmi_plpd != "N/A":
-                current = int(xgmi_plpd["current"])
+                current = int(xgmi_plpd["current_id"])
                 cmds.append((f"amd-smi set --xgmi-plpd {current} --gpu {index}", self.PASS))
 
             # set --ptl-status defaults
