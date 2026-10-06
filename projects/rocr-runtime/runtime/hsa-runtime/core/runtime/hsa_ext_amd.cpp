@@ -218,6 +218,8 @@ core::MemoryRegion::AllocateFlags MemoryPoolFlagsToAllocateFlags(uint64_t flags)
 
 }  // namespace
 
+static bool IsOrderingEdgeSignal(hsa_signal_t handle);
+
 hsa_status_t handleException() {
   try {
     throw;
@@ -447,6 +449,7 @@ hsa_status_t hsa_amd_memory_async_copy(void* dst, hsa_agent_t dst_agent_handle, 
                                        uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                        hsa_signal_t completion_signal) {
   TRY;
+  if (IsOrderingEdgeSignal(completion_signal)) return HSA_STATUS_ERROR_INVALID_SIGNAL;
   IS_BAD_PTR(dst);
   IS_BAD_PTR(src);
 
@@ -492,6 +495,7 @@ hsa_status_t hsa_amd_memory_async_copy_on_engine(void* dst, hsa_agent_t dst_agen
                                        hsa_amd_sdma_engine_id_t engine_id,
                                        bool force_copy_on_sdma) {
   TRY;
+  if (IsOrderingEdgeSignal(completion_signal)) return HSA_STATUS_ERROR_INVALID_SIGNAL;
   IS_BAD_PTR(dst);
   IS_BAD_PTR(src);
 
@@ -568,6 +572,8 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
 
     core::Signal* sig = core::Signal::Convert(op.completion_signal);
     IS_VALID(sig);
+
+    if (sig->IsDeviceResidentValue()) return HSA_STATUS_ERROR_INVALID_SIGNAL;
 
     IS_BAD_PTR(op.src);
 
@@ -820,6 +826,7 @@ hsa_status_t hsa_amd_memory_async_copy_rect(
     hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
     hsa_signal_t completion_signal) {
   TRY;
+  if (IsOrderingEdgeSignal(completion_signal)) return HSA_STATUS_ERROR_INVALID_SIGNAL;
   if (dst == nullptr || src == nullptr || dst_offset == nullptr || src_offset == nullptr ||
       range == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1040,6 +1047,111 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
   CATCH;
 }
 
+// Entry points that host-poll or host-RMW a signal refuse a device resident one.
+static bool IsOrderingEdgeSignal(hsa_signal_t handle) {
+  if (handle.handle == 0) return false;
+  core::Signal* signal = core::Signal::Convert(handle);
+  return (signal != nullptr) && signal->IsValid() && signal->IsDeviceResidentValue();
+}
+
+static_assert(sizeof(hsa_amd_signal_create_desc_t) == 64,
+              "hsa_amd_signal_create_desc_t ABI layout changed");
+static_assert(alignof(hsa_amd_signal_create_desc_t) == 8,
+              "hsa_amd_signal_create_desc_t alignment changed");
+static_assert(offsetof(hsa_amd_signal_create_desc_t, version) == 0, "ABI: version");
+static_assert(offsetof(hsa_amd_signal_create_desc_t, flags) == 2, "ABI: flags");
+static_assert(offsetof(hsa_amd_signal_create_desc_t, initial_value) == 8, "ABI: initial_value");
+static_assert(offsetof(hsa_amd_signal_create_desc_t, attributes) == 16, "ABI: attributes");
+static_assert(offsetof(hsa_amd_signal_create_desc_t, num_consumers) == 24, "ABI: num_consumers");
+static_assert(offsetof(hsa_amd_signal_create_desc_t, consumers) == 32, "ABI: consumers");
+static_assert(offsetof(hsa_amd_signal_create_desc_t, signal) == 40, "ABI: signal");
+
+static constexpr uint16_t kAllSignalCreateFlags =
+    uint16_t(HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD);
+
+// Precondition: the descriptor's common header has already been validated.
+static hsa_status_t CreateOrderingEdgeSignal(hsa_amd_signal_create_desc_t& d) {
+  if (d.attributes & HSA_AMD_SIGNAL_IPC) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (d.num_consumers != 1) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  IS_BAD_PTR(d.consumers);
+
+  core::Agent* agent = core::Agent::Convert(d.consumers[0]);
+  IS_VALID(agent);
+  if (agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  if (!static_cast<AMD::GpuAgent*>(agent)->SupportsOrderingEdgeSignal())
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  // Always a DefaultSignal, so HSA_AMD_SIGNAL_AMD_GPU_ONLY has no effect.
+  core::Signal* ret = new core::DefaultSignal(d.initial_value, *agent);
+  d.signal = core::Signal::Convert(ret);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t hsa_amd_signal_create_v2(hsa_amd_signal_create_desc_t* descs, uint32_t num_descs) {
+  TRY;
+  IS_OPEN();
+
+  if (descs == nullptr || num_descs == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  static const uint8_t header_zeroes[sizeof(descs->reserved_header)] = {};
+  static const uint8_t zeroes[sizeof(descs->reserved)] = {};
+
+  hsa_status_t first_error = HSA_STATUS_SUCCESS;
+  auto record = [&first_error](hsa_status_t st) {
+    if (first_error == HSA_STATUS_SUCCESS) first_error = st;
+  };
+
+  for (uint32_t i = 0; i < num_descs; ++i) {
+    auto& d = descs[i];
+
+    d.signal.handle = 0;
+
+    if (d.version != HSA_AMD_SIGNAL_CREATE_DESC_VERSION) {
+      record(HSA_STATUS_ERROR_INVALID_ARGUMENT);
+      continue;
+    }
+
+    if (d.reserved_count != 0 ||
+        memcmp(d.reserved_header, header_zeroes, sizeof(d.reserved_header)) != 0 ||
+        memcmp(d.reserved, zeroes, sizeof(d.reserved)) != 0) {
+      record(HSA_STATUS_ERROR_INVALID_ARGUMENT);
+      continue;
+    }
+
+    if ((d.flags & ~kAllSignalCreateFlags) != 0) {
+      record(HSA_STATUS_ERROR_INVALID_ARGUMENT);
+      continue;
+    }
+
+    if ((d.attributes & ~uint64_t(HSA_AMD_SIGNAL_AMD_GPU_ONLY | HSA_AMD_SIGNAL_IPC)) != 0) {
+      record(HSA_STATUS_ERROR_INVALID_ARGUMENT);
+      continue;
+    }
+
+    // Contain a throw to this descriptor so the rest of the batch is still processed.
+    hsa_status_t st;
+    try {
+      if ((d.flags & HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD) != 0) {
+        st = CreateOrderingEdgeSignal(d);
+      } else {
+        st = AMD::hsa_amd_signal_create(d.initial_value, d.num_consumers, d.consumers,
+                                        d.attributes, &d.signal);
+      }
+    } catch (...) {
+      st = handleException();
+    }
+
+    if (st != HSA_STATUS_SUCCESS) {
+      d.signal.handle = 0;
+      record(st);
+    }
+  }
+
+  return first_error;
+  CATCH;
+}
+
 hsa_status_t hsa_amd_signal_value_pointer(hsa_signal_t hsa_signal,
                                           volatile hsa_signal_value_t** value_ptr) {
   TRY;
@@ -1050,6 +1162,8 @@ hsa_status_t hsa_amd_signal_value_pointer(hsa_signal_t hsa_signal,
 
   if(!core::BusyWaitSignal::IsType(signal))
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if (signal->IsDeviceResidentValue()) return HSA_STATUS_ERROR_INVALID_SIGNAL;
 
   *value_ptr = (volatile hsa_signal_value_t*)&signal->signal_.value;
   return HSA_STATUS_SUCCESS;
@@ -1192,6 +1306,8 @@ hsa_status_t hsa_amd_signal_async_handler(hsa_signal_t hsa_signal, hsa_signal_co
   if ((core::g_use_interrupt_wait && (!core::InterruptSignal::IsType(signal)) &&
       !core::IPCSignal::IsType(signal)))
     return HSA_STATUS_ERROR_INVALID_SIGNAL;
+
+  if (signal->IsDeviceResidentValue()) return HSA_STATUS_ERROR_INVALID_SIGNAL;
   return core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
       hsa_signal, cond, value, handler, arg);
   CATCH;
@@ -1795,6 +1911,8 @@ hsa_status_t hsa_amd_svm_prefetch_async(void* ptr, size_t size, hsa_agent_t agen
                                         hsa_signal_t completion_signal) {
   TRY;
   IS_OPEN();
+  // Completes with a host side SubRelaxed(1) on this signal (Runtime::SvmPrefetch).
+  if (IsOrderingEdgeSignal(completion_signal)) return HSA_STATUS_ERROR_INVALID_SIGNAL;
   // Validate inputs.
   // if (core::g_use_interrupt_wait && (!core::InterruptSignal::IsType(signal)))
   return core::Runtime::runtime_singleton_->SvmPrefetch(ptr, size, agent, num_dep_signals,
@@ -2226,6 +2344,8 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
                                                hsa_signal_t completion_signal) {
   TRY;
   IS_OPEN();
+  // Completes with a host side SubRelaxed(1) on this signal (Runtime::SvmBatchDiscard).
+  if (IsOrderingEdgeSignal(completion_signal)) return HSA_STATUS_ERROR_INVALID_SIGNAL;
   IS_BAD_PTR(ptrs);
   IS_BAD_PTR(sizes);
   IS_ZERO(count);
@@ -2254,6 +2374,8 @@ hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
     hsa_signal_t completion_signal) {
   TRY;
   IS_OPEN();
+  // Completes with a host side SubRelaxed(1) (Runtime::SvmDiscardAndPrefetchBatch).
+  if (IsOrderingEdgeSignal(completion_signal)) return HSA_STATUS_ERROR_INVALID_SIGNAL;
   IS_BAD_PTR(ptrs);
   IS_BAD_PTR(sizes);
   IS_ZERO(count);

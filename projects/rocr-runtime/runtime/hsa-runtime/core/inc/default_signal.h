@@ -63,7 +63,8 @@ class BusyWaitSignal : public Signal {
   }
 
   /// @brief See base class Signal.
-  explicit BusyWaitSignal(SharedSignal* abi_block, bool enableIPC);
+  explicit BusyWaitSignal(SharedSignal* abi_block, bool enableIPC,
+                          bool device_resident_value = false);
 
   // Below are various methods corresponding to the APIs, which load/store the
   // signal value or modify the existing signal value automically and with
@@ -156,6 +157,12 @@ class BusyWaitSignal : public Signal {
  protected:
   bool _IsA(rtti_t id) const { return id == &rtti_id(); }
 
+  /// @brief Abort on a host read-modify-write of a device resident value word, which is not
+  /// atomic with respect to the GPU. The callers have no status return.
+  void RejectHostAtomicRmw() const;
+
+  void DrainDeviceResidentStore() const;
+
  private:
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;
@@ -175,6 +182,11 @@ class DefaultSignal : private LocalSignal, public BusyWaitSignal {
   /// @brief See base class Signal.
   explicit DefaultSignal(hsa_signal_value_t initial_value, bool enableIPC = false)
       : LocalSignal(initial_value, enableIPC), BusyWaitSignal(signal(), enableIPC) {}
+
+  DefaultSignal(hsa_signal_value_t initial_value, core::Agent& device_agent)
+      : LocalSignal(initial_value, device_agent), BusyWaitSignal(signal(), false, true) {
+    DrainDeviceResidentStore();
+  }
 
  protected:
   bool _IsA(rtti_t id) const {

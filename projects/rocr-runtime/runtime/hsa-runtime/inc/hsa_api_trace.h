@@ -290,6 +290,7 @@ struct AmdExtTable {
   decltype(hsa_amd_interop_map_buffer_with_size)* hsa_amd_interop_map_buffer_with_size_fn;
   decltype(hsa_amd_svm_discard_and_prefetch_batch_async)* hsa_amd_svm_discard_and_prefetch_batch_async_fn;
   decltype(hsa_amd_agent_set_attribute)* hsa_amd_agent_set_attribute_fn;
+  decltype(hsa_amd_signal_create_v2)* hsa_amd_signal_create_v2_fn;
 };
 
 // Table to export HSA Core Runtime Apis
