@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_timestamp.hpp"
-#include "core/control/clocks/posix.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "library/thread_info.hpp"
 #include <cstdint>
 

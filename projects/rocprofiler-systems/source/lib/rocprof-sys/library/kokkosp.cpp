@@ -13,7 +13,7 @@
 #include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/posix.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/trace_cache/cache_manager.hpp"

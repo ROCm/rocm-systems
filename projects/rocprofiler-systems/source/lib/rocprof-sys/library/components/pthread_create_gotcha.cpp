@@ -3,7 +3,7 @@
 
 #include "library/components/pthread_create_gotcha.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/posix.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"

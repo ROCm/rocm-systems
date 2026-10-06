@@ -24,6 +24,7 @@
 #include "core/config/trace_period_config.hpp"
 #include "core/control/clocks/posix.hpp"
 #include "core/control/clocks/steady.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "core/control/session.hpp"
 #include "core/control/triggers/time_window.hpp"
 #include "core/cpu.hpp"
@@ -710,6 +711,17 @@ rocprofsys_init_tooling_hidden(void)
     pid_t expected = 0;
     if(!rocprofsys_init_tooling_done.compare_exchange_strong(expected, getpid()))
     {
+        return false;
+    }
+
+    // Claim initialization only after the timeline clock is usable. CPU,
+    // call-stack, and SDK host records all depend on CLOCK_BOOTTIME, so a
+    // missing clock disables profiling before any of those subsystems start.
+    if(!control::clocks::timeline_available())
+    {
+        LOG_CRITICAL("CLOCK_BOOTTIME is unavailable; profiling will not start");
+        state::process::set(state::process::Disabled);
+        rocprofsys_init_tooling_done.store(0);
         return false;
     }
 

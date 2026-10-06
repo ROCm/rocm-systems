@@ -5,7 +5,7 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/posix.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"

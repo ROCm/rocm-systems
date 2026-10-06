@@ -6,7 +6,7 @@
 #include "common/defines.h"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/posix.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"

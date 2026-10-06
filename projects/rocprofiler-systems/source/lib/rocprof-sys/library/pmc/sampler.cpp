@@ -5,7 +5,7 @@
 // and ROCPROFSYS_USE_AINIC before any header gates code on that macro.
 #include "backends/amd_smi/ainic_feature.hpp"
 
-#include "core/control/clocks/posix.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "library/pmc/collectors/common/collector_slice.hpp"
 #include "library/pmc/collectors/common/settings.hpp"
 #include "library/pmc/collectors/gpu/cache_policy.hpp"
