@@ -683,6 +683,20 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(
 2. Allocate an array of `num_stats` elements.
 3. Call again with the allocated array.
 
+The statistics are the driver's RDMA hardware counters, the same set as
+``rdma statistic show link DEV/PORT``, and are read on every call.
+``rdma_port_index`` counts RDMA ports from 0 across the NIC's RDMA devices, in the
+order of ``amdsmi_nic_rdma_devices_info_t`` (each device's ports in turn). On an
+AI-NIC with one RDMA device and one port, the only valid index is 0. An index past
+the last RDMA port, or a NIC without an RDMA device, returns
+``AMDSMI_STATUS_NOT_SUPPORTED``.
+
+Not supported: ``rdma statistic show mr``, ``rdma statistic mode supported``, and
+setting optional counters with ``rdma statistic set link DEV/PORT optional-counters``.
+
+The Python binding is ``amdsmi_get_nic_rdma_port_statistics(processor_handle,
+rdma_port_index)``. It returns a dictionary of counter name to value.
+
 ### NIC port statistics and vendor statistics
 
 Both APIs use a **two-call pattern** and return per-port counters. Port
@@ -848,6 +862,59 @@ sudo amd-smi metric --nic 0 --port 0 --extended
 # All ports on NIC 0, EXTENDED scope (JSON)
 sudo amd-smi metric --nic 0 --port --json
 ```
+
+### RDMA port statistics with `metric --nic --rdma`
+
+The `metric --nic` command reports RDMA hardware counters per RDMA port with the
+``--rdma`` flag:
+
+```
+amd-smi metric --nic <ID | BDF | UUID> --rdma [RDMA_PORT_NUM] [--json]
+```
+
+**Flags:**
+
+- ``--rdma`` (bare, no argument): Report counters for every RDMA port on the NIC.
+- ``--rdma RDMA_PORT_NUM``: Report one RDMA port. The number counts the NIC's RDMA
+  ports from 0, across its RDMA devices. It is not a netdev port index (``--port``)
+  and not a BDF. To find the valid numbers, run ``amd-smi static --nic <ID>``, which
+  lists each RDMA device and its ports. It numbers ports per device (each device
+  restarts at ``PORT_0``), so on a NIC with several RDMA devices or ports the number
+  to pass is the position across all of them, not the ``static`` label. On an
+  AI-NIC with one device and one port, the only valid number is 0.
+- ``--rdma`` does not need ``--port``, and the two can be combined. ``--extended``
+  still requires ``--port``: RDMA counters have no default and extended sets.
+
+**Output structure:**
+
+```
+RDMA_PORTS:
+  PORT_<N>:
+    RDMA_DEVICE: <RDMA device name, for example ionic_0>
+    PORT_NUM: <port number on that device>
+    NETDEV: <interface name>
+    STATISTICS:
+      <COUNTER_NAME>: <value>
+      ...
+```
+
+``RDMA_DEVICE`` and ``PORT_NUM`` map an index to ``rdma statistic show link DEV/PORT``.
+A NIC without RDMA ports prints ``RDMA_PORTS: No RDMA ports found for this NIC`` in text
+and ``{}`` in JSON. That is the case for a UALoE endpoint, which has no RDMA device.
+
+**Examples:**
+
+```bash
+# Every RDMA port on NIC 0
+sudo amd-smi metric --nic 0 --rdma
+
+# The first RDMA port on a NIC selected by BDF, as JSON
+sudo amd-smi metric --nic 0001:01:00.0 --rdma 0 --json
+```
+
+Only AI-NIC (ionic) RDMA devices are reported. Broadcom RDMA devices are not part of
+the NIC list. ``rdma statistic show mr``, ``rdma statistic mode supported``, and
+setting optional counters are not supported.
 
 ---
 
