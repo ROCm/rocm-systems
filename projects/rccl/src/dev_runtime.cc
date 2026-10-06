@@ -1646,10 +1646,14 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
       ncclResult_t probeRet = ncclSuccess;
       CUmemorytype memType = CU_MEMORYTYPE_DEVICE;
       struct ncclDevrState* devr = &comm->devrState;
-      int* kinds = nullptr;
-      if (devr->lsaSize > 1) {
-        NCCLCHECKGOTO(ncclCalloc(&kinds, devr->lsaSize), ret, fail_locReg);
+      // No rank-local allocation here: lsaSize is team-uniform, so this bound
+      // fails on every rank alike and none is left waiting in the allgather.
+      if (devr->lsaSize > NCCL_MAX_LOCAL_RANKS) {
+        WARN("LSA team of %d exceeds %d local ranks", devr->lsaSize, NCCL_MAX_LOCAL_RANKS);
+        ret = ncclInternalError;
+        goto fail_locReg;
       }
+      int kinds[NCCL_MAX_LOCAL_RANKS] = {};
       auto noteProbeFailure = [&](hipError_t err) {
         if (err == hipSuccess || probeRet != ncclSuccess) return;
         WARN("HIP failure '%s' while classifying window %p", hipGetErrorString(err), userPtr);
@@ -1709,7 +1713,6 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
             if (kinds[r] == 1) anyHost = 1;
           }
         }
-        free(kinds);
         if (agRet != ncclSuccess) {
           ret = agRet;
           goto fail_locReg;
