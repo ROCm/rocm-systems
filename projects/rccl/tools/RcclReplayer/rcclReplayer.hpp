@@ -6,7 +6,10 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <unordered_set>
+#include <vector>
 
+#include <mpi.h>
 #include <rccl/rccl.h>
 #include <hip/hip_bfloat16.h>
 #include "hip/hip_fp16.h"
@@ -36,12 +39,15 @@ struct ncclInfo;
       }                                                                 \
   } while (0)
 
+// Abort the whole job on any NCCL failure so a broken replay never exits 0.
 #define NCCL_CALL(cmd)                                          \
   do {                                                          \
     ncclResult_t res = cmd;                                     \
     if (res != ncclSuccess) {                                   \
       printf("NCCL failure %s:%d '%s'\n",                       \
              __FILE__,__LINE__,ncclGetErrorString(res));        \
+      fflush(stdout);                                           \
+      MPI_Abort(MPI_COMM_WORLD, 1);                             \
     }                                                           \
   } while(0)
 
@@ -50,6 +56,7 @@ struct DeviceMemAllocation
   void*                 base = NULL;
   size_t                size = 0;
   int                   lastLineUsed = -1;
+  bool                  ncclMemAllocated = false; // owned by ncclMemAlloc/ncclMemFree, never hipFree'd here
 };
 
 struct DeviceGraphInfo
@@ -121,6 +128,8 @@ class Replayer
   std::unordered_map<void*, void*>                      handleMap; // UBR handle
   std::unordered_map<unsigned long long, DeviceGraphInfo>
                                                         graphLife; // when does a graph (graphID) end and how many node it contains
+  std::unordered_map<int, std::vector<void*>>           buffersToFree; // line -> logged buffer bases to free there
+  std::unordered_map<int, std::vector<hipStream_t>>     streamsToDestroy; // line -> logged streams to destroy there
 
   // auxiliary variables for replayer
   ncclUniqueId uniqueID;

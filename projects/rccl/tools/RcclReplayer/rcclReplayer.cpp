@@ -11,6 +11,7 @@
 #include <unordered_set>
 
 #include "rcclReplayer.hpp"
+#include "replay_log_name.hpp"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -50,39 +51,71 @@ Replayer::Replayer(const std::string& logname, int json_format, int rank, int si
                                                                                       numGlobalRanks(size)
 {
   log.open(logname, json_format ? std::ifstream::in : std::ifstream::binary);
+  if (!log.is_open()) {
+    printf("[ERROR   ] Rank %d : cannot open replay log %s\n", rank, logname.c_str());
+    fflush(stdout);
+    MPI_Abort(MPI_COMM_WORLD, 1);
+  }
 }
 
 void Replayer::parse()
 {
+  // A grouped call only launches at the outermost GroupEnd, so its buffers and streams must outlive that line.
+  int groupDepth = 0;
+  std::unordered_set<void*> groupBuffers;
+  std::unordered_set<hipStream_t> groupStreams;
+
   while (log.read(line, rcclCallSize)) // istream::get fail here when running into newline
   {
     rcclApiCall call = *((rcclApiCall*) line);
 
     if (call.sendPtrBase)
     {
-      if (!dMemMap.contains(call.sendPtrBase))
-      {
-        dMemMap[call.sendPtrBase].size = call.sendPtrExtent;
+      DeviceMemAllocation& mem = dMemMap[call.sendPtrBase];
+      mem.size = std::max(mem.size, call.sendPtrExtent);
+      mem.lastLineUsed = lineNum;
+      if (groupDepth > 0) {
+        groupBuffers.insert(call.sendPtrBase);
       }
-      dMemMap[call.sendPtrBase].lastLineUsed = lineNum;
     }
     if (call.recvPtrBase)
     {
-      if (!dMemMap.contains(call.recvPtrBase))
-      {
-        dMemMap[call.recvPtrBase].size = call.recvPtrExtent;
+      DeviceMemAllocation& mem = dMemMap[call.recvPtrBase];
+      mem.size = std::max(mem.size, call.recvPtrExtent);
+      mem.lastLineUsed = lineNum;
+      if (groupDepth > 0) {
+        groupBuffers.insert(call.recvPtrBase);
       }
-      dMemMap[call.recvPtrBase].lastLineUsed = lineNum;
     }
     if (call.stream)
     {
       streams[call.stream].second = lineNum;
+      if (groupDepth > 0) {
+        groupStreams.insert(call.stream);
+      }
     }
 
     switch (call.type) {
     case rrGroupStart:
+    {
+      groupDepth++;
+      break;
+    }
     case rrGroupEnd:
-    case rrGroupSimulatedEnd: // TODO
+    case rrGroupSimulatedEnd:
+    {
+      if (groupDepth > 0 && --groupDepth == 0) {
+        for (void* base : groupBuffers) {
+          dMemMap[base].lastLineUsed = lineNum;
+        }
+        for (hipStream_t stream : groupStreams) {
+          streams[stream].second = lineNum;
+        }
+        groupBuffers.clear();
+        groupStreams.clear();
+      }
+      break;
+    }
     case rrCommInitRank:
     /// case rrCommInitRankConfig:   <-- these all should depend on CommInitDev
     case rrCommSplit: // <-- not covered for now dealt with in replay time
@@ -126,6 +159,7 @@ void Replayer::parse()
     {
       // Replayer will not free this without explicit ncclMemFree
       dMemMap[call.recvbuff].size = call.count;
+      dMemMap[call.recvbuff].ncclMemAllocated = true;
       break;
     }
 
@@ -170,6 +204,15 @@ void Replayer::parse()
     }
     }
     lineNum++;
+  }
+
+  for (const auto& [base, mem] : dMemMap) {
+    if (mem.lastLineUsed >= 0 && !mem.ncclMemAllocated) {
+      buffersToFree[mem.lastLineUsed].push_back(base);
+    }
+  }
+  for (const auto& [stream, info] : streams) {
+    streamsToDestroy[info.second].push_back(stream);
   }
 
   // exchange communicator info
@@ -287,6 +330,10 @@ void Replayer::replay()
           HIP_CALL(hipGraphLaunch(graphLife[call.graphID].graphExec, streams[call.stream].first));
         }
         printf("[INFO    ] Rank %d - Line %d : being played by previous graph %llu\n", myRank, lineNum, call.graphID);
+        if (call.type == rrAllToAllv) {
+          // The graph replays this call, but its count arrays still follow in the log.
+          log.ignore(4 * call.nRanks * sizeof(size_t));
+        }
         goto cleanup;
       }
     }
@@ -543,27 +590,40 @@ void Replayer::replay()
 cleanup:
     printf("[INFO    ] Rank %d - Line %d : cleaning up\n", myRank, lineNum);
     
-    // Free resources if possible
-    if (call.sendPtrBase && lineNum == dMemMap[call.sendPtrBase].lastLineUsed) {
-      // TODO: free contains a sync, may need a second thought
-      //       also this may proceed commDeregister in case of UBR thus susceptible to change in implementation
-      HIP_CALL(hipFree(dMemMap[call.sendPtrBase].base));
-      dMemMap[call.sendPtrBase].base = NULL; // in case of in place ops
-    }
-    if (call.recvPtrBase && lineNum == dMemMap[call.recvPtrBase].lastLineUsed && dMemMap[call.recvPtrBase].base) {
-      HIP_CALL(hipFree(dMemMap[call.recvPtrBase].base));
-    }
-    if (call.graphID && lineNum == graphLife[call.graphID].end) {
-      HIP_CALL(hipStreamSynchronize(streams[call.stream].first));
-      HIP_CALL(hipGraphExecDestroy(graphLife[call.graphID].graphExec));
-      HIP_CALL(hipGraphDestroy(graphLife[call.graphID].graph));
-    }
-    if (call.stream && lineNum == streams[call.stream].second)
+    // Free resources whose last use (moved past the closing GroupEnd for grouped calls) is this line
     {
-      if (call.graphCaptured != 1) {
-        HIP_CALL(hipStreamSynchronize(streams[call.stream].first)); // ?
+      auto destroyIt = streamsToDestroy.find(lineNum);
+      if (destroyIt != streamsToDestroy.end() && call.graphCaptured != 1) {
+        for (hipStream_t stream : destroyIt->second) {
+          if (streams[stream].first) {
+            HIP_CALL(hipStreamSynchronize(streams[stream].first));
+          }
+        }
       }
-      HIP_CALL(hipStreamDestroy(streams[call.stream].first));
+      auto freeIt = buffersToFree.find(lineNum);
+      if (freeIt != buffersToFree.end()) {
+        for (void* base : freeIt->second) {
+          // TODO: free contains a sync, may need a second thought
+          //       also this may proceed commDeregister in case of UBR thus susceptible to change in implementation
+          if (dMemMap[base].base) {
+            HIP_CALL(hipFree(dMemMap[base].base));
+            dMemMap[base].base = NULL;
+          }
+        }
+      }
+      if (call.graphID && lineNum == graphLife[call.graphID].end) {
+        HIP_CALL(hipStreamSynchronize(streams[call.stream].first));
+        HIP_CALL(hipGraphExecDestroy(graphLife[call.graphID].graphExec));
+        HIP_CALL(hipGraphDestroy(graphLife[call.graphID].graph));
+      }
+      if (destroyIt != streamsToDestroy.end()) {
+        for (hipStream_t stream : destroyIt->second) {
+          if (streams[stream].first) {
+            HIP_CALL(hipStreamDestroy(streams[stream].first));
+            streams[stream].first = NULL;
+          }
+        }
+      }
     }
     lineNum++; // change for a2av
   }
@@ -596,7 +656,12 @@ int main(int argc, char **argv)
 
   std::string output_file, output_extension;
   int json_format = ParseLogFormat(logFilename, output_file, output_extension);
-  assert(json_format == 0);
+  if (json_format != 0) {
+    printf("[ERROR   ] Rank %d : JSON logs are not replayable; convert them with "
+           "replay_log_converter.py <basename> tobin\n", mpiRank);
+    fflush(stdout);
+    MPI_Abort(MPI_COMM_WORLD, 1);
+  }
 
   // Only root handles file-rank assignment to avoid file handle pressure
   if (mpiRank != 0)
@@ -625,22 +690,32 @@ int main(int argc, char **argv)
     // Register all hostnames and pid from recorder logs
     std::unordered_map<std::string, std::vector<int>> logHosts;
     int file_pid, a = 0/*counter*/;
+    std::string file_host;
     DIR *d;
     struct dirent *dir;
     if (d = opendir(".")) {
       while ((dir = readdir(d)) != NULL) {
-        // MPI_MAX_PROCESSOR_NAME = 256
-        if (sscanf(dir->d_name, (output_file + ".%d.%256[^.]" + output_extension).c_str(), &file_pid, hostname) == 2)
+        if (ParseLogName(dir->d_name, output_file, output_extension, &file_pid, &file_host))
         {
-          logHosts[std::string(hostname)].push_back(file_pid);
+          if (file_host.size() >= MPI_MAX_PROCESSOR_NAME) {
+            printf("[ERROR   ] Rank 0 : hostname in %s exceeds %d characters\n", dir->d_name,
+                   MPI_MAX_PROCESSOR_NAME - 1);
+            fflush(stdout);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+          }
+          logHosts[file_host].push_back(file_pid);
           a++;
         }
       }
       closedir(d);
     }
     // Double check number of nodes and number of processes match for recorder and replayer
-    assert(logHosts.size() == hostnames.size());
-    assert(a == numMpiRanks);
+    if (logHosts.size() != hostnames.size() || a != numMpiRanks) {
+      printf("[ERROR   ] Rank 0 : found %d logs from %zu hosts for %s%s, replaying %d ranks on %zu hosts\n", a,
+             logHosts.size(), output_file.c_str(), output_extension.c_str(), numMpiRanks, hostnames.size());
+      fflush(stdout);
+      MPI_Abort(MPI_COMM_WORLD, 1);
+    }
     // Assign mapping of replayer hostname to recorder hostname
     std::unordered_map<std::string, std::string> hostAssignment;
     auto it = logHosts.begin();
