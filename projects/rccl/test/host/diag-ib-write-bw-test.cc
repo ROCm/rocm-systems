@@ -1060,9 +1060,11 @@ TEST_F(DiagIbWriteBwMicrotest, RunPair_ServerToolFailureReportsAfterReady) {
   EXPECT_EQ(log_.size(), 3u);
   ResetPairScene(1);
   serverExit_ = 1;
+  serverOutput_ = "";
   inbox_[kSync] = {Bytes(-1.0)};
   EXPECT_DOUBLE_EQ(RunPair(1, 2, false, &out), -1);
   EXPECT_EQ(out, PairLine("same", 1, 2, "tool run failed"));
+  EXPECT_EQ(log_.front(), (IbMsg{'S', 2, kReady, Bytes(false)}));
 }
 
 TEST_F(DiagIbWriteBwMicrotest, RunPair_ClientMeasuresAfterReadyAndAdoptsEcho) {
@@ -1262,7 +1264,7 @@ TEST_F(DiagIbWriteBwMicrotest, CommUsesCrossNic_NeedsCrossNicGraphWithChannels) 
 TEST_F(DiagIbWriteBwMicrotest, Run_ReportsCoverageGapsThenSummaryWithOutlier) {
   BuildTwoNodePair(0);
   info_[3] = Info("nodeB1", "mlx5_0");
-  info_[1].deviceCount = 3;
+  info_[1].deviceCount = 2;
   info_[3].deviceCount = 2;
   bw_[1].direct = 93.0;
   bw_[2].direct = 94.0;
