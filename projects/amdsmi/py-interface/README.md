@@ -16,8 +16,7 @@ Requirements:
 
 - Linux on x86_64 with glibc 2.27 or later.
 - CPython 3.6 or later, or PyPy, with pip 20.3 or later. Older pip versions
-  cannot install this wheel; the `>=27.1.0` above makes them fail instead of
-  installing the old 7.0.2 wrapper.
+  cannot install this wheel.
 - The `amdgpu` driver and `libdrm_amdgpu` (see below).
 - Access to the GPU device files: add your user to the `render` and `video`
   groups. Changing GPU settings requires root.
@@ -31,18 +30,6 @@ Do not install this wheel into the Python environment used by an `amd-smi`
 command-line tool from ROCm 7.2 or earlier, or from TheRock 7.11 or earlier.
 Those tools load whichever `amdsmi` package their Python finds first and do
 not work with this one. Use a virtual environment instead.
-
-### Upgrading from 7.0.2 or earlier
-
-PyPI releases up to 7.0.2 were a separate, community-built wrapper. 27.x is
-not fully compatible with them:
-
-- `amdsmi_set_gpu_clk_range()`, `amdsmi_get_cpusocket_handles()` and
-  `amdsmi_gpu_driver_reload()` were removed.
-- `AmdSmiProcessorType` members dropped their `AMDSMI_PROCESSOR_TYPE_` prefix,
-  for example `AmdSmiProcessorType.AMD_GPU`.
-- `amdsmi_set_cpu_df_pstate_range()` now takes `min_pstate` before
-  `max_pstate`. Pass both by keyword.
 
 ## Online documentation
 
