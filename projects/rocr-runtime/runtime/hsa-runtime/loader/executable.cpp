@@ -725,6 +725,14 @@ bool VariableSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void *value) {
 // AieKernelSymbol.                                                            //
 //===----------------------------------------------------------------------===//
 
+// Alignment, in bytes, reported to applications for an AIE kernel's kernarg buffer. Independent
+// of kAieBlobAlignment: one is a contract with the application, the other is internal placement.
+static constexpr uint32_t kAieKernargSegmentAlignment = 64;
+
+// Alignment, in bytes, of the PDI and instruction sequence blobs the loader places in device
+// memory.
+static constexpr size_t kAieBlobAlignment = 64;
+
 bool AieKernelSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void* value) {
   switch (symbol_info) {
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT:
@@ -736,7 +744,7 @@ bool AieKernelSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void* value) {
       *static_cast<uint32_t*>(value) = kernarg_size;
       return true;
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT:
-      *static_cast<uint32_t*>(value) = 64;  // Default alignment
+      *static_cast<uint32_t*>(value) = kAieKernargSegmentAlignment;
       return true;
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE:
       *static_cast<uint32_t*>(value) = 0;  // NPU doesn't use group segment
@@ -1406,25 +1414,21 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     }
   }
 
-  // AIE code objects take a separate loading path. IsAieCodeObject() (amd_aie_code.cpp)
-  // is pure ELF parsing with no driver dependency, so the sniff runs on every platform;
-  // restrict it to AIE agents so every non-AIE (e.g. GPU) code object load doesn't pay
-  // that cost for nothing. The dispatch to LoadAieCodeObject is Linux-only because it
-  // requires AieAgent, which is coupled to XdnaDriver (SRC_XDNA).
+#if defined(__linux__)
+  // AIE code objects take a separate loading path. The sniff is restricted to AIE agents so
+  // every non-AIE (e.g. GPU) code object load doesn't pay its cost for nothing. AIE agents only
+  // exist on Linux: AieAgent is coupled to XdnaDriver, and both are built only there (SRC_XDNA).
   {
     core::Agent* aie_probe_agent = core::Agent::Convert(agent);
     if (aie_probe_agent &&
         aie_probe_agent->device_type() == core::Agent::DeviceType::kAmdAieDevice &&
         AMD::AieCode::IsAieCodeObject(reinterpret_cast<const void*>(code_object.handle),
                                       code_object_size)) {
-#if defined(__linux__)
       return LoadAieCodeObject(agent, reinterpret_cast<const void*>(code_object.handle),
                                code_object_size, loaded_code_object);
-#else
-      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-#endif
     }
   }
+#endif  // defined(__linux__)
 
   LoaderOptions loaderOptions;
   if (options && !loaderOptions.ParseOptions(options)) {
@@ -1642,7 +1646,8 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       *out_ptr = it->second;
       return HSA_STATUS_SUCCESS;
     }
-    void* buf = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, len, 64, false);
+    void* buf =
+        context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, len, kAieBlobAlignment, false);
     if (!buf) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     if (!context_->SegmentCopy(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, 0, src, len)) {
       context_->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, len);
