@@ -92,6 +92,19 @@ TEST(ConversionTest, PackU8RoundsInModeAndKeepsOtherBytes) {
   EXPECT_EQ(negated(0xc0400000u, 1u, 0u), 0x300u); // -(-3)
 }
 
+TEST(ConversionTest, PackB32F16ModifiesFlushesAndQuietsEachHalf) {
+  const conversion::PackB32F16 keep{0, 0, kKeep, true};
+  EXPECT_EQ(keep(0x12347c01u, 0x5678fc00u), 0xfc007e01u); // upper source bits are ignored
+  EXPECT_EQ(keep(0x03ffu, 0x8001u), 0x800103ffu);
+  const conversion::PackB32F16 flush{0, 0, kFlush, true};
+  EXPECT_EQ(flush(0x03ffu, 0x8001u), 0x80000000u);
+  const conversion::PackB32F16 modified{1, 2, kKeep, true};
+  EXPECT_EQ(modified(0xbc00u, 0x3c00u), 0xbc003c00u);
+  // Targets that keep signaling NaNs copy their payload unchanged.
+  const conversion::PackB32F16 raw{0, 0, kKeep, false};
+  EXPECT_EQ(raw(0x7c01u, 0u), 0x7c01u);
+}
+
 template <typename From, typename To>
 conversion::ToFloat<From, To> to_float(uint32_t mode, uint32_t omod = 0, bool clamp = false) {
   conversion::ToFloat<From, To> stages;

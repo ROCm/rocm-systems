@@ -179,6 +179,34 @@ struct PackU8 {
   }
 };
 
+/// @brief V_PACK_B32_F16: two F16 sources in the low and high halves of the result.
+/// @details Each half takes its ABS/NEG bit, a flush of a subnormal under MODE and,
+/// when the target quiets NaNs, the quiet bit of a NaN.
+// ISA discrepancy: the ISA expects the halves to be copied unchanged, but
+// gfx1201 applies ABS/NEG, flushes input denormals and quiets signaling NaNs.
+struct PackB32F16 {
+  /// VOP3 ABS and NEG fields; bit i applies to source i.
+  uint32_t abs = 0;
+  uint32_t neg = 0;
+  input_denormal::Policy input;
+  bool quiet_nan = true;
+
+  template <typename V> constexpr V operator()(V low, V high) const {
+    return half(low, 0) | (half(high, 1) << 16);
+  }
+
+private:
+  template <typename V> constexpr V half(V bits, unsigned index) const {
+    using F16 = fp_format::F16;
+    bits = source_modifier::apply<F16>(bits & V(F16::kBits), index, abs, neg);
+    bits = input_denormal::flush_input<F16>(bits, input);
+    if (quiet_nan)
+      bits = detail::choose((bits & V(F16::kMagnitude)) > V(F16::kInfinity), bits | V(F16::kQuiet),
+                            bits);
+    return bits;
+  }
+};
+
 /// @brief An integer source format: the low Width bits of a 32-bit register.
 template <typename Int> struct Integer {
   using Lane = uint32_t;

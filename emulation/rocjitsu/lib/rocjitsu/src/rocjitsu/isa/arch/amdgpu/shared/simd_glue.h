@@ -789,6 +789,13 @@ inline conversion::PackU8 conversion_pk_u8(const Wavefront &wf, uint32_t abs = 0
           conversion::integer_rounding(wf.fp_round_mode_f32())};
 }
 
+/// @brief Resolve V_PACK_B32_F16 from MODE and the target's NaN quieting.
+inline conversion::PackB32F16 conversion_pack_b32_f16(const Wavefront &wf, uint32_t abs = 0,
+                                                      uint32_t neg = 0) {
+  return {abs, neg, input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
+          fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())};
+}
+
 /// @brief Resolve V_CVT_PK_RTZ_F16_F32: each F32 source rounds toward zero into one half.
 /// @details MODE.FP_ROUND is ignored. ABS/NEG bit i applies to source i; OMOD and
 /// CLAMP are not applied to the packed result.

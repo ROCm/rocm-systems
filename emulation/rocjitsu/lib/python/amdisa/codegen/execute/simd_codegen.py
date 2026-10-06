@@ -1821,7 +1821,7 @@ SIMD_VOP3_BINARY_TRUE16_SRC: dict[str, tuple[str, str]] = {
     # instructions write a full packed b32 result.
     'v_pack_b32_f16_vop3': (
         'uint32_t',
-        '[](auto a, auto b) { return (a & 0xFFFFu) | ((b & 0xFFFFu) << 16); }',
+        conversion.pack_b32_f16_expr(True, True, 'inst.inst_'),
     ),
     'v_cvt_pk_norm_i16_f16_vop3': (
         'uint32_t',

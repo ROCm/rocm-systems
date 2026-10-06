@@ -2942,6 +2942,34 @@ std::vector<ArithmeticCase> normalized_and_byte_cases() {
   return cases;
 }
 
+// V_PACK_B32_F16 applies ABS/NEG to each half, flushes a subnormal half under
+// the F16 MODE field and quiets signaling NaNs. Results are gfx1201 captures.
+std::vector<ArithmeticCase> pack_b32_f16_cases() {
+  std::vector<ArithmeticCase> cases;
+  const auto add = [&](const char *name, rdna4::Vop3BuilderFields fields, uint32_t low,
+                       uint32_t high, uint32_t result, uint32_t mode) {
+    fields.vdst = 6;
+    fields.src0 = 256;
+    fields.src1 = 257;
+    const auto words = rdna4::build_vop3(rdna4::kVPackB32F16Vop3, fields);
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     {{0, low}, {1, high}},
+                     {{6, result}},
+                     mode,
+                     FE_TONEAREST});
+  };
+  add("SignalingNan", {}, 0x31d27c01u, 0x31a90000u, 0x00007e01u, 0x30u);
+  add("SubnormalMode30", {}, 0x1bab03ffu, 0x22930000u, 0u, 0x30u);
+  add("SubnormalModeC0", {}, 0x1bab03ffu, 0x22930000u, 0x000003ffu, 0xc0u);
+  add("NegHigh", {.neg = 2}, 0x9a870001u, 0x438b0000u, 0x80000001u, 0xf0u);
+  add("AbsLow", {.abs = 1}, 0xd43183ffu, 0xe3b40000u, 0x000003ffu, 0xf0u);
+  // OP_SEL picks the high source halves.
+  add("HighHalves", {.opsel = 3}, 0xa6830100u, 0xfd620000u, 0xff62a683u, 0xf0u);
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -3230,6 +3258,11 @@ INSTANTIATE_TEST_SUITE_P(FloatToFloat, ValuConversionTest,
 
 INSTANTIATE_TEST_SUITE_P(NormalizedAndByte, ValuConversionTest,
                          testing::ValuesIn(normalized_and_byte_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(PackB32F16, ValuConversionTest, testing::ValuesIn(pack_b32_f16_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

@@ -755,3 +755,27 @@ def test_packed_u8_uses_the_shared_conversion(has_abs):
         ['vdst'], ['src0', 'src1'], 'vector_cvt_pk_u8_f32', None, is_vop3=True
     )
     assert 'conversion_pk_u8' not in accumulate
+
+
+@pytest.mark.parametrize('has_abs', [False, True])
+def test_pack_b32_f16_uses_the_shared_conversion(has_abs):
+    cpp = gen_vector_cvt_pk(
+        ['vdst'],
+        ['src0', 'src1'],
+        'vector_pack_b32_f16',
+        None,
+        opsel='inst_.opsel',
+        dtype='f16',
+        is_vop3=True,
+        has_abs=has_abs,
+    )
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    assert cpp.startswith(
+        f'  const auto conversion = amdgpu::conversion_pack_b32_f16(wf, {abs_field}, inst_.neg);'
+    )
+    assert 'conversion(s0, s1)' in cpp
+    probe = simd_probe_line('v_pack_b32_f16_vop3')
+    assert probe == (
+        '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, '
+        'amdgpu::conversion_pack_b32_f16(wf, inst.inst_.abs, inst.inst_.neg));'
+    )
