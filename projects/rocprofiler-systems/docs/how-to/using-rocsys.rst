@@ -91,12 +91,15 @@ Default output for rewrite
      - Default output
    * - ``./app``, already in the current directory and not a library
      - ``./app.inst``
+   * - A name with no extension, such as ``./libfoo``
+     - ``./libfoo.inst``
    * - A library already in the current directory, such as ``./libfoo.so``
      - ``./instrumented/libfoo.so``
    * - A target outside the current directory, such as ``/usr/bin/app``
      - ``./app``
 
-A library name starts with ``lib``, contains ``.so``, or ends with ``.a``.
+A target is treated as a library only when its basename contains a dot and either
+starts with ``lib``, contains ``.so``, or ends with ``.a``.
 Pass ``-o``, ``--output``, or ``-o=`` to choose the path yourself:
 
 .. code-block:: shell
