@@ -40,10 +40,10 @@ registry::instance()
 }
 
 void
-registry::register_file(std::string path, output_format format, std::optional<pid_t> pid)
+registry::register_file(std::string path, output_format format)
 {
     artifact entry{};
-    entry.pid        = pid.value_or(getpid());
+    entry.pid        = getpid();
     entry.size_bytes = get_file_size(path);
     entry.path       = std::move(path);
     entry.format     = format;

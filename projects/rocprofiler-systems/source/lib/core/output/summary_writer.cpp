@@ -3,48 +3,39 @@
 
 #include "core/output/output_summary.hpp"
 
+#include "common/units/data_size.hpp"
 #include "logger/debug.hpp"
 
+#include <spdlog/fmt/chrono.h>
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/fmt/ranges.h>
 
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <array>
-#include <cstddef>
 #include <cstdint>
-#include <ctime>
 #include <filesystem>
+#include <numeric>
 #include <ostream>
+#include <ranges>
 #include <set>
 #include <system_error>
 
 namespace rocprofsys::output
 {
 
+using rocprofsys::common::units::bytes;
+using rocprofsys::common::units::data_size_cast;
+using rocprofsys::common::units::gigabytes;
+using rocprofsys::common::units::kilobytes;
+using rocprofsys::common::units::megabytes;
+
 namespace
 {
-inline constexpr std::size_t ISO_8601_BUFFER_BYTES = 32;
-
 inline constexpr std::string_view UNKNOWN_VALUE_PLACEHOLDER = "?";
-
-inline constexpr double BYTES_PER_KILOBYTE = 1000.0;
-inline constexpr double BYTES_PER_MEGABYTE = 1000.0 * BYTES_PER_KILOBYTE;
-inline constexpr double BYTES_PER_GIGABYTE = 1000.0 * BYTES_PER_MEGABYTE;
 
 inline constexpr std::size_t FORMAT_NAME_WIDTH = 9;
 inline constexpr std::size_t FILE_SIZE_WIDTH   = 10;
-
-inline constexpr std::string_view GLYPH_NODE_MARKER       = "● ";
-inline constexpr std::string_view GLYPH_SEPARATOR         = "│";
-inline constexpr std::string_view GLYPH_FILE_BRANCH_LAST  = "└─ ";
-inline constexpr std::string_view GLYPH_FILE_BRANCH_MID   = "├─ ";
-inline constexpr std::string_view GLYPH_CHILD_CONN_LAST   = "└─";
-inline constexpr std::string_view GLYPH_CHILD_CONN_MID    = "├─";
-inline constexpr std::string_view GLYPH_CHILD_INDENT_LAST = "    ";
-inline constexpr std::string_view GLYPH_CHILD_INDENT_MID  = "│   ";
-inline constexpr std::string_view GLYPH_ROOT_INDENT       = "  ";
 }  // namespace
 
 run_metadata
@@ -52,15 +43,9 @@ run_metadata::capture(std::chrono::steady_clock::time_point load_baseline)
 {
     run_metadata meta{};
 
-    const auto now = std::chrono::system_clock::now();
-    const auto tt  = std::chrono::system_clock::to_time_t(now);
-    std::tm    utc{};
-    if(::gmtime_r(&tt, &utc) != nullptr)
-    {
-        std::array<char, ISO_8601_BUFFER_BYTES> buf{};
-        if(std::strftime(buf.data(), buf.size(), "%Y-%m-%dT%H:%M:%SZ", &utc) > 0)
-            meta.run_label = buf.data();
-    }
+    const auto tt =
+        std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    meta.run_label = fmt::format("{:%FT%TZ}", fmt::gmtime(tt));
 
     meta.duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - load_baseline);
@@ -110,14 +95,13 @@ format_duration(std::chrono::nanoseconds dur)
 std::string
 datasize_to_string(std::uint64_t size_bytes)
 {
-    if(size_bytes < BYTES_PER_KILOBYTE) return fmt::format("{} B", size_bytes);
-    if(size_bytes < BYTES_PER_MEGABYTE)
-        return fmt::format("{:.2f} KB",
-                           static_cast<double>(size_bytes) / BYTES_PER_KILOBYTE);
-    if(size_bytes < BYTES_PER_GIGABYTE)
-        return fmt::format("{:.2f} MB",
-                           static_cast<double>(size_bytes) / BYTES_PER_MEGABYTE);
-    return fmt::format("{:.2f} GB", static_cast<double>(size_bytes) / BYTES_PER_GIGABYTE);
+    const auto value = bytes{ static_cast<double>(size_bytes) };
+    if(value < kilobytes{ 1 }) return fmt::format("{}", data_size_cast<bytes>(value));
+    if(value < megabytes{ 1 })
+        return fmt::format("{:.2f}", data_size_cast<kilobytes>(value));
+    if(value < gigabytes{ 1 })
+        return fmt::format("{:.2f}", data_size_cast<megabytes>(value));
+    return fmt::format("{:.2f}", data_size_cast<gigabytes>(value));
 }
 
 struct format_badge
@@ -194,153 +178,59 @@ file_row_line(std::string_view branch, const artifact& file,
                        FILE_SIZE_WIDTH, display_path(file.path, cwd));
 }
 
-struct render_task
+void
+print_node(std::string& out, const process_node& node, std::string_view connector,
+           const std::string& prefix, pid_t main_pid, const std::filesystem::path& cwd)
 {
-    const process_node* node = nullptr;  // nullptr => separator task
-    std::string         connector;
-    std::string         child_prefix;
-};
+    out += connector;
+    out += "● ";
+    out += process_label(node, main_pid);
+    out += '\n';
 
-[[nodiscard]] std::size_t
-count_nodes(const std::vector<process_node>& roots)
-{
-    std::size_t                      count = 0;
-    std::vector<const process_node*> stack;
-    stack.reserve(roots.size());
-    for(const auto& root : roots)
-        stack.push_back(&root);
-    while(!stack.empty())
+    const bool has_children = !node.children.empty();
+    for(std::size_t i = 0; i < node.rows.size(); ++i)
     {
-        const process_node* node = stack.back();
-        stack.pop_back();
-        ++count;
-        for(const auto& child : node->children)
-            stack.push_back(&child);
+        const bool last = (i + 1 == node.rows.size()) && !has_children;
+        out += file_row_line(prefix + (last ? "└─ " : "├─ "), node.rows[i], cwd);
+        out += '\n';
     }
-    return count;
+    if(!node.rows.empty() && has_children) out += prefix + "│\n";
+
+    for(std::size_t i = 0; i < node.children.size(); ++i)
+    {
+        const bool last = (i + 1 == node.children.size());
+        if(i > 0) out += prefix + "│\n";
+        print_node(out, node.children[i], last ? "└─" : "├─",
+                   prefix + (last ? "    " : "│   "), main_pid, cwd);
+    }
 }
 
 [[nodiscard]] std::string
-derive_output_dir(const run_metadata& meta, std::span<const artifact> rows)
+derive_output_dir(std::span<const artifact> rows)
 {
-    if(!meta.output_dir_abs.empty()) return meta.output_dir_abs;
     if(rows.empty()) return std::string{ UNKNOWN_VALUE_PLACEHOLDER };
     auto parent = std::filesystem::path{ rows.front().path }.parent_path().string();
     return parent.empty() ? std::string{ UNKNOWN_VALUE_PLACEHOLDER } : parent;
 }
 
-void
-push_root_tasks(std::vector<render_task>& stack, const process_tree& tree)
-{
-    for(auto it = tree.roots().rbegin(); it != tree.roots().rend(); ++it)
-        stack.push_back({ &*it, std::string{}, std::string{ GLYPH_ROOT_INDENT } });
-}
-
-void
-emit_file_rows(std::vector<std::string>& lines, const render_task& task,
-               const process_node& node, const std::filesystem::path& cwd)
-{
-    const std::size_t file_count  = node.rows.size();
-    const std::size_t child_count = node.children.size();
-    for(std::size_t index = 0; index < file_count; ++index)
-    {
-        const bool last_entry = (index + 1 == file_count) && child_count == 0;
-        const auto branch =
-            task.child_prefix +
-            std::string{ last_entry ? GLYPH_FILE_BRANCH_LAST : GLYPH_FILE_BRANCH_MID };
-        lines.push_back(file_row_line(branch, node.rows[index], cwd));
-    }
-    if(file_count > 0 && child_count > 0)
-        lines.push_back(task.child_prefix + std::string{ GLYPH_SEPARATOR });
-}
-
-// Pushes a node's children directly onto the DFS stack in reverse order (so
-// popping restores left-to-right order), including the separator rows
-// between them — no intermediate vector needed.
-void
-push_child_tasks(std::vector<render_task>& stack, const render_task& task,
-                 const process_node& node)
-{
-    const std::size_t child_count = node.children.size();
-    for(std::size_t ri = child_count; ri-- > 0;)
-    {
-        const bool  last_child = (ri + 1 == child_count);
-        std::string child_conn =
-            task.child_prefix +
-            std::string{ last_child ? GLYPH_CHILD_CONN_LAST : GLYPH_CHILD_CONN_MID };
-        std::string next_prefix =
-            task.child_prefix +
-            std::string{ last_child ? GLYPH_CHILD_INDENT_LAST : GLYPH_CHILD_INDENT_MID };
-        stack.push_back(
-            { &node.children[ri], std::move(child_conn), std::move(next_prefix) });
-        if(ri > 0) stack.push_back({ nullptr, {}, task.child_prefix });
-    }
-}
-
 std::vector<std::string>
-render_header(const run_metadata& meta, const process_tree& tree,
-              std::span<const artifact> rows)
+render_header(const run_metadata& meta, std::span<const artifact> rows,
+              std::size_t process_count)
 {
+    const auto sizes = rows | std::views::transform(&artifact::size_bytes);
+
     std::string run_line =
         fmt::format("Run: {}   Duration: {}   Processes: {}",
                     meta.run_label.empty() ? std::string{ UNKNOWN_VALUE_PLACEHOLDER }
                                            : meta.run_label,
-                    format_duration(meta.duration), count_nodes(tree.roots()));
-    run_line += fmt::format("   Total output: {}", datasize_to_string(sum_sizes(rows)));
+                    format_duration(meta.duration), process_count);
+    run_line += fmt::format("   Total output: {}",
+                            datasize_to_string(std::accumulate(sizes.begin(), sizes.end(),
+                                                               std::uint64_t{ 0 })));
 
-    std::string dir_line = fmt::format("Output dir: {}", derive_output_dir(meta, rows));
+    std::string dir_line = fmt::format("Output dir: {}", derive_output_dir(rows));
 
     return { std::move(run_line), std::move(dir_line) };
-}
-
-std::vector<std::string>
-render_tree(const process_tree& tree, pid_t main_pid)
-{
-    std::vector<std::string> lines;
-    std::vector<render_task> stack;
-    push_root_tasks(stack, tree);
-
-    // Resolved once for the whole render
-    std::error_code       cwd_error;
-    std::filesystem::path cwd = std::filesystem::current_path(cwd_error);
-
-    while(!stack.empty())
-    {
-        render_task task = std::move(stack.back());
-        stack.pop_back();
-
-        if(task.node == nullptr)
-        {
-            lines.push_back(task.child_prefix + std::string{ GLYPH_SEPARATOR });
-            continue;
-        }
-
-        const process_node& node = *task.node;
-        lines.push_back(task.connector + std::string{ GLYPH_NODE_MARKER } +
-                        process_label(node, main_pid));
-        emit_file_rows(lines, task, node, cwd);
-        push_child_tasks(stack, task, node);
-    }
-
-    return lines;
-}
-
-[[nodiscard]] std::vector<artifact>
-collect_rows(const process_tree& tree)
-{
-    std::vector<artifact>            rows;
-    std::vector<const process_node*> stack;
-    for(const auto& root : tree.roots())
-        stack.push_back(&root);
-    while(!stack.empty())
-    {
-        const process_node* node = stack.back();
-        stack.pop_back();
-        rows.insert(rows.end(), node->rows.begin(), node->rows.end());
-        for(const auto& child : node->children)
-            stack.push_back(&child);
-    }
-    return rows;
 }
 
 [[nodiscard]] std::string
@@ -363,23 +253,26 @@ build_legend(std::span<const artifact> rows)
 }  // namespace
 
 void
-write_summary(std::ostream& os, const process_tree& tree, const run_metadata& meta)
+write_summary(std::ostream& os, const process_tree& tree, const run_metadata& meta,
+              std::span<const artifact> rows, std::size_t process_count)
 {
-    const auto rows = collect_rows(tree);
     if(rows.empty()) return;
 
     report_diagnostics(tree.diagnostics());
 
-    const auto header_lines = render_header(meta, tree, rows);
-    const auto tree_lines   = render_tree(tree, getpid());
+    const auto header_lines = render_header(meta, rows, process_count);
     const auto legend       = build_legend(rows);
+
+    std::error_code       cwd_error;
+    std::filesystem::path cwd      = std::filesystem::current_path(cwd_error);
+    const pid_t           main_pid = getpid();
 
     std::string out = "\nOutput Summary\n";
     for(const auto& line : header_lines)
         out += "  " + line + "\n";
     out += "\nProcess tree\n";
-    for(const auto& line : tree_lines)
-        out += "  " + line + "\n";
+    for(const auto& root : tree.roots())
+        print_node(out, root, "", "  ", main_pid, cwd);
     if(!legend.empty()) out += fmt::format("\n  {}\n", legend);
 
     os << out;
