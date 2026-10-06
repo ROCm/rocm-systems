@@ -100,19 +100,20 @@ TEST_F(UBR_MultiSegment, Generic)
         }
         ASSERT_GT(ipcPeers, 0) << "IPC registration recorded no peer";
     } else {
-        const bool netDone = (reg->state & NET_REG_COMPLETE) != 0 && reg->netNSegments != 0;
+        const bool netPeersDone = reg->rcclNet.allPeers;
         if (envNetIsIbCast()) {
+            const bool netDone = (reg->state & NET_REG_COMPLETE) != 0 && reg->rcclNet.nSegments != 0;
             ASSERT_TRUE(MPIHelpers::allRanksTrue(netDone))
                 << "CAST netIbCast register arm did not set NET_REG_COMPLETE";
-            ASSERT_EQ(reg->netNSegments, kNumSegments)
+            ASSERT_EQ(reg->rcclNet.nSegments, kNumSegments)
                 << "NET registration walked a prefix of the ncclCommRegister range, not the full 8-segment allocation";
         } else {
             const std::string why = mpiCoordinatedSkipReason(
-                !MPIHelpers::anyRankTrue(netDone),
-                "NET full-range segment count not cached on any rank");
+                !MPIHelpers::anyRankTrue(netPeersDone),
+                "NET registration did not finish for every peer on any rank");
             if (!why.empty()) GTEST_SKIP() << why;
-            if (netDone) {
-                ASSERT_EQ(reg->netNSegments, kNumSegments)
+            if (netPeersDone) {
+                ASSERT_EQ(reg->rcclNet.nSegments, kNumSegments)
                     << "NET registration walked a prefix of the ncclCommRegister range, not the full 8-segment allocation";
             }
         }
@@ -215,6 +216,42 @@ TEST_F(UBR_MultiSegment, Generic_Reuse_BeforeCePlanBypassesRegistrationCache)
         << "Forced CE unexpectedly revisited the transport registration cache";
 }
 
+// Odd hipMalloc sizes page-round past the allocation. The NET segment count must still be 1.
+TEST_F(UBR_MultiSegment, NetSegmentCountOddSizedHipMalloc)
+{
+    if (!validateTestPrerequisites(
+            /*min_processes=*/1, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/1, /*max_nodes=*/kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires at least one rank";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    auto* comm = reinterpret_cast<struct ncclComm*>(getActiveCommunicator());
+    for (const size_t size : {size_t{1000001}, size_t{2 * 1024 * 1024 + 1}}) {
+        SCOPED_TRACE("size=" + std::to_string(size));
+        void* buf = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&buf, size));
+        auto bufCleanup = makeScopeGuard([&]() { HIP_EXPECT(hipFree(buf)); });
+
+        void* regHandle = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf, size, &regHandle));
+        auto regCleanup = makeScopeGuard([&]() {
+            if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
+        });
+
+        struct ncclReg* reg = nullptr;
+        ncclRegFind(comm, buf, size, &reg);
+        ASSERT_MPI_NE(reg, nullptr);
+        ASSERT_MPI_TRUE(reg->endAddr > reinterpret_cast<uintptr_t>(buf) + size);
+
+        int numSegments = 0;
+        ASSERT_MPI_EQ(ncclSuccess, rcclNetRegSegmentCount(comm, reg, &numSegments));
+        ASSERT_MPI_EQ(1, numSegments);
+    }
+}
+
 /**
  * @brief NET proxy registration clips the final physical segment.
  *
@@ -222,7 +259,7 @@ TEST_F(UBR_MultiSegment, Generic_Reuse_BeforeCePlanBypassesRegistrationCache)
  * AllReduce whose receive half ends at the final registered byte. This drives
  * sendProxyRegBuffer and recvProxyRegBuffer through netIbRegMrMultiSeg with a
  * short final MR and verifies the mapped-but-unregistered tail is untouched.
- * Ranks that took the NET path must record netNSegments==3 on that cache entry.
+ * Ranks that took the NET path must cache a segment count of 3 on that entry.
  */
 TEST_F(UBR_MultiSegment, NetProxyPartialFinalSegment)
 {
@@ -310,7 +347,7 @@ TEST_F(UBR_MultiSegment, NetProxyPartialFinalSegment)
     }
     if (netDone) {
         ASSERT_NE(reg->netHandleHead, nullptr);
-        ASSERT_EQ(reg->netNSegments, kMappedSegments)
+        ASSERT_EQ(reg->rcclNet.nSegments, kMappedSegments)
             << "NET proxy must enumerate three physical segments for a 2.5-segment clip";
     }
 }

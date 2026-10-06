@@ -129,7 +129,8 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowFallsBack)
     ASSERT_GT(recvOffset + totalBytes, windowBytes);
     ASSERT_LE(recvOffset + totalBytes, buf.totalSize);
     ASSERT_EQ(totalBytes % sizeof(T), 0u);
-    ASSERT_LE(totalBytes, ncclCeAllReduceStagingBufBytes(nRanks));
+    ASSERT_LE(totalBytes, ncclCeAllReduceStagingBufBytes(
+        nRanks, reinterpret_cast<struct ncclComm*>(getActiveCommunicator())->ceColl.ceArStagingBytes));
 
     char* base = reinterpret_cast<char*>(buf.vaBase);
     void* sendBuf = base;
@@ -211,7 +212,8 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowStagingOverflow)
     ASSERT_GT(recvOffset + totalBytes, windowBytes);
     ASSERT_LE(recvOffset + totalBytes, buf.totalSize);
     ASSERT_EQ(totalBytes % sizeof(T), 0u);
-    ASSERT_GT(totalBytes, ncclCeAllReduceStagingBufBytes(nRanks));
+    ASSERT_GT(totalBytes, ncclCeAllReduceStagingBufBytes(
+        nRanks, reinterpret_cast<struct ncclComm*>(getActiveCommunicator())->ceColl.ceArStagingBytes));
 
     char* base = reinterpret_cast<char*>(buf.vaBase);
     void* sendBuf = base;
