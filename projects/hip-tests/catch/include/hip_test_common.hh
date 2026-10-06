@@ -877,6 +877,92 @@ class BlockingContext {
   std::shared_ptr<State> state_ = std::make_shared<State>();
   bool callback_enqueued_ = false;
 };
+
+#if HT_AMD
+/**
+ * Holds a stream un-drained until the host releases it, without parking a host thread.
+ *
+ * Prefer this over BlockingContext when the gated window contains a HIP call. A
+ * hipStreamAddCallback callback runs on the runtime's async-signal thread, which is
+ * also the thread that grants a queue its dynamic scratch; a test that only releases
+ * the callback after the call under test returns therefore deadlocks whenever that
+ * call waits on the GPU, as it does in a device-sanitizer build.
+ *
+ * The gate is a dispatch of the runtime's streamOpsWait blit kernel, so it does occupy
+ * one work-item for the gated window. What matters is that it does not route through
+ * ihipModuleLaunchKernel, the only caller of StatCO::InitManagedVarDevicePtr, so
+ * __managed__ symbols stay uninitialized. Tests observing deferred managed
+ * initialization need that; gating with an ordinary kernel launch would initialize
+ * every managed variable on the device first and make them vacuous.
+ *
+ * Releasing before freeing is required, not tidiness: hipFree of still-watched signal
+ * memory synchronizes every stream on the owning device and would wait on a kernel
+ * that can never retire.
+ *
+ * Hangs rather than fails if the call under test turns out to be host-synchronous,
+ * because the release cannot be reached. Deliberate: a timed release would make the
+ * result depend on how long the call takes relative to the gate.
+ */
+class StreamGate {
+ public:
+  explicit StreamGate(hipStream_t stream) : stream_(stream) {}
+
+  ~StreamGate() {
+    release();
+    if (signal_ != nullptr) {
+      static_cast<void>(hipFree(signal_));
+    }
+  }
+
+  StreamGate(const StreamGate&) = delete;
+  StreamGate& operator=(const StreamGate&) = delete;
+  StreamGate(StreamGate&&) = delete;
+  StreamGate& operator=(StreamGate&&) = delete;
+
+  //! Must be called with the gated stream's device current.
+  hipError_t gate() {
+    if (signal_ != nullptr) {
+      return hipErrorInvalidValue;
+    }
+    uint64_t* signal = nullptr;
+    // hipStreamWaitValue64 polls signal memory, which is 8 bytes by contract.
+    hipError_t status = hipExtMallocWithFlags(reinterpret_cast<void**>(&signal),
+                                              sizeof(uint64_t), hipMallocSignalMemory);
+    if (status != hipSuccess) {
+      return status;
+    }
+    __atomic_store_n(signal, kBlocked, __ATOMIC_RELEASE);
+    status = hipStreamWaitValue64(stream_, signal, kReleased, hipStreamWaitValueEq);
+    if (status != hipSuccess) {
+      static_cast<void>(hipFree(signal));
+      return status;
+    }
+    signal_ = signal;
+    return hipSuccess;
+  }
+
+  void release() {
+    if (signal_ != nullptr) {
+      __atomic_store_n(signal_, kReleased, __ATOMIC_RELEASE);
+    }
+  }
+
+  bool is_blocked() const {
+    const hipError_t status = hipStreamQuery(stream_);
+    if (status != hipSuccess && status != hipErrorNotReady) {
+      WARN("hipStreamQuery failed while checking StreamGate");
+    }
+    return status == hipErrorNotReady;
+  }
+
+ private:
+  static constexpr uint64_t kBlocked = 0;
+  static constexpr uint64_t kReleased = 1;
+
+  hipStream_t stream_;
+  uint64_t* signal_ = nullptr;
+};
+#endif  // HT_AMD
 }  // namespace HipTest
 
 // Call at the start of tests that require image/texture support to indicate whether it

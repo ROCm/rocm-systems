@@ -373,19 +373,24 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemset3D) {
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipLaunchKernel_SyncBehavior) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
-  HipTest::BlockingContext b_context{nullptr};
+  HipTest::StreamGate gate{nullptr};
   hipStream_t kernel_stream{nullptr};
 
-  HIP_CHECK(b_context.block_stream());
-  REQUIRE(b_context.is_blocked());
+  HIP_CHECK(gate.gate());
+  REQUIRE(gate.is_blocked());
 
   AddConst<<<dim3(kNumBlocks), dim3(kBlockSize), 0, kernel_stream>>>(g_managed_launch, kN,
                                                                      kKernelAddValue);
-  HIP_CHECK(hipGetLastError());
+  // Captured, not asserted: every check between gating and release is deferred so a
+  // failure unwinds through the gate's destructor instead of leaving it pending.
+  const hipError_t launch_error = hipGetLastError();
+  const hipError_t query_while_gated = hipStreamQuery(kernel_stream);
 
-  HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
-  b_context.unblock_stream();
+  gate.release();
   HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(launch_error);
+  REQUIRE(query_while_gated == hipErrorNotReady);
   REQUIRE(hipStreamQuery(kernel_stream) == hipSuccess);
 
   for (int i = 0; i < kN; ++i) {
@@ -493,22 +498,26 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeerAsync_SyncBehavior) {
   HIP_CHECK(hipSetDevice(1));
   LinearAllocGuard<int> destination(LinearAllocs::hipMalloc, kStaticInitLen * sizeof(int));
 
-  // Neither hipMalloc nor hipStreamAddCallback touches a managed symbol, so device 1 is still
-  // uninitialized once its null stream is blocked.
-  HipTest::BlockingContext blockedDestinationNullStream{nullptr};
-  HIP_CHECK(blockedDestinationNullStream.block_stream());
-  REQUIRE(blockedDestinationNullStream.is_blocked());
+  // Neither hipMalloc nor the gate touches a managed symbol, so device 1 is still
+  // uninitialized once its null stream is gated. Device 1 must be current here: the
+  // gate resolves its stream through the current device.
+  HipTest::StreamGate destinationNullStreamGate{nullptr};
+  HIP_CHECK(destinationNullStreamGate.gate());
+  REQUIRE(destinationNullStreamGate.is_blocked());
 
   HIP_CHECK(hipSetDevice(0));
   StreamGuard copyStream(Streams::withFlags, hipStreamNonBlocking);
-  HIP_CHECK(hipMemcpyPeerAsync(destination.ptr(), /*dstDevice=*/1, g_managed_initialized,
-                               /*srcDevice=*/0, kStaticInitLen * sizeof(int),
-                               copyStream.stream()));
+  const hipError_t copy_error =
+      hipMemcpyPeerAsync(destination.ptr(), /*dstDevice=*/1, g_managed_initialized,
+                         /*srcDevice=*/0, kStaticInitLen * sizeof(int), copyStream.stream());
 
-  blockedDestinationNullStream.unblock_stream();
+  destinationNullStreamGate.release();
   HIP_CHECK(hipStreamSynchronize(copyStream.stream()));
+  HIP_CHECK(copy_error);
 
+  // Drains device 1's gate explicitly: hipDeviceSynchronize would act on device 0.
   HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipDeviceSynchronize());
   std::vector<int> result(kStaticInitLen);
   HIP_CHECK(hipMemcpy(result.data(), destination.ptr(), kStaticInitLen * sizeof(int),
                       hipMemcpyDeviceToHost));
@@ -565,14 +574,14 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_InitIndependentOfNullStream) {
 
   StreamGuard kernel_stream(Streams::withFlags, hipStreamNonBlocking);
 
-  HipTest::BlockingContext b_context{nullptr};
-  HIP_CHECK(b_context.block_stream());
-  REQUIRE(b_context.is_blocked());
+  HipTest::StreamGate gate{nullptr};
+  HIP_CHECK(gate.gate());
+  REQUIRE(gate.is_blocked());
 
   constexpr int kSentinel = 0x5151;
   WriteManagedNonBlocking<<<dim3(kNumBlocks), dim3(kBlockSize), 0, kernel_stream.stream()>>>(
       kSentinel);
-  HIP_CHECK(hipGetLastError());
+  const hipError_t launch_error = hipGetLastError();
 
   // The write lands in microseconds; the timeout is sized so a loaded machine cannot
   // report a false failure. Read through a volatile pointer so the load is not hoisted
@@ -587,12 +596,16 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_InitIndependentOfNullStream) {
     std::this_thread::yield();
   }
 
-  INFO("Managed symbol was not published while the null stream was still blocked");
-  REQUIRE(visible);
-  REQUIRE(b_context.is_blocked());
+  const bool gated_throughout = gate.is_blocked();
 
-  b_context.unblock_stream();
+  gate.release();
   HIP_CHECK(hipStreamSynchronize(kernel_stream.stream()));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(launch_error);
+  INFO("Managed symbol was not published while the null stream was still gated");
+  REQUIRE(visible);
+  REQUIRE(gated_throughout);
 
   for (int i = 0; i < kN; ++i) {
     INFO("Index " << i);

@@ -30,23 +30,31 @@ HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Basic) {
   }
 }
 
-// Verifies a kernel launch does not block the host: issued on a deliberately
-// blocked stream, it must return before the stream is unblocked.
-// CUDA deadlocks when its first kernel launch targets a blocked null stream.
+// Verifies a kernel launch does not block the host: issued on a deliberately gated
+// stream, it must return while the stream is still un-drained.
+//
+// The gate must not itself be a kernel launch, or it loads the module first and this
+// covers only the warm path. A hipStreamAddCallback gate additionally deadlocks: the
+// callback occupies the same runtime thread that grants the queue its dynamic scratch.
+//
+// Asserts an AMD implementation property, not a portable guarantee: CUDA permits any
+// API call to block on "contention for or unavailability of internal resources".
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Synchronization_Behavior) {
-  HipTest::BlockingContext b_context{nullptr};
+  HipTest::StreamGate gate{nullptr};
   hipStream_t kernel_stream{nullptr};
 
-  HIP_CHECK(b_context.block_stream());
-  REQUIRE(b_context.is_blocked());
+  HIP_CHECK(gate.gate());
+  REQUIRE(gate.is_blocked());
 
   HIP_CHECK(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr,
                             0, kernel_stream));
+  const hipError_t query_while_gated = hipStreamQuery(kernel_stream);
 
-  HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
-  b_context.unblock_stream();
+  gate.release();
   HIP_CHECK(hipDeviceSynchronize());
+
+  REQUIRE(query_while_gated == hipErrorNotReady);
   REQUIRE(hipStreamQuery(kernel_stream) == hipSuccess);
 }
 #endif  // HT_AMD

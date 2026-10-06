@@ -194,8 +194,17 @@ HIP_TEST_CASE(Unit_StatCO_ConcurrentDlopenDlcloseWhileLaunching) {
   /* Worker launches are cheap (kernel launch + sync), so iterate many times to
    * keep the functions_.find load high. Each churn cycle registers and removes
    * the library's fat binary without invoking its memory-intensive kernels. */
+#if defined(ENABLE_ADDRESS_SANITIZER)
+  /* An instrumented launch-and-sync iteration costs enough that the full counts
+   * take 16-67s standalone on an idle gfx942, and overrun the 1500s ctest
+   * timeout once CI runs the suite in parallel. The reduced counts keep the
+   * same find/erase interleaving, just fewer samples of it. */
+  constexpr int kWorkerIters = 60;
+  constexpr int kChurnerIters = 10;
+#else
   constexpr int kWorkerIters = 300;
   constexpr int kChurnerIters = 40;
+#endif
   constexpr int kN = 1024;  /* Small buffer; latency matters, not bandwidth. */
 
   g_failure.store(false);
