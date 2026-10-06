@@ -2796,7 +2796,8 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
 
 // ---------------------------------------------------------------------------
 // Manual playback: hipMemPoolSetAttribute / hipMemPoolGetAttribute
-// value is void*; stored inline as value_u64 (8 bytes covers all attr sizes).
+// value is void*, stored inline in the low bytes of value_u64 (an int32_t for the
+// three reuse policies, uint64_t otherwise).
 // GetAttribute is a no-op at playback (output only; pool state matches capture).
 // ---------------------------------------------------------------------------
 

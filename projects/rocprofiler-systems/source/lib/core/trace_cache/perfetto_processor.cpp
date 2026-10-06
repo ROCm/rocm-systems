@@ -510,7 +510,7 @@ perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<agent_manager>& agent_mngr, int pid, [[maybe_unused]] int ppid,
     [[maybe_unused]] output_file_registry& output_registry,
     rocprofsys::track_registry&            tracks)
-: processor_t<perfetto_processor_t>()
+: sample_processor_interface()
 , m_metadata(*metadata)
 , m_process_id(pid)
 , m_agent_manager(*agent_mngr)

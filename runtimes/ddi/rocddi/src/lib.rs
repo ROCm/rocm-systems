@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Implementation-neutral device-interface mechanisms for heterogeneous
 //! compute runtimes.
 //!
