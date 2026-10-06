@@ -379,7 +379,7 @@ The kernel descriptor is a host structure. It is not part of the file format. It
    4. `FullElf`: parse the full ELF (one time for each distinct blob). Find the kernel by name. Examine `kernarg_size`. Copy each different PDI into device memory and get its BO handle. Keep the control code and the patch sites in host memory.
 6. Publish the symbols. Before this step, a failure releases all device memory from steps 5.3 and 5.4.
 
-Device memory for blobs comes from the device SVM region (the device heap). Each buffer has 64-byte alignment. The loader copies each distinct blob one time. It identifies a blob by its address and size in the hsaco buffer. After the copy, the loader flushes the CPU cache for the buffer one time.
+Device memory for blobs comes from the device SVM region (the device heap). Each buffer has 64-byte alignment. The loader copies each distinct blob one time. It identifies a blob by its address and size in the hsaco buffer. This does not apply to the PDIs of a full-ELF kernel: the loader copies them out of the nested ELF and places them once per kernel, so two kernels that load the same PDI each get their own copy. After the copy, the loader flushes the CPU cache for the buffer one time.
 
 The loaded code object is not visible to `hsa_ven_amd_loader_executable_iterate_loaded_code_objects`. It has no `r_debug` link-map entry. Its load base, load size and delta are 0.
 

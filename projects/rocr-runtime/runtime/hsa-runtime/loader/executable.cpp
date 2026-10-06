@@ -1633,18 +1633,23 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   // Dismissed only once the object is handed to `objects`, which owns it from then on.
   MAKE_NAMED_SCOPE_GUARD(loaded_obj_guard, [&] { loaded_obj->Destroy(); });
 
-  // Copy each unique blob to memory once, keyed on (host source, size).
+  // Copy each unique blob to memory once, keyed on (host source, size). The key is only sound for
+  // a source that lives for the whole load, i.e. one inside the hsaco buffer; a caller passing
+  // memory that may be freed and reused during the load passes cache = false.
   std::map<std::pair<const uint8_t*, uint64_t>, void*> blob_addr;
-  auto place_blob = [&](const uint8_t* src, uint64_t len, void** out_ptr) -> hsa_status_t {
+  auto place_blob = [&](const uint8_t* src, uint64_t len, void** out_ptr,
+                        bool cache = true) -> hsa_status_t {
     if (len == 0) {
       *out_ptr = nullptr;
       return HSA_STATUS_SUCCESS;
     }
     auto key = std::make_pair(src, len);
-    auto it = blob_addr.find(key);
-    if (it != blob_addr.end()) {
-      *out_ptr = it->second;
-      return HSA_STATUS_SUCCESS;
+    if (cache) {
+      auto it = blob_addr.find(key);
+      if (it != blob_addr.end()) {
+        *out_ptr = it->second;
+        return HSA_STATUS_SUCCESS;
+      }
     }
     void* buf =
         context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, len, kAieBlobAlignment, false);
@@ -1663,7 +1668,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     // is unnecessary for these buffers (only kernargs change per dispatch).
     rocr::FlushCpuCache(dev, 0, len);
     loaded_obj->device_buffers.emplace_back(buf, len);
-    blob_addr[key] = dev;
+    if (cache) blob_addr[key] = dev;
     *out_ptr = dev;
     return HSA_STATUS_SUCCESS;
   };
@@ -1820,7 +1825,10 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       for (uint32_t p = 0; p < desc->num_pdis; ++p) {
         AMD::aie_elf::Pdi& pdi = kernel.pdis[p];
         void* pdi_dev = nullptr;
-        if (auto s = place_blob(pdi.bytes.data(), pdi.bytes.size(), &pdi_dev);
+        // Not cached: pdi.bytes is heap memory owned by the parsed kernel, freed when the kernel is
+        // erased below, so a later nested ELF's PDI of the same size can reuse its address and
+        // would match a stale key.
+        if (auto s = place_blob(pdi.bytes.data(), pdi.bytes.size(), &pdi_dev, /*cache=*/false);
             s != HSA_STATUS_SUCCESS) {
           return s;
         }
