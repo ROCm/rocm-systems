@@ -5747,6 +5747,8 @@ def amdsmi_get_gpu_od_volt_info(processor_handle: processor_handle_t) -> Dict[st
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_od_volt_info(processor_handle, ctypes.byref(freq_data))
     )
+    # The library writes rocm_smi's smaller layout into this buffer.
+    freq_data = _RsmiOdVoltFreqData.from_buffer(freq_data)
 
     sclk_lower = freq_data.curr_sclk_range.lower_bound
     sclk_upper = freq_data.curr_sclk_range.upper_bound
@@ -6587,6 +6589,8 @@ def amdsmi_get_gpu_od_volt_curve_regions(
             processor_handle, ctypes.byref(region_count), buffer
         )
     )
+    # The library writes rocm_smi's 32-byte records into this buffer.
+    buffer = (_RsmiFreqVoltRegion * num_regions).from_buffer(buffer)
 
     result = []
 
