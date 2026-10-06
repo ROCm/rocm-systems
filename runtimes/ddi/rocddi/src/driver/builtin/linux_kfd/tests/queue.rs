@@ -14,7 +14,7 @@ use std::sync::Arc;
 fn shared<T>(value: T) -> Shared<T> {
     Shared::new(value, Allocator::default()).unwrap()
 }
-use crate::queue::QueueProducerMode;
+use crate::queue::{QueueProducerMode, SdmaEngineSelection};
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -58,6 +58,7 @@ fn native_node() -> sysfs::NativeNode {
             context_size: 65536,
             control_stack_size: 4096,
             sdma_engines: 2,
+            sdma_xgmi_engines: 1,
             compute_queues: 4,
             sdma_qualified: true,
         },
@@ -118,6 +119,7 @@ struct State {
     expected_inactive_signal: Option<u64>,
     expected_error_event: Option<QueueErrorEvent>,
     expected_aql_queue_type: Option<u32>,
+    expected_sdma_engine_id: Option<u32>,
     expected_priority: u32,
     scratch_bases: usize,
     scratch_base_errno: Option<i32>,
@@ -299,8 +301,13 @@ impl Fixture {
                         state.creates += 1;
                         let expected_scratch = state.expected_scratch;
                         assert_eq!(args.gpu_id, 42);
-                        assert!(matches!(args.queue_type, 0..=2));
-                        assert_eq!(args.sdma_engine_id, 0);
+                        assert!(matches!(args.queue_type, 0..=2 | 4));
+                        if let Some(engine_id) = state.expected_sdma_engine_id {
+                            assert_eq!(args.queue_type, 4);
+                            assert_eq!(args.sdma_engine_id, engine_id);
+                        } else {
+                            assert_eq!(args.sdma_engine_id, 0);
+                        }
                         assert_eq!(args.metadata_ring_size, 0);
                         assert_eq!(args.percentage, 100);
                         assert_eq!(args.priority, state.expected_priority);
@@ -640,7 +647,9 @@ impl Fixture {
                 producer_mode: QueueProducerMode::Multiple,
                 ..
             } => Some(0),
-            QueueParameters::Pm4 | QueueParameters::Sdma => None,
+            QueueParameters::Pm4 | QueueParameters::Sdma | QueueParameters::SdmaByEngine { .. } => {
+                None
+            }
         };
         state.expected_priority = match desc.priority {
             QueuePriority::Low => 0,
@@ -872,6 +881,7 @@ fn all_formats_and_priorities_reach_native_queue_creation() {
         desc.priority = priority;
         let mut queue = fixture.create(desc).unwrap();
         let info = queue.info().unwrap();
+        assert_eq!(info.sdma_engine_id, None);
         assert_eq!(info.index_unit_bytes, unit);
         assert_eq!(info.read_index_width, read_width);
         assert_eq!(info.read_index_wraps, wraps);
@@ -893,6 +903,82 @@ fn all_formats_and_priorities_reach_native_queue_creation() {
         fixture.assert_released();
         assert_eq!(fixture.state.lock().unwrap().destroys, 1);
     }
+}
+
+#[test]
+fn targeted_sdma_queues_select_and_report_general_and_xgmi_engines() {
+    let fixture = Fixture::new(true);
+    let any = descriptor(QueueParameters::SdmaByEngine {
+        selection: SdmaEngineSelection::Any,
+    });
+    for expected in [0, 1, 2, 0] {
+        fixture.state.lock().unwrap().expected_sdma_engine_id = Some(expected);
+        let mut queue = fixture.create(any).unwrap();
+        assert_eq!(queue.info().unwrap().sdma_engine_id, Some(expected));
+        queue.destroy().unwrap();
+        fixture.assert_released();
+    }
+    fixture.state.lock().unwrap().expected_sdma_engine_id = Some(2);
+    let mut queue = fixture
+        .create(descriptor(QueueParameters::SdmaByEngine {
+            selection: SdmaEngineSelection::Id(2),
+        }))
+        .unwrap();
+    assert_eq!(queue.info().unwrap().sdma_engine_id, Some(2));
+    queue.destroy().unwrap();
+    fixture.assert_released();
+    assert_eq!(fixture.state.lock().unwrap().creates, 5);
+
+    assert!(
+        Request::validate(
+            &native_node(),
+            descriptor(QueueParameters::SdmaByEngine {
+                selection: SdmaEngineSelection::Id(3),
+            }),
+        )
+        .is_err()
+    );
+    let mut invalid = native_node();
+    invalid.queues.sdma_xgmi_engines = u32::MAX;
+    assert!(Request::validate(&invalid, any).is_err());
+}
+
+#[test]
+fn targeted_sdma_queues_retain_backing_after_ambiguous_native_calls() {
+    let desc = descriptor(QueueParameters::SdmaByEngine {
+        selection: SdmaEngineSelection::Id(1),
+    });
+    let fixture = Fixture::new(true);
+    {
+        let mut state = fixture.state.lock().unwrap();
+        state.expected_sdma_engine_id = Some(1);
+        state.create_errno = Some(14);
+    }
+    assert_eq!(
+        fixture.create(desc).err().unwrap().kind(),
+        ErrorKind::DriverContract
+    );
+    let state = fixture.state.lock().unwrap();
+    assert_eq!(state.creates, 1);
+    assert_eq!(state.destroys, 0);
+    assert_eq!(state.frees, 0);
+    assert_eq!(state.buffers.len(), 2);
+    drop(state);
+
+    let fixture = Fixture::new(true);
+    fixture.state.lock().unwrap().expected_sdma_engine_id = Some(1);
+    let mut queue = fixture.create(desc).unwrap();
+    fixture.state.lock().unwrap().destroy_errno.push_back(5);
+    assert!(queue.destroy().is_err());
+    assert_eq!(
+        queue.destroy().unwrap_err().kind(),
+        ErrorKind::DriverContract
+    );
+    drop(queue);
+    let state = fixture.state.lock().unwrap();
+    assert_eq!(state.destroys, 1);
+    assert_eq!(state.frees, 0);
+    assert_eq!(state.buffers.len(), 2);
 }
 
 #[test]

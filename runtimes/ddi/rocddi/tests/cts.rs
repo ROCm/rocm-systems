@@ -9,9 +9,13 @@
 
 use std::error::Error;
 use std::io;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering, fence};
+use std::time::{Duration, Instant};
 
 use rocddi::gpu::CopyRect;
+use rocddi::gpu::queue::{
+    QueueAccessWidth, QueueParameters, QueuePriority, QueueRequest, SdmaEngineSelection,
+};
 use rocddi::memory::{DeviceAccess, MemoryKind};
 use rocddi::session::{Session, SessionLifetime};
 
@@ -281,6 +285,156 @@ fn gfx1201_gpu_capability_contract() -> Result<(), Box<dyn Error>> {
         gpu.info().maximum_scratch_aperture_bytes(),
         (8_u64 << 30) * u64::from(gpu.info().xcc_count)
     );
+    drop(device);
+    session.destroy()?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one native queue lifetime covers packet publication, retirement, and cleanup"
+)]
+fn gfx1201_user_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
+    const COPY_BYTES: usize = 256;
+    const PACKET_BYTES: usize = 68;
+    const GCR: u32 = 0x11 | (1 << 8);
+    const WRITEBACK: u32 = (1 << 31) | (1 << 22);
+    const INVALIDATE: u32 = (1 << 30) | (1 << 25) | (1 << 24) | (1 << 23);
+
+    let mut session = Session::new(SessionLifetime::Process)?;
+    let mut selected = None;
+    session.enumerate(&mut |endpoint| {
+        if endpoint.gpu().is_some_and(|gpu| {
+            (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping) == (12, 0, 1)
+                && gpu.queues.sdma_system_cache_control
+        }) {
+            selected = Some(endpoint);
+        }
+        Ok(())
+    })?;
+    let endpoint = selected.ok_or_else(|| io::Error::other("GFX1201 endpoint is unavailable"))?;
+    let device = session.activate(&endpoint)?;
+    let access = DeviceAccess::READ | DeviceAccess::WRITE;
+    let mut source = device.allocate(MemoryKind::System, 4096, 4096, access)?;
+    let mut destination = device.allocate(MemoryKind::System, 4096, 4096, access)?;
+    let source_info = source.info();
+    let destination_info = destination.info();
+    let source_host = source_info
+        .host_address
+        .ok_or_else(|| io::Error::other("source has no host mapping"))?;
+    let destination_host = destination_info
+        .host_address
+        .ok_or_else(|| io::Error::other("destination has no host mapping"))?;
+    // SAFETY: Both live allocations expose at least COPY_BYTES writable host bytes.
+    let (source_bytes, destination_bytes) = unsafe {
+        (
+            std::slice::from_raw_parts_mut(source_host as *mut u8, COPY_BYTES),
+            std::slice::from_raw_parts_mut(destination_host as *mut u8, COPY_BYTES),
+        )
+    };
+    for (index, byte) in source_bytes.iter_mut().enumerate() {
+        *byte = (index as u8).wrapping_mul(13).wrapping_add(7);
+    }
+    destination_bytes.fill(0xa5);
+
+    // SAFETY: This request contains no external GPU pointers. The single
+    // producer writes one complete packet and stops before destruction.
+    let mut queue = unsafe {
+        device.gpu()?.create_queue(QueueRequest {
+            ring_size_bytes: 4096,
+            parameters: QueueParameters::SdmaByEngine {
+                selection: SdmaEngineSelection::Id(0),
+            },
+            priority: QueuePriority::Normal,
+            device_producer: false,
+        })?
+    };
+    let transport = queue.info();
+    assert_eq!(transport.sdma_engine_id, Some(0));
+    assert_eq!(transport.index_unit_bytes, 1);
+    assert_eq!(transport.read_index_width, QueueAccessWidth::Bits64);
+    assert_eq!(transport.write_index_width, QueueAccessWidth::Bits64);
+    assert_eq!(transport.doorbell_width, QueueAccessWidth::Bits64);
+    assert!(transport.ring_size_bytes >= PACKET_BYTES as u64);
+    assert_eq!(transport.read_index_host_address % 8, 0);
+    assert_eq!(transport.write_index_host_address % 8, 0);
+    assert_eq!(transport.doorbell_host_address % 8, 0);
+
+    // GFX1201 OSS5: a GCR cache envelope around one linear copy packet.
+    let mut packet = [0_u32; PACKET_BYTES / 4];
+    packet[0] = GCR;
+    packet[2] = WRITEBACK | INVALIDATE;
+    packet[5] = 1;
+    packet[6] = COPY_BYTES as u32 - 1;
+    packet[8] = source_info.device_address as u32;
+    packet[9] = (source_info.device_address >> 32) as u32;
+    packet[10] = destination_info.device_address as u32;
+    packet[11] = (destination_info.device_address >> 32) as u32;
+    packet[12] = GCR;
+    packet[14] = WRITEBACK;
+    // SAFETY: The live queue owns a writable ring of at least PACKET_BYTES.
+    // The packet and both operands remain live until the read pointer retires.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            packet.as_ptr().cast::<u8>(),
+            transport.ring_host_address as *mut u8,
+            PACKET_BYTES,
+        );
+    }
+    fence(Ordering::SeqCst);
+    // SAFETY: The live queue exposes aligned 64-bit write and doorbell words.
+    // Packet stores precede the release write index and the MMIO doorbell.
+    unsafe {
+        (&*(transport.write_index_host_address as *const AtomicU64))
+            .store(PACKET_BYTES as u64, Ordering::Release);
+        fence(Ordering::SeqCst);
+        std::ptr::write_volatile(
+            transport.doorbell_host_address as *mut u64,
+            PACKET_BYTES as u64,
+        );
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match queue.progress() {
+            Ok((read, write)) if read == PACKET_BYTES as u64 && write == PACKET_BYTES as u64 => {
+                break;
+            }
+            Ok((read, write)) if read <= write && Instant::now() < deadline => {
+                std::thread::yield_now();
+            }
+            Ok((read, write)) => {
+                // Native retirement is unproved. Keep every GPU-reachable
+                // owner live through process teardown.
+                std::mem::forget(queue);
+                std::mem::forget(source);
+                std::mem::forget(destination);
+                std::mem::forget(device);
+                std::mem::forget(session);
+                return Err(io::Error::other(format!(
+                    "SDMA queue did not retire packet: read={read}, write={write}"
+                ))
+                .into());
+            }
+            Err(error) => {
+                std::mem::forget(queue);
+                std::mem::forget(source);
+                std::mem::forget(destination);
+                std::mem::forget(device);
+                std::mem::forget(session);
+                return Err(Box::new(error));
+            }
+        }
+    }
+    fence(Ordering::Acquire);
+    assert_eq!(destination_bytes, source_bytes);
+    // SAFETY: The sole producer has stopped and the native read pointer
+    // reached the complete write frontier before teardown.
+    unsafe { queue.destroy()? };
+    source.free()?;
+    destination.free()?;
     drop(device);
     session.destroy()?;
     Ok(())

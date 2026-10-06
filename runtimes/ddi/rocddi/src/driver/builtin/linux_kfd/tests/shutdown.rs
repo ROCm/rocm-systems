@@ -49,6 +49,7 @@ fn controller(allocator: Allocator) -> LinuxKfdDriver {
             limit: isize::MAX as u64,
             lds_base: 0x1000_0000_0000,
             scratch_base: 0x2000_0000_0000,
+            sdma_next_engine: AtomicU32::new(0),
             scratch: Mutex::new(ScratchPool::new(
                 sysfs::NativeQueueProperties {
                     gfx_target: 120_001,
