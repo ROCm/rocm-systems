@@ -155,7 +155,8 @@ marker syntax require the flat-marker analysis update.
    in the marker CSV (reported after the call tree). Plain analyze without
    those flags does not join and does not report that error.
 4. Consolidate matching operator calls across passes on the stitch key plus
-   `function_ordinal`.
+   `function_ordinal`. Record `PassMarkerMismatchError` when operator calls
+   or the kernel-name set disagree across passes (reported after the tree).
 5. Parse Function into name, file/line, `T_Tid`, `F_Tid`, `Backend`.
 6. Nest marker intervals per `Thread_Id`. Two markers on the same
    `Thread_Id` whose intervals overlap (neither nested nor adjacent) record
