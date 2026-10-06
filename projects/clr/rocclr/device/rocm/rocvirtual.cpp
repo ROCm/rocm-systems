@@ -2385,6 +2385,7 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
                        bool dedicated_queue)
     : device::VirtualDevice(device),
       state_(0),
+      cooperative_(cooperative),
       gpu_queue_(nullptr),
       roc_device_(device),
       virtualQueue_(nullptr),
@@ -2413,7 +2414,6 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
   hasPendingDispatch_ = false;
   skippedDispatches_ = 0;
   profiling_ = profiling;
-  cooperative_ = cooperative;
 
   // Initialize barrier and barrier value packets
   barrier_packet_.header = kInvalidAql;

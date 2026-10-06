@@ -881,7 +881,6 @@ class VirtualGPU : public device::VirtualDevice {
     struct {
       uint32_t hasPendingDispatch_ : 1;     //!< A kernel dispatch is outstanding
       uint32_t profiling_ : 1;              //!< Profiling is enabled
-      uint32_t cooperative_ : 1;            //!< Cooperative launch is enabled
       uint32_t addSystemScope_ : 1;         //!< Insert a system scope to the next aql
       uint32_t tracking_created_ : 1;       //!< Enabled if tracking object was properly initialized
       uint32_t retainExternalSignals_ : 1;  //!< Indicate to retain external signal array
@@ -889,6 +888,9 @@ class VirtualGPU : public device::VirtualDevice {
     };
     uint32_t state_;
   };
+  // Immutable after construction and intentionally kept outside state_: ReleaseHwQueue reads this
+  // from the ROCr callback thread, while command submission updates the packed state_ flags.
+  const bool cooperative_;
 
   Timestamp* timestamp_;
   bool sdma_profiling_for_cmd_ = false;  //!< SDMA profiling enabled for current command
