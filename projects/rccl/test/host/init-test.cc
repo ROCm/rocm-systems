@@ -1186,6 +1186,28 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaClusterSizeInRange_Applied) {
   EXPECT_EQ(2, comm->config.cgaClusterSize);
 }
 // TODO(AICOMRCCL-1685): a MIN_CTAS override does not apply, unlike COMM_BLOCKING on the same g_loadParam path.
+// NCCL_NET goes through rcclCanonicalNetName: only the ROCM-IB alias is rewritten, any other name is kept as typed.
+TEST_F(InitMicrotest, EnvConfigOverride_NetRocmIbAlias_StoredAsIbCast) {
+  SetMicroEnv("NCCL_NET", "rocm-ib");
+  auto comm = UndefConfigComm();
+  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
+  ASSERT_NE(nullptr, comm->config.netName);
+  EXPECT_STREQ("IB-CAST", comm->config.netName);
+  free(const_cast<char*>(comm->config.netName));
+}
+TEST_F(InitMicrotest, EnvConfigOverride_NetOtherName_StoredVerbatim) {
+  SetMicroEnv("NCCL_NET", "ib-cast");
+  auto comm = UndefConfigComm();
+  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
+  ASSERT_NE(nullptr, comm->config.netName);
+  EXPECT_STREQ("ib-cast", comm->config.netName);
+  free(const_cast<char*>(comm->config.netName));
+}
+TEST_F(InitMicrotest, EnvConfigOverride_NetUnset_ClearsNetName) {
+  auto comm = UndefConfigComm();
+  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
+  EXPECT_EQ(nullptr, comm->config.netName);
+}
 
 TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeOwner_UsesDefaultsAndSetsShared) {
   auto comm = std::make_unique<ncclComm>();

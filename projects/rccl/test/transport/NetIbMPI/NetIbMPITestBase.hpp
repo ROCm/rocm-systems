@@ -107,7 +107,8 @@ inline const char* CanonicalNetName(const char* env) {
 inline ncclNet_t* ResolveNetPlugin(const char* env) {
     static ncclNet_t* const plugins[] = {&ncclNetIb, &netIbCast};
     const char* name = CanonicalNetName(env);
-    // Unset: the library picks IB-CAST on AINIC and IB elsewhere.
+    // Unset: the library picks IB-CAST on AINIC and IB elsewhere, unless
+    // NCCL_NET_PLUGIN names an external plugin (src/plugin/net.cc:310).
     if (name == nullptr) return rcclUseAinic() ? &netIbCast : &ncclNetIb;
     for (auto* p : plugins) {
         if (strcasecmp(name, p->name) == 0) return p;

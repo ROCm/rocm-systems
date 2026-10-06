@@ -252,7 +252,9 @@ static void rcclDetectIBNics() {
   int _NicsRate[rcclIBNicTypeMax]{};
   int totalNnics = 0;
 
-  /* NCCL_NET=ROCM-IB forces AINIC mode regardless of detected hardware */
+  /* NCCL_NET=ROCM-IB forces AINIC mode regardless of detected hardware.
+     Keep the literal: rcclCanonicalNetName() folds ROCM-IB into IB-CAST, which
+     must not force AINIC mode (see its comment in net.h). */
   const char* envNet = ncclGetEnv("NCCL_NET");
   if (envNet && strcasecmp(envNet, "ROCM-IB") == 0) {
     INFO(NCCL_NET | NCCL_INIT, "RCCL: AINIC mode forced by NCCL_NET=ROCM-IB");
