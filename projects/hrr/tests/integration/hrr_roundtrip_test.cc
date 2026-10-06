@@ -1671,4 +1671,38 @@ HRR_TEST_CASE(Unit_HRR_ForkAfterCaptureShutdown) {
 
   CHECK(hrr_process_archives(cap.path).size() == 1);
 }
+
+/**
+ * Unit_HRR_ShutdownWhileChildOpensArchive
+ * ---------------------------------------
+ *   - A forked child's capture shutdown waits while another of its threads
+ *     opens the child's archive, and then finalizes that archive. Both
+ *     processes leave a manifest marked "complete": true and an events.bin
+ *     that ends in the clean-shutdown trailer.
+ */
+HRR_TEST_CASE(Unit_HRR_ShutdownWhileChildOpensArchive) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_shutdown_while_child_opens_archive"};
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ShutdownWhileChildOpensArchive_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 2);
+  for (const fs::path& archive : archives) {
+    INFO("Archive: " << archive.string());
+    REQUIRE(fs::exists(archive / "manifest.json"));
+    const std::string manifest = read_text_file(archive / "manifest.json");
+    INFO("Process manifest:\n" << manifest);
+    CHECK(manifest.find("\"complete\": true") != std::string::npos);
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(archive.string(), arc));
+    CHECK(arc.complete);
+  }
+}
 #endif  // !_WIN32

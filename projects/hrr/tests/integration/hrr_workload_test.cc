@@ -45,9 +45,11 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -3932,5 +3934,66 @@ TEST_CASE("Unit_HRR_ForkAfterCaptureShutdown_Direct", "[.][hrr-direct]") {
     const int status = pid > 0 ? hrr_wait_child(pid, 30) : -1;
     if (status == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) _exit(3);
   };
+}
+
+// ---------------------------------------------------------------------------
+// mkdir() for this test binary, for the same reason as fsync() above: CLR
+// resolves it here first. The capture writer creates an archive's directories
+// with it while it opens the archive. With no hook set it is a plain mkdir.
+// ---------------------------------------------------------------------------
+static std::atomic<void (*)(const char*)> g_hrr_mkdir_hook{nullptr};
+
+extern "C" int mkdir(const char* path, mode_t mode) noexcept {
+  if (auto hook = g_hrr_mkdir_hook.load(std::memory_order_acquire)) hook(path);
+  return static_cast<int>(syscall(SYS_mkdirat, AT_FDCWD, path, mode));
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ShutdownWhileChildOpensArchive_Direct
+//
+// A forked child opens its archive on its first record, on whichever thread
+// makes it, and its capture shutdown can run on another thread meanwhile. The
+// shutdown must wait for that open: a manifest or trailer written before it
+// finalizes an archive that is not there yet. Here a second thread of the
+// child makes the first record, and the mkdir hook holds it in the open, at
+// the archive's code_objects directory, for two seconds. The child's main
+// thread exits meanwhile, which runs the capture shutdown. The child exits 4
+// if the hold never came. Unit_HRR_ShutdownWhileChildOpensArchive checks that
+// both archives end in the clean-shutdown trailer.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_child_open_held{false};
+
+void child_open_mkdir_hook(const char* path) {
+  static constexpr char kSuffix[] = "/code_objects";
+  constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
+  const size_t len = strlen(path);
+  if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
+  if (g_child_open_held.exchange(true)) return;
+  for (int ms = 0; ms < 2000; ++ms) hrr_sleep_1ms();
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_ShutdownWhileChildOpensArchive_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+
+  pid_t pid = fork();
+  if (pid == 0) {
+    g_hrr_after_capture_shutdown = [] {};
+    g_hrr_mkdir_hook = child_open_mkdir_hook;
+    std::thread([] { (void)hipGetLastError(); }).detach();
+    for (int ms = 0; ms < 10000 && !g_child_open_held.load(); ++ms) hrr_sleep_1ms();
+    if (!g_child_open_held.load()) _exit(4);
+    exit(0);
+  }
+  REQUIRE(pid > 0);
+  const int status = hrr_wait_child(pid, 30);
+  INFO("child wait status " << status);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
 }
 #endif  // !_WIN32
