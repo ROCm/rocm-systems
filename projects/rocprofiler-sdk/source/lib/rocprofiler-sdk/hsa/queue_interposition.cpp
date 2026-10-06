@@ -1984,24 +1984,25 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
         auto lk = std::lock_guard<std::mutex>{s_consumer_transition_mutex};
         if(s_active_queue_interposition_consumers.load(std::memory_order_acquire) == 0)
         {
-            // Force bypass across drain + the first two resyncs so intercept
-            // doorbells cannot interleave with shadow updates. Unlock before the
-            // third resync so any bypass doorbell that slipped between the
-            // pre-unlock resync and unlock is still absorbed (otherwise hw_wdid
-            // can stay ahead of virtual_wptr and hang the next tracer session).
+            // Force bypass across drain, resyncs, and the absorb fence so intercept
+            // doorbells cannot interleave with shadow updates. Clear the flag only
+            // after that absorb, then quiesce+resync once more for any TOCTOU
+            // bypass that raced the clear (otherwise hw_wdid can stay ahead of
+            // virtual_wptr and hang the next tracer session).
             s_consumer_transition_in_progress.store(true, std::memory_order_release);
             drain_intercept_work(true);
             resync_all_queue_shadow_states();
             s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_acq_rel);
-            // Second resync while transition_in_progress still forces bypass.
+            wait_for_bypass_quiesce();
+            resync_all_queue_shadow_states();
+            wait_for_bypass_quiesce();
+            resync_all_queue_shadow_states();
+            fence_all_queue_gates();
             wait_for_bypass_quiesce();
             resync_all_queue_shadow_states();
             s_consumer_transition_in_progress.store(false, std::memory_order_release);
             // Threads that sampled bypass while transition was true may still be
             // inside next-table write-index/doorbell. Wait them out, then absorb.
-            wait_for_bypass_quiesce();
-            resync_all_queue_shadow_states();
-            fence_all_queue_gates();
             wait_for_bypass_quiesce();
             resync_all_queue_shadow_states();
             return;
