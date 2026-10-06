@@ -854,13 +854,14 @@ inline util::native<float> fma_f32_simd(util::native<float> a, util::native<floa
   return flush_output ? denormal::flush_value(result) : result;
 }
 
-/// ADD and MUL share FMA's NaN and pre-packing tininess policy. SUB retains
+/// ADD, MUL and DX9 MUL share FMA's NaN and tininess policy. SUB retains
 /// direct host subtraction's policy. The caller establishes guest rounding.
 template <fp_mode::Arithmetic operation>
 inline util::native<float> binary_f32_simd(util::native<float> a, util::native<float> b,
                                            const Wavefront &wf, uint32_t omod = 0) {
   static_assert(operation == fp_mode::Arithmetic::ADD || operation == fp_mode::Arithmetic::SUB ||
-                operation == fp_mode::Arithmetic::MUL);
+                operation == fp_mode::Arithmetic::MUL ||
+                operation == fp_mode::Arithmetic::MUL_LEGACY);
   if constexpr (operation == fp_mode::Arithmetic::SUB) {
     // Preserve direct subtraction's existing host NaN policy. Rewriting this as
     // architectural ADD with a negated input would select different NaN bits.
@@ -883,6 +884,21 @@ inline util::native<float> binary_f32_simd(util::native<float> a, util::native<f
     return fma_f32_simd(a, util::native<float>(1.0f), b, wf, omod);
   else {
     using U = util::native<uint32_t>;
+    if constexpr (operation == fp_mode::Arithmetic::MUL_LEGACY) {
+      // DX9 supplies a positive zero product when a MODE-flushed operand is
+      // zero, even for an infinite or NaN partner: 0 * 1 + 0 gives +0.
+      if (!(wf.fp_denorm_mode_f32() & 1u)) {
+        a = denormal::flush_value(a);
+        b = denormal::flush_value(b);
+      }
+      U a_bits = std::bit_cast<U>(a), b_bits = std::bit_cast<U>(b);
+      const auto zero_product =
+          (a_bits & U(0x7fffffffu)) == U(0) || (b_bits & U(0x7fffffffu)) == U(0);
+      util::stdx::where(zero_product, a_bits) = U(0);
+      util::stdx::where(zero_product, b_bits) = U(0x3f800000u);
+      a = std::bit_cast<util::native<float>>(a_bits);
+      b = std::bit_cast<util::native<float>>(b_bits);
+    }
     auto zero = std::bit_cast<util::native<float>>((std::bit_cast<U>(a) ^ std::bit_cast<U>(b)) &
                                                    U(0x80000000u));
     return fma_f32_simd(a, b, zero, wf, omod);

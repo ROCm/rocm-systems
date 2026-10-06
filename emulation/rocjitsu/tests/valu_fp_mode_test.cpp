@@ -2625,6 +2625,39 @@ std::vector<ArithmeticCase> tiny_result_cases() {
   // OMOD flushes a tiny result even when MODE keeps output denormals.
   add_f16("MulF16Vop3Mul2TinyModeF0", mul_f16_mul2, 0x3bffu, 0x0400u, 0xf0u, 0x0000u);
   add_f16("MulF16Vop3Mul2RoundsToNormalModeF0", mul_f16_mul2, 0x3bfeu, 0x0401u, 0xf0u, 0x0800u);
+
+  // F32 operands in v0/v1, result in v6.
+  const auto add_f32 = [&](const std::string &name, std::array<uint32_t, 2> words, uint32_t a,
+                           uint32_t b, uint32_t mode, uint32_t result) {
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     {{0, a}, {1, b}},
+                     {{6, result}},
+                     mode,
+                     FE_TONEAREST});
+  };
+  const auto dx9_vop2 =
+      rdna4::build_vop2(rdna4::kVMulDx9ZeroF32Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 6});
+  const std::array<uint32_t, 2> dx9_e32{dx9_vop2[0], 0u};
+  const auto dx9 =
+      rdna4::build_vop3(rdna4::kVMulDx9ZeroF32Vop3, {.vdst = 6, .src0 = 256, .src1 = 257});
+  const auto dx9_mul2 = rdna4::build_vop3(rdna4::kVMulDx9ZeroF32Vop3,
+                                          {.vdst = 6, .src0 = 256, .src1 = 257, .omod = 1});
+  // (1 - 2^-24) * 2^-126 is exact in F32 precision: tiny, although
+  // nearest-even subnormal rounding gives 0x00800000.
+  add_f32("MulDx9F32Vop2TinyModeC0", dx9_e32, 0x3f7fffffu, 0x00800000u, 0xc0u, 0u);
+  add_f32("MulDx9F32Vop2TinyMode30", dx9_e32, 0x3f7fffffu, 0x00800000u, 0x30u, 0x00800000u);
+  add_f32("MulDx9F32Vop2NegativeTinyModeC0", dx9_e32, 0x3f7fffffu, 0x80800000u, 0xc0u, 0x80000000u);
+  // MODE 0xd0 keeps the subnormal input but flushes the tiny product.
+  add_f32("MulDx9F32Vop2SubnormalInputModeD0", dx9_e32, 0x3fffffffu, 0x00400000u, 0xd0u, 0u);
+  add_f32("MulDx9F32Vop3Mul2TinyModeF0", dx9_mul2, 0x3f7fffffu, 0x00800000u, 0xf0u, 0u);
+  // (1 - 2^-46) * 2^-126 rounds to 2^-126 at F32 precision: not tiny.
+  add_f32("MulDx9F32Vop3Mul2RoundsToNormalModeF0", dx9_mul2, 0x3f7ffffeu, 0x00800001u, 0xf0u,
+          0x01000000u);
+  // A zero operand gives +0 even with a NaN or infinite partner.
+  add_f32("MulDx9F32Vop3NegativeZeroTimesNanModeC0", dx9, 0x80000000u, 0x7fc00000u, 0xc0u, 0u);
+  add_f32("MulDx9F32Vop3InfinityTimesZeroModeF0", dx9, 0xff800000u, 0u, 0xf0u, 0u);
   return cases;
 }
 

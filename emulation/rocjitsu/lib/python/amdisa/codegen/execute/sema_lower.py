@@ -574,7 +574,7 @@ def _mode_arithmetic(
     arguments += [f'wf.fp_round_mode_{mode}()', f'wf.fp_denorm_mode_{mode}()']
     if operation == 'FMA' and ctx.dx9_zero_fma:
         operation = 'FMA_DX9_ZERO'
-    if width == 32 and operation in ('ADD', 'MUL', 'FMA', 'FMA_DX9_ZERO'):
+    if width == 32 and operation in ('ADD', 'MUL', 'MUL_LEGACY', 'FMA', 'FMA_DX9_ZERO'):
         arguments += ['wf.cu().arch()', 'wf.ieee_mode()']
         if ctx.arithmetic_flush_output is not None:
             arguments.append(ctx.arithmetic_flush_output)
@@ -2468,6 +2468,7 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
         and ctx.mode_arithmetic
         and any(
             n.kind in (SemaNodeKind.ADD, SemaNodeKind.MUL, SemaNodeKind.FMA)
+            or (n.kind == SemaNodeKind.CALL and n.call_name == 'mul_legacy')
             for n in node.children[1].walk()
         )
     )

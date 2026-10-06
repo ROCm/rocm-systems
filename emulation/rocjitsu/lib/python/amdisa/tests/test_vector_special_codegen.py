@@ -648,3 +648,15 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
             negative = f'if (inst.inst_.neg & {1 << index}u) {source} ^= {sign};'
             assert probe.index(absolute) < probe.index(negative)
             assert probe.index(negative) < probe.index(f'cvt_pknorm_{op}_f32_simd')
+
+
+@pytest.mark.parametrize('mnemonic', ['v_mul_dx9_zero_f32', 'v_mul_legacy_f32'])
+def test_dx9_multiply_simd_uses_the_fma_tininess_policy(mnemonic: str):
+    operation = 'amdgpu::binary_f32_simd<amdgpu::fp_mode::Arithmetic::MUL_LEGACY>('
+    for encoding in ('vop2', 'vop3'):
+        probe = simd_probe_line(f'{mnemonic}_{encoding}')
+        # MODE is established for the batch instead of gating on native MODE.
+        assert 'amdgpu::fp_mode::ScopedEnvironment environment' in probe
+        assert 'native_arithmetic_matches' not in probe
+        assert operation in probe
+    assert 'effective_vop3_omod_f32' in simd_probe_line(f'{mnemonic}_vop3')

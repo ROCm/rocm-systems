@@ -62,23 +62,9 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     'v_sub_f32_vop2': ('float32_t', _binary_f32_op('SUB')),
     'v_subrev_f32_vop2': ('float32_t', _binary_f32_op('SUB', reverse=True)),
     'v_mul_f32_vop2': ('float32_t', _binary_f32_op('MUL')),
-    # Legacy / DX9 zero-multiply: (a==0 || b==0) ? 0 : a*b. The ==0 matches both
-    # ±0 (as the scalar `a == 0.0f` does). Routed via the VOP3 binary fp glue for
-    # the _vop3 twin (which applies abs/neg/omod/clamp around this functor).
-    'v_mul_legacy_f32_vop2': (
-        'float32_t',
-        '[](auto a, auto b) {'
-        ' auto r = a * b;'
-        ' util::stdx::where(a == 0.0f || b == 0.0f, r) = util::native<float32_t>(0.0f);'
-        ' return r; }',
-    ),
-    'v_mul_dx9_zero_f32_vop2': (
-        'float32_t',
-        '[](auto a, auto b) {'
-        ' auto r = a * b;'
-        ' util::stdx::where(a == 0.0f || b == 0.0f, r) = util::native<float32_t>(0.0f);'
-        ' return r; }',
-    ),
+    # Legacy / DX9 zero-multiply: a zero operand gives +0, otherwise MUL.
+    'v_mul_legacy_f32_vop2': ('float32_t', _binary_f32_op('MUL_LEGACY')),
+    'v_mul_dx9_zero_f32_vop2': ('float32_t', _binary_f32_op('MUL_LEGACY')),
     # --- uint32 (wrap-around / bitwise, bit-identical to scalar body) ---
     "v_add_u32_vop2": ("uint32_t", "std::plus<>{}"),
     'v_sub_u32_vop2': ('uint32_t', 'std::minus<>{}'),
@@ -2671,10 +2657,8 @@ def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str |
             '  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), '
             f'wf.fp_denorm_mode_f32())) {{\n{native_probe}\n  }}'
         )
-    if (
-        dtype == 'f32'
-        and 'dx9' not in fields
-        and ('amdgpu::fma_f32_simd(' in probe or 'amdgpu::binary_f32_simd<' in probe)
+    if dtype == 'f32' and (
+        'amdgpu::fma_f32_simd(' in probe or 'amdgpu::binary_f32_simd<' in probe
     ):
         # This helper applies guest denormal controls explicitly. Establish MODE
         # once for the wave, including its output scaling and clamp operations.
@@ -3065,9 +3049,22 @@ def _simd_probe_line(
                 cpp_op = _modified_conversion_op(cpp_op, bits=32)
                 return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
             if cpp_t == 'float32_t':
-                if base in ('v_add_f32', 'v_mul_f32', 'v_sub_f32', 'v_subrev_f32'):
+                if base in (
+                    'v_add_f32',
+                    'v_mul_f32',
+                    'v_sub_f32',
+                    'v_subrev_f32',
+                    'v_mul_legacy_f32',
+                    'v_mul_dx9_zero_f32',
+                ):
                     operation = (
-                        'SUB' if base == 'v_subrev_f32' else base.split('_')[1].upper()
+                        'SUB'
+                        if base == 'v_subrev_f32'
+                        else (
+                            'MUL_LEGACY'
+                            if base in ('v_mul_legacy_f32', 'v_mul_dx9_zero_f32')
+                            else base.split('_')[1].upper()
+                        )
                     )
                     cpp_op = _binary_f32_op(
                         operation, modifiers=True, reverse=base == 'v_subrev_f32'

@@ -864,7 +864,8 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
                         uint32_t denorm_mode, rj_code_arch_t arch, bool ieee_mode,
                         bool force_output_flush = false) {
   static_assert(operation == Arithmetic::ADD || operation == Arithmetic::MUL ||
-                operation == Arithmetic::FMA || operation == Arithmetic::FMA_DX9_ZERO);
+                operation == Arithmetic::MUL_LEGACY || operation == Arithmetic::FMA ||
+                operation == Arithmetic::FMA_DX9_ZERO);
   // DX9 FMA flushes all inputs and the output, independently of MODE.
   if constexpr (operation == Arithmetic::FMA_DX9_ZERO)
     denorm_mode = 0;
@@ -875,17 +876,20 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
         if constexpr (operation == Arithmetic::ADD) {
           c = b;
           b = 1.0f;
-        } else if constexpr (operation == Arithmetic::MUL) {
+        } else if constexpr (operation == Arithmetic::MUL || operation == Arithmetic::MUL_LEGACY) {
           c = std::bit_cast<float>((std::bit_cast<uint32_t>(a) ^ std::bit_cast<uint32_t>(b)) &
                                    0x80000000u);
         }
-        if constexpr (operation == Arithmetic::FMA_DX9_ZERO)
+        if constexpr (operation == Arithmetic::FMA_DX9_ZERO || operation == Arithmetic::MUL_LEGACY)
           if ((std::bit_cast<uint32_t>(a) & 0x7fffffffu) == 0 ||
               (std::bit_cast<uint32_t>(b) & 0x7fffffffu) == 0) {
-            // DX9 supplies a positive zero product, then performs the addition.
-            // This still applies signed-zero rounding and the addend's NaN policy.
+            // DX9 supplies a positive zero product, even for an infinite or NaN
+            // partner, then performs the addition. This still applies
+            // signed-zero rounding and the addend's NaN policy; MUL adds +0.
             a = 0.0f;
             b = 1.0f;
+            if constexpr (operation == Arithmetic::MUL_LEGACY)
+              c = 0.0f;
           }
         return fma_f32(a, b, c, arch, ieee_mode, denorm_mode, force_output_flush);
       });
