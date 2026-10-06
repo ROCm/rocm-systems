@@ -3010,8 +3010,13 @@ void CommandProcessor::service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick
     return;
   }
   const auto consumer = queue.read_pointer_journal.cursor();
-  const auto producer =
-      normalize_pm4_producer_cursor(queue.last_doorbell, consumer, queue.ring_size / 4);
+  const auto ring_dwords = queue.ring_size / 4;
+  // Native PM4 compares ring offsets. A client may lift its software producer
+  // by whole rings without changing the hardware consumer's starting offset.
+  const auto notified = queue.doorbell_mode == QueueDoorbellMode::HostPolled
+                            ? queue.last_doorbell % ring_dwords
+                            : queue.last_doorbell;
+  const auto producer = normalize_pm4_producer_cursor(notified, consumer, ring_dwords);
   if (outcome != VmAccessOutcome::Complete || !producer) {
     fail_pm4_queue(queue, queue.dispatches);
     return;

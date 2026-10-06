@@ -1537,8 +1537,9 @@ TEST_P(KfdNativePm4Test, HostDoorbellExecutesWrappedPacketHdpFlushAndIndirectBuf
   void *doorbell = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
                                  static_cast<off_t>(queue.doorbell_offset));
   ASSERT_NE(doorbell, MAP_FAILED);
+  constexpr uint64_t counter_base = (2ull << 32) - 1024;
   std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
-      .store(1022, std::memory_order_release);
+      .store(counter_base + 1022, std::memory_order_release);
   for (unsigned i = 0;
        i < 2000 && std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire) != 1022;
        ++i) {
@@ -1548,7 +1549,7 @@ TEST_P(KfdNativePm4Test, HostDoorbellExecutesWrappedPacketHdpFlushAndIndirectBuf
   ASSERT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 1022u);
   for (size_t i = 0; i < packets.size(); ++i)
     ring[(1022 + i) % ring.size()] = packets[i];
-  constexpr uint64_t producer = 1031;
+  constexpr uint64_t producer = counter_base + 1031;
   std::atomic_ref<uint64_t>(pointers[1]).store(producer, std::memory_order_release);
   std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
       .store(producer, std::memory_order_release);
