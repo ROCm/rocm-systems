@@ -61,8 +61,8 @@ struct ReadArgs {
 // The output pointer reaches the kernel only inside the by-value struct, so the
 // runtime's per-buffer dependency check does not register it.
 __global__ void writeStruct(WriteArgs a) {
-  const int64_t t0 = wall_clock64();
-  while (wall_clock64() - t0 < a.cycles) {
+  const int64_t t0 = clock64();
+  while (clock64() - t0 < a.cycles) {
   }
   for (unsigned int i = threadIdx.x; i < a.n; i += blockDim.x) a.x[i] = a.w;
 }
@@ -70,8 +70,8 @@ __global__ void writeStruct(WriteArgs a) {
 // Same body, but `alias` (== a.x) is also passed directly, so the dependency
 // check does register the buffer. Used only by the control case.
 __global__ void writeStructAlias(WriteArgs a, int64_t* /*alias*/) {
-  const int64_t t0 = wall_clock64();
-  while (wall_clock64() - t0 < a.cycles) {
+  const int64_t t0 = clock64();
+  while (clock64() - t0 < a.cycles) {
   }
   for (unsigned int i = threadIdx.x; i < a.n; i += blockDim.x) a.x[i] = a.w;
 }
