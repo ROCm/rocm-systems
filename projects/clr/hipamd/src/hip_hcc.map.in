@@ -706,6 +706,7 @@ local:
 hip_7.18 {
 global:
     hipDeviceFlushGPUDirectRDMAWrites;
+    hipDeviceGetP2PAtomicCapabilities;
 local:
     *;
 } hip_7.17;

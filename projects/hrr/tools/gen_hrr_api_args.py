@@ -658,6 +658,11 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     # Category 8: Device extra — output ptr stale, dangerous context ops, or struct-ptr params
     # hipDeviceGetUuid — output hipUUID* stale
     "hipDeviceGetUuid",
+    # hipDeviceGetP2PAtomicCapabilities — the `operations` input is a
+    # const hipAtomicOperation* array of `count` entries; only the capture-time
+    # host address is recorded, so replaying it would dereference a stale VA.
+    # Capability query with no effect on replay state — noop.
+    "hipDeviceGetP2PAtomicCapabilities",
     # Primary ctx ops that would destroy the context at playback
     "hipDevicePrimaryCtxRelease",
     "hipDevicePrimaryCtxReset",

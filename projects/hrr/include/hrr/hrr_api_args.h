@@ -5820,6 +5820,35 @@ typedef struct {
     uint64_t module;
 } hrr_args_hipModuleEnumerateFunctions;
 
+/* hipError_t hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTarget target, enum hipFlushGPUDirectRDMAWritesScope scope) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t /* enum hipFlushGPUDirectRDMAWritesTarget */ target;
+    uint64_t /* enum hipFlushGPUDirectRDMAWritesScope */ scope;
+} hrr_args_hipDeviceFlushGPUDirectRDMAWrites;
+
+/* hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value, int device) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t kernel;
+    int32_t attr;
+    int32_t value;
+    int32_t device;
+} hrr_args_hipKernelSetAttributeForDevice;
+
+/* hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities, const hipAtomicOperation* operations, unsigned int count, int srcDevice, int dstDevice) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t capabilities;
+    uint64_t operations;
+    uint32_t count;
+    int32_t srcDevice;
+    int32_t dstDevice;
+} hrr_args_hipDeviceGetP2PAtomicCapabilities;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6367,16 +6396,19 @@ typedef enum hrr_api_id {
     HRR_API_HIPDEVICEGETLUID = 542,
     HRR_API_HIPINITDEVICE = 543,
     HRR_API_HIPMODULEENUMERATEFUNCTIONS = 544,
-    HRR_API_HIPPOPCALLCONFIGURATION = 545,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 546,
-    HRR_API_HIPREGISTERFATBINARY = 547,
-    HRR_API_HIPREGISTERFUNCTION = 548,
-    HRR_API_HIPREGISTERMANAGEDVAR = 549,
-    HRR_API_HIPREGISTERSURFACE = 550,
-    HRR_API_HIPREGISTERTEXTURE = 551,
-    HRR_API_HIPREGISTERVAR = 552,
-    HRR_API_HIPUNREGISTERFATBINARY = 553,
-    HRR_API_COUNT = 554
+    HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES = 545,
+    HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE = 546,
+    HRR_API_HIPDEVICEGETP2PATOMICCAPABILITIES = 547,
+    HRR_API_HIPPOPCALLCONFIGURATION = 548,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 549,
+    HRR_API_HIPREGISTERFATBINARY = 550,
+    HRR_API_HIPREGISTERFUNCTION = 551,
+    HRR_API_HIPREGISTERMANAGEDVAR = 552,
+    HRR_API_HIPREGISTERSURFACE = 553,
+    HRR_API_HIPREGISTERTEXTURE = 554,
+    HRR_API_HIPREGISTERVAR = 555,
+    HRR_API_HIPUNREGISTERFATBINARY = 556,
+    HRR_API_COUNT = 557
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6927,6 +6959,9 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipDeviceGetLuid",
     "hipInitDevice",
     "hipModuleEnumerateFunctions",
+    "hipDeviceFlushGPUDirectRDMAWrites",
+    "hipKernelSetAttributeForDevice",
+    "hipDeviceGetP2PAtomicCapabilities",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",

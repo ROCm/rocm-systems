@@ -378,6 +378,15 @@ HIP_PUBLIC_API hipError_t hipDeviceGetName(char* name, int len, hipDevice_t devi
   return hip::GetHipDispatchTable()->hipDeviceGetName_fn(name, len, device);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities,
+                                                            const hipAtomicOperation* operations,
+                                                            unsigned int count, int srcDevice,
+                                                            int dstDevice) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceGetP2PAtomicCapabilities_fn(
+      capabilities, operations, count, srcDevice, dstDevice);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                     int dstDevice) {
   TRY;

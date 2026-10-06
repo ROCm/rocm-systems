@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 618 | 618 | 0 |
-| **total** | **618** | **618** | **0** |
+| `contract` | 621 | 621 | 0 |
+| **total** | **621** | **621** | **0** |
 
 ## Tier: `contract`
 
@@ -997,10 +997,13 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_PeerCopy_HipMemcpyPeer_InvalidDevice_IsRejected` | hipMemcpyPeer | rejects an out-of-range device ordinal and leaves a matching sticky last error that clears once consumed |
 | `Contract_PeerCopy_HipMemcpyPeer_SelfDevice1D_CopiesBytes` | hipMemcpyPeer | a same-device (degenerate) 1D peer copy transfers bytes like an ordinary device-to-device copy |
 
-### `peer_query` (5 cases)
+### `peer_query` (8 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_PeerQuery_HipDeviceGetP2PAtomicCapabilities_InvalidOperation_IsRejected` | hipDeviceGetP2PAtomicCapabilities | rejects an operation value outside the hipAtomicOperation enum with a non-success status |
+| `Contract_PeerQuery_HipDeviceGetP2PAtomicCapabilities_NullOrEmptyArgs_AreRejected` | hipDeviceGetP2PAtomicCapabilities | rejects a null capabilities array, a null operations array, and a zero operation count with a non-success status |
+| `Contract_PeerQuery_HipDeviceGetP2PAtomicCapabilities_SelfOrInvalidDevice_IsRejected` | hipDeviceGetP2PAtomicCapabilities | rejects a same-device (src==dst) query and out-of-range or negative device ids with a non-success status |
 | `Contract_PeerQuery_HipDeviceGetP2PAttribute_InvalidArgs_AreRejected` | hipDeviceGetP2PAttribute | rejects null output, an unknown attribute enum, and out-of-range device ids with a non-success status |
 | `Contract_PeerQuery_HipDeviceGetP2PAttribute_SelfDevice_IsRejected` | hipDeviceGetP2PAttribute | rejects a same-device (src==dst) P2P attribute query with a non-success status |
 | `Contract_PeerQuery_HipExtGetLinkTypeAndHopCount_InvalidDevice_IsRejected` | hipExtGetLinkTypeAndHopCount | rejects out-of-range and negative device ids with a non-success status |
