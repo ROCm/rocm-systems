@@ -9,7 +9,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Resolved Issues
 
 - **Fixed PCIe link information being hidden when GPU metrics are unsupported**.  
-  - Static and available current link data are returned from sysfs, including kernels that report `Unknown speed`. Missing or unsupported attributes remain `N/A`; malformed data, permission failures and I/O errors still fail the query.
+  - Static and available current link data are returned from sysfs, including kernels that report `Unknown speed`. Current link attributes that are missing or unreadable remain `N/A`.
   - This also applies when the library does not support the driver's GPU-metrics format. Unavailable bandwidth and error counters remain `N/A`.
   - `amdsmi_get_gpu_metrics_info()` and the underlying `rsmi_dev_gpu_metrics_info_get()` preserve read errors instead of returning stale data or replacing unsupported status with `AMDSMI_STATUS_UNEXPECTED_DATA`.
 

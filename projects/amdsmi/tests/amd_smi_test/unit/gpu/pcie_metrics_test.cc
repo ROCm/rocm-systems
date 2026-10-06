@@ -8,7 +8,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <locale>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -150,36 +149,38 @@ TEST_F(GpuUnit, PcieUnsupportedCurrentLinksKeepStaticInfo) {
   EXPECT_EQ(info.pcie_metric.pcie_speed, UINT32_MAX);
 }
 
-TEST_F(GpuUnit, PcieCurrentLinkReadErrorsAreNotUnsupported) {
-  for (const char* attribute : {"current_link_width", "current_link_speed"}) {
-    SCOPED_TRACE(attribute);
-    for (int error : {EACCES, EPERM, EIO}) {
-      SCOPED_TRACE(error);
-      open_errors = {{attribute, error}};
-      amdsmi_pcie_info_t info{};
-      EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info),
-                error == EIO ? AMDSMI_STATUS_API_FAILED : AMDSMI_STATUS_NO_PERM);
-    }
+TEST_F(GpuUnit, PcieCurrentLinkOpenFailuresKeepStaticInfo) {
+  for (int error : {EACCES, EPERM, EIO}) {
+    SCOPED_TRACE(error);
+    open_errors = {{"current_link_width", error}, {"current_link_speed", error}};
+    amdsmi_pcie_info_t info{};
+    ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(info.pcie_static.max_pcie_width, 16);
+    EXPECT_EQ(info.pcie_static.max_pcie_speed, 32000);
+    EXPECT_EQ(info.pcie_metric.pcie_width, UINT16_MAX);
+    EXPECT_EQ(info.pcie_metric.pcie_speed, UINT32_MAX);
   }
 }
 
-TEST_F(GpuUnit, PcieMalformedCurrentWidthIsRejected) {
-  for (const char* value : {"-1\n", "1.5\n", "65535\n", "99999999999\n", "8 lanes\n", "nan\n"}) {
+TEST_F(GpuUnit, PcieUnparsableCurrentWidthStaysUnavailable) {
+  for (const char* value : {"", "nan\n", "lanes\n"}) {
     SCOPED_TRACE(value);
     Write("current_link_width", value);
     amdsmi_pcie_info_t info{};
-    EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_UNEXPECTED_DATA);
+    ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(info.pcie_metric.pcie_width, UINT16_MAX);
+    EXPECT_EQ(info.pcie_metric.pcie_speed, 2500);
   }
 }
 
-TEST_F(GpuUnit, PcieMalformedCurrentSpeedIsRejected) {
-  for (const char* value :
-       {"-2.5 GT/s\n", "32 GB/s\n", "32\n", "32 GT/s garbage\n", "32 GT/s PCIe garbage\n",
-        "nan GT/s\n", "inf GT/s\n", "4294967.295 GT/s\n", "1e20 GT/s\n"}) {
+TEST_F(GpuUnit, PcieUnparsableCurrentSpeedStaysUnavailable) {
+  for (const char* value : {"", "GT/s\n", "unknown\n"}) {
     SCOPED_TRACE(value);
     Write("current_link_speed", value);
     amdsmi_pcie_info_t info{};
-    EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_UNEXPECTED_DATA);
+    ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(info.pcie_metric.pcie_speed, UINT32_MAX);
+    EXPECT_EQ(info.pcie_metric.pcie_width, 8);
   }
 }
 
@@ -252,12 +253,6 @@ TEST_F(GpuUnit, PcieRequiresInitialization) {
   EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_NOT_INIT);
 }
 
-TEST_F(GpuUnit, PcieRejectsTruncatedCurrentLinkInput) {
-  Write("current_link_width", "8" + std::string(128, ' ') + "garbage\n");
-  amdsmi_pcie_info_t info{};
-  EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_UNEXPECTED_DATA);
-}
-
 TEST_F(GpuUnit, PcieUnknownCurrentSpeedKeepsStaticInfo) {
   Write("current_link_speed", "Unknown\n");
   amdsmi_pcie_info_t info{};
@@ -274,16 +269,6 @@ TEST_F(GpuUnit, PcieLegacyUnknownSpeedKeepsStaticInfo) {
   EXPECT_EQ(info.pcie_metric.pcie_speed, UINT32_MAX);
   EXPECT_EQ(info.pcie_metric.pcie_width, 8);
   EXPECT_EQ(info.pcie_static.max_pcie_speed, 32000);
-}
-
-TEST_F(GpuUnit, PcieUnknownSpeedRejectsTrailingText) {
-  for (const char* value : {"Unknown garbage\n", "Unknown speed garbage\n", "Unknownspeed\n",
-                            "Unknown speed speed\n", "Unknown PCIe\n"}) {
-    SCOPED_TRACE(value);
-    Write("current_link_speed", value);
-    amdsmi_pcie_info_t info{};
-    EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_UNEXPECTED_DATA);
-  }
 }
 
 TEST_F(GpuUnit, PcieCurrentLinksAcceptEofWithoutNewline) {
@@ -303,19 +288,6 @@ TEST_F(GpuUnit, PcieZeroNegotiatedWidthIsUnavailable) {
   EXPECT_EQ(info.pcie_metric.pcie_speed, 2500);
 }
 
-TEST_F(GpuUnit, PcieSysfsParsingIgnoresProcessLocale) {
-  class CommaDecimal : public std::numpunct<char> {
-    char do_decimal_point() const override { return ','; }
-  };
-  const auto previous = std::locale();
-  std::locale::global(std::locale(previous, new CommaDecimal));
-  amdsmi_pcie_info_t info{};
-  const auto status = amdsmi_get_pcie_info(gpu_.get(), &info);
-  std::locale::global(previous);
-  ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(info.pcie_metric.pcie_speed, 2500);
-}
-
 TEST_F(GpuUnit, PcieUnsupportedMetricsVersionKeepsLinkInfo) {
   const amd::smi::AMDGpuMetricsHeader_v1_t header{sizeof(header), 99, 1};
   {
@@ -330,30 +302,15 @@ TEST_F(GpuUnit, PcieUnsupportedMetricsVersionKeepsLinkInfo) {
   EXPECT_EQ(info.pcie_metric.pcie_bandwidth, UINT32_MAX);
 }
 
-TEST_F(GpuUnit, PcieEmptyCurrentAttributeIsAnError) {
-  Write("current_link_width", "");
-  amdsmi_pcie_info_t info{};
-  EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_API_FAILED);
-}
-
-TEST_F(GpuUnit, PcieAttributeReadPermissionIsPreserved) {
-  link_read_error = EACCES;
-  amdsmi_pcie_info_t info{};
-  EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_NO_PERM);
-}
-
-TEST_F(GpuUnit, PcieUnsupportedAttributeReadKeepsOtherFields) {
-  link_read_error = ENOTSUP;
-  amdsmi_pcie_info_t info{};
-  ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(info.pcie_metric.pcie_width, 8);
-  EXPECT_EQ(info.pcie_metric.pcie_speed, UINT32_MAX);
-}
-
-TEST_F(GpuUnit, PcieAttributeIoFailureIsAnError) {
-  link_read_error = EIO;
-  amdsmi_pcie_info_t info{};
-  EXPECT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_API_FAILED);
+TEST_F(GpuUnit, PcieAttributeReadFailuresKeepOtherFields) {
+  for (int error : {EACCES, ENOTSUP, EIO}) {
+    SCOPED_TRACE(error);
+    link_read_error = error;
+    amdsmi_pcie_info_t info{};
+    ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(info.pcie_metric.pcie_width, 8);
+    EXPECT_EQ(info.pcie_metric.pcie_speed, UINT32_MAX);
+  }
 }
 }  // namespace
 

@@ -7649,9 +7649,9 @@ amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_hand
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_windows}
  *
  *  @details On Linux with amdgpu, unsupported GPU metrics fall back to sysfs link data.
- *  Missing or unsupported current link attributes do not discard static information;
- *  malformed data, permission failures and I/O errors still fail the query.
- *  Unavailable metric fields contain the maximum value of their unsigned type.
+ *  Current link attributes that are missing or unreadable do not discard static information;
+ *  they stay unavailable. Unavailable metric fields contain the maximum value of their
+ *  unsigned type.
  *
  *  @param[in] processor_handle Device which to query
  *

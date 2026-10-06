@@ -26,8 +26,6 @@ if(NOT GTest_FOUND)
         URL_HASH SHA256=78c676fc63881529bf97bf9d45948d905a66833fbfa5318ea2cd7478cb98f399
     )
     FetchContent_MakeAvailable(googletest)
-    # Match the RTTI-enabled locale test without changing imported GTest targets.
-    target_compile_options(gtest PRIVATE -frtti)
 endif()
 
 enable_testing()
@@ -131,8 +129,6 @@ if(AMDSMI_TEST_LIBRARY_TYPE STREQUAL "STATIC_LIBRARY")
     add_executable(amdsmi_pcie_metrics_test unit/gpu/pcie_metrics_test.cc)
     target_include_directories(amdsmi_pcie_metrics_test PRIVATE ${PROJECT_SOURCE_DIR}/rocm_smi/include)
     target_link_libraries(amdsmi_pcie_metrics_test PRIVATE ${AMD_SMI_TARGET} GTest::gtest)
-    # libstdc++ uses dynamic_cast when installing the test's custom locale facet.
-    target_compile_options(amdsmi_pcie_metrics_test PRIVATE -frtti)
     target_link_options(
         amdsmi_pcie_metrics_test
         PRIVATE

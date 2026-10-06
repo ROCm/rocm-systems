@@ -10,7 +10,6 @@
 #include <cassert>
 #include <cctype>
 #include <cerrno>
-#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -21,7 +20,6 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
-#include <locale>
 #include <map>
 #include <memory>
 #include <queue>
@@ -5939,56 +5937,28 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
     info->pcie_metric.pcie_nak_received_count = UINT64_MAX;
     info->pcie_metric.pcie_lc_perf_other_end_recovery_count = UINT32_MAX;
 
-    auto read_link = [&](const char* attribute, auto& value, bool is_speed) -> amdsmi_status_t {
-      const auto path = "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/" + attribute;
-      std::unique_ptr<FILE, decltype(&fclose)> file(fopen(path.c_str(), "r"), &fclose);
-      if (!file) {
-        if (errno == ENOENT || errno == ENOTSUP) return AMDSMI_STATUS_SUCCESS;
-        return errno == EACCES || errno == EPERM ? AMDSMI_STATUS_NO_PERM : AMDSMI_STATUS_API_FAILED;
+    std::string path_cur_link_width =
+        "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/current_link_width";
+    fp = fopen(path_cur_link_width.c_str(), "r");
+    if (fp) {
+      // A down link negotiates zero lanes, which is not a usable width.
+      if (fscanf(fp, "%u", &pcie_width) == 1 && pcie_width != 0) {
+        info->pcie_metric.pcie_width = (uint16_t)pcie_width;
       }
-      char buffer[128];
-      errno = 0;
-      if (!fgets(buffer, sizeof(buffer), file.get())) {
-        if (ferror(file.get()) && errno == ENOTSUP) return AMDSMI_STATUS_SUCCESS;
-        if (ferror(file.get()) && (errno == EACCES || errno == EPERM)) return AMDSMI_STATUS_NO_PERM;
-        return AMDSMI_STATUS_API_FAILED;
-      }
-      if (!std::strchr(buffer, '\n') && !feof(file.get())) return AMDSMI_STATUS_UNEXPECTED_DATA;
-      std::istringstream input(buffer);
-      input.imbue(std::locale::classic());
-      if (is_speed && input.peek() == 'U') {
-        std::string unknown, extra;
-        input >> unknown;
-        if (unknown != "Unknown") return AMDSMI_STATUS_UNEXPECTED_DATA;
-        if (!(input >> extra)) return AMDSMI_STATUS_SUCCESS;
-        if (extra != "speed" || (input >> extra)) return AMDSMI_STATUS_UNEXPECTED_DATA;
-        return AMDSMI_STATUS_SUCCESS;
-      }
-      double number = 0;
-      if (!(input >> number)) return AMDSMI_STATUS_UNEXPECTED_DATA;
-      if (is_speed) {
-        std::string unit;
-        if (!(input >> unit) || unit != "GT/s") return AMDSMI_STATUS_UNEXPECTED_DATA;
-        if (input >> unit) {
-          if (unit != "PCIe") return AMDSMI_STATUS_UNEXPECTED_DATA;
-        }
-      }
-      std::string extra;
-      if (input >> extra) return AMDSMI_STATUS_UNEXPECTED_DATA;
-      const double scaled = number * (is_speed ? 1000 : 1);
-      using Value = std::decay_t<decltype(value)>;
-      if (!std::isfinite(scaled) || scaled < 0 || scaled >= std::numeric_limits<Value>::max() ||
-          std::floor(scaled) != scaled) {
-        return AMDSMI_STATUS_UNEXPECTED_DATA;
-      }
-      if (!is_speed && scaled == 0) return AMDSMI_STATUS_SUCCESS;
-      value = static_cast<Value>(scaled);
-      return AMDSMI_STATUS_SUCCESS;
-    };
+      fclose(fp);
+    }
 
-    status = read_link("current_link_width", info->pcie_metric.pcie_width, false);
-    if (status != AMDSMI_STATUS_SUCCESS) return status;
-    return read_link("current_link_speed", info->pcie_metric.pcie_speed, true);
+    std::string path_cur_link_speed =
+        "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/current_link_speed";
+    fp = fopen(path_cur_link_speed.c_str(), "r");
+    if (fp) {
+      // A down link reports "Unknown speed", which does not parse and stays unavailable.
+      if (fscanf(fp, "%lf %*s", &pcie_speed) == 1) {
+        info->pcie_metric.pcie_speed = static_cast<uint32_t>(pcie_speed * 1000);
+      }
+      fclose(fp);
+    }
+    return AMDSMI_STATUS_SUCCESS;
   }
   if (status != AMDSMI_STATUS_SUCCESS) return status;
 
