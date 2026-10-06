@@ -185,6 +185,10 @@ ncclResult_t ncclSocketListen(struct ncclSocket* sock) {
 /* Format a string representation of a (union ncclSocketAddress *) socket address using getnameinfo()
  *
  * Output: "IPv4/IPv6 address<port>"
+ *
+ * The result is written into buf and truncated to at most bufLen bytes, including the terminating NUL.
+ *
+ * Output: "IPv4/IPv6 address<port>"
  */
 const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, size_t bufLen, const int numericHostForm /*= 1*/) {
   const struct sockaddr* saddr = &addr->sa;
