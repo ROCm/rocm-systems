@@ -3459,6 +3459,35 @@ class AMDSMIHelpers:
             if logger.is_json_format() or logger.is_csv_format():
                 return {"status": "error", "message": message}
             return message
+
+        # Pre-check NPM enablement, mirroring validate_and_set_node_power_limit():
+        # amdsmi_get_npm_supported_balancing_modes() is NOT gated on NPM
+        # enablement (it reflects hardware/firmware capability regardless of
+        # whether NPM is enabled), so a platform that supports both PB and FB
+        # would otherwise fall through to the generic "not supported on this
+        # node" message below even when the real cause is "NPM is disabled."
+        # Checking status up front lets that case be reported unambiguously.
+        try:
+            npm_info = amdsmi_interface.amdsmi_get_npm_info(node_handle)
+            if npm_info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED:
+                message = "[AMDSMI_STATUS_NOT_SUPPORTED] NPM is disabled on this node; cannot set balancing mode"
+                self.error_collector.record_library_error(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "error",
+                        "requested_mode": requested_mode,
+                        "error": "AMDSMI_STATUS_NOT_SUPPORTED",
+                        "message": message,
+                    }
+                return message
+        except amdsmi_exception.AmdSmiLibraryException:
+            # NPM enablement couldn't be determined (e.g. npm_status sysfs file
+            # unreadable); fall through and let the set call below report its
+            # own error rather than masking it with a pre-check failure.
+            pass
+
         try:
             amdsmi_interface.amdsmi_set_npm_balancing_mode(
                 node_handle, self.NPM_BALANCING_MODE_FROM_CLI[requested_mode]
@@ -3471,13 +3500,14 @@ class AMDSMIHelpers:
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                 raise PermissionError("Command requires elevation") from e
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
-                # NOT_SUPPORTED covers "NPM disabled", "board/mode sysfs file
-                # missing/unreadable while NPM is enabled", and "requested mode
-                # absent from this platform's supported_mode bitmask" --
-                # the status code alone can't distinguish them. Query the
-                # supported-modes bitmask separately to tell the last case
-                # apart from the other two, which stay lumped together since
-                # they're indistinguishable from here.
+                # NPM-disabled is already handled by the pre-check above, so a
+                # NOT_SUPPORTED reaching here means either "requested mode
+                # absent from this platform's supported_mode bitmask" or
+                # "board/mode sysfs file missing/unreadable while NPM is
+                # enabled" -- the status code alone can't distinguish those
+                # two. Query the supported-modes bitmask separately to tell
+                # the former apart from the latter, which stays lumped into
+                # the generic message since it's indistinguishable from here.
                 try:
                     supported = amdsmi_interface.amdsmi_get_npm_supported_balancing_modes(
                         node_handle

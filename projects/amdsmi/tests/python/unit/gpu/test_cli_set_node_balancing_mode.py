@@ -129,16 +129,21 @@ def _build_fake_amdsmi():
     # this feature) is evaluated at import time and needs these to resolve.
     wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE = 100
     wrapper.AMDSMI_STATUS_UNEXPECTED_DATA = 101
+    wrapper.AMDSMI_NPM_STATUS_DISABLED = 0
+    wrapper.AMDSMI_NPM_STATUS_ENABLED = 1
     interface.amdsmi_wrapper = wrapper
     # set_value.py imports these two constants by name at module scope.
     interface.AMDSMI_MAX_PPT_LIMIT = 0
     interface.AMDSMI_MAX_UTIL = 100
     # Overwritten per-test.
     interface.amdsmi_set_npm_balancing_mode = lambda _handle, _mode: None
+    # Defaults to "NPM enabled" so existing tests reach the set call below the
+    # enablement pre-check; overwritten per-test to exercise the disabled path.
+    interface.amdsmi_get_npm_info = lambda _handle: {"status": wrapper.AMDSMI_NPM_STATUS_ENABLED}
     # Defaults to "both modes supported" so existing NOT_SUPPORTED tests (which
-    # pre-date this query and mean "NPM disabled") keep getting the generic
-    # message; overwritten per-test to exercise the "mode not supported on
-    # this platform" branch.
+    # pre-date this query and mean "requested mode absent from platform") keep
+    # getting the generic message; overwritten per-test to exercise the "mode
+    # not supported on this platform" branch.
     interface.amdsmi_get_npm_supported_balancing_modes = lambda _handle: ["PB", "FB"]
 
     exception.AmdSmiLibraryException = _FakeLibraryException
@@ -334,6 +339,11 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
     def setUp(self):
         self.calls = []
         self.interface.amdsmi_set_npm_balancing_mode = lambda h, m: self.calls.append((h, m))
+        # Reset to "NPM enabled" each test -- individual tests override this
+        # to exercise the NPM-disabled pre-check branch.
+        self.interface.amdsmi_get_npm_info = lambda h: {
+            "status": self.interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_ENABLED
+        }
         # Reset to "both modes supported" each test -- individual tests
         # override this to exercise the "mode absent from platform" branch.
         self.interface.amdsmi_get_npm_supported_balancing_modes = lambda h: ["PB", "FB"]
@@ -374,13 +384,35 @@ class TestValidateAndSetNodeBalancingMode(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self._validate(node_handle=object(), requested_mode="POWER_BALANCING")
 
+    def test_npm_disabled_reports_distinct_message_without_raising(self):
+        # The NPM-disabled case is caught by the pre-check (amdsmi_get_npm_info()
+        # status), before amdsmi_set_npm_balancing_mode() is ever called -- this
+        # is what fixes the bug where a platform supporting both PB and FB
+        # (supported_mode is NOT gated on NPM enablement) fell through to the
+        # generic "not supported on this node" message instead of reporting
+        # that NPM itself is disabled.
+        self.interface.amdsmi_get_npm_info = lambda h: {
+            "status": self.interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED
+        }
+
+        fake_self, result = self._validate(node_handle=object(), requested_mode="POWER_BALANCING")
+
+        self.assertIn(
+            "[AMDSMI_STATUS_NOT_SUPPORTED] NPM is disabled on this node; cannot set balancing mode",
+            result,
+        )
+        self.assertEqual(self.calls, [], "API must not be called when NPM is disabled")
+        fake_self.error_collector.record_library_error.assert_called_once_with(
+            _STATUS_NOT_SUPPORTED
+        )
+
     def test_not_supported_returns_message_without_raising(self):
-        # The balancing-mode-specific divergence from
-        # validate_and_set_node_power_limit(): NPM disabled surfaces as
-        # AMDSMI_STATUS_NOT_SUPPORTED here (not AMDSMI_STATUS_INVAL), and is
-        # reported as a message, not raised. The same status also covers
-        # "NPM enabled but board/mode unreadable", indistinguishable from
-        # this status code alone, hence the non-overclaiming message text.
+        # With NPM enabled (the pre-check passes), the balancing-mode-specific
+        # divergence from validate_and_set_node_power_limit() still applies:
+        # AMDSMI_STATUS_NOT_SUPPORTED from the set call itself is reported as a
+        # message, not raised. This covers "NPM enabled but board/mode
+        # unreadable", indistinguishable from this status code alone, hence
+        # the non-overclaiming message text.
         self.interface.amdsmi_set_npm_balancing_mode = lambda h, m: (_ for _ in ()).throw(
             _FakeLibraryException(
                 _STATUS_NOT_SUPPORTED, "AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported"
