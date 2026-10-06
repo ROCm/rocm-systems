@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Host-only microtests for src/diagnostics/ib_write_bw.cc, #include-d via DIAG_IB_WRITE_BW_CC_PATH to reach its
- * file-static helpers: discovery, pairing, command build, output parse and stats. No test spawns ib_write_bw.
+ * file-static helpers. Peers are simulated through the bootstrap seams; no test spawns ib_write_bw.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -944,7 +944,7 @@ TEST_F(DiagIbWriteBwMicrotest, ReportBandwidthStats_SummaryOnRankZeroWithCappedO
   bandwidth[13].direct = 100;
   EXPECT_EQ(Report(bandwidth.data(), false, true),
             NetInfo("10.0/100.0/131.0 Gbit/s min/median/max same-nic bw (across 19 ranks)") + shownLines);
-  comm_->rank = 1;
+  PlaceRank(1);
   EXPECT_EQ(Report(bandwidth.data(), false, true), "");
 }
 
@@ -1327,8 +1327,7 @@ TEST_F(DiagIbWriteBwMicrotest, Run_SetupFailureOnAnyRankEndsBeforeSchedule) {
             NetInfo("required external tool missing") + NetInfo("setup failed on rank 0"));
   EXPECT_TRUE(selfInfo_.setupFailed);
   probeExit_ = 0;
-  comm_->rank = 2;
-  comm_->node = 1;
+  PlaceRank(2);
   EXPECT_EQ(CaptureStdout([&] { Run(); }), "");
   EXPECT_EQ(gathers_, 2);
   EXPECT_TRUE(serverCommands_.empty());
