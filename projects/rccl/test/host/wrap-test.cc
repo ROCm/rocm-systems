@@ -6074,9 +6074,10 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherReachesCeRegisteredUnlikeGe
               *out = ncclSymSendNonregRecvReg;
               return ncclSuccess;
             });
-        // gfx942/gfx950 have ceRegMax[AllGather]=0 by tuning design; supply the
-        // threshold via param seam so the size window opens. gfx1250 has a non-zero
-        // table entry (8 GiB) and does not need the override.
+        // Use the env seam to set a known 256 MiB upper bound for test determinism;
+        // table values may change with tuning.  The loop confirms all three arch
+        // families route AllGather to RCCL_CE_REGISTERED when a registered window
+        // is open and the message fits.
         g_loadParam = ForceParam("RCCL_CE_COLL_MAX_BYTES", int64_t(268435456));
         for (const char* arch : {"gfx942", "gfx950", "gfx1250"}) {
           ncclComm* comm = MakeCommWithArch(arch);
