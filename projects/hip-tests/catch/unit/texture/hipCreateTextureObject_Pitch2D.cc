@@ -295,6 +295,9 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2D_NormalizedCoordsLinearFilter) 
     // either hipSuccess or hipErrorNotSupported is correct here.
     hipError_t ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
     REQUIRE((ret == hipSuccess || ret == hipErrorNotSupported));
+    if (ret == hipErrorNotSupported) {
+      (void)hipGetLastError();  // drain latched error; don't leak into later sections
+    }
     if (ret == hipSuccess) {
       HIP_CHECK(hipDestroyTextureObject(texObj));
     }
@@ -313,6 +316,9 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2D_NormalizedCoordsLinearFilter) 
     // match the device-required rowPitch on a given ASIC: hipSuccess or hipErrorNotSupported.
     hipError_t ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
     REQUIRE((ret == hipSuccess || ret == hipErrorNotSupported));
+    if (ret == hipErrorNotSupported) {
+      (void)hipGetLastError();  // drain latched error; don't leak into later sections
+    }
     if (ret == hipSuccess) {
       HIP_CHECK(hipDestroyTextureObject(texObj));
     }
@@ -332,6 +338,9 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2D_NormalizedCoordsLinearFilter) 
     // ASIC: either hipSuccess or hipErrorNotSupported is correct here.
     hipError_t ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
     REQUIRE((ret == hipSuccess || ret == hipErrorNotSupported));
+    if (ret == hipErrorNotSupported) {
+      (void)hipGetLastError();  // drain latched error; don't leak into later sections
+    }
     if (ret == hipSuccess) {
       HIP_CHECK(hipDestroyTextureObject(texObj));
     }
@@ -383,6 +392,9 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2D_NormalizedCoordsLinearFilter) 
                               << " (expected hipSuccess or hipErrorNotSupported; "
                               << "hipErrorOutOfMemory would indicate a propagation regression)");
     REQUIRE((ret == hipSuccess || ret == hipErrorNotSupported));
+    if (ret == hipErrorNotSupported) {
+      (void)hipGetLastError();  // drain latched error; don't leak into later sections
+    }
     if (ret == hipSuccess) {
       HIP_CHECK(hipDestroyTextureObject(texObj));
     }
