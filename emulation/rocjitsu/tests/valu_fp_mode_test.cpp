@@ -53,10 +53,12 @@ struct ArithmeticCase {
                  std::vector<std::pair<uint32_t, uint32_t>> sources_,
                  std::vector<std::pair<uint32_t, uint32_t>> expected_, uint32_t mode_,
                  int host_rounding_, uint32_t mxcsr_mask_ = 0, uint32_t mxcsr_bits_ = 0,
-                 SimdPathExpectation simd_ = {})
+                 SimdPathExpectation simd_ = {},
+                 std::vector<std::pair<uint32_t, uint32_t>> scalar_sources_ = {})
       : name(std::move(name_)), arch(arch_), words(words_), sources(std::move(sources_)),
         expected(std::move(expected_)), mode(mode_), host_rounding(host_rounding_),
-        mxcsr_mask(mxcsr_mask_), mxcsr_bits(mxcsr_bits_), simd(simd_) {}
+        mxcsr_mask(mxcsr_mask_), mxcsr_bits(mxcsr_bits_), simd(simd_),
+        scalar_sources(std::move(scalar_sources_)) {}
 
   std::string name;
   rj_code_arch_t arch;
@@ -68,6 +70,8 @@ struct ArithmeticCase {
   uint32_t mxcsr_mask = 0;
   uint32_t mxcsr_bits = 0;
   SimdPathExpectation simd;
+  // SGPR index and value pairs, written before execution.
+  std::vector<std::pair<uint32_t, uint32_t>> scalar_sources;
 };
 
 void PrintTo(const ArithmeticCase &test, std::ostream *stream) { *stream << test.name; }
@@ -2964,6 +2968,49 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
   return cases;
 }
 
+// V_CNDMASK_B16 applies ABS/NEG to the selected half's sign bit, without
+// flushing or quieting it. Lanes are gfx1201 captures of
+// v_cndmask_b16 v6, -v0, |v1|, s[10:11], which gave the same result under all
+// 16 MODE denormal settings. The selector picks the captured source in every lane.
+std::vector<ArithmeticCase> cndmask_b16_modifier_cases() {
+  struct Lane {
+    const char *name;
+    uint32_t src0;
+    uint32_t src1;
+    bool select_src1;
+    uint32_t result;
+  };
+  constexpr std::array<Lane, 5> lanes = {{
+      {"NegSubnormal", 0x7ac50200u, 0xe8ea0000u, false, 0xa5a58200u},
+      {"NegNegativeSubnormal", 0x2eff83ffu, 0xc24b0000u, false, 0xa5a503ffu},
+      {"NegSignalingNan", 0xe9eb7d55u, 0xed760000u, false, 0xa5a5fd55u},
+      {"AbsNegativeSubnormal", 0x0c140000u, 0x56f883ffu, true, 0xa5a503ffu},
+      {"AbsNegativeNan", 0x24ed8000u, 0x2835fe00u, true, 0xa5a57e00u},
+  }};
+  constexpr uint32_t kHigh = 0xa5a50000u;
+  std::vector<ArithmeticCase> cases;
+  const auto words =
+      rdna4::build_vop3(rdna4::kVCndmaskB16Vop3,
+                        {.vdst = 6, .abs = 2, .src0 = 256, .src1 = 257, .src2 = 10, .neg = 1});
+  for (const Lane &lane : lanes) {
+    const uint32_t selector = lane.select_src1 ? ~0u : 0u;
+    for (const uint32_t mode : {0x00u, 0x30u, 0xc0u}) {
+      cases.push_back({std::format("{}Mode{:02X}", lane.name, mode),
+                       ROCJITSU_CODE_ARCH_RDNA4,
+                       {words[0], words[1], 0u},
+                       {{0, lane.src0}, {1, lane.src1}, {6, kHigh}},
+                       {{6, lane.result}},
+                       mode,
+                       FE_TONEAREST,
+                       0u,
+                       0u,
+                       {},
+                       {{10, selector}, {11, selector}}});
+    }
+  }
+  return cases;
+}
+
 SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool force_scalar) {
   if (!util::has_stdx_simd || !test.simd.checked)
     return {};
@@ -2999,6 +3046,8 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
     for (const std::pair<uint32_t, uint32_t> &source : test.sources)
       for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
         cu->write_vgpr(base + source.first, lane, source.second);
+    for (const std::pair<uint32_t, uint32_t> &source : test.scalar_sources)
+      cu->write_sgpr(wave->sgpr_alloc().base + source.first, source.second);
     std::fenv_t saved_environment;
     ASSERT_EQ(std::fegetenv(&saved_environment), 0);
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
@@ -3164,6 +3213,23 @@ TEST_P(ValuSubtractionNanTest, MatchesGfx1201WithSimdEnabledAndForcedScalar) {
 
 INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuSubtractionNanTest,
                          testing::ValuesIn(subtraction_nan_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuCndmaskB16ModifierTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuCndmaskB16ModifierTest, MatchesGfx1201WithSimdEnabledAndForcedScalar) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuCndmaskB16ModifierTest,
+                         testing::ValuesIn(cndmask_b16_modifier_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
