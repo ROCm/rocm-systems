@@ -153,22 +153,6 @@ protected:
         return vmmBuffers_.back().get();
     }
 
-    RCCLHybridVmmTests::HybridVmmBuffer* AllocHybrid(
-        size_t gpuBytes, size_t localCpuBytes, std::string* reason)
-    {
-        int dev = 0;
-        if (hipGetDevice(&dev) != hipSuccess)
-            return nullptr;
-        if (!RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason))
-            return nullptr;
-        auto buf = std::make_unique<RCCLHybridVmmTests::HybridVmmBuffer>();
-        if (!RCCLHybridVmmTests::AllocHybridVmm(
-                dev, gpuBytes, localCpuBytes, buf.get(), reason))
-            return nullptr;
-        hybridBuffers_.push_back(std::move(buf));
-        return hybridBuffers_.back().get();
-    }
-
     bool AllocHybridForLocalRanks(
         size_t gpuBytes, size_t localCpuBytes, int expectedLocalRanks,
         RCCLHybridVmmTests::HybridVmmBuffer** out, std::string* reason)
@@ -176,8 +160,9 @@ protected:
         *out = nullptr;
         int dev = 0;
         std::string localReason;
-        bool supported = hipGetDevice(&dev) == hipSuccess &&
-            RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason);
+        // The support check runs collectives; call it even if hipGetDevice failed.
+        const bool haveDev = hipGetDevice(&dev) == hipSuccess;
+        bool supported = RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason) && haveDev;
         if (SyncSkip(!supported)) {
             if (reason && reason->empty())
                 *reason = "hybrid VMM runtime support is unavailable on another rank";

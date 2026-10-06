@@ -34,6 +34,7 @@
 #include "CeAllReduceTestHelpers.hpp"
 #include "ce_coll.h"
 #include "comm.h"
+#include "dev_runtime_internal.h"
 #include "rccl_common.h"
 #include "register.h"
 #include "register_inline.h"
@@ -1032,6 +1033,18 @@ protected:
         buf.handles.clear();
     }
 
+    // Check the registered window's memory record, not the shared INFO log.
+    void expectWindowSegments(void* userPtr, int numSegments)
+    {
+        struct ncclDevrWindow* devrWin = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclDevrFindWindow(
+            reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), userPtr, &devrWin));
+        ASSERT_MPI_NE(devrWin, nullptr);
+        ASSERT_MPI_NE(devrWin->memory, nullptr);
+        ASSERT_MPI_EQ(numSegments, devrWin->memory->numSegments);
+        ASSERT_MPI_TRUE(devrWin->memory->hasSysmemSegment);
+    }
+
     // Shared geometry for Symmetric_Lsa AFTER and the BEFORE-legacy-offset
     // control. Offset and payload deliberately have different magnitudes.
     void prepareSymmetricLsaRecvOffset(MultiSegmentBuffer& buf, ncclWindow_t* win, int* rank, int* nRanks,
@@ -1272,6 +1285,7 @@ protected:
         ASSERT_EQ(numGpuBytes % kDeepEpAlignment, 0u);
         ASSERT_EQ(numCpuBytes % kDeepEpAlignment, 0u);
 
+#if NCCL_CUMEM_HOST_GATE
         RCCLHybridVmmTests::DeepEpElasticRange range;
         if (!RCCLHybridVmmTests::AllocDeepEpElasticRange(dev, numGpuBytes, numCpuBytes, &range))
             return;
@@ -1279,6 +1293,10 @@ protected:
         buf.segmentSize = 0; // segments intentionally have different sizes
         buf.totalSize   = range.totalSize;
         buf.handles     = std::move(range.handles);
+#else
+        // Host VMM is outside this build's support window; totalSize 0 skips.
+        (void)dev;
+#endif
     }
 
     bool createHybridVmmBuffer(size_t gpuBytes, size_t localCpuBytes,
@@ -1286,9 +1304,15 @@ protected:
                                std::string& reason,
                                int expectedLocalRanks = 4)
     {
+#if !NCCL_CUMEM_HOST_GATE
+        // Compile-time gate, so every rank returns here without a collective.
+        reason = "host VMM is outside this build's NCCL_CUMEM_HOST_GATE window";
+        return false;
+#endif
         int dev = 0;
-        bool supported = hipGetDevice(&dev) == hipSuccess &&
-            RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, &reason);
+        // The support check runs collectives; call it even if hipGetDevice failed.
+        const bool haveDev = hipGetDevice(&dev) == hipSuccess;
+        bool supported = RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, &reason) && haveDev;
         if (!MPIHelpers::allRanksTrue(supported)) {
             if (reason.empty())
                 reason = "hybrid VMM runtime support is unavailable on another rank";
@@ -1562,6 +1586,8 @@ TEST_F(UBR_MultiSegment, NetProxyPartialFinalSegment)
         }
         MPI_Allreduce(&localSize, &maxLocalSize, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
         (void)hipRuntimeGetVersion(&hipVersion);
+        // Nodes can run different HIP runtimes; skip on the oldest so all ranks agree.
+        MPI_Allreduce(MPI_IN_PLACE, &hipVersion, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
         if (maxLocalSize > 1 && hipVersion < kFirstHipWithoutIpcHang) {
             GTEST_SKIP() << "HIP " << hipVersion << " hangs with an intra-node IPC peer; "
                          << "run 1 rank per node";
@@ -2065,12 +2091,12 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(
          createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
+     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
      {
          const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
              "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime");
          if (!why.empty()) GTEST_SKIP() << why;
      }
-     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
  
      // Split the window into send/recv halves. With kNumHostSegments=1 the recv
      // half straddles the host-backed trailing segment, exercising host access.
@@ -2138,12 +2164,12 @@ TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
 
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(createDeepEpElasticBuffer(dev, kGpuBytes, kCpuBytes, buf));
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
     {
         const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
             "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime");
         if (!why.empty()) GTEST_SKIP() << why;
     }
-    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
 
     ncclWindow_t win = nullptr;
     ncclResult_t result = ncclCommWindowRegister(
@@ -2169,10 +2195,10 @@ TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
     ASSERT_MPI_NE(mappedWindow, nullptr);
 
     REGLogChecker checker = getLogChecker();
-    TEST_INFO("DeepEP_ElasticWindowRegistration: %s (log size: %zu bytes)",
-              checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasNumSegments(2))
-        << "Expected two segments for DeepEP [GPU][CPU] elastic window";
+    TEST_INFO("DeepEP_ElasticWindowRegistration: %s (log size: %zu bytes, numSegments 2 logged: %d)",
+              checker.getSummary().c_str(), checker.getContentLength(), checker.hasNumSegments(2));
+    // DeepEP [GPU][CPU] elastic window: two segments, the second CPU-backed.
+    ASSERT_NO_FATAL_FAILURE(expectWindowSegments(buf.vaBase, 2));
 }
 
 /**
@@ -2232,10 +2258,11 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridWindowRegistrationAndHandleReuse)
     ASSERT_MPI_NE(mappedWindow, nullptr);
 
     REGLogChecker checker = getLogChecker();
-    TEST_INFO("DeepEP_HybridWindowRegistration: %s (log size: %zu bytes)",
-              checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasNumSegments(hybrid.localSize + 1))
-        << "Expected [GPU] plus one imported CPU segment per local rank";
+    TEST_INFO("DeepEP_HybridWindowRegistration: %s (log size: %zu bytes, numSegments %d logged: %d)",
+              checker.getSummary().c_str(), checker.getContentLength(), hybrid.localSize + 1,
+              checker.hasNumSegments(hybrid.localSize + 1));
+    // [GPU] plus one imported CPU segment per local rank.
+    ASSERT_NO_FATAL_FAILURE(expectWindowSegments(hybrid.ptr, hybrid.localSize + 1));
     ASSERT_TRUE(checker.hasSymSysmemHandleReuse())
         << "Expected explicit NCCL_SYM_REUSE_SYSMEM_HANDLES reuse marker";
 }
@@ -2315,12 +2342,12 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Gating)
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(
          createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
+     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
      {
          const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
              "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime");
          if (!why.empty()) GTEST_SKIP() << why;
      }
-     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
  
      SCOPED_TRACE("Host-backed symmetric window registration must be rejected "
                   "when NCCL_ELASTIC_BUFFER_REGISTER=0");

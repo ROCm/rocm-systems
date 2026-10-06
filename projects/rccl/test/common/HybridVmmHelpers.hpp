@@ -572,11 +572,18 @@ inline bool AllocDeepEpElasticRange(int dev, size_t gpuBytes, size_t cpuBytes,
     // Device RW on both segments (GPU kernels / GIN). Host RW on the CPU
     // segment matches DeepEP CPU-storage access.
     if (hipMemSetAccess(vaBase, gpuBytes, &accessDesc, 1) != hipSuccess ||
-        hipMemSetAccess(cpuVa, cpuBytes, &accessDesc, 1) != hipSuccess ||
-        hipMemSetAccess(cpuVa, cpuBytes, &hostAccess, 1) != hipSuccess)
+        hipMemSetAccess(cpuVa, cpuBytes, &accessDesc, 1) != hipSuccess)
     {
         cleanup();
         return false;
+    }
+    // Best-effort: callers touch the CPU segment only through hipMemcpy/hipMemset.
+    const hipError_t hostAccessErr = hipMemSetAccess(cpuVa, cpuBytes, &hostAccess, 1);
+    if (hostAccessErr != hipSuccess)
+    {
+        (void)hipGetLastError();
+        fprintf(stderr, "[ WARNING  ] DeepEP elastic CPU segment host access grant failed (%s); continuing\n",
+                hipGetErrorString(hostAccessErr));
     }
 
     out->base      = vaBase;
