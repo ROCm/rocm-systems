@@ -14,8 +14,11 @@ drain its CUs without holding that mutex. Pending submissions rotate when a
 worker takes an assignment. An assigned worker finishes its current submission;
 this is not preemptive scheduling.
 
-Each caller executes only its own submission and cancels unused assignments
-when its task index is exhausted. It joins only workers holding that submission.
+Each caller executes only its own submission. The first caller or worker to
+finish draining the task index cancels unused assignments under the queue mutex,
+preventing further empty claims after that cancellation while assigned CUs
+continue running. Tickets may remain queued between the last CU claim and the
+first completed drain; CU claiming itself remains free of the queue mutex. The caller joins all workers holding that submission.
 The last worker notifies before dropping the mutex, protecting the stack-owned
 submission's lifetime. There is no per-submission queue allocation.
 
@@ -147,8 +150,9 @@ be waiting for the caller's own submission to finish.
 ## Validation and reproduction
 
 Focused tests cover overlapping submissions, independent completion, exception
-ownership, per-submission width limits, repeated reuse, caller isolation and XCD
-queue/barrier ordering. Policy tests cover affinity, overrides, multiple GPUs,
+ownership, per-submission width limits, repeated reuse, caller isolation, retiring
+unused assignments while the caller and a peer stay gated, and XCD queue/barrier
+ordering. Policy tests cover affinity, overrides, multiple GPUs,
 topology clamps, discrete granules, preset tables and checkpoint persistence.
 Mirage tests exercise generated configurations and the real CLI override path.
 
