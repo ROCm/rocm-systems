@@ -382,9 +382,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     if (RECV) {
       { // Consume data from first recv
 // Fully unrolling this loop is miscompiled on gfx1250 at -O1: 1-byte element types
-// Fully unrolling this loop is miscompiled on gfx1250 at -O1: 1-byte element types
 // get byte 5 of each uint64_t silently corrupted. Capping the unroll factor avoids it.
-// TODO: Remove once LCOMPILER-2920 is fixed.
+// TODO: Remove once compiler fix is landed.
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && defined(RCCL_GFX1250_LL128_UNROLL_WORKAROUND)
 #pragma unroll 1
 #else
