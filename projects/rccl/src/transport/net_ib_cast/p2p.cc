@@ -774,6 +774,11 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
       return ncclSuccess;
     }
     nreqs = ctsFifoNreqs(slots, 0);
+    if (nreqs < 1 || nreqs > NCCL_NET_IB_MAX_RECVS) {
+      WARN("NET/IB: peer posted invalid CTS nreqs %d (max %d)", nreqs, NCCL_NET_IB_MAX_RECVS);
+      *request = NULL;
+      return ncclInternalError;
+    }
     // Wait until all data has arrived
     for (int r = 1; r < nreqs; r++)
       while (ctsFifoIdx(slots, r) != idx);
@@ -822,9 +827,8 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     req->send.size = size;
     req->send.data = data;
     req->send.segmented = segmented;
-    if (comm->base.resiliency) {
-      memset(req->send.sentData, 0, sizeof(req->send.sentData));
-    }
+    // Also read by isendFail to find QPs never posted, so reset it without resiliency too.
+    memset(req->send.sentData, 0, sizeof(req->send.sentData));
 #ifdef NCCL_ENABLE_NET_PROFILING
     req->pInfo[0].pHandle = phandle;
 #endif
@@ -907,6 +911,19 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
 
 isendFail:
   IbCastStatsFatalError(&comm->base.stats);
+  // Builders stop at the first failing QP; events armed for QPs never posted get no CQE.
+  for (int j = 0; j < nreqs; j++) {
+    struct ncclIbRequest* fr = reqs[j];
+    if (fr == NULL) continue;
+    const int failNqps = comm->useCtsOffload ? 1 : fr->desc.nqps;
+    const uint64_t failStart = comm->useCtsOffload ? (uint64_t)fr->id : (uint64_t)fr->desc.startQpIndex;
+    for (int i = 0; i < failNqps; i++) {
+      ncclIbQp* qp = NULL;
+      int qpIndex = -1;
+      if (IbCastCommBaseGetQpForRequest(&comm->base, failStart, i, &qp, &qpIndex) != ncclSuccess || qp == NULL) continue;
+      if (!fr->send.sentData[qpIndex] && fr->events[qp->devIndex] > 0) fr->events[qp->devIndex]--;
+    }
+  }
   bool anyEvents = false;
   for (int j = 0; j < nreqs; j++) {
     if (reqs[j] != NULL && IbCastRequestHasEvents(reqs[j])) {
@@ -1245,16 +1262,8 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   return res;
 err:
   IbCastStatsFatalError(&comm->base.stats);
-  if (req) {
-    // Completions may still name this request. Recycle only when nothing is in
-    // flight; otherwise mark failed and return it so Test can drain.
-    if (IbCastRequestHasEvents(req)) {
-      req->type = NCCL_NET_IB_REQ_FAILED;
-      *request = req;
-      return ncclSuccess;
-    }
-    IbCastFreeRequest(req);
-  }
+  // No CTS went out, so no data CQE can complete this request; return the error.
+  if (req) IbCastFreeRequest(req);
   *request = NULL;
   return res;
 }
@@ -1391,15 +1400,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
       iflushRet = wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr);
       TIME_STOP(4);
       if (iflushRet != ncclSuccess) {
-        int posted = 0;
-        for (struct ibv_send_wr* w = &flushWrs[0]; w != NULL && w != bad_wr; w = w->next) posted++;
-        if (posted > 0) {
-          IbCastAddEvent(req, i);
-          req->type = NCCL_NET_IB_REQ_FAILED;
-          *request = req;
-          IbCastStatsFatalError(&comm->base.stats);
-          return ncclSuccess;
-        }
+        // Only the chain tail is signaled, so a partial post never completes on this device.
         goto iflushFail;
       }
     }

@@ -6,6 +6,7 @@
  *************************************************************************/
 
 #include "common_cast.h"
+#include "qp_sharing.h"
 #include "rccl_ib_multiseg.h"
 
 ncclResult_t IbCastDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle);
@@ -111,8 +112,9 @@ ncclResult_t IbCastRegMr(void* comm, void* data, size_t size, int type, void** m
  *
  * Same HIP first-segment dma-buf limitation as classic. Distinct symbol from
  * ncclIbRegMrDmaBufMultiSeg because both plugins link into librccl. nSegments>1
- * is declined when the peer did not advertise NCCL_IB_CAP_MULTISEG or when CTS
- * offload is on (the NIC owns CTS and will not consume a host-visible side table).
+ * is declined when the peer did not advertise NCCL_IB_CAP_MULTISEG, when CTS
+ * offload is on (the NIC owns CTS and will not consume a host-visible side table),
+ * under BY_ORDER matching, or when QP sharing is enabled.
  */
 ncclResult_t IbCastRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens, uint64_t* segOffsets,
                                        int* segFds, int type, void** mhandle) {
@@ -135,10 +137,13 @@ ncclResult_t IbCastRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, si
       peerCaps = ((struct ncclIbRecvComm*)comm)->peerCaps;
       useCtsOffload = ((struct ncclIbRecvComm*)comm)->useCtsOffload;
     }
-    if (useCtsOffload || (peerCaps & NCCL_IB_CAP_MULTISEG) == 0) {
+    // BY_ORDER adds byte_len per imm, and shared QPs need a commId and per-QP WR budget;
+    // segmented sends publish size out of band and carry neither.
+    if (useCtsOffload || base->recvMatchingScheme == BY_ORDER || IbCastQpSharingEnabled() ||
+        ncclIbDeclineMultiSegRegistration(peerCaps, nSeg)) {
       INFO(NCCL_NET | NCCL_REG,
-           "NET/IB: CAST declining %d-segment registration (ctsOffload=%d peerCaps=0x%x)", nSeg, (int)useCtsOffload,
-           peerCaps);
+           "NET/IB: CAST declining %d-segment registration (ctsOffload=%d scheme=%d qpSharing=%d peerCaps=0x%x)", nSeg,
+           (int)useCtsOffload, base->recvMatchingScheme, (int)IbCastQpSharingEnabled(), peerCaps);
       return ncclInvalidUsage;
     }
   }
