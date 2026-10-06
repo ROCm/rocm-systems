@@ -61,6 +61,22 @@ exclusion, which prevents partial runs from becoming a develop baseline.
 With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
 runtime approaches the pytest timeout.
 
+## Runtime CTS AQL
+
+The release lane builds only the runtime CTS `aql` suite and runs its eligible
+cases sequentially on gfx1250, gfx950, gfx942, gfx1201, and gfx1100. It uses the
+existing KFD configs for gfx942/gfx950 and the MI455X, R9700, and W7900 configs
+for the remaining targets. Every binary runs through the rocjitsu launcher.
+All targets use the thread allocation defaults from their configs.
+Manifest entries marked slow or explicitly skipped remain excluded; the
+simulator slow cutoff is 60 seconds. Logs, JSON results, and per-target JUnit
+reports are uploaded as `rocjitsu-runtime-cts-aql-release`.
+
+The runtime CTS checkout has its own pin. Publish the corpus commit before
+running CI, then keep `ROCJITSU_RUNTIME_CTS_CORPUS_REF` and the
+`runtime_cts_corpus_ref` dispatch default synchronized. Manual dispatches can
+override this ref independently of the HIP/DBT and Vulkan corpus pins.
+
 ## gfx1201 simulator exclusions
 
 `fpsan_global_load_tr_gfx12_w64_test` is excluded because its wave64
