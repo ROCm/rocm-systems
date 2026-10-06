@@ -592,22 +592,23 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
         # Shadow columns + PassLayout; expressions are bound in calc_expressions.
         self._pass_layout_per_workload: dict[str, Optional[PassLayout]] = {}
+        iteration_multiplexing = self._profiling_config.get("iteration_multiplexing")
 
         for workload_path in self._runs.keys():
             pmc_df, pass_layout = file_io.load_df_pmc(
                 workload_path,
                 self.get_args().verbose,
+                preserve_pass_provenance=iteration_multiplexing is None,
             )
             if pmc_df.empty:
                 continue
 
-            if self._profiling_config.get("iteration_multiplexing") is not None:
+            if iteration_multiplexing is not None:
                 pmc_df = self.iteration_multiplex_impute_counters(
                     pmc_df,
-                    policy=self._profiling_config["iteration_multiplexing"],
+                    policy=iteration_multiplexing,
                     workload_dir=Path(workload_path),
                 )
-                pass_layout = None
 
             pmc_df_per_workload[workload_path] = pmc_df
             self._pass_layout_per_workload[workload_path] = pass_layout
