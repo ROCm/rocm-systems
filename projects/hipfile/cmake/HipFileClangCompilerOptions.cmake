@@ -6,7 +6,7 @@
 #
 # https://clang.llvm.org/docs/DiagnosticsReference.html
 
-function(get_ais_clang_warning_flags outvar compiler_version)
+function(get_hipfile_clang_warning_flags outvar compiler_version)
 
     # Warning flags for clang 17 and earlier
     set(flags

@@ -20,7 +20,7 @@ rocm_install(
 )
 
 # Install AIS tools
-if(AIS_INSTALL_TOOLS)
+if(HIPFILE_INSTALL_TOOLS)
 install(PROGRAMS tools/ais-check/ais-check DESTINATION bin)
     if(TARGET ais-stats)
         install(TARGETS ais-stats DESTINATION bin)
@@ -30,7 +30,7 @@ endif()
 # Install example code
 # Since the input DIRECTORY is `examples` don't include it in
 # the DESTINATION path or you'll get `examples/examples/*` output
-if(AIS_INSTALL_EXAMPLES)
+if(HIPFILE_INSTALL_EXAMPLES)
     install(
         DIRECTORY ${HIPFILE_ROOT_PATH}/examples
         DESTINATION share/doc/${CMAKE_PROJECT_NAME}
@@ -44,7 +44,7 @@ if(AIS_INSTALL_EXAMPLES)
     # The CMakeLists.txt files in the examples tree use our build
     # flags and infrastructure so we can ensure they are well-vetted
     # and these can't be installed.
-    set(AIS_EXAMPLE_DIRS
+    set(HIPFILE_EXAMPLE_DIRS
         aiscp
         api
         common
@@ -52,7 +52,7 @@ if(AIS_INSTALL_EXAMPLES)
         batch
         async
     )
-    foreach(example_dir ${AIS_EXAMPLE_DIRS})
+    foreach(example_dir ${HIPFILE_EXAMPLE_DIRS})
         configure_file(
             "${CMAKE_CURRENT_SOURCE_DIR}/examples/${example_dir}/CMakeLists.install.cmake"
             "examples/${example_dir}/CMakeLists.txt"
