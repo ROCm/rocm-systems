@@ -954,16 +954,19 @@ ncclResult_t amd_smi_diagGpuCount(uint32_t* count) {
   AMDSMIDIAG(getSocketHandles, &nSockets, nullptr);
   std::vector<amdsmi_socket_handle> sockets(nSockets);
   AMDSMIDIAG(getSocketHandles, &nSockets, sockets.data());
+  // The second call may report a different count than the first; only the handles it wrote are read.
+  sockets.resize(std::min<size_t>(nSockets, sockets.size()));
 
   uint32_t nGpus = 0;
-  for (uint32_t s = 0; s < nSockets; s++) {
+  for (amdsmi_socket_handle socket : sockets) {
     uint32_t nProcs = 0;
-    AMDSMIDIAG(getProcessorHandles, sockets[s], &nProcs, nullptr);
+    AMDSMIDIAG(getProcessorHandles, socket, &nProcs, nullptr);
     std::vector<amdsmi_processor_handle> procs(nProcs);
-    AMDSMIDIAG(getProcessorHandles, sockets[s], &nProcs, procs.data());
-    for (uint32_t p = 0; p < nProcs; p++) {
+    AMDSMIDIAG(getProcessorHandles, socket, &nProcs, procs.data());
+    procs.resize(std::min<size_t>(nProcs, procs.size()));
+    for (amdsmi_processor_handle proc : procs) {
       processor_type_t type;
-      AMDSMIDIAG(getProcessorType, procs[p], &type);
+      AMDSMIDIAG(getProcessorType, proc, &type);
       if (type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) nGpus++;
     }
   }

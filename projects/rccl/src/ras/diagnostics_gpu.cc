@@ -415,7 +415,7 @@ struct rasDiagnosticsEccData {
   uint64_t uncorrectedSram;
   uint64_t correctedDram;
   uint64_t uncorrectedDram;
-  uint8_t available; // 1 only if NVML reported every ECC counter for this rank; 0 otherwise.
+  uint8_t available; // 1 only if the GPU data source reported every ECC counter for this rank; 0 otherwise.
 };
 
 #if !RAS_DIAG_AMD_SMI
