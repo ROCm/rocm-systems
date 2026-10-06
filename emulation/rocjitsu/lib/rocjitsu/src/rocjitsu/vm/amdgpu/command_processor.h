@@ -607,7 +607,8 @@ private:
   admit_kernel_dispatch(const hsa_kernel_dispatch_packet_t &packet, ComputeQueueRecord &queue,
                         const GpuVmAccess &transaction_access, uint64_t packet_address,
                         uint32_t ring_slot, uint64_t packet_index = 0,
-                        ClusterDispatchShape cluster_shape = {});
+                        ClusterDispatchShape cluster_shape = {},
+                        std::span<const uint32_t> metadata = {});
 
   /// @brief Commit the typed action produced by AqlPacketProcessor.
   [[nodiscard]] AqlAdmissionResult admit_aql_packet(const AqlPacketProcessRequest &request,

@@ -5651,6 +5651,73 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
   }
 }
 
+TEST(CommandProcessorAqlTest, MetadataWaitsForAllHeadersAndOwnsDescriptorAndPreloadedArguments) {
+  using namespace rocr::llvm::amdhsa;
+  VmFixture fixture("cdna5");
+  auto *snapshots = fixture.capture_halts();
+  constexpr uint64_t ring = 0x8000, companion = ring + 64, read_pointer = 0x9000;
+  constexpr uint64_t write_pointer = 0x9008, doorbell = 0x9010, args = 0x6000;
+  constexpr uint32_t code = 0xbfb00000;
+  const uint64_t kernel = fixture.write_kernel(0x1000, &code, sizeof(code));
+  kernel_descriptor_t kd{};
+  fixture.mem()->read_block(kernel, {reinterpret_cast<uint8_t *>(&kd), sizeof(kd)});
+  set_kernel_descriptor_user_sgpr_count(ROCJITSU_CODE_ARCH_CDNA5, kd, 32);
+  kd.kernarg_preload = 32;
+  const auto registration = fixture.cp()->register_queue({
+      .address_space = fixture.cp()->default_address_space(),
+      .queue_id = 1,
+      .ring_base_va = ring,
+      .ring_size = 64,
+      .read_ptr_va = read_pointer,
+      .write_ptr_va = write_pointer,
+      .doorbell_va = doorbell,
+      .doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled,
+      .metadata_ring_size = 256,
+  });
+  ASSERT_NE(registration, 0u);
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  packet.setup = 1;
+  packet.workgroup_size_x = packet.grid_size_x = 32;
+  packet.workgroup_size_y = packet.workgroup_size_z = packet.grid_size_y = packet.grid_size_z = 1;
+  packet.kernel_object = kernel;
+  packet.kernarg_address = reinterpret_cast<void *>(args);
+  // Poison the original resource fields and kernargs. Only the companion is authoritative.
+  fixture.mem()->write32(kernel + 48, 0xffffffff);
+  for (uint32_t preload_index = 0; preload_index < 32; ++preload_index)
+    fixture.mem()->write32(args + preload_index * 4, 0xdeadbeef);
+  for (uint32_t round = 1; round <= 2; ++round) {
+    std::array<uint32_t, 64> metadata{};
+    for (uint32_t block = 0; block < 4; ++block)
+      metadata[block * 16] = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    std::memcpy(metadata.data() + 2, reinterpret_cast<const std::byte *>(&kd) + 16, 48);
+    for (uint32_t preload_index = 0; preload_index < 32; ++preload_index)
+      metadata[17 + preload_index + preload_index / 15] = round * 100 + preload_index;
+    metadata[48] = HSA_PACKET_TYPE_INVALID;
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(metadata.data()), sizeof(metadata),
+                              companion);
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), ring);
+    fixture.mem()->write64(write_pointer, round);
+    fixture.mem()->write64(doorbell, round);
+    fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+    (void)fixture.engine->step();
+    EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(1, 0), round - 1);
+    EXPECT_EQ(fixture.mem()->read64(read_pointer), round - 1);
+    EXPECT_EQ(fixture.mem()->read32(ring) & 0xff, HSA_PACKET_TYPE_KERNEL_DISPATCH);
+    fixture.mem()->write32(companion + 192, HSA_PACKET_TYPE_KERNEL_DISPATCH);
+    for (uint32_t step = 0; step < 100 && snapshots->snapshots().size() < round; ++step)
+      ASSERT_TRUE(fixture.engine->step());
+    ASSERT_EQ(snapshots->snapshots().size(), round);
+    for (uint32_t preload_index = 0; preload_index < 32; ++preload_index)
+      EXPECT_EQ(snapshots->snapshots().back().sgpr(preload_index), round * 100 + preload_index);
+    EXPECT_EQ(fixture.mem()->read64(read_pointer), round);
+    EXPECT_EQ(fixture.mem()->read32(ring) & 0xff, HSA_PACKET_TYPE_INVALID);
+    for (uint32_t block = 0; block < 4; ++block)
+      EXPECT_EQ(fixture.mem()->read32(companion + block * 64), HSA_PACKET_TYPE_INVALID);
+  }
+  EXPECT_TRUE(fixture.cp()->unregister_queue_registration(registration));
+}
+
 TEST(CommandProcessorAqlTest, BlockingBarriersRetireBeforeUnsupportedSuccessorFaultsQueue) {
   struct BarrierCase {
     uint16_t packet_type;

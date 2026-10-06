@@ -570,9 +570,12 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       uint64_t preload_addr = pkt.kernarg_addr + static_cast<uint64_t>(preload_offset) * 4;
       for (uint32_t preload_index = 0; preload_index < preload_length; ++preload_index) {
         const uint64_t address = preload_addr + preload_index * 4;
-        const AtomicLoadResult loaded = pkt.execution_access
-                                            ? read_gpu_u32(*pkt.execution_access, address)
-                                            : read_gpu_u32(pkt.address_space, address);
+        const AtomicLoadResult loaded =
+            pkt.metadata_kernargs
+                ? AtomicLoadResult{.outcome = VmAccessOutcome::Complete,
+                                   .value = (*pkt.metadata_kernargs)[preload_index]}
+                : pkt.execution_access ? read_gpu_u32(*pkt.execution_access, address)
+                                       : read_gpu_u32(pkt.address_space, address);
         if (loaded.outcome != VmAccessOutcome::Complete)
           return loaded.outcome;
         cu->write_sgpr(sbase + idx + preload_index, static_cast<uint32_t>(loaded.value));
@@ -1139,6 +1142,14 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
     if (!valid)
       return 0;
   }
+  // ROCr enables metadata prefetch on GFX12.5 and newer, using 256-byte companions.
+  if (config.metadata_ring_size &&
+      (config.packet_format != QueuePacketFormat::Aql || config.metadata_ring_size < 256 ||
+       (config.metadata_ring_size & (config.metadata_ring_size - 1)) || cus_.empty() ||
+       cus_[0]->config().arch != ROCJITSU_CODE_ARCH_CDNA5 ||
+       config.ring_base_va >
+           std::numeric_limits<uint64_t>::max() - config.ring_size - config.metadata_ring_size))
+    return 0;
   // Native PM4 has no VM-doorbell poller. Reject it until polling is implemented.
   if (config.packet_format == QueuePacketFormat::Pm4 &&
       config.doorbell_mode == QueueDoorbellMode::VmPolled)
@@ -1569,6 +1580,9 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
       if (q.registration_id == registration_id) {
         if (q.packet_format == QueuePacketFormat::Aql &&
             !valid_aql_packet_ring(ring_base_va, ring_size))
+          return false;
+        if (q.metadata_ring_size &&
+            ring_base_va > std::numeric_limits<uint64_t>::max() - ring_size - q.metadata_ring_size)
           return false;
         if (q.packet_format == QueuePacketFormat::Pm4 &&
             (q.ring_base_va != ring_base_va || q.ring_size != ring_size)) {
@@ -3655,14 +3669,24 @@ static const uint8_t *find_elf_base(const uint8_t *ptr, const uint8_t *limit) {
 AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
     const hsa_kernel_dispatch_packet_t &pkt, ComputeQueueRecord &queue,
     const GpuVmAccess &transaction_access, uint64_t pkt_addr, uint32_t queue_packet_id,
-    uint64_t aql_packet_id, ClusterDispatchShape cluster_shape) {
+    uint64_t aql_packet_id, ClusterDispatchShape cluster_shape,
+    std::span<const uint32_t> metadata) {
   const bool uses_kfd_queue_abi = queue.uses_kfd_queue_abi;
   using namespace rocr::llvm::amdhsa;
-  const KernelDescriptorReadResult descriptor =
-      read_kernel_descriptor(transaction_access, pkt.kernel_object);
-  if (descriptor.outcome != VmAccessOutcome::Complete)
-    return admission_from_vm_outcome(descriptor.outcome);
-  const kernel_descriptor_t &kd = descriptor.descriptor;
+  kernel_descriptor_t kd{};
+  if (!metadata.empty()) {
+    // ROCr's metadata descriptor is bytes 16..63 of the AMDHSA descriptor.
+    std::memcpy(reinterpret_cast<std::byte *>(&kd) + 16, metadata.data() + 2, 48);
+    kd.group_segment_fixed_size = pkt.group_segment_size;
+    kd.private_segment_fixed_size = pkt.private_segment_size;
+    if (AMDHSA_BITS_GET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_LENGTH) > 32)
+      return {.status = AqlAdmissionStatus::Malformed};
+  } else {
+    const auto descriptor = read_kernel_descriptor(transaction_access, pkt.kernel_object);
+    if (descriptor.outcome != VmAccessOutcome::Complete)
+      return admission_from_vm_outcome(descriptor.outcome);
+    kd = descriptor.descriptor;
+  }
   uint32_t vgpr_gran =
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   uint32_t sgpr_gran =
@@ -3913,6 +3937,14 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   }
   dp.kernel_wave_size = wave_size;
   dp.kernarg_preload = kd.kernarg_preload;
+  if (!metadata.empty()) {
+    dp.metadata_event_id = metadata[1];
+    dp.metadata_kernargs.emplace();
+    // Block zero holds the descriptor. The remaining 64-byte blocks start
+    // with a header followed by 15 kernarg dwords, starting at metadata[17].
+    for (uint32_t preload_index = 0; preload_index < dp.metadata_kernargs->size(); ++preload_index)
+      (*dp.metadata_kernargs)[preload_index] = metadata[17 + preload_index + preload_index / 15];
+  }
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(kd.compute_pgm_rsrc1, arch);
   dp.private_segment_fixed_size = private_segment_fixed_size;
   dp.scratch_wave_limit_per_se = scratch_wave_limit_per_se;
@@ -4185,7 +4217,7 @@ AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequ
   if (prepared.kind == AqlPreparedPacketKind::KernelDispatch) {
     return admit_kernel_dispatch(prepared.kernel_dispatch, *queue, request.access,
                                  request.packet_address, request.ring_slot, request.packet_index,
-                                 prepared.cluster_shape);
+                                 prepared.cluster_shape, request.metadata);
   }
 
   DispatchEntry entry{
@@ -4211,6 +4243,8 @@ AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequ
       entry.grid_completion->grid_wgs = xcd_peers_.size();
     }
   }
+  if (!request.metadata.empty())
+    entry.metadata_event_id = request.metadata[1];
   if (queue->xcd_fanout)
     replicate_non_kernel_entry(entry);
   queue->push_entry(std::move(entry));
@@ -4296,20 +4330,29 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
   const auto release_slot = [&]() {
     if (!queue.aql_slot_release)
       return true;
-    const auto &release = *queue.aql_slot_release;
-    const auto outcome =
-        release.access.atomic_store(release.address, sizeof(uint32_t), release.header);
-    if (outcome == VmAccessOutcome::Complete) {
-      queue.aql_slot_release.reset();
-      return true;
+    auto &release = *queue.aql_slot_release;
+    for (;;) {
+      const bool metadata = release.metadata_address && release.metadata_block < 4;
+      const uint64_t address =
+          metadata ? release.metadata_address + release.metadata_block * 64 : release.address;
+      const auto outcome = release.access.atomic_store(
+          address, sizeof(uint32_t), metadata ? uint32_t{HSA_PACKET_TYPE_INVALID} : release.header);
+      if (outcome == VmAccessOutcome::Complete) {
+        if (metadata) {
+          ++release.metadata_block;
+          continue;
+        }
+        queue.aql_slot_release.reset();
+        return true;
+      }
+      if (outcome == VmAccessOutcome::Unavailable)
+        arm_stall_recheck(now);
+      else {
+        queue.publication_faulted = true;
+        queue.faulted = true;
+      }
+      return false;
     }
-    if (outcome == VmAccessOutcome::Unavailable)
-      arm_stall_recheck(now);
-    else {
-      queue.publication_faulted = true;
-      queue.faulted = true;
-    }
-    return false;
   };
   if (!release_slot())
     return;
@@ -4496,6 +4539,54 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
                         (pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1, read_idx);
     });
 
+    std::array<uint32_t, 64> metadata{};
+    uint64_t metadata_address = 0;
+    if (queue.metadata_ring_size) {
+      if (pkt_type != HSA_PACKET_TYPE_KERNEL_DISPATCH && pkt_type != HSA_PACKET_TYPE_BARRIER_AND &&
+          pkt_type != HSA_PACKET_TYPE_BARRIER_OR) {
+        queue.faulted = true;
+        process_limit = read_idx;
+        break;
+      }
+      metadata_address = queue.ring_base_va + queue.ring_size +
+                         (read_idx % (queue.metadata_ring_size / 256)) * 256;
+      bool ready = true;
+      for (uint32_t block = 0; block < 4; ++block) {
+        const uint64_t address = metadata_address + block * 64;
+        const auto header = access.atomic_load(address, sizeof(uint32_t));
+        if (header.outcome != VmAccessOutcome::Complete ||
+            header.value == HSA_PACKET_TYPE_INVALID) {
+          ready = false;
+          if (header.outcome == VmAccessOutcome::Complete ||
+              header.outcome == VmAccessOutcome::Unavailable)
+            arm_stall_recheck(now);
+          else
+            queue.faulted = true;
+          break;
+        }
+        // Public metadata version 0.0 requires four identical type/version headers.
+        if (header.value != pkt_type) {
+          ready = false;
+          queue.faulted = true;
+          break;
+        }
+        metadata[block * 16] = static_cast<uint32_t>(header.value);
+        const auto outcome =
+            read_gpu_block(access, address + 4, metadata.data() + block * 16 + 1, 60);
+        if (outcome != VmAccessOutcome::Complete) {
+          ready = false;
+          if (outcome == VmAccessOutcome::Unavailable)
+            arm_stall_recheck(now);
+          else
+            queue.faulted = true;
+          break;
+        }
+      }
+      if (!ready) {
+        process_limit = read_idx;
+        break;
+      }
+    }
     const auto packet_bytes =
         std::as_bytes(std::span<const hsa_kernel_dispatch_packet_t, 1>(&pkt, 1));
     const AqlPacketProcessResult result = aql_packet_processor_.process({
@@ -4508,6 +4599,8 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
         .packet_index = read_idx,
         .packet_address = pkt_addr,
         .kernel_admission_enabled = !queue.enabled_cus || !queue.enabled_cus->empty(),
+        .metadata =
+            metadata_address ? std::span<const uint32_t>(metadata) : std::span<const uint32_t>{},
     });
     const PacketProcessResult &packet_result = result.packet_result();
     if (!valid_packet_process_result(packet_result, packet_bytes.size(), kAqlPacketBytes))
@@ -4524,7 +4617,8 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
       queue.aql_slot_release.emplace(ComputeQueueRecord::AqlSlotRelease{
           .access = access,
           .address = pkt_addr,
-          .header = (static_cast<uint32_t>(header_load.value) & ~0xffu) | HSA_PACKET_TYPE_INVALID});
+          .header = (static_cast<uint32_t>(header_load.value) & ~0xffu) | HSA_PACKET_TYPE_INVALID,
+          .metadata_address = metadata_address});
       if (!release_slot() || result.blocks_following || queue.scratch_reclaim.active()) {
         process_limit = read_idx;
         break;
