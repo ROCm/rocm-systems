@@ -214,6 +214,7 @@ in the following table.
           diagnostics report a GPU. Has no effect while the ECC check reports
           ``unavailable`` on AMD GPUs.
       - | ``0``: Corrected errors are not reported (default).
+        | ``N`` > 0: Ranks with at least ``N`` corrected errors are reported.
 
 .. _check-mode:
 

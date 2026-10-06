@@ -16,7 +16,6 @@
 #include <rccl/rccl.h>
 
 #include <arpa/inet.h>
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -24,8 +23,10 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -33,6 +34,7 @@
 #include <functional>
 #include <iostream>
 #include <numeric>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -237,7 +239,8 @@ private:
     int saved_ = -1;
 };
 
-// Picks a likely-free loopback TCP port (bind to port 0, read the assignment, close).
+// Picks a likely-free loopback TCP port (bind to port 0, read the assignment, close). The RAS client listener binds
+// with SO_REUSEADDR, so the closed probe does not block it; another process may still take the port in between.
 static int pickFreePort()
 {
     const int s = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -264,6 +267,7 @@ static int setRasEnv(bool runDiagnostics)
     unsetenv("NCCL_RUN_DIAGNOSTICS");
     unsetenv("NCCL_RAS_ENABLE");
     unsetenv("NCCL_DIAGNOSTICS_ECC_THRESHOLD");
+    unsetenv("NCCL_RAS_ADDR");
     unsetenv(kMarkerVar);
     if(runDiagnostics)
         setenv("NCCL_RUN_RAS_DIAGNOSTICS", "1", 1);
@@ -718,6 +722,7 @@ TEST_F(RasDiagnostics, OnDemandClientRequest)
         const auto commGuards = guardComms(comms);
 
         const std::string response = rasRequest(port, "DIAGNOSTICS", "json");
+        ASSERT_FALSE(response.empty()) << "no response from the RAS client listener on port " << port;
         EXPECT_NE(response.find("ERROR: diagnostics only supports text output"), std::string::npos) << response;
         EXPECT_TRUE(parseRasReport(response).lines.empty()) << response;
     };
@@ -786,19 +791,26 @@ TEST(RasDiagnosticsWorker, Run)
     ASSERT_TRUE(uniqueIdFromHex(uidEnv, id)) << "malformed ncclUniqueId in the environment";
     HIP_CHECK(hipSetDevice(rank));
 
-    StdoutToFile capture;
-    ASSERT_TRUE(capture.active());
+    // Only rank 0 prints the report; rank 1 keeps stdout so that its failures reach the coordinator's output.
+    std::optional<StdoutToFile> capture;
+    if(rank == 0)
+    {
+        capture.emplace();
+        ASSERT_TRUE(capture->active());
+    }
     ncclComm_t comm        = nullptr;
     const ncclResult_t res = ncclCommInitRank(&comm, 2, id, rank);
+    if(res != ncclSuccess && capture)
+        capture->restore();
     ASSERT_EQ(res, ncclSuccess) << "ncclCommInitRank: " << ncclGetErrorString(res);
     const auto commGuard = RCCLTestGuards::makeCommAutoGuard(comm);
     if(rank == 0)
     {
-        const RasReport report = capture.waitForReports(1);
+        const RasReport report = capture->waitForReports(1);
+        capture->restore();
         EXPECT_EQ(report.count(kRasDone), 1) << report.dump();
-        std::ofstream(outEnv) << capture.read();
+        std::ofstream(outEnv) << capture->read();
     }
-    capture.restore();
 
     float* buf         = nullptr;
     hipStream_t stream = nullptr;
@@ -823,13 +835,11 @@ TEST_F(RasDiagnostics, RasDisabledRunsNoChecks)
         setenv("NCCL_RAS_ENABLE", "0", 1);
         StdoutToFile capture;
         ASSERT_TRUE(capture.active());
-        {
-            std::vector<ncclComm_t> comms;
-            ASSERT_NO_FATAL_FAILURE(initAll(comms, usableGpus()));
-            const auto commGuards = guardComms(comms);
-            checkAllReduce(comms);
-        }
+        std::vector<ncclComm_t> comms;
+        ASSERT_NO_FATAL_FAILURE(initAll(comms, usableGpus()));
+        const auto commGuards = guardComms(comms);
         capture.restore();
+        checkAllReduce(comms);
         const RasReport report = parseRasReport(capture.read());
         EXPECT_EQ(report.count(kRasHeader), 1) << report.dump();
         EXPECT_EQ(report.lines.size(), 1u) << report.dump();
@@ -858,7 +868,7 @@ TEST_F(RasDiagnostics, ReportParserOnFixedCapture)
     expectCompleteReport(report, 8, "8 ranks");
     EXPECT_TRUE(parseRasReport("no report here\n").lines.empty());
 
-    // One line per failure marker, in the product wording.
+    // One line per failure marker, trimmed rather than verbatim product wording.
     const std::string failing
         = "node01:4242 NCCL DIAG [INFO] GPU inventory: diagnostics incomplete, gathered 7/8 ranks in comm 0x1f\n"
           "node01:4242 NCCL DIAG [INFO] GPU inventory: model mismatch across 8 ranks in comm 0x1f, rank(s) {3} "

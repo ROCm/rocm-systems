@@ -145,6 +145,11 @@ the client:
    export NCCL_RAS_ADDR=localhost:<port>
    rcclras -p <port> -D
 
+The client port does not check who connects. Any local user who can reach the
+port can request a report, which includes the names and values of ``NCCL_*``
+variables that differ across ranks. Keep ``NCCL_RAS_ADDR`` on ``localhost``
+unless remote access is required.
+
 Reading the report
 ==================
 
