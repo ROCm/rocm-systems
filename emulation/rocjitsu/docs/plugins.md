@@ -167,18 +167,22 @@ required exports.
 
 The `config_schema` string describes the accepted config keys. Each key
 maps to an object with a `type` (`string`, `number`, or `boolean`), an
-optional `description`, and an optional `default`. Keys without a
-`default` are required. Example:
+optional `description`, an optional `default`, and an optional boolean
+`optional`. A missing key with a `default` receives that value, including when
+`optional` is also `true`. A missing key with `optional: true` and no default
+remains absent. All other keys are required. Example:
 
 ```json
 {
   "argname": { "type": "string", "description": "does something important", "default": "defaultvalue" },
-  "requiredarg": { "type": "number" }
+  "requiredarg": { "type": "number" },
+  "optionalarg": { "type": "boolean", "optional": true }
 }
 ```
 
-The loader merges defaults, validates types, checks for required keys,
-and passes the resolved JSON object to `rocjitsu_plugin_create`.
+The loader validates supplied values first, applies defaults to missing keys,
+omits missing optional keys, checks for required keys, and passes the resolved
+JSON object to `rocjitsu_plugin_create`.
 
 ## Plugin output
 
