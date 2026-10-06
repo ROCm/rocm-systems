@@ -1,0 +1,164 @@
+# RCCL correctness and performance runner for one 8-GPU MI350P PCIe host.
+#
+# The test plans are configs/mi350p_pcie_8gpu_func.json and
+# configs/mi350p_pcie_8gpu_perf.json. test_runner.py is run from
+# projects/rccl/tools/scripts/test_runner so its `from lib...` imports resolve.
+#
+# This job is not a required merge check. It does not run on an ordinary PR.
+# It runs when one of these is true:
+#   - schedule: nightly, both plans, on the default branch
+#   - workflow_dispatch: manual, plan selected in the Actions UI (func, perf, or both)
+#   - pull_request: the PR is from this repo and carries the "mi350p-test" label
+#     (labeled, and later pushes while the label stays on). A labeled PR runs
+#     the func plan only.
+# Do not add this workflow name to branch protection.
+#
+# The runner must be the 8-GPU MI350P itself, registered with the label
+# mi350p-pcie-8gpu. The job refuses to start the suites unless lspci shows
+# exactly eight AMD devices 1002:75a8, so an MI355 or MI300 runner with the
+# wrong label still stops before test_runner.
+
+name: RCCL MI350P PCIe 8-GPU Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan:
+        description: 'Which plan to run'
+        required: true
+        default: both
+        type: choice
+        options:
+          - func
+          - perf
+          - both
+      rocm_path:
+        description: 'ROCm toolchain root (ROCM_PATH). Empty uses /opt/rocm.'
+        required: false
+        default: ''
+        type: string
+      mpi_path:
+        description: 'MPI install path (MPI_PATH). Empty uses /opt/ompi.'
+        required: false
+        default: ''
+        type: string
+  schedule:
+    # 06:00 UTC, offset from the 02:00 AINIC nightly. This host is not that cluster.
+    - cron: '0 6 * * *'
+  pull_request:
+    types: [labeled, synchronize]
+    paths:
+      - 'projects/rccl/**'
+      - 'projects/rccl-tests/**'
+      - '.github/workflows/rccl-mi350p-pcie-8gpu-runner.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  mi350p-test-runner:
+    # Same-repo only. A labeled fork PR must not execute fork code on this host.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(github.event.pull_request.labels.*.name, 'mi350p-test'))
+    concurrency:
+      group: mi350p-pcie-8gpu
+      cancel-in-progress: false
+    runs-on: [self-hosted, mi350p-pcie-8gpu]
+    timeout-minutes: 540
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            projects/rccl
+            projects/rccl-tests
+
+      - name: Require eight MI350P GPUs
+        run: |
+          set -euo pipefail
+          if ! command -v lspci >/dev/null 2>&1; then
+            echo "ERROR: lspci is not installed; cannot confirm this host is MI350P."
+            exit 1
+          fi
+          count="$(lspci -nn -d 1002:75a8 | wc -l)"
+          echo "PCI devices 1002:75a8: ${count}"
+          lspci -nn -d 1002:75a8 || true
+          if [ "${count}" -ne 8 ]; then
+            echo "ERROR: this job runs only on an 8-GPU MI350P (PCI 1002:75a8)."
+            exit 1
+          fi
+
+      - name: Run MI350P plans
+        id: run_tests
+        continue-on-error: true
+        env:
+          ROCM_PATH: ${{ github.event.inputs.rocm_path || '/opt/rocm' }}
+          MPI_PATH: ${{ github.event.inputs.mpi_path || '/opt/ompi' }}
+          # A labeled PR runs correctness only. Nightly runs both. Manual uses the input.
+          PLAN: ${{ github.event_name == 'pull_request' && 'func' || github.event.inputs.plan || 'both' }}
+        run: |
+          set -o pipefail
+          cd "${GITHUB_WORKSPACE}/projects/rccl/tools/scripts/test_runner"
+          export WORKDIR="${GITHUB_WORKSPACE}/projects/rccl"
+          export RCCL_TESTS_DIR="${GITHUB_WORKSPACE}/projects/rccl-tests"
+          export ROCM_PATH MPI_PATH
+
+          run_config() {
+            local config="$1"
+            local log="$2"
+            echo "================================================================"
+            echo "test_runner --config configs/${config}"
+            echo "================================================================"
+            python3 test_runner.py --config "configs/${config}" 2>&1 | tee "${log}"
+          }
+
+          rc=0
+          case "${PLAN}" in
+            func|both)
+              run_config mi350p_pcie_8gpu_func.json "${RUNNER_TEMP}/mi350p_func.log" || rc=$?
+              ;;
+          esac
+          if [ "${rc}" -eq 0 ]; then
+            case "${PLAN}" in
+              perf|both)
+                run_config mi350p_pcie_8gpu_perf.json "${RUNNER_TEMP}/mi350p_perf.log" || rc=$?
+                ;;
+            esac
+          fi
+          echo "plan=${PLAN} exit code: ${rc}"
+          exit "${rc}"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mi350p-pcie-8gpu-report
+          path: |
+            ${{ runner.temp }}/mi350p_func.log
+            ${{ runner.temp }}/mi350p_perf.log
+          if-no-files-found: warn
+
+      - name: Print summary
+        if: always()
+        run: |
+          {
+            echo '### RCCL MI350P PCIe 8-GPU Runner'
+            for label_log in "Func:${RUNNER_TEMP}/mi350p_func.log" \
+                              "Perf:${RUNNER_TEMP}/mi350p_perf.log"; do
+              label="${label_log%%:*}"
+              log="${label_log#*:}"
+              if [ -f "${log}" ]; then
+                echo "#### ${label}"
+                echo '```'
+                tail -n 80 "${log}"
+                echo '```'
+              fi
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Fail job if tests failed
+        if: steps.run_tests.outcome == 'failure'
+        run: exit 1
