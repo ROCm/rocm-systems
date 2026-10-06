@@ -698,7 +698,7 @@ inline constexpr HrrTierFloor kHrrTierFloors[] = {
     {"T2", 34, 1, false, kHrrWorkloadsT2},
     {"T3", 20, 2, false, kHrrWorkloadsT3},
     {"T4", 254, 1, false, kHrrWorkloadsT4},
-    {"T5", 14, 1, true, kHrrWorkloadsT5},
+    {"T5", 12, 1, true, kHrrWorkloadsT5},
 };
 
 inline constexpr size_t kHrrTierFloorCount =
