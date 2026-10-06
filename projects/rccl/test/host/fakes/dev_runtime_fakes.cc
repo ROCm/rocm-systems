@@ -10,12 +10,14 @@
 #include "dev_runtime_fakes.h"
 
 #include "dev_runtime.h"
+#include "fail_loud.h"
 #include "signature-drift.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_devrFindWindow, ncclDevrFindWindow);
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowIsMultiSegment, ncclDevrWindowIsMultiSegment);
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowHasSysmemSegment, ncclDevrWindowHasSysmemSegment);
 ASSERT_HOOK_MATCHES_PROD(g_devrInitOnce, ncclDevrInitOnce);
+ASSERT_HOOK_MATCHES_PROD(g_devrGetLsaRankPtr, ncclDevrGetLsaRankPtr);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 static ncclResult_t DefaultDevrFindWindow(struct ncclComm*, void const*, struct ncclDevrWindow** window) {
@@ -48,6 +50,20 @@ static ncclResult_t DefaultDevrInitOnce(struct ncclComm*) { return ncclSuccess; 
 std::function<ncclResult_t(struct ncclComm*)> g_devrInitOnce = DefaultDevrInitOnce;
 ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) { return g_devrInitOnce(comm); }
 
+static ncclResult_t DefaultDevrGetLsaRankPtr(struct ncclComm*, struct ncclDevrWindow*, size_t, int, void**) {
+  FailLoudUnfaked("dev_runtime_fakes", "ncclDevrGetLsaRankPtr");
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevrWindow*, size_t, int, void**)> g_devrGetLsaRankPtr =
+    DefaultDevrGetLsaRankPtr;
+ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank,
+                                   void** outPtr) {
+  return g_devrGetLsaRankPtr(comm, winHost, offset, lsaRank, outPtr);
+}
+
+ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm*, struct ncclDevrWindow*, size_t, struct ncclTeam, void**) {
+  FailLoudUnfaked("dev_runtime_fakes", "ncclDevrGetLsaTeamPtrMC");
+}
+
 void ResetDevRuntimeFakes() {
   g_devrFindWindow = DefaultDevrFindWindow;
   g_devrWindowIsMultiSegmentValue = false;
@@ -55,4 +71,5 @@ void ResetDevRuntimeFakes() {
   g_devrWindowIsMultiSegment = DefaultDevrWindowIsMultiSegment;
   g_devrWindowHasSysmemSegment = DefaultDevrWindowHasSysmemSegment;
   g_devrInitOnce = DefaultDevrInitOnce;
+  g_devrGetLsaRankPtr = DefaultDevrGetLsaRankPtr;
 }

@@ -11,6 +11,7 @@
 #ifndef RCCL_TEST_HOST_DEV_RUNTIME_FAKES_H_
 #define RCCL_TEST_HOST_DEV_RUNTIME_FAKES_H_
 
+#include <cstddef>
 #include <functional>
 
 #include "nccl.h"
@@ -27,6 +28,11 @@ extern bool g_devrWindowHasSysmemSegmentValue;
 // src/dev_runtime.cc's ncclDevrInitOnce: generous default (ncclSuccess), matching a comm that
 // never sets symmetricSupport with a null peerInfo (dev_runtime.cc's own real error condition).
 extern std::function<ncclResult_t(struct ncclComm*)> g_devrInitOnce;
+
+// ncclDevrGetLsaRankPtr: fail-loud by default, since a peer address only exists for a window layout the test defines.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevrWindow*, size_t /*offset*/, int /*lsaRank*/,
+                                  void** /*outPtr*/)>
+    g_devrGetLsaRankPtr;
 
 void ResetDevRuntimeFakes();
 
