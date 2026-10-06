@@ -331,6 +331,36 @@ impl CopyResources {
             }
         }
     }
+
+    fn copy_rect(&mut self, rect: CopyRect, cancel: &AtomicBool) -> Result<(), CopyFailure> {
+        if rect.width == 0 || rect.height == 0 || rect.depth == 0 {
+            return Ok(());
+        }
+        for layer in 0..rect.depth {
+            for row in 0..rect.height {
+                let source_row = rect.source
+                    + u64::from(layer) * rect.source_slice
+                    + u64::from(row) * rect.source_pitch;
+                let destination_row = rect.destination
+                    + u64::from(layer) * rect.destination_slice
+                    + u64::from(row) * rect.destination_pitch;
+                let mut completed = 0;
+                while completed < rect.width {
+                    let chunk = (rect.width - completed).min(MAX_COPY_PACKET_BYTES) as u32;
+                    self.submit_packet(
+                        SdmaCommand::Copy {
+                            destination: destination_row + completed,
+                            source: source_row + completed,
+                            size: chunk,
+                        },
+                        cancel,
+                    )?;
+                    completed += u64::from(chunk);
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[allow(unsafe_code)]
@@ -350,6 +380,194 @@ impl Drop for CopyResources {
             ManuallyDrop::drop(&mut self.queue);
             ManuallyDrop::drop(&mut self.command);
         }
+    }
+}
+
+/// An ordered GFX1201 SDMA copy sequence sharing one native queue and command
+/// allocation. Each operation retires before the next begins. A failed
+/// operation makes the sequence terminal, so an unretired packet cannot be
+/// replaced in the shared command allocation.
+pub struct GpuCopySequence<'device, 'cancel> {
+    gpu: GpuDevice<'device>,
+    cancel: &'cancel AtomicBool,
+    resources: CopyResources,
+    staging: Option<Allocation>,
+    terminal_retention: Option<bool>,
+}
+
+impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
+    /// Acquires the native resources for an ordered copy sequence.
+    ///
+    /// # Errors
+    /// Returns a target-capability or native resource failure.
+    pub fn begin(
+        gpu: GpuDevice<'device>,
+        cancel: &'cancel AtomicBool,
+    ) -> Result<Self, CopyFailure> {
+        if !gpu.supports_linear_copy() {
+            return Err(CopyFailure::retired(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "linear SDMA copy is not qualified for this GPU",
+            }));
+        }
+        Ok(Self {
+            gpu,
+            cancel,
+            resources: CopyResources::new(&gpu)?,
+            staging: None,
+            terminal_retention: None,
+        })
+    }
+
+    fn active(&self) -> Result<(), CopyFailure> {
+        if let Some(operands_may_be_live) = self.terminal_retention {
+            return Err(CopyFailure {
+                error: Error::Operation {
+                    kind: ErrorKind::Busy,
+                    detail: "SDMA copy sequence cannot resume after failure",
+                },
+                operands_may_be_live,
+            });
+        }
+        Ok(())
+    }
+
+    fn record(&mut self, result: Result<(), CopyFailure>) -> Result<(), CopyFailure> {
+        if let Err(failure) = &result {
+            self.terminal_retention = Some(failure.operands_may_be_live);
+        }
+        result
+    }
+
+    fn release_staging(&mut self, retain: bool) {
+        if let Some(staging) = self.staging.take() {
+            if retain {
+                std::mem::forget(staging);
+            }
+        }
+    }
+
+    /// Copies a non-overlapping GPU-addressable range after earlier sequence
+    /// operations have retired.
+    ///
+    /// # Safety
+    /// Both ranges must be GPU-accessible with source-read and
+    /// destination-write permissions. Their backing must remain live until
+    /// retirement, or until conclusive teardown after a failure with
+    /// `operands_may_be_live`.
+    ///
+    /// # Errors
+    /// Returns range, cancellation, or native failures with the operand
+    /// retention requirement.
+    #[allow(unsafe_code)]
+    pub unsafe fn copy_linear(
+        &mut self,
+        destination: u64,
+        source: u64,
+        size: u64,
+    ) -> Result<(), CopyFailure> {
+        self.active()?;
+        let rect = CopyRect::linear(destination, source, size);
+        if let Err(failure) = rect.validate() {
+            return self.record(Err(failure));
+        }
+        let result = self.resources.copy_rect(rect, self.cancel);
+        self.record(result)
+    }
+
+    /// Copies a host slice to a GPU range. The source is sampled when this
+    /// entry executes, after all preceding entries have retired.
+    ///
+    /// # Safety
+    /// The destination must be GPU-mapped and writable through retirement or
+    /// conclusive teardown after a failure with `operands_may_be_live`.
+    ///
+    /// # Errors
+    /// Returns staging, range, cancellation, or native failures with the GPU
+    /// destination retention requirement.
+    #[allow(unsafe_code)]
+    pub unsafe fn copy_from_host(
+        &mut self,
+        destination: u64,
+        source: &[u8],
+    ) -> Result<(), CopyFailure> {
+        self.active()?;
+        if source.is_empty() {
+            return Ok(());
+        }
+        let (staging, host, device) = match self.gpu.staging(source.len(), DeviceAccess::READ) {
+            Ok(staging) => staging,
+            Err(failure) => return self.record(Err(failure)),
+        };
+        self.staging = Some(staging);
+        // SAFETY: The staging allocation owns a writable host mapping of at
+        // least source.len() bytes. The source slice is live for this call.
+        unsafe { std::ptr::copy_nonoverlapping(source.as_ptr(), host as *mut u8, source.len()) };
+        fence(Ordering::Release);
+        // SAFETY: Staging and the caller's destination stay mapped through
+        // retirement. An uncertain result retains staging below.
+        let result = unsafe { self.copy_linear(destination, device, source.len() as u64) };
+        self.release_staging(
+            result
+                .as_ref()
+                .is_err_and(|failure| failure.operands_may_be_live),
+        );
+        result
+    }
+
+    /// Copies a GPU range into a host slice. The destination is written only
+    /// after this entry's native retirement is proved.
+    ///
+    /// # Safety
+    /// The source must be GPU-mapped and readable through retirement or
+    /// conclusive teardown after a failure with `operands_may_be_live`.
+    ///
+    /// # Errors
+    /// Returns staging, range, cancellation, or native failures with the GPU
+    /// source retention requirement.
+    #[allow(unsafe_code)]
+    pub unsafe fn copy_to_host(
+        &mut self,
+        destination: &mut [u8],
+        source: u64,
+    ) -> Result<(), CopyFailure> {
+        self.active()?;
+        if destination.is_empty() {
+            return Ok(());
+        }
+        let (staging, host, device) = match self
+            .gpu
+            .staging(destination.len(), DeviceAccess::READ | DeviceAccess::WRITE)
+        {
+            Ok(staging) => staging,
+            Err(failure) => return self.record(Err(failure)),
+        };
+        self.staging = Some(staging);
+        // SAFETY: Staging and the caller's source remain mapped until native
+        // retirement. An uncertain result retains staging below.
+        let result = unsafe { self.copy_linear(device, source, destination.len() as u64) };
+        if let Err(failure) = result {
+            self.release_staging(failure.operands_may_be_live);
+            return Err(failure);
+        }
+        fence(Ordering::Acquire);
+        // SAFETY: The completed GPU copy initialized the full staging range;
+        // its host mapping and the destination slice stay live for this call.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                host as *const u8,
+                destination.as_mut_ptr(),
+                destination.len(),
+            );
+        };
+        self.release_staging(false);
+        Ok(())
+    }
+}
+
+impl Drop for GpuCopySequence<'_, '_> {
+    fn drop(&mut self) {
+        self.release_staging(self.resources.pending.is_some() || self.resources.submitting);
     }
 }
 
@@ -430,21 +648,10 @@ impl GpuDevice<'_> {
         if source.is_empty() {
             return Ok(());
         }
-        let (staging, host, device) = self.staging(source.len(), DeviceAccess::READ)?;
-        // SAFETY: The staging allocation owns a writable host mapping of at
-        // least source.len() bytes. The source slice is live for this call.
-        unsafe { std::ptr::copy_nonoverlapping(source.as_ptr(), host as *mut u8, source.len()) };
-        fence(Ordering::Release);
-        // SAFETY: Staging and the caller's destination stay mapped through
-        // retirement. An uncertain result retains staging below.
-        let result = unsafe { self.copy_linear(destination, device, source.len() as u64, cancel) };
-        if result
-            .as_ref()
-            .is_err_and(|failure| failure.operands_may_be_live)
-        {
-            std::mem::forget(staging);
-        }
-        result
+        let mut sequence = GpuCopySequence::begin(*self, cancel)?;
+        // SAFETY: The sequence preserves the caller's range and retention
+        // obligations while owning the native queue and staging allocation.
+        unsafe { sequence.copy_from_host(destination, source) }
     }
 
     /// Copies a GPU range into a host slice through rocddi-owned staging.
@@ -467,28 +674,10 @@ impl GpuDevice<'_> {
         if destination.is_empty() {
             return Ok(());
         }
-        let (staging, host, device) =
-            self.staging(destination.len(), DeviceAccess::READ | DeviceAccess::WRITE)?;
-        // SAFETY: Staging and the caller's source remain mapped until native
-        // retirement. An uncertain result retains staging below.
-        let result = unsafe { self.copy_linear(device, source, destination.len() as u64, cancel) };
-        if let Err(failure) = result {
-            if failure.operands_may_be_live {
-                std::mem::forget(staging);
-            }
-            return Err(failure);
-        }
-        fence(Ordering::Acquire);
-        // SAFETY: The completed GPU copy initialized the full staging range;
-        // its host mapping and the destination slice stay live for this call.
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                host as *const u8,
-                destination.as_mut_ptr(),
-                destination.len(),
-            );
-        };
-        Ok(())
+        let mut sequence = GpuCopySequence::begin(*self, cancel)?;
+        // SAFETY: The sequence preserves the caller's range and retention
+        // obligations while owning the native queue and staging allocation.
+        unsafe { sequence.copy_to_host(destination, source) }
     }
 
     /// Copies a pitched byte rectangle. Each row is split into bounded SDMA
@@ -544,31 +733,7 @@ impl GpuDevice<'_> {
         }
         let mut resources = CopyResources::new(self)?;
         for rect in rects {
-            for layer in 0..rect.depth {
-                for row in 0..rect.height {
-                    let source_row = rect.source
-                        + u64::from(layer) * rect.source_slice
-                        + u64::from(row) * rect.source_pitch;
-                    let destination_row = rect.destination
-                        + u64::from(layer) * rect.destination_slice
-                        + u64::from(row) * rect.destination_pitch;
-                    let mut completed = 0;
-                    while completed < rect.width {
-                        let chunk = (rect.width - completed).min(MAX_COPY_PACKET_BYTES) as u32;
-                        let src = source_row + completed;
-                        let dst = destination_row + completed;
-                        resources.submit_packet(
-                            SdmaCommand::Copy {
-                                destination: dst,
-                                source: src,
-                                size: chunk,
-                            },
-                            cancel,
-                        )?;
-                        completed += u64::from(chunk);
-                    }
-                }
-            }
+            resources.copy_rect(*rect, cancel)?;
         }
         Ok(())
     }

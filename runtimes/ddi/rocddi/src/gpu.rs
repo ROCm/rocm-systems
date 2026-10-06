@@ -14,7 +14,7 @@ use crate::topology::{CacheInfo, GpuInfo};
 use crate::{Error, ErrorKind};
 
 mod copy;
-pub use copy::{CopyFailure, CopyRect};
+pub use copy::{CopyFailure, CopyRect, GpuCopySequence};
 
 /// Returns whether a topology cache is a non-instruction GPU compute-unit
 /// cache.
