@@ -152,6 +152,20 @@ TEST(RmaSegmentMathTest, PrefixPostKeepsRequestOnlyWhenSomethingPosted)
     EXPECT_FALSE(ncclRmaPrefixPostLostSignaledTail(/*posted=*/0, /*nWr=*/0));
 }
 
+// A freed id must not leave a gap the next request would wait on, nor be
+// reused while a later request holds a higher id.
+TEST(RmaSegmentMathTest, ReleaseSeqIdOnlyReturnsNewestId)
+{
+    uint64_t posted = 5;
+    ncclRmaReleaseSeqId(/*id=*/5, &posted);
+    EXPECT_EQ(posted, uint64_t{4});
+    EXPECT_EQ(++posted, uint64_t{5}) << "the next request reuses the released id";
+
+    posted = 7;
+    ncclRmaReleaseSeqId(/*id=*/6, &posted);
+    EXPECT_EQ(posted, uint64_t{7}) << "a later request already holds id 7";
+}
+
 // A failed handle calloc must still reach the status AllGather. memcpy of
 // segOff is skipped until the handle exists.
 TEST(RmaSegmentMathTest, FailedHandleCallocDoesNotCopySegmentOffsets)

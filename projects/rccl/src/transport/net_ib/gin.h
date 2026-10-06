@@ -150,6 +150,11 @@ static inline ncclResult_t ncclRmaCompletePostedRequest(ncclResult_t postRet, in
   return ncclRmaPostedRequestStatus(postRet, posted);
 }
 
+// A freed request returns its sequence id only if no later request took one.
+static inline void ncclRmaReleaseSeqId(uint64_t id, uint64_t* postedSeq) {
+  if (id == *postedSeq) (*postedSeq)--;
+}
+
 struct ncclGinIbCollComm {
   void* ctx;
   int rank;
