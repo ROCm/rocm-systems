@@ -2571,7 +2571,7 @@ void InstallPeerInfoAllGather(TransportsRankComm& c, std::vector<PeerSpec> specs
       info[i].cuMemSupport = s.cuMemSupport;
       info[i].mloPart = s.mloPart;
       info[i].nvmlDev = s.nvmlDev < 0 ? 100 + i : s.nvmlDev;  // self is 0, so -1 never collides
-      info[i].busId = s.busId;  // defaults to 0, which is also what the faked getBusId gives self
+      info[i].busId = s.busId;  // defaults to 0, as does self's: fillInfo copies the zero-init comm->busId
       std::memset(&info[i].gpuUuid, 0, sizeof(info[i].gpuUuid));
       reinterpret_cast<unsigned char*>(&info[i].gpuUuid)[0] =
           static_cast<unsigned char>(s.uuidTag < 0 ? i + 1 : s.uuidTag);  // 1-based: never matches self's zeros
@@ -2742,8 +2742,8 @@ TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuidDifferentHosts_IsAllowe
 
 // AICOMRCCL-2749. The CPX shape: one UUID, one bus/device, eight PCI functions. hipDeviceGetUuid
 // returns KFD's per-device unique_id, so every partition of an MI300X OAM reports the same UUID;
-// only the function nibble tells them apart. Measured on dell300x-ccs-aus-k13-09 in CPX: 63
-// partitions, 8 distinct UUIDs (each shared by 8), 63 distinct busIds. Dropping the busId conjunct
+// only the function nibble tells them apart. Measured on an MI300X node in CPX: 63
+// partitions, 8 distinct UUIDs and 63 distinct busIds. Dropping the busId conjunct
 // refuses this communicator, which is the whole bug -- one rank per partition is how CPX is run.
 TEST_F(InitMicrotest, InitTransportsRank_SameGpuUuidDifferentPciFunctions_IsAllowed) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);

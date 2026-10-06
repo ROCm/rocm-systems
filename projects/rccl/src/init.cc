@@ -1821,7 +1821,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
         comm->hasMloPart = true;
     }
     for (int j = 0; j < i; j++) {
-      // NVML device is agnostic to MloPart being used. With MloPart, each partition has a different GPU UUID.
+      // NVML device is agnostic to MloPart being used. On NVIDIA MLOPart, each partition has a different GPU UUID.
       comm->hasMultiRankNvml |= (comm->peerInfo[i].hostHash == comm->peerInfo[j].hostHash) &&
                                 (comm->peerInfo[i].nvmlDev == comm->peerInfo[j].nvmlDev);
       // The UUID alone does not identify a partition on AMD. hipDeviceGetUuid returns ROCr's
