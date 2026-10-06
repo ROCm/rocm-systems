@@ -24,6 +24,8 @@ from utils.inject_roctx._backends.torch_trace_collector import (
     _find_collector,
 )
 
+pytestmark = pytest.mark.torch_trace
+
 MARKER_API_COLUMNS = {
     "Domain",
     "Function",
@@ -218,7 +220,6 @@ def torch_trace_profiled_workload(
     return torch_trace_workload_state["dir"]
 
 
-@pytest.mark.torch_trace
 def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
     """Assert PMC, marker, and counter CSVs from a --torch-trace profile."""
     workload_dir = torch_trace_profiled_workload
@@ -292,7 +293,6 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
             assert found_row, f"{corresponding_counter_file} is empty"
 
 
-@pytest.mark.torch_trace
 def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     """Compare host and GPU timeline overhead with and without --torch-trace.
 
@@ -383,7 +383,6 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     )
 
 
-@pytest.mark.torch_trace
 @pytest.mark.parametrize(
     "workload_cmd, expected_exit",
     [
@@ -522,7 +521,6 @@ def test_profile_invalid_workloads_no_torch_trace(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.torch_trace
 def test_torch_trace_deep_tensor_wraps_overhead(
     binary_handler_profile_rocprof_compute,
 ):
@@ -601,7 +599,6 @@ def test_torch_trace_deep_tensor_wraps_overhead(
     print("=" * 70 + "\n")
 
 
-@pytest.mark.torch_trace
 def test_list_torch_operators_prints_call_tree(
     torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -624,7 +621,6 @@ def test_list_torch_operators_prints_call_tree(
     ).exists()
 
 
-@pytest.mark.torch_trace
 def test_torch_operator_addmm_selects_kernels(
     torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -645,7 +641,6 @@ def test_torch_operator_addmm_selects_kernels(
     assert "operator filter selected" in out
 
 
-@pytest.mark.torch_trace
 def test_list_torch_operators_wins_over_filter(
     torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -666,7 +661,6 @@ def test_list_torch_operators_wins_over_filter(
     assert "Matched PyTorch Operators:" not in out
 
 
-@pytest.mark.torch_trace
 def test_torch_operator_intersects_kernel_id(
     torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -701,7 +695,6 @@ def test_torch_operator_intersects_kernel_id(
     assert "operator filter selected 1 kernel" in out
 
 
-@pytest.mark.torch_trace
 def test_torch_operator_with_dispatch_filter(
     torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -761,7 +754,6 @@ def test_torch_operator_with_dispatch_filter(
     )
 
 
-@pytest.mark.torch_trace
 def test_torch_trace_user_range_in_marker_csv(binary_handler_profile_rocprof_compute):
     require_torch(gpu=True)
     workload_dir = common.get_output_dir(param_id="torch_trace_user_range")
@@ -798,7 +790,6 @@ def test_torch_trace_user_range_in_marker_csv(binary_handler_profile_rocprof_com
         common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.torch_trace
 def test_torch_trace_backward_thread_in_marker_csv(
     binary_handler_profile_rocprof_compute,
 ):
