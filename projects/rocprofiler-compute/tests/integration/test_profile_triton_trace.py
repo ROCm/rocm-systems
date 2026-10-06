@@ -88,3 +88,22 @@ def test_list_triton_operators_prints_call_tree(
     out = captured.out + captured.err
     assert "Triton Operator Call Tree:" in out
     assert "triton.JITFunction.matmul_kernel" in out
+
+
+@pytest.mark.triton_trace
+def test_triton_operator_matmul_selects_kernels(
+    triton_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--triton-operator",
+        "*matmul*",
+        "--path",
+        triton_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Matched Triton Operators:" in out
+    assert "triton.JITFunction.matmul_kernel" in out
