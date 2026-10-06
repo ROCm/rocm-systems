@@ -3,12 +3,16 @@
 
 #include "common/cli_dispatcher.hpp"
 
+#include <fmt/format.h>
+
+#include <algorithm>
 #include <cstddef>
+#include <filesystem>
 #include <ostream>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace rocprofsys::cli
 {
@@ -21,24 +25,6 @@ constexpr std::string_view k_output_long_eq   = "--output=";
 constexpr std::string_view k_output_short_eq  = "-o=";
 constexpr std::size_t      k_name_column      = 14;
 constexpr int              k_index_after_verb = 2;
-
-[[nodiscard]] constexpr bool
-is_help_flag(std::string_view arg) noexcept
-{
-    return arg == "-h" || arg == "-?" || arg == "--help" || arg.starts_with("--help=");
-}
-
-[[nodiscard]] constexpr bool
-is_version_flag(std::string_view arg) noexcept
-{
-    return arg == "--version";
-}
-
-[[nodiscard]] constexpr bool
-is_flag(std::string_view arg) noexcept
-{
-    return !arg.empty() && arg.front() == '-';
-}
 
 [[nodiscard]] constexpr bool
 is_injected_flag_present(std::string_view arg, std::string_view flag) noexcept
@@ -58,9 +44,7 @@ is_injected_flag_present(std::string_view arg, std::string_view flag) noexcept
 [[nodiscard]] std::string
 help_hint(std::string_view program)
 {
-    std::ostringstream oss;
-    oss << "hint: run '" << program << " --help' for available subcommands.";
-    return oss.str();
+    return fmt::format("hint: run '{} --help' for available subcommands.", program);
 }
 
 [[nodiscard]] std::string_view
@@ -120,52 +104,29 @@ make_error(std::string message)
 dispatch_result
 unknown_subcommand_error(std::string_view program, std::string_view token)
 {
-    std::ostringstream oss;
-    oss << "error: unknown subcommand '" << token << "'\n" << help_hint(program);
-    return make_error(oss.str());
-}
-
-dispatch_result
-missing_app_error(std::string_view program)
-{
-    std::ostringstream oss;
-    oss << "error: missing application argument\n"
-        << "Usage: " << program << " [subcommand] [flags] [--] <app> [app-args]\n"
-        << help_hint(program);
-    return make_error(oss.str());
-}
-
-dispatch_result
-from_spec(const subcommand_spec& spec, bool strip_subcommand)
-{
-    dispatch_result result;
-    result.kind = spec.in_process ? dispatch_kind::in_process : dispatch_kind::exec_tool;
-    result.mode = spec.mode;
-    result.binary_name      = spec.binary_name;
-    result.subcommand_name  = spec.name;
-    result.strip_subcommand = strip_subcommand;
-    result.extra_flag       = spec.extra_flag;
-    return result;
+    return make_error(
+        fmt::format("error: unknown subcommand '{}'\n{}", token, help_hint(program)));
 }
 
 void
-append_argv0(forwarded_argv& result, int argc, char** argv, std::string_view replacement)
+append_argv0(std::vector<std::string>& args, int argc, char** argv,
+             std::string_view replacement)
 {
     if(!replacement.empty())
     {
-        result.args.emplace_back(replacement);
+        args.emplace_back(replacement);
         return;
     }
     if(argc > 0 && argv != nullptr && argv[0] != nullptr)
     {
-        result.args.emplace_back(argv[0]);
+        args.emplace_back(argv[0]);
         return;
     }
-    result.args.emplace_back(k_program_fallback);
+    args.emplace_back(k_program_fallback);
 }
 
 void
-append_payload(forwarded_argv& result, int argc, char** argv, int start)
+append_payload(std::vector<std::string>& args, int argc, char** argv, int start)
 {
     if(argc <= 0 || argv == nullptr)
     {
@@ -175,113 +136,17 @@ append_payload(forwarded_argv& result, int argc, char** argv, int start)
     {
         if(argv[idx] != nullptr)
         {
-            result.args.emplace_back(argv[idx]);
+            args.emplace_back(argv[idx]);
         }
     }
 }
 }  // namespace
 
-void
-forwarded_argv::bind() noexcept
-{
-    ptrs.clear();
-    ptrs.reserve(args.size() + 1);
-    for(auto& entry : args)
-    {
-        ptrs.push_back(entry.data());
-    }
-    ptrs.push_back(nullptr);
-}
-
-forwarded_argv::forwarded_argv(const forwarded_argv& other)
-: args(other.args)
-{
-    bind();
-}
-
-forwarded_argv&
-forwarded_argv::operator=(const forwarded_argv& other)
-{
-    if(this != &other)
-    {
-        args = other.args;
-        bind();
-    }
-    return *this;
-}
-
-forwarded_argv::forwarded_argv(forwarded_argv&& other) noexcept
-: args(std::move(other.args))
-{
-    bind();
-    other.ptrs.clear();
-}
-
-forwarded_argv&
-forwarded_argv::operator=(forwarded_argv&& other) noexcept
-{
-    if(this != &other)
-    {
-        args = std::move(other.args);
-        bind();
-        other.ptrs.clear();
-    }
-    return *this;
-}
-
-std::string_view
-program_name(std::string_view argv0) noexcept
-{
-    if(argv0.empty())
-    {
-        return k_program_fallback;
-    }
-    const auto pos = argv0.find_last_of('/');
-    if(pos == std::string_view::npos)
-    {
-        return argv0;
-    }
-    const auto name = argv0.substr(pos + 1);
-    if(name.empty())
-    {
-        return k_program_fallback;
-    }
-    return name;
-}
-
-std::string
-directory_of(std::string_view argv0)
-{
-    const auto pos = argv0.find_last_of('/');
-    if(pos == std::string_view::npos)
-    {
-        return {};
-    }
-    if(pos == 0)
-    {
-        return "/";
-    }
-    return std::string{ argv0.substr(0, pos) };
-}
-
-std::string
-join_sibling_path(std::string_view directory, std::string_view binary_name)
-{
-    if(directory.empty())
-    {
-        return std::string{ binary_name };
-    }
-    if(directory == "/")
-    {
-        return std::string{ "/" } + std::string{ binary_name };
-    }
-    return std::string{ directory } + '/' + std::string{ binary_name };
-}
-
 dispatch_result
 parse_dispatch(int argc, char** argv)
 {
-    const auto program = program_name(arg_at(argc, argv, 0));
+    const auto program =
+        std::filesystem::path{ arg_at(argc, argv, 0) }.filename().string();
 
     if(argc <= 1)
     {
@@ -295,13 +160,14 @@ parse_dispatch(int argc, char** argv)
     {
         return unknown_subcommand_error(program, first);
     }
-    if(is_help_flag(first))
+    if(first == "-h" || first == "-?" || first == "--help" ||
+       first.starts_with("--help="))
     {
         dispatch_result result;
         result.kind = dispatch_kind::show_help;
         return result;
     }
-    if(is_version_flag(first))
+    if(first == "--version")
     {
         dispatch_result result;
         result.kind = dispatch_kind::show_version;
@@ -313,35 +179,49 @@ parse_dispatch(int argc, char** argv)
         constexpr bool k_strip_verb = true;
         if(spec->requires_app && !has_payload_args(argc, k_strip_verb))
         {
-            return missing_app_error(program);
+            return make_error(
+                fmt::format("error: missing application argument\n"
+                            "Usage: {} [subcommand] [flags] [--] <app> [app-args]\n"
+                            "{}",
+                            program, help_hint(program)));
         }
-        return from_spec(*spec, k_strip_verb);
+        dispatch_result result;
+        result.spec = spec;
+        result.kind =
+            spec->mode.has_value() ? dispatch_kind::in_process : dispatch_kind::exec_tool;
+        result.strip_subcommand = k_strip_verb;
+        return result;
     }
 
-    if(!is_flag(first))
+    if(first.empty() || first.front() != '-')
     {
         return unknown_subcommand_error(program, first);
     }
 
     // Implicit default: first token is a flag or "--".
-    constexpr bool k_keep_leading_flag = false;
-    return from_spec(default_subcommand(), k_keep_leading_flag);
+    constexpr bool  k_keep_leading_flag = false;
+    const auto&     chosen              = k_subcommands.front();
+    dispatch_result result;
+    result.spec = &chosen;
+    result.kind =
+        chosen.mode.has_value() ? dispatch_kind::in_process : dispatch_kind::exec_tool;
+    result.strip_subcommand = k_keep_leading_flag;
+    return result;
 }
 
-forwarded_argv
+std::vector<std::string>
 make_forwarded_argv(int argc, char** argv, forward_options options)
 {
-    forwarded_argv result;
-    const int      start = payload_index(options.strip_subcommand);
-    append_argv0(result, argc, argv, options.argv0_override);
+    std::vector<std::string> args;
+    const int                start = payload_index(options.strip_subcommand);
+    append_argv0(args, argc, argv, options.argv0_override);
     if(!options.extra_flag.empty() &&
        !payload_already_has_flag(argc, argv, start, options.extra_flag))
     {
-        result.args.emplace_back(options.extra_flag);
+        args.emplace_back(options.extra_flag);
     }
-    append_payload(result, argc, argv, start);
-    result.bind();
-    return result;
+    append_payload(args, argc, argv, start);
+    return args;
 }
 
 void
@@ -356,10 +236,8 @@ print_help(std::ostream& out, std::string_view program)
 
     for(const auto& spec : k_subcommands)
     {
-        out << "  " << spec.name;
-        const auto name_size = spec.name.size();
-        const auto pad       = name_size >= k_name_column ? 1 : k_name_column - name_size;
-        out << std::string(pad, ' ') << spec.description << '\n';
+        const auto width = std::max(spec.name.size() + 1, k_name_column);
+        out << fmt::format("  {:<{}}{}\n", spec.name, width, spec.description);
     }
 
     out << "\n"
