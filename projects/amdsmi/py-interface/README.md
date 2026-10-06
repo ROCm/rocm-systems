@@ -3,6 +3,47 @@
 The AMD SMI Python interface offers an accessible way to interact
 with AMD hardware through a user-friendly API.
 
+## Install from PyPI
+
+```shell
+python3 -m pip install "amdsmi>=27.1.0"
+```
+
+The wheel contains the Python library and the native AMD SMI library it
+needs. It does not include the `amd-smi` command-line tool or the C headers.
+
+Requirements:
+
+- Linux on x86_64 with glibc 2.27 or later.
+- CPython 3.6 or later, or PyPy, with pip 20.3 or later. Older pip versions
+  cannot install this wheel; the `>=27.1.0` above makes them fail instead of
+  installing the old 7.0.2 wrapper.
+- The `amdgpu` driver and `libdrm_amdgpu` (see below).
+- Access to the GPU device files: add your user to the `render` and `video`
+  groups. Changing GPU settings requires root.
+
+Call `amdsmi_init()` once per process and `amdsmi_shut_down()` when you are
+done. Do not call them from several threads at the same time, and do not
+request process lists for several GPUs from different threads at the same
+time.
+
+Do not install this wheel into the Python environment used by an `amd-smi`
+command-line tool from ROCm 7.2 or earlier, or from TheRock 7.11 or earlier.
+Those tools load whichever `amdsmi` package their Python finds first and do
+not work with this one. Use a virtual environment instead.
+
+### Upgrading from 7.0.2 or earlier
+
+PyPI releases up to 7.0.2 were a separate, community-built wrapper. 27.x is
+not fully compatible with them:
+
+- `amdsmi_set_gpu_clk_range()`, `amdsmi_get_cpusocket_handles()` and
+  `amdsmi_gpu_driver_reload()` were removed.
+- `AmdSmiProcessorType` members dropped their `AMDSMI_PROCESSOR_TYPE_` prefix,
+  for example `AmdSmiProcessorType.AMD_GPU`.
+- `amdsmi_set_cpu_df_pstate_range()` now takes `min_pstate` before
+  `max_pstate`. Pass both by keyword.
+
 ## Online documentation
 
 Explore the latest documentation on the [ROCm documentation
@@ -28,8 +69,8 @@ The following install modes expose the same `import amdsmi` entry point:
 | Community-built PyPI releases through 7.0.2 | Only the Python wrapper in `<site-packages>/amdsmi/`. Its version must match the ROCm release providing the library. | Matching ROCm `libamd_smi.so`; the legacy loader checks `ROCM_HOME` before `ROCM_PATH`. |
 | Bundled-library wheel (`BUILD_PYTHON_WHEEL=ON`) | The wrapper plus a SONAME-renamed `libamd_smi_python.so` directly inside `<site-packages>/amdsmi/`. | `libamd_smi_python.so` next to the wrapper. |
 
-AMD SMI 27.x wheels built by the manylinux workflow include the native
-library and use the AMD SMI library version, not the ROCm release number.
+AMD SMI 27.x wheels on PyPI include the native library and use the AMD SMI
+library version, not the ROCm release number.
 The community-built PyPI releases through 7.0.2 predate that packaging and
 require a matching older ROCm library. Do not use those wrappers with arbitrary
 newer AMD SMI libraries. See the
@@ -39,8 +80,8 @@ for the available delivery channels.
 The manylinux wheel needs the dynamically loaded `libdrm_amdgpu` for
 DRM-backed GPU queries: install `libdrm-amdgpu1` on
 Debian/Ubuntu, `libdrm` on RHEL/AlmaLinux/Rocky, or `libdrm_amdgpu1` on
-SLES/openSUSE. Missing it can leave some query results unavailable or incorrect
-even when GPU discovery succeeds.
+SLES/openSUSE. Without it, some queries fail and the PCI address reported for
+a GPU can be wrong, even when GPU discovery succeeds.
 
 For raw source-built wheel dependencies, see
 [Packaging and install paths](https://rocm.docs.amd.com/projects/amdsmi/en/develop/packaging.html).
