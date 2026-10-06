@@ -459,15 +459,13 @@ make_core_table()
     return table;
 }
 
-rocprofiler::context::context
-make_dispatch_tracing_context()
+void
+make_dispatch_tracing_context(rocprofiler::context::context& ctx)
 {
-    auto ctx = rocprofiler::context::context{};
     ctx.callback_tracer = std::make_unique<rocprofiler::context::callback_tracing_service>();
     EXPECT_EQ(rocprofiler::context::add_domain(ctx.callback_tracer->domains,
                                                ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH),
               ROCPROFILER_STATUS_SUCCESS);
-    return ctx;
 }
 
 class QueueInterpositionConsumerTransition : public ::testing::Test
@@ -512,7 +510,8 @@ TEST_F(QueueInterpositionConsumerTransition, start_resyncs_stale_shadow)
 
     get_queue_registry().wlock([&](auto& registry) { registry[queue_ptr] = state; });
 
-    auto ctx = make_dispatch_tracing_context();
+    auto ctx = rocprofiler::context::context{};
+    make_dispatch_tracing_context(ctx);
     notify_queue_interposition_consumer_context_started(&ctx);
 
     EXPECT_EQ(state->virtual_wptr.load(), 17u);
@@ -562,7 +561,8 @@ TEST_F(QueueInterpositionConsumerTransition, stop_then_start_resyncs_again)
 
     get_queue_registry().wlock([&](auto& registry) { registry[queue_ptr] = state; });
 
-    auto ctx = make_dispatch_tracing_context();
+    auto ctx = rocprofiler::context::context{};
+    make_dispatch_tracing_context(ctx);
     notify_queue_interposition_consumer_context_started(&ctx);
     notify_queue_interposition_consumer_context_stopped(&ctx);
 
@@ -579,7 +579,8 @@ TEST_F(QueueInterpositionConsumerTransition, stop_then_start_resyncs_again)
 
 TEST_F(QueueInterpositionConsumerTransition, rapid_start_stop_does_not_hang)
 {
-    auto ctx      = make_dispatch_tracing_context();
+    auto ctx = rocprofiler::context::context{};
+    make_dispatch_tracing_context(ctx);
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
 
     for(int i = 0; i < 50; ++i)
