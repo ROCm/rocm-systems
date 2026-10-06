@@ -15,19 +15,20 @@ namespace rocprofsys::control::clocks
 [[nodiscard]] inline bool
 timeline_available() noexcept
 {
-    struct timespec ts = {};
-    return clock_gettime(CLOCK_BOOTTIME, &ts) == 0;
+    struct timespec specs = {};
+    return clock_gettime(CLOCK_BOOTTIME, &specs) == 0;
 }
 
 [[nodiscard]] inline std::chrono::nanoseconds
 timeline_now() noexcept
 {
-    struct timespec ts = {};
-    if(clock_gettime(CLOCK_BOOTTIME, &ts) != 0)
+    struct timespec specs = {};
+    if(clock_gettime(CLOCK_BOOTTIME, &specs) != 0)
     {
         return std::chrono::nanoseconds::zero();
     }
-    return std::chrono::seconds{ ts.tv_sec } + std::chrono::nanoseconds{ ts.tv_nsec };
+    return std::chrono::seconds{ specs.tv_sec } +
+           std::chrono::nanoseconds{ specs.tv_nsec };
 }
 
 template <typename Tp = std::uint64_t>

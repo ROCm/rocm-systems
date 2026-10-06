@@ -11,7 +11,6 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <thread>
-#include <time.h>
 
 namespace
 {
