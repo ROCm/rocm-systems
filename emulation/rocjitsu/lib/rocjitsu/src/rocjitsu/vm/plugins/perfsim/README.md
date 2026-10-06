@@ -117,6 +117,21 @@ Configure Perfsim through its own environment, then launch the workload:
   --config /absolute/path/to/gfx1250-config.json -- ./application
 ```
 
+## When `on_shutdown` runs
+
+`on_shutdown` is a required backend callback. On a normal process exit the
+launcher stops the local VM engine, joins it, and delivers `on_shutdown` while
+the backend library is still loaded. That includes exits where HIP or ROCr
+still hold KFD descriptors. The simulated driver stays up until those
+descriptors close, so a later runtime finalizer can still release memory.
+Plugin shutdown does not wait for that close.
+
+A killed process, for example `SIGKILL`, does not run this path. `on_shutdown`
+is not called, and a backend that writes its report only from that callback
+produces no report. Flushing as the run proceeds is what still yields a report
+after a kill. On a normal exit, that one `on_shutdown` call is the supported
+place to flush.
+
 `GPUCSIM_INTERNAL_DETAILED_REPORT=1` is a diagnostic option implemented by
 recent `libgpucsim_ffm_plugin.so` builds, not by the RocJITsu adapter. It asks
 the backend to emit its internal detailed JSON schema, including fields such as

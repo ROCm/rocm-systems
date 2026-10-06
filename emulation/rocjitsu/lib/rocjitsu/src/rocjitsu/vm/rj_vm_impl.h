@@ -25,4 +25,9 @@ struct rj_vm_t : rocjitsu::RefCounted {
   std::atomic<bool> plugin_group_active{false};
 };
 
+/// @brief Deliver on_shutdown once, after simulation callbacks have stopped.
+/// @details A second call is a no-op. The host must not overlap this with
+/// engine workers that are still executing plugin callbacks.
+void rj_vm_shutdown_plugins(rj_vm_t *vm);
+
 #endif // ROCJITSU_VM_RJ_VM_IMPL_H_
