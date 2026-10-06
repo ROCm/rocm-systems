@@ -4,7 +4,7 @@ dynamicLoading:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) FAIL 3/3: device-kernels-from-library REQUIRE(testResult==true) fails. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: testResult == true -> false == true. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. Loading device kernels from a library fails. gfx1030 (amd_linux) FAIL 3/3: REQUIRE(testResult == true). gfx1201 (amd_wsl) FAIL: testResult == true -> false == true."
     tags: [module]
   Unit_hipApiDynamicLoad_hipGetProcAddress:
     <<: *level_2

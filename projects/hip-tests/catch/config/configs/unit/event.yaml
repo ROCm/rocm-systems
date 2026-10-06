@@ -43,7 +43,7 @@ event:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "gfx1201 (amd_windows) FLAKY: passed then failed within 10 runs. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FLAKY: passed then failed within 10 runs."
     tags: [synchronization, smoke, P0]
   Unit_hipEventRecord_Negative:
     <<: *level_2
@@ -52,7 +52,7 @@ event:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails on amd_windows (gfx1201). Needs re-triage."
     tags: [ipc, P1]
   Unit_hipEventIpc_DestroyNonBlocking:
     <<: *level_2
@@ -82,37 +82,37 @@ event:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: intermittent Seg fault failure gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - intermittent segfault failure. gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs re-triage."
     tags: [lifecycle, P1]
   Unit_hipEventCreateWithFlags_DefaultFlg_HstVisMem:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: intermittent Seg fault failure gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - intermittent segfault failure. gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs re-triage."
     tags: [lifecycle, P0]
   Unit_hipEventCreateWithFlags_DisableSystemFence_NonCohHstMem:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: intermittent Seg fault failure gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - intermittent segfault failure. gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs re-triage."
     tags: [lifecycle, P1]
   Unit_hipEventCreateWithFlags_DefaultFlg_NonCohHstMem:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: intermittent Seg fault failure gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - intermittent segfault failure. gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs re-triage."
     tags: [lifecycle, P1]
   Unit_hipEventCreateWithFlags_DisableSystemFence_CohHstMem:
     <<: *level_2
     disabled:
       targets: [gfx1200, gfx1201, amdgcnspirv, amd_windows, amd_wsl]
-      reason: "(amd_linux) SWDEV-470751 : Fine Grain memory is MTYPE_NC due to HW bug.; (amd_windows) Note: intermittent Seg fault failure gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs to be re-triaged on gfx1200, gfx1201, amdgcnspirv AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - amd_linux: SWDEV-470751, fine-grain memory is MTYPE_NC due to a HW bug. amd_windows: intermittent segfault failure. gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs re-triage on gfx1200, gfx1201, amdgcnspirv."
     tags: [lifecycle, P1]
   Unit_hipEventCreateWithFlags_DefaultFlg_CohHstMem:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: intermittent Seg fault failure gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - intermittent segfault failure. gfx1201 (amd_windows) self-skips: large BAR (resizable BAR) is not supported on this device. gfx1201 (amd_wsl) self-skips: large BAR (resizable BAR) is not supported on this device. Needs re-triage."
     tags: [lifecycle, P1]
   Unit_hipEventCreateWithFlags_Verify_Capture:
     <<: *level_2

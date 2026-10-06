@@ -22,7 +22,7 @@ rtc:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "AIRUNTIME-2410 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2410 - fails on asan; needs to be re-triaged on asan"
     tags: [compile]
   Unit_hiprtc_cpp17:
     <<: *level_2
@@ -31,13 +31,13 @@ rtc:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "AIRUNTIME-2410 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2410 - fails on asan; needs to be re-triaged on asan"
     tags: [compile]
   Unit_hiprtc_getloweredname:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "AIRUNTIME-2410 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2410 - fails on asan; needs to be re-triaged on asan"
     tags: [compile]
   Unit_hiprtc_test_hip_bfloat16:
     <<: *level_2
@@ -64,25 +64,25 @@ rtc:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "AIRUNTIME-2410 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2410 - fails on asan; needs to be re-triaged on asan"
     tags: [integration]
   Unit_hiprtc_half_shuffle_sync:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "AIRUNTIME-2410 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2410 - fails on asan; needs to be re-triaged on asan"
     tags: [integration]
   Unit_Rtc_ReduceRandom:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "AIRUNTIME-2410 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2410 - fails on asan; needs to be re-triaged on asan"
     tags: [compile]
   Unit_hiprtc_stdheaders:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Patch which removes the typetraits implementation from std namespace in hiprtc is reverted; AIRUNTIME-2410 Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "AIRUNTIME-2410 - fails on asan; patch which removes the typetraits implementation from the std namespace in hiprtc is reverted; needs to be re-triaged on asan"
     tags: [header]
   Unit_Rtc_MathConstants_header:
     <<: *level_2
@@ -226,12 +226,12 @@ rtc:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Rock_Window_Failures_on_gfx1151; Asan: AIRUNTIME-2410 Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "AIRUNTIME-2410 - Rock window failures on gfx1151 and asan failures; needs to be re-triaged on asan"
   Unit_Rtc_CoopScan:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Rock_Window_Failures_on_gfx1151; Asan: AIRUNTIME-2410 Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "AIRUNTIME-2410 - Rock window failures on gfx1151 and asan failures; needs to be re-triaged on asan"
   Unit_RTC_BUNDLE_FROM_FILE:
     <<: *level_2
     tags: [link]

@@ -11,7 +11,7 @@ multiproc:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Note: no valid pci bdf in wsl gfx1201 (amd_wsl) FAIL: deviceMatchCount == deviceCount -> 0 == 1. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated; no valid PCI BDF in WSL. gfx1201 (amd_wsl) FAIL: deviceMatchCount == deviceCount -> 0 == 1."
   Unit_hipDeviceTotalMem_MaskedDevices: *level_2
   Unit_hipDeviceGetAttribute_MaskedDevices: *level_2
   Unit_hipGetDeviceCount_MaskedDevices: *level_2
@@ -45,7 +45,7 @@ multiproc:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Test does not play well with Asan. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN. Needs re-triage."
   Unit_hipMemGetInfo_Functional_MultiDevice_Scenario5: *level_2
   Unit_hipMemGetInfo_SetHiddenFreeMemFromChild: *level_2
   Unit_hipMemGetInfo_VerifyHiddenFreeMemForAllGpu: *level_2

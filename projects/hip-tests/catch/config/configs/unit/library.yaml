@@ -14,7 +14,7 @@ library:
     tags: [module]
     disabled:
       targets: [asan]
-      reason: "AIRUNTIME-2410 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2410 - RTC library load fails under asan. Needs re-triage."
   Unit_hipKernelGetAttribute_Positive_Basic:
     <<: *level_2
     tags: [module]

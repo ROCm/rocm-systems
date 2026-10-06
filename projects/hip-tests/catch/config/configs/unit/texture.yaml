@@ -28,13 +28,13 @@ texture:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "SWDEV-431191:Below tests failed in stress test on 03/11/23 gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - failed in a stress test on 03/11/23 (SWDEV-431191); gfx1201 (amd_wsl) self-skips the variant. Needs re-triage."
     tags: [sample, image]
   Unit_Layered1DTexture_Check_DeviceBufferToFromLayered1DArray:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "SWDEV-431191:Below tests failed in stress test on 03/11/23; SWDEV-432250:Below tests failed in stress test on 10/11/23 gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - failed in stress tests on 03/11/23 (SWDEV-431191) and 10/11/23 (SWDEV-432250); gfx1201 (amd_wsl) self-skips the variant. Needs re-triage."
     tags: [sample, image]
   Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray:
     <<: *level_2
@@ -43,7 +43,7 @@ texture:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "SWDEV-431191:Below tests failed in stress test on 03/11/23; SWDEV-432250:Below tests failed in stress test on 10/11/23 gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - failed in stress tests on 03/11/23 (SWDEV-431191) and 10/11/23 (SWDEV-432250); gfx1201 (amd_wsl) self-skips the variant. Needs re-triage."
     tags: [sample, image]
   Unit_hipSimpleTexture3D_Check_DataTypes:
     <<: *level_2
@@ -76,7 +76,7 @@ texture:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in external CI for hip-tests PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device. Needs re-triage."
     tags: [texobj, image]
   Unit_hipGetTextureAlignmentOffset_Positive:
     <<: *level_2
@@ -97,31 +97,31 @@ texture:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetArray_CheckData:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetArray_Negative:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetArray_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetArray_Negative:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetBorderColor_Positive:
     <<: *level_2
@@ -130,7 +130,7 @@ texture:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetBorderColor_Positive:
     <<: *level_2
@@ -139,73 +139,73 @@ texture:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetAddress_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetAddress_Negative:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetAddress_AdressNotSet:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetAddress_Basic:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetAddress_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetAddress_Negative:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetFormat_Basic:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetFormat_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetFormat_Negative:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetFormat_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetFormat_Negative:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipCreateTextureObject_tex1DfetchVerification:
     <<: *level_2
@@ -316,37 +316,37 @@ texture:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetAddress2D_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetMaxAnisotropy_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetMaxAnisotropy_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetMaxAnisotropy_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipUnbindTexture_Null_Texture:
     <<: *level_2
@@ -364,13 +364,13 @@ texture:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetFlags_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipBindTextureToArray_Negative_Parameters:
     <<: *level_2
@@ -388,37 +388,37 @@ texture:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetFlags_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetAddressMode_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetAddressMode_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetAddressMode_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefGetAddressMode_Positive:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [texref, image]
   Unit_hipTexRefSetGetFilterMode:
     <<: *level_2
@@ -439,13 +439,13 @@ texture:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92 gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in external CI for hip-tests PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92; gfx1201 (amd_wsl) self-skips the variant. Needs re-triage."
     tags: [texref, image]
   Unit_hipTextureMipmapRef2D_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92 gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in external CI for hip-tests PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92; gfx1201 (amd_wsl) self-skips the variant. Needs re-triage."
     tags: [texref, image]
   Unit_hipMallocMipmappedArray_Negative_Parameters:
     <<: *level_2

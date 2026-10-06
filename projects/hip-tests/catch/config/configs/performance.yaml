@@ -16,7 +16,7 @@ performance:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "Following tests disabled as it should be a local perf test Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled because this should be run as a local perf test; needs to be re-triaged."
   Performance_hipMemcpy_DeviceToHost: *level_2
   Performance_hipMemcpy_HostToDevice: *level_2
   Performance_hipMemcpy_HostToHost: *level_2
@@ -72,7 +72,7 @@ performance:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - failing in PSDB; needs to be re-triaged."
   Performance_hipMemcpy2D_DeviceToDevice_DisablePeerAccess: *level_2
   Performance_hipMemcpy2D_DeviceToDevice_EnablePeerAccess: *level_2
   Performance_hipMemcpy2DAsync_DeviceToHost: *level_2
@@ -81,7 +81,7 @@ performance:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Below tests are failing PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - failing in PSDB; needs to be re-triaged."
   Performance_hipMemcpy2DAsync_DeviceToDevice_DisablePeerAccess: *level_2
   Performance_hipMemcpy2DAsync_DeviceToDevice_EnablePeerAccess: *level_2
   Performance_hipMemcpy2DToArray_HostToDevice:
@@ -148,22 +148,22 @@ performance:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
   Performance_hipMemsetD16Async:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
   Performance_hipMemsetD32:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
   Performance_hipMemsetD32Async:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
   Performance_hipMemset2D: *level_2
   Performance_hipMemset2DAsync: *level_2
   Performance_hipMemset3D: *level_2

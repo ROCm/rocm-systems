@@ -52,14 +52,14 @@ occupancy:
     <<: *level_2
     disabled:
       targets: [nvidia]
-      reason: "WGP/CU LDS reporting is AMD specific; not built for the NVIDIA platform Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - WGP/CU LDS reporting is AMD-specific; not built for the NVIDIA platform. Needs re-triage."
   Unit_hipOccupancy_Positive_OccupancyMatchesSharedMemPerMultiprocessor:
     <<: *level_2
     disabled:
       targets: [nvidia]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - AMD-specific LDS/occupancy consistency check; not applicable on the NVIDIA platform. Needs re-triage."
   Unit_hipOccupancy_Positive_ZeroLdsMatchesThreadLimit:
     <<: *level_2
     disabled:
       targets: [nvidia]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - AMD-specific LDS/occupancy consistency check; not applicable on the NVIDIA platform. Needs re-triage."

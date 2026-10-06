@@ -10,7 +10,7 @@ multiThread:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - in the Rock_Linux_Failures_on_gfx94X set. Needs re-triage on amd_linux."
     tags: [device_mgmt, P1]
   Unit_hipMultiThreadDevice_ParallelPyramid:
     <<: *level_2

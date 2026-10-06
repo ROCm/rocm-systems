@@ -3,9 +3,13 @@
 # SPDX-License-Identifier: MIT
 
 import argparse
+import re
 import sys
 
 from common import iter_group_configs, ERROR, RESET
+
+
+JIRA_RE = re.compile(r"AIRUNTIME-\d+")
 
 
 def parse_args():
@@ -28,6 +32,7 @@ def main():
     missing = []
     invalid_skip_fields = []
     missing_reasons = []
+    missing_jira = []
 
     for group, cases in iter_group_configs(configs_path):
         for case_name, case_config in cases.items():
@@ -57,6 +62,11 @@ def main():
                 # (targets: []) is a no-op and needs no reason.
                 if targets and not (isinstance(reason, str) and reason.strip()):
                     missing_reasons.append(f"  {group}/{case_name}: '{field}'")
+                # A populated skip section with a real reason must cite a Jira
+                # reference (AIRUNTIME-<number>); the placeholder AIRUNTIME-XXXX
+                # has no digits and therefore does not count as a real ref.
+                elif targets and not JIRA_RE.search(reason):
+                    missing_jira.append(f"  {group}/{case_name}: '{field}'")
 
     if missing:
         print(
@@ -82,6 +92,15 @@ def main():
             file=sys.stderr,
         )
         for entry in missing_reasons:
+            print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    if missing_jira:
+        print(
+            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' 'reason' with no real Jira reference. The reason must contain a real AIRUNTIME-<number> (the placeholder AIRUNTIME-XXXX does not count):{RESET}",
+            file=sys.stderr,
+        )
+        for entry in missing_jira:
             print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
         sys.exit(1)
 

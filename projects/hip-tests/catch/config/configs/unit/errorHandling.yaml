@@ -67,7 +67,7 @@ errorHandling:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Test causes error state in the runtime and prevents resource cleanup. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test puts the runtime in an error state, which prevents resource cleanup under asan. Needs re-triage."
   Unit_hipExtGetLastError_Positive_Basic:
     <<: *level_2
     tags: [P0]
@@ -100,9 +100,9 @@ errorHandling:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Following tests disabled as it should be a local perf test gfx1201 (amd_windows) FAIL: hipDynamicLoggingTest() == true -> false == true. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated; this is really a local perf test. gfx1201 (amd_windows) FAIL: hipDynamicLoggingTest() == true -> false == true."
   Unit_hipDynamicLogging_Positive_MultipleEnableDisable:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Following tests disabled as it should be a local perf test gfx1201 (amd_windows) FAIL: output.size() > 0 -> 0 > 0. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated; this is really a local perf test. gfx1201 (amd_windows) FAIL: output.size() > 0 -> 0 > 0."

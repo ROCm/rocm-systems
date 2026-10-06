@@ -28,7 +28,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Disabling tests tracked with SWDEV-389647.. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled, tracked by SWDEV-389647; gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
     tags: [transfer, image, P1]
   Unit_hipMemcpy2DToArrayAsync_Positive_ZeroWidthHeight:
     <<: *level_2
@@ -52,7 +52,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged on nvidia_windows AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test fails in PSDB; needs to be re-triaged on nvidia_windows."
     tags: [transfer, P1]
   Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior:
     <<: *level_2
@@ -103,7 +103,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged on nvidia_windows AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test fails in PSDB; needs to be re-triaged on nvidia_windows."
     tags: [transfer, P1]
   Unit_hipMemcpyParam2D_Positive_Parameters:
     <<: *level_2
@@ -145,7 +145,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged on nvidia_windows AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test fails in PSDB; needs to be re-triaged on nvidia_windows."
     tags: [transfer, P1]
   Unit_hipMemcpy2D_Positive_Parameters:
     <<: *level_2
@@ -220,7 +220,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "SWDEV-396963 gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled, tracked by SWDEV-396963; gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
     tags: [transfer, image, P1]
   Unit_hipMemcpy2DFromArrayAsync_Positive_ZeroWidthHeight:
     <<: *level_2
@@ -298,7 +298,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "Rock_Linux_Failures_on_gfx94X gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged on amd_linux."
     tags: [transfer, image, P1]
   Unit_hipMemcpyHtoAAsync_MultiDevice:
     <<: *level_2
@@ -325,7 +325,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged."
     tags: [P1]
   Unit_hipMemcpy_DynamicQueueChurn_StagedCopies:
     <<: *level_2
@@ -336,7 +336,7 @@ memory:
     tags: [P1]
     disabled:
       targets: [amd_linux]
-      reason: "Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - needs to be re-triaged on amd_linux."
   Unit_hipHostRegister_DirectReferenceFromKernel:
     <<: *level_2
     tags: [P1]
@@ -345,7 +345,7 @@ memory:
     tags: [P1]
     disabled:
       targets: [amd_linux]
-      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux."
   Unit_hipHostRegister_SameChunkRepeat:
     <<: *level_2
     tags: [alloc, P1]
@@ -381,7 +381,7 @@ memory:
     tags: [P1]
     disabled:
       targets: [asan]
-      reason: "Tests behaviour after free which throws off the sanitizer Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test exercises behaviour after free, which throws off the sanitizer; needs to be re-triaged."
   Unit_hipHostRegister_DuplicateAndDisjoint:
     <<: *level_2
     tags: [alloc]
@@ -473,7 +473,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Huge memory usage, no point enabling it with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - huge memory usage, no point enabling it with ASAN; needs to be re-triaged."
     tags: [alloc, P1, managed_memory]
   Unit_hipMallocManaged_Negative:
     <<: *level_2
@@ -486,7 +486,7 @@ memory:
     tags: [multigpu, P1, managed_memory]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled on Windows; gfx1201 (amd_windows) self-skips because the GPU does not support managed memory, gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
   Unit_hipManagedMultiGpuVaConsistency_MultiDevice:
     <<: *level_2
     tags: [alloc, multigpu, managed_memory]
@@ -503,7 +503,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Out of bounds access is caught by the sanitizer Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - out-of-bounds access is caught by the sanitizer; needs to be re-triaged."
     tags: [memset, P1]
   Unit_hipMemset2D_Negative_InvalidPtr:
     <<: *level_2
@@ -623,7 +623,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "Disabling below tests temporarily due to change in API behavior Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - temporarily disabled due to a change in API behavior; needs to be re-triaged on amd_linux."
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_MmapMem:
     <<: *level_2
@@ -635,13 +635,13 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled on Windows; gfx1201 (amd_windows) self-skips because the GPU does not support managed memory, gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
     tags: [alloc, P1, managed_memory]
   Unit_hipMallocManaged_Large:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Huge memory usage, no point enabling it with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - huge memory usage, no point enabling it with ASAN; needs to be re-triaged."
     tags: [alloc, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Basic:
     <<: *level_2
@@ -671,13 +671,13 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice:
     <<: *level_2
@@ -689,19 +689,19 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Huge memory usage, no point enabling it with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - huge memory usage, no point enabling it with ASAN; needs to be re-triaged."
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_AccessedBy1:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_windows) self-skips because the GPU does not support managed memory, gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_4:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_windows) self-skips because the GPU does not support managed memory, gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
     tags: [query, P1, managed_memory]
   Unit_hipHostMalloc_CoherentTst:
     <<: *level_2
@@ -713,13 +713,13 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled on Windows; gfx1201 (amd_windows) self-skips because the GPU does not support managed memory, gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
     tags: [query, P1, managed_memory]
   Unit_hipMalloc_CoherentTst:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Note: Windows disabled gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated; disabled on Windows, gfx1201 (amd_windows) FAIL: false -> false."
     tags: [query, P0]
   Unit_hipExtMallocWithFlags_CoherentTst:
     <<: *level_2
@@ -931,7 +931,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "Self-skips: fewer than two GPUs (3D peer) -- not locally verifiable. Rock_Linux_Failures_on_gfx94X Further investigation needed. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - self-skips because fewer than two GPUs are present (3D peer), not locally verifiable; Rock Linux failures on gfx94X, further investigation needed; gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged on amd_linux."
     tags: [multigpu, transfer, image]
   Unit_hipMemcpy3DPeerAsync_NegativeTsts:
     <<: *level_2
@@ -943,7 +943,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - needs to be re-triaged on amd_linux."
     tags: [alloc, P1]
   Unit_hipMemPoolExportToShareableHandle_ChldUseHdl:
     <<: *level_2
@@ -1009,7 +1009,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged."
     tags: [alloc, P1, managed_memory]
   Unit_hipMallocManaged_MGpuMThread:
     <<: *level_2
@@ -1030,7 +1030,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "SWDEV-396616 hipMemMap returns invalid error; AIRUNTIME-2291: temporarily disabled (hangs in CI 942) Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2291 - temporarily disabled because it hangs in CI 942; hipMemMap returns an invalid error (SWDEV-396616); re-triage on amd_linux is still pending."
     tags: [virtualMemoryManagement, P1]
   Unit_hipMemVmm_Uncached:
     <<: *level_2
@@ -1100,7 +1100,7 @@ memory:
     tags: [P1]
     disabled:
       targets: [amd_wsl]
-      reason: "gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
   Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array:
     <<: *level_2
     tags: [image]
@@ -1146,7 +1146,7 @@ memory:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
-      reason: "unit/memory/CMakeLists.txt adds hipPointerSetAttribute.cc only if(UNIX) (Windows build error: undefined symbol hipPointerSetAttribute); never built or run on native Windows. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Linux-only test; unit/memory/CMakeLists.txt adds hipPointerSetAttribute.cc only under if(UNIX) because of a Windows build error (undefined symbol hipPointerSetAttribute), so it is never built or run on native Windows."
     tags: [query, P1]
   Unit_hipPointerSetAttribute_Negative_Parameters:
     <<: *level_2
@@ -1213,7 +1213,7 @@ memory:
     tags: [alloc, multigpu, P1]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). gfx1201 (amd_wsl) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_windows) and gfx1201 (amd_wsl) both self-skip because fewer than two GPUs are present (numDevices < 2); needs to be re-triaged."
   Unit_hipMemPoolSetGetAccess_Positive_P2P:
     <<: *level_2
     tags: [alloc, multigpu, P1]
@@ -1338,31 +1338,31 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged."
     tags: [alloc, multigpu, P1]
   Unit_hipMallocFromPoolAsync_MThread_DefaultThresh:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipMallocFromPoolAsync_MThread_MaxThresh:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged on asan."
     tags: [alloc, P1]
   Unit_hipMallocFromPoolAsync_MThread_CommonMpool_DefaultMempool:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged on asan."
     tags: [alloc, P1]
   Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipMallocFromPoolAsync_MultStream_Sync:
     <<: *level_2
@@ -1393,7 +1393,7 @@ memory:
     tags: [multigpu, transfer, P1]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Disabling test tracked SWDEV-391555 gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). gfx1201 (amd_wsl) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled, tracked by SWDEV-391555; gfx1201 (amd_windows) and gfx1201 (amd_wsl) both self-skip because fewer than two GPUs are present (numDevices < 2); needs to be re-triaged."
   Unit_hipMemcpyPeer_Positive_OrderingWithSrcBlockingStream:
     <<: *level_2
     tags: [multigpu, transfer]
@@ -1411,7 +1411,7 @@ memory:
     tags: [multigpu, transfer, P1]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Disabling test tracked SWDEV-391555 gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). gfx1201 (amd_wsl) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled, tracked by SWDEV-391555; gfx1201 (amd_windows) and gfx1201 (amd_wsl) both self-skip because fewer than two GPUs are present (numDevices < 2); needs to be re-triaged."
   Unit_hipMemcpyPeerAsync_Negative_Parameters:
     <<: *level_2
     tags: [multigpu, transfer, P1]
@@ -1452,7 +1452,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test fails in PSDB; needs to be re-triaged."
     tags: [transfer, P1]
   Unit_hipMemcpy_Negative_Parameters:
     <<: *level_2
@@ -1464,7 +1464,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged."
     tags: [transfer, P1]
   Unit_hipMemsetAsync_VerifyExecutionWithKernel:
     <<: *level_2
@@ -1677,7 +1677,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Rock_Window_Failures_on_gfx1151; Huge memory usage, no point enabling it with ASAN Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151; huge memory usage, no point enabling it with ASAN; needs to be re-triaged on asan."
     tags: [alloc, P0]
   Unit_hipMalloc_Positive_APU_LargeAllocSpill:
     <<: *level_2
@@ -1726,7 +1726,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "hipMemGetInfo doesnt report updated memory immediately after hipFree in ASAN Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - hipMemGetInfo doesn't report updated memory immediately after hipFree under ASAN; needs to be re-triaged on asan."
     tags: [alloc, P0]
   Unit_hipMalloc3D_SmallandBigChunks:
     <<: *level_2
@@ -1765,31 +1765,31 @@ memory:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, image, P1]
   Unit_hipMalloc3DArray_Negative_BadChannelLayout:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, image, P1]
   Unit_hipMalloc3DArray_Negative_8BitFloat:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, image, P1]
   Unit_hipMalloc3DArray_Negative_DifferentChannelSizes:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, image, P1]
   Unit_hipMalloc3DArray_Negative_BadChannelSize:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, image, P1]
   Unit_hipMalloc3DArray_Negative_NumericLimit:
     <<: *level_2
@@ -1837,7 +1837,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged on nvidia_windows AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test fails in PSDB; needs to be re-triaged on nvidia_windows."
     tags: [transfer, P1]
   Unit_hipDrvMemcpy3D_Positive_Parameters:
     <<: *level_2
@@ -1846,7 +1846,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-238; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged."
     tags: [transfer, image, P1]
   Unit_hipDrvMemcpy3D_Negative_Parameters:
     <<: *level_2
@@ -1879,7 +1879,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "gfx1201 (amd_wsl) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated; gfx1201 (amd_wsl) FAIL: false -> false."
     tags: [transfer, P1]
   Unit_hipDrvMemcpy3DAsync_Positive_Synchronization_Behavior:
     <<: *level_2
@@ -1891,7 +1891,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-238; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged."
     tags: [transfer, image, P1]
   Unit_hipDrvMemcpy3DAsync_Negative_Parameters:
     <<: *level_2
@@ -1966,7 +1966,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "gfx1201 (amd_windows) self-skips: Device does not support concurrent managed access. gfx1201 (amd_wsl) self-skips: Device does not support concurrent managed access. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_windows) and gfx1201 (amd_wsl) both self-skip because the device does not support concurrent managed access; needs to be re-triaged."
     tags: [query, managed_memory]
   Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity:
     <<: *level_2
@@ -2042,7 +2042,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - needs to be re-triaged."
     tags: [query, P0]
   Unit_hipFreeImplicitSyncDev:
     <<: *level_2
@@ -2066,13 +2066,13 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Tests double free which throws off the sanitizer Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test exercises double free, which throws off the sanitizer; needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipFreeDoubleHost:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Tests double free which throws off the sanitizer Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test exercises double free, which throws off the sanitizer; needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipFreeDoubleArrayFree:
     <<: *level_2
@@ -2109,7 +2109,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Tests double free which throws off the sanitizer Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test exercises double free, which throws off the sanitizer; needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipHostFree_Multithreading:
     <<: *level_2
@@ -2163,7 +2163,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl, amd_linux]
-      reason: "Note: Windows disabled; AIRUNTIME-2291: temporarily disabled (hangs in CI 942) gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: GPU does not support managed memory. Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2291 - temporarily disabled because it hangs in CI 942; also disabled on Windows, where gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because the GPU does not support managed memory; re-triage on amd_linux is still pending."
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_TstAlignedAllocMem:
     <<: *level_2
@@ -2172,14 +2172,14 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "Rock_Linux_Failures_on_gfx94X gfx1201 (amd_wsl) self-skips: GPU is not XNACK-enabled. Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; gfx1201 (amd_wsl) self-skips because the GPU is not XNACK-enabled; needs to be re-triaged on amd_linux."
     tags: [query, P1]
   Unit_hipMemAdvise_ReadMosltyMgpuTst:
     <<: *level_2
     tags: [multigpu, query, P1, managed_memory]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: GPU does not support managed memory. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled on Windows; gfx1201 (amd_windows) and gfx1201 (amd_wsl) both self-skip because the GPU does not support managed memory; needs to be re-triaged."
   Unit_hipMemAdvise_Set_Unset_Basic:
     <<: *level_2
     tags: [query, P1, managed_memory]
@@ -2187,7 +2187,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: GPU does not support managed memory. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_windows) and gfx1201 (amd_wsl) both self-skip because the GPU does not support managed memory; needs to be re-triaged."
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_Rounding:
     <<: *level_2
@@ -2205,7 +2205,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Note: intermittent Seg fault failure gfx1201 (amd_wsl) self-skips: GPU does not support managed memory. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - intermittent segmentation fault failure; gfx1201 (amd_wsl) self-skips because the GPU does not support managed memory; needs to be re-triaged."
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_Negative_Parameters:
     <<: *level_2
@@ -2223,7 +2223,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux."
     tags: [alloc, P0]
   Unit_hipFreeHost_InvalidMemory:
     <<: *level_2
@@ -2232,7 +2232,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Tests double free which throws off the sanitizer Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test exercises double free, which throws off the sanitizer; needs to be re-triaged."
     tags: [alloc, P0]
   Unit_hipFreeHost_Multithreading:
     <<: *level_2
@@ -2259,7 +2259,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipMallocAsync_Multidevice:
     <<: *level_2
@@ -2271,7 +2271,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged."
     tags: [alloc, multigpu, P1]
   Unit_hipMallocAsync_ByUsinghipMalloc:
     <<: *level_2
@@ -2283,13 +2283,13 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipMallocAsync_MThread_ThreadSharedStream:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Does not play well with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipMallocAsync_DefaultStreams_Concurrent:
     <<: *level_2
@@ -2313,7 +2313,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_wsl, asan]
-      reason: "Below tests soft hang in stress test on 13/09/23; Asan test disabled temporarily until PR #5287 is merged gfx1201 (amd_wsl) self-skips: GPU does not support managed memory. Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test soft-hangs in the stress test on 13/09/23; ASAN run temporarily disabled until PR #5287 is merged; gfx1201 (amd_wsl) self-skips because the GPU does not support managed memory; needs to be re-triaged on asan."
     tags: [query, P1, managed_memory]
   Unit_hipMemGetAddressRange_Positive:
     <<: *level_2
@@ -2325,14 +2325,14 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Below tests are failing PSDB gfx1201 (amd_windows) FLAKY: passed then failed within 10 runs. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated; test fails in PSDB, gfx1201 (amd_windows) is FLAKY (passed then failed within 10 runs)."
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_MultiThread:
     <<: *level_2
     tags: [alloc, P1]
     disabled:
       targets: [amd_windows]
-      reason: "Below tests are failing PSDB gfx1201 (amd_windows) FLAKY: passed then failed within 10 runs. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated; test fails in PSDB, gfx1201 (amd_windows) is FLAKY (passed then failed within 10 runs)."
   Unit_hipMallocMipmappedArray_happy:
     <<: *level_2
     tags: [P1]
@@ -2355,31 +2355,31 @@ memory:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_Negative_BadChannelLayout:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_Negative_8BitFloat:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_Negative_DifferentChannelSizes:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_Negative_BadChannelSize:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_Negative_NumericLimit:
     <<: *level_2
@@ -2427,7 +2427,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, image, P1]
   Unit_hipMallocArray_Negative_ZeroWidth:
     <<: *level_2
@@ -2446,30 +2446,30 @@ memory:
     tags: [image, P1]
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
   Unit_hipMallocArray_Negative_BadNumberOfBits:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, image, P1]
   Unit_hipMallocArray_Negative_3ChannelElement:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, image, P1]
   Unit_hipMallocArray_Negative_ChannelAfterZeroChannel:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, image, P1]
   Unit_hipMallocArray_Negative_InvalidChannelFormat:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled to merge hipother change on 12/08/2024 (SWDEV-475987); needs to be re-triaged."
     tags: [alloc, image, P1]
   Unit_hipMallocArray_Negative_NumericLimit:
     <<: *level_2
@@ -2487,13 +2487,13 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated; temporarily disabled after Windows PSDB failed (SWDEV-468258), gfx1201 (amd_windows) FAIL: false -> false and gfx1201 (amd_wsl) FAIL: false -> false."
     tags: [alloc, P1]
   Unit_hipHostAlloc_Default:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed gfx1201 (amd_windows) FLAKY: passed then failed within 10 runs. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated; temporarily disabled after Windows PSDB failed (SWDEV-468258), gfx1201 (amd_windows) FLAKY (passed then failed within 10 runs) and gfx1201 (amd_wsl) FAIL: false -> false."
     tags: [alloc, P1]
   Unit_hipHostAlloc_Negative_NonCoherent:
     <<: *level_2
@@ -2605,18 +2605,18 @@ memory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Huge memory usage, no point enabling it with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - huge memory usage, no point enabling it with ASAN; needs to be re-triaged."
   Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Huge memory usage, no point enabling it with ASAN Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - huge memory usage, no point enabling it with ASAN; needs to be re-triaged."
   Unit_hipMemPoolExportToShareableHandle_multiproc: *level_2
   Unit_hipMemPoolExportToShareableHandle_multiproc_child:
     <<: *level_2
     disabled:
       targets: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
-      reason: "Multiproc child; needs 2nd process -- not locally verifiable single-GPU. Further investigation needed. gfx1201 (amd_windows) self-skips: Parent shared memory not found. This test should only be invoked by Unit_hipMemPoolExportToShareableHandle_multiproc. Skipping. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged on amd_linux, nvidia_windows, nvidia_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - multiproc child that needs a second process, not locally verifiable on a single GPU, further investigation needed; gfx1201 (amd_windows) self-skips because the parent shared memory is not found (this test should only be invoked by Unit_hipMemPoolExportToShareableHandle_multiproc), gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged on amd_linux, nvidia_windows, nvidia_linux."
   Unit_hipMemGetDefaultMemPool_Negative:
     <<: *level_2
     tags: [alloc]

@@ -4,19 +4,19 @@ module:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX gfx1201 (amd_wsl) self-skips: cooperative launch is not supported. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151); gfx1201 (amd_wsl) self-skips because cooperative launch is not supported."
     tags: [launch, P0]
   Unit_hipModuleLaunchCooperativeKernel_Positive_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX gfx1201 (amd_wsl) self-skips: cooperative launch is not supported. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151); gfx1201 (amd_wsl) self-skips because cooperative launch is not supported."
     tags: [launch]
   Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX gfx1201 (amd_wsl) self-skips: cooperative launch is not supported. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151); gfx1201 (amd_wsl) self-skips because cooperative launch is not supported."
     tags: [launch]
   Unit_hipModuleLaunchCooperativeKernel_Verify_Capture:
     <<: *level_2
@@ -25,19 +25,19 @@ module:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151)."
     tags: [launch, P0]
   Unit_hipModuleLaunchKernel_Positive_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151)."
     tags: [launch]
   Unit_hipModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale ModuleTest, correct cwd): launch error-code mismatch (was PSDB fail). AIRUNTIME-XXXX gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: localError == expectedErrorLaunchParam -> 0 == 1. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1030 (amd_linux) FAILs 3/3 with a launch error-code mismatch (stale ModuleTest, correct cwd; was a PSDB failure); gfx1201 (amd_windows) FAILs (false -> false); gfx1201 (amd_wsl) FAILs localError == expectedErrorLaunchParam -> 0 == 1."
     tags: [launch]
   Unit_hipModuleLaunchKernel_Fntl:
     <<: *level_2
@@ -46,7 +46,7 @@ module:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151)."
     tags: [launch]
   Unit_hipExtLaunchKernelGGL_Functional:
     <<: *level_2
@@ -55,13 +55,13 @@ module:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
     tags: [load]
   Unit_hipModuleLoadDataEx_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
     tags: [load]
   Unit_hipGetFuncBySymbol_PositiveTest:
     <<: *level_2
@@ -133,7 +133,7 @@ module:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "Rock_Linux_Failures_on_gfx94X gfx1201 (amd_wsl) self-skips: cooperative launch is not supported. Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx94X fails on amd_linux and needs to be re-triaged there; gfx1201 (amd_wsl) self-skips because cooperative launch is not supported."
     tags: [launch]
   Unit_hipDrvLaunchKernelEx_With_MaxBlockDims:
     <<: *level_2
@@ -148,13 +148,13 @@ module:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
     tags: [load, P0]
   Unit_hipModuleLoadData_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
     tags: [load]
   Unit_hipModuleLoadData_Functional:
     <<: *level_2
@@ -163,7 +163,7 @@ module:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
     tags: [load, P0]
   Unit_hipModuleLoad_Negative_Parameters:
     <<: *level_2
@@ -175,13 +175,13 @@ module:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Below tests tests fail in PSDB Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
     tags: [load]
   Unit_hipModuleLoad_Positive_NoFdLeak:
     <<: *level_2
     disabled:
       targets: [windows, nvidia_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - needs to be re-triaged."
     tags: [load]
   Unit_hipFuncSetSharedMemConfig_functional:
     <<: *level_2
@@ -193,7 +193,7 @@ module:
     <<: *level_2
     disabled:
       targets: [nvidia_linux, nvidia_windows]
-      reason: "Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215 Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in external CI for hip-tests PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215; needs to be re-triaged."
     tags: [load]
   Unit_hipModuleUnload_basic:
     <<: *level_2
@@ -226,7 +226,7 @@ module:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) FAIL: load_co_from_file(filename, co_source) == true -> false == true. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs load_co_from_file(filename, co_source) == true -> false == true (Rock window failures on gfx1151)."
     tags: [resource]
   Unit_hipLinkCreate_Negative:
     <<: *level_2
@@ -241,20 +241,20 @@ module:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX gfx1201 (amd_wsl) self-skips: cooperative launch is not supported. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151); gfx1201 (amd_wsl) self-skips because cooperative launch is not supported."
     tags: [launch]
   Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX gfx1201 (amd_wsl) self-skips: cooperative launch is not supported. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151); gfx1201 (amd_wsl) self-skips because cooperative launch is not supported."
     tags: [launch]
   Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice:
     <<: *level_2
     tags: [multigpu]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX gfx1201 (amd_wsl) self-skips: cooperative launch is not supported. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151); gfx1201 (amd_wsl) self-skips because cooperative launch is not supported."
   Unit_hipModuleGetGlobal_Positive_Basic:
     <<: *level_2
     tags: [resource]
@@ -283,25 +283,25 @@ module:
     <<: *level_2
     disabled:
       targets: [nvidia_windows, amd_wsl]
-      reason: "(nvidia_windows) Disabling tests which no longer behave the same on nvidia platform gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged on nvidia_windows AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled on nvidia_windows where these tests no longer behave the same on the nvidia platform (needs re-triage there); gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [resource, image]
   Unit_hipModuleGetTexRef_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [resource, image]
   Unit_hipModuleGetTexRef_Negative_Hmod_Is_Nullptr:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Note: Test disabled due to defect - EXSWHTEC-166 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-166; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [resource, image]
   Unit_hipModuleGetTexRef_Negative_Name_Is_Empty_String:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Note: Test disabled due to defect - EXSWHTEC-167 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-167; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device."
     tags: [resource, image]
   Unit_hipFuncSetAttribute_Basic:
     <<: *level_2
@@ -319,13 +319,13 @@ module:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Rock_Window_Failures_on_gfx1151 gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151)."
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale ModuleTest, correct cwd): launch error-code mismatch (was PSDB fail). AIRUNTIME-XXXX gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: localError == expectedErrorLaunchParam -> 0 == 9. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1030 (amd_linux) FAILs 3/3 with a launch error-code mismatch (stale ModuleTest, correct cwd; was a PSDB failure); gfx1201 (amd_windows) FAILs (false -> false); gfx1201 (amd_wsl) FAILs localError == expectedErrorLaunchParam -> 0 == 9."
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Functional:
     <<: *level_2
@@ -340,11 +340,11 @@ module:
     <<: *level_2
     disabled:
       targets: [nvidia_linux, nvidia_windows]
-      reason: "Fixture fatbin_mismatch_module.code is built only on the amd platform. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fixture fatbin_mismatch_module.code is built only on the amd platform; needs to be re-triaged."
     tags: [load]
   Unit_FatBin_MixedArch_IncompatibleDeviceDoesNotPoisonOthers:
     <<: *level_2
     disabled:
       targets: [nvidia_linux, nvidia_windows]
-      reason: "Compiled-in kernel path; fixture/build support is amd-only. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - compiled-in kernel path; fixture/build support is amd-only; needs to be re-triaged."
     tags: [load]

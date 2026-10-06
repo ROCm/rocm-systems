@@ -60,7 +60,7 @@ executionctx:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails on amd_linux. Needs re-triage on amd_linux."
   Unit_hipExecutionCtxRecordEventFunctional:
     <<: *level_2
   Unit_hipExecutionCtxRecordWait_Blocking:
@@ -71,7 +71,7 @@ executionctx:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
-      reason: "gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged on amd_linux, nvidia_linux, nvidia_windows AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAIL: false -> false. gfx1201 (amd_wsl) FAIL: false -> false. Needs re-triage on amd_linux, nvidia_linux, nvidia_windows."
   Unit_hipExecutionCtxRecordWaitEvent_Negative:
     <<: *level_2
   Unit_hipExecutionCtxWaitEvent_CrossCtx:
@@ -98,7 +98,7 @@ executionctx:
     <<: *level_2
     disabled:
       targets: [nvidia_linux]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails on nvidia_linux. Needs re-triage."
   Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource:
     <<: *level_2
   Unit_hipExecutionCtxSmAlignment_StreamGetDevResource:

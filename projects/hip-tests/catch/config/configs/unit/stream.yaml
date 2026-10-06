@@ -41,7 +41,7 @@ stream:
     <<: *level_2
     disabled:
       targets: [nvidia_linux, nvidia_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - uses wall_clock64(), so only compiled on AMD; needs to be re-triaged on nvidia_linux, nvidia_windows"
     tags: [synchronization]
   Unit_hipMultiStream_multimeDevice:
     <<: *level_2
@@ -62,14 +62,14 @@ stream:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Asan test disabled temporarily until PR #5287 is merged Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - asan test disabled temporarily until PR #5287 is merged; needs to be re-triaged"
     tags: [memory]
   Unit_hipStreamAttachMemAsync_UseCase:
     <<: *level_2
     tags: [memory, P0]
     disabled:
       targets: [amd_wsl]
-      reason: "disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111 gfx1201 (amd_wsl) self-skips: GPU does not support managed memory. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111; gfx1201 (amd_wsl) self-skips because the GPU does not support managed memory; needs to be re-triaged"
   Unit_hipStreamCreateWithFlags_Negative_NullStream:
     <<: *level_2
     tags: [lifecycle, P1]
@@ -89,13 +89,13 @@ stream:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "SWDEV-398981 fails in stress test; Does not play well with ASAN Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - SWDEV-398981: fails in stress test and does not play well with asan; needs to be re-triaged on asan"
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Disabling test tracked SWDEV-394199; Does not play well with ASAN Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - SWDEV-394199: does not play well with asan; needs to be re-triaged on asan"
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_NegTst:
     <<: *level_2
@@ -113,37 +113,37 @@ stream:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
-      reason: "Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX). Never built or run on native Windows. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
     disabled:
       targets: [nvidia_linux, nvidia_windows]
-      reason: "Internal helper, only invoked by the parent test via re-exec (by exact; name, which still runs hidden [.] cases). Enabled on amd_linux, where it; runs as a harmless standalone no-op; disabled on other platforms. Needs to be re-triaged on nvidia_linux, nvidia_windows AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - internal helper, only invoked by the parent test via re-exec (by exact name, which still runs hidden [.] cases); enabled on amd_linux where it runs as a harmless standalone no-op, disabled on other platforms; needs to be re-triaged on nvidia_linux, nvidia_windows"
     tags: [lifecycle]
   Unit_hipStreamPriorityAqlLog_TraceReportsPriority:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
-      reason: "Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX). Never built or run on native Windows. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
     disabled:
       targets: [nvidia_linux, nvidia_windows]
-      reason: "Verifies AQL packet trace reports stream priority next to HWq; relies on; AMD_LOG AQL output, so AMD/Linux only. Needs to be re-triaged on nvidia_linux, nvidia_windows AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - verifies AQL packet trace reports stream priority next to HWq; relies on AMD_LOG AQL output, so AMD/Linux only; needs to be re-triaged on nvidia_linux, nvidia_windows"
     tags: [lifecycle]
   Unit_hipStreamAqlBarrierBit_ChildWorkload:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
-      reason: "Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX). Never built or run on native Windows. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
     disabled:
       targets: [amd_linux, nvidia_linux, nvidia_windows]
-      reason: "Internal helper invoked by the parent test via re-exec. Needs to be re-triaged on amd_linux, nvidia_linux, nvidia_windows AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - internal helper invoked by the parent test via re-exec; needs to be re-triaged on amd_linux, nvidia_linux, nvidia_windows"
     tags: [synchronization]
   Unit_hipStreamAqlBarrierBit_Scenarios:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
-      reason: "Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX). Never built or run on native Windows. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Linux-only test (unit/stream/hipStreamPriorityAqlLog.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
     disabled:
       targets: [nvidia_linux, nvidia_windows]
-      reason: "Parses AMD AQL logs and requires fork/exec. Needs to be re-triaged on nvidia_linux, nvidia_windows AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - parses AMD AQL logs and requires fork/exec; needs to be re-triaged on nvidia_linux, nvidia_windows"
     tags: [synchronization]
   Unit_hipStreamDestroy_Default:
     <<: *level_2
@@ -200,7 +200,7 @@ stream:
     <<: *level_2
     unsupported:
       targets: [amd_linux]
-      reason: "Windows-only test (unit/stream/CMakeLists.txt if(WIN32)); never built or run on Linux. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Windows-only test (unit/stream/CMakeLists.txt if(WIN32)); never built or run on Linux"
     tags: [synchronization]
   Unit_hipStreamQuery_WithNoWork:
     <<: *level_2
@@ -218,7 +218,7 @@ stream:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "(amd_linux) Rock_Linux_Failures_on_gfx94X Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - amd_linux Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux"
     tags: [synchronization, P0]
   Unit_hipDeviceGetStreamPriorityRange_Default:
     <<: *level_2
@@ -227,7 +227,7 @@ stream:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203 gfx1201 (amd_wsl) FLAKY: passed then failed within 10 runs. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - amd_wsl disabled due to defect EXSWHTEC-203; gfx1201 (amd_wsl) flaky, passed then failed within 10 runs; needs to be re-triaged"
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_basic:
     <<: *level_2
@@ -239,7 +239,7 @@ stream:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux"
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_multistreams:
     <<: *level_2
@@ -359,7 +359,7 @@ stream:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "Rock_Linux_Failures_on_gfx94X Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux"
     tags: [properties, P1]
   Unit_hipStreamAddCallback_MultipleThreads:
     <<: *level_2
@@ -419,31 +419,31 @@ stream:
     <<: *level_2
     disabled:
       targets: [amd_wsl, nvidia]
-      reason: "gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged on nvidia AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips because the variant is skipped; needs to be re-triaged on nvidia"
     tags: [synchronization, memory]
   Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl, nvidia]
-      reason: "gfx1201 (amd_windows) self-skips: Test requires at least 2 GPUs. gfx1201 (amd_wsl) self-skips: Test requires at least 2 GPUs. Needs to be re-triaged on nvidia AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because the test requires at least 2 GPUs; needs to be re-triaged on nvidia"
     tags: [synchronization, memory, multigpu]
   Unit_hipStreamWaitWriteValue32_Capture:
     <<: *level_2
     disabled:
       targets: [amd_windows, nvidia]
-      reason: "gfx1201 (amd_windows) FAIL: result == 0x42 -> 0 == 66. AIRUNTIME-XXXX Needs to be re-triaged on nvidia AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 0x42 -> 0 == 66; needs to be re-triaged on nvidia"
     tags: [synchronization]
   Unit_hipStreamWaitWriteValue64_Capture:
     <<: *level_2
     disabled:
       targets: [amd_windows, nvidia]
-      reason: "gfx1201 (amd_windows) FAIL: result == 0xCAFEBABECAFEBABEULL -> 0 == 14627333968358193854 (0xcafebabecafebabe). AIRUNTIME-XXXX Needs to be re-triaged on nvidia AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 0xCAFEBABECAFEBABEULL -> 0 == 14627333968358193854 (0xcafebabecafebabe); needs to be re-triaged on nvidia"
     tags: [synchronization]
   Unit_hipStreamBatchMemOp_Capture:
     <<: *level_2
     disabled:
       targets: [amd_windows, nvidia]
-      reason: "gfx1201 (amd_windows) FAIL: result == 0x1234 -> 0 == 4660 (0x1234). AIRUNTIME-XXXX Needs to be re-triaged on nvidia AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 0x1234 -> 0 == 4660 (0x1234); needs to be re-triaged on nvidia"
     tags: [synchronization, memory]
   Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic:
     <<: *level_2
@@ -504,4 +504,4 @@ stream:
     tags: [synchronization, overlap]
     disabled:
       targets: [amd_windows]
-      reason: "Pre-existing PAL limitation (unrelated to the barrier-bit opt): spin-wait blit; stream wait-value deadlocks on HW rings. gfx1201 (amd_windows) HANG (>300s timeout). AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - pre-existing PAL limitation (unrelated to the barrier-bit opt): spin-wait blit stream wait-value deadlocks on HW rings; gfx1201 (amd_windows) hangs (>300s timeout); needs to be re-triaged"

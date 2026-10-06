@@ -4,13 +4,13 @@ syncthreads:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
-      reason: "Linux-only test (unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX)); never built or run on native Windows. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Basic:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
-      reason: "Linux-only test (unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX)); never built or run on native Windows. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Predicate_Zero:
     <<: *level_2
@@ -34,7 +34,7 @@ syncthreads:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
-      reason: "Linux-only test (unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX)); never built or run on native Windows. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Positive_Predicate_Zero:
     <<: *level_2
@@ -58,7 +58,7 @@ syncthreads:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
-      reason: "Linux-only test (unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX)); never built or run on native Windows. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Positive_Predicate_Zero:
     <<: *level_2

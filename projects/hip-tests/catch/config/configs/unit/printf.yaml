@@ -4,7 +4,7 @@ printf:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/274 gfx1201 (amd_windows) FAIL: proc.getOutput() == reference -> '00000042 -0000042 00000042 0123.456 +0000042 -42 +0000042 xyzzy -42 42 00000042 00000042 052 0x2a 0X2A 42.000000 4.200000e+01. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. Fails in external CI for hip-tests PR 274. gfx1201 (amd_windows) FAIL: proc.getOutput() == reference -> '00000042 -0000042 00000042 0123.456 +0000042 -42 +0000042 xyzzy -42 42 00000042 00000042 052 0x2a 0X2A 42.000000 4.200000e+01."
   Unit_Printf_length_Sanity_Positive:
     <<: *level_2
   Unit_Printf_specifier_Sanity_Positive: *level_2

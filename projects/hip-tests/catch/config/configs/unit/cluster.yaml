@@ -4,12 +4,12 @@ cluster:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "gfx1030 (amd_linux) FAIL 3/3: REQUIRE(o.dim_blocks.x==2) — cluster dim not honored. AIRUNTIME-XXXX gfx1201 (amd_windows) FAIL: o.dim_blocks.x == 2 -> 1 == 2. AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: o.dim_blocks.x == 2 -> 1 == 2. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. Cluster dim is not honored. gfx1030 (amd_linux) FAIL 3/3: REQUIRE(o.dim_blocks.x == 2). gfx1201 (amd_windows) FAIL: o.dim_blocks.x == 2 -> 1 == 2. gfx1201 (amd_wsl) FAIL: o.dim_blocks.x == 2 -> 1 == 2."
   Unit_cluster_split_barrier:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "gfx1030 (amd_linux) self-skips on fresh build: cluster launch is not supported on this device. gfx1201 (amd_windows) self-skips: cluster launch is not supported on this device. gfx1201 (amd_wsl): cluster launch not supported on this device (cluster tests arch-gated to gfx1101/gfx1250 in unit/cluster/CMakeLists.txt)."
+      reason: "AIRUNTIME-2744 - cluster launch is not supported on these devices; cluster tests are arch-gated to gfx1101/gfx1250 in unit/cluster/CMakeLists.txt. gfx1030 (amd_linux) self-skips on fresh build: cluster launch is not supported on this device. gfx1201 (amd_windows) self-skips: cluster launch is not supported on this device. gfx1201 (amd_wsl) self-skips: cluster launch is not supported on this device."
   Unit_hipClusterLaunch_CompilerDirective_Basic:
     <<: *level_2
   Unit_hipClusterLaunch_LaunchApi_Basic:

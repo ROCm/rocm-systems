@@ -31,7 +31,7 @@ streamperthread:
     <<: *level_2
     disabled:
       targets: [amd_linux, nvidia_linux, nvidia_windows]
-      reason: "(amd_linux) === Test does not reflect a valid use case - SWDEV-569454; (nvidia_linux) === Test does not reflect a valid use case - SWDEV-569454; (nvidia_windows) === Test does not reflect a valid use case - SWDEV-569454 Needs to be re-triaged on amd_linux, nvidia_linux, nvidia_windows AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - test does not reflect a valid use case (SWDEV-569454) on amd_linux, nvidia_linux, and nvidia_windows. Needs re-triage on amd_linux, nvidia_linux, nvidia_windows."
     tags: [stream]
   Unit_hipStreamPerThread_DeviceReset_1:
     <<: *level_2
@@ -55,7 +55,7 @@ streamperthread:
     <<: *level_2
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "Note: Windows disabled Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled on Windows (amd_windows, amd_wsl). Needs re-triage."
     tags: [stream]
   Unit_hipStreamPerThread_CoopLaunch:
     <<: *level_2
@@ -73,7 +73,7 @@ streamperthread:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "gfx1201 (amd_wsl) FLAKY: passed then failed within 10 runs. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_wsl) FLAKY: passed then failed within 10 runs."
     tags: [stream]
   Unit_hipGetProcAddress_spt_Memcpy2D:
     <<: *level_2

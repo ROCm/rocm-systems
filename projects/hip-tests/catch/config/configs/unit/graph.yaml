@@ -85,7 +85,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "NOTE: The following test is disabled due to defect - EXSWHTEC-245 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-245; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged"
     tags: [node, image]
   Unit_hipGraphClone_Negative:
     <<: *level_2
@@ -107,7 +107,7 @@ graph:
     tags: [lifecycle, multigpu]
     disabled:
       targets: [amd_wsl]
-      reason: "gfx1201 (amd_wsl) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips because there are fewer than two GPUs (numDevices < 2); needs to be re-triaged"
   Unit_hipGraphInstantiateWithFlags_StreamCapture:
     <<: *level_2
     tags: [lifecycle, multigpu]
@@ -116,7 +116,7 @@ graph:
     tags: [lifecycle, multigpu]
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "Self-skips: requires >1 GPU (device-context change) — not locally verifiable single-GPU. SWDEV-445928 Further investigation needed. gfx1201 (amd_wsl) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - SWDEV-445928: self-skips because it requires >1 GPU (device-context change) -- not locally verifiable on single-GPU; further investigation needed; gfx1201 (amd_wsl) self-skips because there are fewer than two GPUs (numDevices < 2); needs to be re-triaged on amd_linux"
   Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check:
     <<: *level_2
     tags: [lifecycle]
@@ -136,7 +136,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Unit_hipGraphInstantiateWithParams_Negative Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Unit_hipGraphInstantiateWithParams_Negative needs to be re-triaged"
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithParams_DependencyGraph:
     <<: *level_2
@@ -331,7 +331,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [nvidia_windows]
-      reason: "Disabling tests which no longer behave the same on nvidia platform Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - disabled because the tests no longer behave the same on the nvidia platform; needs to be re-triaged"
     tags: [node]
   Unit_hipGraphAddChildGraphNode_ExecuteChildGraph:
     <<: *level_2
@@ -491,7 +491,7 @@ graph:
     tags: [exec, multigpu]
     disabled:
       targets: [amd_windows, amd_wsl]
-      reason: "SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it gfx1201 (amd_windows) self-skips: peer access is not available between devices. gfx1201 (amd_wsl) self-skips: peer access is not available between devices. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - SWDEV-446588: disable graph multi-GPU testcases until graph has support for it; gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because peer access is not available between devices; needs to be re-triaged"
   Unit_hipGraphExecUpdate_Functional_KernelFunction_Changed:
     <<: *level_2
     tags: [exec]
@@ -555,7 +555,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "Self-skips: fewer than two GPUs (multi-device) — not locally verifiable. ROCM-22772 Further investigation needed. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - ROCM-22772: self-skips because there are fewer than two GPUs (multi-device) -- not locally verifiable; further investigation needed; needs to be re-triaged"
     tags: [multigpu]
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative:
     <<: *level_2
@@ -871,7 +871,7 @@ graph:
     tags: [exec]
     disabled:
       targets: [amd_windows]
-      reason: "PAL does not implement batch memory operations gfx1201 (amd_windows) FAIL: launch_and_read() == 1000 -> 0 == 1000 (0x3e8). AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - PAL does not implement batch memory operations; gfx1201 (amd_windows) fails: launch_and_read() == 1000 -> 0 == 1000 (0x3e8); needs to be re-triaged"
   Unit_hipGraphAddBatchMemOpNode_NegativeTsts:
     <<: *level_2
     tags: [node]
@@ -879,7 +879,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_windows, nvidia]
-      reason: "gfx1201 (amd_windows) FAIL: result == 1000 -> 0 == 1000 (0x3e8). AIRUNTIME-XXXX Needs to be re-triaged on nvidia AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 1000 -> 0 == 1000 (0x3e8); needs to be re-triaged on nvidia"
     tags: [node]
   Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts:
     <<: *level_2
@@ -912,7 +912,7 @@ graph:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
-      reason: "Linux-only (wrapped in #ifdef __linux__ in unit/graph/hipStreamBeginCaptureToGraph.cc); never built or run on native Windows. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Linux-only test (wrapped in #ifdef __linux__ in unit/graph/hipStreamBeginCaptureToGraph.cc); never built or run on native Windows"
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_ComplexGraph:
     <<: *level_2
@@ -954,7 +954,7 @@ graph:
     <<: *level_2
     unsupported:
       targets: [amd_windows]
-      reason: "Linux-only (wrapped in #ifdef __linux__ in unit/graph/hipStreamBeginCaptureToGraph.cc); never built or run on native Windows. AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - Linux-only test (wrapped in #ifdef __linux__ in unit/graph/hipStreamBeginCaptureToGraph.cc); never built or run on native Windows"
     tags: [capture]
   Unit_hipGetProcAddress_GraphAPIs_StreamCapture:
     <<: *level_2
@@ -987,7 +987,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_linux]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - needs to be re-triaged"
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams:
     <<: *level_2
@@ -1190,7 +1190,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_windows]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - needs to be re-triaged"
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_2
@@ -1340,7 +1340,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [asan]
-      reason: "Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - needs to be re-triaged"
     tags: [userobj]
   Unit_hipGraphDebugDotPrint_Functional:
     <<: *level_2
@@ -1364,7 +1364,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "Below tests fail in stress test on 23/06/23 gfx1201 (amd_wsl) self-skips: texture/image is not supported on this device. Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - fails in stress test on 23/06/23; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged"
     tags: [lifecycle, image]
   Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec:
     <<: *level_2
@@ -1452,19 +1452,19 @@ graph:
     tags: [exec]
     disabled:
       targets: [amd_windows, amd_linux]
-      reason: "Self-skips: fewer than two GPUs (cross-device) — not locally verifiable. ROCM-22772 Further investigation needed. gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - ROCM-22772: self-skips because there are fewer than two GPUs (cross-device) -- not locally verifiable; further investigation needed; gfx1201 (amd_windows) self-skips because there are fewer than two GPUs (numDevices < 2); needs to be re-triaged on amd_linux"
   Unit_hipGraphCrossDeviceLaunch_ExplicitNodes:
     <<: *level_2
     tags: [exec]
     disabled:
       targets: [amd_windows]
-      reason: "gfx1201 (amd_windows) self-skips: fewer than two GPUs (numDevices < 2). Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_windows) self-skips because there are fewer than two GPUs (numDevices < 2); needs to be re-triaged"
   Unit_hipGraphStreamPool_InstantiateFootprint:
     <<: *level_2
     tags: [exec]
     disabled:
       targets: [asan]
-      reason: "stream allocation at instantiate, so the footprint is unmeasurable there.; asan quarantines freed gpu allocations, so hipMemGetInfo does not; immediately report memory released by hipGraphExecDestroy. Needs to be re-triaged on asan AIRUNTIME-2744"
+      reason: "AIRUNTIME-2744 - stream allocation at instantiate, so the footprint is unmeasurable there; asan quarantines freed gpu allocations, so hipMemGetInfo does not immediately report memory released by hipGraphExecDestroy; needs to be re-triaged on asan"
   Unit_hipGraphKernelNodeCopyAttributes_Functional:
     <<: *level_2
     tags: [node]
@@ -1578,13 +1578,13 @@ graph:
     tags: [node]
     disabled:
       targets: [amd_windows]
-      reason: "gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: false -> false; needs to be re-triaged"
   Unit_hipGraphKernelNodePriority_ChildGraphWithFlag:
     <<: *level_2
     tags: [node]
     disabled:
       targets: [amd_windows]
-      reason: "gfx1201 (amd_windows) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: false -> false; needs to be re-triaged"
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional:
     <<: *level_2
     tags: [query]
@@ -1646,7 +1646,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "gfx1201 (amd_wsl) FAIL: ret == hipErrorInvalidValue -> 0 == 1. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_wsl) fails: ret == hipErrorInvalidValue -> 0 == 1; needs to be re-triaged"
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph:
     <<: *level_2
@@ -1670,7 +1670,7 @@ graph:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "gfx1201 (amd_wsl) FAIL: false -> false. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_wsl) fails: false -> false; needs to be re-triaged"
     tags: [node]
   Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array:
     <<: *level_2
