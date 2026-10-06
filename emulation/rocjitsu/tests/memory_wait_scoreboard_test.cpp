@@ -2390,8 +2390,9 @@ TEST(MemoryWaitExecutionTest, BlockDependenciesUseCapturedDwordMask) {
           auto &scoreboard = *wf->memory_wait_scoreboard();
           const auto counter = load ? WaitCounterKind::Load : WaitCounterKind::Store;
           EXPECT_EQ(scoreboard.outstanding(counter), 1u); // Even M0=0 occupies a slot.
-          if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+          if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
             EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::X), 1u);
+          }
           for (uint16_t word = 0; word < 32; ++word) {
             // A diagnostic retires its dependency to suppress repeats. Reissue
             // before each probe so every word is checked independently.
