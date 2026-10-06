@@ -182,6 +182,7 @@ protected:
     std::vector<uint32_t> inflight_;
     std::vector<ncclRmaProxyDesc*> circular_;
     std::vector<ncclIntruQueue<ncclRmaProxyDesc, &ncclRmaProxyDesc::next>> inProgress_;
+    std::vector<ncclIntruQueue<ncclRmaProxyDesc, &ncclRmaProxyDesc::next>> persistent_;
     // Descriptors the test allocates (kept alive here; destruction is faked).
     std::vector<std::unique_ptr<ncclRmaProxyDesc>> descs_;
     // Sequence storage for descriptors that need a readySeq pointer.
@@ -205,6 +206,13 @@ protected:
         for (auto& q : inProgress_) {
             ncclIntruQueueConstruct(&q);
         }
+        // ncclRmaProxyProgress also walks the persistent queues. Tests that
+        // call the per-peer poll helpers never touch them; the progress entry
+        // point does, so they have to exist and be empty.
+        persistent_.resize(nRanks_);
+        for (auto& q : persistent_) {
+            ncclIntruQueueConstruct(&q);
+        }
 
         ctx_ = std::make_unique<ncclRmaProxyCtx>();
         ctx_->comm = comm_.get();
@@ -213,6 +221,7 @@ protected:
         ctx_->cis = cis_.data();
         ctx_->pis = pis_.data();
         ctx_->inProgressQueues = inProgress_.data();
+        ctx_->persistentQueues = persistent_.data();
         ctx_->inflightRequests = inflight_.data();
         ctx_->maxInflightRequests = 256;
         ctx_->rmaCtx = &net_.ctxH;
@@ -223,6 +232,34 @@ protected:
     }
 
     void TearDown() override { ResetRmaFakes(); }
+
+    // SetUp builds a 2-rank comm at rank 0. The rotation test needs a wider
+    // team whose own rank is not 0, so the visit order is not 0,1,2,...
+    void RebuildRanks(int nRanks, int rank) {
+        nRanks_ = nRanks;
+        comm_->rank = rank;
+        comm_->nRanks = nRanks;
+
+        cis_.assign(nRanks, 0);
+        pis_.assign(nRanks, 0);
+        inflight_.assign(nRanks, 0);
+        circular_.assign(static_cast<size_t>(nRanks) * kQueueSize, nullptr);
+        inProgress_.resize(nRanks);
+        for (auto& q : inProgress_) {
+            ncclIntruQueueConstruct(&q);
+        }
+        persistent_.resize(nRanks);
+        for (auto& q : persistent_) {
+            ncclIntruQueueConstruct(&q);
+        }
+
+        ctx_->circularBuffers = circular_.data();
+        ctx_->cis = cis_.data();
+        ctx_->pis = pis_.data();
+        ctx_->inProgressQueues = inProgress_.data();
+        ctx_->persistentQueues = persistent_.data();
+        ctx_->inflightRequests = inflight_.data();
+    }
 
     // Allocate a single PutSignal descriptor targeting `targetRank`, ready to
     // issue (readySeq >= opSeq), and place it at the current pending head for
@@ -813,6 +850,42 @@ TEST_F(RmaProxyProgressTest, PollDesc_NullRequestOnSuccess_PropagatesWithoutCred
     EXPECT_EQ(inflight_[target], 0u);          // no credit for a phantom request
     EXPECT_EQ(cis_[peer], 0u);
     EXPECT_EQ(InProgressHead(peer), nullptr);
+}
+
+// Progress starts at this rank, so the issue order is (rank + i) % nRanks
+// rather than peer 0 first.
+TEST_F(RmaProxyProgressTest, Progress_IssuesEveryPeerOnceFromOwnRank) {
+    RebuildRanks(/*nRanks=*/4, /*rank=*/1);
+    for (int peer = 0; peer < nRanks_; peer++) {
+        PushPendingPutSignal(peer, static_cast<uint32_t>(peer));
+    }
+
+    ASSERT_EQ(ncclRmaProxyProgress(&rma_, ctx_.get()), ncclSuccess);
+
+    std::vector<uint32_t> issued;
+    for (const auto& req : net_.owned) issued.push_back(req->targetRank);
+    // Visit order from rank 1: 1, 2, 3, 0. Each peer once.
+    EXPECT_EQ(issued, (std::vector<uint32_t>{1, 2, 3, 0}));
+    EXPECT_EQ(net_.issueCalls, 4);
+}
+
+// An empty peer is skipped in place. Later peers keep the rotated order
+// instead of sliding forward to fill the hole.
+TEST_F(RmaProxyProgressTest, Progress_EmptyPeerKeepsRotatedOrder) {
+    RebuildRanks(/*nRanks=*/4, /*rank=*/1);
+    // Peer 3 has nothing queued. Each other put's target is its peer index,
+    // so the issued target is the peer that was visited.
+    for (int peer = 0; peer < 3; peer++) {
+        PushPendingPutSignal(peer, static_cast<uint32_t>(peer));
+    }
+
+    ASSERT_EQ(ncclRmaProxyProgress(&rma_, ctx_.get()), ncclSuccess);
+
+    std::vector<uint32_t> issued;
+    for (const auto& req : net_.owned) issued.push_back(req->targetRank);
+    // Visit order from rank 1: 1, 2, 3 (empty), 0.
+    EXPECT_EQ(issued, (std::vector<uint32_t>{1, 2, 0}));
+    EXPECT_EQ(net_.issueCalls, 3);
 }
 
 }  // namespace

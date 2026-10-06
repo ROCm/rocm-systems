@@ -3064,7 +3064,7 @@
         },
         {
           "name": "CE_Internal_Launch",
-          "description": "ncclCeLaunchBatchOps: empty batch succeeds; 4-op batch transfers data correctly",
+          "description": "ncclCeLaunchBatchOps: empty batch succeeds; 4-op batch transfers data correctly; chunked unequal sizes copy without overrun",
           "test_filter": "CeInternalMPITest.Launch*"
         },
         {

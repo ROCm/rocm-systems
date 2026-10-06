@@ -20,6 +20,7 @@
 #include <ce_coll.h>
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -634,6 +635,78 @@ TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
             << "op " << i << " produced wrong data on the null stream";
     }
     // srcGuards, dstGuards, and params freed automatically on scope exit.
+}
+
+// Chunked launch: sizes that are not multiples of the default 8 MiB wave, plus a
+// short op that finishes in the first wave. A sentinel past each destination must
+// stay put, which fails if a wave copies past the op's own size.
+//
+// ASSERT_* here returns from this helper, not from the test. Callers check
+// HasFatalFailure() before using the result.
+static void CheckChunkedBatch(ncclComm* comm, hipStream_t stream)
+{
+    using namespace RCCLTestGuards;
+    constexpr size_t kChunk    = 8u * 1024u * 1024u; // NCCL_CE_CHUNK_SIZE default
+    constexpr size_t kSentinel = 16;
+    constexpr int    kOps      = 3;
+    const size_t sizes[kOps]   = {kChunk + 32, 2 * kChunk + 32, 100};
+
+    std::vector<DeviceBufferAutoGuard> src(kOps), dst(kOps);
+    std::vector<std::vector<uint8_t>>  patterns(kOps);
+    for(int i = 0; i < kOps; ++i)
+    {
+        patterns[i].resize(sizes[i]);
+        for(size_t b = 0; b < sizes[i]; ++b)
+            patterns[i][b] = static_cast<uint8_t>((i + 1) * 17u + b);
+
+        void* p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, sizes[i]), hipSuccess);
+        src[i].set(p);
+        ASSERT_EQ(hipMemcpy(src[i].get(), patterns[i].data(), sizes[i], hipMemcpyHostToDevice),
+                  hipSuccess);
+
+        p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, sizes[i] + kSentinel), hipSuccess);
+        dst[i].set(p);
+        ASSERT_EQ(hipMemset(dst[i].get(), 0, sizes[i]), hipSuccess);
+        std::vector<uint8_t> sentinel(kSentinel, 0xA5);
+        ASSERT_EQ(hipMemcpy(static_cast<uint8_t*>(dst[i].get()) + sizes[i], sentinel.data(), kSentinel,
+                            hipMemcpyHostToDevice),
+                  hipSuccess);
+    }
+
+    ncclCeBatchOpsParams params{};
+    ASSERT_EQ(ncclCeInitBatchOpsParams(&params, kOps), ncclSuccess);
+    SCOPE_EXIT(ncclCeFreeBatchOpsParams(&params));
+
+    for(int i = 0; i < kOps; ++i)
+    {
+        params.srcs[i]  = src[i].get();
+        params.dsts[i]  = dst[i].get();
+        params.sizes[i] = sizes[i];
+    }
+    params.numOps   = kOps;
+    params.chunking = true;
+
+    ncclCeCollArgs collArgs{};
+    ASSERT_EQ(ncclCeLaunchBatchOps(comm, &params, stream, &collArgs), ncclSuccess);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+
+    for(int i = 0; i < kOps; ++i)
+    {
+        std::vector<uint8_t> got(sizes[i] + kSentinel);
+        ASSERT_EQ(hipMemcpy(got.data(), dst[i].get(), got.size(), hipMemcpyDeviceToHost), hipSuccess);
+        EXPECT_EQ(std::memcmp(got.data(), patterns[i].data(), sizes[i]), 0) << "op " << i;
+        for(size_t s = 0; s < kSentinel; ++s)
+            EXPECT_EQ(got[sizes[i] + s], 0xA5) << "op " << i << " sentinel byte " << s;
+    }
+}
+
+// LAUNCH-04: round-robin chunking copies every byte and does not run past an op.
+TEST_F(CeInternalMPITest, LaunchChunkedUnequalSizes)
+{
+    CheckChunkedBatch(ceComm, getActiveStream());
+    if(HasFatalFailure()) return;
 }
 
 // ===========================================================================
