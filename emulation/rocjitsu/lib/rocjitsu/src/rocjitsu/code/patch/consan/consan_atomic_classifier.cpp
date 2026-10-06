@@ -140,7 +140,7 @@ AtomicLoweringClassification classify_atomic_lowering(const AtomicSite &site, rj
     constexpr uint32_t kNullScalarOffset = 0x7cu;
     constexpr int32_t kSigned24Min = -(1 << 23);
     constexpr int32_t kSigned24Max = (1 << 23) - 1;
-    if (!target->program_analysis || !target->program_analysis->decode_buffer_memory)
+    if (!target->program_analysis || !target->program_analysis->get().decode_buffer_memory)
       return reject(Reason::UnsupportedAddressSource);
     if (site.width_bits == 0u || site.width_bits > 128u)
       return reject(Reason::InvalidAccessWidth);

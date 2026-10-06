@@ -6,7 +6,7 @@
   TargetProfile profile;
   profile.accumulator_model = AccumulatorModel::DescriptorPartitioned;
   profile.scalar_placement_model = ScalarPlacementModel::DescriptorPartitioned;
-  profile.program_analysis = &kCdna3Cdna4ProgramAnalysisOperations;
+  profile.program_analysis = std::cref(kCdna3Cdna4ProgramAnalysisOperations);
   profile.resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6};
   profile.vgpr_allocation_granularity_wave64 = 8;
   profile.accumulator_offset_granularity = 4;

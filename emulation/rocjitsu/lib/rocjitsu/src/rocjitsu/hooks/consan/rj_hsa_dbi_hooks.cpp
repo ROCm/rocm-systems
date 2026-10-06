@@ -1173,7 +1173,7 @@ public:
                                       std::optional<uint64_t> limit_bytes) {
     std::lock_guard lock(mutex_);
     const ProcessByteBudget::ChargePlan plan = budget_.plan_charge(reservation_bytes, limit_bytes);
-    AdmissionOutcome outcome;
+    AdmissionOutcome outcome = AdmissionOutcome::AccountingOverflow;
     switch (plan.outcome) {
     case ProcessByteBudget::ChargeOutcome::WithinLimit:
       outcome = AdmissionOutcome::Admitted;
@@ -1355,7 +1355,7 @@ public:
         growth_budget_.plan_charge(replacement_growth_bytes, process_growth_limit_bytes);
     const ProcessByteBudget::ChargePlan image_plan =
         image_budget_.plan_charge(replacement_size, process_image_limit_bytes);
-    RetainOutcome outcome;
+    RetainOutcome outcome = RetainOutcome::GrowthAccountingOverflow;
     switch (growth_plan.outcome) {
     case ProcessByteBudget::ChargeOutcome::WithinLimit:
       outcome = RetainOutcome::Retained;

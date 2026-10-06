@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string_view>
 
@@ -344,7 +345,9 @@ struct TargetProfile {
   ScalarPlacementModel scalar_placement_model = ScalarPlacementModel::Unsupported;
   /// Target-owned decoder facet. Keeping this registration beside the target
   /// facts prevents every consumer domain from rebuilding the five-target map.
-  const ProgramAnalysisTargetOperations *program_analysis = nullptr;
+  /// An optional reference makes registration presence constexpr without an
+  /// external-address/null comparison, which GCC rejects with UBSan (PR71962).
+  std::optional<std::reference_wrapper<const ProgramAnalysisTargetOperations>> program_analysis;
   DispatchIdentitySource dispatch_identity = DispatchIdentitySource::PreloadedSgprPair;
   std::optional<CommandProcessorWorkgroupIdentity> command_processor_workgroup_identity;
   DirectCallForm direct_call_form = DirectCallForm::SCallB64;
@@ -470,7 +473,7 @@ target_profiles_are_valid(const std::array<TargetProfile, N> &profiles) {
     const TargetProfile &profile = profiles[lhs];
     const auto &workgroup_identity = profile.command_processor_workgroup_identity;
     if (profile.target == ROCJITSU_CODE_TARGET_INVALID ||
-        profile.arch == ROCJITSU_CODE_ARCH_INVALID || profile.program_analysis == nullptr ||
+        profile.arch == ROCJITSU_CODE_ARCH_INVALID || !profile.program_analysis.has_value() ||
         (profile.flat_compare_swap_data_pair_alignment != 1u &&
          profile.flat_compare_swap_data_pair_alignment != 2u) ||
         profile.vgpr_allocation_granularity_wave64 == 0u ||

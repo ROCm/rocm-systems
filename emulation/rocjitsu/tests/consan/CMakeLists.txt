@@ -82,6 +82,7 @@ function(rj_add_consan_unit_sources target)
             patch/consan/access_classifier_test.cpp
             patch/consan/barrier_policy_test.cpp
             patch/consan/capability_contract_test.cpp
+            patch/consan/target_profile_registration_test.cpp
             patch/consan/composition_test.cpp
             patch/consan/core_test.cpp
             patch/consan/descriptor_test.cpp
