@@ -17,6 +17,7 @@
 #include <sched.h>
 
 #include "graph.h"  // PATH_DIS
+#include "fakes/signature-drift.h"
 #include "nccl.h"
 #include "os.h"   // ncclAffinity
 #include "plugin/nccl_tuner.h"  // NCCL_NUM_ALGORITHMS, the width of initTransportsRank's graphs[]
@@ -120,6 +121,7 @@ static ncclResult_t DefaultTopoGetLocalNet(struct ncclTopoSystem*, int, int, int
 }
 std::function<ncclResult_t(struct ncclTopoSystem*, int, int, int64_t*, int*)> g_ncclTopoGetLocalNet =
     DefaultTopoGetLocalNet;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetLocalNet, ncclTopoGetLocalNet);
 ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev) {
   return g_ncclTopoGetLocalNet(system, rank, channelId, id, dev);
 }

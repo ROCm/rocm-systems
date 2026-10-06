@@ -33,6 +33,7 @@
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
 #include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
+#include "fakes/signature-drift.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -106,6 +107,8 @@ ncclResult_t bootstrapSend(void* bs, int peer, int tag, void* data, int size) {
 
 static ncclResult_t DefaultBootstrapRecv(void*, int, int, void*, int) { return ncclSuccess; }
 std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv = DefaultBootstrapRecv;
+ASSERT_HOOK_MATCHES_PROD(g_devrBootstrapSend, bootstrapSend);
+ASSERT_HOOK_MATCHES_PROD(g_devrBootstrapRecv, bootstrapRecv);
 
 ncclResult_t bootstrapRecv(void* bs, int peer, int tag, void* data, int size) {
   return g_devrBootstrapRecv(bs, peer, tag, data, size);

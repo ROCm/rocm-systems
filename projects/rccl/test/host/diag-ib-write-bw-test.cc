@@ -14,26 +14,28 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include <unistd.h>
+
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
-#include "fakes/dev_runtime_micro_fakes.h"
-#include "fakes/diagnostics_fakes.h"
-#include "fakes/libc_fakes.h"
-#include "fakes/nccl_fakes.h"
-#include "fakes/topo_stubs.h"
-
 #include "alloc.h"
 #include "bootstrap.h"
 #include "comm.h"
 #include "debug.h"
 #include "diagnostics.h"
 #include "diagnostics_log.h"
+#include "fakes/dev_runtime_micro_fakes.h"
+#include "fakes/diagnostics_fakes.h"
+#include "fakes/libc_fakes.h"
+#include "fakes/nccl_fakes.h"
+#include "fakes/topo_stubs.h"
 #include "graph.h"
 #include "os.h"
 #include "transport.h"
@@ -143,6 +145,10 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     diagLogInit();
+    InstallHooks();
+  }
+
+  void InstallHooks() {
     net_.name = "IB";
     net_.devices = IbNetDevices;
     net_.getProperties = IbNetGetProperties;
@@ -200,6 +206,8 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
     g_ibCallocFailAt = 0;
     g_ibCallocCalls = 0;
     g_ibClockNano = DefaultIbClockNano;
+    g_ibNetDevices = nullptr;
+    g_ibNetGetProperties = nullptr;
     ResetDevRuntimeMicroFakes();
     ResetDiagnosticsFakes();
     ResetLibcFakes();
@@ -253,6 +261,28 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
     return findPair(comm_.get(), info_.data(), phase, cross, *serverRank, *clientRank);
   }
 
+  void ResetDiscoverScene() {
+    InstallHooks();
+    BuildComm(0, {{0}, {1}});
+    propName_ = "mlx5_0";
+    probeExit_ = 0;
+    devicesResult_ = ncclSuccess;
+    propsResult_ = ncclSuccess;
+    localNetResult_ = ncclSuccess;
+    localNetDev_ = kNetDev;
+    localNetChannels_.clear();
+  }
+
+  // Moves the queried rank to `rank` on its own node.
+  void PlaceRank(int rank) {
+    comm_->rank = rank;
+    for (std::size_t n = 0; n < nodes_.size(); n++) {
+      if (std::find(nodes_[n].begin(), nodes_[n].end(), rank) != nodes_[n].end()) {
+        comm_->node = static_cast<int>(n);
+      }
+    }
+  }
+
   LocalInfo Discover() {
     LocalInfo local;
     std::memset(&local, 0x5a, sizeof(local));
@@ -275,7 +305,7 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
   int localNetDev_ = kNetDev;
   ncclResult_t localNetResult_ = ncclSuccess;
   std::vector<int> localNetChannels_;
-  std::vector<std::string> sysfs_ = {SysPath("mlx5_0"), SysPath("mlx5_1")};
+  std::vector<std::string> sysfs_ = {SysPath(""), SysPath("mlx5_0"), SysPath("mlx5_1")};
   std::vector<std::string> accessed_;
   std::string help_ = kHelp;
   int probeExit_ = 0;
@@ -355,6 +385,56 @@ TEST_F(DiagIbWriteBwMicrotest, FindPair_CrossClientAnchorsOnPreviousDeviceOfThre
   ASSERT_TRUE(FindPair(0, true, &server, &client));
   EXPECT_EQ(server, 2);
   EXPECT_EQ(client, 3);
+  PlaceRank(0);
+  ASSERT_TRUE(FindPair(0, true, &server, &client));
+  EXPECT_EQ(server, 0);
+  EXPECT_EQ(client, 4);
+  PlaceRank(2);
+  ASSERT_TRUE(FindPair(0, true, &server, &client));
+  EXPECT_EQ(server, 2);
+  EXPECT_EQ(client, 3);
+}
+
+TEST_F(DiagIbWriteBwMicrotest, FindPair_BothEndsOfEveryPairAgree) {
+  struct Topology {
+    std::vector<std::vector<int>> nodes;
+    std::vector<const char*> devices;
+  };
+  const std::vector<Topology> topologies = {
+      {{{0, 1, 2}, {3, 4, 5}}, {"A", "B", "C", "C", "A", "B"}},
+      {{{0, 1, 2, 3}, {4, 5, 6, 7}}, {"A", "A", "B", "C", "C", "B", "A", "A"}},
+      {{{0, 1}, {2, 3}, {4, 5}}, {"A", "B", "B", "A", "A", "C"}},
+      {{{3, 0}, {1, 4}, {2, 5}, {6, 7}}, {"A", "B", "A", "B", "A", "B", "B", "A"}},
+  };
+  for (std::size_t t = 0; t < topologies.size(); t++) {
+    BuildComm(0, topologies[t].nodes);
+    SetDevices(topologies[t].devices);
+    const int nRanks = comm_->nRanks;
+    for (int phase = 0; phase < 2; phase++) {
+      for (bool cross : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << "topology " << t << " phase " << phase << " cross " << cross);
+        std::vector<int> servers(nRanks), clients(nRanks);
+        std::vector<bool> paired(nRanks);
+        for (int r = 0; r < nRanks; r++) {
+          PlaceRank(r);
+          paired[r] = FindPair(phase, cross, &servers[r], &clients[r]);
+        }
+        int pairs = 0;
+        for (int r = 0; r < nRanks; r++) {
+          if (!paired[r]) {
+            continue;
+          }
+          ASSERT_TRUE(servers[r] == r || clients[r] == r) << r;
+          const int peer = servers[r] == r ? clients[r] : servers[r];
+          ASSERT_TRUE(paired[peer]) << r << " names unpaired " << peer;
+          EXPECT_EQ(servers[peer], servers[r]) << r;
+          EXPECT_EQ(clients[peer], clients[r]) << r;
+          pairs++;
+        }
+        EXPECT_GT(pairs, 0);
+      }
+    }
+  }
 }
 
 TEST_F(DiagIbWriteBwMicrotest, FindPair_OddRingSkipsOnlyTheWrappingPair) {
@@ -445,7 +525,6 @@ TEST_F(DiagIbWriteBwMicrotest, ResolveDeviceName_CopiesSegmentAndCutsDmaSuffixSy
   sysfs_.push_back(SysPath("x_dma"));
   EXPECT_TRUE(resolveDeviceName("x_dma", 5, out));
   EXPECT_STREQ(out, "x_dma");
-  sysfs_.push_back(SysPath(""));
   EXPECT_FALSE(resolveDeviceName("mlx5_0", 0, out));
   const std::string longest(IB_BW_NAME_SIZE - 1, 'n');
   sysfs_.push_back(SysPath(longest.c_str()));
@@ -531,11 +610,10 @@ TEST_F(DiagIbWriteBwMicrotest, DiscoverLocal_CudaNeedsDeviceAndDmabufNeedsCommSu
 }
 
 TEST_F(DiagIbWriteBwMicrotest, DiscoverLocal_EachSetupFailureReportsAndMarksRank) {
-  BuildComm(0, {{0}, {1}});
   struct Case {
     std::function<void()> arm;
-    std::string body;
-    bool selected;
+    std::string line;
+    bool reached;
   };
   const std::vector<Case> cases = {
       {[] { g_gethostname = [](char*, size_t) { return -1; }; }, "cannot determine local hostname", false},
@@ -544,7 +622,12 @@ TEST_F(DiagIbWriteBwMicrotest, DiscoverLocal_EachSetupFailureReportsAndMarksRank
       {[this] { comm_->ncclNet = nullptr; }, "failed: selected network plugin does not support IB", false},
       {[this] { net_.name = "Socket"; }, "failed: selected network plugin does not support IB", false},
       {[this] { devicesResult_ = ncclSystemError; }, "cannot enumerate network devices", false},
-      {[this] { g_ibNetDevices = [](int* count) { *count = 0; return ncclSuccess; }; },
+      {[] {
+         g_ibNetDevices = [](int* count) {
+           *count = 0;
+           return ncclSuccess;
+         };
+       },
        "failed: no usable IB device", false},
       {[this] { comm_->topo = nullptr; }, "failed: no usable IB device", false},
       {[this] { comm_->nChannels = 0; }, "invalid channel count=0", false},
@@ -558,21 +641,14 @@ TEST_F(DiagIbWriteBwMicrotest, DiscoverLocal_EachSetupFailureReportsAndMarksRank
   };
   for (std::size_t i = 0; i < cases.size(); i++) {
     SCOPED_TRACE(i);
-    SetUp();
-    BuildComm(0, {{0}, {1}});
-    propName_ = "mlx5_0";
-    probeExit_ = 0;
-    devicesResult_ = propsResult_ = localNetResult_ = ncclSuccess;
-    localNetDev_ = kNetDev;
-    localNetChannels_.clear();
-    sysfs_.push_back(SysPath(""));
+    ResetDiscoverScene();
     cases[i].arm();
     LocalInfo local{};
     const std::string out = CaptureStdout([&] { local = Discover(); });
-    EXPECT_EQ(out, NetInfo(cases[i].body));
+    EXPECT_EQ(out, NetInfo(cases[i].line));
     EXPECT_TRUE(local.setupFailed);
     EXPECT_EQ(local.deviceCount, 0);
-    EXPECT_EQ(localNetChannels_.size(), cases[i].selected ? 1u : 0u);
+    EXPECT_EQ(localNetChannels_.size(), cases[i].reached ? 1u : 0u);
   }
 }
 

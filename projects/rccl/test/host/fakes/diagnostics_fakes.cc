@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cstring>
 
+#include "fakes/signature-drift.h"
+
 namespace {
 
 constexpr std::size_t kFgetsChunk = 4095;
@@ -29,6 +31,8 @@ int DefaultChildRun(const char* command, int timeoutSec, char* output, int outpu
 std::function<int(const char*, int, char*, int, bool*)> g_ncclDiagChildRun = DefaultChildRun;
 std::function<int(const char*, int, char*, int, ncclDiagChildLineFn, void*, bool*)> g_ncclDiagChildRunStream =
     DefaultChildRunStream;
+ASSERT_HOOK_MATCHES_PROD(g_ncclDiagChildRun, ncclDiagChildRun);
+ASSERT_HOOK_MATCHES_PROD(g_ncclDiagChildRunStream, ncclDiagChildRunStream);
 
 void DeliverChildOutput(const std::string& text, char* output, int outputSize, ncclDiagChildLineFn onLine, void* ctx,
                         bool* outputTruncated) {

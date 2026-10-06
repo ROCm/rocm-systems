@@ -9,10 +9,10 @@
 #ifndef RCCL_TEST_HOST_FAKES_DIAGNOSTICS_FAKES_H_
 #define RCCL_TEST_HOST_FAKES_DIAGNOSTICS_FAKES_H_
 
-#include "diagnostics.h"
-
 #include <functional>
 #include <string>
+
+#include "diagnostics.h"
 
 extern std::function<int(const char*, int, char*, int, bool*)> g_ncclDiagChildRun;
 extern std::function<int(const char*, int, char*, int, ncclDiagChildLineFn, void*, bool*)> g_ncclDiagChildRunStream;
