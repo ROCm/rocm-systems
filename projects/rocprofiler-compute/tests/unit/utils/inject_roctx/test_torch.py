@@ -31,3 +31,21 @@ def test_dispatcher_marker_name_for_aten_packet():
     packet = SimpleNamespace(_qualified_op_name="aten::addmm")
     func = SimpleNamespace(overloadpacket=packet)
     assert dispatcher_marker_name_for(func) == "torch.ops.aten.addmm"
+
+
+def test_roctx_wrapper_idempotent_and_push_pop(monkeypatch):
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    pushes = []
+    pops = []
+    monkeypatch.setattr(
+        torch_backend,
+        "_push_scope",
+        lambda *args, **kwargs: pushes.append(1),
+    )
+    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: pops.append(1))
+    wrapped = torch_backend.roctx_wrapper(lambda value: value + 1)
+    assert wrapped(1) == 2
+    assert pushes == [1]
+    assert pops == [1]
+    assert torch_backend.roctx_wrapper(wrapped) is wrapped
