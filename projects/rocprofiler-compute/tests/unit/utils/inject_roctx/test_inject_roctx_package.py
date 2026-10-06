@@ -326,3 +326,11 @@ def test_extract_kernel_name_prefers_attr_then_meta_then_fn():
         triton_backend._extract_kernel_name(types.SimpleNamespace())
         == "<triton_kernel>"
     )
+
+
+def test_encode_marker_name_wrap_chars():
+    from utils.inject_roctx.core import encode_marker_name
+
+    assert encode_marker_name("nn.Module.Linear.forward") == "nn.Module.Linear.forward"
+    assert encode_marker_name("pkg/mod%hook") == "pkg%2Fmod%25hook"
+    assert encode_marker_name("aten::addmm") == "aten::addmm"
