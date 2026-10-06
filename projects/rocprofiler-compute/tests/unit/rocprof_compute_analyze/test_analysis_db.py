@@ -22,6 +22,7 @@ from sqlalchemy import text
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
+from rocprof_compute_analyze.analysis_base import TOP_STATS_BUILD_IN_CONFIG
 from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
     db_analysis,
@@ -172,6 +173,7 @@ def make_pc_sampling_database_analyzer(
         for workload_path, tool_data_records in tool_data_per_workload.items()
     }
     analyzer._roofline_data_per_kernel = {}
+    analyzer._roofline_data_per_workload = {}
     return analyzer
 
 
@@ -219,6 +221,7 @@ def make_counter_backed_database_analyzer(
         ])
     }
     analyzer._roofline_data_per_kernel = {workload_path: pd.DataFrame()}
+    analyzer._roofline_data_per_workload = {}
     analyzer._metrics_info_data_per_workload = {}
     analyzer._kernel_values_data_per_workload = {}
     analyzer._workload_values_data_per_workload = {}
@@ -773,7 +776,7 @@ def test_calc_dataframe_expressions_empty_returns_assignable_series():
 
 def test_calc_metrics_data_builds_rows_and_preserves_schema():
     """Metric tables expand into rows with table-level fields resolved once;
-    non-metric tables are skipped and the output frames keep their columns."""
+    titleless raw tables are skipped and the output frames keep their columns."""
     workload_path = "/fake/workload"
     metric_df = pd.DataFrame(
         {
@@ -794,19 +797,20 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
         701: metric_df,
     }
     arch_config.panel_configs = {
+        **copy.deepcopy(TOP_STATS_BUILD_IN_CONFIG),
         700: {
             "id": 700,
             "title": "Wavefront",
             "data source": [
                 {"metric_table": {"id": 701, "title": "Wavefront Launch Stats"}}
             ],
-        }
+        },
     }
 
-    analyzer = db_analysis(MagicMock(verbose=0), {})
+    analyzer = db_analysis(SimpleNamespace(verbose=0), {})
     analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
     analyzer._runs = {
-        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+        workload_path: schema.Workload(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
     }
     analyzer._arch_configs = {"gfx942": arch_config}
 
@@ -1560,6 +1564,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
         )
     }
     analyzer._roofline_data_per_kernel = {}
+    analyzer._roofline_data_per_workload = {}
 
     with ExitStack() as patch_stack:
         patch_stack.enter_context(patch.object(orm.Database, "init"))
@@ -3392,7 +3397,12 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     result = db_analysis.calc_roofline_data(analyzer)
 
     # Verify early exit behavior
-    assert result == {}, "Should return no kernel data when roofline data is empty"
+    assert len(result[0]) == 0, (
+        "Should return empty kernel level dict when roofline data is empty"
+    )
+    assert len(result[1]) == 0, (
+        "Should return empty workload level dict when roofline data is empty"
+    )
     assert len(warning_messages) == 1, "Should log one warning message"
     assert "Roofline data is filtered out or not found" in warning_messages[0]
     assert workload_path in warning_messages[0]
@@ -3517,15 +3527,10 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
 
     workload_path = "/mock/workload/path"
     analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
-    evaluated_row_counts = []
-
-    def evaluate_roofline_metric(name, value, kernel_pmc_df, sys_info):
-        evaluated_row_counts.append(len(kernel_pmc_df))
-        return 42.0
 
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_db.db_analysis.evaluate",
-        evaluate_roofline_metric,
+        lambda name, value, pmc_df, sys_info: 42.0,
     )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_db.console_warning", lambda msg: None
@@ -3534,7 +3539,7 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
         "rocprof_compute_analyze.analysis_db.console_debug", lambda msg: None
     )
 
-    kernel_data = db_analysis.calc_roofline_data(analyzer)
+    kernel_data, workload_data = db_analysis.calc_roofline_data(analyzer)
 
     assert len(kernel_data) == 1
     df = kernel_data[workload_path]
@@ -3555,4 +3560,7 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
         assert col in df.columns
         assert (df[col] == 42.0).all()
 
-    assert evaluated_row_counts == [2] * (NUM_KERNELS * len(roofline_metrics))
+    assert len(workload_data) == 1
+    workload_metrics = workload_data[workload_path]
+    assert len(workload_metrics) == len(roofline_metrics)
+    assert all(v == 42.0 for v in workload_metrics.values())

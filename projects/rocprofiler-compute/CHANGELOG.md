@@ -13,11 +13,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
-* Removed the unused `compute_workload_roofline_data` table from the analysis database.
 
 ### Optimized
 
 ### Resolved issues
+
+* Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. Both formats now export kernel statistics successfully.
 
 ### Upcoming changes
 

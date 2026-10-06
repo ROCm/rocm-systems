@@ -4,7 +4,9 @@
 import csv
 import os
 import shutil
+import sqlite3
 import tempfile
+from contextlib import closing
 from pathlib import Path
 
 import common
@@ -69,6 +71,52 @@ def test_list_kernels(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
         common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.misc
+@pytest.mark.parametrize("output_format", ["csv", "db"])
+def test_list_stats_export(
+    binary_handler_analyze_rocprof_compute, tmp_path, monkeypatch, output_format
+):
+    workload_path = tmp_path / "vcopy" / "MI100"
+    shutil.copytree(Path(common.ROOT) / "tests/workloads/vcopy/MI100", workload_path)
+    output_path = tmp_path / "kernel_stats"
+    monkeypatch.chdir(tmp_path)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(workload_path),
+        "--list-stats",
+        "--output-format",
+        output_format,
+        "--output-name",
+        output_path.name,
+    ])
+
+    assert code == 0
+    if output_format == "csv":
+        kernel_stats = pd.read_csv(output_path / "kernel.csv")
+    else:
+        database_path = output_path.with_suffix(".db")
+        assert database_path.is_file()
+        with closing(sqlite3.connect(database_path)) as connection:
+            kernel_stats = pd.read_sql_query(
+                "SELECT * FROM compute_kernel_view", connection
+            )
+            assert connection.execute(
+                "SELECT dispatch_id FROM compute_dispatch ORDER BY dispatch_id"
+            ).fetchall() == [(1,), (2,), (3,)]
+
+    assert kernel_stats["kernel_name"].tolist() == [
+        "vecCopy(double*, double*, double*, int, int)"
+    ]
+    assert kernel_stats["dispatch_count"].tolist() == [3]
+    assert kernel_stats["duration_ns_sum"].tolist() == [61440]
+    assert kernel_stats["duration_ns_min"].tolist() == [19040]
+    assert kernel_stats["duration_ns_max"].tolist() == [23200]
+    assert kernel_stats["duration_ns_median"].tolist() == [19200]
+    assert kernel_stats["duration_ns_mean"].tolist() == [20480]
 
 
 @pytest.mark.list_metrics
