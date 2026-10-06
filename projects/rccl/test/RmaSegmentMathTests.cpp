@@ -10,7 +10,7 @@
 
 #include <gtest/gtest.h>
 
-#include "../src/transport/net_ib/gin.h"
+#include "transport/net_ib/gin.h"
 
 namespace {
 
@@ -152,6 +152,19 @@ TEST(RmaSegmentMathTest, PrefixPostKeepsRequestOnlyWhenSomethingPosted)
     EXPECT_FALSE(ncclRmaPrefixPostLostSignaledTail(/*posted=*/0, /*nWr=*/0));
 }
 
+// A freed id must not leave a gap the next request would wait on, nor be
+// reused while a later request holds a higher id.
+TEST(RmaSegmentMathTest, ReleaseSeqIdOnlyReturnsNewestId)
+{
+    uint64_t posted = 5;
+    ncclRmaReleaseSeqId(/*id=*/5, &posted);
+    EXPECT_EQ(posted, uint64_t{4});
+
+    posted = 7;
+    ncclRmaReleaseSeqId(/*id=*/6, &posted);
+    EXPECT_EQ(posted, uint64_t{7}) << "a later request already holds id 7";
+}
+
 // A failed handle calloc must still reach the status AllGather. memcpy of
 // segOff is skipped until the handle exists.
 TEST(RmaSegmentMathTest, FailedHandleCallocDoesNotCopySegmentOffsets)
@@ -165,19 +178,6 @@ TEST(RmaSegmentMathTest, FailedHandleCallocDoesNotCopySegmentOffsets)
     EXPECT_TRUE(ncclRmaRegistrationHandleReady(&handle, NCCL_RMA_MAX_SEGMENTS));
 }
 
-// nranks>64 overlays compact consensus on the unused registration stack.
-TEST(RmaSegmentMathTest, CompactConsensusOverlaysRegistrationStackWhenHeapFails)
-{
-    char heap{};
-    char stack[64 * 128];
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(&heap, stack, sizeof(stack), 65, sizeof(int)), &heap);
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, sizeof(stack), 65, sizeof(int)), stack);
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, sizeof(stack), 65, sizeof(ncclResult_t)), stack);
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, 64 * sizeof(int), 65, sizeof(int)), nullptr);
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, sizeof(stack), 0, sizeof(int)), nullptr);
-    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, nullptr, sizeof(stack), 65, sizeof(int)), nullptr);
-}
-
 TEST(RmaSegmentMathTest, SegmentCountsMatchIgnoresBoundaries)
 {
     EXPECT_TRUE(ncclRmaSegmentCountsMatch(2, 2));
@@ -185,6 +185,30 @@ TEST(RmaSegmentMathTest, SegmentCountsMatchIgnoresBoundaries)
     EXPECT_FALSE(ncclRmaSegmentCountsMatch(2, 1));
     EXPECT_FALSE(ncclRmaSegmentCountsMatch(0, 0));
     EXPECT_FALSE(ncclRmaSegmentCountsMatch(NCCL_RMA_MAX_SEGMENTS + 1, NCCL_RMA_MAX_SEGMENTS + 1));
+}
+
+TEST(RmaSegmentMathTest, SegOffTableValidRequiresZeroStartAndOrder)
+{
+    const size_t single[] = {0, 4096};
+    const size_t multi[]  = {0, 2097152, 4194304, 4194404};
+    const size_t empty[]  = {0, 0};
+    const size_t repeat[] = {0, 4096, 4096, 8192};
+    EXPECT_TRUE(ncclRmaSegOffTableValid(single, 1));
+    EXPECT_TRUE(ncclRmaSegOffTableValid(multi, 3));
+    EXPECT_TRUE(ncclRmaSegOffTableValid(empty, 1));
+    EXPECT_TRUE(ncclRmaSegOffTableValid(repeat, 3));
+
+    const size_t nonZeroStart[] = {64, 4096};
+    const size_t decreasing[]   = {0, 8192, 4096, 12288};
+    const size_t lastWraps[]    = {0, 4096, 8192, 100};
+    EXPECT_FALSE(ncclRmaSegOffTableValid(nonZeroStart, 1));
+    EXPECT_FALSE(ncclRmaSegOffTableValid(decreasing, 3));
+    EXPECT_FALSE(ncclRmaSegOffTableValid(lastWraps, 3));
+    EXPECT_TRUE(ncclRmaSegOffTableValid(lastWraps, 2)) << "entries past nSegments are ignored";
+
+    EXPECT_FALSE(ncclRmaSegOffTableValid(nullptr, 1));
+    EXPECT_FALSE(ncclRmaSegOffTableValid(single, 0));
+    EXPECT_FALSE(ncclRmaSegOffTableValid(multi, NCCL_RMA_MAX_SEGMENTS + 1));
 }
 
 TEST(RmaSegmentMathTest, PeerSegOffIndexesPerRankTable)
