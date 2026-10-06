@@ -39,12 +39,17 @@ def _fake_modules() -> dict:
         _NA_amdsmi_get_gpu_metrics_info=Mock(return_value={"is_apu": False}),
     )
     for name in (
+        "amdsmi_get_gpu_metrics_header_info",
         "amdsmi_get_gpu_metrics_info",
         "amdsmi_get_gpu_pci_throughput",
         "amdsmi_get_gpu_pci_replay_counter",
     ):
         setattr(interface, name, Mock(side_effect=_FakeLibraryException("NOT_SUPPORTED")))
-    exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
+    exception = fake_module(
+        "amdsmi.amdsmi_exception",
+        AmdSmiException=_FakeLibraryException,
+        AmdSmiLibraryException=_FakeLibraryException,
+    )
     return {
         "amdsmi": fake_module("amdsmi", amdsmi_interface=interface, amdsmi_exception=exception),
         "amdsmi.amdsmi_interface": interface,
@@ -98,7 +103,7 @@ class TestCliMetricPcieUnsupported(unittest.TestCase):
         )
         return commands
 
-    def _run_metric(self, fmt: str, speed: int) -> dict:
+    def _run_metric(self, fmt: str, speed: int, loglevel: str = "INFO") -> dict:
         pcie_metric = {"pcie_" + name: "N/A" for name in _METRIC_COUNTERS}
         pcie_metric.update(pcie_width=16, pcie_speed=speed)
         self.interface.amdsmi_get_pcie_info.return_value = {"pcie_metric": pcie_metric}
@@ -107,14 +112,20 @@ class TestCliMetricPcieUnsupported(unittest.TestCase):
                 value.reset_mock()
         commands = self._build_commands(fmt)
         args = _build_args()
+        args.loglevel = loglevel
         commands.metric_gpu(args)
         for name in (
-            "amdsmi_get_gpu_metrics_info",
             "amdsmi_get_pcie_info",
             "amdsmi_get_gpu_pci_throughput",
             "amdsmi_get_gpu_pci_replay_counter",
         ):
             getattr(self.interface, name).assert_called_once_with(args.gpu)
+        self.interface.amdsmi_get_gpu_metrics_info.assert_called_with(args.gpu)
+        self.assertEqual(
+            self.interface.amdsmi_get_gpu_metrics_info.call_count, 2 if loglevel == "DEBUG" else 1
+        )
+        if loglevel == "DEBUG":
+            self.interface.amdsmi_get_gpu_metrics_header_info.assert_called_once_with(args.gpu)
         self.interface._NA_amdsmi_get_gpu_metrics_info.assert_called_once_with()
         self.assertEqual(len(commands.logger.store_gpu_json_output), 1)
         values = commands.logger.store_gpu_json_output[0]
@@ -128,10 +139,10 @@ class TestCliMetricPcieUnsupported(unittest.TestCase):
             commands.logger.print_output.assert_called_once_with(watching_output=False)
         return values["pcie"]
 
-    def _check_output(self, fmt: str) -> None:
+    def _check_output(self, fmt: str, loglevel: str = "INFO") -> None:
         for speed, expected_speed in ((32000, 32), (2500, 2.5)):
             with self.subTest(format=fmt, speed=speed):
-                pcie = self._run_metric(fmt, speed)
+                pcie = self._run_metric(fmt=fmt, speed=speed, loglevel=loglevel)
                 expected = dict.fromkeys(_METRIC_COUNTERS + _THROUGHPUT_FIELDS, "N/A")
                 expected["width"] = 16
                 if fmt == "human":
@@ -155,3 +166,7 @@ class TestCliMetricPcieUnsupported(unittest.TestCase):
 
     def test_csv_link_with_unavailable_counters(self) -> None:
         self._check_output("csv")
+
+    def test_debug_link_with_unavailable_counters(self) -> None:
+        for fmt in ("human", "json", "csv"):
+            self._check_output(fmt, loglevel="DEBUG")

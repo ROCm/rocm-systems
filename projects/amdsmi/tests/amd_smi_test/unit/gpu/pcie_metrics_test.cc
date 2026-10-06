@@ -26,6 +26,9 @@ std::string sysfs_prefix;
 std::string fixture_prefix;
 std::map<std::string, int> open_errors;
 int link_read_error = 0;
+std::string link_read_attribute = "current_link_speed";
+std::string link_read_prefix;
+std::size_t link_read_offset = 0;
 int metrics_read_error = 0;
 
 class GpuUnit : public ::testing::Test {
@@ -65,6 +68,9 @@ class GpuUnit : public ::testing::Test {
     test_device = nullptr;
     metrics_read_error = 0;
     link_read_error = 0;
+    link_read_attribute = "current_link_speed";
+    link_read_prefix.clear();
+    link_read_offset = 0;
     open_errors.clear();
     sysfs_prefix.clear();
     fixture_prefix.clear();
@@ -173,6 +179,20 @@ TEST_F(GpuUnit, PcieUnparsableCurrentWidthStaysUnavailable) {
   }
 }
 
+TEST_F(GpuUnit, PcieInvalidCurrentWidthStaysUnavailable) {
+  for (const std::string& value :
+       std::vector<std::string>{"-8\n", "65535\n", "65536\n", "70000\n", "4294967297\n", "1.5\n",
+                                "8 lanes\n", "8\njunk\n", std::string(1024, '9') + "\n"}) {
+    SCOPED_TRACE(value);
+    Write("current_link_width", value);
+    amdsmi_pcie_info_t info{};
+    ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(info.pcie_metric.pcie_width, UINT16_MAX);
+    EXPECT_EQ(info.pcie_metric.pcie_speed, 2500);
+    EXPECT_EQ(info.pcie_static.max_pcie_width, 16);
+  }
+}
+
 TEST_F(GpuUnit, PcieUnparsableCurrentSpeedStaysUnavailable) {
   for (const char* value : {"", "GT/s\n", "unknown\n"}) {
     SCOPED_TRACE(value);
@@ -185,13 +205,40 @@ TEST_F(GpuUnit, PcieUnparsableCurrentSpeedStaysUnavailable) {
 }
 
 TEST_F(GpuUnit, PcieCurrentSpeedsConvertToMTs) {
-  for (const auto& value : std::map<std::string, uint32_t>{
-           {"2.5", 2500}, {"5", 5000}, {"8", 8000}, {"16", 16000}, {"32", 32000}, {"64", 64000}}) {
+  for (const auto& value : std::map<std::string, uint32_t>{{"2.5", 2500},
+                                                           {"5", 5000},
+                                                           {"8", 8000},
+                                                           {"16", 16000},
+                                                           {"32.0", 32000},
+                                                           {"64", 64000},
+                                                           {"128", 128000},
+                                                           {"0.001", 1},
+                                                           {"4294967.294", UINT32_MAX - 1}}) {
     SCOPED_TRACE(value.first);
-    Write("current_link_speed", value.first + " GT/s PCIe\n");
+    for (const char* suffix : {" GT/s PCIe\n", " GT/s\n", " GT/s", " GT/s PCIe \t\n"}) {
+      SCOPED_TRACE(suffix);
+      Write("current_link_speed", value.first + suffix);
+      amdsmi_pcie_info_t info{};
+      ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
+      EXPECT_EQ(info.pcie_metric.pcie_speed, value.second);
+    }
+  }
+}
+
+TEST_F(GpuUnit, PcieInvalidCurrentSpeedStaysUnavailable) {
+  for (const std::string& value : std::vector<std::string>{
+           "nan GT/s\n", "inf GT/s\n", "-inf GT/s\n", "-2.5 GT/s\n", "0 GT/s\n",
+           "4294967.295 GT/s\n", "4294967.296 GT/s\n", "1e20 GT/s\n", "0x1p200 GT/s\n", "32\n",
+           "32 GB/s\n", "32 GT/s Xyz\n", "32 GT/s garbage\n", "32 GT/s PCIe garbage\n",
+           "32 GT/s PCIe\njunk\n", "1.2345 GT/s\n", "2.5.0 GT/s\n",
+           std::string(1024, '9') + " GT/s\n"}) {
+    SCOPED_TRACE(value);
+    Write("current_link_speed", value);
     amdsmi_pcie_info_t info{};
     ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
-    EXPECT_EQ(info.pcie_metric.pcie_speed, value.second);
+    EXPECT_EQ(info.pcie_metric.pcie_speed, UINT32_MAX);
+    EXPECT_EQ(info.pcie_metric.pcie_width, 8);
+    EXPECT_EQ(info.pcie_static.max_pcie_speed, 32000);
   }
 }
 
@@ -303,13 +350,40 @@ TEST_F(GpuUnit, PcieUnsupportedMetricsVersionKeepsLinkInfo) {
 }
 
 TEST_F(GpuUnit, PcieAttributeReadFailuresKeepOtherFields) {
-  for (int error : {EACCES, ENOTSUP, EIO}) {
-    SCOPED_TRACE(error);
-    link_read_error = error;
-    amdsmi_pcie_info_t info{};
-    ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
-    EXPECT_EQ(info.pcie_metric.pcie_width, 8);
-    EXPECT_EQ(info.pcie_metric.pcie_speed, UINT32_MAX);
+  for (const char* attribute : {"current_link_width", "current_link_speed"}) {
+    SCOPED_TRACE(attribute);
+    link_read_attribute = attribute;
+    for (int error : {EACCES, EPERM, ENOTSUP, EIO, ENOENT}) {
+      SCOPED_TRACE(error);
+      link_read_error = error;
+      amdsmi_pcie_info_t info{};
+      ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
+      EXPECT_EQ(info.pcie_metric.pcie_width,
+                link_read_attribute == "current_link_width" ? UINT16_MAX : 8);
+      EXPECT_EQ(info.pcie_metric.pcie_speed,
+                link_read_attribute == "current_link_speed" ? UINT32_MAX : 2500);
+    }
+  }
+}
+
+TEST_F(GpuUnit, PciePartialReadFailuresKeepValuesUnavailable) {
+  for (const auto& entry : std::map<std::string, std::string>{
+           {"current_link_width", "8\n"}, {"current_link_speed", "2.5 GT/s PCIe\n"}}) {
+    SCOPED_TRACE(entry.first);
+    link_read_attribute = entry.first;
+    link_read_prefix = entry.second;
+    for (int error : {EACCES, ENOTSUP, EIO}) {
+      SCOPED_TRACE(error);
+      link_read_offset = 0;
+      link_read_error = error;
+      amdsmi_pcie_info_t info{};
+      ASSERT_EQ(amdsmi_get_pcie_info(gpu_.get(), &info), AMDSMI_STATUS_SUCCESS);
+      EXPECT_EQ(info.pcie_metric.pcie_width, entry.first == "current_link_width" ? UINT16_MAX : 8);
+      EXPECT_EQ(info.pcie_metric.pcie_speed,
+                entry.first == "current_link_speed" ? UINT32_MAX : 2500);
+      EXPECT_EQ(info.pcie_static.max_pcie_width, 16);
+      EXPECT_EQ(info.pcie_static.max_pcie_speed, 32000);
+    }
   }
 }
 }  // namespace
@@ -330,9 +404,14 @@ extern "C" FILE* __wrap_fopen(const char* path, const char* mode) {
   const std::string name(path);
   if (!sysfs_prefix.empty() && name.compare(0, sysfs_prefix.size(), sysfs_prefix) == 0) {
     const auto attribute = name.substr(sysfs_prefix.size());
-    if (attribute == "current_link_speed" && link_read_error != 0) {
+    if (attribute == link_read_attribute && link_read_error != 0) {
       cookie_io_functions_t io{};
-      io.read = [](void*, char*, size_t) -> ssize_t {
+      io.read = [](void*, char* buffer, size_t size) -> ssize_t {
+        if (link_read_offset < link_read_prefix.size()) {
+          const auto count = link_read_prefix.copy(buffer, size, link_read_offset);
+          link_read_offset += count;
+          return static_cast<ssize_t>(count);
+        }
         errno = link_read_error;
         return -1;
       };

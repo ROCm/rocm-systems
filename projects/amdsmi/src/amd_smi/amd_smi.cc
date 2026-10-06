@@ -5941,9 +5941,11 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
         "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/current_link_width";
     fp = fopen(path_cur_link_width.c_str(), "r");
     if (fp) {
-      // A down link negotiates zero lanes, which is not a usable width.
-      if (fscanf(fp, "%u", &pcie_width) == 1 && pcie_width != 0) {
-        info->pcie_metric.pcie_width = (uint16_t)pcie_width;
+      char extra;
+      // Bound the scan before narrowing; zero lanes means the link is unavailable.
+      if (fscanf(fp, "%5u %c", &pcie_width, &extra) == 1 && !ferror(fp) && pcie_width > 0 &&
+          pcie_width < UINT16_MAX) {
+        info->pcie_metric.pcie_width = static_cast<uint16_t>(pcie_width);
       }
       fclose(fp);
     }
@@ -5952,9 +5954,17 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
         "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/current_link_speed";
     fp = fopen(path_cur_link_speed.c_str(), "r");
     if (fp) {
-      // A down link reports "Unknown speed", which does not parse and stays unavailable.
-      if (fscanf(fp, "%lf %*s", &pcie_speed) == 1) {
-        info->pcie_metric.pcie_speed = static_cast<uint32_t>(pcie_speed * 1000);
+      char speed[16], unit[5], suffix[5], extra;
+      const int fields = fscanf(fp, " %15[0123456789.] %4s %4s %c", speed, unit, suffix, &extra);
+      // Older kernels omit the PCIe suffix; unknown speed text remains unavailable.
+      if ((fields == 2 || (fields == 3 && strcmp(suffix, "PCIe") == 0)) && !ferror(fp) &&
+          strcmp(unit, "GT/s") == 0) {
+        char* end;
+        pcie_speed = std::strtod(speed, &end) * 1000;
+        if (*end == '\0' && pcie_speed > 0 && pcie_speed < UINT32_MAX) {
+          const auto rate = static_cast<uint32_t>(pcie_speed);
+          if (pcie_speed == rate) info->pcie_metric.pcie_speed = rate;
+        }
       }
       fclose(fp);
     }
