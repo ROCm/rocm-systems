@@ -643,6 +643,8 @@ void VDot4I32Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst_.opsel, inst_.opsel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src2, lane)));
     const bool src0_signed = (inst_.neg & 0x1u) != 0;
@@ -674,6 +676,8 @@ void VDot4U32U8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst_.opsel, inst_.opsel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     for (int i = 0; i < 4; ++i) {
       uint8_t a = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);
@@ -696,6 +700,8 @@ void VDot8I32Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst_.opsel, inst_.opsel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src2, lane)));
     const bool src0_signed = (inst_.neg & 0x1u) != 0;
@@ -727,6 +733,8 @@ void VDot8U32U4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst_.opsel, inst_.opsel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     for (int i = 0; i < 8; ++i) {
       uint32_t a = (raw0 >> (i * 4)) & 0xF;

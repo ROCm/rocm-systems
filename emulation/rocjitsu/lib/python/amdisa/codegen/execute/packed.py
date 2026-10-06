@@ -1408,12 +1408,30 @@ def gen_dot2_true16(
     return '\n'.join(L)
 
 
+def _append_dot_int_halves(L: list[str], opsel_exprs: tuple[str, str]) -> None:
+    """Apply VOP3P OP_SEL/OP_SEL_HI to the packed integer sources of DOT4/DOT8.
+
+    gfx1201 and gfx1100 treat each 32-bit source as two 16-bit halves: OP_SEL
+    picks the half used for bits 15:0 and OP_SEL_HI the half for bits 31:16,
+    as for packed 16-bit math. The assembler default (op_sel:[0,0],
+    op_sel_hi:[1,1]) keeps the register as is. src2 is unaffected.
+    """
+    opsel, opsel_hi = opsel_exprs
+    if not opsel:
+        return
+    for i in range(2):
+        L.append(
+            f'    raw{i} = amdgpu::select_packed_halves(raw{i}, {opsel}, {opsel_hi}, {i});'
+        )
+
+
 def gen_dot4(
     dst: list[str],
     src: list[str],
     cls: str,
     instruction: str = '',
     dot_accumulation: FloatDotAccumulation = FloatDotAccumulation.HOST_F32,
+    opsel_exprs: tuple[str, str] = ('', ''),
 ) -> str:
     """Generate V_DOT4_I32_I8 / V_DOT4_I32_IU8 / V_DOT4_U32_U8 and the RDNA4
     V_DOT4_F32_{FP8,BF8}_{FP8,BF8} forms (``instruction`` names the formats)."""
@@ -1424,6 +1442,8 @@ def gen_dot4(
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
     L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
+    if cls != 'dot4_f32_fp8':
+        _append_dot_int_halves(L, opsel_exprs)
 
     if cls in ('dot4_i32_i8', 'dot4_i32_iu8'):
         L.append(
@@ -1497,7 +1517,9 @@ def gen_dot4(
     return '\n'.join(L)
 
 
-def gen_dot8(dst: list[str], src: list[str], cls: str) -> str:
+def gen_dot8(
+    dst: list[str], src: list[str], cls: str, opsel_exprs: tuple[str, str] = ('', '')
+) -> str:
     """Generate V_DOT8_I32_I4 / V_DOT8_I32_IU4 / V_DOT8_U32_U4."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     L = []
@@ -1506,6 +1528,7 @@ def gen_dot8(dst: list[str], src: list[str], cls: str) -> str:
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
     L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
+    _append_dot_int_halves(L, opsel_exprs)
 
     if cls in ('dot8_i32_i4', 'dot8_i32_iu4'):
         L.append(

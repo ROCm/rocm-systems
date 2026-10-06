@@ -2918,6 +2918,25 @@ std::vector<DotLane> dot_family_lanes() {
       0x73aa2116u, {}, {0x30u, 0xc0u, 0xffu});
   add("Bf8Bf8AbsSubnormalAccumulator", bf8_bf8, {.neg_hi = kSrc2}, 0x53b44830u, 0xa4473741u,
       0x0099da20u, 0x3f980000u, {}, {0x30u, 0xc0u});
+  // Integer DOT4/DOT8 read each source as two 16-bit halves: OP_SEL picks the
+  // half for bits 15:0 and OP_SEL_HI the half for bits 31:16. Both cards agree.
+  const uint16_t iu8 = rdna4::kVDot4I32Iu8Vop3p;
+  const uint16_t u8 = rdna4::kVDot4U32U8Vop3p;
+  const uint16_t iu4 = rdna4::kVDot8I32Iu4Vop3p;
+  const uint16_t u4 = rdna4::kVDot8U32U4Vop3p;
+  const std::vector<uint32_t> int_modes{0xf0u, 0x00u};
+  add("Dot4Iu8HighHalfSrc0", iu8, {.opsel = 1}, 0x32bf5f5eu, 0xf9c54f6bu, 0x00b85d08u, 0x00b97fe8u,
+      0x00b97fe8u, int_modes);
+  add("Dot4Iu8LowHalves", iu8, {.opsel_hi = 0}, 0xe9d6d2a3u, 0xffffffefu, 0x00000031u, 0x0002d2e7u,
+      0x0002d2e7u, int_modes);
+  add("Dot4U8LowHalves", u8, {.opsel_hi = 0}, 0x2e1ae63eu, 0x14771051u, 0x00dc74cbu, 0x00dcb8c7u,
+      0x00dcb8c7u, int_modes);
+  add("Dot8Iu4HighHalfSrc0", iu4, {.opsel = 1}, 0x8d7fb53du, 0x64aeeb2fu, 0x5385deddu, 0x5385e247u,
+      0x5385e247u, int_modes);
+  add("Dot8Iu4LowHalves", iu4, {.opsel_hi = 0}, 0x041e0e34u, 0x3f5b683eu, 0xb7a86fa9u, 0xb7a8710bu,
+      0xb7a8710bu, int_modes);
+  add("Dot8U4LowHalves", u4, {.opsel_hi = 0}, 0xfffffffdu, 0x00000c75u, 0xffffd984u, 0xffffdc40u,
+      0xffffdc40u, int_modes);
   return lanes;
 }
 

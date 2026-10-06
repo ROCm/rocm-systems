@@ -7531,10 +7531,13 @@ class CodeGenerator:
                 cls,
                 instruction=sem.name,
                 dot_accumulation=self.isa_spec.profile.float_dot_accumulation,
+                opsel_exprs=self._vop3p_opsel_exprs(),
             )
 
         if cls.startswith('dot8_'):
-            return gen_dot8(dst_ops, src_ops, cls)
+            return gen_dot8(
+                dst_ops, src_ops, cls, opsel_exprs=self._vop3p_opsel_exprs()
+            )
 
         if cls == 'smem_load':
             return self._gen_smem_load(dst_ops, src_ops, sem)

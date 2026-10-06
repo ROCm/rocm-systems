@@ -423,6 +423,30 @@ def test_fp8_dot4_rejects_other_accumulation_models():
         )
 
 
+def test_integer_dot4_dot8_select_source_halves():
+    for gen, cls in (
+        (gen_dot4, 'dot4_i32_iu8'),
+        (gen_dot4, 'dot4_u32_u8'),
+        (gen_dot4, 'dot4_i32_i8'),
+        (gen_dot8, 'dot8_i32_iu4'),
+        (gen_dot8, 'dot8_u32_u4'),
+        (gen_dot8, 'dot8_i32_i4'),
+    ):
+        cpp = gen(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            cls,
+            opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+        )
+        for i in range(2):
+            assert (
+                f'raw{i} = amdgpu::select_packed_halves(raw{i}, inst_.opsel, inst_.opsel_hi, {i});'
+                in cpp
+            )
+        # The accumulator is a full 32-bit operand.
+        assert 'select_packed_halves(raw2' not in cpp
+
+
 def test_dot2_integer_forms_leave_inline_constants_alone():
     for cls in ('dot2_i32_i16', 'dot2_u32_u16'):
         cpp = gen_dot2(

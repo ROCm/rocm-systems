@@ -4438,11 +4438,10 @@ template <typename Inst> [[nodiscard]] bool try_execute_vop3p_mov_b32_simd(Inst 
 /// signed forms when inst.clamp is set, saturation to [INT_MIN, INT_MAX]. Unsigned
 /// clamp saturates to UINT_MAX. Clamped accumulation is widened so overflow is
 /// detected before narrowing; unclamped accumulation remains in uint32_t bits
-/// and wraps. For the 16-bit forms op_sel /
-/// op_sel_hi pick the source halves,
-/// so the fast path gates on the default packing (op_sel == 0, op_sel_hi == 3)
-/// and bails otherwise; the 8/4-bit scalar bodies ignore op_sel so no gate is
-/// needed there.
+/// and wraps. op_sel / op_sel_hi pick the source halves. The 16-bit forms gate
+/// on the default packing (op_sel == 0, op_sel_hi == 3) and bail otherwise; the
+/// 8/4-bit forms apply the selection to the packed sources, as gfx1201 and
+/// gfx1100 do.
 template <int ElemBits, bool Signed, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_dot_int_simd(Inst &inst, Wavefront &wf) {
@@ -4476,8 +4475,12 @@ template <int ElemBits, bool Signed, typename Inst>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const U raw0 = src0.template load_native<uint32_t>(base);
-    const U raw1 = src1.template load_native<uint32_t>(base);
+    U raw0 = src0.template load_native<uint32_t>(base);
+    U raw1 = src1.template load_native<uint32_t>(base);
+    if constexpr (ElemBits != 16) {
+      raw0 = select_packed_halves(raw0, packed_opsel(inst.inst_), packed_opsel_hi(inst.inst_), 0);
+      raw1 = select_packed_halves(raw1, packed_opsel(inst.inst_), packed_opsel_hi(inst.inst_), 1);
+    }
     const U acc = src2.template load_native<uint32_t>(base);
     if constexpr (Signed) {
 #if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
@@ -4632,8 +4635,8 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
 /// signedness is chosen at RUNTIME from inst.neg (bit 0 -> src0 signed, bit 1
 /// -> src1 signed) — hoisted out of the chunk loop. src2 is the int32
 /// accumulator seed; clamp (when set) saturates to [INT_MIN, INT_MAX] before
-/// narrowing. Unclamped accumulation wraps in uint32_t bits. The 8/4-bit scalar
-/// bodies read no op_sel/neg_hi, so no gate.
+/// narrowing. Unclamped accumulation wraps in uint32_t bits. op_sel / op_sel_hi
+/// pick the source halves, as in the scalar bodies.
 template <int ElemBits, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_dot_int_mixed_simd(Inst &inst, Wavefront &wf) {
@@ -4654,6 +4657,8 @@ template <int ElemBits, typename Inst>
 #endif
   const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
   const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
+  const uint32_t opsel = packed_opsel(inst.inst_);
+  const uint32_t opsel_hi = packed_opsel_hi(inst.inst_);
   using U = util::native<uint32_t>;
   using I = util::native<int32_t>;
   RegisterAccess regs(wf);
@@ -4665,8 +4670,10 @@ template <int ElemBits, typename Inst>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const U raw0 = src0.template load_native<uint32_t>(base);
-    const U raw1 = src1.template load_native<uint32_t>(base);
+    const U raw0 =
+        select_packed_halves(src0.template load_native<uint32_t>(base), opsel, opsel_hi, 0);
+    const U raw1 =
+        select_packed_halves(src1.template load_native<uint32_t>(base), opsel, opsel_hi, 1);
     const U acc = src2.template load_native<uint32_t>(base);
 #if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
     if (clamp) {
