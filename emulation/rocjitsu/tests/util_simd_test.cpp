@@ -569,9 +569,9 @@ TEST(UtilSimd, FmaF64_VectorMatchesScalar_BitExact) {
   }
 }
 
-// native<double>: the f64 unary VOP1 fast path (v_ceil/floor/trunc/rndne/fract/
-// rcp/rsq/sqrt_f64) relies on util::stdx::{ceil,floor,trunc,nearbyint,sqrt} and
-// 1.0/x being bit-identical to the scalar std::* used in the generated bodies.
+// native<double>: the f64 unary VOP1 fast path (v_ceil/floor/trunc/rndne/fract_f64)
+// relies on util::stdx::{ceil,floor,trunc,nearbyint} being bit-identical to the
+// scalar std::* used in the generated bodies.
 // Sweeps full-range random 64-bit patterns, skipping lanes whose result is NaN
 // (accepted payload divergence). If a finite/Inf lane diverges, drop the
 // corresponding SIMD_VOP1_UNARY_F64 row.
@@ -648,23 +648,6 @@ TEST(UtilSimd, RcpF32MatchesPhysicalHardwareBits) {
                   cases[(start + lane) % std::size(cases)][1]);
     }
   }
-}
-
-TEST(UtilSimd, RcpF64_VectorMatchesScalar_BitExact) {
-  SKIP_IF_NO_SIMD();
-  expect_f64_unary_bit_exact([](double x) { return 1.0f / x; },
-                             [](util::native<double> x) { return util::native<double>(1.0) / x; });
-}
-TEST(UtilSimd, RsqF64_VectorMatchesScalar_BitExact) {
-  SKIP_IF_NO_SIMD();
-  expect_f64_unary_bit_exact(
-      [](double x) { return 1.0f / std::sqrt(x); },
-      [](util::native<double> x) { return util::native<double>(1.0) / util::stdx::sqrt(x); });
-}
-TEST(UtilSimd, SqrtF64_VectorMatchesScalar_BitExact) {
-  SKIP_IF_NO_SIMD();
-  expect_f64_unary_bit_exact([](double x) { return std::sqrt(x); },
-                             [](util::native<double> x) { return util::stdx::sqrt(x); });
 }
 
 // Toolchain guard for the float min/max SIMD fast path (v_max/min_f32 and the

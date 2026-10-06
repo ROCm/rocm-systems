@@ -28,7 +28,7 @@ excluded — those need their own helpers.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute import float_compare, float_minmax
+from amdisa.codegen.execute import float_compare, float_minmax, transcendental_f64
 from amdisa.codegen.execute.floating_policy import (
     FLUSH_NEAREST_F32_OPS,
     ROUNDED_F16_OPS,
@@ -1037,15 +1037,6 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
     'v_trunc_f64_vop1': ('double', '[](auto a) { return util::trunc_simd(a); }'),
     'v_rndne_f64_vop1': ('double', '[](auto a) { return util::rndne_simd(a); }'),
     'v_fract_f64_vop1': ('double', '[](auto a) { return a - util::floor_simd(a); }'),
-    'v_rcp_f64_vop1': (
-        'double',
-        '[](auto a) { return util::native<double>(1.0) / a; }',
-    ),
-    'v_rsq_f64_vop1': (
-        'double',
-        '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
-    ),
-    'v_sqrt_f64_vop1': ('double', '[](auto a) { return util::sqrt_f64_simd(a); }'),
     'v_mov_b64_vop1': ('uint64_t', '[](auto a) { return a; }'),
     # frexp mantissa: significand in [0.5,1) via bitfield rebias + denormal
     # renorm (see util::frexp_mant_f64_simd). VOP3 twin in SIMD_VOP3_UNARY_FP64.
@@ -1993,9 +1984,6 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     ),
     'v_trunc_f64_vop3': '[](auto a) { return util::trunc_simd(a); }',
     'v_rndne_f64_vop3': '[](auto a) { return util::rndne_simd(a); }',
-    # sqrt_f64 is correctly-rounded IEEE (scalar uses transcendental::sqrt_f64
-    # which is `std::sqrt` after NaN/negative guards); stdx::sqrt matches.
-    'v_sqrt_f64_vop3': ('[](auto a) { return util::sqrt_f64_simd(a); }'),
     # v_fract_f64: scalar = v - std::floor(v); util::floor_simd matches
     # std::floor bit-exact incl. sign-of-zero (NaN-floor(NaN) = NaN; NaN result
     # skipped by the test like any other NaN-result lane).
@@ -2003,12 +1991,6 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     # frexp mantissa: same functor as the VOP1 form; the f64 unary FP glue applies
     # abs/neg on the source and omod/clamp on the mantissa, matching the scalar.
     'v_frexp_mant_f64_vop3': '[](auto a) { return util::frexp_mant_f64_simd(a); }',
-    # v_rcp_f64 / v_rsq_f64: scalar uses transcendental::*_f64 with explicit
-    # NaN passthrough, ±0 -> copysign(Inf, x), ±Inf -> copysign(0, x); negative
-    # rsq inputs -> qNaN. Plain 1.0 / x and 1.0 / sqrt match the IEEE result
-    # for all non-NaN inputs; NaN-result lanes are skipped by the A/B test.
-    'v_rcp_f64_vop3': '[](auto a) { return util::native<double>(1.0) / a; }',
-    'v_rsq_f64_vop3': '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
     # NOTE: v_mov_b64 is deliberately NOT here. It is an integer 64-bit bit-move;
     # OMOD/CLAMP are float-only, so its generated VOP3 scalar body is a raw copy
     # that ignores them. Routing it through the f64 modifier glue made the SIMD
@@ -2703,6 +2685,9 @@ def _simd_probe_line(
     minmax_probe = float_minmax.simd_probe(template_name, true16_vop3)
     if minmax_probe is not None:
         return minmax_probe
+    transcendental_probe = transcendental_f64.simd_probe(template_name)
+    if transcendental_probe is not None:
+        return transcendental_probe
     if template_name in SIMD_PACKED_FLOAT:
         op, bf16 = SIMD_PACKED_FLOAT[template_name]
         return f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({op}, {str(bf16).lower()});'
@@ -3017,7 +3002,7 @@ def _simd_probe_line(
         if template_name in _ROUNDED_VOP3_BINARY_FP64:
             return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_ROUNDED_FP64({spec3binf64});'
         return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64({spec3binf64});'
-    # VOP3 f64 unary (ceil/floor/trunc/rndne/sqrt). Same modifier policy.
+    # VOP3 f64 unary (ceil/floor/trunc/rndne/fract/frexp). Same modifier policy.
     spec3unaf64 = SIMD_VOP3_UNARY_FP64.get(template_name)
     if spec3unaf64 is not None:
         if template_name.split('_')[1] in ('ceil', 'floor', 'trunc', 'rndne'):
@@ -3166,9 +3151,8 @@ def _simd_probe_line(
         # bodies apply OMOD and CLAMP, so they use the glue only without them. (A symmetric
         # SIMD_VOP1_UNARY_F64 fallback was considered but explicitly NOT added:
         # the f64-unary VOP3 forms apply modifiers via apply_vop3_*_mod_f64 —
-        # routed through SIMD_VOP3_UNARY_FP64 above instead — and the rcp/rsq
-        # forms use transcendental::*_f64 with NaN/±0/±Inf carve-outs not
-        # present in the plain VOP1 functors.)
+        # routed through SIMD_VOP3_UNARY_FP64 above instead — and the
+        # rcp/rsq/sqrt forms are routed by transcendental_f64.simd_probe.)
         speccvtoutv3 = SIMD_CVT_F64_TO_B32.get(base + '_vop1')
         if speccvtoutv3 is not None:
             # Unlike the plain cvt ops, v_frexp_exp_i32_f64's VOP3 body keeps the

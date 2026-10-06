@@ -2548,6 +2548,74 @@ std::vector<ArithmeticCase> trig_preop_cases() {
   return cases;
 }
 
+// V_RCP_F64, V_RSQ_F64 and V_SQRT_F64 lanes captured on gfx1201. MODE 0x30
+// flushes F64 denormals and keeps F32 ones; 0xc0 does the reverse. MODE 0xff
+// rounds toward zero, which the TRANS unit ignores, also for OMOD overflow.
+std::vector<ArithmeticCase> transcendental_f64_cases() {
+  constexpr uint16_t V0 = 256;
+  struct Op {
+    const char *name;
+    uint16_t vop1;
+    uint16_t vop3;
+  };
+  constexpr Op rcp{"Rcp", rdna4::kVRcpF64Vop1, rdna4::kVRcpF64Vop3};
+  constexpr Op rsq{"Rsq", rdna4::kVRsqF64Vop1, rdna4::kVRsqF64Vop3};
+  constexpr Op sqrt{"Sqrt", rdna4::kVSqrtF64Vop1, rdna4::kVSqrtF64Vop3};
+  std::vector<ArithmeticCase> cases;
+  const auto add = [&](const std::string &name, std::array<uint32_t, 2> words, uint64_t source,
+                       uint64_t result, uint32_t mode) {
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     {{0, uint32_t(source)}, {1, uint32_t(source >> 32)}},
+                     {{6, uint32_t(result)}, {7, uint32_t(result >> 32)}},
+                     mode,
+                     FE_TONEAREST});
+  };
+  const auto vop1 = [&](const Op &op, const std::string &name, uint64_t source, uint64_t result,
+                        uint32_t mode) {
+    add(std::string(op.name) + name, {rdna4::build_vop1(op.vop1, {.src0 = V0, .vdst = 6})[0], 0u},
+        source, result, mode);
+  };
+  const auto vop3 = [&](const Op &op, const std::string &name, rdna4::Vop3BuilderFields fields,
+                        uint64_t source, uint64_t result, uint32_t mode) {
+    fields.vdst = 6;
+    fields.src0 = V0;
+    add(std::string(op.name) + name, rdna4::build_vop3(op.vop3, fields), source, result, mode);
+  };
+
+  // RCP keeps 34 fraction bits. A source with every fraction bit set, or with
+  // only bits below the top 29 set, gets the neighbor of a power of two.
+  vop1(rcp, "Approximation", 0x4004000000000000u, 0x3fd999999c000000u, 0x30u);
+  vop1(rcp, "AllFractionBits", 0x3fdfffffffffffffu, 0x4000000000000001u, 0xc0u);
+  vop1(rcp, "LowFractionBits", 0x3fe0000000000001u, 0x3fffffffffffffffu, 0x30u);
+  vop1(rcp, "SubnormalResultModeC0", 0x7fefffffffffffffu, 0x0004000000000001u, 0xc0u);
+  vop1(rcp, "SubnormalResultMode30", 0x7fefffffffffffffu, 0u, 0x30u);
+  vop1(rcp, "SubnormalSourceModeC0", 0x800fffffffffffffu, 0xffd000000af80000u, 0xc0u);
+  vop1(rcp, "SubnormalSourceMode30", 0x800fffffffffffffu, 0xfff0000000000000u, 0x30u);
+  vop1(rcp, "SignalingNan", 0x7ff4000012345678u, 0x7ffc000012345678u, 0x30u);
+  vop3(rcp, "Abs", {.abs = 1}, 0xffefffffffffffffu, 0x0004000000000001u, 0xf0u);
+  vop3(rcp, "Mul4OverflowTowardZero", {.omod = 2}, 0x0010000000000000u, 0x7ff0000000000000u, 0xffu);
+  vop3(rcp, "ClampNan", {.clamp = 1}, 0xfff8000000000000u, 0u, 0u);
+
+  // RSQ and SQRT keep 35 fraction bits; a negative source gives -NaN.
+  vop1(rsq, "Approximation", 0x4004000000000000u, 0x3fe43d1364000000u, 0x30u);
+  vop1(rsq, "LowFractionBits", 0x3ff0000000000001u, 0x3fefffffffffffffu, 0xc0u);
+  vop1(rsq, "Negative", 0xbff0000000000000u, 0xfff8000000000000u, 0x30u);
+  vop1(rsq, "SubnormalSourceModeC0", 0x0000000000000001u, 0x6180000000000000u, 0xc0u);
+  vop1(rsq, "NegativeSubnormalModeC0", 0x800fffffffffffffu, 0xfff8000000000000u, 0xc0u);
+  vop1(rsq, "NegativeSubnormalMode30", 0x800fffffffffffffu, 0xfff0000000000000u, 0x30u);
+  vop3(rsq, "Neg", {.neg = 1}, 0xbff8000000000000u, 0x3fea20bd74000000u, 0xf0u);
+
+  vop1(sqrt, "One", 0x3ff0000000000000u, 0x3ff0000004000000u, 0x30u);
+  vop1(sqrt, "Approximation", 0x3fdfffffffffffffu, 0x3fe6a09e5fba0000u, 0xc0u);
+  vop1(sqrt, "Negative", 0xbff0000000000000u, 0xfff8000000000000u, 0xc0u);
+  vop1(sqrt, "NegativeSubnormalModeC0", 0x800fffffffffffffu, 0xfff8000000000000u, 0xc0u);
+  vop1(sqrt, "NegativeSubnormalMode30", 0x800fffffffffffffu, 0x8000000000000000u, 0x30u);
+  vop3(sqrt, "Div2", {.omod = 3}, 0x400921fb54442d18u, 0x3fec5bf895180000u, 0xf0u);
+  return cases;
+}
+
 // CEIL and FLOOR flush a subnormal source to a signed zero when MODE disables
 // input denormals, so ceil(+tiny) = +0 and floor(-tiny) = -0. Results are
 // gfx1201 captures. MODE 0x30 keeps F32 input denormals and flushes F16/F64;
@@ -2754,6 +2822,12 @@ INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
 
 INSTANTIATE_TEST_SUITE_P(TrigPreopF64, ValuRoundedResultModifierTest,
                          testing::ValuesIn(trig_preop_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(TranscendentalF64, ValuRoundedResultModifierTest,
+                         testing::ValuesIn(transcendental_f64_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

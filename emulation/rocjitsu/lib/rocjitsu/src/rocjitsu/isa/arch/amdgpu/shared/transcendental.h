@@ -9,8 +9,8 @@
 /// These reference implementations produce results within the ULP accuracy
 /// specified by the ISA manuals (typically 1 ULP for f32, 2 ULP for f64).
 /// They are used by the simulator's execute() bodies for V_RCP_F32,
-/// V_RSQ_F32, V_RSQ_F16, V_SQRT_F32, V_SQRT_F16, V_LOG_F32, V_EXP_F32, V_SIN_F32, V_COS_F32,
-/// V_RCP_F64, V_RSQ_F64, V_SQRT_F64.
+/// V_RSQ_F32, V_RSQ_F16, V_SQRT_F32, V_SQRT_F16, V_LOG_F32, V_EXP_F32, V_SIN_F32, V_COS_F32.
+/// V_RCP_F64, V_RSQ_F64 and V_SQRT_F64 are in transcendental_f64.h.
 /// F32 reciprocal, square root and F32/F16 reciprocal square root match the captured RDNA3/4
 /// mappings. F16 RSQ/SQRT apply the half input-denormal policy after promotion to F32. F32 LOG/EXP
 /// and SIN/COS use staged integer arithmetic modeled from RDNA3/4 captures, including coordinate
@@ -207,39 +207,6 @@ inline float tanh_f32(float x) {
   if (std::isnan(x))
     return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
   return std::tanh(x);
-}
-
-/// @brief 1.0 / x (double-precision reciprocal, ~1 ULP).
-inline double rcp_f64(double x) {
-  if (std::isnan(x))
-    return x;
-  if (x == 0.0)
-    return std::copysign(std::numeric_limits<double>::infinity(), x);
-  if (std::isinf(x))
-    return std::copysign(0.0, x);
-  return 1.0 / x;
-}
-
-/// @brief 1.0 / sqrt(x) (double-precision reciprocal square root, ~2 ULP).
-inline double rsq_f64(double x) {
-  if (std::isnan(x))
-    return x;
-  if (x == 0.0)
-    return std::copysign(std::numeric_limits<double>::infinity(), x);
-  if (x < 0.0)
-    return std::numeric_limits<double>::quiet_NaN();
-  if (std::isinf(x))
-    return 0.0;
-  return 1.0 / std::sqrt(x);
-}
-
-/// @brief sqrt(x) (double-precision square root, correctly-rounded).
-inline double sqrt_f64(double x) {
-  if (std::isnan(x))
-    return x;
-  if (x < 0.0)
-    return std::numeric_limits<double>::quiet_NaN();
-  return std::sqrt(x);
 }
 
 } // namespace transcendental

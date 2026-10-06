@@ -28,6 +28,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/transcendental_f64.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/trig_preop.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -714,6 +715,12 @@ transcendental_output_modifier_policy(const Wavefront &wf, uint32_t omod, uint32
   output_modifier::Policy policy = output_modifier_policy<Fmt>(wf, omod, clamp);
   policy.round_mode = 0;
   return policy;
+}
+
+/// @brief MODE policy of V_RCP_F64, V_RSQ_F64 and V_SQRT_F64.
+inline transcendental_f64::Policy transcendental_f64_policy(const Wavefront &wf) {
+  return transcendental_f64::Policy::make(wf.fp_denorm_mode_f16_f64(),
+                                          fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
 }
 
 /// @brief Flush MODE input denormals in the source, then run a unary operation.
@@ -2505,6 +2512,25 @@ template <typename Float, typename Inst, typename UnOp>
 
 template <typename Float, typename Inst, typename UnOp>
 [[nodiscard]] bool try_execute_unary_vop3_rounded_simd(Inst &, Wavefront &, UnOp) {
+  return false;
+}
+
+/// @brief Run an F64 TRANS operation on raw lanes with all VOP3 modifiers.
+/// @details ABS/NEG come before the operation; OMOD and CLAMP follow it with
+/// the TRANS-unit output policy. The operation flushes per MODE itself.
+template <typename Inst, typename Op>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_unary_vop3_transcendental_f64_simd(Inst &inst, Wavefront &wf,
+                                                                         Op operation) {
+  const floating_operation::WithModifiers<fp_format::F64, Op> modified{
+      {inst.inst_.abs, inst.inst_.neg},
+      transcendental_output_modifier_policy<fp_format::F64>(wf, inst.inst_.omod, inst.inst_.clamp),
+      operation};
+  return try_execute_unary_vop1_f64_simd<uint64_t>(inst, wf, modified);
+}
+
+template <typename Inst, typename Op>
+[[nodiscard]] bool try_execute_unary_vop3_transcendental_f64_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -5132,6 +5158,13 @@ template <bool Vop3, typename Inst>
 #else
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_ROUNDED_FP64(...)                                             \
   if (::rocjitsu::amdgpu::try_execute_unary_vop3_rounded_simd<double>(inst, wf, __VA_ARGS__))      \
+  return
+#endif
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_TRANSCENDENTAL_FP64(...) static_cast<void>(inst)
+#else
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_TRANSCENDENTAL_FP64(...)                                      \
+  if (::rocjitsu::amdgpu::try_execute_unary_vop3_transcendental_f64_simd(inst, wf, __VA_ARGS__))   \
   return
 #endif
 

@@ -397,9 +397,6 @@ def gen_vector_unary(
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         math_map_f64 = {
-            'rcp': 'amdgpu::transcendental::rcp_f64(s)',
-            'sqrt': 'amdgpu::transcendental::sqrt_f64(s)',
-            'rsq': 'amdgpu::transcendental::rsq_f64(s)',
             'floor': 'std::floor(s)',
             'ceil': 'std::ceil(s)',
             'trunc': 'std::trunc(s)',

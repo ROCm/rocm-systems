@@ -17198,48 +17198,41 @@ inline void execute_v_rcp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_rcp_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(double, [](auto a) { return util::native<double>(1.0) / a; });
+  ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(
+      uint64_t, amdgpu::transcendental_f64::Operation<amdgpu::transcendental_f64::Kind::RCP>{
+                    amdgpu::transcendental_f64_policy(wf)});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto transcendental_policy = amdgpu::transcendental_f64_policy(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint64_t>(amdgpu::transcendental::rcp_f64(
-            std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)))));
+        amdgpu::transcendental_f64::evaluate<amdgpu::transcendental_f64::Kind::RCP>(
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane), transcendental_policy));
   }
 }
 
 template <typename Inst>
 inline void execute_v_rcp_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64([](auto a) { return util::native<double>(1.0) / a; });
+  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRANSCENDENTAL_FP64(
+      amdgpu::transcendental_f64::Operation<amdgpu::transcendental_f64::Kind::RCP>{
+          amdgpu::transcendental_f64_policy(wf)});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto transcendental_policy = amdgpu::transcendental_f64_policy(wf);
+  const auto output_policy = amdgpu::transcendental_output_modifier_policy<amdgpu::fp_format::F64>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint64_t>([&]() {
-          double v = [&]() {
-            double v = amdgpu::transcendental::rcp_f64([&]() {
-              double sv =
-                  std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
-              return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
-            }());
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0;
-            else if (effective_omod == 2)
-              v *= 4.0;
-            else if (effective_omod == 3)
-              v *= 0.5;
-            v = amdgpu::fp_mode::finalize_omod_f64(v, effective_omod);
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F64>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::transcendental_f64::Operation<amdgpu::transcendental_f64::Kind::RCP>{
+                transcendental_policy},
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
   }
 }
 
@@ -17546,49 +17539,40 @@ inline void execute_v_rsq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_rsq_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(
-      double, [](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); });
+      uint64_t, amdgpu::transcendental_f64::Operation<amdgpu::transcendental_f64::Kind::RSQ>{
+                    amdgpu::transcendental_f64_policy(wf)});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto transcendental_policy = amdgpu::transcendental_f64_policy(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint64_t>(amdgpu::transcendental::rsq_f64(
-            std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)))));
+        amdgpu::transcendental_f64::evaluate<amdgpu::transcendental_f64::Kind::RSQ>(
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane), transcendental_policy));
   }
 }
 
 template <typename Inst>
 inline void execute_v_rsq_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64(
-      [](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); });
+  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRANSCENDENTAL_FP64(
+      amdgpu::transcendental_f64::Operation<amdgpu::transcendental_f64::Kind::RSQ>{
+          amdgpu::transcendental_f64_policy(wf)});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto transcendental_policy = amdgpu::transcendental_f64_policy(wf);
+  const auto output_policy = amdgpu::transcendental_output_modifier_policy<amdgpu::fp_format::F64>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint64_t>([&]() {
-          double v = [&]() {
-            double v = amdgpu::transcendental::rsq_f64([&]() {
-              double sv =
-                  std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
-              return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
-            }());
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0;
-            else if (effective_omod == 2)
-              v *= 4.0;
-            else if (effective_omod == 3)
-              v *= 0.5;
-            v = amdgpu::fp_mode::finalize_omod_f64(v, effective_omod);
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F64>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::transcendental_f64::Operation<amdgpu::transcendental_f64::Kind::RSQ>{
+                transcendental_policy},
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
   }
 }
 
@@ -17986,48 +17970,41 @@ inline void execute_v_sqrt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_sqrt_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(double, [](auto a) { return util::sqrt_f64_simd(a); });
+  ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(
+      uint64_t, amdgpu::transcendental_f64::Operation<amdgpu::transcendental_f64::Kind::SQRT>{
+                    amdgpu::transcendental_f64_policy(wf)});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto transcendental_policy = amdgpu::transcendental_f64_policy(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint64_t>(amdgpu::transcendental::sqrt_f64(
-            std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)))));
+        amdgpu::transcendental_f64::evaluate<amdgpu::transcendental_f64::Kind::SQRT>(
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane), transcendental_policy));
   }
 }
 
 template <typename Inst>
 inline void execute_v_sqrt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64([](auto a) { return util::sqrt_f64_simd(a); });
+  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRANSCENDENTAL_FP64(
+      amdgpu::transcendental_f64::Operation<amdgpu::transcendental_f64::Kind::SQRT>{
+          amdgpu::transcendental_f64_policy(wf)});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto transcendental_policy = amdgpu::transcendental_f64_policy(wf);
+  const auto output_policy = amdgpu::transcendental_output_modifier_policy<amdgpu::fp_format::F64>(
+      wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
-        inst, wf, inst.vdst, lane, std::bit_cast<uint64_t>([&]() {
-          double v = [&]() {
-            double v = amdgpu::transcendental::sqrt_f64([&]() {
-              double sv =
-                  std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
-              return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
-            }());
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0;
-            else if (effective_omod == 2)
-              v *= 4.0;
-            else if (effective_omod == 3)
-              v *= 0.5;
-            v = amdgpu::fp_mode::finalize_omod_f64(v, effective_omod);
-            return v;
-          }();
-          if (inst.inst_.clamp)
-            v = amdgpu::clamp_floating_result(v, wf);
-          return v;
-        }()));
+        inst, wf, inst.vdst, lane,
+        amdgpu::floating_operation::apply<amdgpu::fp_format::F64>(
+            amdgpu::floating_operation::SourceModifiers{inst.inst_.abs, inst.inst_.neg},
+            output_policy,
+            amdgpu::transcendental_f64::Operation<amdgpu::transcendental_f64::Kind::SQRT>{
+                transcendental_policy},
+            amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)));
   }
 }
 

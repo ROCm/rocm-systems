@@ -755,6 +755,78 @@ class TestLowerVectorAdd:
         assert 'amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(' in result
         assert 'apply_omod_f16' not in result
 
+    @staticmethod
+    def _f64_transcendental(call: str, source: SemaNode) -> SemaNode:
+        return SemaNode(
+            SemaNodeKind.CALL,
+            call_name=call,
+            ty=SemaType.F64,
+            children=(SemaNode(SemaNodeKind.ID, id_name=call), source),
+        )
+
+    @pytest.mark.parametrize(
+        ('call', 'kind'), [('rcp_f64', 'RCP'), ('rsq_f64', 'RSQ'), ('sqrt_f64', 'SQRT')]
+    )
+    def test_f64_transcendental_evaluates_raw_bits(self, call: str, kind: str):
+        source = _cast(_src(0), SemaType.F64)
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), SemaType.F64),
+                self._f64_transcendental(call, source),
+            ),
+        )
+        result = lower_sema_block(SemaBlock('V_TRANS_F64', ExecModel.VECTOR, body))
+
+        assert (
+            'const auto transcendental_policy = amdgpu::transcendental_f64_policy(wf);'
+            in result
+        )
+        evaluate = (
+            'amdgpu::transcendental_f64::evaluate<'
+            f'amdgpu::transcendental_f64::Kind::{kind}>('
+        )
+        assert evaluate in result
+        assert 'std::bit_cast<double>' not in result
+        assert 'output_policy' not in result
+
+    def test_vop3_f64_transcendental_wraps_modifiers(self):
+        source = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_src_mod',
+            ty=SemaType.F64,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='apply_src_mod'),
+                _cast(_src(0), SemaType.F64),
+                SemaNode(SemaNodeKind.LIT, lit_value='0'),
+                SemaNode(SemaNodeKind.LIT, lit_value='1'),
+                SemaNode(SemaNodeKind.LIT, lit_value='1'),
+            ),
+        )
+        rsq = self._f64_transcendental('rsq_f64', source)
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(_cast(_dst(0), SemaType.F64), self._output_modified(rsq)),
+        )
+        result = lower_sema_block(SemaBlock('V_RSQ_F64', ExecModel.VECTOR, body))
+
+        # ABS/NEG, then the operation, then OMOD/CLAMP with the TRANS policy.
+        assert (
+            'amdgpu::transcendental_output_modifier_policy<amdgpu::fp_format::F64>'
+            '(wf, inst_.omod, inst_.clamp)' in result
+        )
+        assert 'amdgpu::floating_operation::apply<amdgpu::fp_format::F64>(' in result
+        assert (
+            'amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}'
+            in result
+        )
+        assert (
+            'amdgpu::transcendental_f64::Operation<'
+            'amdgpu::transcendental_f64::Kind::RSQ>{transcendental_policy}' in result
+        )
+        assert 'finalize_omod_f64' not in result
+        assert 'clamp_floating_result' not in result
+
     @pytest.mark.parametrize(
         ('result_type', 'mode'),
         [

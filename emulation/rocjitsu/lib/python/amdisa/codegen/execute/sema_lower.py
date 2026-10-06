@@ -14,7 +14,12 @@ from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
-from amdisa.codegen.execute import float_compare, float_minmax, vop3_modifiers
+from amdisa.codegen.execute import (
+    float_compare,
+    float_minmax,
+    transcendental_f64,
+    vop3_modifiers,
+)
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.sema_derive import FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
@@ -1141,9 +1146,16 @@ def _lower_dst_write(
     # conversion to host float and back. These forms only exist on targets
     # without SDWA, so bypassing SDWA's F16 output modifiers is safe here.
     selection_node, output_fields = _unwrap_output_modifiers(rhs_node)
-    writes_bits = _is_float_minmax(selection_node)
+    writes_bits = _is_float_minmax(selection_node) or _is_transcendental_f64(
+        selection_node
+    )
     if writes_bits:
-        _, rhs = _float_minmax_selection(
+        selection = (
+            _float_minmax_selection
+            if _is_float_minmax(selection_node)
+            else _transcendental_f64_result
+        )
+        _, rhs = selection(
             selection_node,
             ctx,
             output_fields if selection_node is not rhs_node else None,
@@ -1303,9 +1315,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'tanh': 'amdgpu::transcendental::tanh_f32({0})',
     'log': 'amdgpu::transcendental::log_f32({0})',
     'exp': 'amdgpu::transcendental::exp_f32({0})',
-    'rcp_f64': 'amdgpu::transcendental::rcp_f64({0})',
-    'rsq_f64': 'amdgpu::transcendental::rsq_f64({0})',
-    'sqrt_f64': 'amdgpu::transcendental::sqrt_f64({0})',
     'abs': '[&]() {{ int32_t v = static_cast<int32_t>({0});'
     ' return static_cast<uint32_t>'
     '(v < 0 ? (0u - static_cast<uint32_t>(v))'
@@ -2122,6 +2131,20 @@ def _raw_float_sources(
 ) -> tuple[str, list[str], tuple[str, str] | None]:
     """Read comparison/minmax source bits and declare their shared input policy.
 
+    Return (source dtype, register reads, optional (ABS, NEG) fields).
+    """
+    dtype, reads, modifiers = _raw_float_reads(node, ctx)
+    declaration = float_compare.policy_decl(dtype)
+    if declaration not in ctx.vector_preamble:
+        ctx.vector_preamble.append(declaration)
+    return dtype, reads, modifiers
+
+
+def _raw_float_reads(
+    node: SemaNode, ctx: LoweringContext
+) -> tuple[str, list[str], tuple[str, str] | None]:
+    """Read the floating source bits of a call without decoding them.
+
     Sources are register reads wrapped in typed casts and optional apply_src_mod
     calls. Pass ABS/NEG fields to the C++ helper, which applies them to the bits.
     Return (source dtype, register reads, optional (ABS, NEG) fields).
@@ -2142,9 +2165,6 @@ def _raw_float_sources(
             raise ValueError(f'unexpected {node.call_name} source: {src}')
         # Register reads already have the unsigned type the C++ helper requires.
         reads.append(_lower_expr(src, ctx))
-    declaration = float_compare.policy_decl(dtype)
-    if declaration not in ctx.vector_preamble:
-        ctx.vector_preamble.append(declaration)
     modifiers = None
     if has_abs or has_neg:
         modifiers = ('inst_.abs' if has_abs else '0u', 'inst_.neg' if has_neg else '0u')
@@ -2334,6 +2354,38 @@ def _float_minmax_selection(
         output_policy = vop3_modifiers.OUTPUT_POLICY
     return dtype, float_minmax.minmax_expr(
         dtype, form, reads, modifiers=modifiers, output_policy=output_policy
+    )
+
+
+def _is_transcendental_f64(node: SemaNode) -> bool:
+    return (
+        node.kind == SemaNodeKind.CALL
+        and node.call_name in transcendental_f64.CALLS
+        and len(node.children) == 2
+    )
+
+
+def _transcendental_f64_result(
+    node: SemaNode,
+    ctx: LoweringContext,
+    output_fields: tuple[str, str] | None = None,
+) -> tuple[str, str]:
+    """Return the F64 TRANS result bits, with VOP3 modifiers when present."""
+    _, (source,), modifiers = _raw_float_reads(node, ctx)
+    declaration = transcendental_f64.policy_decl()
+    if declaration not in ctx.vector_preamble:
+        ctx.vector_preamble.append(declaration)
+    output_policy = None
+    if output_fields is not None:
+        declaration = vop3_modifiers.output_policy_decl(
+            'f64', output_fields, transcendental=True
+        )
+        if declaration not in ctx.vector_preamble:
+            ctx.vector_preamble.append(declaration)
+        output_policy = vop3_modifiers.OUTPUT_POLICY
+    kind = transcendental_f64.CALLS[node.call_name]
+    return 'f64', transcendental_f64.evaluate_expr(
+        kind, source, modifiers=modifiers, output_policy=output_policy
     )
 
 

@@ -629,3 +629,18 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
             negative = f'if (inst.inst_.neg & {1 << index}u) {source} ^= {sign};'
             assert probe.index(absolute) < probe.index(negative)
             assert probe.index(negative) < probe.index(f'cvt_pknorm_{op}_f32_simd')
+
+
+@pytest.mark.parametrize('op', ['rcp', 'rsq', 'sqrt'])
+def test_f64_transcendental_simd_probes_use_raw_lanes(op):
+    operation = (
+        'amdgpu::transcendental_f64::Operation<'
+        f'amdgpu::transcendental_f64::Kind::{op.upper()}>'
+        '{amdgpu::transcendental_f64_policy(wf)}'
+    )
+    assert simd_probe_line(f'v_{op}_f64_vop1') == (
+        f'  ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(uint64_t, {operation});'
+    )
+    assert simd_probe_line(f'v_{op}_f64_vop3') == (
+        f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRANSCENDENTAL_FP64({operation});'
+    )
