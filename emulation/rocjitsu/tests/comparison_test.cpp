@@ -198,6 +198,15 @@ TEST(SourceModifierTest, FloatAdaptersPreserveNanBitsAndSignedZero) {
   EXPECT_EQ(std::bit_cast<uint32_t>(src::apply_to_float(0.0f, 2, 0u, 4u)), 0x80000000u);
 }
 
+TEST(SourceModifierTest, Bf16UsesTheLowSixteenBits) {
+  namespace src = rocjitsu::amdgpu::source_modifier;
+  static_assert(fmt::BF16::kWidth == 16 && fmt::BF16::kInfinity == 0x7f80u &&
+                fmt::BF16::kQuiet == 0x40u && fmt::BF16::kMinNormal == 0x80u);
+  // ABS and NEG touch only bit 15; a BF16 NaN payload is unchanged.
+  EXPECT_EQ(src::apply<fmt::BF16>(0xff81u, 0, 1u, 0u), 0x7f81u);
+  EXPECT_EQ(src::apply<fmt::BF16>(0x0001u, 2, 0u, 4u), 0x8001u);
+}
+
 TEST(ComparisonTest, AppliesModifiersBeforeTheFlush) {
   // v_cmp_lt_f16 -a, |b| with a = 0x0001: NEG makes -tiny, the flush makes -0.
   EXPECT_FALSE((cmp::evaluate<fmt::F16, cmp::Lt>(0x0001u, 0x0000u, 0u, 1u, kFlush)));

@@ -30,8 +30,9 @@ template <typename LaneType, unsigned ExponentBits, unsigned MantissaBits> struc
   static_assert(std::is_unsigned_v<Lane> && kWidth <= 8 * sizeof(Lane));
 };
 
-// F16 uses the low 16 bits of a 32-bit register or SIMD lane.
+// F16 and BF16 use the low 16 bits of a 32-bit register or SIMD lane.
 using F16 = Format<uint32_t, 5, 10>;
+using BF16 = Format<uint32_t, 8, 7>;
 using F32 = Format<uint32_t, 8, 23>;
 using F64 = Format<uint64_t, 11, 52>;
 
