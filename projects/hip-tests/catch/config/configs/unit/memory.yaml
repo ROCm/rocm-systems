@@ -931,7 +931,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_linux, amd_wsl]
-      reason: "Self-skips: fewer than two GPUs (3D peer) â€” not locally verifiable. Rock_Linux_Failures_on_gfx94X Further investigation needed. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged on amd_linux AIRUNTIME-2744"
+      reason: "Self-skips: fewer than two GPUs (3D peer) -- not locally verifiable. Rock_Linux_Failures_on_gfx94X Further investigation needed. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged on amd_linux AIRUNTIME-2744"
     tags: [multigpu, transfer, image]
   Unit_hipMemcpy3DPeerAsync_NegativeTsts:
     <<: *level_2
@@ -2616,7 +2616,7 @@ memory:
     <<: *level_2
     disabled:
       targets: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
-      reason: "Multiproc child; needs 2nd process â€” not locally verifiable single-GPU. Further investigation needed. gfx1201 (amd_windows) self-skips: Parent shared memory not found. This test should only be invoked by Unit_hipMemPoolExportToShareableHandle_multiproc. Skipping. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged on amd_linux, nvidia_windows, nvidia_linux AIRUNTIME-2744"
+      reason: "Multiproc child; needs 2nd process -- not locally verifiable single-GPU. Further investigation needed. gfx1201 (amd_windows) self-skips: Parent shared memory not found. This test should only be invoked by Unit_hipMemPoolExportToShareableHandle_multiproc. Skipping. gfx1201 (amd_wsl) self-skips: variant skipped. Needs to be re-triaged on amd_linux, nvidia_windows, nvidia_linux AIRUNTIME-2744"
   Unit_hipMemGetDefaultMemPool_Negative:
     <<: *level_2
     tags: [alloc]
