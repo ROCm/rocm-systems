@@ -2885,6 +2885,63 @@ std::vector<ArithmeticCase> float_to_float_cases() {
   return cases;
 }
 
+// NORM conversions flush a subnormal half under the F16 MODE field before
+// scaling, and V_CVT_PK_U8_F32 rounds in the F32 FP_ROUND field after ABS/NEG.
+// Results are gfx1201 captures. MODE 0x30 keeps F32 denormals and flushes F16
+// ones, 0xc0 the reverse; 0xf6 rounds F32 toward -inf and 0xf9 toward +inf,
+// with the F16/F64 field the other way.
+std::vector<ArithmeticCase> normalized_and_byte_cases() {
+  constexpr uint32_t kHigh = 0xa5a50000u;
+  std::vector<ArithmeticCase> cases;
+  const auto add = [&](const char *name, std::array<uint32_t, 2> words,
+                       std::vector<std::pair<uint32_t, uint32_t>> sources, uint32_t result,
+                       uint32_t mode) {
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     std::move(sources),
+                     {{6, result}},
+                     mode,
+                     FE_TONEAREST});
+  };
+  const auto norm = std::array<uint32_t, 2>{
+      rdna4::build_vop1(rdna4::kVCvtNormI16F16Vop1, {.src0 = 256, .vdst = 6})[0], 0u};
+  const std::vector<std::pair<uint32_t, uint32_t>> subnormal{{0, 0xeb8483ffu}, {6, 0xa5a5a5a5u}};
+  add("NormI16SubnormalMode30", norm, subnormal, kHigh, 0x30u);
+  add("NormI16SubnormalModeC0", norm, subnormal, kHigh | 0xfffeu, 0xc0u);
+  add("NormI16MinusOne", norm, {{0, 0xbc24bc00u}, {6, 0xa5a5a5a5u}}, kHigh | 0x8001u, 0x30u);
+
+  const auto pk_norm = [](uint8_t neg) {
+    return rdna4::build_vop3(rdna4::kVCvtPkNormI16F16Vop3,
+                             {.vdst = 6, .src0 = 256, .src1 = 257, .neg = neg});
+  };
+  add("PkNormI16SubnormalMode30", pk_norm(0), {{0, 0x0d403c00u}, {1, 0x7bd383ffu}}, 0x00007fffu,
+      0x30u);
+  add("PkNormI16SubnormalModeC0", pk_norm(0), {{0, 0x0d403c00u}, {1, 0x7bd383ffu}}, 0xfffe7fffu,
+      0xc0u);
+  // NEG makes the subnormal high source positive before it is flushed or scaled.
+  add("PkNormI16NegSubnormalMode0", pk_norm(2), {{0, 0x97540000u}, {1, 0xb29c83ffu}}, 0u, 0u);
+  add("PkNormI16NegSubnormalModeF0", pk_norm(2), {{0, 0x97540000u}, {1, 0xb29c83ffu}}, 0x20000u,
+      0xf0u);
+
+  const auto pk_u8 = [](uint8_t abs, uint8_t neg) {
+    return rdna4::build_vop3(
+        rdna4::kVCvtPkU8F32Vop3,
+        {.vdst = 6, .abs = abs, .src0 = 256, .src1 = 257, .src2 = 258, .neg = neg});
+  };
+  const auto bytes = [](uint32_t value, uint32_t selector, uint32_t packed) {
+    return std::vector<std::pair<uint32_t, uint32_t>>{{0, value}, {1, selector}, {2, packed}};
+  };
+  add("PkU8NearestEven", pk_u8(0, 0), bytes(0x3fc00000u, 0u, 0u), 2u, 0xf0u);
+  add("PkU8TowardNegative", pk_u8(0, 0), bytes(0x3fc00000u, 0u, 0u), 1u, 0xf6u);
+  add("PkU8TowardPositive", pk_u8(0, 0), bytes(0x3f000000u, 0u, 0u), 1u, 0xf9u);
+  add("PkU8InfinityByte1", pk_u8(0, 0), bytes(0x7f800000u, 1u, 1u), 0xff01u, 0xf0u);
+  add("PkU8NanByte1", pk_u8(0, 0), bytes(0x7fc00000u, 1u, 1u), 1u, 0xf0u);
+  add("PkU8NegByte4IsByte0", pk_u8(0, 1), bytes(0x3f800000u, 4u, 1u), 0u, 0xf0u);
+  add("PkU8AbsByte1", pk_u8(1, 0), bytes(0xbfc00000u, 0x29u, 0xffffffe0u), 0xffff02e0u, 0xf0u);
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -3167,6 +3224,12 @@ INSTANTIATE_TEST_SUITE_P(IntegerToFloat, ValuConversionTest,
 
 INSTANTIATE_TEST_SUITE_P(FloatToFloat, ValuConversionTest,
                          testing::ValuesIn(float_to_float_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(NormalizedAndByte, ValuConversionTest,
+                         testing::ValuesIn(normalized_and_byte_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

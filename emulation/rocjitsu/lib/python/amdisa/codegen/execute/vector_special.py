@@ -10,7 +10,7 @@ saturating packs, arithmetic, lane permutations, and packed type conversion.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute.conversion import pk_rtz_f16_expr
+from amdisa.codegen.execute.conversion import pk_rtz_f16_expr, pk_u8_expr
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     apply_output,
@@ -1397,15 +1397,27 @@ def gen_vector_cvt_pk(
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    if cls == 'vector_cvt_pk_u8_f32':
+    if cls == 'vector_cvt_pk_u8_f32' and len(src) > 2:
+        # shared/conversion.h stages, resolved before the lane loop.
+        L.insert(
+            0, f'  const auto conversion = {pk_u8_expr(is_vop3, has_abs, "inst_")};'
+        )
+        L.extend(
+            f'    uint32_t s{i} = amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane);'
+            for i in range(3)
+        )
+        L.append(
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1, s2));'
+        )
+    elif cls == 'vector_cvt_pk_u8_f32':
         L.append(
             f'    float fval = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
         )
         L.append(
             f'    uint32_t byte_sel = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane) & 3;'
         )
-        # V_CVT_PK_U8_F32 has 3 srcs; V_CVT_PKACCUM reads old from dst
-        old_src = src[2] if len(src) > 2 else dst[0]
+        # V_CVT_PKACCUM_U8_F32 reads the packed bytes from its destination.
+        old_src = dst[0]
         L.append(
             f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({old_src}, lane);'
         )
@@ -1418,19 +1430,23 @@ def gen_vector_cvt_pk(
         )
     elif cls == 'vector_cvt_pknorm':
         if dtype == 'f16':
+            # MODE flushes a subnormal half before it is widened.
+            L.insert(
+                0,
+                '  const auto input_policy = '
+                'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());',
+            )
             if is_vop3:
-                L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[0], opsel, 0)}));'
-                )
-                L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[1], opsel, 1)}));'
-                )
+                reads = [_read_vop3_true16_src(src[i], opsel, i) for i in range(2)]
             else:
+                reads = [
+                    f'amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane)'
+                    for i in range(2)
+                ]
+            for i, read in enumerate(reads):
                 L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));'
-                )
-                L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)));'
+                    f'    float s{i} = util::f16_to_f32(static_cast<uint16_t>('
+                    f'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>({read}, input_policy)));'
                 )
         else:
             L.append(

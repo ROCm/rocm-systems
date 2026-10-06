@@ -77,6 +77,21 @@ TEST(ConversionTest, SimdLanesMatchScalarLanes) {
   }
 }
 
+TEST(ConversionTest, PackU8RoundsInModeAndKeepsOtherBytes) {
+  const conversion::PackU8 nearest{0, 0, kKeep, conversion::integer_rounding(0)};
+  const conversion::PackU8 down{0, 0, kKeep, conversion::integer_rounding(2)};
+  const conversion::PackU8 up{0, 0, kKeep, conversion::integer_rounding(1)};
+  EXPECT_EQ(nearest(0x3fc00000u, 0u, 0u), 2u); // 1.5
+  EXPECT_EQ(nearest(0x40200000u, 0u, 0u), 2u); // 2.5 ties to even
+  EXPECT_EQ(down(0x3fc00000u, 0u, 0u), 1u);
+  EXPECT_EQ(up(0x3f000000u, 0u, 0u), 1u);                        // 0.5
+  EXPECT_EQ(up(0xbf000000u, 0u, 0u), 0u);                        // -0.5 rounds to -0
+  EXPECT_EQ(nearest(0x437f8000u, 2u, 0x11223344u), 0x11ff3344u); // 255.5 saturates
+  EXPECT_EQ(nearest(0x7fc00000u, 3u, 0x11223344u), 0x00223344u); // NaN gives zero
+  const conversion::PackU8 negated{0, 1, kKeep, conversion::integer_rounding(0)};
+  EXPECT_EQ(negated(0xc0400000u, 1u, 0u), 0x300u); // -(-3)
+}
+
 template <typename From, typename To>
 conversion::ToFloat<From, To> to_float(uint32_t mode, uint32_t omod = 0, bool clamp = false) {
   conversion::ToFloat<From, To> stages;

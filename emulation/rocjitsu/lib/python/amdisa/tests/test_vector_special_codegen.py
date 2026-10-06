@@ -703,12 +703,55 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
         )
         assert modifiers in cpp
         assert cpp.index(modifiers) < cpp.index('util::rndne_scalar')
+    if dtype == 'f16':
+        assert 'input_denormal::flush_input<amdgpu::fp_format::F16>(' in cpp
+        assert cpp.index('flush_input<amdgpu::fp_format::F16>') < cpp.index(
+            'source_modifier::apply_to_float'
+        )
     for prefix in (['pk_norm', 'pknorm'] if dtype == 'f32' else ['pk_norm']):
         probe = simd_probe_line(f'v_cvt_{prefix}_{op}_{dtype}_vop3')
         assert not probe.startswith('  if (!(inst.inst_.abs | inst.inst_.neg))')
-        sign = '0x80000000u' if dtype == 'f32' else '0x8000u'
+        if dtype == 'f16':
+            # The raw halves take ABS/NEG, then MODE input flushing, before widening.
+            for index, source in enumerate(('a', 'b')):
+                modified = (
+                    f'source_modifier::apply<amdgpu::fp_format::F16>({source}, {index}, '
+                    'inst.inst_.abs, inst.inst_.neg)'
+                )
+                assert modified in probe
+                assert probe.index(modified) < probe.index(f'cvt_pknorm_{op}_f32_simd')
+            assert 'flush_input<amdgpu::fp_format::F16>(' in probe
+            continue
+        sign = '0x80000000u'
         for index, source in enumerate(('a', 'b')):
             absolute = f'if (inst.inst_.abs & {1 << index}u) {source} &= ~{sign};'
             negative = f'if (inst.inst_.neg & {1 << index}u) {source} ^= {sign};'
             assert probe.index(absolute) < probe.index(negative)
             assert probe.index(negative) < probe.index(f'cvt_pknorm_{op}_f32_simd')
+
+
+@pytest.mark.parametrize('has_abs', [False, True])
+def test_packed_u8_uses_the_shared_conversion(has_abs):
+    cpp = gen_vector_cvt_pk(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'vector_cvt_pk_u8_f32',
+        None,
+        is_vop3=True,
+        has_abs=has_abs,
+    )
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    assert cpp.startswith(
+        f'  const auto conversion = amdgpu::conversion_pk_u8(wf, {abs_field}, inst_.neg);'
+    )
+    assert 'conversion(s0, s1, s2)' in cpp
+    assert 'std::clamp' not in cpp
+    assert simd_probe_line('v_cvt_pk_u8_f32_vop3') == (
+        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, '
+        'amdgpu::conversion_pk_u8(wf, inst.inst_.abs, inst.inst_.neg));'
+    )
+    # V_CVT_PKACCUM_U8_F32 keeps its own body.
+    accumulate = gen_vector_cvt_pk(
+        ['vdst'], ['src0', 'src1'], 'vector_cvt_pk_u8_f32', None, is_vop3=True
+    )
+    assert 'conversion_pk_u8' not in accumulate

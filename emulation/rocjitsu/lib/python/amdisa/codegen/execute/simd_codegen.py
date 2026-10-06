@@ -2509,6 +2509,22 @@ def _modified_conversion_op(cpp_op: str, *, bits: int, arity: int = 2) -> str:
     )
 
 
+def _modified_f16_conversion_op(cpp_op: str) -> str:
+    """Apply F16 source signs, then MODE input flushing, before a raw-half conversion."""
+    policy = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
+    sources = ''.join(
+        f' {source} = amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
+        f'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>({source}, {i}, '
+        'inst.inst_.abs, inst.inst_.neg), policy);'
+        for i, source in enumerate(('a', 'b'))
+    )
+    return (
+        f'[&inst, policy = {policy}](auto a, auto b) {{'
+        + sources
+        + f' return ({cpp_op})(a, b); }}'
+    )
+
+
 def _mode_aware_f16_result_simd_probe(default_probe: str, ovfl_probe: str) -> str:
     default_body = _indent_probe(default_probe)
     ovfl_body = _indent_probe(ovfl_probe)
@@ -2641,6 +2657,9 @@ def _simd_probe_line(
     conversion_probe = conversion.simd_probe(template_name, true16_vop3=true16_vop3)
     if conversion_probe is not None:
         return conversion_probe
+    if template_name == 'v_cvt_pk_u8_f32_vop3':
+        stages = conversion.pk_u8_expr(True, True, 'inst.inst_')
+        return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, {stages});'
     if template_name in SIMD_PACKED_FLOAT:
         op, bf16 = SIMD_PACKED_FLOAT[template_name]
         return f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({op}, {str(bf16).lower()});'
@@ -2938,7 +2957,7 @@ def _simd_probe_line(
     if spec3bin16 is not None:
         cpp_t, cpp_op = spec3bin16
         if template_name in _PACKED_NORMALIZED_VOP3:
-            cpp_op = _modified_conversion_op(cpp_op, bits=16)
+            cpp_op = _modified_f16_conversion_op(cpp_op)
         return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC({cpp_t}, {cpp_op});'
     spec3binx = SIMD_VOP3_BINARY_INT_EXTRA.get(template_name)
     if spec3binx is not None:

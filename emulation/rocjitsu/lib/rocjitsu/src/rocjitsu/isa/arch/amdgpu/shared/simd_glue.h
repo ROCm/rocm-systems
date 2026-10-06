@@ -782,6 +782,13 @@ inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const In
   return stages;
 }
 
+/// @brief Resolve V_CVT_PK_U8_F32, which rounds in the F32 MODE.FP_ROUND field.
+inline conversion::PackU8 conversion_pk_u8(const Wavefront &wf, uint32_t abs = 0,
+                                           uint32_t neg = 0) {
+  return {abs, neg, input_denormal::Policy::make(wf.fp_denorm_mode_f32()),
+          conversion::integer_rounding(wf.fp_round_mode_f32())};
+}
+
 /// @brief Resolve V_CVT_PK_RTZ_F16_F32: each F32 source rounds toward zero into one half.
 /// @details MODE.FP_ROUND is ignored. ABS/NEG bit i applies to source i; OMOD and
 /// CLAMP are not applied to the packed result.

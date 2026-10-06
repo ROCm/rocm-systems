@@ -1899,7 +1899,7 @@ def _takes_flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> bool:
         return True
     if ctx.exec_model != ExecModel.VECTOR:
         return False
-    if callee == 'cvt_f32_f16_valu':
+    if callee in ('cvt_f32_f16_valu', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'):
         return True
     return callee in _F16_FLUSHED_SOURCE_CALLS and node.ty == SemaType.F16
 

@@ -872,12 +872,18 @@ class TestDeriveVectorUnary:
             fields.add('abs')
         block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
         cpp = lower_sema_block(block)
-        assert cpp.index('util::f16_to_f32') < cpp.index(
-            'source_modifier::apply_to_float(sv'
+        # MODE flushes the raw half before it is widened; ABS/NEG apply to the
+        # widened value, before the scaled rounding.
+        flush = 'input_denormal::flush_input<amdgpu::fp_format::F16>('
+        assert (
+            'input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
+            in cpp
         )
-        assert cpp.index('source_modifier::apply_to_float(sv') < cpp.index(
-            'util::rndne_scalar'
+        assert cpp.index('source_modifier::apply_to_float(') < cpp.index(
+            'util::f16_to_f32'
         )
+        assert cpp.index('util::f16_to_f32') < cpp.index(flush)
+        assert cpp.index(flush) < cpp.index('util::rndne_scalar')
         assert ('inst_.abs' in cpp) == has_abs
         assert 'inst_.neg' in cpp
         assert 'inst_.omod' not in cpp

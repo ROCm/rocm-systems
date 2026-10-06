@@ -40,9 +40,27 @@ enum class IntegerRounding : uint8_t {
   TOWARD_ZERO,
   /// Toward -infinity (V_CVT_FLOOR_I32_F32).
   FLOOR,
+  /// Toward +infinity.
+  CEIL,
+  /// Halves round to the even integer.
+  NEAREST_EVEN,
   /// floor(x + 0.5): halves round toward +infinity (V_CVT_NEAREST_I32_F32).
   NEAREST_UP,
 };
+
+/// @brief The integer rounding a MODE.FP_ROUND field selects.
+constexpr IntegerRounding integer_rounding(uint32_t round_mode) {
+  switch (round_mode & 3u) {
+  case rounding::TOWARD_POSITIVE:
+    return IntegerRounding::CEIL;
+  case rounding::TOWARD_NEGATIVE:
+    return IntegerRounding::FLOOR;
+  case rounding::TOWARD_ZERO:
+    return IntegerRounding::TOWARD_ZERO;
+  default:
+    return IntegerRounding::NEAREST_EVEN;
+  }
+}
 
 /// @brief The integer a NaN source converts to.
 enum class NanResult : uint8_t {
@@ -55,16 +73,21 @@ namespace detail {
 
 using comparison::detail::choose;
 
-/// @brief Whether discarding `rest` from an integer magnitude rounds it up.
+/// @brief Whether discarding `rest` from the integer magnitude `kept` rounds it up.
 /// @param half The weight of the most significant discarded bit; zero when nothing is discarded.
 template <typename V, typename Mask>
-constexpr Mask rounds_up(IntegerRounding rounding, const Mask &negative, V rest, V half) {
+constexpr Mask rounds_up(IntegerRounding rounding, const Mask &negative, V kept, V rest, V half) {
   const V zero(typename fp_format::F32::Lane{0});
+  const auto tie = rest == half && rest != zero;
   switch (rounding) {
   case IntegerRounding::FLOOR:
     return rest != zero && negative;
+  case IntegerRounding::CEIL:
+    return rest != zero && !negative;
+  case IntegerRounding::NEAREST_EVEN:
+    return rest > half || (tie && (kept & V(typename fp_format::F32::Lane{1})) != zero);
   case IntegerRounding::NEAREST_UP:
-    return rest > half || (rest == half && rest != zero && !negative);
+    return rest > half || (tie && !negative);
   default:
     return rest != rest;
   }
@@ -102,7 +125,7 @@ constexpr V f32_to_integer(V bits, IntegerRounding rounding, NanResult nan_resul
   const V rest = significand & ((V(L{1}) << shift) - V(L{1}));
   const V half = (V(L{1}) << shift) >> 1;
   const V rounded =
-      kept + choose(detail::rounds_up(rounding, negative, rest, half), V(L{1}), V(L{0}));
+      kept + choose(detail::rounds_up(rounding, negative, kept, rest, half), V(L{1}), V(L{0}));
   // At or above 2^31 every Int saturates; below it the left shift is at most 7 bits.
   const auto huge = field >= V(kUnitField + 8);
   const V left = choose(integral && !huge, field - V(kUnitField), V(L{0}));
@@ -135,6 +158,26 @@ template <typename Int, IntegerRounding Rounding, NanResult Nan> struct F32ToInt
 using FloorI32 = F32ToInteger<int32_t, IntegerRounding::FLOOR, NanResult::SATURATE_BY_SIGN>;
 /// V_CVT_NEAREST_I32_F32 (V_CVT_RPI_I32_F32).
 using NearestI32 = F32ToInteger<int32_t, IntegerRounding::NEAREST_UP, NanResult::SATURATE_BY_SIGN>;
+
+/// @brief V_CVT_PK_U8_F32: an F32 source rounded in MODE to an unsigned byte.
+/// @details The byte replaces the one that bits [1:0] of the selector pick in
+/// the third source; the other bytes pass through. A NaN gives zero.
+struct PackU8 {
+  /// VOP3 ABS and NEG fields; bit 0 applies to the F32 source.
+  uint32_t abs = 0;
+  uint32_t neg = 0;
+  input_denormal::Policy input;
+  IntegerRounding rounding = IntegerRounding::NEAREST_EVEN;
+
+  template <typename V> constexpr V operator()(V value, V selector, V packed) const {
+    using L = typename fp_format::F32::Lane;
+    value = source_modifier::apply<fp_format::F32>(value, 0, abs, neg);
+    value = input_denormal::flush_input<fp_format::F32>(value, input);
+    const V byte = f32_to_integer<uint8_t>(value, rounding, NanResult::ZERO);
+    const V shift = (selector & V(L{3})) << 3;
+    return (packed & ~(V(L{0xff}) << shift)) | (byte << shift);
+  }
+};
 
 /// @brief An integer source format: the low Width bits of a 32-bit register.
 template <typename Int> struct Integer {

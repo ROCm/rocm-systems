@@ -131,3 +131,11 @@ def pk_rtz_f16_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
         return 'amdgpu::conversion_pk_rtz_f16(wf)'
     abs_field = f'{inst}.abs' if has_abs else '0u'
     return f'amdgpu::conversion_pk_rtz_f16(wf, {abs_field}, {inst}.neg)'
+
+
+def pk_u8_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
+    """Resolve V_CVT_PK_U8_F32's stages; VOP3 passes its ABS/NEG fields."""
+    if not is_vop3:
+        return 'amdgpu::conversion_pk_u8(wf)'
+    abs_field = f'{inst}.abs' if has_abs else '0u'
+    return f'amdgpu::conversion_pk_u8(wf, {abs_field}, {inst}.neg)'

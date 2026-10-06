@@ -9235,13 +9235,15 @@ template <typename Inst>
 inline void execute_v_cvt_norm_i16_f16_vop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
           float s = util::f16_to_f32(
-              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
+              static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                  amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), input_policy)));
           if (std::isnan(s))
             return 0u;
           double scaled =
@@ -9255,16 +9257,17 @@ template <typename Inst>
 inline void execute_v_cvt_norm_i16_f16_vop3([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = [&]() {
-            float sv = util::f16_to_f32(
-                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
-            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
-          }();
+          float s = amdgpu::source_modifier::apply_to_float(
+              util::f16_to_f32(
+                  static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                      amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), input_policy))),
+              0, inst.inst_.abs, inst.inst_.neg);
           if (std::isnan(s))
             return 0u;
           double scaled =
@@ -9278,13 +9281,15 @@ template <typename Inst>
 inline void execute_v_cvt_norm_u16_f16_vop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
           float s = util::f16_to_f32(
-              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
+              static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                  amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), input_policy)));
           if (std::isnan(s))
             return 0u;
           double scaled =
@@ -9298,16 +9303,17 @@ template <typename Inst>
 inline void execute_v_cvt_norm_u16_f16_vop3([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane, [&]() -> uint32_t {
-          float s = [&]() {
-            float sv = util::f16_to_f32(
-                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
-            return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs, inst.inst_.neg);
-          }();
+          float s = amdgpu::source_modifier::apply_to_float(
+              util::f16_to_f32(
+                  static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                      amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), input_policy))),
+              0, inst.inst_.abs, inst.inst_.neg);
           if (std::isnan(s))
             return 0u;
           double scaled =
@@ -9536,17 +9542,18 @@ inline void execute_v_cvt_pk_u16_u32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_pk_u8_f32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t,
+                                     amdgpu::conversion_pk_u8(wf, inst.inst_.abs, inst.inst_.neg));
+  const auto conversion = amdgpu::conversion_pk_u8(wf, inst.inst_.abs, inst.inst_.neg);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float fval = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-    uint32_t byte_sel = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane) & 3;
-    uint32_t old = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));
-    uint32_t mask = ~(0xFFu << (byte_sel * 8));
+    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
+    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    uint32_t s2 = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
-                                                       (old & mask) | (byte << (byte_sel * 8)));
+                                                       conversion(s0, s1, s2));
   }
 }
 
