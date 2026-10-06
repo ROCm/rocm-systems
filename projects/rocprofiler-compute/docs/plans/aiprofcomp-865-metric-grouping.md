@@ -1,4 +1,4 @@
-# AIPROFCOMP-865 — Metric grouping (SPP / SPU)
+# Metric grouping (SPP / SPU)
 
 **Parent:** [Overall plan](aiprofcomp-865.md)
 
