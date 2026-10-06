@@ -1696,12 +1696,11 @@ configure_settings(bool _init)
            path::is_regular_file(expanded_filename) &&
            !json_has_project_name_root(expanded_filename))
         {
-            LOG_WARNING(
-                "Config file '{}' is missing the expected '{}' root object and cannot "
-                "be loaded via -c. If this is hierarchical preset JSON (e.g. from "
-                "--export-config), pass it via --preset instead.",
-                expanded_filename, TIMEMORY_PROJECT_NAME);
-            continue;
+            throw std::runtime_error(
+                fmt::format("Config file '{}' is missing the expected '{}' root object "
+                            "and cannot be loaded. If this is a hierarchical preset "
+                            "configuration, pass it via --preset instead.",
+                            expanded_filename, TIMEMORY_PROJECT_NAME));
         }
 
         // Timemory parses config files during static init before main() (see
@@ -1718,18 +1717,27 @@ configure_settings(bool _init)
 
         LOG_DEBUG("Reading config file {}", filename);
         validate_config_file_values(filename, _config->get_tag(), _config);
-        if(!_config->read(filename))
+        // settings::read() returns false when the file is missing, which is normal
+        // for the default '~/.rocprofiler-systems.{cfg,json}' entries. A text .cfg
+        // also returns false when it contains unknown keys; with strict config off
+        // those are warnings and the known keys are still applied. JSON and XML
+        // return false when the file exists but does not parse.
+        const bool structured_config = expanded_filename.ends_with(".json") ||
+                                       expanded_filename.ends_with(".xml") ||
+                                       expanded_filename.ends_with(".txt");
+        LOG_DEBUG("Reading config file {}", filename);
+        bool good_config = _config->read(filename);
+        if(!good_config && structured_config && path::is_regular_file(expanded_filename))
         {
-            LOG_WARNING("Unable to apply configuration file '{}'.The file does not "
-                        "contain valid key/value formatting. If this file is intended to "
-                        "be used as a preset configuration, specify it with '--preset' "
-                        "instead. Otherwise, correct the file structure and try again.",
-                        expanded_filename);
-            continue;
+            throw std::runtime_error(
+                fmt::format("Unable to apply configuration file '{}', incorrect file "
+                            "structure found. Correct the file structure and try again.",
+                            expanded_filename));
         }
-        if(_main_proc && ((_config->get<bool>(std::string{ env_vars::CI }) &&
-                           settings::verbose() >= 0) ||
-                          settings::verbose() >= 1 || settings::debug()))
+        if(good_config && _main_proc &&
+           ((_config->get<bool>(std::string{ env_vars::CI }) &&
+             settings::verbose() >= 0) ||
+            settings::verbose() >= 1 || settings::debug()))
         {
             std::ifstream     _in{ expanded_filename };
             std::stringstream _iss{};
