@@ -35,6 +35,7 @@ int GenericNetlinkClient::connect() {
   }
 
   socket_.set_buffer_size(32768, 32768);
+  socket_.disable_auto_ack();
 
   connected_ = true;
   return 0;

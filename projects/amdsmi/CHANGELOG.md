@@ -33,6 +33,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **AI-NIC discovery now recognizes the ``1dd8:1478`` Pensando upstream bridge**.  
   - Cards whose bridge reports ``0x1478`` were not registered, so their ionic ports were orphaned and ``amd-smi list --nic all`` and ``amd-smi metric --nic all`` showed only the UALoE endpoints. Each such card is now listed with its identity, ``ASIC_TEMP_C`` and health.
 
+- **Fixed AI-NIC FEC counters missing or shown for the wrong port**.  
+  - ``amd-smi metric --nic --port --extended`` omitted ``CORRECTED_BITS`` and ``CORRECTED_BLOCKS`` on most ports and could show another port's values. Each ethtool netlink query left an unread acknowledgement on the socket, so the next query read it, or a stale reply, instead of its own. Queries now read only their own reply.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added

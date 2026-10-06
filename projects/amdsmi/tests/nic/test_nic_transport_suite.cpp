@@ -161,6 +161,52 @@ void test_netlink_operations(const std::string& iface) {
               "Expected ENOTSUP for unsupported operation");
 }
 
+// A netlink query that reads another request's reply returns a different
+// outcome (or another interface's data) on each repeat, so one query per
+// operation, as above, cannot see it.
+void test_netlink_repeated_queries_are_consistent(const std::string& iface) {
+  constexpr int kRepeatCount = 6;
+  std::cout << "\nTest: Netlink Repeated Queries Are Consistent\n";
+  std::cout << "+-------------------------------------------------------------------+\n";
+
+  auto transport = create_transport(NicBackend_t::Netlink);
+
+  int link_ok_count = 0;
+  uint32_t first_speed = 0;
+  bool is_link_speed_stable = true;
+  for (int i = 0; i < kRepeatCount; ++i) {
+    auto link = transport->get_link_settings(iface);
+    if (link.success) {
+      first_speed = (link_ok_count == 0) ? link.value.speed : first_speed;
+      is_link_speed_stable = (is_link_speed_stable && (link.value.speed == first_speed));
+      link_ok_count++;
+    }
+  }
+  const bool is_link_supported = (link_ok_count > 0);
+  record_test("Link settings: every repeat succeeds",
+              (link_ok_count == 0) || (link_ok_count == kRepeatCount),
+              std::to_string(link_ok_count) + " of " + std::to_string(kRepeatCount) + " succeeded");
+  record_test("Link settings: speed is the same on every repeat", is_link_speed_stable);
+  if (!is_link_supported) {
+    std::cout << "  NOTE: netlink link settings unsupported on " << iface
+              << "; the two checks above did not exercise a reply\n";
+  }
+
+  int fec_ok_count = 0;
+  for (int i = 0; i < kRepeatCount; ++i) {
+    if (transport->get_fec_statistics(iface).success) {
+      fec_ok_count++;
+    }
+  }
+  record_test("FEC statistics: every repeat succeeds",
+              (fec_ok_count == 0) || (fec_ok_count == kRepeatCount),
+              std::to_string(fec_ok_count) + " of " + std::to_string(kRepeatCount) + " succeeded");
+  if (fec_ok_count == 0) {
+    std::cout << "  NOTE: netlink FEC statistics unavailable on " << iface
+              << "; the check above did not exercise a reply\n";
+  }
+}
+
 void test_auto_backend_fallback(const std::string& iface) {
   std::cout << "\nTest: Auto Backend Fallback Logic\n";
   std::cout << "+-------------------------------------------------------------------+\n";
@@ -266,6 +312,7 @@ int main(int argc, char** argv) {
 #ifdef HAVE_LIBNL3
   // Test 3: Netlink Operations
   test_netlink_operations(iface);
+  test_netlink_repeated_queries_are_consistent(iface);
 
   // Test 4: Auto Backend Fallback
   test_auto_backend_fallback(iface);
