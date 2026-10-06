@@ -49,3 +49,27 @@ def test_roctx_wrapper_idempotent_and_push_pop(monkeypatch):
     assert pushes == [1]
     assert pops == [1]
     assert torch_backend.roctx_wrapper(wrapped) is wrapped
+
+
+def test_inject_roctx_into_model_pushes_class_forward(monkeypatch):
+    from tests.integration.common import require_torch
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    require_torch()
+    import torch
+
+    torch_backend._resolve_torch()
+    pushes = []
+    monkeypatch.setattr(
+        torch_backend,
+        "_push_scope",
+        lambda name, location, backend="", args="n/a": pushes.append((name, backend)),
+    )
+    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    original_call = torch.nn.Module.__call__
+    try:
+        torch_backend.inject_roctx_into_model()
+        torch.nn.Linear(2, 2)(torch.zeros(1, 2))
+        assert ("nn.Module.Linear.forward", "torch") in pushes
+    finally:
+        torch.nn.Module.__call__ = original_call
