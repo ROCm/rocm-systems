@@ -387,6 +387,8 @@ def _pass_key_from_result_file(result_file: Path) -> str:
 def load_df_pmc(
     raw_data_dir: str,
     verbose: int,
+    *,
+    preserve_pass_provenance: bool = True,
 ) -> tuple[pd.DataFrame, PassLayout]:
     """
     Read all raw pmc counters into one analysis df plus a ``PassLayout``.
@@ -400,13 +402,12 @@ def load_df_pmc(
     if long_df.empty:
         return pd.DataFrame(), PassLayout.empty()
 
-    layout = build_pass_layout(long_df)
-
-    if legacy_pass_merge_enabled():
+    if legacy_pass_merge_enabled() or not preserve_pass_provenance:
         long_df = long_df.drop(columns=["Pass_Key"])
         df = utils_analysis.process_rocpd_csv(long_df)
         layout = PassLayout.empty()
     else:
+        layout = build_pass_layout(long_df)
         df = utils_analysis.process_rocpd_csv(long_df, pass_layout=layout)
 
     utils_analysis.add_unit_counter(df)
