@@ -439,8 +439,8 @@ device:
     <<: *level_2
     tags: [P0]
     disabled:
-      targets: [amd_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale DeviceTest): expected error, got 'no error' (was SWDEV-511679 stress). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: xml parse failed. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_linux]
+      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale DeviceTest): expected error, got 'no error' (was SWDEV-511679 stress). AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Separate_Allocations:
     <<: *level_2
     tags: [P0]
@@ -454,8 +454,8 @@ device:
     <<: *level_2
     tags: [P0]
     disabled:
-      targets: [amd_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale DeviceTest): expected error, got 'no error' (was SWDEV-511679 stress). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: xml parse failed. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      targets: [amd_linux]
+      reason: "gfx1030 (amd_linux) FAIL 3/3 (stale DeviceTest): expected error, got 'no error' (was SWDEV-511679 stress). AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
   Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process:
     <<: *level_2
     tags: [P0]

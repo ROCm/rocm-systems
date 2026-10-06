@@ -227,7 +227,7 @@ stream:
     <<: *level_2
     disabled:
       targets: [amd_wsl]
-      reason: "(amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203 gfx1201 (amd_wsl) FAIL. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
+      reason: "(amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203 gfx1201 (amd_wsl) FLAKY: passed then failed within 10 runs. AIRUNTIME-XXXX Needs to be re-triaged AIRUNTIME-2744"
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_basic:
     <<: *level_2

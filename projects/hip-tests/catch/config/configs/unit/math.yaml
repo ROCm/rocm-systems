@@ -121,7 +121,7 @@ math:
     <<: *level_2
     disabled:
       targets: [amd_linux, nvidia_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) double section 0-ULP miss (fma). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: 1/2 variants fail. AIRUNTIME-XXXX Needs to be re-triaged on nvidia_linux AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) double section 0-ULP miss (fma). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: ULP accuracy: result not within 0 ULPs (1/2 variants). AIRUNTIME-XXXX Needs to be re-triaged on nvidia_linux AIRUNTIME-2744"
   Unit_Device_fma_fmaf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -163,7 +163,7 @@ math:
     <<: *level_2
     disabled:
       targets: [amd_linux, nvidia_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) double section 0-ULP miss (fdim). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: 1/2 variants fail. AIRUNTIME-XXXX Needs to be re-triaged on nvidia_linux AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) double section 0-ULP miss (fdim). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: ULP accuracy: result not within 0 ULPs (1/2 variants). AIRUNTIME-XXXX Needs to be re-triaged on nvidia_linux AIRUNTIME-2744"
   Unit_Device_fdim_fdimf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -221,7 +221,7 @@ math:
     <<: *level_2
     disabled:
       targets: [amd_linux, nvidia_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) both sections 0-ULP miss (remquo special values). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: 2/2 variants fail. AIRUNTIME-XXXX Needs to be re-triaged on nvidia_linux AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) both sections 0-ULP miss (remquo special values). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: ULP accuracy: result not within 0 ULPs (2/2 variants). AIRUNTIME-XXXX Needs to be re-triaged on nvidia_linux AIRUNTIME-2744"
   Unit_Device_remquo_remquof_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -261,7 +261,7 @@ math:
       reason: "Linux-only test (unit/CMakeLists.txt gates add_subdirectory(math) under if(UNIX)); never built or run on native Windows. AIRUNTIME-2744"
     disabled:
       targets: [amd_linux, nvidia_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) fatal abort; ULP formula defect (__expf, ulp of 4294967298). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: xml parse failed. AIRUNTIME-XXXX Needs to be re-triaged on nvidia_linux AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) fatal abort; ULP formula defect (__expf, ulp of 4294967298). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: assertion failed then crash/abort (core dump). AIRUNTIME-XXXX Needs to be re-triaged on nvidia_linux AIRUNTIME-2744"
   Unit_Device___exp10f_Accuracy_Positive:
     <<: *level_2
     unsupported:
@@ -269,7 +269,7 @@ math:
       reason: "Linux-only test (unit/CMakeLists.txt gates add_subdirectory(math) under if(UNIX)); never built or run on native Windows. AIRUNTIME-2744"
     disabled:
       targets: [amd_linux, nvidia_linux, amd_wsl]
-      reason: "gfx1030 (amd_linux) fatal abort; ULP formula defect (__exp10f). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: xml parse failed. AIRUNTIME-XXXX Needs to be re-triaged on nvidia_linux AIRUNTIME-2744"
+      reason: "gfx1030 (amd_linux) fatal abort; ULP formula defect (__exp10f). AIRUNTIME-XXXX gfx1201 (amd_wsl) FAIL: crash/abort (recursive terminate, core dump). AIRUNTIME-XXXX Needs to be re-triaged on nvidia_linux AIRUNTIME-2744"
   Unit_Device___logf_Accuracy_Positive:
     <<: *level_2
     unsupported:
