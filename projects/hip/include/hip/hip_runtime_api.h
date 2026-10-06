@@ -3222,6 +3222,10 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
  * The @p flags parameter controls behavior of the stream. The valid values are #hipStreamDefault
  * and #hipStreamNonBlocking.
  *
+ * @warning Stream priority is currently disabled by default to avoid queue-priority-related
+ * issues in KFD. Developers who require stream priority can set the `GPU_MAX_HW_QUEUES`
+ * environment variable to allow KFD to elevate hardware queue priorities.
+ *
  * @see hipStreamCreate, hipStreamSynchronize, hipStreamWaitEvent, hipStreamDestroy
  *
  */
@@ -3242,7 +3246,9 @@ hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, 
  * value that is outside the meaningful range as specified by this API, the priority is
  * automatically clamped to within the valid range.
  *
- * @warning This API is under development on AMD GPUs and simply returns #hipSuccess.
+ * @warning Stream priority is currently disabled by default to avoid queue-priority-related
+ * issues in KFD. Developers who require stream priority can set the `GPU_MAX_HW_QUEUES`
+ * environment variable to allow KFD to elevate hardware queue priorities.
  */
 hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority);
 /**
@@ -3355,6 +3361,10 @@ hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
  * @param[in] stream  Stream to be queried
  * @param[in,out] priority  Pointer to an unsigned integer in which the stream's priority is
  * returned
+ *
+ * @warning Stream priority is currently disabled by default to avoid queue-priority-related
+ * issues in KFD. Developers who require stream priority can set the `GPU_MAX_HW_QUEUES`
+ * environment variable to allow KFD to elevate hardware queue priorities.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle.
  *
