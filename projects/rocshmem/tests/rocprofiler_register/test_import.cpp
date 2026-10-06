@@ -7,8 +7,8 @@
 //
 //   extern "C" uint32_t rocprofiler_register_import_rocshmem() { return VERSION; }
 //
-// If CMakeLists.txt ever drops:
-//   target_compile_definitions(rocshmem PRIVATE ROCSHMEM_ROCPROFILER_REGISTER=1)
+// If CMakeLists.txt ever drops set(ROCSHMEM_ROCPROFILER_REGISTER 1), or
+// #cmakedefine01 ROCSHMEM_ROCPROFILER_REGISTER is dropped from rocshmem_config.h.in,
 // that symbol disappears from librocshmem.a and two things break:
 //
 //   (a) This program fails to LINK:
@@ -21,6 +21,18 @@
 
 #include <rocprofiler-register/rocprofiler-register.h>
 #include <rocshmem/rocshmem_config.h>   // ROCSHMEM_VENDOR_*_VERSION, ROCSHMEM_VERSION
+                                         // also defines ROCSHMEM_ROCPROFILER_REGISTER
+
+// Compile-time guard: if ROCSHMEM_ROCPROFILER_REGISTER is absent from
+// rocshmem_config.h the root cause is a missing #cmakedefine or a missing
+// set(ROCSHMEM_ROCPROFILER_REGISTER 1) in CMakeLists.txt.
+#if !defined(ROCSHMEM_ROCPROFILER_REGISTER)
+#    error "ROCSHMEM_ROCPROFILER_REGISTER not defined in rocshmem_config.h. "\
+           "Restore set(ROCSHMEM_ROCPROFILER_REGISTER 1) in CMakeLists.txt "\
+           "and ensure #cmakedefine01 ROCSHMEM_ROCPROFILER_REGISTER is in "\
+           "cmake/rocshmem_config.h.in"
+#endif
+
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
