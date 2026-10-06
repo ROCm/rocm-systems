@@ -36,7 +36,7 @@ on:
         default: "4c7fdd08d55bc1801cf1525732d6cabad06e05de"
         required: true
       runtime_cts_corpus_ref:
-        description: "Branch, tag, or SHA used by the runtime CTS AQL tests"
+        description: "Branch, tag, or SHA used by the runtime CTS AQL and PM4 tests"
         default: "9e8986527d9f33f3fc49290f7659759b9cb5b785"
         required: true
 
@@ -823,7 +823,7 @@ jobs:
           ref: ${{ github.event.inputs.runtime_cts_corpus_ref || env.ROCJITSU_RUNTIME_CTS_CORPUS_REF }}
           path: rocjitsu-runtime-cts-corpus
 
-      - name: Build runtime CTS AQL suite
+      - name: Build runtime CTS AQL and PM4 suites
         id: build_runtime_cts
         if: ${{ !cancelled() && matrix.name == 'release' && steps.checkout_runtime_cts_corpus.outcome == 'success' }}
         timeout-minutes: 15
@@ -833,7 +833,7 @@ jobs:
           uv pip install --system pytest pytest-xdist filelock
           bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-runtime-cts.sh" build
 
-      - name: Run runtime CTS AQL suite
+      - name: Run runtime CTS AQL and PM4 suites
         if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.build_runtime_cts.outcome == 'success' }}
         timeout-minutes: 45
         working-directory: ${{ env.ROCJITSU_RUNTIME_CTS_CORPUS_DIR }}
@@ -841,11 +841,11 @@ jobs:
         run: |
           bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-runtime-cts.sh" run
 
-      - name: Upload runtime CTS AQL diagnostics
+      - name: Upload runtime CTS diagnostics
         if: ${{ always() && matrix.name == 'release' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rocjitsu-runtime-cts-aql-release
+          name: rocjitsu-runtime-cts-release
           path: ${{ env.ROCJITSU_RUNTIME_CTS_CORPUS_DIR }}/.pytest-artifacts/runtime-cts
           include-hidden-files: true
           if-no-files-found: warn
