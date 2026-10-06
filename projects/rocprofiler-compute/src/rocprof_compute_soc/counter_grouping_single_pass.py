@@ -5,11 +5,11 @@
 
 Goal
 ----
-1. Every metric whose PMC set fits one ``CounterFile`` (packable / not
-   ``SLOT_LIMIT``) has **some** perfmon bucket containing its full PMC set.
+1. Every metric whose PMC set fits one ``CounterFile`` (single-pass
+   packable, not SPU) has **some** perfmon bucket containing its full PMC set.
 2. Minimize the number of passes under that hard constraint.
 3. Counters not required by any packable union use ordinary first-fit.
-4. Place remaining ``SLOT_LIMIT`` PMCs into existing buckets when possible
+4. Place remaining SPU PMCs into existing buckets when possible
    (open new passes only if needed).
 5. TCC series affinity + coverage: keep LEVEL with matching REQ/ATOMIC in
    the same pass; cover every selected series; never emit orphan REQ
@@ -252,7 +252,7 @@ def _largest_subset_fitting_empty(
 
 @dataclass(frozen=True)
 class SlotLimitFillStats:
-    """Pass impact of filling SLOT_LIMIT PMCs into an existing layout."""
+    """Pass impact of filling SPU PMCs into an existing layout."""
 
     passes_before: int
     passes_after: int
@@ -272,9 +272,9 @@ def fill_slot_limit_into_existing_passes(
     slot_limit_metric_count: int = 0,
     file_count_start: int | None = None,
 ) -> tuple[list[CounterFile], int, SlotLimitFillStats]:
-    """Place SLOT_LIMIT PMCs into existing buckets; open new ones only if needed.
+    """Place SPU PMCs into existing buckets; open new ones only if needed.
 
-    For each unique SLOT_LIMIT PMC set (full set cannot fit one bucket):
+    For each unique SPU PMC set (full set cannot fit one bucket):
     repeatedly pack the largest remaining subset into the best existing bucket,
     else open a new bucket with the largest empty-bucket-fitting subset.
 
@@ -318,7 +318,7 @@ def fill_slot_limit_into_existing_passes(
             if not subset:
                 console_warning(
                     "profiling",
-                    "single-pass-packable: SLOT_LIMIT PMC cannot fit any bucket.",
+                    "single-pass-packable: SPU PMC cannot fit any bucket.",
                 )
                 break
             new_bucket = _open_bucket_with_group(
