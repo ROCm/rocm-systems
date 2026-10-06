@@ -648,13 +648,21 @@ class RequiredCheckScopeTests(unittest.TestCase):
     def test_multi_subtree_requires_both_workflows(self) -> None:
         self.assertEqual(
             self._required("runtimes/Cargo.toml", "emulation/rocjitsu/rocjitsu.py"),
-            ["pre-commit / runtimes", "pre-commit / rocjitsu"],
+            ["pre-commit / runtimes", "pre-commit"],
         )
 
     def test_shared_config_requires_both_root_config_workflows(self) -> None:
         self.assertEqual(
             self._required(".pre-commit-config.yaml"),
-            ["pre-commit / runtimes", "pre-commit / rocjitsu"],
+            ["pre-commit / runtimes", "pre-commit"],
+        )
+
+    def test_rocjitsu_workflow_change_preserves_precommit_requirement(self) -> None:
+        # The privileged bot reads base-branch policy, so the PR introducing
+        # scoped names must still publish the check that policy requires.
+        self.assertEqual(
+            self._required(".github/workflows/rocjitsu-formatting.yml"),
+            ["pre-commit"],
         )
 
     def test_base_branch_is_part_of_scope(self) -> None:
@@ -663,7 +671,7 @@ class RequiredCheckScopeTests(unittest.TestCase):
         )
         self.assertEqual(
             self._required("emulation/mirage/src/lib.rs", branch="pr-bot-test"),
-            ["pre-commit / rocjitsu"],
+            ["pre-commit"],
         )
 
     def test_each_project_workflow_and_documentation_exclusions(self) -> None:
@@ -823,8 +831,8 @@ class RequiredCheckPollingTests(unittest.TestCase):
             self._run(
                 [
                     [first],
-                    [first, make_check_run(None, "pre-commit / rocjitsu")],
-                    [first, make_check_run("failure", "pre-commit / rocjitsu")],
+                    [first, make_check_run(None, "pre-commit")],
+                    [first, make_check_run("failure", "pre-commit")],
                 ]
             ),
             (1, 3, 2),
@@ -838,8 +846,8 @@ class RequiredCheckPollingTests(unittest.TestCase):
             self._run(
                 [
                     [first],
-                    [first, make_check_run(None, "pre-commit / rocjitsu")],
-                    [first, make_check_run("success", "pre-commit / rocjitsu")],
+                    [first, make_check_run(None, "pre-commit")],
+                    [first, make_check_run("success", "pre-commit")],
                 ]
             ),
             (0, 3, 2),
@@ -849,7 +857,7 @@ class RequiredCheckPollingTests(unittest.TestCase):
         runs = (
             [make_check_run("success", "pre-commit / runtimes")]
             + [make_check_run("success", f"other-{index}") for index in range(99)]
-            + [make_check_run("failure", "pre-commit / rocjitsu")]
+            + [make_check_run("failure", "pre-commit")]
         )
         self.assertEqual(self._run([runs]), (1, 1, 0))
 
@@ -871,7 +879,7 @@ class RequiredCheckPollingTests(unittest.TestCase):
 
     def test_description_failure_still_waits_for_every_applicable_check(self) -> None:
         first = make_check_run("success", "pre-commit / runtimes")
-        final = [first, make_check_run("failure", "pre-commit / rocjitsu")]
+        final = [first, make_check_run("failure", "pre-commit")]
         self.assertEqual(
             self._run([[first], [first], final], body="Missing tracking reference."),
             (1, 3, 1),
@@ -969,27 +977,41 @@ class LoadPolicyTests(unittest.TestCase):
     def test_required_check_names_and_filters_match_workflow_sources(self) -> None:
         policy = pc.load_policy(THIS_DIR / "policy.yml")
         workflows = THIS_DIR.parents[1] / ".github" / "workflows"
+        bot_workflow = pc.yaml.load(
+            (workflows / "systems-pr-bot.yml").read_text(), Loader=pc.yaml.BaseLoader
+        )
+        bot_branches = bot_workflow["on"]["pull_request_target"]["branches"]
+        # These are concrete target branches, not patterns to intersect.
+        for branch in bot_branches:
+            self.assertRegex(branch, r"^[\w./-]+$")
         by_name = {check.name: check for check in policy.required_checks}
         declared = set()
         for path in workflows.glob("*.yml"):
             # BaseLoader preserves the YAML key "on" rather than treating it
             # as a YAML 1.1 boolean. Filters and job names remain strings.
             workflow = pc.yaml.load(path.read_text(), Loader=pc.yaml.BaseLoader)
-            for job in workflow.get("jobs", {}).values():
-                name = job.get("name", "")
-                if not name.startswith("pre-commit / "):
+            for job_id, job in workflow.get("jobs", {}).items():
+                name = job.get("name", job_id)
+                if name != "pre-commit" and not name.startswith("pre-commit / "):
                     continue
                 with self.subTest(workflow=path.name):
+                    trigger = workflow["on"]["pull_request"]
+                    self.assertNotIn("paths-ignore", trigger)
+                    self.assertNotIn("branches-ignore", trigger)
+                    # Formatting experiments on other target branches are
+                    # outside the bot's required-check contract.
+                    if not any(
+                        pc._matches_workflow_filter(branch, trigger.get("branches", []))
+                        for branch in bot_branches
+                    ):
+                        continue
                     self.assertNotIn(name, declared)
                     declared.add(name)
                     self.assertIn(name, by_name)
-                    trigger = workflow["on"]["pull_request"]
                     self.assertEqual(by_name[name].paths, trigger.get("paths", []))
                     self.assertEqual(
                         by_name[name].branches, trigger.get("branches", [])
                     )
-                    self.assertNotIn("paths-ignore", trigger)
-                    self.assertNotIn("branches-ignore", trigger)
         self.assertEqual(declared, set(by_name))
 
     def test_invalid_required_check_rules_are_rejected(self) -> None:

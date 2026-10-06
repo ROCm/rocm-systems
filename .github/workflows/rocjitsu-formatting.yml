@@ -25,7 +25,8 @@ concurrency:
 
 jobs:
   pre-commit:
-    name: pre-commit / rocjitsu
+    # This workflow owns the unqualified pre-commit check name.
+    name: pre-commit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
