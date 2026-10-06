@@ -64,10 +64,11 @@ answering "nothing on this pass" there is the per-pass switch. The tool learns t
 The first version of this API also carried localized context toggles on the PASS payload
 (`replay_start_context` / `replay_stop_context`): a thread-scoped override map, armed during PASS
 `PHASE_ENTER` and consulted inside each service's dispatch path, that masked already-active contexts
-per pass without touching global state. It was an interim layer for the per-queue callback
-registry, which offered no per-dispatch decision point of its own, and it is removed now that the
-explicit hooks provide one. Three properties of the toggles made the dispatch callback the better
-home for the decision:
+per pass without touching global state. It was an interim layer from before the services moved onto
+explicit queue hooks, when the per-queue callback registry gave the SDK no named, per-service place
+to ask whether a service was on for one pass. Each service's hook is now that place, and the
+question it already puts to the tool, through the dispatch callback, answers it. Three properties of
+the toggles made the dispatch callback the better home for the decision:
 
 - **They duplicated a decision the tool already makes.** A masked counters context and a dispatch
   callback that returns no configuration produce the same instrumentation; the mask just made the
