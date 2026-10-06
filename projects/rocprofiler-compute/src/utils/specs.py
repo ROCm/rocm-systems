@@ -1031,6 +1031,91 @@ class MachineSpecsCDNA(MachineSpecs):
         divisor = {"nps2": 2, "nps4": 4, "nps8": 8}.get(partition, 1)
         return str(int(self.l2_banks) * whole_chip_xcds // divisor)
 
+    def _apply_single_xcd_partition_correction(self, reason: str) -> None:
+        """Force CPX / num_xcd=1 after a single-XCD visibility check."""
+        prior_partition = self.compute_partition
+        prior_xcds = self.num_xcd
+        self.num_xcd = "1"
+        self.compute_partition = "CPX"
+        console_warning(
+            f"{reason} "
+            f"(partition was {prior_partition} / num_xcd={prior_xcds}). "
+            "Using num_xcd=1 (CPX) for L2 channel expansion."
+        )
+
+    def _should_downcorrect_inflated_multi_xcd(
+        self, amdsmi_cus: Optional[int]
+    ) -> Optional[str]:
+        """Return a warning reason if multi-XCD partition overstates visibility.
+
+        Two signals (either is enough):
+
+        1. amd-smi full-chip CU count is ``num_xcd`` × rocminfo CUs (classic
+           SPX handle + ``ROCR_VISIBLE_DEVICES`` single die).
+        2. rocminfo SE count is not an aggregate of ``num_xcd`` dies
+           (``se % num_xcd != 0``), e.g. ``se_per_gpu=4`` with
+           ``num_xcd=8`` while true SPX reports ``se_per_gpu=32``.
+        """
+        if not self.cu_per_gpu or not self.num_xcd:
+            return None
+        try:
+            visible_cus = int(self.cu_per_gpu)
+            partition_xcds = int(self.num_xcd)
+        except (TypeError, ValueError):
+            return None
+        if partition_xcds <= 1 or visible_cus <= 0:
+            return None
+
+        cpx_xcds = mi_gpu_specs.get_num_xcds(
+            self.gpu_arch, self.gpu_model or None, "CPX"
+        )
+        if cpx_xcds != 1:
+            return None
+
+        if (
+            amdsmi_cus is not None
+            and amdsmi_cus > visible_cus
+            and amdsmi_cus % visible_cus == 0
+            and amdsmi_cus // visible_cus == partition_xcds
+        ):
+            return (
+                "rocminfo CU count indicates a single-XCD device "
+                f"({visible_cus} CUs) while amd-smi reports "
+                f"{amdsmi_cus} CUs"
+            )
+
+        if not self.se_per_gpu:
+            return None
+        try:
+            shader_engines = int(self.se_per_gpu)
+        except (TypeError, ValueError):
+            return None
+        # True multi-XCD SPX reports aggregate SE (divisible by num_xcd).
+        # ROCR_VISIBLE_DEVICES isolation can leave a single-XCD die mislabeled
+        # as SPX with per-die SE (not divisible by num_xcd).
+        if shader_engines > 0 and shader_engines % partition_xcds != 0:
+            return (
+                "rocminfo Shader Engines indicate a single-XCD device "
+                f"(se_per_gpu={shader_engines}, cu_per_gpu={visible_cus})"
+            )
+        return None
+
+    def _reconcile_num_xcd_with_visible_cus(self, gpu_info: dict[str, Any]) -> None:
+        """Down-correct num_xcd when the visible ROCR device is one XCD.
+
+        Isolating via ``ROCR_VISIBLE_DEVICES`` can yield a single-XCD
+        profiled device while amd-smi still reports SPX. Inflated
+        ``total_l2_chan`` expands block 18 past collectable TCC channels.
+        """
+        amdsmi_raw = gpu_info.get("num_compute_units")
+        try:
+            amdsmi_cus = int(amdsmi_raw) if amdsmi_raw is not None else None
+        except (TypeError, ValueError):
+            amdsmi_cus = None
+        reason = self._should_downcorrect_inflated_multi_xcd(amdsmi_cus)
+        if reason:
+            self._apply_single_xcd_partition_correction(reason)
+
     def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
         self.compute_partition = gpu_info["compute_partition"]
         self.memory_partition = gpu_info["memory_partition"]
@@ -1039,6 +1124,7 @@ class MachineSpecsCDNA(MachineSpecs):
                 self.gpu_arch, self.gpu_model or None, self.compute_partition
             )
         )
+        self._reconcile_num_xcd_with_visible_cus(gpu_info)
         super().finalize_soc_fields(gpu_info)
         self.num_memory_channels = self._get_hbm_channels()
 
