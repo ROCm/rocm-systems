@@ -1732,10 +1732,13 @@ TEST_F(rocpd_write_read_test_interface, handle_in_time_sample_pathway)
     run_processor_and_open_reader(
         { managed_gpu_agent() },
         [](const std::shared_ptr<metadata_registry>& metadata) {
-            metadata->add_pmc_info(make_agent_pmc_row({ .type        = agent_type::gpu,
-                                                        .name        = "my_track",
-                                                        .target_arch = "GPU",
-                                                        .description = "IN_TIME" }));
+            constexpr size_t k_unregistered_agent_index = 999;
+            metadata->add_pmc_info(
+                make_agent_pmc_row({ .type             = agent_type::gpu,
+                                     .agent_type_index = k_unregistered_agent_index,
+                                     .name             = "my_track",
+                                     .target_arch      = "GPU",
+                                     .description      = "IN_TIME" }));
             add_process_scoped_track(metadata, "my_track");
         },
         [](rocpd_processor_t& processor) {
@@ -1751,12 +1754,11 @@ TEST_F(rocpd_write_read_test_interface, handle_in_time_sample_pathway)
     // Validate: profiler_hub::reader_t read-back matches inserted values.
     const auto pmc_infos = m_reader->get_all_pmc_info();
     ASSERT_EQ(pmc_infos.size(), 1U);
-    expect_named_pmc_arch(pmc_infos, { .name                 = "my_track",
-                                       .expected_arch        = "GPU",
-                                       .expected_agent_type  = "GPU",
-                                       .expected_symbol      = "my_track",
-                                       .expected_units       = "",
-                                       .expected_description = "IN_TIME" });
+    const auto& pmc_info = pmc_infos.front();
+    EXPECT_EQ(pmc_info->name, "my_track");
+    EXPECT_EQ(pmc_info->target_arch, "GPU");
+    EXPECT_EQ(pmc_info->description, "IN_TIME");
+    EXPECT_EQ(pmc_info->agent_info, nullptr);
 
     expect_reader_has_tracks({ "my_track" });
 }

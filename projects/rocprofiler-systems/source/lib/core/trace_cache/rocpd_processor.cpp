@@ -36,10 +36,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <filesystem>
 #include <fmt/format.h>
-#include <fmt/ranges.h>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -305,6 +303,8 @@ rocpd_processor_t::handle(const backtrace_region_sample& bts)
 void
 rocpd_processor_t::handle(const in_time_sample& its)
 {
+    const auto& process_info = m_metadata->get_process_info();
+
     auto event    = make_event(its.stack_id, its.parent_stack_id, its.correlation_id,
                                its.track_name.data());
     event.extdata = its.event_metadata;
@@ -314,7 +314,9 @@ rocpd_processor_t::handle(const in_time_sample& its)
     pmc_data.value = 0.0;
 
     profiler_hub::writer_types::track_info_t track;
-    track.name = its.track_name;
+    track.name       = its.track_name;
+    track.node_id    = node_info::get_instance().id;
+    track.process_id = process_info.pid;
 
     profiler_hub::writer_types::sample_data_t sample;
     sample.timestamp = its.timestamp_ns;
@@ -324,31 +326,19 @@ rocpd_processor_t::handle(const in_time_sample& its)
     profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
     pmc_uid.name = its.track_name;
 
-    try_insert_pmc_event(pmc_data, pmc_uid, "In-time sample");
+    m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
 }
 
 void
 rocpd_processor_t::handle(const pmc_event_with_sample& pmc)
 {
     const auto& process_info = m_metadata->get_process_info();
+    const auto& agent_ref    = m_agent_manager->get_agent_by_type_index(
+        pmc.device_id, static_cast<agent_type>(pmc.device_type));
 
-    const agent* agent_ptr = nullptr;
-    try
-    {
-        agent_ptr = &m_agent_manager->get_agent_by_type_index(
-            pmc.device_id, static_cast<agent_type>(pmc.device_type));
-    } catch(const std::out_of_range& e)
-    {
-        LOG_WARNING("PMC event skipped: agent lookup failed for device_id={}, "
-                    "device_type={}: {}",
-                    pmc.device_id, pmc.device_type, e.what());
-        return;
-    }
-
-    const auto& agent_ref = *agent_ptr;
-    auto        event = make_event(pmc.stack_id, pmc.parent_stack_id, pmc.correlation_id,
-                                   pmc.track_name.data());
-    event.extdata     = pmc.event_metadata;
+    auto event    = make_event(pmc.stack_id, pmc.parent_stack_id, pmc.correlation_id,
+                               pmc.track_name.data());
+    event.extdata = pmc.event_metadata;
 
     profiler_hub::writer_types::pmc_event_data_t pmc_data;
     pmc_data.event   = event;
@@ -370,7 +360,7 @@ rocpd_processor_t::handle(const pmc_event_with_sample& pmc)
     pmc_uid.name     = pmc.pmc_info_name;
     pmc_uid.agent_id = make_agent_uid(agent_ref);
 
-    try_insert_pmc_event(pmc_data, pmc_uid, "PMC event");
+    m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
 }
 
 void
@@ -378,21 +368,10 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
 {
     const auto* name         = trait::name<category::amd_smi>::value;
     const auto& process_info = m_metadata->get_process_info();
+    const auto& agent_ref =
+        m_agent_manager->get_agent_by_type_index(gpu_pmc.device_id, agent_type::gpu);
 
-    const agent* agent_ptr = nullptr;
-    try
-    {
-        agent_ptr =
-            &m_agent_manager->get_agent_by_type_index(gpu_pmc.device_id, agent_type::gpu);
-    } catch(const std::out_of_range& e)
-    {
-        LOG_WARNING("GPU PMC sample skipped: agent lookup failed for device_id={}: {}",
-                    gpu_pmc.device_id, e.what());
-        return;
-    }
-
-    const auto& agent_ref = *agent_ptr;
-    const auto  agent_uid = make_agent_uid(agent_ref);
+    const auto agent_uid = make_agent_uid(agent_ref);
 
     auto event = make_event(0, 0, 0, name);
 
@@ -421,7 +400,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
         pmc_uid.name     = pmc_name;
         pmc_uid.agent_id = agent_uid;
 
-        try_insert_pmc_event(pmc_data, pmc_uid, "GPU PMC sample");
+        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
     };
 
     const auto& m       = gpu_pmc.metric_values;
@@ -586,21 +565,10 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
     // Insert NIC RDMA metrics into rocpd database
     const auto* name         = trait::name<category::amd_smi_nic>::value;
     const auto& process_info = m_metadata->get_process_info();
+    const auto& nic_agent =
+        m_agent_manager->get_agent_by_id(nic_sample.device_id, agent_type::nic);
 
-    const agent* agent_ptr = nullptr;
-    try
-    {
-        agent_ptr =
-            &m_agent_manager->get_agent_by_id(nic_sample.device_id, agent_type::nic);
-    } catch(const std::out_of_range& e)
-    {
-        LOG_WARNING("NIC PMC sample skipped: agent lookup failed for device_id={}: {}",
-                    nic_sample.device_id, e.what());
-        return;
-    }
-
-    const auto& nic_agent = *agent_ptr;
-    const auto  agent_uid = make_agent_uid(nic_agent);
+    const auto agent_uid = make_agent_uid(nic_agent);
 
     auto event = make_event(0, 0, 0, name);
 
@@ -633,7 +601,7 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
         pmc_uid.name     = pmc_name;
         pmc_uid.agent_id = agent_uid;
 
-        try_insert_pmc_event(pmc_data, pmc_uid, "NIC PMC sample");
+        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
     };
 
     const auto& mtrcs   = nic_sample.metric_values;
@@ -743,24 +711,13 @@ rocpd_processor_t::handle(
         return;
     }
 
-    const auto*  name         = "rocm_counter_collection";
-    const auto&  process_info = m_metadata->get_process_info();
-    const agent* agent_ptr    = nullptr;
-    try
-    {
-        agent_ptr = &m_agent_manager->get_agent_by_type_index(gpu_perf_counter.device_id,
-                                                              agent_type::gpu);
-    } catch(const std::out_of_range& e)
-    {
-        LOG_WARNING("GPU perf-counter sample skipped: agent lookup failed for "
-                    "device_id={}: {}",
-                    gpu_perf_counter.device_id, e.what());
-        return;
-    }
+    const auto* name         = "rocm_counter_collection";
+    const auto& process_info = m_metadata->get_process_info();
+    const auto& agent_ref    = m_agent_manager->get_agent_by_type_index(
+        gpu_perf_counter.device_id, agent_type::gpu);
 
-    const auto& agent_ref = *agent_ptr;
-    const auto  agent_uid = make_agent_uid(agent_ref);
-    auto const  event     = make_event(0, 0, 0, name);
+    const auto agent_uid = make_agent_uid(agent_ref);
+    auto const event     = make_event(0, 0, 0, name);
 
     for(const auto& entry : gpu_perf_counter.entries)
     {
@@ -791,7 +748,7 @@ rocpd_processor_t::handle(
         pmc_uid.name     = info.pmc_info_name;
         pmc_uid.agent_id = agent_uid;
 
-        try_insert_pmc_event(pmc_data, pmc_uid, "GPU perf-counter sample");
+        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
     }
 }
 
@@ -847,19 +804,10 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
 
     const auto device_id = static_cast<size_t>(cpu_pmc_smpl.device_id);
 
-    const agent* agent_ptr = nullptr;
-    try
-    {
-        agent_ptr = &m_agent_manager->get_agent_by_type_index(device_id, agent_type::cpu);
-    } catch(const std::out_of_range& e)
-    {
-        LOG_WARNING("CPU PMC sample skipped: agent lookup failed for device_id={}: {}",
-                    device_id, e.what());
-        return;
-    }
+    const auto& agent_ref =
+        m_agent_manager->get_agent_by_type_index(device_id, agent_type::cpu);
 
-    const auto& agent_ref = *agent_ptr;
-    const auto  agent_uid = make_agent_uid(agent_ref);
+    const auto agent_uid = make_agent_uid(agent_ref);
 
     auto event = make_event(0, 0, 0, name);
 
@@ -883,7 +831,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
         pmc_uid.name     = pmc_name;
         pmc_uid.agent_id = agent_uid;
 
-        try_insert_pmc_event(pmc_data, pmc_uid, "CPU PMC sample");
+        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
     };
 
     const auto& enabled_m = cpu_pmc_smpl.enabled_metric;
@@ -1053,7 +1001,7 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
         pmc_uid.name     = kfd.pmc_info_name;
         pmc_uid.agent_id = make_agent_uid(agent_ref);
 
-        try_insert_pmc_event(pmc_data, pmc_uid, "KFD PMC event");
+        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("KFD PMC event skipped: agent lookup failed for device_id={}, "
@@ -1094,39 +1042,6 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
 }
 
 void
-rocpd_processor_t::try_insert_pmc_event(
-    const profiler_hub::writer_types::pmc_event_data_t&     event_data,
-    const profiler_hub::writer_types::pmc_info_unique_id_t& unique_id,
-    std::string_view                                        context)
-{
-    try
-    {
-        m_writer->insert_pmc_event_data(event_data, unique_id);
-    } catch(const std::runtime_error& e)
-    {
-        ++m_dropped_pmc_events_count;
-
-        auto key = std::string{ unique_id.name };
-
-        // Build the key for the PMC info. Two agents missing the same PMC info will
-        // warn separately.
-        if(unique_id.agent_id.has_value())
-        {
-            const auto& agent_id = unique_id.agent_id.value();
-            key += fmt::format(" [{}:{}]", agent_id.agent_type.value_or("unknown"),
-                               agent_id.type_index);
-        }
-
-        if(m_unregistered_pmcs_already_warned.emplace(std::move(key)).second)
-        {
-            LOG_WARNING("{} skipped: PMC info not registered for name={} - {}. "
-                        "Further samples for this PMC will be dropped without warning.",
-                        context, unique_id.name, e.what());
-        }
-    }
-}
-
-void
 rocpd_processor_t::prepare_for_processing()
 {
     LOG_DEBUG("Preparing rocpd processor for processing");
@@ -1138,40 +1053,11 @@ void
 rocpd_processor_t::finalize_processing()
 {
     LOG_DEBUG("Finalizing rocpd processor");
-    try
-    {
-        m_writer->flush_in_memory_data_to_disk();
-    } catch(const std::exception& e)
-    {
-        // This can happen in multi-process scenarios when two processes attempt
-        // to flush their in-memory databases to the same output file at the same
-        // time (SQLITE_BUSY). The underlying fix belongs in profiler-hub (retry
-        // with back-off or per-PID filenames), but crashing is never appropriate.
-        LOG_ERROR("Failed to flush rocpd database to disk ({}): {}. "
-                  "Profile data for this process may be incomplete.",
-                  m_db_output_path, e.what());
-        return;
-    }
+    m_writer->flush_in_memory_data_to_disk();
 
     m_output_registry.register_file(m_db_output_path, output_format::rocpd);
 
-    if(m_dropped_pmc_events_count > 0)
-    {
-        // Sorted so the message is reproducible across runs.
-        auto counters =
-            std::vector<std::string>{ m_unregistered_pmcs_already_warned.begin(),
-                                      m_unregistered_pmcs_already_warned.end() };
-        std::ranges::sort(counters);
-
-        LOG_WARNING("Rocpd processor finalized with {} PMC event(s) dropped across {} "
-                    "unregistered counter(s); {} is incomplete. Counters: {}",
-                    m_dropped_pmc_events_count, counters.size(), m_db_output_path,
-                    fmt::join(counters, ", "));
-    }
-    else
-    {
-        LOG_INFO("Rocpd processor finalized successfully");
-    }
+    LOG_INFO("Rocpd processor finalized successfully");
 }
 
 void
@@ -1379,19 +1265,21 @@ rocpd_processor_t::post_process_metadata()
                     pmc_info.agent_type_index, pmc_info.type);
             } catch(const std::out_of_range& e)
             {
-                LOG_WARNING("PMC info registration skipped: agent lookup failed for "
-                            "agent_type_index={}, type={}: {}",
+                LOG_WARNING("PMC info registered without agent: agent lookup failed "
+                            "for agent_type_index={}, type={}: {}",
                             pmc_info.agent_type_index, to_string(pmc_info.type),
                             e.what());
-                continue;
             }
         }
 
-        const auto& pmc_agent     = *pmc_agent_ptr;
-        auto        pmc_agent_uid = make_agent_uid(pmc_agent);
+        std::optional<profiler_hub::writer_types::agent_unique_id_t> pmc_agent_uid;
+        if(pmc_agent_ptr != nullptr)
+        {
+            pmc_agent_uid = make_agent_uid(*pmc_agent_ptr);
+        }
 
-        LOG_TRACE("Inserting PMC description: agent_uid: {}, pmc_info: {}",
-                  pmc_agent_uid.type_index, pmc_info.name);
+        LOG_TRACE("Inserting PMC description: has_agent: {}, pmc_info: {}",
+                  pmc_agent_uid.has_value(), pmc_info.name);
 
         profiler_hub::writer_types::pmc_info_t           pmc_info_data;
         profiler_hub::writer_types::pmc_info_unique_id_t uid;
