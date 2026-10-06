@@ -236,6 +236,7 @@ jobs:
           path: rocjitsu-test-corpus
 
       - name: Set up Python
+        id: python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
@@ -259,6 +260,13 @@ jobs:
           ROCM_LIB="$(rocm-sdk path --root)"/lib
           # Prefer this checkout's build-root libraries over SDK copies.
           echo "LD_LIBRARY_PATH=${ROCJITSU_BUILD_DIR}:${ROCM_LIB}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+
+      - name: Install Python unit test dependencies
+        run: |
+          uv pip install --system --python "${{ steps.python.outputs.python-path }}" PyYAML
+          # The ConSan Aorta oracle tests only use CPU tensors.
+          uv pip install --system --python "${{ steps.python.outputs.python-path }}" \
+            --index-url https://download.pytorch.org/whl/cpu torch
 
       - name: Build rocjitsu
         id: build_rocjitsu
@@ -374,6 +382,7 @@ jobs:
           ROCM_PATH=`rocm-sdk path --root` \
             cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
+            -DPython3_EXECUTABLE="${{ steps.python.outputs.python-path }}" \
             -DCMAKE_C_FLAGS="${CFLAGS:-}" \
             -DCMAKE_CXX_FLAGS="${CXXFLAGS:-}" \
             "${CMAKE_CONFIG_FLAGS[@]}" \

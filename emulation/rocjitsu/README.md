@@ -72,7 +72,14 @@ and formatting setup.
 
 ## Running tests
 
+The ConSan Python suites require PyTorch and PyYAML. Install them in your
+Python environment and configure CMake to use that interpreter. CPU-only
+PyTorch is sufficient for these unit tests:
+
 ```bash
+python3 -m pip install PyYAML
+python3 -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+cmake -B build -DPython3_EXECUTABLE="$(command -v python3)"
 ctest --test-dir build
 ```
 
