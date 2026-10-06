@@ -40,6 +40,8 @@ __all__ = [
     "_notifyTypeToString",
     "_pad_hex_value",
     "_parse_bdf",
+    "_RsmiFreqVoltRegion",
+    "_RsmiOdVoltFreqData",
     "_validate_if_max_uint",
 ]
 
@@ -217,6 +219,50 @@ def _get_name_value(num, data) -> List[Dict[str, int]]:
     return [
         {"name": records[i].name.decode("utf-8", errors="replace"), "value": records[i].value}
         for i in range(num.value)
+    ]
+
+
+class _RsmiRange(ctypes.Structure):
+    _fields_ = [("lower_bound", ctypes.c_uint64), ("upper_bound", ctypes.c_uint64)]
+
+
+class _RsmiOdVddcPoint(ctypes.Structure):
+    _fields_ = [("frequency", ctypes.c_uint64), ("voltage", ctypes.c_uint64)]
+
+
+class _RsmiFreqVoltRegion(ctypes.Structure):
+    """Record layout behind amdsmi_get_gpu_od_volt_curve_regions().
+
+    rocm_smi fills the caller's buffer with rsmi_freq_volt_region_t records
+    (two 16-byte ranges, 32 bytes per record), not the 64-byte
+    amdsmi_freq_volt_region_t declared in amdsmi.h, whose ranges carry two
+    extra reserved words.
+    """
+
+    _fields_ = [("freq_range", _RsmiRange), ("volt_range", _RsmiRange)]
+
+
+class _RsmiOdVoltCurve(ctypes.Structure):
+    _fields_ = [("vc_points", _RsmiOdVddcPoint * 3)]
+
+
+class _RsmiOdVoltFreqData(ctypes.Structure):
+    """Layout behind amdsmi_get_gpu_od_volt_info().
+
+    rocm_smi fills the caller's buffer with its rsmi_od_volt_freq_data_t
+    (16-byte ranges, 152 bytes), not the 248-byte amdsmi_od_volt_freq_data_t
+    declared in amdsmi.h.
+    """
+
+    _fields_ = [
+        ("curr_sclk_range", _RsmiRange),
+        ("curr_mclk_range", _RsmiRange),
+        ("curr_fclk_range", _RsmiRange),
+        ("sclk_freq_limits", _RsmiRange),
+        ("mclk_freq_limits", _RsmiRange),
+        ("fclk_freq_limits", _RsmiRange),
+        ("curve", _RsmiOdVoltCurve),
+        ("num_regions", ctypes.c_uint32),
     ]
 
 
