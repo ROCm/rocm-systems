@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rounding.h"
 #include "util/simd.h"
 
@@ -233,6 +234,90 @@ TEST(RoundingTest, SimdLanesMatchScalarLanes) {
       }
     }
   }
+}
+
+TEST(FpFormatTest, BiasAndFractionMask) {
+  EXPECT_EQ(fmt::F16::kBias, 15u);
+  EXPECT_EQ(fmt::F16::kFraction, 0x3ffu);
+  EXPECT_EQ(fmt::F32::kBias, 127u);
+  EXPECT_EQ(fmt::F32::kFraction, 0x7fffffu);
+  EXPECT_EQ(fmt::F64::kBias, uint64_t{1023});
+  EXPECT_EQ(fmt::F64::kFraction, uint64_t{0xfffffffffffff});
+}
+
+// SIMD lanes count the same bits as std::bit_width, at 32 and 64 bits.
+TEST(FpFormatTest, BitWidthMatchesScalarOnSimdLanes) {
+  constexpr uint64_t kValues[] = {0,           1,          2,           3,
+                                  0x3ff,       0x400,      0x7fffff,    0x800000,
+                                  0x80000000,  0xffffffff, 0x123456789, uint64_t{1} << 52,
+                                  ~uint64_t{0}};
+  for (const uint64_t value : kValues) {
+    const uint32_t low = static_cast<uint32_t>(value);
+    EXPECT_EQ(fmt::bit_width(low), static_cast<uint32_t>(std::bit_width(low))) << value;
+    EXPECT_EQ(fmt::bit_width(value), static_cast<uint64_t>(std::bit_width(value))) << value;
+    const util::native<uint32_t> lanes32(low);
+    const util::native<uint64_t> lanes64(value);
+    EXPECT_EQ(uint32_t(fmt::bit_width(lanes32)[0]), static_cast<uint32_t>(std::bit_width(low)))
+        << value;
+    EXPECT_EQ(uint64_t(fmt::bit_width(lanes64)[0]), static_cast<uint64_t>(std::bit_width(value)))
+        << value;
+  }
+}
+
+struct ShiftCase {
+  uint32_t value;
+  uint32_t count;
+  bool negative;
+  // Rounded magnitude for nearest even, toward +inf, toward -inf, toward zero.
+  uint32_t expected[4];
+};
+
+// 0b1011 / 4 = 2.75; 0b1010 / 4 = 2.5 (tie, even below); 0b1110 / 4 = 3.5 (tie,
+// even above); 0b1000 / 4 is exact. Dropping more bits than the value has
+// leaves a nonzero remainder below one half.
+constexpr ShiftCase kShiftCases[] = {
+    {0b1011, 2, false, {3, 3, 2, 2}}, {0b1011, 2, true, {3, 2, 3, 2}},
+    {0b1010, 2, false, {2, 3, 2, 2}}, {0b1110, 2, true, {4, 3, 4, 3}},
+    {0b1000, 2, false, {2, 2, 2, 2}}, {0b1000, 2, true, {2, 2, 2, 2}},
+    {0x7ff, 12, false, {0, 1, 0, 0}}, {0x7ff, 12, true, {0, 0, 1, 0}},
+};
+
+TEST(RoundingTest, ShiftRightFollowsModeAndSign) {
+  for (const ShiftCase &test : kShiftCases) {
+    for (uint32_t mode : kModes) {
+      SCOPED_TRACE(testing::Message() << test.value << " >> " << test.count << " negative "
+                                      << test.negative << " mode " << mode);
+      EXPECT_EQ(rounding::shift_right(test.value, test.count, test.negative, mode),
+                test.expected[mode]);
+      const util::native<uint32_t> value(test.value);
+      const util::native<uint32_t> count(test.count);
+      const auto negative = util::native<uint32_t>(test.negative ? 1u : 0u) != 0u;
+      EXPECT_EQ(uint32_t(rounding::shift_right(value, count, negative, mode)[0]),
+                test.expected[mode]);
+    }
+  }
+}
+
+// F16 significands with the leading one at bit 12. 0x7ff * 2^-25 = 0x3bff *
+// 2^-14 is tiny after rounding to 11 bits, so a flushing policy gives zero
+// even though its subnormal encoding rounds up to the smallest normal; gfx1201
+// V_LDEXP_F16 does the same.
+TEST(RoundingTest, RoundSignificandJudgesTininessAfterRounding) {
+  constexpr unsigned kTop = fmt::F16::kMantissaBits + 2;
+  const auto round = [](uint32_t significand, int exponent, bool negative,
+                        const rounding::Policy &policy) {
+    return rounding::round_significand<fmt::F16, kTop>(
+        significand << 2, uint32_t(int(rounding::kExponentOrigin) + exponent), negative, policy);
+  };
+  // Biased exponent 0 is one step below the smallest normal.
+  EXPECT_EQ(round(0x7ffu, 0, false, {}), 0x0400u);
+  EXPECT_EQ(round(0x7ffu, 0, false, {rounding::NEAREST_EVEN, true, false}), 0u);
+  EXPECT_EQ(round(0x7ffu, 0, false, {rounding::TOWARD_ZERO, false, false}), 0x03ffu);
+  EXPECT_EQ(round(0x400u, 1, false, {rounding::NEAREST_EVEN, true, false}), 0x0400u);
+  // Overflow follows the rounding direction, or saturates.
+  EXPECT_EQ(round(0x400u, 31, false, {}), 0x7c00u);
+  EXPECT_EQ(round(0x400u, 31, true, {rounding::TOWARD_POSITIVE, false, false}), 0x7bffu);
+  EXPECT_EQ(round(0x400u, 31, false, {rounding::NEAREST_EVEN, false, true}), 0x7bffu);
 }
 
 } // namespace

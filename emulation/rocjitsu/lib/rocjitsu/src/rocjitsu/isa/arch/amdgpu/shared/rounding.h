@@ -186,6 +186,36 @@ constexpr V resolve_overflow(V magnitude, const Mask &negative, const Policy &po
 
 } // namespace detail
 
+/// @brief Offset of the `exponent` argument of round_significand.
+inline constexpr unsigned kExponentOrigin = detail::kExponentOrigin;
+
+/// @brief Round value / 2^count to an integer, for a number of the given sign.
+/// @details Rounds the magnitude in the policy direction: toward +infinity and
+/// toward -infinity increase it only for a number of that sign. `count` is in
+/// [1, lane width - 1]; dropping more bits than `value` has rounds the same as
+/// dropping one more than its width.
+template <typename V, typename Mask>
+constexpr V shift_right(V value, V count, const Mask &negative, uint32_t mode) {
+  using L = detail::Lane<V>;
+  const V one(L{1});
+  const V kept = value >> count;
+  const V rest = value & ((one << count) - one);
+  const V half = one << (count - one);
+  return kept + detail::choose(detail::rounds_up(mode, negative, kept, rest, half), one, V(L{0}));
+}
+
+/// @brief Round a finite nonzero magnitude, significand * 2^exponent, to `Fmt`.
+/// @details `significand` has its leading one at bit TopBit, above the format's
+/// fraction, and `exponent` is the biased `Fmt` exponent of that bit plus
+/// kExponentOrigin. Tininess, flushing and overflow follow the policy as for
+/// narrow(); the caller applies the sign.
+template <typename Fmt, unsigned TopBit, typename V, typename Mask>
+constexpr V round_significand(V significand, V exponent, const Mask &negative,
+                              const Policy &policy) {
+  const V magnitude = detail::round_magnitude<Fmt, TopBit>(significand, exponent, negative, policy);
+  return detail::resolve_overflow<Fmt>(magnitude, negative, policy);
+}
+
 /// @brief Convert to a narrower format (F32 to F16, F64 to F32).
 /// @details `bits` holds a `From` encoding in a lane of `From::Lane`; the result is a
 /// `To` encoding in the same lane type. A `From` subnormal lies below half of the
