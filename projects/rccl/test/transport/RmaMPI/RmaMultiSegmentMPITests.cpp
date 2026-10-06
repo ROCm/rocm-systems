@@ -2392,8 +2392,17 @@ TEST_F(RmaMultiSegmentPostMPITest, IPutSignalSendQueueOversubscribe)
     EXPECT_TRUE(MPIHelpers::allRanksTrue(!HasFailure())) << "flood hung or misreported on some rank";
     if (HasFailure()) return;
 
-    RunAndVerify({MakeOp(OpKind::Put, srcMh_, dstMh_, chains[0], /*ctx=*/1, false)}, {0},
-                 {IntoDst(chains)}, /*signals=*/0);
+    // A FAILED request returns before its posted WRs finish, so context 0 can still
+    // signal; check only context 1's payload, which those late writes duplicate.
+    FillSentinel(dst_->ptr, dst_->totalSize, kSentinel);
+    Barrier();
+    void* req = nullptr;
+    const ncclResult_t r = Post(MakeOp(OpKind::Put, srcMh_, dstMh_, chains[0], /*ctx=*/1, false), &req);
+    const bool ok = r == ncclSuccess && req != nullptr && PollUntilDone(req);
+    EXPECT_TRUE(MPIHelpers::allRanksTrue(ok)) << "context 1 put failed after the flood: " << r;
+    if (HasFailure()) return;
+    Barrier();
+    ExpectRegions(IntoDst(chains));
 }
 
 // Every rank puts its slot into every peer and gets every peer's slot, driving
