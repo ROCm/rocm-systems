@@ -387,3 +387,24 @@ def test_push_scope_emits_composed_marker_and_pop_is_idempotent():
     finally:
         core.set_python_tier_io(*previous)
         core._thread_local.depth = 0
+
+
+def test_resolve_user_caller_location_skips_package_and_framework_roots():
+    import os
+    from pathlib import Path
+
+    from utils.inject_roctx import core
+
+    location = core.resolve_user_caller_location()
+    assert location.startswith(Path(__file__).name)
+    assert ":" in location
+    parent = str(Path(__file__).resolve().parent)
+    core.add_framework_root(parent)
+    stored = parent if parent.endswith(os.sep) else parent + os.sep
+    try:
+        skipped = core.resolve_user_caller_location()
+        assert ":" in skipped
+        assert not skipped.startswith(Path(__file__).name)
+    finally:
+        if stored in core._STATE.framework_roots:
+            core._STATE.framework_roots.remove(stored)
