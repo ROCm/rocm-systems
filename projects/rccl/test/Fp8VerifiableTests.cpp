@@ -38,13 +38,12 @@ namespace RcclUnitTesting
   TEST(Fp8Verifiable, AllReduceSymmetric)     { RunFp8VerifiableSweep(ncclCollAllReduce,     kFp8Ops,   MEM_ALLOC_SYMMETRIC_WIN); }
   TEST(Fp8Verifiable, ReduceScatterSymmetric) { RunFp8VerifiableSweep(ncclCollReduceScatter, kFp8Ops,   MEM_ALLOC_SYMMETRIC_WIN); }
 
-  // Disabled: on gfx942 FP8 ncclAvg returns half the average, because enqueue.cc
-  // encodes the 1/nRanks PreMulSum scalar as OCP FP8 on the host while the device
-  // reads it as fnuz. With one rank it aborts instead: the host looks up
-  // oneRankReduce<FuncPreMulSum<__hip_fp8_e4m3>>, but the device has only the fnuz one.
-  TEST(Fp8Verifiable, DISABLED_AvgAllReduce)              { RunFp8VerifiableSweep(ncclCollAllReduce,     {ncclAvg}, MEM_ALLOC_HIP); }
-  TEST(Fp8Verifiable, DISABLED_AvgReduce)                 { RunFp8VerifiableSweep(ncclCollReduce,        {ncclAvg}, MEM_ALLOC_HIP); }
-  TEST(Fp8Verifiable, DISABLED_AvgReduceScatter)          { RunFp8VerifiableSweep(ncclCollReduceScatter, {ncclAvg}, MEM_ALLOC_HIP); }
-  TEST(Fp8Verifiable, DISABLED_AvgAllReduceSymmetric)     { RunFp8VerifiableSweep(ncclCollAllReduce,     {ncclAvg}, MEM_ALLOC_SYMMETRIC_WIN); }
-  TEST(Fp8Verifiable, DISABLED_AvgReduceScatterSymmetric) { RunFp8VerifiableSweep(ncclCollReduceScatter, {ncclAvg}, MEM_ALLOC_SYMMETRIC_WIN); }
+  // Avg on gfx942 guards two fixed bugs: enqueue.cc once encoded the 1/nRanks PreMulSum
+  // scalar as OCP FP8 while the device read it as fnuz, halving the average, and one-rank
+  // Avg once aborted because the host and device named the fp8 oneRankReduce differently.
+  TEST(Fp8Verifiable, AvgAllReduce)              { RunFp8VerifiableSweep(ncclCollAllReduce,     {ncclAvg}, MEM_ALLOC_HIP); }
+  TEST(Fp8Verifiable, AvgReduce)                 { RunFp8VerifiableSweep(ncclCollReduce,        {ncclAvg}, MEM_ALLOC_HIP); }
+  TEST(Fp8Verifiable, AvgReduceScatter)          { RunFp8VerifiableSweep(ncclCollReduceScatter, {ncclAvg}, MEM_ALLOC_HIP); }
+  TEST(Fp8Verifiable, AvgAllReduceSymmetric)     { RunFp8VerifiableSweep(ncclCollAllReduce,     {ncclAvg}, MEM_ALLOC_SYMMETRIC_WIN); }
+  TEST(Fp8Verifiable, AvgReduceScatterSymmetric) { RunFp8VerifiableSweep(ncclCollReduceScatter, {ncclAvg}, MEM_ALLOC_SYMMETRIC_WIN); }
 }
