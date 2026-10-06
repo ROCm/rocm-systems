@@ -1343,6 +1343,10 @@ The event wire format (finding H5):
   `manifest.complete=false`, so replay/validation cannot mistake a capture missing a GPU
   launch for a faithful one. (Previously the size wrapped mod 65536, slipping past the
   total-payload guard and writing a corrupt event.)
+- **Kernel-name length limit (64 KiB) fails loudly too.** The kernel name's length is
+  also a `uint16_t` on the wire. A launch whose name is longer than 65,535 bytes is
+  dropped and the archive marked incomplete in the same way, rather than recorded with a
+  truncated name that matches no symbol at replay.
 - **Pointer-translation size precondition.** Whole-arg pointer translation requires the
   recorded `arg_size >= 8`; a smaller pointer descriptor is copied through untranslated,
   passing the stale capture-time VA to the kernel.
