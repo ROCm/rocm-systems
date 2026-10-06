@@ -26,6 +26,7 @@ from utils.utils_analysis import (
     NodeRollup,
     attach_unlocated_trees_by_launcher_thread,
     build_operator_summary,
+    copy_matched_operator_subtree,
     filter_forest_by_backends,
     fold_identical_sibling_subtrees,
     format_operator_args,
@@ -1041,6 +1042,23 @@ def test_filter_forest_by_backends_strips_scaffolding_kernels():
     assert "triton_matmul_kernel" in filtered_parent.children[0].kernels
     assert "torch_gemm_kernel" in forest["1"][0].kernels
     assert "triton_matmul_kernel" in forest["1"][0].children[0].kernels
+
+
+def test_copy_matched_operator_subtree_keeps_ancestors_and_descendants():
+    node_c = leaf_operator("C", "2", 30.0, kernel="c_kernel")
+    node_b = leaf_operator("B", "1", 20.0, kernel="b_kernel")
+    node_d = leaf_operator("D", "3", 40.0, kernel="d_kernel")
+    node_a = leaf_operator("A", "0", 10.0, kernel="a_kernel")
+    node_b.children = [node_c]
+    node_a.children = [node_b, node_d]
+    forest = {"1": [node_a]}
+
+    copied = copy_matched_operator_subtree(forest, [node_b])
+    copied_a = copied["1"][0]
+    assert copied_a.name == "A"
+    assert copied_a.kernels == {}
+    assert [child.name for child in copied_a.children] == ["B"]
+    assert [child.name for child in copied_a.children[0].children] == ["C"]
 
 
 def test_split_operator_args_respects_nested_commas():
