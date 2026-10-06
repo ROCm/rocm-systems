@@ -3554,15 +3554,15 @@ TEST_CASE("Unit_HRR_ForkWhileRecording_Direct", "[.][hrr-direct]") {
 // The capture writer calls fsync() at two points the cases below need to stop
 // a thread at: a checkpoint, under the events mutex, and the crash callback's
 // manifest write, while it owns the emergency manifest buffer. CLR resolves
-// fsync() through this executable before libc, so a case that sets
-// g_hrr_fsync_hook can hold the calling thread there. With no hook set this is
-// libc's fsync, and every other case in the binary runs as before.
+// fsync() through this executable before libc, to the one definition in
+// hrr_disk_space_test.cc, which runs this hook before anything else. A case
+// that sets g_hrr_fsync_hook can hold the calling thread there. With no hook
+// set this does nothing, and every other case in the binary runs as before.
 // ---------------------------------------------------------------------------
 static std::atomic<void (*)(int)> g_hrr_fsync_hook{nullptr};
 
-extern "C" int fsync(int fd) {
+extern "C" void hrr_workload_fsync_hook(int fd) {
   if (auto hook = g_hrr_fsync_hook.load(std::memory_order_acquire)) hook(fd);
-  return static_cast<int>(syscall(SYS_fsync, fd));
 }
 
 // Async-signal-safe, for the hooks: one of them runs in a crash handler.

@@ -194,7 +194,11 @@ extern "C" int hrr_disk_space_statvfs64(const char* path, struct statvfs* buf) {
   return fake_statvfs("statvfs64", path, buf);
 }
 
+// Defined in hrr_workload_test.cc: the fork cases there hold a thread in fsync.
+extern "C" void hrr_workload_fsync_hook(int fd);
+
 extern "C" int hrr_disk_space_fsync(int fd) {
+  hrr_workload_fsync_hook(fd);
   using Fn = int (*)(int);
   static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "fsync"));
   if (g_fsync_hold.exchange(false)) {
