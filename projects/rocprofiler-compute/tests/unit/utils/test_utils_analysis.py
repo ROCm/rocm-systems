@@ -6,6 +6,7 @@
 import gzip
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import common
 import pandas as pd
@@ -14,6 +15,7 @@ import pytest
 import utils.utils_analysis as utils_analysis
 from utils import csv_compression, schema
 from utils.ml_api_trace_errors import (
+    KernelSequenceLengthMismatchError,
     MissingSourceLocationError,
     OverlappingMarkerRangeError,
     PassMarkerMismatchError,
@@ -1059,6 +1061,19 @@ def test_copy_matched_operator_subtree_keeps_ancestors_and_descendants():
     assert copied_a.kernels == {}
     assert [child.name for child in copied_a.children] == ["B"]
     assert [child.name for child in copied_a.children[0].children] == ["C"]
+
+
+def test_kernel_stats_length_mismatch_records_error():
+    row = SimpleNamespace(
+        Operator_Name="aten::addmm",
+        Kernel_Names=["gemm", "add"],
+        Kernel_Start_Timestamps=[0, 10],
+        Kernel_End_Timestamps=[5],
+    )
+    errors = []
+    kernels = utils_analysis._kernel_stats_from_marker_row(row, errors)
+    assert kernels == {}
+    assert any(isinstance(err, KernelSequenceLengthMismatchError) for err in errors)
 
 
 def test_split_operator_args_respects_nested_commas():
