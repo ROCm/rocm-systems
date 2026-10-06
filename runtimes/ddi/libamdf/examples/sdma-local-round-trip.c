@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /* GFX1201 SDMA qualification for private and host-visible LOCAL memory.
  * Both paths exercise SYSTEM -> LOCAL -> SYSTEM. The public path also checks
  * the CPU view and publishes CPU writes from VRAM to a second SDMA copy. */

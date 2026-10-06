@@ -223,6 +223,11 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize);
 size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter);
+// Builds the hierarchical sub-communicators and temp buffer. Collective: every
+// rank in comm must call it together.
+ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm);
+// Allocates the hierarchical temp buffer unless it exists. Local to the calling rank.
+ncclResult_t rcclReserveHierarchicalTempBuffer(struct ncclComm* comm);
 // Fills in algo/protocol/channels for a hierarchical AllGather or ReduceScatter.
 ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                                       int* algo, int* protocol, int* maxChannels);
@@ -293,6 +298,8 @@ RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 RCCL_PARAM_DECLARE(HierarchicalAllGather);
 // Hierarchical ReduceScatter enabled
 RCCL_PARAM_DECLARE(HierarchicalReduceScatter);
+// Hierarchical sub-communicators deferred to the first eligible AllGather
+RCCL_PARAM_DECLARE(HierarchicalLazyInit);
 // Pivot AlltoAll enabled (defined in collectives.cc)
 RCCL_PARAM_DECLARE(AlltoAllPivotEnable);
 #define HIERARCHICAL_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
@@ -381,6 +388,56 @@ inline int rcclComputeCheapPostSendFenceOff(int cudaArch, int64_t param, bool un
   // off for gfx950 (950) and everything else.
   if (cudaArch == 940 || cudaArch == 1250) return 0;
   return 1;
+}
+
+// gfx1250 SendRecv (ncclSend/ncclRecv only, not AlltoAll) LL128 caps for
+// NCCL_P2P_LL128_ENABLE=1 on 4 GPU/node. 0 means this communicator has no window
+// (ENABLE=1 then uses NCCL_P2P_LL128_THRESHOLD). Inclusive: [0, max].
+// nNodes is unused: MNNVL folds multi-host gfx1250 into one NVL domain (comm->nNodes=1
+// and comm->localRanks=nRanks), so localRanks cannot tell 4 GPU/node hosts apart from
+// CPX or 1 GPU/node. Callers pass different nNodes meanings (physical hosts in init,
+// NVL domains in enqueue); key off nRanks 4 / 8 / 16 instead.
+inline ssize_t rcclGfx1250SendRecvLl128MaxBytes(int cudaArch, int nNodes, int nRanks) {
+  if (cudaArch != 1250) return 0;
+  // MNNVL folds multi-host gfx1250 into nNodes=1 (one NVL domain). 4 GPU/node
+  // SendRecv windows are keyed off nRanks: 4 / 8 / 16.
+  (void)nNodes;
+  if (nRanks == 4) return 1 << 20;     // 1 host, 0 .. 1 MiB
+  if (nRanks == 8) return 512 << 10;   // 2 host, 0 .. 512 KiB
+  if (nRanks == 16) return 256 << 10;  // 4 host, 0 .. 256 KiB
+  return 0;
+}
+
+#ifndef NCCL_PROTO_LL
+#include "nccl_tuner.h"
+#endif
+
+// Protocol for one SendRecv dir when ENABLE=1 and a window exists. bytes < 0 is a
+// no-op dir. Missing LL128 staging (hasLL128=false) falls back to SIMPLE, not
+// legacy LL. hi <= 0 means no window (caller uses the threshold path).
+inline int rcclGfx1250SendRecvEnableProtocol(ssize_t bytes, ssize_t hi, bool hasLL128) {
+  if (bytes < 0 || hi <= 0) return NCCL_PROTO_SIMPLE;
+  if (bytes <= hi && hasLL128) return NCCL_PROTO_LL128;
+  return NCCL_PROTO_SIMPLE;
+}
+
+// One P2P kernel cannot mix LL and LL128 (ncclDevWorkP2p has no per-dir family).
+// SIMPLE + either latency proto is fine (sendProtoLL / recvProtoLL). ENABLE=1
+// windows are [0, cap], so mixed sizes under the cap are both LL128.
+inline bool rcclP2pLlFamilyMix(int proto0, int proto1) {
+  auto lat = [](int p) { return p == NCCL_PROTO_LL || p == NCCL_PROTO_LL128; };
+  return lat(proto0) && lat(proto1) && proto0 != proto1;
+}
+
+// NET LL128 staging. ENABLE=1 needs the buffers for internodal gfx1250 (any nRanks).
+// Default ENABLE=-1 does not use LL128, so it does not auto-allocate. ENABLE=0 never
+// auto-allocates. allocEnv==1 is the explicit NCCL_ALLOC_P2P_NET_LL_BUFFERS=1.
+inline int rcclAllocP2pNetLLBuffers(int cudaArch, int nNodes, int nRanks, int64_t enable, int64_t allocEnv) {
+  (void)nNodes;
+  (void)nRanks;
+  if (allocEnv == 1) return 1;
+  if (cudaArch == 1250 && enable > 0) return 1;
+  return 0;
 }
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);

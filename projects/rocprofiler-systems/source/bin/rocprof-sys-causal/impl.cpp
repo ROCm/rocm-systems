@@ -783,8 +783,9 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
         }
 
         _env.erase(
-            std::remove_if(_env.begin(), _env.end(),
-                           [&](const std::string& entry) { return _is_omni_cfg(entry); }),
+            std::ranges::remove_if(
+                _env, [&](const std::string& entry) { return _is_omni_cfg(entry); })
+                .begin(),
             _env.end());
 
         auto _omni_env = std::vector<std::pair<std::string, std::string>>{};

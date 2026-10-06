@@ -112,7 +112,7 @@ find_cache_files(const pid_t& root_pid, const data::directory_files_t& dir_conte
         }
     };
 
-    std::for_each(dir_contents.begin(), dir_contents.end(), parse_and_fill_cache);
+    std::ranges::for_each(dir_contents, parse_and_fill_cache);
     return cache_map;
 }
 

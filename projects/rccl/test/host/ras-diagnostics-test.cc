@@ -34,6 +34,18 @@
 #define rasDiagnosticsNvLinkSummarize DiagnosticsTestNvLinkSummarize
 #define rasDiagnosticsNcclEnvCollectLocal DiagnosticsTestNcclEnvCollectLocal
 #define rasDiagnosticsNcclEnvSummarize DiagnosticsTestNcclEnvSummarize
+#define rasDiagnosticsRdmaTopoCollectLocal DiagnosticsTestRdmaTopoCollectLocal
+#define rasDiagnosticsRdmaTopoSummarize DiagnosticsTestRdmaTopoSummarize
+#define rasDiagnosticsIommuCollectLocal DiagnosticsTestIommuCollectLocal
+#define rasDiagnosticsIommuSummarize DiagnosticsTestIommuSummarize
+#define rasDiagnosticsAtsCollectLocal DiagnosticsTestAtsCollectLocal
+#define rasDiagnosticsAtsSummarize DiagnosticsTestAtsSummarize
+#define rasDiagnosticsXidCollectLocal DiagnosticsTestXidCollectLocal
+#define rasDiagnosticsXidSummarize DiagnosticsTestXidSummarize
+#define rasDiagnosticsNvidiaDriverVersionCollectLocal DiagnosticsTestNvidiaDriverVersionCollectLocal
+#define rasDiagnosticsNvidiaDriverVersionSummarize DiagnosticsTestNvidiaDriverVersionSummarize
+#define rasDiagnosticsPathsCollectLocal DiagnosticsTestPathsCollectLocal
+#define rasDiagnosticsPathsSummarize DiagnosticsTestPathsSummarize
 
 #include "comm.h"
 #include "ras/diagnostics.h"
@@ -186,6 +198,13 @@ DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_CUDA_DRIVER_VERSION, rasDiagnosticsCudaDriverVe
 DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_ECC, rasDiagnosticsEccCollectLocal, rasDiagnosticsEccSummarize)
 DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_NVLINK, rasDiagnosticsNvLinkCollectLocal, rasDiagnosticsNvLinkSummarize)
 DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_NCCL_ENV, rasDiagnosticsNcclEnvCollectLocal, rasDiagnosticsNcclEnvSummarize)
+DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_RDMA_TOPO, rasDiagnosticsRdmaTopoCollectLocal, rasDiagnosticsRdmaTopoSummarize)
+DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_IOMMU_MODE, rasDiagnosticsIommuCollectLocal, rasDiagnosticsIommuSummarize)
+DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_ATS, rasDiagnosticsAtsCollectLocal, rasDiagnosticsAtsSummarize)
+DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_XID_SXID, rasDiagnosticsXidCollectLocal, rasDiagnosticsXidSummarize)
+DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_NVIDIA_DRIVER_VERSION, rasDiagnosticsNvidiaDriverVersionCollectLocal,
+                  rasDiagnosticsNvidiaDriverVersionSummarize)
+DEFINE_CHECK_FAKE(RAS_DIAG_CHECK_PATHS, rasDiagnosticsPathsCollectLocal, rasDiagnosticsPathsSummarize)
 
 #undef DEFINE_CHECK_FAKE
 
@@ -1121,6 +1140,22 @@ TEST_F(RasDiagnosticsMicrotest, GetCheck_CountSentinelReturnsInternalError) {
   EXPECT_EQ(sentinel, check);
 }
 
+TEST_F(RasDiagnosticsMicrotest, EveryRegisteredCheckDispatchesToItsOwnHooks) {
+  struct rasDiagnosticsContext ctx{};
+  auto reporter = MakeRecordingReporter();
+  for (int id = 0; id < RAS_DIAG_CHECK_COUNT; ++id) {
+    SCOPED_TRACE(id);
+    const struct rasDiagnosticsCheck* check = nullptr;
+    ASSERT_EQ(ncclSuccess, rasDiagnosticsGetCheck(static_cast<rasDiagnosticsCheckId>(id), &check));
+    ASSERT_NE(nullptr, check);
+    struct rasDiagnosticsLocalData data{};
+    ASSERT_EQ(ncclSuccess, check->collectLocal(&ctx, &data));
+    ASSERT_EQ(ncclSuccess, check->summarize(&ctx, &reporter, nullptr, 0));
+    EXPECT_EQ(1, g_checkHooks[id].collectLocalCalls);
+    EXPECT_EQ(1, g_checkHooks[id].summarizeCalls);
+  }
+}
+
 TEST_F(RasDiagnosticsMicrotest, Resume_CountSentinelReturnsInternalError) {
   auto reporter = MakeRecordingReporter();
   struct rasDiagnosticsContext ctx{};
@@ -1405,6 +1440,18 @@ TEST_F(RasDiagnosticsMicrotest, Start_SendFailureFreesStaleCollectiveAndCleansUp
   free(client);
 }
 
+#undef rasDiagnosticsPathsSummarize
+#undef rasDiagnosticsPathsCollectLocal
+#undef rasDiagnosticsNvidiaDriverVersionSummarize
+#undef rasDiagnosticsNvidiaDriverVersionCollectLocal
+#undef rasDiagnosticsXidSummarize
+#undef rasDiagnosticsXidCollectLocal
+#undef rasDiagnosticsAtsSummarize
+#undef rasDiagnosticsAtsCollectLocal
+#undef rasDiagnosticsIommuSummarize
+#undef rasDiagnosticsIommuCollectLocal
+#undef rasDiagnosticsRdmaTopoSummarize
+#undef rasDiagnosticsRdmaTopoCollectLocal
 #undef rasDiagnosticsNcclEnvSummarize
 #undef rasDiagnosticsNcclEnvCollectLocal
 #undef rasDiagnosticsNvLinkSummarize
