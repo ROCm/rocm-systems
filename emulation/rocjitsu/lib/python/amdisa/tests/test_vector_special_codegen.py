@@ -277,6 +277,23 @@ def test_frexp_simd_probes_use_the_shared_raw_operations():
         assert 'util::frexp' not in simd_probe_line(name)
 
 
+def test_ldexp_f16_simd_probes_use_the_shared_raw_operation():
+    operation = (
+        'amdgpu::ldexp::Operation<amdgpu::fp_format::F16>{amdgpu::ldexp::Policy::make('
+    )
+    vop2 = simd_probe_line('v_ldexp_f16_vop2')
+    # Every MODE takes the SIMD path; the helper rounds and saturates itself.
+    assert vop2 == f'  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, {operation}' + (
+        'wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl())});'
+    )
+    assert simd_probe_line('v_ldexp_f16_vop3').startswith(
+        f'  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP16({operation}'
+    )
+    assert simd_probe_line('v_ldexp_f16_vop3', true16_vop3=True).startswith(
+        f'  ROCJITSU_TRY_SIMD_VOP3_LDEXP_TRUE16_RAW_FP16({operation}'
+    )
+
+
 def test_vop3_f16_simd_probes_split_true16_from_generic():
     add_generic = simd_probe_line('v_add_f16_vop3')
     add_true16 = simd_probe_line('v_add_f16_vop3', true16_vop3=True)

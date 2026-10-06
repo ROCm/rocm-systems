@@ -2848,6 +2848,81 @@ std::vector<ArithmeticCase> frexp_cases() {
   return cases;
 }
 
+// V_LDEXP_F16 lanes from gfx1201. An exponent of 0x7fff overflows every finite
+// value; with MODE.FP16_OVFL (0x800000) the result saturates to the largest
+// finite half instead of infinity. The SIMD path once scaled through host F32
+// and returned infinity. The tininess lanes come from a hand-run gfx1201
+// probe, not the audit captures: 0x3bff * 2^-14 stays below the smallest
+// normal at full precision, so MODE 0x30 flushes it to zero although its
+// subnormal encoding rounds up to 0x0400, which MODE 0xc0 keeps.
+// The value and exponent occupy the selected halves of v0 and v1; their other
+// halves hold 0x5a5a, and the destination's other half keeps 0xa5a5.
+std::vector<ArithmeticCase> ldexp_f16_captured_cases() {
+  enum class Encoding { Vop2, Vop2High, Vop3, Vop3High };
+  struct Lane {
+    const char *name;
+    Encoding encoding;
+    rdna4::Vop3BuilderFields fields;
+    uint16_t value;
+    uint16_t exponent;
+    uint32_t mode;
+    uint16_t expected;
+  };
+  using enum Encoding;
+  const std::array<Lane, 14> lanes = {{
+      {"SaturatesPositiveOverflow", Vop2, {}, 0x0001u, 0x7fffu, 0x8000f0u, 0x7bffu},
+      {"PositiveOverflowWithoutSaturation", Vop2, {}, 0x0001u, 0x7fffu, 0xf0u, 0x7c00u},
+      {"SaturatesNegativeOverflow", Vop2, {}, 0x83ffu, 0x7fffu, 0x8000f0u, 0xfbffu},
+      {"SaturatesTowardZero", Vop2, {}, 0x83ffu, 0x7fffu, 0x8000ffu, 0xfbffu},
+      {"SaturatesOverflow", Vop3, {}, 0x3c00u, 0x7fffu, 0x8000f0u, 0x7bffu},
+      {"NegatedThenSaturated", Vop3, {.neg = 1}, 0x3c00u, 0x7fffu, 0x8000f0u, 0xfbffu},
+      {"SaturatedThenDoubled", Vop3, {.omod = 1}, 0x3c00u, 0x7fffu, 0x8000f0u, 0x7bffu},
+      {"SaturatesOverflow", Vop2High, {}, 0xbfd0u, 0x1d13u, 0x8000f0u, 0xfbffu},
+      {"SaturatesOverflow", Vop3High, {}, 0x096eu, 0x274eu, 0x8000f0u, 0x7bffu},
+      {"TinyAfterRoundingFlushed", Vop2, {}, 0x3bffu, 0xfff2u, 0x30u, 0x0000u},
+      {"TinyAfterRoundingKept", Vop2, {}, 0x3bffu, 0xfff2u, 0xc0u, 0x0400u},
+      {"TinyTowardZeroKept", Vop2, {}, 0x3bffu, 0xfff2u, 0xccu, 0x03ffu},
+      {"NegativeTinyFlushed", Vop3, {}, 0xbbffu, 0xfff2u, 0x30u, 0x8000u},
+      {"NegativeTinyTowardPositive", Vop3, {}, 0xbbffu, 0xfff2u, 0xc4u, 0x83ffu},
+  }};
+  static constexpr const char *kEncodingNames[] = {"Vop2", "Vop2High", "Vop3", "Vop3High"};
+  constexpr uint16_t V0 = 256, V1 = 257;
+  constexpr uint8_t kHighHalf = 128;
+  std::vector<ArithmeticCase> cases;
+  for (const Lane &lane : lanes) {
+    const bool high = lane.encoding == Vop2High || lane.encoding == Vop3High;
+    std::array<uint32_t, 3> words{};
+    if (lane.encoding == Vop2 || lane.encoding == Vop2High) {
+      const uint8_t half = high ? kHighHalf : 0;
+      const auto word = rdna4::build_vop2(
+          rdna4::kVLdexpF16Vop2,
+          {.src0 = uint16_t(V0 + half), .vsrc1 = uint8_t(1 + half), .vdst = uint8_t(6 + half)});
+      words = {word[0], 0u, 0u};
+    } else {
+      rdna4::Vop3BuilderFields fields = lane.fields;
+      fields.vdst = 6;
+      fields.src0 = V0;
+      fields.src1 = V1;
+      if (high)
+        fields.opsel = 0b1011; // both sources and the destination use the high half
+      const auto pair = rdna4::build_vop3(rdna4::kVLdexpF16Vop3, fields);
+      words = {pair[0], pair[1], 0u};
+    }
+    const auto place = [high](uint16_t half, uint32_t other) {
+      return high ? (uint32_t(half) << 16) | other : (other << 16) | half;
+    };
+    cases.push_back(
+        {std::string("LdexpF16") + kEncodingNames[static_cast<int>(lane.encoding)] + lane.name,
+         ROCJITSU_CODE_ARCH_RDNA4,
+         words,
+         {{0, place(lane.value, 0x5a5au)}, {1, place(lane.exponent, 0x5a5au)}, {6, 0xa5a5a5a5u}},
+         {{6, place(lane.expected, 0xa5a5u)}},
+         lane.mode,
+         FE_TONEAREST});
+  }
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2983,6 +3058,12 @@ INSTANTIATE_TEST_SUITE_P(Fract, ValuCapturedLaneTest, testing::ValuesIn(fract_ca
                          });
 
 INSTANTIATE_TEST_SUITE_P(Frexp, ValuCapturedLaneTest, testing::ValuesIn(frexp_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(LdexpF16, ValuCapturedLaneTest,
+                         testing::ValuesIn(ldexp_f16_captured_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
@@ -3277,9 +3358,9 @@ TEST(ValuFpModeHelpers, HostFlushControlsDoNotOverrideGpuMode) {
   const uint32_t result = std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(
       std::bit_cast<float>(1u), std::bit_cast<float>(1u), 0.0f, 0, 3));
   const uint32_t scaled32 =
-      std::bit_cast<uint32_t>(amdgpu::ldexp(std::bit_cast<float>(1u), 1, 1, 3));
+      std::bit_cast<uint32_t>(amdgpu::ldexp_float(std::bit_cast<float>(1u), 1, 1, 3));
   const uint64_t scaled64 =
-      std::bit_cast<uint64_t>(amdgpu::ldexp(std::bit_cast<double>(uint64_t{1}), 1, 1, 3));
+      std::bit_cast<uint64_t>(amdgpu::ldexp_float(std::bit_cast<double>(uint64_t{1}), 1, 1, 3));
   const uint32_t restored_mxcsr = _mm_getcsr();
   _mm_setcsr(saved_mxcsr);
   EXPECT_FALSE(native_matches);

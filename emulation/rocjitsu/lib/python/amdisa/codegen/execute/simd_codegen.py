@@ -28,7 +28,7 @@ excluded — those need their own helpers.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute import float_compare, float_minmax, float_unary
+from amdisa.codegen.execute import float_compare, float_ldexp, float_minmax, float_unary
 from amdisa.codegen.execute.floating_policy import (
     FLUSH_NEAREST_F32_OPS,
     ROUNDED_F16_OPS,
@@ -280,17 +280,8 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         '[](auto a, auto b) {'
         ' return util::f32_to_f16_simd(util::f16_to_f32_simd(a) * util::f16_to_f32_simd(b)); }',
     ),
-    # F16 LDEXP uses this fast path only for RNE with preserved denormals and
-    # a matching host environment; other MODE settings use the scalar helper.
-    'v_ldexp_f16_vop2': (
-        'uint32_t',
-        '[](auto a, auto b) {'
-        ' auto x = util::f16_to_f32_simd(a);'
-        ' auto n = util::stdx::static_simd_cast<'
-        'util::stdx::fixed_size_simd<int, util::native<float>::size()>>('
-        '(util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);'
-        ' return util::f32_to_f16_simd(util::stdx::ldexp(x, n)); }',
-    ),
+    # F16 LDEXP reads raw halves; see float_ldexp.simd_probe for VOP3.
+    'v_ldexp_f16_vop2': ('uint32_t', float_ldexp.simd_functor()),
 }
 
 # template_name -> (cpp_in_type, cpp_out_type, cpp_unary_op_functor)
@@ -2090,14 +2081,14 @@ SIMD_VOP3_FMAC_FP64 = {'v_fmac_f64_vop3'}
 SIMD_VOP3_LDEXP_FP32: dict[str, str] = {
     'v_ldexp_f32_vop3': (
         '[&wf](auto a, auto e) { return util::native<float>([&](auto i) {'
-        ' return amdgpu::ldexp(static_cast<float>(a[i]), static_cast<int32_t>(e[i]),'
+        ' return amdgpu::ldexp_float(static_cast<float>(a[i]), static_cast<int32_t>(e[i]),'
         ' wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32()); }); }'
     ),
 }
 SIMD_VOP3_LDEXP_FP64: dict[str, str] = {
     'v_ldexp_f64_vop3': (
         '[&wf](auto a, auto e) { return util::native<double>([&](auto i) {'
-        ' return amdgpu::ldexp(static_cast<double>(a[i]), static_cast<int32_t>(e[i]),'
+        ' return amdgpu::ldexp_float(static_cast<double>(a[i]), static_cast<int32_t>(e[i]),'
         ' wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); }); }'
     ),
 }
@@ -2538,7 +2529,6 @@ def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str |
         'mac',
         'madak',
         'madmk',
-        'ldexp',
     )
     fields = template_name.split('_')
     if (
@@ -2549,7 +2539,7 @@ def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str |
     ):
         return probe
     dtype = next((field for field in fields if field in ('f16', 'f32', 'f64')), None)
-    if dtype is None or (fields[1] == 'ldexp' and dtype != 'f16'):
+    if dtype is None:
         return probe
     if dtype == 'f32' and fields[1] in ('sub', 'subrev'):
         # Reuse the checked SIMD views and share MODE setup for ordinary
@@ -2609,6 +2599,9 @@ def _simd_probe_line(
     unary_probe = float_unary.simd_probe(template_name, true16_vop3)
     if unary_probe is not None:
         return unary_probe
+    ldexp_probe = float_ldexp.simd_probe(template_name, true16_vop3)
+    if ldexp_probe is not None:
+        return ldexp_probe
     if template_name in SIMD_PACKED_FLOAT:
         op, bf16 = SIMD_PACKED_FLOAT[template_name]
         return f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({op}, {str(bf16).lower()});'
@@ -2966,7 +2959,7 @@ def _simd_probe_line(
                         operation, modifiers=True, reverse=base == 'v_subrev_f32'
                     )
                 return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP({cpp_t}, {cpp_op});'
-            # f16 float binaries (v_add/sub/subrev/mul/max/min/ldexp_f16) are
+            # f16 float binaries (v_add/sub/subrev/mul/max/min) are
             # uint32-typed (the functor widens f16->f32 by hand), but their VOP3
             # twin applies abs/neg/omod/clamp around the f16<->f32 round trip (see
             # the generated scalar body). The plain integer VOP3 glue

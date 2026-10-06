@@ -922,6 +922,23 @@ class TestDeriveVectorUnary:
         assert 'inst_.omod' not in cpp and 'inst_.clamp' not in cpp
         assert 'f32_to_f16' not in cpp and 'std::frexp' not in cpp
 
+    def test_ldexp_f16_vop3_modifies_only_the_value(self):
+        sem = derive_semantics('V_LDEXP_F16', 'ENC_VOP3')
+        fields = frozenset({'abs', 'neg', 'clamp', 'omod'})
+        cpp = lower_sema_block(
+            enrich_block(derive_sema_block(sem), enc_field_names=fields)
+        )
+        assert 'amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(' in cpp
+        assert (
+            'amdgpu::floating_operation::SourceModifiers{inst_.abs & 1u, inst_.neg & 1u}'
+            in cpp
+        )
+        assert (
+            'amdgpu::output_modifier_policy<amdgpu::fp_format::F16>'
+            '(wf, inst_.omod, inst_.clamp)' in cpp
+        )
+        assert 'fp_mode::ldexp_f16' not in cpp
+
     @pytest.mark.parametrize(
         ('name', 'enc', 'op', 'scale'),
         [

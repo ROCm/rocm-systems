@@ -25,6 +25,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/frexp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ldexp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mixed_fma_simd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
@@ -737,10 +738,13 @@ inline auto flush_input_then(input_denormal::Policy policy, Op operation) {
 /// @brief Wrap a raw-bit operation with the instruction's source and output modifiers.
 /// @details Resolve MODE once, before the SIMD lane loop. The operation itself
 /// only needs to implement input flushing and produce destination-format bits.
+/// @param floating_sources Bit i set when source i is floating and takes ABS/NEG;
+/// LDEXP's integer exponent does not.
 template <typename Fmt, typename Inst, typename Op>
-inline auto vop3_float_operation(const Inst &inst, const Wavefront &wf, Op operation) {
+inline auto vop3_float_operation(const Inst &inst, const Wavefront &wf, Op operation,
+                                 uint32_t floating_sources = ~0u) {
   return floating_operation::WithModifiers<Fmt, Op>{
-      {inst.inst_.abs, inst.inst_.neg},
+      {inst.inst_.abs & floating_sources, inst.inst_.neg & floating_sources},
       output_modifier_policy<Fmt>(wf, inst.inst_.omod, inst.inst_.clamp),
       operation};
 }
@@ -5095,6 +5099,20 @@ template <bool Vop3, typename Inst>
           inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
   return
 #endif
+
+/// LDEXP_F16 on raw halves: ABS/NEG apply to the value, never to the exponent.
+#define ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP16(...)                                                 \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<false, uint32_t>(                       \
+          inst, wf,                                                                                \
+          ::rocjitsu::amdgpu::vop3_float_operation<::rocjitsu::amdgpu::fp_format::F16>(            \
+              inst, wf, __VA_ARGS__, 1u)))                                                         \
+  return
+#define ROCJITSU_TRY_SIMD_VOP3_LDEXP_TRUE16_RAW_FP16(...)                                          \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<true, uint32_t>(                        \
+          inst, wf,                                                                                \
+          ::rocjitsu::amdgpu::vop3_float_operation<::rocjitsu::amdgpu::fp_format::F16>(            \
+              inst, wf, __VA_ARGS__, 1u)))                                                         \
+  return
 
 /// Unary raw floating-point paths, with the same modifier wrapper as the binary ones.
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_RAW_FP(Fmt, ...)                                              \

@@ -16,6 +16,7 @@ from enum import Enum, auto
 
 from amdisa.codegen.execute import (
     float_compare,
+    float_ldexp,
     float_minmax,
     float_unary,
     vop3_modifiers,
@@ -640,13 +641,10 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         return f'std::pow({lhs}, {rhs})'
 
     if kind == SemaNodeKind.LDEXP:
+        if _is_ldexp_f16(node, ctx):
+            half = _ldexp_f16_result(node, ctx)
+            return f'util::f16_to_f32(static_cast<uint16_t>({half}))'
         exp = _lower_expr(node.children[1], ctx)
-        if ctx.exec_model == ExecModel.VECTOR and node.ty == SemaType.F16:
-            val = _flushed_f16_source(node.children[0], ctx)
-            return (
-                f'amdgpu::fp_mode::ldexp_f16({val}, {exp}, '
-                'wf.fp_denorm_mode_f16_f64())'
-            )
         val = _lower_expr(node.children[0], ctx)
         if ctx.exec_model == ExecModel.VECTOR and node.ty in (
             SemaType.F32,
@@ -654,7 +652,7 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         ):
             mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
             return (
-                f'amdgpu::ldexp({val}, {exp}, wf.fp_round_mode_{mode}(), '
+                f'amdgpu::ldexp_float({val}, {exp}, wf.fp_round_mode_{mode}(), '
                 f'wf.fp_denorm_mode_{mode}())'
             )
         return f'std::ldexp({val}, {exp})'
@@ -1156,6 +1154,15 @@ def _lower_dst_write(
         needs_bitcast = 0
     elif _is_float_unary(selection_node):
         _, rhs = _float_unary_result(
+            selection_node,
+            ctx,
+            output_fields if selection_node is not rhs_node else None,
+            destination=True,
+        )
+        needs_bitcast = 0
+    elif _is_ldexp_f16(selection_node, ctx):
+        writes_bits = True
+        rhs = _ldexp_f16_result(
             selection_node,
             ctx,
             output_fields if selection_node is not rhs_node else None,
@@ -2211,7 +2218,7 @@ def _input_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
 def _flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> str:
     """Return an F16 helper operand, flushed by MODE before it is widened.
 
-    The F16 arithmetic, LDEXP, conversion and transcendental helpers expect
+    The F16 arithmetic, conversion and transcendental helpers expect
     their sources already input-flushed; see _input_flushed_source.
     """
     if (source := _input_flushed_source(node, ctx)) is None:
@@ -2392,6 +2399,64 @@ def _float_unary_result(
     return dtype, float_unary.unary_expr(
         form, dtype, reads[0], modifiers=modifiers, output_policy=output_policy
     )
+
+
+def _is_ldexp_f16(node: SemaNode, ctx: LoweringContext) -> bool:
+    return (
+        node.kind == SemaNodeKind.LDEXP
+        and node.ty == SemaType.F16
+        and ctx.exec_model == ExecModel.VECTOR
+    )
+
+
+def _register_read(node: SemaNode, ctx: LoweringContext) -> tuple[str, bool, bool]:
+    """Return (raw register read, has ABS, has NEG) through casts and apply_src_mod."""
+    has_abs = has_neg = False
+    while True:
+        if node.kind == SemaNodeKind.CALL and node.call_name == 'apply_src_mod':
+            has_neg |= node.children[3].lit_value == '1'
+            has_abs |= node.children[4].lit_value == '1'
+            node = node.children[1]
+        elif node.kind == SemaNodeKind.CAST:
+            node = node.children[0]
+        else:
+            break
+    if node.kind != SemaNodeKind.INSTOPERAND:
+        raise ValueError(f'unexpected LDEXP source: {node}')
+    return _lower_expr(node, ctx), has_abs, has_neg
+
+
+def _ldexp_f16_result(
+    node: SemaNode,
+    ctx: LoweringContext,
+    output_fields: tuple[str, str] | None = None,
+    destination: bool = False,
+) -> str:
+    """Return the half bits of V_LDEXP_F16 from raw value and exponent reads.
+
+    ABS/NEG apply to the value only. VOP3 forms pass their (OMOD, CLAMP)
+    fields; VOP2 destination writes take SDWA OMOD, as F16 unary results do.
+    """
+    value, has_abs, has_neg = _register_read(node.children[0], ctx)
+    exponent, _, _ = _register_read(node.children[1], ctx)
+    declaration = float_ldexp.policy_decl()
+    if declaration not in ctx.vector_preamble:
+        ctx.vector_preamble.append(declaration)
+    modifiers = None
+    if has_abs or has_neg:
+        modifiers = (
+            'inst_.abs & 1u' if has_abs else '0u',
+            'inst_.neg & 1u' if has_neg else '0u',
+        )
+    if output_fields is None and destination:
+        output_fields = (_SDWA_F16_OMOD, '0u')
+    output_policy = None
+    if output_fields is not None:
+        declaration = vop3_modifiers.output_policy_decl('f16', output_fields)
+        if declaration not in ctx.vector_preamble:
+            ctx.vector_preamble.append(declaration)
+        output_policy = vop3_modifiers.OUTPUT_POLICY
+    return float_ldexp.ldexp_expr(value, exponent, modifiers, output_policy)
 
 
 def _lower_float_unary(node: SemaNode, ctx: LoweringContext) -> str:

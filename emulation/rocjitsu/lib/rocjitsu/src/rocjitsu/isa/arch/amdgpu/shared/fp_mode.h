@@ -1136,9 +1136,10 @@ inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
   return util::f32_to_f16_mode(value, fp16_ovfl);
 }
 
-/// @brief Scale by an integer power of two with explicit guest rounding and flushing.
+/// @brief Scale an F32 or F64 value by an integer power of two with explicit
+/// guest rounding and flushing. V_LDEXP_F16 uses ldexp.h on raw halves.
 template <typename Float>
-inline Float ldexp(Float value, int32_t adjustment, uint32_t rounding, uint32_t denorm) {
+inline Float ldexp_float(Float value, int32_t adjustment, uint32_t rounding, uint32_t denorm) {
   using Format = DivisionFormat<Float>;
   using Bits = typename Format::Bits;
   const Bits bits = std::bit_cast<Bits>(value);

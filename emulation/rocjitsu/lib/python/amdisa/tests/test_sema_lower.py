@@ -792,7 +792,7 @@ class TestLowerVectorAdd:
         if result_type == SemaType.F16:
             assert result.index('util::f16_to_f32(') < result.index(flush)
 
-    @pytest.mark.parametrize('operation', ['add', 'rcp', 'ldexp'])
+    @pytest.mark.parametrize('operation', ['add', 'rcp'])
     def test_f16_helpers_receive_flushed_sources(self, operation: str):
         source = _cast(_src(0), SemaType.F16)
         if operation == 'add':
@@ -800,12 +800,6 @@ class TestLowerVectorAdd:
                 SemaNodeKind.ADD,
                 ty=SemaType.F16,
                 children=(source, _cast(_src(1), SemaType.F16)),
-            )
-        elif operation == 'ldexp':
-            value = SemaNode(
-                SemaNodeKind.LDEXP,
-                ty=SemaType.F16,
-                children=(source, _cast(_src(1), SemaType.I32)),
             )
         else:
             value = SemaNode(
@@ -823,6 +817,31 @@ class TestLowerVectorAdd:
         flushes = result.count('input_denormal::flush_input<amdgpu::fp_format::F16>(')
         assert flushes == (2 if operation == 'add' else 1)
         assert 'Policy::make(wf.fp_denorm_mode_f16_f64())' in result
+
+    def test_ldexp_f16_scales_raw_halves_in_the_shared_helper(self):
+        exponent = _cast(_cast(_src(1), SemaType('I', 16)), SemaType.I32)
+        value = SemaNode(
+            SemaNodeKind.LDEXP,
+            ty=SemaType.F16,
+            children=(_cast(_src(0), SemaType.F16), exponent),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN, children=(_cast(_dst(0), SemaType.F16), value)
+        )
+        result = lower_sema_block(SemaBlock('V_LDEXP_F16', ExecModel.VECTOR, body))
+
+        policy = (
+            'amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(), '
+            'wf.fp_round_mode_f16_f64(), wf.fp16_ovfl())'
+        )
+        assert f'const auto ldexp_policy = {policy};' in result
+        assert (
+            'amdgpu::ldexp::Operation<amdgpu::fp_format::F16>{ldexp_policy}' in result
+        )
+        # The helper flushes the value itself and never the exponent; it also
+        # rounds, so no host F16 narrowing remains.
+        assert 'input_denormal' not in result
+        assert 'finish_arithmetic_f16' not in result and 'f16_to_f32' not in result
 
     def test_scalar_alu_rounding_keeps_unflushed_source(self):
         body = SemaNode(
