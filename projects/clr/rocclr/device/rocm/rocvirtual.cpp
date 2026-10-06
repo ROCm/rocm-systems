@@ -5048,26 +5048,31 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       uint8_t percent;
 
       const int requestedPercent = devKernel->workGroupInfo()->groupMemCarveout_;
-
-      switch (devKernel->workGroupInfo()->coarseMemCarveout_) {
-      case 0:
-        // Signed storage preserves -1 (device default) and explicit 0; cast only resolved 0..100.
-        percent = requestedPercent >= 0 ?
+      // Signed storage preserves -1 (device default) and explicit 0; cast only resolved 0..100.
+      percent = requestedPercent >= 0 ?
                     static_cast<uint8_t>(requestedPercent) :
                     dev().GetGroupMemCarveout();
-        break;
-      case 1: // hipFuncCachePreferShared
-        percent = 100;
-        break;
-      case 2: // hipFuncCachePreferL1
-        percent = 1;
-        break;
-      case 3: // hipFuncCachePreferEqual
-        percent = 50;
-        break;
-      default:
-        assert(false && "Unexpected hipFuncCache_t value");
-        percent = 0;
+
+      if (!devKernel->workGroupInfo()->hasFuncPreferredShmemCarveout_) {
+        // hipFuncSetCacheConfig() has priority (regardless of being called before of after this
+        // function), so only use the coarse carveout if the former was not called
+        switch (devKernel->workGroupInfo()->coarseMemCarveout_) {
+        case 0:
+          // hipFuncCachePreferNone; the coarse setting is "off"
+          break;
+        case 1: // hipFuncCachePreferShared
+          percent = 100;
+          break;
+        case 2: // hipFuncCachePreferL1
+          percent = 1;
+          break;
+        case 3: // hipFuncCachePreferEqual
+          percent = 50;
+          break;
+        default:
+          assert(false && "Unexpected hipFuncCache_t value");
+          percent = 0;
+        }
       }
 
       auto& dispatchPacketExt = dispatchPacketUnion.extKernelDispatch;
