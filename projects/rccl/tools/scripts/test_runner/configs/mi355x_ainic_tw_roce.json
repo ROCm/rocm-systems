@@ -243,7 +243,7 @@
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
         "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1"
       },
-      "description": "A20: open finding, nightly only. Ten blocking messages on a connection the recovery thread has restored must not leave the two ranks a message apart. This suite is omitted from the smoke subset used by label-gated PR runs, so until the plugin side is fixed it is expected to fail only some nightly runs, where a reader can act on it.",
+      "description": "A20: open finding, nightly-only canary. Ten blocking messages on a recovered connection must not leave the ranks a message apart. It is omitted from label-gated PR smoke; a failure on the scheduled run is intentionally reported as a real nightly failure until the plugin issue is fixed.",
       "tests": [
         {
           "name": "A20_Cast_PostRecoveryPingPongHoldsSync",

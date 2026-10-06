@@ -1422,7 +1422,7 @@
       "tests": [
         {
           "name": "FaultInj_MultiThread_PostRecoveryPingPongHoldsSync",
-          "description": "Ten blocking messages on a recovered connection must not leave the two ranks a message apart (open finding, expected to fail some runs)",
+          "description": "Open finding: ten blocking messages on a recovered connection must not leave the ranks a message apart; disabled in this generic plan",
           "test_filter": "NetIbMPITest.PostRecoveryPingPongHoldsSync"
         }
       ]

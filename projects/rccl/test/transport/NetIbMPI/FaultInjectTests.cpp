@@ -122,12 +122,14 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
                     return result;
                 }
                 if (!outcome.retired) {
-                    // Unseen work may still touch this memory: never freed, but the MR goes so the PD can close.
+                    // Completion was not observed: retain both buffer and MR until this isolated test process exits.
+                    mhandleGuard.release();
                     bufferGuard.release();
+                    g_workerRetainedResources.fetch_add(1, std::memory_order_relaxed);
                     if (!outcome.quiesced) {
                         result.ok = false;
                         result.msg = "the injected-fault send left work on queue pairs that could not all be "
-                                     "driven to error, so its buffer is kept";
+                                     "driven to error, so its buffer and registration are retained";
                         return result;
                     }
                 }
@@ -746,12 +748,14 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
                         return result;
                     }
                     if (!outcome.retired) {
-                        // Unseen work may still touch this memory: never freed, but the MR goes so the PD can close.
+                        // Completion was not observed: retain both buffer and MR until this isolated test process exits.
+                        faultedGuard.release();
                         bufferGuard.release();
+                        g_workerRetainedResources.fetch_add(1, std::memory_order_relaxed);
                         if (!outcome.quiesced) {
                             result.ok = false;
                             result.msg = "the injected-fault send left work on queue pairs that could not all be "
-                                         "driven to error, so its buffer is kept";
+                                         "driven to error, so its buffer and registration are retained";
                             return result;
                         }
                     }
@@ -4021,12 +4025,14 @@ TEST_F(NetIbMPITest, FaultIsolationAcrossWorkers) {
                     return result;
                 }
                 if (!outcome.retired) {
-                    // Unseen work may still touch this memory: never freed, but the MR goes so the PD can close.
+                    // Completion was not observed: retain both buffer and MR until this isolated test process exits.
+                    mhandleGuard.release();
                     bufferGuard.release();
+                    g_workerRetainedResources.fetch_add(1, std::memory_order_relaxed);
                     if (!outcome.quiesced) {
                         result.ok = false;
                         result.msg = "the injected-fault send left work on queue pairs that could not all be "
-                                     "driven to error, so its buffer is kept";
+                                     "driven to error, so its buffer and registration are retained";
                         return result;
                     }
                 }

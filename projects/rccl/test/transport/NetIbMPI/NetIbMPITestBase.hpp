@@ -192,6 +192,10 @@ struct NetMHandleDeleter {
 // GTest-parallel runner, or a body that abandons a worker on timeout), this
 // counter becomes wrong, not merely imprecise.
 inline std::atomic<int> g_workerDeregFailures{0};
+// A worker that cannot observe request completion keeps its buffer and MR alive
+// until this isolated test process exits. The main-thread resource check needs
+// to distinguish those deliberate holds from a teardown leak.
+inline std::atomic<int> g_workerRetainedResources{0};
 
 // Worker threads must not invoke TEST_INFO or any helper that can call MPI.
 // This deleter is used only by the threaded test bodies.
@@ -2758,6 +2762,7 @@ protected:
         std::vector<ThreadResult> initResults(nSlots);
 
         g_workerDeregFailures.store(0, std::memory_order_relaxed);
+        g_workerRetainedResources.store(0, std::memory_order_relaxed);
 
         for (int slot = 0; slot < nSlots; ++slot) {
             if (InitNetIbCtx(&connections[slot].ctx) != ncclSuccess
@@ -2845,7 +2850,33 @@ protected:
         const RdmaResourceCounts before = CaptureRdmaResources();
         RunMultiThreadedIndependent(policy, nThreads, std::move(body));
         MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), label);
+        const RdmaResourceCounts after = CaptureRdmaResources();
+        const int localRetainedResources =
+            g_workerRetainedResources.load(std::memory_order_relaxed);
+        int retainedResources = 0;
+        if (MPI_Allreduce(&localRetainedResources, &retainedResources, 1, MPI_INT, MPI_SUM,
+                          MPI_COMM_WORLD)
+            != MPI_SUCCESS) {
+            ADD_FAILURE() << "MPI_Allreduce of retained worker resources failed for " << label;
+            return;
+        }
+        if (retainedResources == 0) {
+            AssertNoRdmaLeaks(before, after, label);
+            return;
+        }
+        // QPs and CQs must still be cleaned up. An uncompleted request retains
+        // its MR and protection domain deliberately until the isolated process
+        // exits, so checking those two categories as leaks would be misleading.
+        const int rank = MPIEnvironment::world_rank;
+        EXPECT_EQ(after.qp, before.qp)
+            << label << " QP leak on rank " << rank
+            << ": before=" << before.qp << " after=" << after.qp;
+        EXPECT_EQ(after.cq, before.cq)
+            << label << " CQ leak on rank " << rank
+            << ": before=" << before.cq << " after=" << after.cq;
+        TEST_INFO("%s intentionally retained %d uncompleted worker request resource(s); "
+                  "their buffers and MRs live until this isolated test process exits",
+                  label, retainedResources);
     }
 
     void RunThreadedBody(int dev, int nThreads, const char* label,
