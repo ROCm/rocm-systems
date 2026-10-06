@@ -2698,10 +2698,12 @@ TEST_F(InitMicrotest, InitTransportsRank_HipOverlayMloPart0Fn0_LeavesHasMloPartU
 // takes the communicator so the production call site cannot transpose cuMemGdrSupport and
 // hasMloPart; the fields below are the only ones it reads.
 
-static ncclComm GinGateComm(bool cuMemGdrSupport, bool hasMloPart) {
-  ncclComm c = {};
-  c.cuMemGdrSupport = cuMemGdrSupport;
-  c.hasMloPart = hasMloPart;
+// Heap-allocated: ncclComm's copy is deleted, and one value is already ~3.7 MiB, so two
+// locals in the veto case below blow an 8 MiB stack. Same shape as FreshComm.
+static std::unique_ptr<ncclComm> GinGateComm(bool cuMemGdrSupport, bool hasMloPart) {
+  auto c = std::make_unique<ncclComm>();
+  c->cuMemGdrSupport = cuMemGdrSupport;
+  c->hasMloPart = hasMloPart;
   return c;
 }
 
@@ -2709,38 +2711,38 @@ static ncclComm GinGateComm(bool cuMemGdrSupport, bool hasMloPart) {
 // every partitioned rank loses GIN.
 TEST_F(InitMicrotest, GinGate_PartitionedCommWithMloPartDisabled_RefusesGin) {
   SetParams({{"GIN_MLOPART", 0}});
-  ncclComm c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true);
-  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/UINT64_MAX, &c));
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true);
+  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/UINT64_MAX, c.get()));
 }
 
 // The fix: the parameter readmits them.
 TEST_F(InitMicrotest, GinGate_PartitionedCommWithMloPartEnabled_AllowsGin) {
   SetParams({{"GIN_MLOPART", 1}});
-  ncclComm c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true);
-  EXPECT_TRUE(ginGateAllows(UINT64_MAX, &c));
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
 }
 
 // The parameter governs partitioned communicators only. An unpartitioned one keeps GIN even with
 // the parameter off, so a regression that widened the carve-out would show up here.
 TEST_F(InitMicrotest, GinGate_UnpartitionedCommIgnoresMloPartParam) {
   SetParams({{"GIN_MLOPART", 0}});
-  ncclComm c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false);
-  EXPECT_TRUE(ginGateAllows(UINT64_MAX, &c));
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
 }
 
 // Pins the default to 1: no override installed, so the gate must admit a partition.
 TEST_F(InitMicrotest, GinGate_MloPartParamDefaultsToAllowingPartitions) {
-  ncclComm c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true);
-  EXPECT_TRUE(ginGateAllows(UINT64_MAX, &c));
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
 }
 
 // The other two terms still veto, with the parameter on, so the carve-out did not swallow them.
 TEST_F(InitMicrotest, GinGate_NoSupportedGinTypeOrNoCuMemGdr_RefusesGin) {
   SetParams({{"GIN_MLOPART", 1}});
-  ncclComm noType = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false);
-  ncclComm noGdr = GinGateComm(/*cuMemGdrSupport=*/false, /*hasMloPart=*/false);
-  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/0, &noType));
-  EXPECT_FALSE(ginGateAllows(UINT64_MAX, &noGdr));
+  auto noType = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false);
+  auto noGdr = GinGateComm(/*cuMemGdrSupport=*/false, /*hasMloPart=*/false);
+  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/0, noType.get()));
+  EXPECT_FALSE(ginGateAllows(UINT64_MAX, noGdr.get()));
 }
 
 // NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are

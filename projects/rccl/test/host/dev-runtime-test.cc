@@ -3746,17 +3746,19 @@ protected:
   // address-range hook and the proxy-fd behaviour differ between the happy path
   // and the peer-import failure case; a seam added to the import path later
   // lands here once. ScopedHook is immovable, so this is a local aggregate
-  // constructed in place rather than returned from a factory.
+  // constructed in place rather than returned from a factory. Members spell the
+  // signature: CTAD is not allowed on a non-static data member.
   struct CuMemImportBaseline {
-    ScopedHook cuMem;
-    ScopedHook retain;
-    ScopedHook release;
-    ScopedHook gather;
-    ScopedHook granularity;
-    ScopedHook import;
-    ScopedHook reserve;
-    ScopedHook map;
-    ScopedHook setAccess;
+    ScopedHook<int()> cuMem;
+    ScopedHook<hipError_t(hipMemGenericAllocationHandle_t*, void*)> retain;
+    ScopedHook<hipError_t(hipMemGenericAllocationHandle_t)> release;
+    ScopedHook<ncclResult_t(void*, int*, int, int, void*, int)> gather;
+    ScopedHook<hipError_t(size_t*, const hipMemAllocationProp*, hipMemAllocationGranularity_flags)>
+        granularity;
+    ScopedHook<hipError_t(hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType)> import;
+    ScopedHook<hipError_t(void**, size_t, size_t, void*, unsigned long long)> reserve;
+    ScopedHook<hipError_t(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long)> map;
+    ScopedHook<hipError_t(void*, size_t, const hipMemAccessDesc*, size_t)> setAccess;
 
     CuMemImportBaseline(hipMemGenericAllocationHandle_t retained, void* peerBase,
                         std::function<ncclResult_t(void*, int*, int, int, void*, int)> gatherFn)
@@ -3882,6 +3884,59 @@ TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
     EXPECT_EQ(::close(fd), -1);
     EXPECT_EQ(errno, EBADF);
   }
+}
+
+// Branch: retain failing is how a plain hipMalloc buffer leaves the cuMem arm
+// under NCCL_CUMEM_ENABLE=1. CuMemImportBaseline's retain always succeeds, so
+// deleting the `== CUDA_SUCCESS` check on cuMemRetainAllocationHandle would
+// still leave that suite green and publish isCuMem with a zero handle. hipErrorInvalidValue
+// is nonzero, so that deletion takes the success arm; this case must stay on
+// legacy IPC and publish isCuMem == 0.
+TEST_F(WindowRegisterNonSymCuMemTest, RetainFails_FallsBackToLegacyIpc) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(8192));
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) {
+    return hipErrorInvalidValue;
+  });
+  ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) {
+                      ADD_FAILURE() << "a failed retain must not import peers as cuMem";
+                      return hipErrorInvalidValue;
+                    });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [this](void*, int*, int self, int size, void* buf, int) {
+                      auto* e = static_cast<ExchangeEntry*>(buf);
+                      publishedSelf = e[self];
+                      capturedSelf = true;
+                      for (int r = 0; r < size; r++) {
+                        e[r].hostHash = (r == self) ? peers[0].hostHash : 500 + r;
+                        e[r].pidHash = (r == self) ? peers[0].pidHash : 600 + r;
+                        e[r].userOffset = 0;
+                        e[r].userSize = 4096;
+                        e[r].allocSize = 8192;
+                        e[r].isCuMem = 0;
+                      }
+                      return ncclSuccess;
+                    });
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    if (ptr) *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  ASSERT_TRUE(capturedSelf);
+  EXPECT_EQ(retain.calls, 1);
+  EXPECT_EQ(ipcGet.calls, 1);
+  EXPECT_EQ(import.calls, 0);
+  EXPECT_EQ(publishedSelf.isCuMem, 0);
+
+  ncclDevrWindow* win = comm->devrState.winSorted[0].win;
+  ASSERT_EQ(win->ipcPeerCount, 3);
+  EXPECT_EQ(win->ipcPeerIsCuMem[1], 0);
+  EXPECT_EQ(win->ipcPeerIsCuMem[2], 0);
+  EXPECT_EQ(open.calls, 2);
 }
 
 // Branch: a cuMem peer is already mapped when a later one fails, so cleanup has
