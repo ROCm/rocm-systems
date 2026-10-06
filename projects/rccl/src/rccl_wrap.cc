@@ -834,7 +834,7 @@ inline size_t rcclCeRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) 
   const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArMinMsgBytes() : rcclParamCeCollMinBytes();
   if (param >= 0) return (size_t)param;
   if (table == nullptr) return 0;
-  return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
+  return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceRegMin[(size_t)func] : 0;
 }
 
 inline size_t rcclCeNonRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) {

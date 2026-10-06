@@ -57,6 +57,11 @@ struct rcclArchThresholds {
   size_t ceNonRegMin[RCCL_DDA_FUNC_COUNT];
   size_t ceNonRegMax[RCCL_DDA_FUNC_COUNT];
 
+  // CE registered-window lower bound per collective, total bytes.
+  // CE-registered fires when ceRegMin[func] <= totalBytes <= ceRegMax[func].
+  // 0 means no lower bound. Independent of ceNonRegMin (the non-registered / scratch path).
+  size_t ceRegMin[RCCL_DDA_FUNC_COUNT];
+
   // CE registered-window upper bound per collective, total bytes.
   // For AllReduce: registered CE copies through user symmetric windows (tuning cap only).
   // For AllGather: upper bound for CE-registered (R=2). 0 means no upper bound.

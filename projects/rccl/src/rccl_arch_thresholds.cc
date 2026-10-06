@@ -117,6 +117,19 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [7] Recv            -- not used
     0,                    // [8] AlltoAll        -- not used
   },
+  // ceRegMin: registered CE lower bound per collective (-R 2). 0 = no lower bound.
+  // Independent of ceNonRegMin (the non-registered / staging path).
+  .ceRegMin = {
+    0,                             // [0] Broadcast      -- not used
+    0,                             // [1] Reduce          -- not used
+    0,                             // [2] AllGather
+    0,                             // [3] ReduceScatter   -- not used
+    0,                             // [4] AllReduce
+    0,                             // [5] SendRecv        -- not used
+    0,                             // [6] Send            -- not used
+    0,                             // [7] Recv            -- not used
+    0,                             // [8] AlltoAll        -- not used
+  },
   // ceRegMax: registered CE upper bound per collective (-R 2).
   .ceRegMax = {
     0,                             // [0] Broadcast      -- not used
@@ -258,6 +271,19 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     0,                    // [7] Recv            -- not used
     0,                    // [8] AlltoAll        -- not used
   },
+  // ceRegMin: registered CE lower bound per collective. 0 = no lower bound.
+  // Independent of ceNonRegMin (the non-registered / staging path).
+  .ceRegMin = {
+    0,                    // [0] Broadcast      -- not used
+    0,                    // [1] Reduce          -- not used
+    0,                    // [2] AllGather
+    0,                    // [3] ReduceScatter   -- not used
+    0,                    // [4] AllReduce
+    0,                    // [5] SendRecv        -- not used
+    0,                    // [6] Send            -- not used
+    0,                    // [7] Recv            -- not used
+    0,                    // [8] AlltoAll        -- not used
+  },
   // ceRegMax: registered CE upper bound per collective. kThreshUnlimited = no cap
   // (CE fires for any size when CTAPolicy_ZERO and ceAvailable). 0 = disabled.
   .ceRegMax = {
@@ -389,6 +415,19 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
     0,                    // [2] AllGather       -- 0 = disabled
     0,                    // [3] ReduceScatter   -- not used
     256ULL*1024*1024,     // [4] AllReduce
+    0,                    // [5] SendRecv        -- not used
+    0,                    // [6] Send            -- not used
+    0,                    // [7] Recv            -- not used
+    0,                    // [8] AlltoAll        -- not used
+  },
+  // ceRegMin: registered CE lower bound per collective. 0 = no lower bound.
+  // Independent of ceNonRegMin (the non-registered / staging path).
+  .ceRegMin = {
+    0,                    // [0] Broadcast      -- not used
+    0,                    // [1] Reduce          -- not used
+    0,                    // [2] AllGather
+    0,                    // [3] ReduceScatter   -- not used
+    0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
