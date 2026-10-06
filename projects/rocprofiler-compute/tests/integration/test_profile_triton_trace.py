@@ -70,3 +70,21 @@ def test_triton_trace_profile_csvs(triton_trace_profiled_workload):
                 functions.append(row["Function"])
     assert any("|triton" in fn for fn in functions)
     assert any("triton.JITFunction.matmul_kernel" in fn for fn in functions)
+
+
+@pytest.mark.triton_trace
+def test_list_triton_operators_prints_call_tree(
+    triton_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-triton-operators",
+        "--path",
+        triton_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Triton Operator Call Tree:" in out
+    assert "triton.JITFunction.matmul_kernel" in out
