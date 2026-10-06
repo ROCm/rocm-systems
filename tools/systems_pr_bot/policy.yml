@@ -158,7 +158,7 @@ checks:
         - 'runtimes/**'
         - '.github/workflows/runtimes-formatting.yml'
         - '.pre-commit-config.yaml'
-    - name: pre-commit / rocjitsu
+    - name: pre-commit
       paths:
         - 'emulation/mirage/**'
         - 'emulation/rocjitsu/**'

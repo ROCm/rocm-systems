@@ -196,7 +196,7 @@ ______________________________________________________________________
 **What does it check?**
 The bot requires the formatting workflows selected by the PR's changed paths
 and target branch. Each workflow publishes a distinct check name:
-`pre-commit / runtimes`, `pre-commit / rocjitsu`, `pre-commit / cuid`, or
+`pre-commit / runtimes`, `pre-commit` (RocJITsu), `pre-commit / cuid`, or
 `pre-commit / rocprofiler-compute`. A PR touching several scopes must pass every
 applicable check, including checks that have not appeared yet when polling starts.
 
@@ -303,8 +303,17 @@ query code-scanning alerts.
 
 **The bot timed out — what do I do?**
 
-If `pre-commit` or CodeQL takes longer than 15 minutes, the bot times out.
-Push an empty commit to re-trigger the workflow or close and reopen PR:
+The bot times out after 15 minutes if an expected check is missing or still
+running. Compare the required names in the PR's **base-commit**
+`tools/systems_pr_bot/policy.yml` with the checks reported on the PR head. The
+privileged bot executes that trusted base policy; policy changes in the PR
+take effect only after merge. A renamed check cannot satisfy its old name,
+even when it has passed. RocJITsu retains the `pre-commit` name so the base
+policy can still find it while the other workflows gain distinct names.
+
+For a missing check, inspect its name and the workflow's path and branch
+filters. For a running check, inspect its job for queued runners or stalled
+steps. Once the cause is resolved, push a commit to trigger a fresh policy run:
 
 ```bash
 git commit --allow-empty -m "ci: retrigger policy check"
