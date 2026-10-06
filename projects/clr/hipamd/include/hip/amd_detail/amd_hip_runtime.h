@@ -141,7 +141,19 @@ extern int HIP_TRACE_API;
 #endif /* Device feature flags */
 
 
+// clang < 24 accepts launch_bounds (so __has_attribute is true) but ignores it for AMD targets.
+#if __clang_major__ >= 24
 #define __launch_bounds__(...) __attribute__((launch_bounds(__VA_ARGS__)))
+#else
+#define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                            \
+  __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
+#define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)                \
+  __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock),                       \
+                 amdgpu_waves_per_eu(minBlocksPerMultiprocessor)))
+#define select_impl_(_1, _2, impl_, ...) impl_
+#define __launch_bounds__(...)                                                                     \
+  select_impl_(__VA_ARGS__, launch_bounds_impl1, launch_bounds_impl0, )(__VA_ARGS__)
+#endif
 
 #if !defined(__HIPCC_RTC__)
 __host__ inline void* __get_dynamicgroupbaseptr() { return nullptr; }
