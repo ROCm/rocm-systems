@@ -748,7 +748,9 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
                             ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
                             break;
                         }
-                        ParseSeiMessage(sei_rbsp_buf_, rbsp_size_);
+                        if (ParseSeiMessage(sei_rbsp_buf_, rbsp_size_) != PARSER_OK) {
+                            ErrorLog(g_rocdec_logger, "Error in SEI message parsing. Remaining SEI messages in this NAL unit are skipped.");
+                        }
                     }
                     break;
                 }
