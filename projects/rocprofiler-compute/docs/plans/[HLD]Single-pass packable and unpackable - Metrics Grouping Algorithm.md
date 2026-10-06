@@ -58,6 +58,26 @@ flowchart TD
   S4 --> S1
 ```
 
+### Sample walk-through
+
+Same toy as the legacy heuristic. Profile PMCs: `A B C D E F`. **3 counters per bucket.**
+
+Packable unions:
+
+- HBM-like = `{A, B}`
+- M1 = `{C, D, E}`
+- M2 = `{A, F}`
+- M3 = `{B, D}`
+
+Visit order: largest unions first (M1, then HBM-like, M2, M3).
+
+1. **M1 = `{C, D, E}`** — open bucket0 = `{C, D, E}`.
+2. **HBM-like = `{A, B}`** — open bucket1 = `{A, B}`.
+3. **M2 = `{A, F}`** — extend bucket1 → `{A, B, F}`.
+4. **M3 = `{B, D}`** — B and D live in different buckets; cannot merge without breaking M1/M2 → open bucket2 = `{B, D}` (B duplicated in bucket1 and bucket2).
+5. **First-fit / merge** — all packable PMCs placed.
+6. **SPU residual fill** — if an SPU metric only needs PMCs already in these buckets → +0 passes (gfx942 case). Only missing PMCs open new buckets.
+
 ---
 
 ## 3. TCC series affinity + coverage
