@@ -139,6 +139,43 @@ struct backend
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_RCCL_API =
         Wrapper::CALLBACK_TRACING_RCCL_API;
 
+    // ─── RCCL / NCCL types and constants ─────────────────────────────────────────
+    using rccl_api_data    = Wrapper::rccl_api_data;
+    using rccl_api_id_t    = Wrapper::rccl_api_id_t;
+    using nccl_data_type_t = Wrapper::nccl_data_type_t;
+    using nccl_comm_t      = Wrapper::nccl_comm_t;
+    using nccl_result_t    = Wrapper::nccl_result_t;
+
+    // NOLINTBEGIN(readability-identifier-naming) names mirror RCCL / rocprofiler-sdk
+    // headers
+    static constexpr nccl_result_t NCCL_SUCCESS = Wrapper::NCCL_SUCCESS;
+
+    static constexpr bool k_are_nccl_fp8_types_available =
+        Wrapper::k_are_nccl_fp8_types_available;
+
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather =
+        Wrapper::RCCL_API_ID_ncclAllGather;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllToAll =
+        Wrapper::RCCL_API_ID_ncclAllToAll;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllReduce =
+        Wrapper::RCCL_API_ID_ncclAllReduce;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclGather =
+        Wrapper::RCCL_API_ID_ncclGather;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclRecv = Wrapper::RCCL_API_ID_ncclRecv;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduce =
+        Wrapper::RCCL_API_ID_ncclReduce;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclBroadcast =
+        Wrapper::RCCL_API_ID_ncclBroadcast;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduceScatter =
+        Wrapper::RCCL_API_ID_ncclReduceScatter;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclSend = Wrapper::RCCL_API_ID_ncclSend;
+
+#if defined(ROCPROFILER_RCCL_API_ID_ncclAlltoAll)
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAlltoAll =
+        Wrapper::RCCL_API_ID_ncclAlltoAll;
+#endif
+    // NOLINTEND(readability-identifier-naming)
+
 #if ROCPROFILER_VERSION >= 600
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_ROCDECODE_API =
         Wrapper::CALLBACK_TRACING_ROCDECODE_API;
@@ -634,6 +671,45 @@ public:
         }
 
         return 0;
+    }
+
+    [[nodiscard]] static constexpr bool is_rccl_fp8_type(
+        Wrapper::nccl_data_type_t datatype) noexcept
+    {
+        if constexpr(Wrapper::k_are_nccl_fp8_types_available)
+        {
+            return datatype == Wrapper::NCCL_FP8_E4M3 ||
+                   datatype == Wrapper::NCCL_FP8_E5M2;
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    [[nodiscard]] static constexpr size_t rccl_type_size(
+        Wrapper::nccl_data_type_t datatype) noexcept
+    {
+        constexpr size_t k_no_size     = 0;
+        constexpr size_t k_byte        = 1;
+        constexpr size_t k_two_bytes   = 2;
+        constexpr size_t k_four_bytes  = 4;
+        constexpr size_t k_eight_bytes = 8;
+
+        switch(datatype)
+        {
+            case Wrapper::NCCL_INT8:
+            case Wrapper::NCCL_UINT8: return k_byte;
+            case Wrapper::NCCL_FLOAT16:
+            case Wrapper::NCCL_BFLOAT16: return k_two_bytes;
+            case Wrapper::NCCL_INT32:
+            case Wrapper::NCCL_UINT32:
+            case Wrapper::NCCL_FLOAT32: return k_four_bytes;
+            case Wrapper::NCCL_INT64:
+            case Wrapper::NCCL_UINT64:
+            case Wrapper::NCCL_FLOAT64: return k_eight_bytes;
+            default: return is_rccl_fp8_type(datatype) ? k_byte : k_no_size;
+        }
     }
 };
 
