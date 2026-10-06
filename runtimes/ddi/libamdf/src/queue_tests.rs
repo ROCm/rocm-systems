@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Queue lifecycle and publication contracts exercised without a native GPU.
 
 #![allow(clippy::unwrap_used)]
