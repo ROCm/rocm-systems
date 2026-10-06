@@ -99,6 +99,7 @@ public:
   }
 
   void make_read_unavailable(uint64_t address) { unavailable_read_ = address; }
+  void make_reads_available() { unavailable_read_.reset(); }
   void make_store_unavailable_once(uint64_t address) { unavailable_store_once_ = address; }
   void make_store_faulted_once(uint64_t address) {
     store_outcome_once_ = std::pair{address, VmAccessOutcome::Faulted};
@@ -381,6 +382,47 @@ TEST_F(Pm4PacketProcessorTest, WaitBlocksLaterMemoryEffectsUntilItsConditionPass
   EXPECT_EQ(service(), Pm4TestStatus::Ready);
   EXPECT_EQ(memory->load<uint32_t>(kOutput + 4), 0xdeadbeefu);
   EXPECT_TRUE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, WideWaitUsesMaskedHighBitsAndRetriesUnavailableMemory) {
+  constexpr uint64_t reference = 0x8000000000000010ull;
+  constexpr uint64_t mask = 0xffff00000000ffffull;
+  const std::array<uint64_t, 6> blocked{reference + (1ull << 48), reference + (1ull << 48),
+                                        reference + (1ull << 48), reference,
+                                        reference - (1ull << 48), reference};
+  const std::array<uint64_t, 6> ready{
+      reference - (1ull << 48), reference, reference,
+      reference + (1ull << 48), reference, reference + (1ull << 48)};
+  for (uint32_t function = 1; function <= 6; ++function) {
+    SCOPED_TRACE(function);
+    const std::array words{0xc0079300u,
+                           function | 0x10u,
+                           kOutput,
+                           0u,
+                           uint32_t(reference),
+                           uint32_t(reference >> 32),
+                           uint32_t(mask),
+                           uint32_t(mask >> 32),
+                           0u,
+                           0xc0033700u,
+                           0x100u,
+                           kOutput + 16,
+                           0u,
+                           function};
+    memory->store<uint64_t>(kOutput, blocked[function - 1] | 0x0000123456780000ull);
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput + 16), function - 1);
+    EXPECT_EQ(queue.commands.submissions.front().buffers.front().address, kRing);
+    memory->store<uint64_t>(kOutput, ready[function - 1] | 0x0000fedcba980000ull);
+    memory->make_read_unavailable(kOutput);
+    EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput + 16), function - 1);
+    memory->make_reads_available();
+    EXPECT_EQ(service(), Pm4TestStatus::Ready);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput + 16), function);
+    EXPECT_EQ(memory->load<uint64_t>(kOutput + 8), 0u);
+  }
 }
 
 TEST_F(Pm4PacketProcessorTest, DispatchPausesInterpretationUntilCpRetiresIt) {
