@@ -686,7 +686,7 @@ static ncclResult_t ncclRmaFinishPostedRequest(struct ncclIbRequest* req, uint64
   int keep = 0, failed = 0;
   ncclResult_t status = ncclRmaCompletePostedRequest(postRet, posted, nWr, &keep, &failed);
   if (!keep) {
-    if (req->id == *postedSeq) (*postedSeq)--;
+    ncclRmaReleaseSeqId(req->id, postedSeq);
     (void)ncclIbFreeRequest(req);
     return status;
   }
