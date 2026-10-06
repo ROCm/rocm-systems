@@ -32,6 +32,9 @@ COVERAGE_TEST_CONFIG: Dict[str, Any] = {"cleanup": True}
 os.environ["ROCPROF"] = "rocprofiler-sdk"
 
 
+pytestmark = pytest.mark.torch_trace_coverage
+
+
 @pytest.fixture
 def torch_trace_coverage_sampling(request):
     seed = request.config.getoption("--coverage-seed")
@@ -41,7 +44,6 @@ def torch_trace_coverage_sampling(request):
     return seed, n
 
 
-@pytest.mark.torch_trace_coverage
 def test_random_operator_kernel_coverage(
     request,
     binary_handler_profile_rocprof_compute,
