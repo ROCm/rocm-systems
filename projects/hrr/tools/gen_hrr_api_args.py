@@ -832,6 +832,40 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemGetDefaultMemPool",
 }
 
+# APIs that pass an opaque handle playback does not translate, but that
+# already replay through a generated call. A new API with one of those
+# parameter types replays as a no-op until it is added here or given another
+# playback class. A hand-written handler belongs in MANUAL_PLAYBACK_APIS and
+# must not also be listed here.
+DIRECT_PLAYBACK_APIS: Set[str] = {
+    "hipDestroyExternalMemory",
+    "hipDestroyExternalSemaphore",
+    "hipDevResourceGenerateDesc",
+    "hipDeviceGetExecutionCtx",
+    "hipExecutionCtxDestroy",
+    "hipExecutionCtxGetDevResource",
+    "hipExecutionCtxGetDevice",
+    "hipExecutionCtxGetId",
+    "hipExecutionCtxRecordEvent",
+    "hipExecutionCtxStreamCreate",
+    "hipExecutionCtxSynchronize",
+    "hipExecutionCtxWaitEvent",
+    "hipExternalMemoryGetMappedBuffer",
+    "hipExternalMemoryGetMappedMipmappedArray",
+    "hipGraphicsMapResources",
+    "hipGraphicsResourceGetMappedPointer",
+    "hipGraphicsSubResourceGetMappedArray",
+    "hipGraphicsUnmapResources",
+    "hipGraphicsUnregisterResource",
+    "hipGreenCtxCreate",
+    "hipImportExternalMemory",
+    "hipImportExternalSemaphore",
+    "hipLibraryGetGlobal",
+    "hipLibraryGetManaged",
+    "hipSignalExternalSemaphoresAsync",
+    "hipWaitExternalSemaphoresAsync",
+}
+
 # ---------------------------------------------------------------------------
 # Playback APIs whose recorded destination must resolve to a live allocation
 # before the real API is called: API name -> destination parameter name.
@@ -2788,6 +2822,22 @@ _PLAYBACK_HANDLE_TRANSLATE = {k: v[0] for k, v in _PLAYBACK_HANDLE_INFO.items()}
 _PLAYBACK_HANDLE_TRANSLATE['hipMemGenericAllocationHandle_t'] = \
     'ctx.translate_vmm_handle'
 
+# Opaque values playback cannot turn back into a live object. A generated
+# call would pass the recorded address from the capturing process, or a zero
+# for a type that cannot be recorded. hipDevice_t is an int and is not here.
+_UNTRANSLATED_PLAYBACK_TYPES = {
+    "hipKernel_t",
+    "hipLibrary_t",
+    "hipExternalMemory_t",
+    "hipExternalSemaphore_t",
+    "hipExecutionCtx_t",
+    "hipDevResourceDesc_t",
+    "hipUserObject_t",
+    "hipGraphicsResource_t",
+    "hipStreamCallback_t",
+    "hipHostFn_t",
+}
+
 # `void*` parameters that are really out buffers — the callee writes a handle
 # through them. Nothing in the type says so, so the generator used to treat the
 # recorded value as an ordinary opaque input and hand the runtime an address in
@@ -3215,6 +3265,29 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
     return f"({t})a->{name}"
 
 
+def _playback_needs_handwritten(entry: ApiEntry) -> bool:
+    """True when a generated call would pass an untranslated opaque value."""
+    return any(
+        _get_base_type(p.raw_type) in _UNTRANSLATED_PLAYBACK_TYPES
+        for p in entry.params
+    )
+
+
+def _noop_playback_shim(api: str) -> str:
+    """Warn once and return success. The call's effect is not reproduced."""
+    return (f"static hipError_t playback_{api}"
+            f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
+            f"  (void)ctx; (void)payload;\n"
+            f"  static bool warned = false;\n"
+            f"  if (!warned) {{\n"
+            f"    warned = true;\n"
+            f"    fprintf(stderr, \"[HRR] NOOP playback handler called for {api} — \"\n"
+            f"            \"this API is not replayed; results may differ from capture.\\n\");\n"
+            f"  }}\n"
+            f"  return hipSuccess;\n"
+            f"}}\n")
+
+
 def generate_playback_shim(entry: ApiEntry) -> str:
     """Generate playback function for one API."""
     sname = f"hrr_args_{entry.name}"
@@ -3282,17 +3355,7 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     # The static bool ensures the message fires once per process, not once per event,
     # so replays with thousands of events don't spam stderr.
     if entry.name in NOOP_PLAYBACK_APIS:
-        return (f"static hipError_t {fname}"
-                f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
-                f"  (void)ctx; (void)payload;\n"
-                f"  static bool warned = false;\n"
-                f"  if (!warned) {{\n"
-                f"    warned = true;\n"
-                f"    fprintf(stderr, \"[HRR] NOOP playback handler called for {entry.name} — \"\n"
-                f"            \"this API is not replayed; results may differ from capture.\\n\");\n"
-                f"  }}\n"
-                f"  return hipSuccess;\n"
-                f"}}\n")
+        return _noop_playback_shim(entry.name)
 
     # Per-API custom handler body (special in/out value handling).
     if entry.name in CUSTOM_PLAYBACK_BODIES:
@@ -3312,6 +3375,15 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         lines.append(f"  return hipSuccess;")
         lines.append("}")
         return "\n".join(lines) + "\n"
+
+    # Arguments the generator can translate get a real call. An opaque handle
+    # with no playback translation would be passed as an address from the
+    # capturing process, so that API replays as a no-op until a reviewed
+    # handler is added. DIRECT_PLAYBACK_APIS keeps the generated call for
+    # APIs that already had one. Editing hip_playback_generated.cpp does not.
+    if (entry.name not in DIRECT_PLAYBACK_APIS
+            and _playback_needs_handwritten(entry)):
+        return _noop_playback_shim(entry.name)
 
     # payload points to the full hrr_args_* struct (header + fields).
     lines.append(f"  const auto* a = reinterpret_cast<const {sname}*>(payload);")
@@ -3890,6 +3962,7 @@ def main() -> None:
         ("MANUAL_CAPTURE_APIS",  MANUAL_CAPTURE_APIS),
         ("MANUAL_PLAYBACK_APIS", MANUAL_PLAYBACK_APIS),
         ("NOOP_PLAYBACK_APIS",   NOOP_PLAYBACK_APIS),
+        ("DIRECT_PLAYBACK_APIS", DIRECT_PLAYBACK_APIS),
         ("SKIP_IF_UNMAPPED_PLAYBACK_APIS", set(SKIP_IF_UNMAPPED_PLAYBACK_APIS)),
         ("ERROR_STUB_PLAYBACK_APIS", ERROR_STUB_PLAYBACK_APIS),
         ("SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS",
@@ -3935,6 +4008,7 @@ def main() -> None:
         ("NOOP_PLAYBACK_APIS", NOOP_PLAYBACK_APIS),
         ("CUSTOM_PLAYBACK_BODIES", set(CUSTOM_PLAYBACK_BODIES)),
         ("MANUAL_PLAYBACK_APIS", MANUAL_PLAYBACK_APIS),
+        ("DIRECT_PLAYBACK_APIS", DIRECT_PLAYBACK_APIS),
     ]
     overlaps: List[str] = []
     for i, (first_name, first_set) in enumerate(replay_classes):

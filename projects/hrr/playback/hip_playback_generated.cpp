@@ -6020,13 +6020,14 @@ static hipError_t playback_hipDeviceFlushGPUDirectRDMAWrites(PlaybackContext& ct
 }
 
 static hipError_t playback_hipKernelSetAttributeForDevice(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipKernelSetAttributeForDevice*>(payload);
-  hipError_t _r = (hipError_t)hipKernelSetAttributeForDevice((hipKernel_t)a->kernel, (hipFuncAttribute)a->attr, (int)a->value, (int)a->device);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipKernelSetAttributeForDevice", a->ret);
-    return hipSuccess;
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelSetAttributeForDevice — "
+            "this API is not replayed; results may differ from capture.\n");
   }
-  return _r;
+  return hipSuccess;
 }
 
 static hipError_t playback___hipPopCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {
