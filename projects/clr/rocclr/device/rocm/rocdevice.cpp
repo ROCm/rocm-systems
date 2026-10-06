@@ -10,6 +10,7 @@
 #include "os/os.hpp"
 #include "utils/debug.hpp"
 #include "utils/flags.hpp"
+#include "utils/nontemporal.hpp"
 #include "utils/options.hpp"
 #include "utils/versions.hpp"
 #include "thread/monitor.hpp"
@@ -1242,6 +1243,14 @@ bool Device::populateOCLDeviceConstants() {
   }
 
   assert(group_segment_.handle != 0);
+
+  // The host writes these signals through the BAR.
+  graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && info_.largeBar_ &&
+                          (gpu_ext_fine_grained_segment_.handle != 0);
+  // Left true by a runtime without the query, since flushing is always correct
+  Hsa::agent_get_info(bkendDevice_,
+                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HOST_STORES_NEED_HDP_FLUSH),
+                      &host_stores_need_hdp_flush_);
 
   for (auto agent : gpu_agents_) {
     if (agent.handle != bkendDevice_.handle) {
@@ -4041,20 +4050,50 @@ void Device::RetainGlobalSignal(void* signal) const {
 }
 
 // ================================================================================================
-bool Device::CreateHwEvents(int count, std::vector<void*>& hw_events) const {
-  hw_events.resize(count, nullptr);
-  for (int i = 0; i < count; ++i) {
-    ProfilingSignal* ps = new ProfilingSignal();
+bool Device::CreateHwEvents(int count, bool batched, std::vector<void*>& hw_events) const {
+  std::vector<hsa_signal_t> signals(count);
+  bool in_device_memory = false;
+  if (!CreateSignals(count, 1, HSA_AMD_SIGNAL_AMD_GPU_ONLY, batched, graph_device_signals_,
+                     signals.data(), in_device_memory)) {
+    hw_events.assign(count, nullptr);
+    return false;
+  }
+  hw_events.resize(count);
+  for (int event_idx = 0; event_idx < count; ++event_idx) {
+    ProfilingSignal* profiling_signal = new ProfilingSignal();
+    profiling_signal->signal_ = signals[event_idx];
+    profiling_signal->in_device_memory_ = in_device_memory;
+    hw_events[event_idx] = profiling_signal;
+  }
+  return true;
+}
+
+// ================================================================================================
+bool Device::CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uint64_t attributes,
+                           bool batched, bool device_memory, hsa_signal_t* signals,
+                           bool& in_device_memory) const {
+  in_device_memory = false;
+  // Device memory is only reachable through a batch
+  if (batched || device_memory) {
+    std::vector<hsa_signal_value_t> initial_values(count, initial_value);
+    const hsa_amd_memory_pool_t pool =
+        device_memory ? gpu_ext_fine_grained_segment_ : getHostMemoryPool(kAtomics);
+    hsa_amd_signal_batch_t batch;
+    if (HSA_STATUS_SUCCESS == Hsa::signal_batch_create(count, initial_values.data(), 0, nullptr,
+                                                       attributes, pool, &batch, signals)) {
+      Hsa::signal_batch_destroy(batch);
+      in_device_memory = device_memory;
+      return true;
+    }
+  }
+  for (uint32_t signal_idx = 0; signal_idx < count; ++signal_idx) {
     if (HSA_STATUS_SUCCESS !=
-        Hsa::signal_create(1, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &ps->signal_)) {
-      delete ps;
-      for (int j = 0; j < i; ++j) {
-        reinterpret_cast<ProfilingSignal*>(hw_events[j])->release();
-        hw_events[j] = nullptr;
+        Hsa::signal_create(initial_value, 0, nullptr, attributes, &signals[signal_idx])) {
+      for (uint32_t created_idx = 0; created_idx < signal_idx; ++created_idx) {
+        Hsa::signal_destroy(signals[created_idx]);
       }
       return false;
     }
-    hw_events[i] = ps;
   }
   return true;
 }
@@ -4065,18 +4104,45 @@ void Device::DestroyHwEvent(void* hw_event) const {
 }
 
 // ================================================================================================
+void Device::FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const {
+  if (!host_stores_need_hdp_flush_) {
+    return;
+  }
+  volatile hsa_signal_value_t* last_value =
+      &reinterpret_cast<amd_signal_t*>(last_stored.handle)->value;
+  amd::nontemporalStoreFence();
+  *last_value = value;
+#if defined(ATI_ARCH_X86)
+  _mm_mfence();
+#else
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+#endif
+  (void)*last_value;
+}
+
+// ================================================================================================
 void Device::ResetHwEvents(const std::vector<void*>& hw_events) const {
   // Re-arm pooled signals for reuse by a new graph launch. The caller
   // guarantees these signals belong to a completed (drained) launch, so this
   // cannot corrupt an in-flight launch. Avoids signal_create/destroy on the
   // hot launch path.
+  hsa_signal_t last_stored{0};
   for (void* hw_event : hw_events) {
     if (hw_event != nullptr) {
       auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
-      Hsa::signal_silent_store_relaxed(ps->signal_, 1);
+      if (ps->in_device_memory_) {
+        reinterpret_cast<amd_signal_t*>(ps->signal_.handle)->value = kInitSignalValueOne;
+        last_stored = ps->signal_;
+      } else {
+        Hsa::signal_silent_store_relaxed(ps->signal_, 1);
+      }
       ps->flags_.done_ = true;
       ps->ResetCachedTiming();
     }
+  }
+  // Bulk flush of HDP
+  if (last_stored.handle != 0) {
+    FlushSignalStores(last_stored, kInitSignalValueOne);
   }
 }
 

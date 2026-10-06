@@ -69,6 +69,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   //! AccumulateCommand dispatch record this signal supplies timing for.
   uint32_t dispatch_slot_ = kNoDispatchSlot;
   std::recursive_mutex lock_;  //!< Signal lock for update
+  bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
 
   typedef union {
     struct {
@@ -527,7 +528,19 @@ class Device : public NullDevice {
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override;
   virtual void ReleaseGlobalSignal(void* signal) const override;
   virtual void RetainGlobalSignal(void* signal) const override;
-  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual bool CreateHwEvents(int count, bool batched,
+                              std::vector<void*>& hw_events) const override;
+  //! Creates signals, from one allocation when batched, else from the ROCr signal pool.
+  //! A batch costs an allocation, so batched is for pooled signals. device_memory places the
+  //! batch in device memory, which requires a batch. Each signal is destroyed individually
+  //! either way. in_device_memory reports where the signals were placed.
+  bool CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uint64_t attributes,
+                     bool batched, bool device_memory, hsa_signal_t* signals,
+                     bool& in_device_memory) const;
+  //! Makes earlier host stores to device-memory signal values visible to the GPU. When ROCr
+  //! reports that host stores to device memory pass through HDP, re-store the last one and read
+  //! it back. last_stored must be in device memory, or the readback does not drain HDP.
+  void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
   virtual void DestroyHwEvent(void* hw_event) const override;
   virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
@@ -746,6 +759,8 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t gpuvm_segment_;
   hsa_amd_memory_pool_t gpu_fine_grained_segment_;
   hsa_amd_memory_pool_t gpu_ext_fine_grained_segment_;
+  bool graph_device_signals_ = false;  //!< Graph signals live in gpu_ext_fine_grained_segment_
+  bool host_stores_need_hdp_flush_ = true;  //!< Host stores to device memory pass through HDP
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem
 

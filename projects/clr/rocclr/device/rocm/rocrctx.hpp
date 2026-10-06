@@ -26,9 +26,6 @@
 #include "hsa/hsa_ven_amd_aqlprofile.h"
 #endif
 
-typedef hsa_status_t HSA_API hsa_amd_queue_create_fn(
-    hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs);
-
 namespace amd {
 namespace roc {
 
@@ -109,7 +106,9 @@ struct RocrEntryPoints {
   decltype(hsa_amd_signal_create)* hsa_amd_signal_create_;
   decltype(hsa_amd_register_system_event_handler)* hsa_amd_register_system_event_handler_;
   decltype(hsa_amd_queue_set_priority)* hsa_amd_queue_set_priority_;
-  hsa_amd_queue_create_fn* hsa_amd_queue_create_;
+  decltype(hsa_amd_queue_create)* hsa_amd_queue_create_;
+  decltype(hsa_amd_signal_batch_create)* hsa_amd_signal_batch_create_;
+  decltype(hsa_amd_signal_batch_destroy)* hsa_amd_signal_batch_destroy_;
   decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_;
   decltype(hsa_amd_memory_lock_to_pool)* hsa_amd_memory_lock_to_pool_;
   decltype(hsa_amd_signal_value_pointer)* hsa_amd_signal_value_pointer_;
@@ -159,7 +158,7 @@ struct RocrEntryPoints {
     return false;                                                                                 \
   }
 #define GET_ROCR_OPTIONAL_SYMBOL(NAME)                                                            \
-  cep_.NAME##_ = reinterpret_cast<NAME##_fn*>(Os::getSymbol(cep_.handle, #NAME));
+  cep_.NAME##_ = reinterpret_cast<decltype(NAME)*>(Os::getSymbol(cep_.handle, #NAME));
 #else
 #define ROCR_DYN(NAME) NAME
 #define GET_ROCR_SYMBOL(NAME)
@@ -471,6 +470,16 @@ class Hsa : public amd::AllStatic {
 #else
     return hsa_amd_queue_create(agent, descs, num_descs);
 #endif
+  }
+  static hsa_status_t signal_batch_create(uint32_t count, const hsa_signal_value_t* initial_values,
+                                          uint32_t num_consumers, const hsa_agent_t* consumers,
+                                          uint64_t attributes, hsa_amd_memory_pool_t pool,
+                                          hsa_amd_signal_batch_t* batch, hsa_signal_t* signals) {
+    return ROCR_DYN(hsa_amd_signal_batch_create)(count, initial_values, num_consumers, consumers,
+                                                 attributes, pool, batch, signals);
+  }
+  static hsa_status_t signal_batch_destroy(hsa_amd_signal_batch_t batch) {
+    return ROCR_DYN(hsa_amd_signal_batch_destroy)(batch);
   }
   static hsa_status_t memory_async_copy_rect(
     const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
