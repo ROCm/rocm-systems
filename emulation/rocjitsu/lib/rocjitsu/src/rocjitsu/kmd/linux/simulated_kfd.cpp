@@ -2207,6 +2207,7 @@ int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length) {
 }
 
 int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
+  std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
   {
     uint32_t doorbell_ord = 0;
     uint64_t doorbell_gpu_va = 0;
@@ -2229,14 +2230,19 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
             gs.doorbell_views, [addr](const auto &candidate) { return candidate.page == addr; });
         if (view == gs.doorbell_views.end())
           continue;
-        if (!proc.event_state_.is_closing()) {
-          errno = EPERM;
+        if (length != gs.doorbell_page_size) {
+          errno = EINVAL;
           return -1;
         }
         doorbell_gpu_va = view->gpu_va;
         doorbell_page_size = gs.doorbell_page_size;
         gs.doorbell_views.erase(view);
-        last_doorbell_view = gs.doorbell_views.empty();
+        // KFD doorbell mappings are ordinary userspace VMAs; unmapping one
+        // does not release the process's device doorbell allocation. Retain
+        // our private CP monitor and backing until process teardown so queues
+        // and subsequent client mappings still see the same doorbell slots.
+        // Linux: drivers/gpu/drm/amd/amdkfd/kfd_doorbell.c:kfd_doorbell_mmap.
+        last_doorbell_view = gs.doorbell_views.empty() && proc.event_state_.is_closing();
         if (last_doorbell_view) {
           doorbell_memfd = gs.doorbell_memfd;
           doorbell_monitor_page = gs.doorbell_monitor_page;
