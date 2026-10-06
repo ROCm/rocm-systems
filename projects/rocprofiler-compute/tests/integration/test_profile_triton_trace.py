@@ -1,0 +1,72 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+"""Integration tests for Triton operator tracing during profiling."""
+
+import csv
+import sys
+from pathlib import Path
+
+import common
+import pytest
+
+from tests.integration.common import config, require_triton
+from utils import csv_compression
+
+
+@pytest.fixture(scope="module")
+def triton_trace_workload_state():
+    state = {"dir": None, "profiled": False}
+    yield state
+    if state["dir"] is not None:
+        common.clean_output_dir(config["cleanup"], state["dir"])
+
+
+@pytest.fixture
+def triton_trace_profiled_workload(
+    triton_trace_workload_state,
+    binary_handler_profile_rocprof_compute,
+):
+    require_triton(gpu=True)
+    if not triton_trace_workload_state["profiled"]:
+        workload_dir = common.get_output_dir(param_id="triton_trace")
+        triton_trace_workload_state["dir"] = workload_dir
+        profile_config = dict(config)
+        profile_config["triton_test_app"] = [
+            sys.executable,
+            "./sample/triton_ffn.py",
+        ]
+        returncode = binary_handler_profile_rocprof_compute(
+            profile_config,
+            workload_dir,
+            [
+                "--experimental",
+                "--triton-trace",
+                "--iteration-multiplexing",
+            ],
+            check_success=True,
+            app_name="triton_test_app",
+        )
+        assert returncode == 0, "Profiling the triton application failed"
+        triton_trace_workload_state["profiled"] = True
+    return triton_trace_workload_state["dir"]
+
+
+@pytest.mark.triton_trace
+def test_triton_trace_profile_csvs(triton_trace_profiled_workload):
+    workload_dir = triton_trace_profiled_workload
+    marker_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv.gz"))
+    assert marker_files, "No marker_api_trace.csv.gz produced"
+    functions = []
+    for marker_file in marker_files:
+        corresponding_counter_file = marker_file.parent / marker_file.name.replace(
+            "marker_api_trace", "counter_collection"
+        )
+        assert corresponding_counter_file.is_file(), (
+            f"counter_collection CSV not found for {marker_file}"
+        )
+        with csv_compression.open_gzip_csv_read(marker_file) as f:
+            for row in csv.DictReader(f):
+                functions.append(row["Function"])
+    assert any("|triton" in fn for fn in functions)
+    assert any("triton.JITFunction.matmul_kernel" in fn for fn in functions)
