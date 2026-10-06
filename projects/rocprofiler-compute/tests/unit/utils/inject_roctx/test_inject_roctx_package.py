@@ -352,3 +352,10 @@ def test_compose_marker_python_wrap_wire():
     )
     assert empty_backend.endswith("args=n/a")
     assert not empty_backend.endswith("args=n/a|")
+
+
+def test_encode_args_wrap_delimiters():
+    from utils.inject_roctx.marker_format import encode_args
+
+    assert "%7C" in encode_args("(float32[2x4], bias=float32[2x4]|x)")
+    assert encode_args("%|;|\r\n") == "%25%7C%3B%7C%0D%0A"
