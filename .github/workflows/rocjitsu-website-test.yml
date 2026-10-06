@@ -48,7 +48,6 @@ jobs:
           esac
 
       - name: Set up Node.js
-        if: steps.authorize_uploads.outputs.allowed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22.13.0"
