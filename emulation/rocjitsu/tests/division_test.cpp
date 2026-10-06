@@ -118,6 +118,33 @@ TEST(DivisionTest, RoundingAndDenormModesAreExplicit) {
   }
 }
 
+// With tiny_after_rounding, a flushing output also flushes a value that reaches
+// the smallest normal only on the subnormal grid (judged at full precision).
+TEST(DivisionTest, RoundCanJudgeTininessAfterRounding) {
+  // (2^24 - 1) * 2^-150 = 2^-126 - 2^-150: 24 bits, so tiny at full precision,
+  // although nearest-even subnormal rounding ties up to 0x00800000.
+  const auto tiny = [](uint32_t mode, uint32_t denorm, bool after) {
+    return std::bit_cast<uint32_t>(div_round<float>(0xffffff, -150, false, mode, denorm, after));
+  };
+  EXPECT_EQ(tiny(0, 0, false), 0x00800000u);
+  EXPECT_EQ(tiny(0, 0, true), 0u);
+  EXPECT_EQ(tiny(0, 2, true), 0x00800000u); // output denormals kept
+  EXPECT_EQ(tiny(3, 0, true), 0u);
+  // (2^25 - 1) * 2^-151 ties up to 2^-126 at 24 bits as well: not tiny.
+  EXPECT_EQ(std::bit_cast<uint32_t>(div_round<float>(0x1ffffff, -151, false, 0, 0, true)),
+            0x00800000u);
+  // Toward zero it rounds below: tiny, and the flush keeps the sign.
+  EXPECT_EQ(std::bit_cast<uint32_t>(div_round<float>(0x1ffffff, -151, true, 3, 0, true)),
+            0x80000000u);
+  // The same boundary in F64: (2^53 - 1) * 2^-1075.
+  EXPECT_EQ(
+      std::bit_cast<uint64_t>(div_round<double>((uint64_t{1} << 53) - 1, -1075, false, 0, 0, true)),
+      0u);
+  EXPECT_EQ(std::bit_cast<uint64_t>(
+                div_round<double>((uint64_t{1} << 53) - 1, -1075, false, 0, 0, false)),
+            0x0010000000000000u);
+}
+
 TEST(DivisionTest, FixupHandlesSignAndExceptionalQuotients) {
   const float nan = std::numeric_limits<float>::quiet_NaN();
   EXPECT_EQ(div_fixup(-3.f, 1.f, 1.f, 0, 3), 3.f);

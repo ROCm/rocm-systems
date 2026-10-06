@@ -55,11 +55,30 @@ template <typename Float> inline Float div_overflow(bool negative, uint32_t roun
   return std::bit_cast<Float>(Bits((negative ? F::sign : 0) + F::infinity - !to_infinity));
 }
 
+/// @brief Round `significand` right by `shift` bits, returning the rounded value.
+inline util::uint128_t div_round_shifted(util::uint128_t significand, int shift, bool negative,
+                                         uint32_t rounding) {
+  if (shift <= 0)
+    return significand << -shift;
+  const util::uint128_t kept = shift >= 128 ? 0 : significand >> shift;
+  const bool guard = shift <= 128 && ((significand >> (shift - 1)) & 1) != 0;
+  const bool sticky =
+      shift > 128 ? significand != 0 : shift > 1 && (significand << (129 - shift)) != 0;
+  const bool inexact = guard || sticky;
+  const bool round_up = (rounding == 0 && guard && (sticky || (kept & 1))) ||
+                        (rounding == 1 && !negative && inexact) ||
+                        (rounding == 2 && negative && inexact);
+  return kept + round_up;
+}
+
 // Round an integer significand times 2^exponent exactly once. No floating-point
 // arithmetic or host rounding/flush controls participate, including at underflow.
+// With tiny_after_rounding, a flushing output also flushes a result that reaches
+// the smallest normal only through subnormal rounding: tininess is judged after
+// rounding to full precision with an unbounded exponent (see rounding.h).
 template <typename Float>
 inline Float div_round(util::uint128_t significand, int exponent, bool negative, uint32_t rounding,
-                       uint32_t denorm) {
+                       uint32_t denorm, bool tiny_after_rounding = false) {
   using F = DivisionFormat<Float>;
   using Bits = typename F::Bits;
   const Bits sign = negative ? F::sign : 0;
@@ -72,19 +91,7 @@ inline Float div_round(util::uint128_t significand, int exponent, bool negative,
   const int normal_shift = highest - F::fraction;
   const int subnormal_shift = minimum - exponent;
   const int shift = normal_shift > subnormal_shift ? normal_shift : subnormal_shift;
-  util::uint128_t kept;
-  bool guard = false, sticky = false;
-  if (shift <= 0) {
-    kept = significand << -shift;
-  } else {
-    kept = shift >= 128 ? 0 : significand >> shift;
-    guard = shift <= 128 && ((significand >> (shift - 1)) & 1) != 0;
-    sticky = shift > 128 ? significand != 0 : shift > 1 && (significand << (129 - shift)) != 0;
-  }
-  const bool inexact = guard || sticky;
-  if ((rounding == 0 && guard && (sticky || (kept & 1))) ||
-      (rounding == 1 && !negative && inexact) || (rounding == 2 && negative && inexact))
-    ++kept;
+  util::uint128_t kept = div_round_shifted(significand, shift, negative, rounding);
   int result_exponent = exponent + shift + F::fraction;
   if (kept >= (util::uint128_t{1} << (F::fraction + 1))) {
     kept >>= 1;
@@ -92,6 +99,15 @@ inline Float div_round(util::uint128_t significand, int exponent, bool negative,
   }
   if (result_exponent > F::bias)
     return div_overflow<Float>(negative, rounding);
+  if (tiny_after_rounding && !(denorm & 2u) && shift > normal_shift) {
+    // Below the normal range, only a value one binade under the smallest
+    // normal can round up to it at full precision.
+    const bool reaches_normal =
+        highest + exponent == -F::bias &&
+        div_round_shifted(significand, normal_shift, negative, rounding) >> (F::fraction + 1) != 0;
+    if (!reaches_normal)
+      return std::bit_cast<Float>(sign);
+  }
   if (kept < (util::uint128_t{1} << F::fraction)) {
     if (!(denorm & 2u))
       kept = 0;
