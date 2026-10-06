@@ -7,7 +7,8 @@
 #                        [-o <path>] [--format markdown|json] [-h]
 #
 # Environment knobs (mirror the Linux version):
-#   HRR_TRIAGE_WORKDIR   Output dir for findings + logs (default: current dir)
+#   HRR_TRIAGE_WORKDIR   Output dir for findings + logs (default: a temp dir,
+#                        never the archive: triage must not write into it)
 #   HRR_PLAYBACK         Explicit path to hrr-playback.exe
 #   HIP_PATH / ROCM_PATH HIP SDK root (default: C:\Program Files\AMD\ROCm\6.2)
 #   GPU                  Replay GPU ordinal (default: 0)
@@ -117,9 +118,75 @@ if (-not (Test-Path $Archive -PathType Container)) {
     exit 1
 }
 
+# GetFullPath is lexical only, so a symbolic link or a junction anywhere in a
+# path is followed here, as realpath does for triage_archive.sh. Components that
+# do not exist yet are kept as they are. $null when the links go round in a
+# loop.
+function Resolve-LinkedPath([string]$Path) {
+    $full = [IO.Path]::GetFullPath($Path)
+    $hops = 0
+    while ($true) {
+        $root = [IO.Path]::GetPathRoot($full)
+        $parts = @($full.Substring($root.Length).Split([char[]]'\/', [StringSplitOptions]::RemoveEmptyEntries))
+        $cur = $root
+        $relinked = $false
+        for ($i = 0; $i -lt $parts.Count; $i++) {
+            $next = Join-Path $cur $parts[$i]
+            $item = Get-Item -LiteralPath $next -Force -ErrorAction SilentlyContinue
+            $target = if ($item -and $item.LinkType) { @($item.Target)[0] } else { $null }
+            if (-not $target) { $cur = $next; continue }
+            if (++$hops -gt 40) { return $null }
+            if (-not [IO.Path]::IsPathRooted($target)) { $target = Join-Path $cur $target }
+            # The target can hold links of its own, so the walk starts again on it.
+            foreach ($p in ($parts | Select-Object -Skip ($i + 1))) { $target = Join-Path $target $p }
+            $full = [IO.Path]::GetFullPath($target)
+            $relinked = $true
+            break
+        }
+        if (-not $relinked) { return $cur }
+    }
+}
+
+# The archive's own links are followed before anything is derived from its name,
+# as readlink -f does in triage_archive.sh: a link to a pid-<n> directory has to
+# protect the capture directory holding the target, not the one holding the link.
+$ArchiveTarget = Resolve-LinkedPath $Archive
+if (-not $ArchiveTarget) {
+    Write-Host "error: a symbolic link loop in the archive path: $Archive" -ForegroundColor Red
+    exit 1
+}
+$Archive = $ArchiveTarget
 $Name    = Split-Path $Archive -Leaf
-$Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'")
-$Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { (Get-Location).Path }
+# The pid keeps two runs in the same second from sharing a log and a finding.
+$Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'") + "-$PID"
+$Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { Join-Path ([IO.Path]::GetTempPath()) 'hrr-triage' }
+# The archive is not to be written to, as in triage_archive.sh: the archive here
+# is the pid directory and, for a pid-<n> one, the capture directory holding it.
+# Both paths are resolved, links included, before anything is created: a work
+# directory or a parent of it that is a link into the capture is inside it.
+$ArchiveRoot = if ($Name -like 'pid-*') { Split-Path $Archive -Parent } else { $Archive }
+$ArchiveRoot = Resolve-LinkedPath $ArchiveRoot
+function Test-InArchive([string]$Path) {
+    $full = Resolve-LinkedPath $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+    if (-not $ArchiveRoot -or -not $full) {
+        Write-Host "error: a symbolic link loop in the archive path or in: $Path" -ForegroundColor Red
+        exit 1
+    }
+    $root = $ArchiveRoot.TrimEnd('\', '/')
+    $full = $full.TrimEnd('\', '/')
+    return ($full -ieq $root -or
+            $full.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase))
+}
+if (Test-InArchive $Workdir) {
+    Write-Host "error: the triage work directory is inside the archive: $Workdir; set HRR_TRIAGE_WORKDIR outside it" -ForegroundColor Red
+    exit 1
+}
+# -o is checked too: a finding named into the archive writes there as surely
+# as a work directory inside it does.
+if ($Output -and (Test-InArchive $Output)) {
+    Write-Host "error: --output is inside the archive: $Output" -ForegroundColor Red
+    exit 1
+}
 New-Item -ItemType Directory -Force -Path $Workdir | Out-Null
 $Ext     = if ($Format -eq "json") { ".finding.json" } else { ".finding.md" }
 $Finding = if ($Output) { $Output } else { Join-Path $Workdir "${Name}-${Ts}${Ext}" }
@@ -415,5 +482,5 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+# The analyzer has already printed the finding; it is the only thing on stdout.
 Write-Triage "finding=$Finding"
-Get-Content $Finding

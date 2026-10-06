@@ -12,6 +12,7 @@
 #include "hip_platform.hpp"
 #include "platform/program.hpp"
 #include <hip/hip_version.h>
+#include <mutex>
 
 HIP_PUBLIC_API const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
 
@@ -24,7 +25,10 @@ extern const char __hip_pch_wave32[];
 extern const char __hip_pch_wave64[];
 extern unsigned __hip_pch_wave32_size;
 extern unsigned __hip_pch_wave64_size;
+#endif
+
 void __hipGetPCH(const char** pch, unsigned int* size) {
+#ifdef __HIP_ENABLE_PCH
   hipDeviceProp_t deviceProp;
   int deviceId;
   hipError_t error = hipGetDevice(&deviceId);
@@ -36,8 +40,11 @@ void __hipGetPCH(const char** pch, unsigned int* size) {
     *pch = __hip_pch_wave64;
     *size = __hip_pch_wave64_size;
   }
-}
+#else
+  *pch = nullptr;
+  *size = 0;
 #endif
+}
 namespace hip {
 
 // forward declaration of methods required for managed variables
@@ -70,13 +77,15 @@ amd::Kernel* Function::BuildKernel(hipModule_t hmod) const {
 }
 
 // ================================================================================================
-hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
+hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod, int deviceId) {
   guarantee((dFunc_.size() == g_devices.size()), "dFunc Size mismatch");
-  int dev = ihipGetDevice();
-  if (dFunc_[dev] == nullptr) {
-    dFunc_[dev] = BuildKernel(hmod);
+
+  if (dFunc_[deviceId] == nullptr) {
+    dFunc_[deviceId] = BuildKernel(hmod);
   }
-  *hfunc = asHipFunction(dFunc_[dev]);
+
+  *hfunc = asHipFunction(dFunc_[deviceId]);
+
   return hipSuccess;
 }
 
@@ -115,8 +124,11 @@ hipError_t Function::GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
   const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);
   amd::Kernel* kernel = dFunc_[deviceId];
   auto* device_handle = devices[deviceId];
-  const device::Kernel::WorkGroupInfo* wginfo =
-      kernel->getDeviceKernel(*device_handle)->workGroupInfo();
+  auto* device_kernel = kernel->getDeviceKernel(*device_handle);
+  if (device_kernel == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+  const device::Kernel::WorkGroupInfo* wginfo = device_kernel->workGroupInfo();
   int binaryVersion =
       device_handle->isa().versionMajor() * 10 + device_handle->isa().versionMinor();
   func_attr->sharedSizeBytes = static_cast<int>(wginfo->localMemSize_);

@@ -15,8 +15,9 @@ report rules out broken intra-node links, peer-memory mapping problems, and
 container or IPC isolation problems before the application sends any traffic.
 A failing report names the exact GPU pair and path to investigate.
 
-This feature is inherited from NCCL 2.31 (active diagnostics). The only check
-available is the P2P check. The passive RAS diagnostics
+This feature is inherited from NCCL (active diagnostics). Besides the P2P
+check it includes a network bandwidth check that runs only on multi-node
+communicators, see `Network bandwidth check`_. The passive RAS diagnostics
 (``NCCL_RUN_RAS_DIAGNOSTICS``), which compare configuration across ranks
 without exercising data paths, are a separate feature and are not covered on
 this page.
@@ -50,8 +51,8 @@ Reading the report
 
 The report is printed to standard output, not to ``NCCL_DEBUG_FILE``. Every
 line starts with ``<hostname>:<pid> NCCL DIAG``. The process that hosts rank 0
-of the communicator prints the header, the summary, and the ``completed``
-line. Failed edges are listed by the first rank on the node where they occur,
+of the communicator prints the header, the summary lines, and the
+``completed`` line. Failed edges are listed by the first rank on the node where they occur,
 and a few notices are printed by the rank they concern. Collect the standard
 output of all processes, not only of rank 0.
 
@@ -61,12 +62,18 @@ looks like this:
 .. code:: none
 
    node01:15 NCCL DIAG === NCCL Diagnostics ===
-   node01:15 NCCL DIAG [OK]   p2p: all 56 directed GPU P2P edges verified
+   node01:15 NCCL DIAG [OK] net bw: skipped (single host or no network transport)
+   node01:15 NCCL DIAG [OK]   p2p: verified P2P access in both directions between every GPU pair (56 peer accesses)
    node01:15 NCCL DIAG NCCL diagnostics completed in 40.0 ms across 8 ranks
+
+If some edges fail, the summary line reads
+``[INFO] p2p: only <passed>/<tested> GPU-to-GPU peer accesses passed verification``
+and the failed edges are listed on their own lines.
 
 Result lines use two tags:
 
-* ``[OK]`` means that every tested edge passed.
+* ``[OK]`` means that every tested edge passed, or, on the ``net bw:`` line,
+  that the network bandwidth check passed or was skipped.
 * ``[INFO]`` marks both notices and problems. A notice, such as the
   peer-access line described in `Single-process and multi-process jobs`_, is
   expected on a healthy system. A problem means that at least one edge failed
@@ -81,20 +88,22 @@ The check tests directed edges. For each pair of GPUs A and B it tests both
 A to B and B to A. Only GPUs on the same node are tested, and only pairs that
 RCCL's topology detection allows to use P2P. On a node with ``N`` GPUs in the
 communicator, the check tests ``N * (N - 1)`` edges when all pairs are
-eligible. For a multi-node communicator the edge counts of all nodes are added
-together. For example, two nodes with 8 GPUs each report 112 edges.
+eligible. The summary line counts each tested edge as one peer access. For a
+multi-node communicator the edge counts of all nodes are added together. For
+example, two nodes with 8 GPUs each report 112 peer accesses.
 
-The check does not test the network between nodes.
+The P2P check does not test the network between nodes.
 
 Pairs that can only reach each other through an intermediate GPU are not
-tested. They are listed as ``(skipped indirect=<count>)`` at the end of the
-summary line. On AMD GPUs RCCL does not route P2P through an intermediate GPU,
-so this suffix does not appear.
+tested and are not counted in the summary. With ``NCCL_DEBUG=INFO`` and
+``NCCL_DEBUG_SUBSYS=INIT``, each such edge is logged with ``reason=indirect``.
+On AMD GPUs RCCL does not route P2P through an intermediate GPU, so no edge is
+left out for this reason.
 
 .. note::
 
-   If no pair is eligible, the report contains only the header and the
-   ``completed`` line, with no ``p2p:`` line. This happens, for example, with
+   If no pair is eligible, the report contains no ``p2p:`` line between the
+   header and the ``completed`` line. This happens, for example, with
    ``NCCL_P2P_DISABLE=1``, with a restrictive ``NCCL_P2P_LEVEL``, or with one GPU
    per node. A missing ``p2p:`` line means that nothing was tested, not that
    everything passed.
@@ -131,6 +140,22 @@ enabled. A missing line does not mean that the check did not run.
 When each GPU is driven by its own process, peer memory is shared through HIP
 IPC handles, or through HIP virtual-memory handles when cuMem is enabled, and
 no such line is printed.
+
+Network bandwidth check
+-----------------------
+
+The network bandwidth check runs before the P2P check, and only when the
+communicator spans at least two hosts and uses a network transport between
+them. It runs ``ib_write_bw`` from the ``perftest`` package between the nodes,
+so the tool must be installed on every node and host names must be resolvable
+between the nodes. Rank 0 prints the minimum, median, and maximum bandwidth on
+a ``net bw:`` line and lists the ranks that are more than 30 percent off the
+median. Like the P2P check, it never makes initialization fail. On a single
+host, or without a network transport, the check does not run and rank 0 prints:
+
+.. code:: none
+
+   node01:15 NCCL DIAG [OK] net bw: skipped (single host or no network transport)
 
 Performance impact
 ------------------
@@ -196,7 +221,7 @@ edge fields:
      - Temporary test resources may not have been released on that rank.
    * - ``transport detect returned <n>``
      - The transport scan failed.
-   * - ``p2p: active check returned <n>``
+   * - ``p2p: check returned <n>``
      - The P2P check stopped before it completed.
 
 The edge fields have the following meaning:
@@ -292,7 +317,7 @@ reports depends on the containers:
 * Containers with separate ``/dev/shm``, for example with a private IPC
   namespace, are treated as isolated. RCCL does not use P2P between them, so
   the check does not test those pairs and the summary counts fewer than
-  ``N * (N - 1)`` edges.
+  ``N * (N - 1)`` peer accesses.
 * If a pair between the containers is eligible for P2P but its memory cannot be
   shared, the check reports the edge as failed.
   ``destination buffer unavailable ... reason=noDescriptor`` means that the
