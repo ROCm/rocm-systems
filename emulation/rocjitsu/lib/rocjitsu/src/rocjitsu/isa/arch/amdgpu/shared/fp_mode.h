@@ -890,6 +890,28 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
       });
 }
 
+/// @brief V_MULLIT_F32 on sources with ABS/NEG applied, before OMOD and CLAMP.
+/// @details MODE flushes the sources first, so a subnormal S2 counts as zero.
+/// S1 equal to -MAX_FLOAT, -INF or NaN, or S2 that is zero, negative or NaN,
+/// gives -MAX_FLOAT. Otherwise the result is the legacy product: +0 if either
+/// factor is zero, else S0 * S1 rounded and output-flushed under MODE.
+inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round_mode,
+                           uint32_t denorm_mode) {
+  using F32 = fp_format::F32;
+  constexpr uint32_t kNegativeMax = F32::kSign | (F32::kInfinity - 1);
+  const auto input = input_denormal::Policy::make(denorm_mode);
+  s0 = input_denormal::flush_input<F32>(s0, input);
+  s1 = input_denormal::flush_input<F32>(s1, input);
+  s2 = input_denormal::flush_input<F32>(s2, input);
+  const auto is_nan = [](uint32_t bits) { return (bits & F32::kMagnitude) > F32::kInfinity; };
+  const bool s2_positive = (s2 & F32::kSign) == 0 && s2 != 0;
+  if (s1 == kNegativeMax || s1 == (F32::kSign | F32::kInfinity) || is_nan(s1) || !s2_positive ||
+      is_nan(s2))
+    return kNegativeMax;
+  return std::bit_cast<uint32_t>(arithmetic<Arithmetic::MUL_LEGACY>(
+      std::bit_cast<float>(s0), std::bit_cast<float>(s1), 0.0f, round_mode, denorm_mode));
+}
+
 /// @brief Evaluate F16 arithmetic before output modifiers and destination rounding.
 /// @details The caller flushes each source half under MODE before widening it.
 template <Arithmetic operation>

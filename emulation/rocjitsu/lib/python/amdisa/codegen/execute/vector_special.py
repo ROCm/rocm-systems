@@ -386,35 +386,39 @@ def gen_vector_sat_pack(dst: list[str], src: list[str], op: str | None) -> str:
 def gen_vector_mullit(
     dst: list[str], src: list[str], is_vop3: bool, has_abs: bool
 ) -> str:
-    """Generate V_MULLIT_F32 (the legacy lighting multiply)."""
-    L = [
-        '  uint64_t exec = wf.exec();',
-        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
-        '    if (!(exec & (1ULL << lane))) continue;',
-        f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));',
-        f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));',
-        f'    float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane));',
-    ]
+    """Generate V_MULLIT_F32 (the legacy lighting multiply).
+
+    Stages: ABS/NEG, fp_mode::mullit_f32 (input flush, special cases, legacy
+    product with MODE rounding and output flush), then OMOD and CLAMP.
+    """
+    L = []
     if is_vop3:
-        L.extend(vop3_src_mod('s0', 0, has_abs))
-        L.extend(vop3_src_mod('s1', 1, has_abs))
-        L.extend(vop3_src_mod('s2', 2, has_abs))
+        L.append(output_policy_decl('f32'))
     L.extend(
         [
-            '    float result;',
-            '    if (s1 == -std::numeric_limits<float>::max() ||',
-            '        s1 == -std::numeric_limits<float>::infinity() || std::isnan(s1) ||',
-            '        s2 <= 0.0f || std::isnan(s2))',
-            '      result = -std::numeric_limits<float>::max();',
-            '    else',
-            '      result = (s0 == 0.0f || s1 == 0.0f) ? 0.0f : s0 * s1;',
+            '  uint64_t exec = wf.exec();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
         ]
     )
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    for i in range(3):
+        read = f'amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane)'
+        if is_vop3:
+            read = (
+                f'amdgpu::source_modifier::apply<amdgpu::fp_format::F32>('
+                f'{read}, {i}, {abs_field}, inst_.neg)'
+            )
+        L.append(f'    const uint32_t s{i} = {read};')
+    result = (
+        'amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), '
+        'wf.fp_denorm_mode_f32())'
+    )
     if is_vop3:
-        L.extend(vop3_dst_mod('result'))
+        result = apply_output('f32', result)
     L.extend(
         [
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, std::bit_cast<uint32_t>(result));',
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, {result});',
             '  }',
         ]
     )

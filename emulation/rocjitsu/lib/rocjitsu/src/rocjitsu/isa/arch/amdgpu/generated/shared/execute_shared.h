@@ -15982,35 +15982,24 @@ inline void execute_v_mul_u32_u24_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_mullit_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-    float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-    s0 = amdgpu::source_modifier::apply_to_float(s0, 0, inst.inst_.abs, inst.inst_.neg);
-    s1 = amdgpu::source_modifier::apply_to_float(s1, 1, inst.inst_.abs, inst.inst_.neg);
-    s2 = amdgpu::source_modifier::apply_to_float(s2, 2, inst.inst_.abs, inst.inst_.neg);
-    float result;
-    if (s1 == -std::numeric_limits<float>::max() || s1 == -std::numeric_limits<float>::infinity() ||
-        std::isnan(s1) || s2 <= 0.0f || std::isnan(s2))
-      result = -std::numeric_limits<float>::max();
-    else
-      result = (s0 == 0.0f || s1 == 0.0f) ? 0.0f : s0 * s1;
-    const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-        wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod);
-    if (effective_omod == 1)
-      result *= 2.0f;
-    else if (effective_omod == 2)
-      result *= 4.0f;
-    else if (effective_omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    result = amdgpu::fp_mode::finalize_omod_f32(result, effective_omod);
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(inst, wf, inst.vdst, lane,
-                                                      std::bit_cast<uint32_t>(result));
+    const uint32_t s0 = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(
+        amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), 0, inst.inst_.abs, inst.inst_.neg);
+    const uint32_t s1 = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(
+        amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane), 1, inst.inst_.abs, inst.inst_.neg);
+    const uint32_t s2 = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(
+        amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane), 2, inst.inst_.abs, inst.inst_.neg);
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::output_modifier::apply<amdgpu::fp_format::F32>(
+            amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(),
+                                        wf.fp_denorm_mode_f32()),
+            output_policy));
   }
 }
 

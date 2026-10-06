@@ -2720,6 +2720,96 @@ std::vector<ArithmeticCase> cndmask_b16_modifier_cases() {
   return cases;
 }
 
+// V_MULLIT_F32 flushes its sources and its product under the F32 MODE
+// denormal field, then applies OMOD and CLAMP. A subnormal S2 flushed to zero
+// selects -MAX_FLOAT. Lanes are gfx1201 captures, each under two MODE values.
+// 0x30 keeps F32 denormals and 0xc0 flushes them, so reading the F16/F64
+// field fails.
+std::vector<ArithmeticCase> mullit_cases() {
+  struct Lane {
+    const char *name;
+    uint8_t clamp;
+    uint8_t omod;
+    uint8_t neg;
+    std::array<uint32_t, 3> sources;
+    std::array<std::pair<uint32_t, uint32_t>, 2> mode_results;
+  };
+  constexpr std::array<Lane, 8> lanes = {{
+      // min_normal * min_normal underflows to +0 unless S2 = 2^-149 is flushed.
+      {"S2Subnormal",
+       0,
+       0,
+       0,
+       {0x00800000u, 0x00800000u, 1u},
+       {{{0x30u, 0u}, {0xc0u, 0xff7fffffu}}}},
+      // 0.5 * min_normal is subnormal; output flushing gives +0.
+      {"SubnormalProduct",
+       0,
+       0,
+       0,
+       {0x3f000000u, 0x00800000u, 0x00800000u},
+       {{{0x30u, 0x00400000u}, {0xc0u, 0u}}}},
+      // A flushed S0 is a zero factor, which gives +0, not -0.
+      {"S0Subnormal",
+       0,
+       0,
+       0,
+       {0x807fffffu, 0x00800000u, 0x00800000u},
+       {{{0x30u, 0x80000000u}, {0xc0u, 0u}}}},
+      {"RoundTowardZero",
+       0,
+       0,
+       0,
+       {0x2d1d4000u, 0x49032148u, 0x44630000u},
+       {{{0xf0u, 0x36a11863u}, {0xffu, 0x36a11862u}}}},
+      // OMOD and CLAMP apply to -MAX_FLOAT as to a product.
+      {"ClampS2Subnormal",
+       1,
+       0,
+       0,
+       {0x3f800000u, 0x00800000u, 1u},
+       {{{0xf0u, 0x00800000u}, {0x00u, 0u}}}},
+      {"Mul2S2Subnormal",
+       0,
+       1,
+       0,
+       {0x00800000u, 0x00800000u, 1u},
+       {{{0xf0u, 0u}, {0x00u, 0xff800000u}}}},
+      {"Div2S2Subnormal",
+       0,
+       3,
+       0,
+       {0x00800000u, 0x00800000u, 1u},
+       {{{0xf0u, 0u}, {0x00u, 0xfeffffffu}}}},
+      // NEG makes S2 = 1.0 negative.
+      {"NegS2",
+       0,
+       0,
+       4,
+       {0x00800000u, 0x00800000u, 0x3f800000u},
+       {{{0xf0u, 0xff7fffffu}, {0x00u, 0xff7fffffu}}}},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Lane &lane : lanes) {
+    const auto words = rdna4::build_vop3(rdna4::kVMullitF32Vop3, {.vdst = 6,
+                                                                  .clamp = lane.clamp,
+                                                                  .src0 = 256,
+                                                                  .src1 = 257,
+                                                                  .src2 = 258,
+                                                                  .omod = lane.omod,
+                                                                  .neg = lane.neg});
+    for (const auto &[mode, result] : lane.mode_results)
+      cases.push_back({std::format("{}Mode{:02X}", lane.name, mode),
+                       ROCJITSU_CODE_ARCH_RDNA4,
+                       {words[0], words[1], 0u},
+                       {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}},
+                       {{6, result}},
+                       mode,
+                       FE_TONEAREST});
+  }
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2880,6 +2970,22 @@ TEST_P(ValuCndmaskB16ModifierTest, MatchesGfx1201OnScalarAndSimdPaths) {
 
 INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuCndmaskB16ModifierTest,
                          testing::ValuesIn(cndmask_b16_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuMullitModeTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuMullitModeTest, MatchesGfx1201OnScalarAndSimdPaths) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuMullitModeTest, testing::ValuesIn(mullit_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
