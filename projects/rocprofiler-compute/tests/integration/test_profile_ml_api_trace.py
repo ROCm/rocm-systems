@@ -203,3 +203,23 @@ def test_filter_torch_confines_metric_kernel_ids(
     assert not any(
         "triton.JITFunction" in str(name) for name in kernel_top["Kernel_Name"]
     )
+
+
+@pytest.mark.ml_api_trace
+def test_filter_torch_and_triton_together(
+    ml_api_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--torch-operator",
+        "*",
+        "--triton-operator",
+        "*",
+        "--path",
+        ml_api_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Matched PyTorch, Triton Operators:" in out
