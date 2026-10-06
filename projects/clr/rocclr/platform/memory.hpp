@@ -445,6 +445,13 @@ class Memory : public amd::RuntimeObject {
   //! save the user data during memory allocation
   UserData& getUserData() { return userData_; }
 
+  //! Record the backend status from the last failed device create(). See DeviceCreateStatus.
+  void setDeviceCreateStatus(DeviceCreateStatus status) { userData_.device_create_status_ = status; }
+  //! Backend status from the last failed device create() (kDeviceCreateSuccess if none).
+  DeviceCreateStatus deviceCreateStatus() const {
+    return static_cast<DeviceCreateStatus>(userData_.device_create_status_);
+  }
+
   //! find if memory object is Arena memory
   virtual bool isArena() { return false; }
 

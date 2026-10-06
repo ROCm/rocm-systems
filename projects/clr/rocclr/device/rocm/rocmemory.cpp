@@ -1552,7 +1552,7 @@ bool Image::createInteropImage() {
 }
 
 bool Image::create(bool alloc_local) {
-  owner()->getUserData().device_create_status_ = amd::Memory::kDeviceCreateSuccess;
+  owner()->setDeviceCreateStatus(amd::Memory::kDeviceCreateSuccess);
 
   if (owner()->parent() != nullptr) {
     // Image view creation
@@ -1813,7 +1813,7 @@ bool Image::createView(const Memory& parent) {
     LogPrintfError("[OCL] Fail to allocate image memory with status: %d \n", status);
     if (owner() != nullptr &&
         status == static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED)) {
-      owner()->getUserData().device_create_status_ = amd::Memory::kDeviceCreateImagePitchUnsupported;
+      owner()->setDeviceCreateStatus(amd::Memory::kDeviceCreateImagePitchUnsupported);
     }
     return false;
   }
