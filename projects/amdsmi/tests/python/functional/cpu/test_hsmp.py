@@ -9,6 +9,34 @@ import unittest
 import common.common as common
 from common.common import amdsmi
 
+# amdsmi_get_esmi_err_msg() reads its argument as an esmi_status_t code and returns the
+# amdsmi status that code maps to (esmi_status_map in amd_smi_common.h), so an input
+# inside the esmi enum range comes back as that mapped status rather than SUCCESS.
+# Keyed by esmi_status_t ordinal (e_smi.h).
+_ESMI_CODE_TO_STATUS = {
+    0: amdsmi.AmdSmiStatus.SUCCESS,  # ESMI_SUCCESS / ESMI_INITIALIZED
+    1: amdsmi.AmdSmiStatus.NO_ENERGY_DRV,
+    2: amdsmi.AmdSmiStatus.NO_MSR_DRV,
+    3: amdsmi.AmdSmiStatus.NO_HSMP_DRV,
+    4: amdsmi.AmdSmiStatus.NO_HSMP_SUP,
+    5: amdsmi.AmdSmiStatus.NO_DRV,
+    6: amdsmi.AmdSmiStatus.FILE_NOT_FOUND,
+    7: amdsmi.AmdSmiStatus.BUSY,
+    8: amdsmi.AmdSmiStatus.NO_PERM,
+    9: amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+    10: amdsmi.AmdSmiStatus.FILE_ERROR,
+    11: amdsmi.AmdSmiStatus.INTERRUPT,
+    12: amdsmi.AmdSmiStatus.IO,
+    13: amdsmi.AmdSmiStatus.UNEXPECTED_SIZE,
+    14: amdsmi.AmdSmiStatus.UNKNOWN_ERROR,
+    15: amdsmi.AmdSmiStatus.ARG_PTR_NULL,
+    16: amdsmi.AmdSmiStatus.OUT_OF_RESOURCES,
+    17: amdsmi.AmdSmiStatus.NOT_INIT,
+    18: amdsmi.AmdSmiStatus.INVAL,
+    19: amdsmi.AmdSmiStatus.HSMP_TIMEOUT,
+    20: amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+}
+
 
 class TestCpuHsmp(unittest.TestCase):
     @classmethod
@@ -70,7 +98,10 @@ class TestCpuHsmp(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        for _, status_type, status_cond in common.STATUS_TYPES:
+        for _, status_type, _ in common.STATUS_TYPES:
+            # Inputs outside the esmi enum range match no entry and return SUCCESS.
+            expected = _ESMI_CODE_TO_STATUS.get(status_type.value, amdsmi.AmdSmiStatus.SUCCESS)
+            status_cond = f"AMDSMI_STATUS_{expected.name}"
             msg = f"\t### amdsmi_get_esmi_err_msg(status_type={status_type}):"
             try:
                 ret = amdsmi.amdsmi_get_esmi_err_msg(status_type)
