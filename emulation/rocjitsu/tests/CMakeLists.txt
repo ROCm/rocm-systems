@@ -553,6 +553,7 @@ add_executable(
     gpu_vm_pipeline_test.cpp
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
+    legacy_page_table_cache_test.cpp
     config_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
@@ -571,9 +572,9 @@ add_executable(
     completion_tracker_test.cpp
     mes_engine_test.cpp
     aql_packet_processor_test.cpp
-    pm4_ring_consumer_test.cpp
     pm4_packet_processor_test.cpp
-    pm4_queue_controller_test.cpp
+    packet_processor_contract_test.cpp
+    pm4_compute_queue_test.cpp
     sdma_queue_scheduler_test.cpp
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
@@ -592,6 +593,7 @@ add_executable(
     simdojo_sim_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
+    kfd_events_test.cpp
     decode_smoke_test.cpp
     readlane_selector_test.cpp
     decoder_c_api_test.cpp
@@ -603,6 +605,7 @@ add_executable(
     shared_infra_test.cpp
     scalar_buffer_test.cpp
     transcendental_test.cpp
+    comparison_test.cpp
     amdgpu_elf_test_support.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
@@ -655,6 +658,7 @@ add_executable(
     pseudo_scalar_exec_test.cpp
     valu_fp_mode_test.cpp
     scalar_scc_test.cpp
+    vskip_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
@@ -670,9 +674,11 @@ add_executable(
     smfmac_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
     swmmac_k64_simd_benchmark.cpp
+    swmmac_k128_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
     simd_correctness/swmmac_k64_simd_exact_test.cpp
     simd_correctness/smfmac_simd_exact_test.cpp
+    simd_correctness/swmmac_k128_simd_exact_test.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -1183,35 +1189,20 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
         probe_callable_sgpr_probe_gfx950
     )
     rj_configure_target(probe_fixture_test TEST)
+    # Discover each case once instead of combining a whole-binary run with
+    # additional filtered registrations of the same cases.
+    rj_add_gtest_tests(
+        probe_fixture_test
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    # The helper installs the fragment without including it. Keep the installed
+    # probe cases reachable whenever this fixture target is available.
     if(RJ_INSTALL_TESTS)
-        rj_install_test_target(probe_fixture_test)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"probe_fixture_test.cmake\")\n\n"
+        )
     endif()
-    rj_add_test(
-        NAME "ProbeFixture.NopProbeResolvesAndReturns"
-        COMMAND probe_fixture_test
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND "bin/probe_fixture_test"
-    )
-    rj_add_test(
-        NAME "ProbeFixture.ArgProbeReceivesItsArgumentInV0"
-        COMMAND
-            probe_fixture_test
-            --gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND
-            "bin/probe_fixture_test"
-            "--gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0"
-    )
-    rj_add_test(
-        NAME "ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
-        COMMAND
-            probe_fixture_test
-            --gtest_filter=ProbeFixture.CallableSgprUseExceedsKernelDescriptor
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND
-            "bin/probe_fixture_test"
-            "--gtest_filter=ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
-    )
 endif()
 
 # Pin the zero-test failure behavior independently of GPU availability. This is

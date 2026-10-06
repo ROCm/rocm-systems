@@ -75,17 +75,31 @@ jobs:
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
 
-  AIS_system_lvm_tests:
+  AIS_system_lvm16_tests:
     needs: [build_and_test]
     uses: ./.github/workflows/hipfile-ci-system.yml
     with:
       ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
       ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
-      ais_mount_path: /mnt/ais/lvm
+      ais_mount_path: /mnt/ais/lvm16
       ci_image: ${{ needs.build_and_test.outputs.ci_image }}
       cxx_compiler: ${{ inputs.cxx_compiler }}
       cxx_standard: ${{ inputs.cxx_standard }}
-      mount_label: system_lvm
+      mount_label: system_lvm16
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
+
+  AIS_system_lvm_mirror_tests:
+    needs: [build_and_test]
+    uses: ./.github/workflows/hipfile-ci-system.yml
+    with:
+      ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
+      ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
+      ais_mount_path: /mnt/ais/lvm_mirror
+      ci_image: ${{ needs.build_and_test.outputs.ci_image }}
+      cxx_compiler: ${{ inputs.cxx_compiler }}
+      cxx_standard: ${{ inputs.cxx_standard }}
+      mount_label: system_lvm_mirror
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
 

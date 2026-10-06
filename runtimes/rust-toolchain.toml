@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 [toolchain]
 channel = "1.98.0"
 profile = "minimal"

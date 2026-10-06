@@ -13,8 +13,8 @@
 /// Architecture: the CP directly owns queue state and doorbell monitoring
 /// (CP hardware functions). Four sub-blocks handle distinct pipeline stages:
 ///   - AqlPacketProcessor: AQL framing, classification, and dependency decoding
-///   - Pm4PacketProcessor: the supported PM4 compute-queue packet subset
-///   - DispatchController: SPI+ADC WG iteration, CU resource check, WF creation
+///   - PM4 packet processing: command-stream decoding and execution in pm4/
+///   - CP dispatch admission: SPI+ADC WG iteration, CU resource check, WF creation
 ///   - CompletionTracker: per-dispatch WG counting, in-order signal retirement
 ///
 /// @see <a
@@ -30,8 +30,8 @@
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
-#include "rocjitsu/vm/amdgpu/pm4.h"
-#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
@@ -71,32 +71,22 @@ namespace amdgpu {
 class GpuVm;
 class GpuVmAccess;
 class CommandProcessorCloseTestAccess;
-class Pm4QueueController;
-class QueueBindingFactory;
 enum class VmAccessOutcome : uint8_t;
 enum class QueueReconfigureStatus : uint8_t;
 enum class QueueSubmissionStatus : uint8_t;
 enum class QueuePrepareCloseStatus : uint8_t;
 struct AtomicLoadResult;
-struct Pm4QueueConfig;
-struct QueueReconfigureRequest;
-
-/// @brief Dispatches belonging to one DRM indirect-buffer submission queue.
-struct Pm4DispatchState {
-  std::deque<DispatchEntry> entries;
-  void push_entry(DispatchEntry entry) { entries.push_back(std::move(entry)); }
-};
-
-/// @brief CP-owned DRM queue, independent of AQL rings and PM4 transport rings.
-struct Pm4SubmitQueue {
+/// @brief PM4 queue configuration admitted by one CommandProcessor.
+struct Pm4QueueConfig {
   AddressSpaceHandle address_space;
-  std::optional<GpuVmBindingLease> binding;
-  uint32_t process_id = 0;
-  uint32_t queue_id = 0;
-  bool faulted = false;
-  std::shared_ptr<Pm4QueueState> pm4;
-  Pm4DispatchState dispatches;
+  uint64_t ring_base = 0;
+  uint32_t ring_size_bytes = 0;
+  uint64_t consumer_pointer_address = 0;
+  std::optional<uint64_t> initial_consumer_cursor = std::nullopt;
+  Pm4PacketCallbacks packet_callbacks{};
 };
+
+struct QueueReconfigureRequest;
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
 ///
@@ -176,13 +166,6 @@ public:
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
 
-  /// @brief Create a PM4 queue binding factory backed by this CP's queue controller.
-  /// @details The returned factory is a lifetime/notification adapter. This CP
-  /// owns PM4 ring, packet, retry, and cursor-publication state so semantics do
-  /// not migrate into MES or a PCI/VFIO transport adapter.
-  [[nodiscard]] std::shared_ptr<QueueBindingFactory>
-  make_pm4_queue_binding_factory(Pm4PacketCallbacks callbacks);
-
   [[nodiscard]] uint64_t register_pm4_queue(Pm4QueueConfig config);
   [[nodiscard]] QueuePrepareCloseStatus
   prepare_unregister_pm4_queue_registration(uint64_t registration_id) noexcept;
@@ -195,7 +178,7 @@ public:
   /// @brief Whether this CP currently owns any AQL or PM4 queue state.
   [[nodiscard]] bool has_registered_queues() const;
 
-  /// @brief PM4 queues currently owned by this CP's controller.
+  /// @brief Compute queues whose root ring initially processes PM4.
   /// @details Test-only visibility for cross-layer teardown assertions.
   [[nodiscard]] size_t registered_pm4_queue_count_for_test() const;
 
@@ -203,12 +186,12 @@ public:
   void set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count);
 
   /// @brief Register a queue and return its CP-local lifetime identity.
-  uint64_t register_queue(AqlQueueConfig queue);
+  uint64_t register_queue(ComputeQueueConfig queue);
 
   /// @brief Remove only the queue incarnation identified by @p registration_id.
   [[nodiscard]] bool unregister_queue_registration(uint64_t registration_id);
 
-  /// @brief Gracefully remove one AQL registration without losing publication state.
+  /// @brief Gracefully remove one compute registration without losing publication state.
   /// @details Busy leaves the registration live so its owner thread can resume
   /// retryable cursor or completion publication. Faulted preserves terminal
   /// publication state for explicit force-cancel/reset handling.
@@ -216,7 +199,7 @@ public:
   prepare_unregister_queue_registration(uint64_t registration_id) noexcept;
 
   /// @brief Register one DRM indirect-buffer submission queue.
-  [[nodiscard]] bool register_drm_queue(Pm4SubmitQueue queue);
+  [[nodiscard]] bool register_drm_queue(ComputeQueueConfig config);
   /// @brief Cancel DRM work before its frontend revokes the process VM binding.
   void unregister_drm_queues(uint32_t process_id);
   void unregister_drm_queue(uint32_t queue_id, uint32_t process_id);
@@ -329,7 +312,7 @@ public:
   /// next one arrives.
   [[nodiscard]] size_t accepted_entry_count_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    const AqlQueueRecord *queue_state = find_aql_queue(queue_id, process_id);
+    const ComputeQueueRecord *queue_state = find_compute_queue(queue_id, process_id);
     return queue_state == nullptr ? 0 : queue_state->accepted_entries;
   }
 
@@ -338,30 +321,30 @@ public:
   [[nodiscard]] std::array<DispatchPacketKind, 2>
   first_accepted_entry_kinds_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    const AqlQueueRecord *queue_state = find_aql_queue(queue_id, process_id);
+    const ComputeQueueRecord *queue_state = find_compute_queue(queue_id, process_id);
     return queue_state == nullptr ? std::array<DispatchPacketKind, 2>{}
                                   : queue_state->first_accepted_entry_kinds;
   }
 
-  /// @brief AQL queues registered with this CP, including fan-out replicas.
+  /// @brief Compute queues registered with this CP, including fan-out replicas.
   ///
   /// @details Test-only. Whether a queue is present here as an owner or as a
   /// replica is an internal placement detail, not something production code
   /// should branch on.
   [[nodiscard]] size_t registered_queue_count_for_test() const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    return aql_queues_.size();
+    return compute_queues_.size();
   }
 
   [[nodiscard]] std::optional<bool> queue_uses_kfd_abi_for_test(uint32_t queue_id,
                                                                 uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    const std::vector<AqlQueueRecord>::const_iterator queue =
-        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
+    const std::vector<ComputeQueueRecord>::const_iterator queue =
+        std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
-    return queue == aql_queues_.end() ? std::nullopt
-                                      : std::optional<bool>(queue->uses_kfd_queue_abi);
+    return queue == compute_queues_.end() ? std::nullopt
+                                          : std::optional<bool>(queue->uses_kfd_queue_abi);
   }
 
   /// @brief Address-space identity retained by one registered queue.
@@ -370,20 +353,20 @@ public:
   [[nodiscard]] AddressSpaceHandle queue_address_space_for_test(uint32_t queue_id,
                                                                 uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    const std::vector<AqlQueueRecord>::const_iterator queue =
-        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
+    const std::vector<ComputeQueueRecord>::const_iterator queue =
+        std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
-    return queue == aql_queues_.end() ? AddressSpaceHandle{} : queue->address_space;
+    return queue == compute_queues_.end() ? AddressSpaceHandle{} : queue->address_space;
   }
 
   /// @brief Address-space identity carried by the first accepted queue entry.
-  /// @details Test-only. The bounded history in AqlQueueRecord lets fan-out tests
+  /// @details Test-only. The bounded history in ComputeQueueRecord lets fan-out tests
   /// inspect an entry after it has retired without retaining production work.
   [[nodiscard]] AddressSpaceHandle first_accepted_address_space_for_test(uint32_t queue_id,
                                                                          uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    const AqlQueueRecord *queue_state = find_aql_queue(queue_id, process_id);
+    const ComputeQueueRecord *queue_state = find_compute_queue(queue_id, process_id);
     return queue_state == nullptr ? AddressSpaceHandle{}
                                   : queue_state->first_accepted_address_space;
   }
@@ -398,10 +381,10 @@ public:
   [[nodiscard]] std::optional<uint64_t>
   queue_last_doorbell_for_test(uint64_t registration_id) const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    const std::vector<AqlQueueRecord>::const_iterator queue =
-        std::ranges::find(aql_queues_, registration_id, &AqlQueueRecord::registration_id);
-    return queue == aql_queues_.end() ? std::nullopt
-                                      : std::optional<uint64_t>(queue->last_doorbell);
+    const std::vector<ComputeQueueRecord>::const_iterator queue =
+        std::ranges::find(compute_queues_, registration_id, &ComputeQueueRecord::registration_id);
+    return queue == compute_queues_.end() ? std::nullopt
+                                          : std::optional<uint64_t>(queue->last_doorbell);
   }
 
   /// @brief Host-accessible queues this CP polls, excluding fan-out replicas.
@@ -415,7 +398,7 @@ public:
   [[nodiscard]] size_t polled_kfd_queue_count_for_test() const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     size_t polled = 0;
-    for (const AqlQueueRecord &queue : aql_queues_)
+    for (const ComputeQueueRecord &queue : compute_queues_)
       polled +=
           (queue.doorbell_mode == QueueDoorbellMode::HostPolled && !queue.fanout_replica) ? 1 : 0;
     return polled;
@@ -465,35 +448,35 @@ public:
   /// @brief Test-only view of one queue's debugger suspension gate.
   [[nodiscard]] bool queue_debug_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    std::vector<AqlQueueRecord>::iterator queue =
-        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
+    std::vector<ComputeQueueRecord>::iterator queue =
+        std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
-    return queue != aql_queues_.end() && queue->debug_suspended;
+    return queue != compute_queues_.end() && queue->debug_suspended;
   }
 
   [[nodiscard]] bool queue_runtime_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    std::vector<AqlQueueRecord>::iterator queue =
-        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
+    std::vector<ComputeQueueRecord>::iterator queue =
+        std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
-    return queue != aql_queues_.end() && queue->runtime_suspended;
+    return queue != compute_queues_.end() && queue->runtime_suspended;
   }
 
   [[nodiscard]] bool queue_faulted_for_test(uint32_t queue_id, uint32_t process_id) const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    const std::vector<AqlQueueRecord>::const_iterator queue =
-        std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
+    const std::vector<ComputeQueueRecord>::const_iterator queue =
+        std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &candidate) {
           return candidate.queue_id == queue_id && candidate.process_id == process_id;
         });
-    return queue != aql_queues_.end() && queue->faulted;
+    return queue != compute_queues_.end() && queue->faulted;
   }
 
   [[nodiscard]] bool has_dispatch_for_test(uint32_t queue_id, uint32_t process_id,
                                            uint64_t dispatch_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    const AqlQueueRecord *state = find_aql_queue(queue_id, process_id);
+    const ComputeQueueRecord *state = find_compute_queue(queue_id, process_id);
     return state != nullptr &&
            std::ranges::any_of(state->entries, [dispatch_id](const DispatchEntry &entry) {
              return entry.dispatch_id == dispatch_id;
@@ -507,10 +490,11 @@ public:
 
   [[nodiscard]] bool queue_exception_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    auto queue = std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const auto &candidate) {
-      return candidate.queue_id == queue_id && candidate.process_id == process_id;
-    });
-    return queue != aql_queues_.end() && queue->exception_suspended;
+    auto queue =
+        std::find_if(compute_queues_.begin(), compute_queues_.end(), [&](const auto &candidate) {
+          return candidate.queue_id == queue_id && candidate.process_id == process_id;
+        });
+    return queue != compute_queues_.end() && queue->exception_suspended;
   }
 
   /// @brief Test-only count of executed command-processor doorbell passes.
@@ -540,7 +524,7 @@ private:
     CommandProcessor *owner_ = nullptr;
   };
 
-  uint64_t register_queue(AqlQueueConfig queue, bool fanout_replica);
+  uint64_t register_queue(ComputeQueueConfig queue, bool fanout_replica);
   [[nodiscard]] QueuePrepareCloseStatus close_queue_registration(uint64_t registration_id,
                                                                  bool force) noexcept;
 
@@ -578,7 +562,9 @@ private:
   /// notifications and schedules them for the following tick so they cannot starve
   /// device work already queued there. Internal test queues have no poll thread and
   /// are driven by engine->run()/step(), so there the re-check must be kept alive by
-  /// rescheduling the doorbell event at @p now + 1.
+  /// one engine-owned stall event at @p now plus the current backoff. A shorter
+  /// deadline supersedes that event; repeated later requests are coalesced. Real
+  /// doorbells remain independent so they can wake the CP immediately.
   void arm_stall_recheck(simdojo::Tick now);
 
   /// @brief Re-arm a re-check while this CP holds a shard whose grid is still
@@ -589,7 +575,7 @@ private:
   void arm_grid_wait_recheck();
 
   /// @brief Fetch AQL packets from a single AQL queue.
-  void fetch_from_queue(AqlQueueRecord &queue, simdojo::Tick now);
+  void fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick now);
 
   /// @brief Coarse writeback+invalidate of the GPU data caches (L1 K$/V$ + L2).
   /// @details Scalar and vector L1 are write-through and only need
@@ -597,27 +583,28 @@ private:
   void flush_gpu_caches();
 
   /// @brief Ask ROCr to provision scratch while leaving the head packet unconsumed.
-  [[nodiscard]] AqlAdmissionResult request_dynamic_scratch(AqlQueueRecord &queue,
+  [[nodiscard]] AqlAdmissionResult request_dynamic_scratch(ComputeQueueRecord &queue,
                                                            const GpuVmAccess &transaction_access,
                                                            uint64_t packet_index, uint64_t status);
 
   /// @brief Advertise and maintain ROCr's amd_queue_v2_t scratch-reclaim contract.
-  [[nodiscard]] VmAccessOutcome publish_async_scratch_capability(const AqlQueueRecord &queue) const;
-  [[nodiscard]] VmAccessOutcome record_async_scratch_use(const AqlQueueRecord &queue,
+  [[nodiscard]] VmAccessOutcome
+  publish_async_scratch_capability(const ComputeQueueRecord &queue) const;
+  [[nodiscard]] VmAccessOutcome record_async_scratch_use(const ComputeQueueRecord &queue,
                                                          const GpuVmAccess &access,
                                                          uint64_t packet_index,
                                                          bool alternate) const;
 
   /// @brief Hold retirement until ROCr acknowledges a use-once scratch reclaim.
-  [[nodiscard]] VmAccessOutcome gate_dispatch_retirement(AqlQueueRecord &queue,
+  [[nodiscard]] VmAccessOutcome gate_dispatch_retirement(ComputeQueueRecord &queue,
                                                          const DispatchEntry &entry);
-  [[nodiscard]] VmAccessOutcome advance_scratch_reclaim(AqlQueueRecord &queue,
+  [[nodiscard]] VmAccessOutcome advance_scratch_reclaim(ComputeQueueRecord &queue,
                                                         const DispatchEntry &entry);
 
   /// @brief Build and admit one normalized AQL kernel-dispatch packet.
   /// @param packet_index Absolute AQL ring index for debugger correlation.
   [[nodiscard]] AqlAdmissionResult
-  admit_kernel_dispatch(const hsa_kernel_dispatch_packet_t &packet, AqlQueueRecord &queue,
+  admit_kernel_dispatch(const hsa_kernel_dispatch_packet_t &packet, ComputeQueueRecord &queue,
                         const GpuVmAccess &transaction_access, uint64_t packet_address,
                         uint32_t ring_slot, uint64_t packet_index = 0,
                         ClusterDispatchShape cluster_shape = {});
@@ -633,11 +620,14 @@ private:
   /// is returned. The caller must then fault the dispatch without retaining a
   /// reference into the queue entry container across that operation.
   [[nodiscard]] DispatchWorkgroupResult dispatch_workgroups(DispatchEntry &entry);
-  void fail_pm4_queue(Pm4SubmitQueue &queue, Pm4DispatchState &qs);
-  void fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, simdojo::Tick now);
-  void dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs,
+  [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
+                                     simdojo::Tick now);
+  void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
+  void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
+  void dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
                     const std::array<uint32_t, 4> &dimensions);
-  void service_drm_queues(simdojo::Tick now);
+  void service_command_streams(simdojo::Tick now);
+  void service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick now);
 
   /// @brief Split a dispatch across the SoC's XCDs, keeping this XCD's share.
   ///
@@ -718,10 +708,10 @@ private:
   }
 
   /// @brief Locate the queue state for a (queue_id, process_id) pair.
-  /// @returns Pointer into aql_queues_, or null when not registered. Caller
+  /// @returns Pointer into compute_queues_, or null when not registered. Caller
   /// must hold hw_queue_mutex_ and must not use the result across a registration
   /// change.
-  AqlQueueRecord *find_aql_queue(uint32_t queue_id, uint32_t process_id);
+  ComputeQueueRecord *find_compute_queue(uint32_t queue_id, uint32_t process_id);
 
   void register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
                                   uint32_t global_wg_id, ComputeUnitCore *cu, uint32_t lds_base);
@@ -743,7 +733,7 @@ private:
   /// @brief Drain completed entries and preserve retry/terminal VM outcomes.
   /// @details Caller must hold @ref hw_queue_mutex_.
   /// @returns False when terminal state must stop this processing pass. A
-  /// transient retry is recorded on only the affected AqlQueueRecord so unrelated
+  /// transient retry is recorded on only the affected ComputeQueueRecord so unrelated
   /// queues remain runnable.
   [[nodiscard]] bool drain_completions();
   bool fault_dispatch_local(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
@@ -773,20 +763,19 @@ private:
   void on_cu_pool_ready(ComputeUnitCore *cu);
 
   /// @brief Queue scheduling: select next queue with undispatched entries.
-  AqlQueueRecord *schedule_next_queue();
+  ComputeQueueRecord *schedule_next_queue();
 
   void handle_doorbell_sync(simdojo::Tick timestamp);
 
   /// @brief Check if barrier is satisfied for an entry.
-  bool barrier_satisfied(const AqlQueueRecord &qs, size_t idx) const;
+  bool barrier_satisfied(const ComputeQueueRecord &qs, size_t idx) const;
 
   /// @brief Return total pending entries across all queues.
   size_t pending_entries() const {
     size_t total = 0;
-    for (auto &qs : aql_queues_)
-      total += qs.entries.size();
-    for (const auto &queue : drm_queues_)
-      total += queue.dispatches.entries.size() + queue.pm4->submissions.size();
+    for (const auto &queue : compute_queues_)
+      total += queue.entries.size() + queue.dispatches.entries.size() +
+               queue.commands.submissions.size();
     return total;
   }
 
@@ -795,8 +784,8 @@ private:
   /// @details Answers whether this CP's lifecycle is anchored by the VM-level
   /// primary, which a fan-out replica does anchor just as its owner does.
   bool has_kfd_queues() const {
-    for (const auto &q : aql_queues_)
-      if (q.uses_kfd_queue_abi)
+    for (const auto &q : compute_queues_)
+      if (q.uses_kfd_queue_abi || q.doorbell_mode == QueueDoorbellMode::HostPolled)
         return true;
     return false;
   }
@@ -808,7 +797,7 @@ private:
   /// to the doorbell monitor must ask this rather than has_kfd_queues(), or a CP
   /// left holding only replicas keeps a monitor alive for a ring it never reads.
   bool polls_kfd_queues() const {
-    for (const auto &q : aql_queues_)
+    for (const auto &q : compute_queues_)
       if (q.doorbell_mode == QueueDoorbellMode::HostPolled && !q.fanout_replica)
         return true;
     return false;
@@ -819,9 +808,7 @@ private:
   std::vector<ShaderProcessorInput *> spis_;
   std::vector<L2Cache *> l2_caches_;
   AqlPacketProcessor aql_packet_processor_;
-  std::unique_ptr<Pm4QueueController> pm4_queue_controller_;
-  std::vector<AqlQueueRecord> aql_queues_;
-  std::vector<Pm4SubmitQueue> drm_queues_;
+  std::vector<ComputeQueueRecord> compute_queues_;
   std::unordered_map<uint32_t, DispatchLaunchMetadata> dispatch_launch_metadata_;
   std::vector<ComputeUnitCore *> cus_;
   std::vector<simdojo::Port *> dispatch_ports_;
@@ -1008,6 +995,12 @@ private:
   /// re-checks on its poll thread's own cadence instead.
   simdojo::Tick stall_recheck_backoff_ = 1;
   static constexpr simdojo::Tick kMaxStallRecheckBackoff = 4096;
+  // Owned by the CP's engine thread, unlike the external poller retry below.
+  // The generation rejects superseded deadlines without duplicating live retries.
+  bool stall_recheck_pending_ = false;
+  simdojo::Tick stall_recheck_tick_ = simdojo::TICK_MAX;
+  uintptr_t stall_recheck_generation_ = 0;
+  simdojo::Event stall_recheck_event_{this, simdojo::EventType::TIMER_CALLBACK};
 
   // Set when a queue stalls on a barrier or another unsatisfied dependency --
   // progress external to the current engine pass (a peer rank's kernel completion
