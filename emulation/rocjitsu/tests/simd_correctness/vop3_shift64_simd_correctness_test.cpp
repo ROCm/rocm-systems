@@ -233,10 +233,9 @@ Mad64Result expected_mad_i64_i32(uint32_t a, uint32_t b, uint64_t c) {
   int64_t product_signed = lhs * rhs;
   uint64_t product = static_cast<uint64_t>(product_signed);
   uint64_t value = product + c;
-  int64_t addend = static_cast<int64_t>(c);
-  bool overflow = (addend > 0 && product_signed > std::numeric_limits<int64_t>::max() - addend) ||
-                  (addend < 0 && product_signed < std::numeric_limits<int64_t>::min() - addend);
-  return {value, overflow};
+  // The carry is bit 64 of the exact 65-bit sum, i.e. whether that sum is negative.
+  const auto sum = static_cast<__int128>(product_signed) + static_cast<int64_t>(c);
+  return {value, sum < 0};
 }
 
 uint64_t expected_mad64_sdst(bool is_signed, uint64_t exec, uint32_t arot, uint32_t crot) {
@@ -326,13 +325,16 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
     uint32_t src1;
     uint64_t src2;
     uint64_t expected;
+    bool carry;
   };
+  // The signed carry is bit 64 of the exact sum: set for a negative overflow,
+  // clear for a positive one.
   constexpr std::array kCases{
-      ClampCase{false, UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX},
+      ClampCase{false, UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX, true},
       ClampCase{true, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX),
-                static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN)},
+                static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN), true},
       ClampCase{true, static_cast<uint32_t>(INT32_MAX), static_cast<uint32_t>(INT32_MAX),
-                static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX)},
+                static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), false},
   };
   for (const ClampCase &test : kCases) {
     for (bool force_scalar : {false, true}) {
@@ -358,7 +360,7 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
       EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
       EXPECT_EQ(fx.read64(vb + kDstVgpr, 0), test.expected)
           << "signed " << test.is_signed << " scalar " << force_scalar;
-      EXPECT_EQ(fx.read_sgpr64(sb) & 1u, 1u)
+      EXPECT_EQ((fx.read_sgpr64(sb) & 1u) != 0, test.carry)
           << "signed " << test.is_signed << " scalar " << force_scalar;
     }
   }

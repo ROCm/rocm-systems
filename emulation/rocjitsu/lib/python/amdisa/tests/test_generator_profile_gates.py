@@ -1823,6 +1823,10 @@ def test_vop3_mad_64_32_clamps_exact_result_without_changing_carry():
     assert 'inst_.clamp && overflow' in unsigned
     assert unsigned.index('carry |= 1ULL << lane') < unsigned.index('inst_.clamp')
     assert 'amdgpu::signed_add_overflows(product, s2)' in signed
+    # The signed carry is bit 64 of the 65-bit sum, not signed overflow:
+    # -1 * 1 + 0 sets it.
+    assert 'if (((product ^ s2) >> 63) ^ (result < product))' in signed
+    assert signed.index('(result < product)') < signed.index('signed_add_overflows')
     assert 'inst_.clamp && overflow' in signed
     assert '(product & (1ULL << 63))' in signed
     assert signed.index('carry |= 1ULL << lane') < signed.index('inst_.clamp')

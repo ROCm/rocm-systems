@@ -13018,9 +13018,11 @@ inline void execute_v_mad_co_i64_i32_vop3([[maybe_unused]] Inst &inst,
     uint64_t s2 = amdgpu::RegisterAccess(wf).read_lane64(inst.src2, lane);
     uint64_t product = static_cast<uint64_t>(s0 * s1);
     uint64_t result = product + s2;
-    bool overflow = amdgpu::signed_add_overflows(product, s2);
-    if (overflow)
+    // D1 is bit 64 of the exact 65-bit signed sum: the sign
+    // bits of both operands plus the carry out of bit 63.
+    if (((product ^ s2) >> 63) ^ (result < product))
       carry |= 1ULL << lane;
+    bool overflow = amdgpu::signed_add_overflows(product, s2);
     if (inst.inst_.clamp && overflow) {
       result = (product & (1ULL << 63))
                    ? std::bit_cast<uint64_t>(std::numeric_limits<int64_t>::min())
@@ -13168,7 +13170,7 @@ inline void execute_v_mad_i64_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unus
             util::stdx::static_simd_cast<util::narrow32<int32_t>>(b)));
     auto product = wa * wb;
     auto result = product + c;
-    return make_simd_carry(result, ((~(product ^ c) & (product ^ result)) & (1ULL << 63)) != 0);
+    return make_simd_carry(result, (((product ^ c) >> 63) != 0) ^ (result < product));
   });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t carry = 0;
@@ -13180,9 +13182,11 @@ inline void execute_v_mad_i64_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unus
     uint64_t s2 = amdgpu::RegisterAccess(wf).read_lane64(inst.src2, lane);
     uint64_t product = static_cast<uint64_t>(s0 * s1);
     uint64_t result = product + s2;
-    bool overflow = amdgpu::signed_add_overflows(product, s2);
-    if (overflow)
+    // D1 is bit 64 of the exact 65-bit signed sum: the sign
+    // bits of both operands plus the carry out of bit 63.
+    if (((product ^ s2) >> 63) ^ (result < product))
       carry |= 1ULL << lane;
+    bool overflow = amdgpu::signed_add_overflows(product, s2);
     if (inst.inst_.clamp && overflow) {
       result = (product & (1ULL << 63))
                    ? std::bit_cast<uint64_t>(std::numeric_limits<int64_t>::min())

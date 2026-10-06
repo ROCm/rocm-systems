@@ -561,8 +561,10 @@ TEST(Gfx1250ExecutionTest, Vop3Mad64ClampSaturatesAndPreservesCarryNormalAndDpp)
                static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), false},
       TestCase{true, false, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX),
                static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN), false},
+      // The signed carry is bit 64 of the exact 65-bit sum, which is clear
+      // for a positive int64 overflow.
       TestCase{true, true, static_cast<uint32_t>(INT32_MAX), static_cast<uint32_t>(INT32_MAX),
-               static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), true},
+               static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), false},
       TestCase{true, true, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX),
                static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN), true},
       TestCase{true, true, static_cast<uint32_t>(-2), 3u, 10u, 4u, false},

@@ -745,12 +745,13 @@ def gen_vector_mad_64_32(
         )
         L.append('    uint64_t product = static_cast<uint64_t>(s0 * s1);')
         L.append('    uint64_t result = product + s2;')
-        if writes_carry or integer_clamp:
-            L.append('    bool overflow = amdgpu::signed_add_overflows(product, s2);')
         if writes_carry:
-            L.append('    if (overflow)')
+            L.append('    // D1 is bit 64 of the exact 65-bit signed sum: the sign')
+            L.append('    // bits of both operands plus the carry out of bit 63.')
+            L.append('    if (((product ^ s2) >> 63) ^ (result < product))')
             L.append('      carry |= 1ULL << lane;')
         if integer_clamp:
+            L.append('    bool overflow = amdgpu::signed_add_overflows(product, s2);')
             L.append('    if (inst_.clamp && overflow) {')
             L.append(
                 '      result = (product & (1ULL << 63)) ? std::bit_cast<uint64_t>(std::numeric_limits<int64_t>::min()) : static_cast<uint64_t>(std::numeric_limits<int64_t>::max());'

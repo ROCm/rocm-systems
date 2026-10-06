@@ -2497,8 +2497,8 @@ SIMD_LSHL_ADD_U64: set[str] = {'v_lshl_add_u64_vop3'}
 # --- VOP3 wide 32x32->64 multiply-add (v_mad_u64_u32 / v_mad_i64_i32) -------
 #
 # 32-bit src0/src1 multiplicands widened to 64 (zero-/sign-extend), 64-bit
-# low-half product, plus the 64-bit src2 addend, with the carry/overflow mask
-# written to sdst. Routed through
+# low-half product, plus the 64-bit src2 addend, with the carry-out mask (bit
+# 64 of the exact sum) written to sdst. Routed through
 # try_execute_mad_wide64_vop3_simd; the functor receives the two narrow operands
 # and the 64-bit addend and returns SimdCarry<native<uint64_t>, mask>.
 SIMD_MAD_WIDE64: dict[str, str] = {
@@ -2519,8 +2519,9 @@ SIMD_MAD_WIDE64: dict[str, str] = {
         'util::stdx::static_simd_cast<util::narrow32<int32_t>>(b)));'
         ' auto product = wa * wb;'
         ' auto result = product + c;'
+        # Bit 64 of the exact 65-bit sum, as in the scalar body.
         ' return make_simd_carry(result,'
-        ' ((~(product ^ c) & (product ^ result)) & (1ULL << 63)) != 0); }'
+        ' (((product ^ c) >> 63) != 0) ^ (result < product)); }'
     ),
 }
 

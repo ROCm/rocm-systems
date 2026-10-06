@@ -1171,6 +1171,92 @@ TEST(Rdna4ScalarSccTest, AddSubCoI32UseSignedOverflow) {
     wf->halt();
 }
 
+// V_MAD_CO_I64_I32 writes bit 64 of the exact 65-bit signed sum
+// S0.i32 * S1.i32 + S2.i64 to D1, with or without CLAMP; CLAMP saturates D0 on
+// int64 overflow. Lanes are gfx1201 captures. -1 * 1 + 0 sets D1 although
+// nothing overflows, and 1 * 1 + INT64_MAX overflows but clears it.
+TEST(Rdna4MadCoTest, I64I32CarryIsBit64OfExactSum) {
+  struct Lane {
+    uint32_t src0;
+    uint32_t src1;
+    uint64_t src2;
+    uint64_t result;
+    uint64_t clamped;
+    bool carry;
+  };
+  constexpr std::array<Lane, 5> kLanes{{
+      {0xffffffffu, 1u, 0u, ~uint64_t{0}, ~uint64_t{0}, true},
+      {1u, 1u, 0x7fffffffffffffffULL, 0x8000000000000000ULL, 0x7fffffffffffffffULL, false},
+      {0xffffffffu, 1u, 0x8000000000000000ULL, 0x7fffffffffffffffULL, 0x8000000000000000ULL, true},
+      {0xffffffffu, 1u, 1u, 0u, 0u, false},
+      {0u, 0u, 1u, 1u, 1u, false},
+  }};
+  // The lane after the captured ones is inactive and must keep its registers.
+  constexpr uint32_t kInactive = kLanes.size();
+  constexpr uint64_t kExec = (uint64_t{1} << kLanes.size()) - 1;
+
+  amdgpu::GpuMemory gpu_mem("rdna4_mad_co_mem");
+  amdgpu::L2Cache l2("rdna4_mad_co_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t sb = wf->sgpr_alloc().base;
+
+  ForceScalarGuard guard(util::force_scalar());
+  for (const bool scalar : {true, false}) {
+    util::set_force_scalar_for_testing(scalar);
+    for (const uint8_t clamp : {0, 1}) {
+      SCOPED_TRACE(testing::Message()
+                   << (scalar ? "scalar" : "SIMD enabled") << " clamp " << int(clamp));
+      const auto words = rdna4::build_vop3_sdst_enc(
+          rdna4::kVMadCoI64I32Vop3SdstEnc,
+          {.vdst = 4, .sdst = 10, .clamp = clamp, .src0 = 256, .src1 = 257, .src2 = 258});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(std::string_view(inst->mnemonic()), "v_mad_co_i64_i32");
+      for (uint32_t lane = 0; lane <= kInactive; ++lane) {
+        const Lane &input = kLanes[lane % kLanes.size()];
+        cu->write_vgpr(vb + 0, lane, input.src0);
+        cu->write_vgpr(vb + 1, lane, input.src1);
+        cu->write_vgpr(vb + 2, lane, static_cast<uint32_t>(input.src2));
+        cu->write_vgpr(vb + 3, lane, static_cast<uint32_t>(input.src2 >> 32));
+        cu->write_vgpr(vb + 4, lane, 0xdeadbeefu);
+        cu->write_vgpr(vb + 5, lane, 0xdeadbeefu);
+      }
+      // Seed each active carry bit opposite to the expected one.
+      uint32_t seeded = 0;
+      for (uint32_t lane = 0; lane < kLanes.size(); ++lane)
+        seeded |= uint32_t{!kLanes[lane].carry} << lane;
+      cu->write_sgpr(sb + 10, seeded);
+      wf->set_exec(kExec);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+
+      const uint32_t carry = cu->read_sgpr(sb + 10);
+      for (uint32_t lane = 0; lane < kLanes.size(); ++lane) {
+        const uint64_t result = cu->read_vgpr(vb + 4, lane) |
+                                (static_cast<uint64_t>(cu->read_vgpr(vb + 5, lane)) << 32);
+        EXPECT_EQ(result, clamp ? kLanes[lane].clamped : kLanes[lane].result) << "lane " << lane;
+        EXPECT_EQ(((carry >> lane) & 1u) != 0, kLanes[lane].carry) << "lane " << lane;
+      }
+      EXPECT_EQ(cu->read_vgpr(vb + 4, kInactive), 0xdeadbeefu);
+      EXPECT_EQ(cu->read_vgpr(vb + 5, kInactive), 0xdeadbeefu);
+    }
+  }
+  if (!wf->is_halted())
+    wf->halt();
+}
+
 struct ScalarCvtSccCase {
   uint32_t op;
   const char *mnemonic;
