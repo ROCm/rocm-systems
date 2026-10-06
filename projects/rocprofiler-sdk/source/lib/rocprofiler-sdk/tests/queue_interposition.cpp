@@ -21,15 +21,19 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <gtest/gtest.h>
 
 #include <hsa/amd_hsa_queue.h>
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <future>
 #include <memory>
 #include <thread>
@@ -412,6 +416,179 @@ TEST(queue_interposition, doorbell_out_of_order_does_not_hang)
     EXPECT_EQ(state->next_scan_pos, 2u);
     EXPECT_EQ(get_pkt(ring, 0, 255)->kernel_object, static_cast<uint64_t>(0xB0));
     EXPECT_EQ(get_pkt(ring, 1, 255)->kernel_object, static_cast<uint64_t>(0xB1));
+}
+
+void
+fill_hsa_fn_tables()
+{
+    auto* core = rocprofiler::hsa::get_core_table();
+    auto* amd  = rocprofiler::hsa::get_amd_ext_table();
+    ASSERT_NE(core, nullptr);
+    ASSERT_NE(amd, nullptr);
+
+    core->hsa_signal_store_screlease_fn = hsa_signal_store_screlease;
+    core->hsa_signal_wait_relaxed_fn    = hsa_signal_wait_relaxed;
+    core->hsa_signal_destroy_fn         = hsa_signal_destroy;
+    core->hsa_signal_load_scacquire_fn  = hsa_signal_load_scacquire;
+
+    amd->hsa_amd_signal_create_fn   = hsa_amd_signal_create;
+    amd->hsa_amd_signal_wait_any_fn = hsa_amd_signal_wait_any;
+}
+
+CoreApiTable
+make_core_table()
+{
+    auto table = CoreApiTable{};
+    std::memset(&table, 0, sizeof(table));
+    table.hsa_queue_add_write_index_relaxed_fn     = hsa_queue_add_write_index_relaxed;
+    table.hsa_queue_add_write_index_scacq_screl_fn = hsa_queue_add_write_index_scacq_screl;
+    table.hsa_queue_add_write_index_scacquire_fn   = hsa_queue_add_write_index_scacquire;
+    table.hsa_queue_add_write_index_screlease_fn   = hsa_queue_add_write_index_screlease;
+    table.hsa_queue_store_write_index_relaxed_fn   = hsa_queue_store_write_index_relaxed;
+    table.hsa_queue_store_write_index_screlease_fn = hsa_queue_store_write_index_screlease;
+    table.hsa_queue_cas_write_index_relaxed_fn     = hsa_queue_cas_write_index_relaxed;
+    table.hsa_queue_cas_write_index_scacq_screl_fn = hsa_queue_cas_write_index_scacq_screl;
+    table.hsa_queue_cas_write_index_scacquire_fn   = hsa_queue_cas_write_index_scacquire;
+    table.hsa_queue_cas_write_index_screlease_fn   = hsa_queue_cas_write_index_screlease;
+    table.hsa_queue_load_write_index_relaxed_fn   = hsa_queue_load_write_index_relaxed;
+    table.hsa_queue_load_write_index_scacquire_fn = hsa_queue_load_write_index_scacquire;
+    table.hsa_signal_store_relaxed_fn              = hsa_signal_store_relaxed;
+    table.hsa_signal_store_screlease_fn            = hsa_signal_store_screlease;
+    table.hsa_signal_silent_store_relaxed_fn       = hsa_signal_silent_store_relaxed;
+    table.hsa_signal_silent_store_screlease_fn     = hsa_signal_silent_store_screlease;
+    return table;
+}
+
+rocprofiler::context::context
+make_dispatch_tracing_context()
+{
+    auto ctx = rocprofiler::context::context{};
+    ctx.callback_tracer = std::make_unique<rocprofiler::context::callback_tracing_service>();
+    EXPECT_EQ(rocprofiler::context::add_domain(ctx.callback_tracer->domains,
+                                               ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH),
+              ROCPROFILER_STATUS_SUCCESS);
+    return ctx;
+}
+
+class QueueInterpositionConsumerTransition : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        if(hsa_init() != HSA_STATUS_SUCCESS)
+        {
+            GTEST_SKIP() << "hsa_init failed; consumer-transition tests need HSA";
+        }
+        fill_hsa_fn_tables();
+        core_table_ = make_core_table();
+        interposition_init(&core_table_, true);
+        ASSERT_TRUE(supports_queue_interposition());
+    }
+
+    void TearDown() override
+    {
+        if(!supports_queue_interposition()) return;
+        stop_completion_monitor();
+        interposition_fini();
+    }
+
+    CoreApiTable core_table_{};
+};
+
+TEST_F(QueueInterpositionConsumerTransition, start_resyncs_stale_shadow)
+{
+    auto               dummy_queue = hsa_queue_t{};
+    const hsa_queue_t* queue_ptr   = &dummy_queue;
+
+    auto     state    = std::make_shared<QueueState>();
+    uint64_t real_wdid = 17;
+    uint64_t real_rdid = 3;
+    state->real_wdid       = &real_wdid;
+    state->real_rdid       = &real_rdid;
+    state->virtual_wptr.store(0);
+    state->next_scan_pos   = 0;
+    state->next_submit_pos = 0;
+    state->hsa_queue       = queue_ptr;
+
+    get_queue_registry().wlock([&](auto& registry) { registry[queue_ptr] = state; });
+
+    auto ctx = make_dispatch_tracing_context();
+    notify_queue_interposition_consumer_context_started(&ctx);
+
+    EXPECT_EQ(state->virtual_wptr.load(), 17u);
+    EXPECT_EQ(state->next_scan_pos, 17u);
+    EXPECT_EQ(state->next_submit_pos, 17u);
+
+    notify_queue_interposition_consumer_context_stopped(&ctx);
+    get_queue_registry().wlock([&](auto& registry) { registry.erase(queue_ptr); });
+}
+
+TEST_F(QueueInterpositionConsumerTransition, non_tracing_context_does_not_resync)
+{
+    auto               dummy_queue = hsa_queue_t{};
+    const hsa_queue_t* queue_ptr   = &dummy_queue;
+
+    auto     state     = std::make_shared<QueueState>();
+    uint64_t real_wdid = 9;
+    state->real_wdid       = &real_wdid;
+    state->virtual_wptr.store(1);
+    state->next_scan_pos   = 1;
+    state->next_submit_pos = 1;
+
+    get_queue_registry().wlock([&](auto& registry) { registry[queue_ptr] = state; });
+
+    auto ctx = rocprofiler::context::context{};
+    notify_queue_interposition_consumer_context_started(&ctx);
+    notify_queue_interposition_consumer_context_stopped(&ctx);
+
+    EXPECT_EQ(state->virtual_wptr.load(), 1u);
+    EXPECT_EQ(state->next_scan_pos, 1u);
+    EXPECT_EQ(state->next_submit_pos, 1u);
+
+    get_queue_registry().wlock([&](auto& registry) { registry.erase(queue_ptr); });
+}
+
+TEST_F(QueueInterpositionConsumerTransition, stop_then_start_resyncs_again)
+{
+    auto               dummy_queue = hsa_queue_t{};
+    const hsa_queue_t* queue_ptr   = &dummy_queue;
+
+    auto     state     = std::make_shared<QueueState>();
+    uint64_t real_wdid = 4;
+    state->real_wdid       = &real_wdid;
+    state->virtual_wptr.store(4);
+    state->next_scan_pos   = 4;
+    state->next_submit_pos = 4;
+
+    get_queue_registry().wlock([&](auto& registry) { registry[queue_ptr] = state; });
+
+    auto ctx = make_dispatch_tracing_context();
+    notify_queue_interposition_consumer_context_started(&ctx);
+    notify_queue_interposition_consumer_context_stopped(&ctx);
+
+    real_wdid = 12;
+    notify_queue_interposition_consumer_context_started(&ctx);
+
+    EXPECT_EQ(state->virtual_wptr.load(), 12u);
+    EXPECT_EQ(state->next_scan_pos, 12u);
+    EXPECT_EQ(state->next_submit_pos, 12u);
+
+    notify_queue_interposition_consumer_context_stopped(&ctx);
+    get_queue_registry().wlock([&](auto& registry) { registry.erase(queue_ptr); });
+}
+
+TEST_F(QueueInterpositionConsumerTransition, rapid_start_stop_does_not_hang)
+{
+    auto ctx      = make_dispatch_tracing_context();
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+
+    for(int i = 0; i < 50; ++i)
+    {
+        notify_queue_interposition_consumer_context_started(&ctx);
+        notify_queue_interposition_consumer_context_stopped(&ctx);
+        ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+            << "hung in consumer 0→1 / 1→0 after " << i << " cycles";
+    }
 }
 }  // namespace
 }  // namespace queue_interposition
