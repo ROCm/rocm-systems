@@ -2110,16 +2110,14 @@ void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable) {
   // NCCL_PXN_DISABLE. This sits ahead of the arch gate deliberately: the gate
   // scopes the *built-in*, so consulting after it would make a profile
   // unable to say anything about an arch the built-in never learned.
-  const char* pxnProfile = nullptr;
-  if (inputStr == nullptr && rcclXtpClassAStr(comm, "PXN", &pxnProfile)) {
-    const bool pxnOn = strcmp(pxnProfile, "on") == 0;
-    if (!pxnOn && strcmp(pxnProfile, "off") != 0) {
-      WARN("XTP: PXN is \"%s\", expected \"on\" or \"off\"; using built-in value", pxnProfile);
+  int64_t pxnProfile = 0;
+  if (inputStr == nullptr && rcclXtpClassAInt(comm, "PXN_DISABLE", &pxnProfile)) {
+    if (pxnProfile != 0 && pxnProfile != 1) {
+      WARN("XTP: PXN_DISABLE is %ld, expected 0 or 1; using built-in value", (long)pxnProfile);
     } else {
-      // The profile states whether PXN is on; RCCL caches whether it is disabled.
-      INFO(NCCL_INIT, "RCCL PXN set as %s by XTP (nRanks=%d)", pxnOn ? "enabled" : "disabled", comm->nRanks);
-      comm->enableCustColl = pxnOn;
-      rcclPxnDisable = comm->pxnDisable = pxnOn ? 0 : 1;
+      INFO(NCCL_INIT, "RCCL PXN set as %s by XTP (nRanks=%d)", pxnProfile ? "disabled" : "enabled", comm->nRanks);
+      comm->enableCustColl = !pxnProfile;
+      rcclPxnDisable = comm->pxnDisable = (int)pxnProfile;
       return;
     }
   }

@@ -238,18 +238,6 @@ bool rcclXtpClassAInt(struct ncclComm* comm, const char* key, int64_t* out) {
   return true;
 }
 
-bool rcclXtpClassAStr(struct ncclComm* comm, const char* key, const char** out) {
-  const xtp_value* value = lookup(comm, key);
-  if (value == nullptr) return false;
-  if (value->tag != XTP_STR) {
-    WARN("XTP: %s is not a string in this profile; using built-in value", key);
-    return false;
-  }
-  // Library-owned and stable until the comm is unbound.
-  *out = value->s;
-  return true;
-}
-
 void rcclXtpCommFree(struct ncclComm* comm) {
   if (xtpCtx == nullptr) return;
   std::lock_guard<std::mutex> guard(xtpLock);

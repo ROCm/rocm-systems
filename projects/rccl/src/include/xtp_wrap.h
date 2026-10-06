@@ -25,16 +25,16 @@
 struct ncclComm;
 
 // Comm-level ("Class A") knob lookups, keyed by the names the XTP schema
-// uses: "PXN", "P2P_NET_CHUNKSIZE", "UNROLL_FACTOR", "THREADS_PER_BLOCK".
+// uses: "PXN_DISABLE", "P2P_NET_CHUNKSIZE", "UNROLL_FACTOR",
+// "THREADS_PER_BLOCK".
 //
-// Both bind the comm on first use and cache the binding for its lifetime, so
-// the caller does not have to order an explicit bind against init. They return
-// false and leave *out untouched whenever no profile supplies the knob.
+// Binds the comm on first use and caches the binding for its lifetime, so the
+// caller does not have to order an explicit bind against init. Returns false
+// and leaves *out untouched whenever no profile supplies the knob.
 //
-// Note these do NOT consult the environment: env-wins is the caller's to
+// Note this does NOT consult the environment: env-wins is the caller's to
 // enforce, because only the caller knows which variable overrides which knob.
 bool rcclXtpClassAInt(struct ncclComm* comm, const char* key, int64_t* out);
-bool rcclXtpClassAStr(struct ncclComm* comm, const char* key, const char** out);
 
 // Release the binding held for comm. Safe on a comm that was never bound.
 void rcclXtpCommFree(struct ncclComm* comm);
