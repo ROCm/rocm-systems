@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /* GFX1201 qualification for SYSTEM-memory DMA-BUF export, import, and SDMA use.
  * The provider owns attachment and descriptor lifetimes. Packet construction,
  * publication, completion, and consumption remain explicit caller policy. */

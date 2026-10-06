@@ -1078,7 +1078,7 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
                                      const std::shared_ptr<agent_manager>&     agent_mngr,
                                      int pid, int ppid,
                                      output_file_registry& output_registry)
-: processor_t<rocpd_processor_t>()
+: sample_processor_interface()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
 , m_output_registry(output_registry)

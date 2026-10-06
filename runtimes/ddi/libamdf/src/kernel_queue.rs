@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! AMDF kernel queue ownership and validation over the neutral rocddi queue.
 //!
 //! Public handles, family selection, command access checks, and ABI status
@@ -38,7 +40,6 @@ impl KernelQueue {
     }
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn create(
     pointer: *mut amdf_device_t,
     create_info: *const amdf_gpu_kernel_queue_create_info_t,
@@ -110,7 +111,6 @@ pub(crate) unsafe extern "C" fn create(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn info(
     pointer: *mut amdf_kernel_queue_t,
     out: *mut amdf_kernel_queue_info_t,
@@ -124,7 +124,6 @@ pub(crate) unsafe extern "C" fn info(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn status(
     pointer: *mut amdf_kernel_queue_t,
     out: *mut amdf_kernel_queue_status_t,
@@ -157,7 +156,6 @@ pub(crate) unsafe extern "C" fn status(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn wait(
     pointer: *mut amdf_kernel_queue_t,
     submission: u64,
@@ -186,7 +184,6 @@ pub(crate) unsafe extern "C" fn wait(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn submit(
     pointer: *mut amdf_kernel_queue_t,
     submit_info: *const amdf_gpu_kernel_queue_submission_info_t,
@@ -219,6 +216,10 @@ pub(crate) unsafe extern "C" fn submit(
             descriptor.byte_offset,
             descriptor.byte_length,
         )?;
+        // SAFETY: kernel_command validates current attachment and execute
+        // permission. The AMDF submit contract requires the caller to keep
+        // command storage and indirect dependencies live and unchanged until
+        // the accepted submission retires, including an uncertain outcome.
         let submission = queue
             .native
             .submit(command)
@@ -229,7 +230,6 @@ pub(crate) unsafe extern "C" fn submit(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_kernel_queue_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let queue = exclusive(pointer.cast::<KernelQueue>())?;

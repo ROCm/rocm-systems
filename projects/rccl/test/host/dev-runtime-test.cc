@@ -4367,6 +4367,13 @@ TEST_F(DevrGetLsaRankPtrTest, RankPastTeam_ReturnsInvalidArgument) {
   EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, comm->devrState.lsaSize, &out), ncclInvalidArgument);
 }
 
+// Boundary: a negative rank; a missing check would resolve below the flat base, outside every rank's slot.
+TEST_F(DevrGetLsaRankPtrTest, NegativeRank_ReturnsInvalidArgument) {
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, -1, &out), ncclInvalidArgument);
+  EXPECT_EQ(out, nullptr);
+}
+
 // Branch: a non-symmetric window targeting ourselves resolves against the local
 // window base, not the flat space -- which does not apply to it.
 TEST_F(DevrGetLsaRankPtrTest, NonSymmetricSelfTarget_UsesLocalBase) {
@@ -4412,6 +4419,19 @@ TEST_F(DevrGetLsaRankPtrTest, IpcWindowRankPastTable_ReturnsInvalidArgument) {
 
   void* out = nullptr;
   EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, 5, &out), ncclInvalidArgument);
+}
+
+// Boundary: a negative rank must not index the IPC table; a mapped sentinel at [-1] makes a missing check succeed.
+TEST_F(DevrGetLsaRankPtrTest, IpcWindowNegativeRank_ReturnsInvalidArgument) {
+  comm->symmetricSupport = 0;
+  peerPtrs = {reinterpret_cast<void*>(0x5000), reinterpret_cast<void*>(0xA000), reinterpret_cast<void*>(0xB000),
+              reinterpret_cast<void*>(0xC000)};
+  win.ipcPeerPtrs = peerPtrs.data() + 1;
+  win.ipcPeerCount = 3;
+
+  void* out = nullptr;
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, -1, &out), ncclInvalidArgument);
+  EXPECT_EQ(out, nullptr);
 }
 
 
