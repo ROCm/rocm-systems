@@ -476,6 +476,7 @@ public:
   static constexpr uint32_t DX10_CLAMP_BIT = 1u << 8;
   static constexpr uint32_t IEEE_BIT = 1u << 9;
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
+  static constexpr uint32_t VSKIP_BIT = 1u << 28;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
 
   /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT

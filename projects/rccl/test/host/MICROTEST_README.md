@@ -102,6 +102,15 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     allocation fails after request rewriting. Enable it with the production fix;
     it is excluded from normal host-test runs. To reproduce explicitly, run
     `rccl-UnitTestsMicro --gtest_also_run_disabled_tests --gtest_filter=RasCollectivesMicrotest.DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable`.
+  - `ras/diagnostics.cc` (`RAS_DIAGNOSTICS_CC_PATH`, from
+    `ras-diagnostics-test.cc`); suite `RasDiagnosticsMicrotest.*`. Covers
+    context initialization, request lifecycle, local-data collection,
+    peer-payload aggregation, summaries, timeout propagation, and reporter
+    errors. `DISABLED_Resume_UnknownWireCheckIdReturnsError` tracks
+    AICOMRCCL-2741: production reads an out-of-range peer check ID as an enum
+    before validation. Its raw-byte fixture reproduces the enum UBSan failure;
+    enable it after the production fix. The defined `RAS_DIAG_CHECK_COUNT`
+    sentinel remains covered by enabled dispatch and peer-payload tests.
   - `ras/diagnostics_env.cc` (`RAS_DIAGNOSTICS_ENV_CC_PATH`, from
     `ras-diagnostics-env-test.cc`); suite `RasDiagnosticsEnvMicrotest.*`.
     Covers NCCL environment collection, filtering, truncation, aggregation,
