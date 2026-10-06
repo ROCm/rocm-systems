@@ -98,8 +98,12 @@ the bound KFD interface version; KFD 1.20 or newer is required.
 
 `GpuDevice::copy_linear`, `copy_rect`, `copy_rects`, and `fill_u32` provide
 GFX1201 SDMA copies and dword fills through a bounded DRM submission context
-and a rocddi-owned command allocation. The sequence form validates every range
-before submission and reuses one native queue across its entries. rocddi
+and a rocddi-owned command allocation. `copy_rects` validates every shape
+before submission and reuses one native queue across its entries.
+`GpuCopySequence` uses the same queue and command allocation for an ordered mix
+of device-to-device, host-to-device, and device-to-host linear copies. It stages
+each host operand when that entry runs and retires each packet before starting
+the next entry. Any operation failure makes the sequence terminal. rocddi
 encodes OSS5 linear and constant-fill packets with system cache control,
 splits large transfers into bounded packets, and reuses command backing only
 after native retirement. A failed wait that cannot prove retirement keeps the

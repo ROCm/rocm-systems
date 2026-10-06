@@ -12,10 +12,10 @@ use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering, fence};
 use std::time::{Duration, Instant};
 
-use rocddi::gpu::CopyRect;
 use rocddi::gpu::queue::{
     QueueAccessWidth, QueueParameters, QueuePriority, QueueRequest, SdmaEngineSelection,
 };
+use rocddi::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::{DeviceAccess, MemoryKind};
 use rocddi::session::{Session, SessionLifetime};
 
@@ -209,6 +209,88 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     }
     assert_eq!(staged_output, source_bytes[..256]);
     assert_eq!(&destination_bytes[2048..2304], &source_bytes[..256]);
+
+    let mut host_input = [0_u8; 4096];
+    for (index, byte) in host_input.iter_mut().enumerate() {
+        *byte = (index as u8).wrapping_mul(11).wrapping_add(9);
+    }
+    let mut host_output = [0xa5_u8; 4096];
+    for size in [1, 63, 257, 4096] {
+        source_bytes.fill(0x5a);
+        destination_bytes.fill(0xa5);
+        host_output.fill(0xa5);
+        let mut sequence = match GpuCopySequence::begin(gpu, &cancel) {
+            Ok(sequence) => sequence,
+            Err(failure) => return Err(Box::new(failure.error)),
+        };
+        // SAFETY: The two mapped allocations retain their GPU addresses and
+        // permissions through native retirement. The host slices remain live
+        // until the sequence returns, and the sequence stages each host leg.
+        let result = unsafe {
+            sequence
+                .copy_from_host(source_info.device_address, &host_input[..size])
+                .and_then(|()| {
+                    sequence.copy_linear(
+                        destination_info.device_address,
+                        source_info.device_address,
+                        size as u64,
+                    )
+                })
+                .and_then(|()| {
+                    sequence.copy_to_host(&mut host_output[..size], destination_info.device_address)
+                })
+        };
+        if let Err(failure) = result {
+            drop(sequence);
+            if failure.operands_may_be_live {
+                std::mem::forget(source);
+                std::mem::forget(destination);
+                std::mem::forget(device);
+                std::mem::forget(session);
+            }
+            return Err(Box::new(failure.error));
+        }
+        assert_eq!(&host_output[..size], &host_input[..size]);
+        assert_eq!(&destination_bytes[..size], &host_input[..size]);
+        assert!(destination_bytes[size..].iter().all(|byte| *byte == 0xa5));
+        assert!(host_output[size..].iter().all(|byte| *byte == 0xa5));
+    }
+
+    let cancelled = AtomicBool::new(true);
+    let mut sequence = match GpuCopySequence::begin(gpu, &cancelled) {
+        Ok(sequence) => sequence,
+        Err(failure) => return Err(Box::new(failure.error)),
+    };
+    // SAFETY: Both ranges remain mapped. Cancellation rejects the packet
+    // before submission, so no operand retention is required.
+    let result = unsafe {
+        sequence.copy_linear(
+            destination_info.device_address,
+            source_info.device_address,
+            64,
+        )
+    };
+    let Err(failure) = result else {
+        return Err(io::Error::other("cancelled sequence accepted a packet").into());
+    };
+    assert_eq!(failure.error.kind(), rocddi::ErrorKind::Busy);
+    assert!(!failure.operands_may_be_live);
+    cancelled.store(false, Ordering::Release);
+    // SAFETY: Both ranges remain mapped; a failed sequence cannot submit
+    // another packet even after cancellation is lifted.
+    let result = unsafe {
+        sequence.copy_linear(
+            destination_info.device_address,
+            source_info.device_address,
+            64,
+        )
+    };
+    let Err(failure) = result else {
+        return Err(io::Error::other("failed sequence accepted another packet").into());
+    };
+    assert_eq!(failure.error.kind(), rocddi::ErrorKind::Busy);
+    assert!(!failure.operands_may_be_live);
+    drop(sequence);
 
     let mut virtual_memory =
         device.create_virtual_memory(MemoryKind::System, 4096, false, false)?;
