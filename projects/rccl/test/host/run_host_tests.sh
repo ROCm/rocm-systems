@@ -23,7 +23,8 @@
 #   configure       configure test/host
 #   build           build all host binaries (default target)
 #   guards          device-table unittest and kernel-count pytest plus
-#                   src/include/test_poison_hip_atomics.py
+#                   src/include/test_poison_hip_atomics.py and
+#                   src/test_makefile_depflags.py
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   <BUILD_DIR>/coverage (requires the host tests to be built
@@ -224,6 +225,15 @@ do_poison_hip_atomics() {
   python3 "$RCCL_ROOT/src/include/test_poison_hip_atomics.py"
 }
 
+# NCCL PR #1806: Makefile header tracking must keep using -MM so system
+# headers never enter the device DEPENDS realpath loop. Plain unittest,
+# python3 only. Also registered with add_test() in test/CMakeLists.txt;
+# CI still gates via this phase, not ctest.
+do_makefile_depflags() {
+  echo "==> Makefile -MM depflags (unittest: src/test_makefile_depflags.py)"
+  python3 "$RCCL_ROOT/src/test_makefile_depflags.py" -v
+}
+
 # Run the device-table generator guard. It is plain unittest and needs only
 # python3. The suite is also registered with add_test() in test/CMakeLists.txt,
 # but nothing in RCCL CI runs `ctest`, so that registration never gates. Running
@@ -247,13 +257,15 @@ do_kernel_count_guards() {
   "$venv/bin/python" -m pytest "$gd/tests" -v
 }
 
-# All CPU-only guards: the device-table unittest, the kernel-count pytest suite,
-# then the __hip_atomic_* poison compile probe. Collected with `|| rc=1` rather
-# than run back to back so that under `set -e` (line 53) an early failure still
-# leaves the later guards running and reported, instead of aborting the phase at
-# the first one. Same idiom as do_host_tests above.
+# All CPU-only guards: makefile -MM scan, the device-table unittest, the
+# kernel-count pytest suite, then the __hip_atomic_* poison compile probe.
+# Collected with `|| rc=1` rather than run back to back so that under `set -e`
+# (line 53) an early failure still leaves the later guards running and
+# reported, instead of aborting the phase at the first one. Same idiom as
+# do_host_tests above.
 do_guards() {
   local rc=0
+  do_makefile_depflags || rc=1
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
   do_poison_hip_atomics || rc=1

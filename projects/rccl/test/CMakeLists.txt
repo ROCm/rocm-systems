@@ -39,6 +39,15 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
+  # CPU-only Makefile scan: NCCL PR #1806 (-M -> -MM) must stay in force.
+  # Registered here for local `ctest` only; CI gates via the `guards` phase of
+  # test/host/run_host_tests.sh.
+  add_test(
+    NAME rccl-makefile-depflags
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/src/test_makefile_depflags.py"
+  )
+
   # The kernel-count leak guards and the __hip_atomic_* poison probe
   # (src/include/test_poison_hip_atomics.py) are intentionally NOT registered as
   # ctest cases here: nothing in RCCL CI runs `ctest`, so an add_test() would
