@@ -14,10 +14,15 @@ from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
-from amdisa.codegen.execute import float_compare, float_minmax, vop3_modifiers
+from amdisa.codegen.execute import (
+    float_compare,
+    float_minmax,
+    float_unary,
+    vop3_modifiers,
+)
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
-from amdisa.sema_derive import FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
+from amdisa.sema_derive import FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL, FLOAT_UNARY_CALL
 from amdisa.sema_ast import (
     ExecModel,
     SemaBlock,
@@ -1141,12 +1146,20 @@ def _lower_dst_write(
     # conversion to host float and back. These forms only exist on targets
     # without SDWA, so bypassing SDWA's F16 output modifiers is safe here.
     selection_node, output_fields = _unwrap_output_modifiers(rhs_node)
-    writes_bits = _is_float_minmax(selection_node)
-    if writes_bits:
+    writes_bits = _is_float_minmax(selection_node) or _is_float_unary(selection_node)
+    if _is_float_minmax(selection_node):
         _, rhs = _float_minmax_selection(
             selection_node,
             ctx,
             output_fields if selection_node is not rhs_node else None,
+        )
+        needs_bitcast = 0
+    elif _is_float_unary(selection_node):
+        _, rhs = _float_unary_result(
+            selection_node,
+            ctx,
+            output_fields if selection_node is not rhs_node else None,
+            destination=True,
         )
         needs_bitcast = 0
     elif selection_node is not rhs_node and (
@@ -1912,6 +1925,8 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         return _lower_float_compare(node, ctx)
     if callee.startswith(FLOAT_MINMAX_CALL):
         return _lower_float_minmax(node, ctx)
+    if callee.startswith(FLOAT_UNARY_CALL):
+        return _lower_float_unary(node, ctx)
     if (
         callee == 'ceil'
         and len(node.children) == 2
@@ -2118,12 +2133,13 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
 
 
 def _raw_float_sources(
-    node: SemaNode, ctx: LoweringContext
+    node: SemaNode, ctx: LoweringContext, declare_input_policy: bool = True
 ) -> tuple[str, list[str], tuple[str, str] | None]:
-    """Read comparison/minmax source bits and declare their shared input policy.
+    """Read floating source bits, declaring the comparison/minmax input policy.
 
     Sources are register reads wrapped in typed casts and optional apply_src_mod
     calls. Pass ABS/NEG fields to the C++ helper, which applies them to the bits.
+    Operations with their own MODE policy pass ``declare_input_policy=False``.
     Return (source dtype, register reads, optional (ABS, NEG) fields).
     """
     has_abs = has_neg = False
@@ -2143,7 +2159,7 @@ def _raw_float_sources(
         # Register reads already have the unsigned type the C++ helper requires.
         reads.append(_lower_expr(src, ctx))
     declaration = float_compare.policy_decl(dtype)
-    if declaration not in ctx.vector_preamble:
+    if declare_input_policy and declaration not in ctx.vector_preamble:
         ctx.vector_preamble.append(declaration)
     modifiers = None
     if has_abs or has_neg:
@@ -2346,6 +2362,62 @@ def _lower_float_minmax(node: SemaNode, ctx: LoweringContext) -> str:
     if dtype == 'f16':
         return f'util::f16_to_f32(static_cast<uint16_t>({selected}))'
     return f'std::bit_cast<{"double" if dtype == "f64" else "float"}>({selected})'
+
+
+def _is_float_unary(node: SemaNode) -> bool:
+    return node.kind == SemaNodeKind.CALL and (node.call_name or '').startswith(
+        FLOAT_UNARY_CALL
+    )
+
+
+# An SDWA destination's OMOD for an F16 result; zero for other encodings.
+_SDWA_F16_OMOD = (
+    'amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf)'
+)
+
+
+def _float_unary_result(
+    node: SemaNode,
+    ctx: LoweringContext,
+    output_fields: tuple[str, str] | None = None,
+    destination: bool = False,
+) -> tuple[str, str]:
+    """Return (dtype, result bits) of a raw-encoding unary operation.
+
+    VOP3 forms pass their (OMOD, CLAMP) fields. Other F16 destination writes
+    take SDWA OMOD here: SDWA writes clamp F16 bits but expect them scaled.
+    """
+    form = (node.call_name or '').removeprefix(FLOAT_UNARY_CALL)
+    dtype, reads, modifiers = _raw_float_sources(node, ctx, declare_input_policy=False)
+    declaration = float_unary.policy_decl(form, dtype)
+    if declaration not in ctx.vector_preamble:
+        ctx.vector_preamble.append(declaration)
+    output_policy = None
+    if float_unary.FORMS[form].float_result:
+        if output_fields is None and destination and dtype == 'f16':
+            output_fields = (_SDWA_F16_OMOD, '0u')
+        if output_fields is not None:
+            declaration = vop3_modifiers.output_policy_decl(dtype, output_fields)
+            if declaration not in ctx.vector_preamble:
+                ctx.vector_preamble.append(declaration)
+            output_policy = vop3_modifiers.OUTPUT_POLICY
+    return dtype, float_unary.unary_expr(
+        form, dtype, reads[0], modifiers=modifiers, output_policy=output_policy
+    )
+
+
+def _lower_float_unary(node: SemaNode, ctx: LoweringContext) -> str:
+    """Convert the result bits to a value inside a larger expression.
+
+    Destination writes, including OMOD/CLAMP, keep the bits; see _lower_dst_write.
+    """
+    form = (node.call_name or '').removeprefix(FLOAT_UNARY_CALL)
+    dtype, result = _float_unary_result(node, ctx)
+    if not float_unary.FORMS[form].float_result:
+        return result
+    if dtype == 'f16':
+        return f'util::f16_to_f32(static_cast<uint16_t>({result}))'
+    return f'std::bit_cast<{"double" if dtype == "f64" else "float"}>({result})'
 
 
 def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:

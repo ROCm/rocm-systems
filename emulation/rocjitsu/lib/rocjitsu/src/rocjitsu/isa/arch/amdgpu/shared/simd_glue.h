@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/floating_operation.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fract.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
@@ -2625,6 +2626,64 @@ template <bool True16, typename Inst, typename UnOp>
   return false;
 }
 
+/// VOP3 f16 unary fast path on raw half encodings. The generic form reads the
+/// low source half and zero-extends the destination dword; the true16 form
+/// selects halves as try_execute_binary_vop3_f16_simd does. Operations wrapped
+/// in WithModifiers apply ABS/NEG, OMOD and CLAMP themselves; others run only
+/// when no modifier is set.
+template <bool True16, typename Inst, typename UnOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_unary_vop3_raw_f16_simd(Inst &inst, Wavefront &wf,
+                                                              UnOp un_op) {
+  if (!floating_operation::applies_modifiers_v<UnOp> &&
+      (inst.inst_.abs != 0u || inst.inst_.neg != 0u || inst.inst_.omod != 0u ||
+       inst.inst_.clamp != 0u))
+    return false;
+  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = uint32_t;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const uint32_t opsel = vop3_opsel(inst.inst_);
+  RegisterAccess regs(wf);
+  auto src0 = regs.read_operand(inst.src0, exec);
+  if constexpr (True16) {
+    auto dst = regs.readwrite_operand(inst.vdst, exec);
+    if (!dst.has_storage())
+      return false;
+    for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+      const uint64_t chunk = (exec >> base) & chunk_full;
+      if (chunk == 0)
+        continue;
+      const auto a = select_vop3_true16_src(src0.template load_native<T>(base), opsel, 0);
+      const auto out_half = un_op(a) & util::broadcast<T>(0xffffu);
+      auto prev = dst.template load_native<T>(base);
+      auto out = (opsel & 0x8u) ? ((prev & util::broadcast<T>(0x0000ffffu)) | (out_half << 16))
+                                : ((prev & util::broadcast<T>(0xffff0000u)) | out_half);
+      if (!(opsel & 0x8u) && cdna_vop3_low_dst_zeroes_high(wf))
+        out = out_half;
+      dst.template store_native<T>(base, out, chunk);
+    }
+  } else {
+    auto dst = regs.write_operand(inst.vdst, exec);
+    for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+      const uint64_t chunk = (exec >> base) & chunk_full;
+      if (chunk == 0)
+        continue;
+      const auto a = src0.template load_native<T>(base);
+      dst.template store_native<T>(base, un_op(a) & util::broadcast<T>(0xffffu), chunk);
+    }
+  }
+  return true;
+}
+
+template <bool True16, typename Inst, typename UnOp>
+[[nodiscard]] bool try_execute_unary_vop3_raw_f16_simd(Inst &, Wavefront &, UnOp) {
+  return false;
+}
+
 /// VOP3 integer/bitwise ternary SIMD fast path. Reads `src0`/`src1`/`src2`,
 /// runs `tern_op(a, b, c)`, and masked-stores the result. The generated scalar
 /// bodies for these ternary integer ops apply no source/result modifiers except
@@ -5108,6 +5167,28 @@ template <bool Vop3, typename Inst>
 #else
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(Fmt, ...)                                           \
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_raw64_simd(                                      \
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
+  return
+#endif
+
+/// Unary raw floating-point paths, with the same modifier wrapper as the binary ones.
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_RAW_FP(Fmt, ...)                                              \
+  if (::rocjitsu::amdgpu::try_execute_unary_vop1_simd<uint32_t, uint32_t>(                         \
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
+  return
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_RAW_FP16(Fmt, ...)                                            \
+  if (::rocjitsu::amdgpu::try_execute_unary_vop3_raw_f16_simd<false>(                              \
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
+  return
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_RAW_FP16(Fmt, ...)                                     \
+  if (::rocjitsu::amdgpu::try_execute_unary_vop3_raw_f16_simd<true>(                               \
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
+  return
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_RAW_FP64(Fmt, ...) static_cast<void>(inst)
+#else
+#define ROCJITSU_TRY_SIMD_VOP3_UNARY_RAW_FP64(Fmt, ...)                                            \
+  if (::rocjitsu::amdgpu::try_execute_unary_vop1_f64_simd<uint64_t>(                               \
           inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
   return
 #endif

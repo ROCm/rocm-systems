@@ -48,6 +48,9 @@ FLOAT_COMPARE_CALL = 'float_compare_'
 # Semantic call prefix for IEEE 754-2019 min/max forms, e.g. float_minmax_min_num.
 FLOAT_MINMAX_CALL = 'float_minmax_'
 
+# Semantic call prefix for unary operations on raw encodings, e.g. float_unary_fract.
+FLOAT_UNARY_CALL = 'float_unary_'
+
 # Three-source min/max forms recognized directly by their operation name.
 _IEEE_MINMAX3 = (
     'minimum3',
@@ -67,6 +70,17 @@ def _float_minmax(form: str, ty: SemaType, *sources: SemaNode) -> SemaNode:
     name = f'{FLOAT_MINMAX_CALL}{form}'
     return SemaNode(
         SemaNodeKind.CALL, ty=ty, call_name=name, children=(_id(name), *sources)
+    )
+
+
+def _float_unary(form: str, ty: SemaType, source: SemaNode) -> SemaNode:
+    """Create a unary call for lowering to a shared raw-encoding operation.
+
+    The typed source lets enrichment attach VOP3 ABS/NEG modifiers.
+    """
+    name = f'{FLOAT_UNARY_CALL}{form}'
+    return SemaNode(
+        SemaNodeKind.CALL, ty=ty, call_name=name, children=(_id(name), source)
     )
 
 
@@ -1084,6 +1098,12 @@ class _VectorUnary(_ScalarDeriver):
         ty = _dtype_to_sema(sem.data_type)
         op = sem.operation
         dtype = sem.data_type
+
+        if op == 'fract' and ty.base == 'F':
+            # Write the result encoding directly, without a float round trip.
+            src0 = _cast(_src(0, ty), ty)
+            body = _assign(_cast(_dst(0), ty), _float_unary('fract', ty, src0))
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
         if op == 'frexp_exp_f32' and dtype == 'f32':
             src0 = _cast(_src(0, SemaType.F32), SemaType.F32)

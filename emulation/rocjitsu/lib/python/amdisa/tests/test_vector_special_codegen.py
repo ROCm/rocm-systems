@@ -233,6 +233,28 @@ def test_arch_local_execute_bodies_are_not_shared():
     assert 'vector_qsad' in CodeGenerator._NON_SHAREABLE_CLASSES
 
 
+@pytest.mark.parametrize('dtype', ['f16', 'f32', 'f64'])
+def test_fract_simd_probes_use_the_shared_raw_operation(dtype):
+    fmt = f'amdgpu::fp_format::{dtype.upper()}'
+    operation = f'amdgpu::fract::Operation<{fmt}>{{amdgpu::fract::Policy::make('
+    vop1 = simd_probe_line(f'v_fract_{dtype}_vop1')
+    vop3 = simd_probe_line(f'v_fract_{dtype}_vop3')
+    assert operation in vop1 and operation in vop3
+    assert 'floor' not in vop1 and 'floor' not in vop3
+    assert 'native_arithmetic_matches' not in vop1
+    raw = {
+        'f16': 'VOP3_UNARY_RAW_FP16',
+        'f32': 'VOP3_UNARY_RAW_FP',
+        'f64': 'VOP3_UNARY_RAW_FP64',
+    }
+    assert vop3.startswith(f'  ROCJITSU_TRY_SIMD_{raw[dtype]}({fmt}, ')
+    if dtype == 'f16':
+        true16 = simd_probe_line('v_fract_f16_vop3', true16_vop3=True)
+        assert true16.startswith(
+            f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_RAW_FP16({fmt}, '
+        )
+
+
 def test_vop3_f16_simd_probes_split_true16_from_generic():
     add_generic = simd_probe_line('v_add_f16_vop3')
     add_true16 = simd_probe_line('v_add_f16_vop3', true16_vop3=True)

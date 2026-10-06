@@ -28,7 +28,7 @@ excluded — those need their own helpers.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute import float_compare, float_minmax
+from amdisa.codegen.execute import float_compare, float_minmax, float_unary
 from amdisa.codegen.execute.floating_policy import (
     FLUSH_NEAREST_F32_OPS,
     ROUNDED_F16_OPS,
@@ -316,7 +316,6 @@ _VOP3_UNARY_FP_F32 = {
     'v_ceil_f32',
     'v_trunc_f32',
     'v_rndne_f32',
-    'v_fract_f32',
     'v_rcp_f32',
     'v_rcp_iflag_f32',
     'v_rsq_f32',
@@ -341,7 +340,6 @@ _VOP3_UNARY_SKIP = {
     'v_ceil_f16',
     'v_trunc_f16',
     'v_rndne_f16',
-    'v_fract_f16',
     'v_rcp_f16',
     'v_rsq_f16',
     'v_sqrt_f16',
@@ -608,10 +606,11 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'float32_t',
         '[](auto a) { return util::rndne_simd(a); }',
     ),
+    # FRACT reads raw encodings; see float_unary.simd_probe for VOP3 and F64.
     'v_fract_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[](auto a) { return a - util::floor_simd(a); }',
+        'uint32_t',
+        'uint32_t',
+        float_unary.vop1_functor('fract', 'f32'),
     ),
     # --- transcendental div / sqrt. These mirror amdgpu::transcendental::*_f32
     # exactly via util::*_f32_simd (FTZ input/output flush + canonical-qNaN and
@@ -720,9 +719,7 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_fract_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' auto f = util::f16_to_f32_simd(a);'
-        ' return util::f32_to_f16_simd(f - util::floor_simd(f)); }',
+        float_unary.vop1_functor('fract', 'f16'),
     ),
     # Half transcendentals apply input policy and round before output modifiers.
     'v_rcp_f16_vop1': (
@@ -1036,7 +1033,6 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
     ),
     'v_trunc_f64_vop1': ('double', '[](auto a) { return util::trunc_simd(a); }'),
     'v_rndne_f64_vop1': ('double', '[](auto a) { return util::rndne_simd(a); }'),
-    'v_fract_f64_vop1': ('double', '[](auto a) { return a - util::floor_simd(a); }'),
     'v_rcp_f64_vop1': (
         'double',
         '[](auto a) { return util::native<double>(1.0) / a; }',
@@ -1996,10 +1992,6 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     # sqrt_f64 is correctly-rounded IEEE (scalar uses transcendental::sqrt_f64
     # which is `std::sqrt` after NaN/negative guards); stdx::sqrt matches.
     'v_sqrt_f64_vop3': ('[](auto a) { return util::sqrt_f64_simd(a); }'),
-    # v_fract_f64: scalar = v - std::floor(v); util::floor_simd matches
-    # std::floor bit-exact incl. sign-of-zero (NaN-floor(NaN) = NaN; NaN result
-    # skipped by the test like any other NaN-result lane).
-    'v_fract_f64_vop3': '[](auto a) { return a - util::floor_simd(a); }',
     # frexp mantissa: same functor as the VOP1 form; the f64 unary FP glue applies
     # abs/neg on the source and omod/clamp on the mantissa, matching the scalar.
     'v_frexp_mant_f64_vop3': '[](auto a) { return util::frexp_mant_f64_simd(a); }',
@@ -2054,9 +2046,6 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
         'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
         'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
     ),
-    # v_fract_f16: x - floor(x) in the widened f32 domain (the glue widens/narrows
-    # and applies abs/neg/omod/clamp), mirroring the covered v_fract_f16_vop1.
-    'v_fract_f16_vop3': '[](auto a) { return a - util::floor_simd(a); }',
 }
 
 
@@ -2703,6 +2692,9 @@ def _simd_probe_line(
     minmax_probe = float_minmax.simd_probe(template_name, true16_vop3)
     if minmax_probe is not None:
         return minmax_probe
+    unary_probe = float_unary.simd_probe(template_name, true16_vop3)
+    if unary_probe is not None:
+        return unary_probe
     if template_name in SIMD_PACKED_FLOAT:
         op, bf16 = SIMD_PACKED_FLOAT[template_name]
         return f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({op}, {str(bf16).lower()});'
