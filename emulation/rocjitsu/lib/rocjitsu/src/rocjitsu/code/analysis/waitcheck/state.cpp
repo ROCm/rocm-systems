@@ -52,8 +52,9 @@ bool WaitcheckStateOps::register_set_less(const RegisterSet &lhs, const Register
   std::vector<RegisterRef> rhs_regs;
   lhs_regs.reserve(lhs.size());
   rhs_regs.reserve(rhs.size());
-  lhs.for_each([&](RegisterRef ref) { lhs_regs.push_back(ref); });
-  rhs.for_each([&](RegisterRef ref) { rhs_regs.push_back(ref); });
+  // Inline these callbacks to avoid packing RegisterRef through the aggregate ABI.
+  lhs.for_each([&](RegisterRef ref) __attribute__((always_inline)) { lhs_regs.push_back(ref); });
+  rhs.for_each([&](RegisterRef ref) __attribute__((always_inline)) { rhs_regs.push_back(ref); });
   auto less = [](RegisterRef lhs_ref, RegisterRef rhs_ref) {
     return std::make_tuple(static_cast<uint8_t>(lhs_ref.cls), lhs_ref.index, lhs_ref.width) <
            std::make_tuple(static_cast<uint8_t>(rhs_ref.cls), rhs_ref.index, rhs_ref.width);

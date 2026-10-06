@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Concrete KFD queue ownership. Every ring and pointer page is a separate BO:
 //! `CREATE_QUEUE` checks their GPU mapping extents, so suballocating from a larger
 //! mapping would violate the kernel contract. Compute queues also retain EOP
@@ -858,10 +860,10 @@ impl Request {
                 "KFD queue backing is supported on GFX10.1 through GFX12.0",
             ));
         }
-        if util::page_size().map_err(|source| native_error("queue page size", source))? != 4096 {
+        if util::page_size().map_err(|source| native_error("queue page size", source))? < 4096 {
             return Err(error(
                 ErrorKind::Unsupported,
-                "KFD queue allocation requires a checked 4 KiB host-page layout",
+                "KFD queue allocation requires host pages of at least 4 KiB",
             ));
         }
         let ring_size = u32::try_from(desc.ring_size_bytes).map_err(|_| {
@@ -1168,7 +1170,14 @@ fn compute_storage(properties: sysfs::NativeQueueProperties) -> Result<ComputeSt
     let debug_size = (properties.compute_units / xcc_count)
         .checked_mul(32 * 32)
         .ok_or_else(|| error(ErrorKind::DriverContract, "KFD debugger storage overflows"))?;
-    let total_size = (u64::from(context_size) + u64::from(debug_size)) * u64::from(xcc_count);
+    let total_size = (u64::from(context_size) + u64::from(debug_size))
+        .checked_mul(u64::from(xcc_count))
+        .ok_or_else(|| error(ErrorKind::Unsupported, "KFD context-save extent overflows"))?;
+    let page = util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
+    let total_size = total_size
+        .div_ceil(page)
+        .checked_mul(page)
+        .ok_or_else(|| error(ErrorKind::Unsupported, "KFD context-save extent overflows"))?;
     // DebugOffset and DebugSize in the native header are u32. Check their
     // complete multi-XCC extent before any buffer is acquired or initialized.
     if total_size > u64::from(u32::MAX) {
@@ -1182,7 +1191,7 @@ fn compute_storage(properties: sysfs::NativeQueueProperties) -> Result<ComputeSt
         control_stack_size,
         debug_size,
         xcc_count,
-        total_size: total_size.div_ceil(4096) * 4096,
+        total_size,
     })
 }
 
@@ -1377,37 +1386,6 @@ pub(crate) struct KfdQueue {
 }
 
 impl KfdQueue {
-    fn uncertain_ownership(failure: Error) -> Error {
-        match failure {
-            Error::NativeOperation {
-                operation, source, ..
-            } => Error::NativeOperation {
-                kind: ErrorKind::ResourceOwnershipUncertain,
-                operation,
-                source,
-            },
-            Error::Operation { detail, .. } => error(ErrorKind::ResourceOwnershipUncertain, detail),
-            Error::Capacity { .. } => error(
-                ErrorKind::ResourceOwnershipUncertain,
-                "KFD queue cleanup failed after acquisition",
-            ),
-        }
-    }
-
-    fn abort_creation(mut queue: Owned<Self>, original: Error) -> Error {
-        match queue.destroy() {
-            Ok(()) => original,
-            Err(cleanup) if queue.id.is_none() => cleanup,
-            Err(cleanup) => {
-                // No queue owner can be returned for a later retry. Retain
-                // native backing and tell the frontend to retain its raw
-                // signal and scratch allocations as well.
-                std::mem::forget(queue);
-                Self::uncertain_ownership(cleanup)
-            }
-        }
-    }
-
     #[allow(
         clippy::too_many_lines,
         reason = "keep native queue acquisition and publication in one auditable path"
@@ -1427,12 +1405,14 @@ impl KfdQueue {
         if request.aql.is_some() {
             vm.initialize_scratch()?;
         }
-        let allocate = |size, kind, permissions| {
+        let page =
+            util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
+        let allocate = |size: u64, kind, permissions| {
             KfdAllocation::create(
                 vm.clone(),
                 AllocationDesc {
-                    size,
-                    alignment: 4096,
+                    size: size.div_ceil(page) * page,
+                    alignment: page,
                 },
                 kind,
                 permissions,
@@ -1446,7 +1426,7 @@ impl KfdQueue {
             BufferKind::Gtt
         };
         let mut ring = allocate(
-            u64::from(request.ring_size).div_ceil(4096) * 4096,
+            u64::from(request.ring_size).div_ceil(page) * page,
             ring_kind,
             DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
         )?;
@@ -1459,7 +1439,7 @@ impl KfdQueue {
             ring.fill_records(&packet, request.ring_size as usize / packet.len())?;
         }
         let mut pointers = allocate(
-            4096,
+            page,
             BufferKind::Gtt,
             DeviceAccess::READ | DeviceAccess::WRITE,
         )?;
@@ -1472,7 +1452,7 @@ impl KfdQueue {
         let mut context = None;
         if let Some(compute) = &request.compute {
             eop = Some(allocate(
-                4096,
+                page,
                 BufferKind::Vram {
                     public: false,
                     coherent: false,
@@ -1559,7 +1539,7 @@ impl KfdQueue {
         };
         if let (Some(eop), Some(context), Some(compute)) = (&eop, &context, &request.compute) {
             args.eop_address = eop.device_address(&vm)?;
-            args.eop_size = 4096;
+            args.eop_size = page;
             args.context_address = context.address(&vm)?;
             args.context_size = compute.context_size;
             args.control_stack_size = compute.control_stack_size;
@@ -1597,26 +1577,45 @@ impl KfdQueue {
                 .is_some_and(|source| source.raw_os_error() == Some(14));
         }
         if let Err(source) = result {
-            let failure = native_error("AMDKFD_IOC_CREATE_QUEUE", source);
             return Err(if queue.uncertain {
-                Self::uncertain_ownership(failure)
+                Error::QueueBackingMayBeLive {
+                    operation: "AMDKFD_IOC_CREATE_QUEUE outcome is uncertain",
+                    source: Some(source),
+                }
             } else {
-                failure
+                native_error("AMDKFD_IOC_CREATE_QUEUE", source)
             });
         }
-        let doorbell = match queue.vm.doorbells.addresses(
-            &queue.vm,
-            args.doorbell_offset,
-            request.device_producer,
-        ) {
+        let doorbell =
+            queue
+                .vm
+                .doorbells
+                .addresses(&queue.vm, args.doorbell_offset, request.device_producer);
+        let doorbell = match doorbell {
             Ok(doorbell) => doorbell,
-            Err(source) => return Err(Self::abort_creation(queue, source)),
+            Err(failure) => {
+                if queue.destroy().is_err() {
+                    std::mem::forget(queue);
+                    return Err(Error::QueueBackingMayBeLive {
+                        operation: "KFD queue cleanup after transport acquisition",
+                        source: None,
+                    });
+                }
+                return Err(failure);
+            }
         };
         queue.info.doorbell_host_address = doorbell.host;
         queue.info.doorbell_device_address = doorbell.device;
         queue.doorbell_offset = args.doorbell_offset;
-        if let Err(source) = queue.vm.check() {
-            return Err(Self::abort_creation(queue, source));
+        if let Err(failure) = queue.vm.check() {
+            if queue.destroy().is_err() {
+                std::mem::forget(queue);
+                return Err(Error::QueueBackingMayBeLive {
+                    operation: "KFD queue cleanup after device check",
+                    source: None,
+                });
+            }
+            return Err(failure);
         }
         Ok(queue)
     }
@@ -1906,7 +1905,13 @@ impl KfdQueue {
 
 impl Drop for KfdQueue {
     fn drop(&mut self) {
-        if self.destroy().is_err() {
+        // A returned queue may still have a producer even when one sample of
+        // its indices is empty. Only an explicit destroy call can carry the
+        // adapter's producer-quiescence contract into native teardown. Queue
+        // creation failures have no published transport and can still clean up
+        // here when no native ID was acquired.
+        let live_without_explicit_teardown = self.id.is_some() && !self.destroying;
+        if live_without_explicit_teardown || self.destroy().is_err() {
             // Native queue references can outlive an unsuccessful destructor.
             // Retain their exact BOs and mappings without allocating cleanup
             // work; the kernel's process teardown remains the final owner.

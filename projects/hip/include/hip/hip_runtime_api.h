@@ -585,6 +585,15 @@ typedef enum hipDeviceAttribute_t {
                                                        ///< management)
   hipDeviceAttributeHandleTypeFabricSupported,   ///< Device supports exporting memory to a fabric handle
   hipDeviceAttributeHostAllocDmaBufSupported,  ///< Device supports host-allocated DMABuf buffer sharing
+  hipDeviceAttributeGPUDirectRDMASupported,  ///< Device supports GPUDirect RDMA APIs
+  hipDeviceAttributeGPUDirectRDMAFlushWritesOptions,  ///< Bitmask of
+                                                      ///< hipFlushGPUDirectRDMAWritesOptions
+                                                      ///< describing the flush paths the device
+                                                      ///< supports
+  hipDeviceAttributeGPUDirectRDMAWritesOrdering,  ///< A hipGPUDirectRDMAWritesOrdering value
+                                                  ///< giving the scope at which GPUDirect RDMA
+                                                  ///< writes are naturally ordered, i.e. visible
+                                                  ///< without an explicit flush
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -675,6 +684,25 @@ enum hipGPUDirectRDMAWritesOrdering {
   hipGPUDirectRDMAWritesOrderingNone = 0,
   hipGPUDirectRDMAWritesOrderingOwner = 100,
   hipGPUDirectRDMAWritesOrderingAllDevices = 200
+};
+
+/**
+ * The target of a hipDeviceFlushGPUDirectRDMAWrites operation.
+ */
+enum hipFlushGPUDirectRDMAWritesTarget {
+  hipFlushGPUDirectRDMAWritesTargetCurrentDevice = 0  ///< Memory of the current HIP device
+};
+
+/**
+ * The scope at which hipDeviceFlushGPUDirectRDMAWrites makes pending remote writes visible.
+ *
+ * The enumerator values match hipGPUDirectRDMAWritesOrdering, so a device whose
+ * hipDeviceAttributeGPUDirectRDMAWritesOrdering is greater than or equal to the requested
+ * scope already orders those writes and needs no explicit flush.
+ */
+enum hipFlushGPUDirectRDMAWritesScope {
+  hipFlushGPUDirectRDMAWritesToOwner = 100,      ///< Visible to the device owning the memory
+  hipFlushGPUDirectRDMAWritesToAllDevices = 200  ///< Visible to all HIP devices
 };
 
 #if defined(__HIP_PLATFORM_AMD__) && !defined(__HIP_PLATFORM_NVIDIA__)
@@ -1547,13 +1575,11 @@ typedef struct hipExternalSemaphoreWaitParams_st {
   unsigned int reserved[16];
 } hipExternalSemaphoreWaitParams;
 
-#if __HIP_HAS_GET_PCH
 /**
  * Internal use only. This API may change in the future
  * Pre-Compiled header for online compilation
  */
 void __hipGetPCH(const char** pch, unsigned int* size);
-#endif
 
 /**
  * HIP Access falgs for Interop resources.
@@ -2506,6 +2532,29 @@ hipError_t hipGetDeviceCount(int* count);
  */
 hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int deviceId);
 /**
+ * @brief Blocks until remote writes are visible to the specified scope
+ *
+ * Blocks until GPUDirect RDMA writes to the target device, issued by a third-party device
+ * such as an RDMA-capable NIC, are visible to the specified scope. This is a host-ordered
+ * visibility barrier on inbound remote writes; it does not synchronize with any stream or
+ * kernel.
+ *
+ * If @p scope is at or within the scope reported by
+ * #hipDeviceAttributeGPUDirectRDMAWritesOrdering, the writes are already ordered by the
+ * hardware and the call is a no-op.
+ *
+ * Support is reported by #hipDeviceAttributeGPUDirectRDMAFlushWritesOptions. The call
+ * returns #hipErrorNotSupported when that bitmask does not contain
+ * #hipFlushGPUDirectRDMAWritesOptionHost.
+ *
+ * @param [in] target The target of the operation, see #hipFlushGPUDirectRDMAWritesTarget
+ * @param [in] scope  The scope of the operation, see #hipFlushGPUDirectRDMAWritesScope
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ */
+hipError_t hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTarget target,
+                                             enum hipFlushGPUDirectRDMAWritesScope scope);
+/**
  * @brief Returns the default memory pool of the specified device
  *
  * @param [out] mem_pool Default memory pool to return
@@ -2948,6 +2997,35 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
  */
 
 hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
+
+/**
+ * @brief Set a device-wide attribute for a kernel on a specific device.
+ *
+ * Sets @p attr for @p kernel on @p device without requiring @p device to be
+ * current. Supported attributes are #hipFuncAttributeMaxDynamicSharedMemorySize,
+ * #hipFuncAttributePreferredSharedMemoryCarveout,
+ * #hipFuncAttributeRequiredClusterWidth,
+ * #hipFuncAttributeRequiredClusterHeight,
+ * #hipFuncAttributeRequiredClusterDepth,
+ * #hipFuncAttributeNonPortableClusterSizeAllowed, and
+ * #hipFuncAttributeClusterSchedulingPolicyPreference.
+ *
+ * Attributes set with #hipFuncSetAttribute override values set by this function
+ * for the corresponding device, regardless of call order.
+ *
+ * @note On AMD devices, non-portable cluster size and cluster scheduling policy
+ * are stored for readback but may not affect dispatch.
+ *
+ * @param [in] kernel Kernel to set the attribute for
+ * @param [in] attr Attribute to set
+ * @param [in] value Value to set
+ * @param [in] device Device ordinal on which to set the attribute
+ *
+ * @returns #hipSuccess, #hipErrorInvalidResourceHandle, #hipErrorInvalidValue,
+ * #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction
+ */
+hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value,
+                                          int device);
 
 /**
  * @brief Function will be extracted for specific kernel
@@ -5988,7 +6066,7 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
  *  @param[in]   src    Source memory address
  *  @param[in]   spitch Pitch size in bytes of source memory
  *  @param[in]   width  Width size in bytes of matrix transfer (columns)
- *  @param[in]   height Height size in bytes of matrix transfer (rows)
+ *  @param[in]   height Height of matrix transfer (rows)
  *  @param[in]   kind   Type of transfer
  *  @returns     #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidPitchValue,
  * #hipErrorInvalidDevicePointer, #hipErrorInvalidMemcpyDirection
