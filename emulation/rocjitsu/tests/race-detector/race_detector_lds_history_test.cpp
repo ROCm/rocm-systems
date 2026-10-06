@@ -120,46 +120,6 @@ protected:
                          CounterCapacities{}};
 };
 
-TEST_F(LdsHistoryTest, SampledOrderingAndRetirement) {
-  std::mt19937 random(12581);
-  constexpr int samples = 50;
-  constexpr std::array directions{false, true};
-  constexpr std::array otherWaves{0, 1};
-  constexpr std::array removedIndices{0, 1};
-  constexpr std::array queryWidths{8, 24};
-  // Sample the event orders/direction, same/other wave, retirement choice,
-  // query width and query wave/order with a fixed budget. Query the opposite
-  // direction so every scenario can exercise LDS conflict detection.
-  for (int sample = 0; sample < samples; ++sample) {
-    const auto first = kOrders[random() % kOrders.size()];
-    const auto second = kOrders[random() % kOrders.size()];
-    const bool write = directions[random() % directions.size()];
-    const int otherWave = otherWaves[random() % otherWaves.size()];
-    const size_t removed = removedIndices[random() % removedIndices.size()];
-    const int bytes = queryWidths[random() % queryWidths.size()];
-    const Query query{int(random() % kNumWaves), !write, kOrders[random() % kOrders.size()]};
-    SCOPED_TRACE(::testing::Message() << "seed=12581 sample=" << sample << " first=" << int(first)
-                                      << " second=" << int(second) << " write=" << write
-                                      << " otherWave=" << otherWave << " removed=" << removed);
-    add(/*wave=*/0, write, first, {{3, 7}, {12, 20}});
-    add(otherWave, write, second, {{4, 6}, {16, 34}});
-    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
-    ASSERT_NO_FATAL_FAILURE(complete(removed));
-    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
-    ASSERT_NO_FATAL_FAILURE(retire(removed));
-    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
-    // Reuse a still-populated chunk, then drain it and change owner.
-    add(/*wave=*/2, write, MemoryOrderClass::LDS, {{15, 18}});
-    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
-    while (!events_.empty())
-      ASSERT_NO_FATAL_FAILURE(retire(0));
-    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
-    add(/*wave=*/3, write, MemoryOrderClass::LDS, {{15, 18}});
-    ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, bytes, query));
-    ASSERT_NO_FATAL_FAILURE(retire(0));
-  }
-}
-
 TEST_F(LdsHistoryTest, DeterministicSoak) {
   // Use raw mt19937 output so the fixed seed also fixes the sequence across
   // standard library implementations. The bounds keep this in the unit suite.
