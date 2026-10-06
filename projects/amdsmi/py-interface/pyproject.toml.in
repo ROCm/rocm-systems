@@ -26,10 +26,12 @@ classifiers = [
 packages = ["amdsmi"]
 zip-safe = false
 include-package-data = true
+# Lists the notices as License-File metadata. The [tool.setuptools] key works
+# on setuptools >= 61; PEP 639's [project] key would need setuptools >= 77.
+license-files = ["amdsmi/LICENSE", "amdsmi/THIRD_PARTY_LICENSES/*"]
 
 [tool.setuptools.package-data]
-# Notices ship as package data, not PEP 639 `license-files`, which would need
-# setuptools >= 77. Same glob the bundled .so already relies on.
+# Notices also ship inside the package. Same glob the bundled .so relies on.
 amdsmi = ["*.so", "THIRD_PARTY_LICENSES/*"]
 
 [tool.pytest.ini_options]

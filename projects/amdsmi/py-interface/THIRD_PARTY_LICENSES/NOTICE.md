@@ -1,49 +1,53 @@
 Third-Party Notices for the amdsmi Python Wheel
 ===============================================
 
-`libamd_smi_python.so` is MIT-licensed (see `amdsmi/LICENSE`) but links at
-runtime against the Netlink libraries. When the wheel is repaired for the
-manylinux platform tag (`tools/build_wheel.py --repair`), `auditwheel repair`
-copies the shared libraries that are not on the manylinux baseline allowlist
-into `amdsmi.libs/` so the wheel is self-contained. That currently copies three
-third-party shared objects:
+The Python files and `libamd_smi_python.so` in this wheel are licensed under
+the MIT License (see `amdsmi/LICENSE`). The wheel also contains the following
+third-party components. Their license texts are in this directory.
 
-| Bundled file          | Upstream project                  | Upstream source                  | SPDX license        |
-|-----------------------|-----------------------------------|----------------------------------|---------------------|
-| `libnl-3.so.200`      | libnl                             | https://github.com/thom311/libnl | `LGPL-2.1-only`     |
-| `libnl-genl-3.so.200` | libnl (generic-netlink component) | https://github.com/thom311/libnl | `LGPL-2.1-only`     |
-| `libmnl.so.0`         | libmnl (Netfilter)                | https://git.netfilter.org/libmnl | `LGPL-2.1-or-later` |
+Compiled into libamd_smi_python.so
+----------------------------------
 
-Which exact build is bundled depends on the host that ran `auditwheel repair`;
-the wheel's own `amdsmi.libs/` directory records what shipped in that release.
+| Component | Source | License | License text |
+|-----------|--------|---------|--------------|
+| shared_mutex | `third_party/shared_mutex` in the AMD SMI source tree | MIT; Copyright (c) 2018 Oleg Yamnikov | `shared_mutex-LICENSE.txt` |
+| E-SMI In-Band Library | https://github.com/amd/esmi_ib_library, commit `d494a3194ceb4cc4dbb2debf9fcbe8773c6d3bef` | University of Illinois/NCSA Open Source License; Copyright (c) 2020-2023, Advanced Micro Devices, Inc. | `E-SMI-LICENSE.txt` |
 
-None of the three are modified from upstream — `auditwheel` copies them
-verbatim from the build host's packages. `amdsmi` links to them dynamically
-(`DT_NEEDED`, not static linking or source inclusion), which keeps this inside
-LGPL v2.1 Section 6 ("Combined Works"). Section 6 still requires:
+Shared libraries in amdsmi.libs/
+--------------------------------
 
-1. reproducing the license text and copyright notices — see `LGPL-2.1.txt` in
-   this directory, the verbatim text published at
-   https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt; and
-2. accompanying the work with the library's corresponding source, or a written
-   offer valid for at least three years to provide it.
+The wheel build (`auditwheel repair`) copies these netlink libraries from the
+AlmaLinux 8 packages installed in the build container:
 
-Source availability / written offer
------------------------------------
+| File in the wheel | Library | Package | License |
+|-------------------|---------|---------|---------|
+| `amdsmi.libs/libnl-3-47cd035c.so.200.26.0` | libnl 3.7.0 (core) | `libnl3-3.7.0-1.el8` | `LGPL-2.1-only` |
+| `amdsmi.libs/libnl-genl-3-999b815b.so.200.26.0` | libnl 3.7.0 (generic netlink) | `libnl3-3.7.0-1.el8` | `LGPL-2.1-only` |
+| `amdsmi.libs/libmnl-1831b10a.so.0.2.0` | libmnl 1.0.4 | `libmnl-1.0.4-6.el8` | `LGPL-2.1-or-later` |
 
-libnl and libmnl are distributed as source by their upstream projects at the
-URLs above and by every Linux distribution that packages them. As a written
-offer under LGPL v2.1 Section 6(a): for three years from the publication date
-of a given `amdsmi` wheel, AMD will, on written request to
-amd-smi.support@amd.com identifying the wheel version and the SONAME of the
-bundled library, either point the requester to the exact upstream source
-release matching that build or provide a copy of it.
-
-Copyright notices
------------------
+The LGPL 2.1 text is in `LGPL-2.1.txt`. Copyright notices:
 
 - libnl: Copyright (c) 2003-2012 Thomas Graf <tgraf@suug.ch> and contributors.
 - libmnl: Copyright (c) 2008-2010 Pablo Neira Ayuso <pablo@netfilter.org> and
   contributors.
 
-See each upstream repository for the full list of copyright holders.
+auditwheel does not change the code of these libraries. It adds a hash to each
+file name and SONAME, updates the references between the three libraries to
+those names, and sets the run-time search path (RPATH) of libnl-genl-3 to
+`$ORIGIN`. `libamd_smi_python.so` links to them dynamically, so you can use
+your own build of a library by saving it in `amdsmi.libs/` under the same file
+name.
+
+Source code
+-----------
+
+The corresponding source code is in these AlmaLinux 8 source packages, which
+include the distribution's patches:
+
+- https://vault.almalinux.org/8.10/BaseOS/Source/Packages/libnl3-3.7.0-1.el8.src.rpm
+- https://vault.almalinux.org/8.10/BaseOS/Source/Packages/libmnl-1.0.4-6.el8.src.rpm
+
+For at least three years after AMD last distributes this version of the wheel,
+AMD will also give anyone who asks a complete copy of that source code, for no
+more than the cost of performing the distribution. Send requests to
+amd-smi.support@amd.com and include the amdsmi version.
