@@ -27,9 +27,9 @@
 // than silently taking a slower path, so the dependency is enforced by the
 // build.
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
-#define HIP_ENABLE_GFX1250_BLOCK16_BUILTINS 1
+#define HIP_ENABLE_GFX1250_PK16_SCALE_BUILTINS 1
 #else
-#define HIP_ENABLE_GFX1250_BLOCK16_BUILTINS 0
+#define HIP_ENABLE_GFX1250_PK16_SCALE_BUILTINS 0
 #endif
 // The pk8 scaled unpack converts (fp4, fp8, bf8) are tracked separately from the
 // pk16 ones (fp6, bf6). LCOMPILER-2841 established that the nine pk8 opcodes do

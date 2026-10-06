@@ -14,7 +14,7 @@ measured on MI450-A0 with __has_builtin:
                                        gfx1250  strict  gfx950  gfx942
   HIP_ENABLE_GFX1250_OCP_BUILTINS        40/40   40/40    0/40    0/40
   HIP_ENABLE_GFX1250_PK8_SCALE_BUILTINS    9/9     0/9     0/9     0/9
-  HIP_ENABLE_GFX1250_BLOCK16_BUILTINS      6/6     0/6     0/6     0/6
+  HIP_ENABLE_GFX1250_PK16_SCALE_BUILTINS      6/6     0/6     0/6     0/6
 
 The strict column for pk8 and pk16 is 0 only until the compiler carries
 llvm/llvm-project#227426 and #227475, which move all fifteen cvt_scale_pk8_*
@@ -87,7 +87,7 @@ Regenerate them when entry points are added or removed.
 #include <vector>
 
 #if !defined(HIP_ENABLE_GFX1250_PK8_SCALE_BUILTINS) || \
-    !defined(HIP_ENABLE_GFX1250_BLOCK16_BUILTINS)
+    !defined(HIP_ENABLE_GFX1250_PK16_SCALE_BUILTINS)
 // Defaulting these to 0 would make the gate checks compare 0 == 0 and pass
 // while testing nothing, so refuse to build instead.
 #error "amd_hip_ocp_fp.hpp did not define the gfx1250 OCP gates"
@@ -289,7 +289,7 @@ __global__ void probeGates(int* out) {
   out[13] = INVOCABLE(__builtin_amdgcn_cvt_scale_pk16_bf16_bf6);
   out[14] = INVOCABLE(__builtin_amdgcn_cvt_scale_pk16_f32_bf6);
   out[kPk8Gate] = HIP_ENABLE_GFX1250_PK8_SCALE_BUILTINS;
-  out[kPk16Gate] = HIP_ENABLE_GFX1250_BLOCK16_BUILTINS;
+  out[kPk16Gate] = HIP_ENABLE_GFX1250_PK16_SCALE_BUILTINS;
 }
 
 #undef INVOCABLE
@@ -422,7 +422,7 @@ TEST_CASE("Unit_ocp_scale_gates_match_compiler") {
   const int pk8Gate = v[kPk8Gate];
   const int pk16Gate = v[kPk16Gate];
   INFO("HIP_ENABLE_GFX1250_PK8_SCALE_BUILTINS = " << pk8Gate);
-  INFO("HIP_ENABLE_GFX1250_BLOCK16_BUILTINS   = " << pk16Gate);
+  INFO("HIP_ENABLE_GFX1250_PK16_SCALE_BUILTINS   = " << pk16Gate);
 
   if (v[0] == 1 && pk8Gate == 0) {
     WARN("The compiler offers the pk8 scaled converts on this target but "
@@ -438,12 +438,12 @@ TEST_CASE("Unit_ocp_scale_gates_match_compiler") {
   }
   if (v[kPk8Count] == 1 && pk16Gate == 0) {
     WARN("The compiler offers the pk16 scaled converts on this target but "
-         "HIP_ENABLE_GFX1250_BLOCK16_BUILTINS still selects the software fallback. "
+         "HIP_ENABLE_GFX1250_PK16_SCALE_BUILTINS still selects the software fallback. "
          "Enable it for this target in amd_hip_mx_common.h and amd_hip_ocp_fp.hpp. "
          "See LCOMPILER-2841 and llvm/llvm-project#227475.");
   }
   if (v[kPk8Count] == 0 && pk16Gate == 1) {
-    WARN("HIP_ENABLE_GFX1250_BLOCK16_BUILTINS selects the hardware path but the "
+    WARN("HIP_ENABLE_GFX1250_PK16_SCALE_BUILTINS selects the hardware path but the "
          "compiler does not offer the pk16 scaled converts for this target, so the "
          "headers will not build here. This needs a compiler carrying "
          "llvm/llvm-project#227475.");
