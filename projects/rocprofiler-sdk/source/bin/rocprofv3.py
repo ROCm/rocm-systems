@@ -1152,7 +1152,7 @@ For attachment profiling of running processes:
         "-p",
         "--pid",
         "--attach",
-        help="""Attach to a target process by pid and execute as a tool from within said process.""",
+        help="""Attach to a target process by pid and execute as a tool from within said process. Uses the tool library of the rocprofiler-sdk installation the target process is running when it can be located, otherwise the tool library of this installation (with a warning). Set ROCPROF_ATTACH_TOOL_LIBRARY to attach a different tool library. Options the target's rocprofiler-sdk does not support are skipped with warnings.""",
         type=int,
         default=None,
     )
@@ -1773,11 +1773,13 @@ def run(app_args, args, **kwargs):
         update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
         update_env("LD_PRELOAD", ":".join(append_preload), append=True)
 
-    update_env(
-        "ROCP_TOOL_LIBRARIES",
-        f"{ROCPROF_TOOL_LIBRARY}",
-        append=True,
-    )
+    # in attach mode, rocprof-attach selects the tool library for the target process
+    if not args.pid:
+        update_env(
+            "ROCP_TOOL_LIBRARIES",
+            f"{ROCPROF_TOOL_LIBRARY}",
+            append=True,
+        )
     update_env(
         "LD_LIBRARY_PATH",
         f"{ROCM_DIR}/lib",
@@ -2030,13 +2032,6 @@ def run(app_args, args, **kwargs):
             overwrite_if_true=True,
         )
 
-    if args.pid:
-        update_env(
-            "ROCPROF_ATTACH_TOOL_LIBRARY",
-            ROCPROF_ATTACH_TOOL_LIBRARY,
-            overwrite_if_true=True,
-        )
-
     if args.collection_period:
         factors = {
             "hour": 60 * 60 * 1e9,
@@ -2184,10 +2179,18 @@ def run(app_args, args, **kwargs):
             update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
         update_env("ROCPROF_ATTACH_CHILDREN", "1" if args.attach_children else "0")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprof-attach")
+        # rocprof-attach prefers the tool library of the target's rocprofiler-sdk
+        # installation and falls back to this one
+        attach_args = [
+            sys.executable,
+            path,
+            "--fallback-tool-library",
+            ROCPROF_ATTACH_TOOL_LIBRARY,
+        ]
         if app_args:
-            exit_code = subprocess.check_call([sys.executable, path], env=app_env)
+            exit_code = subprocess.check_call(attach_args, env=app_env)
         else:
-            app_args = [sys.executable, path]
+            app_args = attach_args
 
     elif not app_args and not args.echo:
         log_config(app_env)

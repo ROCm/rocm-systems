@@ -48,3 +48,22 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Internal thread for rocprofiler-sdk should not be created"
     )
+
+# the last library in a colon-delimited ROCP_TOOL_LIBRARIES list is loaded. The
+# rocprofiler-sdk under test is preloaded so that rocprofiler-register uses it instead of
+# an SDK colocated with an installed rocprofiler-register, which may predate list support.
+rocprofiler_add_integration_execute_test(
+    test-c-tool-rocp-tool-lib-list
+    COMMAND $<TARGET_FILE:transpose> 1
+    DEPENDS transpose rocprofiler-sdk-c-tool
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "$<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-shared-library>"
+    ENVIRONMENT
+        "ROCP_TOOL_LIBRARIES=:$<TARGET_FILE:rocprofiler-sdk-c-tool>"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    PASS_REGULAR_EXPRESSION
+        "Test C tool \\(priority=0\\) is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Internal thread for rocprofiler-sdk should not be created"
+    )

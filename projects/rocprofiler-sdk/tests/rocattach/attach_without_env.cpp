@@ -28,7 +28,10 @@
 // The attach should fail with ROCATTACH_STATUS_ERROR and the child process should
 // continue running normally (not crash).
 //
-// Usage: attach_without_env <test_app> [attach|attach-tree]
+// The attach-missing-tool mode keeps ROCP_TOOL_ATTACH and instead attaches with a tool library
+// list whose last library cannot be loaded by the target.
+//
+// Usage: attach_without_env <test_app> [attach|attach-tree|attach-missing-tool <tool_library>]
 
 #include <rocprofiler-sdk-rocattach/defines.h>
 #include <rocprofiler-sdk-rocattach/rocattach.h>
@@ -41,6 +44,7 @@
 
 #include <chrono>
 #include <iostream>
+#include <string>
 #include <thread>
 
 int
@@ -49,12 +53,15 @@ main(int argc, char** argv)
     if(argc < 2)
     {
         std::cout << "error: wrong number of arguments\n";
-        std::cout << "usage: " << argv[0] << " <test_application_path> [attach|attach-tree]\n";
+        std::cout << "usage: " << argv[0]
+                  << " <test_application_path> [attach|attach-tree|attach-missing-tool "
+                     "<tool_library>]\n";
         return 1;
     }
 
     // Determine which attach function to test
-    bool use_tree_attach = false;
+    bool use_tree_attach  = false;
+    bool use_missing_tool = false;
     if(argc >= 3)
     {
         std::string mode{argv[2]};
@@ -62,17 +69,33 @@ main(int argc, char** argv)
         {
             use_tree_attach = true;
         }
+        else if(mode == "attach-missing-tool" && argc >= 4)
+        {
+            use_missing_tool = true;
+        }
         else if(mode != "attach")
         {
             std::cout << "error: invalid mode '" << mode
-                      << "', expected 'attach' or 'attach-tree'\n";
+                      << "', expected 'attach', 'attach-tree', or 'attach-missing-tool "
+                         "<tool_library>'\n";
             return 1;
         }
     }
 
-    // Explicitly unset ROCP_TOOL_ATTACH to ensure the child process
-    // does NOT have the attach thread initialized
-    unsetenv("ROCP_TOOL_ATTACH");
+    if(use_missing_tool)
+    {
+        // A bare library name is not validated by rocattach, so the target's dlopen of it
+        // fails, which must fail the attach without bringing down the target
+        auto tool_libraries =
+            std::string{argv[3]} + ":librocattach-missing-tool-library-does-not-exist.so";
+        setenv("ROCPROF_ATTACH_TOOL_LIBRARY", tool_libraries.c_str(), 1);
+    }
+    else
+    {
+        // Explicitly unset ROCP_TOOL_ATTACH to ensure the child process
+        // does NOT have the attach thread initialized
+        unsetenv("ROCP_TOOL_ATTACH");
+    }
 
     pid_t child_pid = fork();
     if(child_pid < 0)
@@ -84,7 +107,8 @@ main(int argc, char** argv)
     if(child_pid == 0)
     {
         // Child process: exec the test application WITHOUT ROCP_TOOL_ATTACH=1
-        std::cout << "child executing " << argv[1] << " (without ROCP_TOOL_ATTACH)\n";
+        std::cout << "child executing " << argv[1]
+                  << (use_missing_tool ? "\n" : " (without ROCP_TOOL_ATTACH)\n");
         int ret = execl(argv[1], argv[1], nullptr);
         if(ret == -1)
         {
@@ -105,7 +129,8 @@ main(int argc, char** argv)
         std::cout << "attempting to attach to pid " << child_pid << " using " << attach_mode_str
                   << " (should fail with ROCATTACH_STATUS_ERROR)\n";
 
-        // Attempt to attach - this should FAIL because bg-attach thread doesn't exist
+        // Attempt to attach - this should FAIL because bg-attach thread doesn't exist, or
+        // because a tool library cannot be loaded
         //
         // NOTE: for the attach-tree mode, this test spawns a single child with no descendants,
         // so rocattach_attach_tree() reduces to one setup() call and the returned last_status
