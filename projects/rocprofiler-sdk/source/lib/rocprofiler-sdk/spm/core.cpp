@@ -363,6 +363,11 @@ set_dispatch_agents(rocprofiler_context_id_t      context_id,
     }
 
     ctx_p->dispatch_spm->agents = std::move(selected);
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
 configure_agent_collection(rocprofiler_context_id_t                 context_id,
                            rocprofiler_buffer_id_t                  buffer_id,
                            rocprofiler_agent_id_t                   agent_id,

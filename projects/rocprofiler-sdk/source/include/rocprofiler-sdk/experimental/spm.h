@@ -337,6 +337,7 @@ ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_spm_dispatch_counting_service_set_agents(rocprofiler_context_id_t      context_id,
                                                      const rocprofiler_agent_id_t* agents,
                                                      size_t num_agents) ROCPROFILER_API;
+/**
  * @brief (experimental) Configure SPM Device Counting Service for agent. There may only be one
  * counting service configured per agent in a context and can be only one active context that is
  * profiling a single agent at a time. Multiple agent contexts can be started at the same time if

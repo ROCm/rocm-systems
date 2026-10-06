@@ -1,5 +1,5 @@
 set(ROCPROFILER_LIB_SPM_SOURCES core.cpp service.cpp decode.cpp interface.cpp
-                                dispatch_handlers.cpp queue_hooks.cpp)
+                                dispatch_handlers.cpp queue_hooks.cpp device_counting.cpp)
 set(ROCPROFILER_LIB_SPM_HEADERS core.hpp interface.hpp decode.hpp dispatch_handlers.hpp
                                 queue_hooks.hpp device_counting.hpp)
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_SPM_SOURCES}
