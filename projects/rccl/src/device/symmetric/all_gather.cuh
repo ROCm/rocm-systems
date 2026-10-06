@@ -27,7 +27,7 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
   int const& rank = handler.comm.rank;
   int const& nRanks = handler.comm.nRanks;
 
-  Pack* inpPacks = (Pack*)input.localPtr() + intptr_t(w) * UnrollPacks * WARP_SIZE +
+  Pack* inpPacks = (Pack*)input.localPtrConst() + intptr_t(w) * UnrollPacks * WARP_SIZE +
                    (
 #if NCCL_SYMK_ASYNC_TILE
                      EnableTma ? 0 :
@@ -93,13 +93,13 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
             if (partial && dr + ur == nRanks) break;
 #if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              ncclSymkTileStore<TileAligned>(outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize, lane);
+              ncclSymkTileStore<TileAligned>(outPacks.lsaPtrConst(r), tmaSmem->buff[0], tileSize, lane);
             } else
 #endif
             {
               NVCC_PRAGMA_UNROLL(UnrollPacks)
               for (int u = 0; u < UnrollPacks; u++) {
-                outPacks.lsaPtr(r)[u * WARP_SIZE] = tmp[u];
+                outPacks.lsaPtrConst(r)[u * WARP_SIZE] = tmp[u];
               }
             }
             if (++r == nRanks) r = 0;
@@ -136,7 +136,7 @@ static __device__ void bcastEnds(ncclSymkArgsHandler const& handler, int tn, int
                                  ncclSymPtr<T> output, bool inPlace, size_t nElts, uint32_t nPreElts, size_t nSufElts) {
   int const& rank = handler.comm.rank;
   int const& nRanks = handler.comm.nRanks;
-  BytePack<sizeof(T)>* inpPacks = (BytePack<sizeof(T)>*)input.localPtr();
+  BytePack<sizeof(T)>* inpPacks = (BytePack<sizeof(T)>*)input.localPtrConst();
   ncclSymPtr<BytePack<sizeof(T)>> outPacks = (ncclSymPtr<BytePack<sizeof(T)>>)output;
   NVCC_PRAGMA_UNROLL_DISABLED
   for (size_t i = t; i < nPreElts + nSufElts; i += tn) {
@@ -149,14 +149,14 @@ static __device__ void bcastEnds(ncclSymkArgsHandler const& handler, int tn, int
     for (; dr + UnrollPeers <= nRanks; dr += UnrollPeers) {
       NVCC_PRAGMA_UNROLL(UnrollPeers)
       for (int u = 0; u < UnrollPeers; u++) {
-        outPacks.lsaPtr(r)[elt] = tmp;
+        outPacks.lsaPtrConst(r)[elt] = tmp;
         if (++r == nRanks) r = 0;
       }
     }
     NVCC_PRAGMA_UNROLL(UnrollPeers)
     for (int u = 0; u < UnrollPeers; u++) {
       if (dr + u == nRanks) break;
-      outPacks.lsaPtr(r)[elt] = tmp;
+      outPacks.lsaPtrConst(r)[elt] = tmp;
       if (++r == nRanks) r = 0;
     }
   }

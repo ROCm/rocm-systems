@@ -109,6 +109,24 @@ NCCL_DEVICE_INLINE T* ncclSymPtr<T>::lsaPtr(int peer) const {
 
 #ifdef __CUDACC__
 template <typename T>
+NCCL_DEVICE_INLINE T* ncclSymPtr<T>::localPtrConst() const {
+  if (window) {
+    return (T*)ncclGetLocalPointerConst(window, offset);
+  } else {
+    return (T*)offset;
+  }
+}
+#endif
+
+#ifdef __CUDACC__
+template <typename T>
+NCCL_DEVICE_INLINE T* ncclSymPtr<T>::lsaPtrConst(int peer) const {
+  return (T*)ncclGetLsaPointerConst(window, offset, peer);
+}
+#endif
+
+#ifdef __CUDACC__
+template <typename T>
 NCCL_DEVICE_INLINE T* ncclSymPtr<T>::peerPtr(int peer) const {
   return (T*)ncclGetPeerPointer(window, offset, peer);
 }
