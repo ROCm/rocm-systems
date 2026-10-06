@@ -5,7 +5,7 @@
 ### Added
 
 * MD software RAID arrays  running pass-through personalities  whose member devices are all local NVMe are now fastpath capable, and `ais-check` reports them as such.
-* `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one. It is raw bytes, not a NUL-terminated string. Use it to correlate stats across processes, where ordering by device ID is not stable.
+* `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one. It is raw bytes, not a NUL-terminated string.
 * Added a batch API example, `batch-roundtrip`, installed with the other examples when `AIS_INSTALL_EXAMPLES` is `ON`, and a matching batch I/O tutorial.
 * Added reference documentation for the Stats API.
 
