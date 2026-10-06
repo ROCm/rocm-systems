@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /* A complete AMDF consumer for the qualified GFX1201/SDMA7 SYSTEM-memory path.
  * Packet construction and completion policy belong to this caller. The provider
  * supplies resources, queue transport, and the directional cache requirements.

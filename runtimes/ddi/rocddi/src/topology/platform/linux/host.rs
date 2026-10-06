@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Linux host identity and cache facts shared by runtime frontends.
 //!
 //! The parser does not assign public API handles or names to cache records.
