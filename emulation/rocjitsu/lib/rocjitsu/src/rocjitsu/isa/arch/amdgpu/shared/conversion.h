@@ -170,6 +170,8 @@ template <typename From, typename To> struct ToFloat {
   input_denormal::Policy input;
   rounding::Policy rounding;
   output_modifier::Policy output;
+  /// Whether widening quiets a signaling NaN. Narrowing always quiets it.
+  bool quiet_nan = true;
 
   template <typename V> constexpr auto operator()(V bits) const {
     if constexpr (std::is_arithmetic_v<V>) {
@@ -206,11 +208,30 @@ private:
       using Source = fp_format::Format<Lane, From::kExponentBits, From::kMantissaBits>;
       bits = source_modifier::apply<Source>(bits & V(Source::kBits), 0, abs, neg);
       bits = input_denormal::flush_input<Source>(bits, input);
-      if constexpr (From::kMantissaBits > To::kMantissaBits)
+      if constexpr (From::kMantissaBits > To::kMantissaBits) {
         return rounding::narrow<Source, Destination>(bits, rounding);
-      else
-        return rounding::widen<Source, Destination>(bits);
+      } else {
+        const V widened = rounding::widen<Source, Destination>(bits);
+        if (quiet_nan)
+          return widened;
+        // A signaling NaN keeps its quiet bit clear; its payload survives widening.
+        const auto signaling = (bits & V(Source::kMagnitude)) > V(Source::kInfinity) &&
+                               (bits & V(Source::kQuiet)) == V(Lane{0});
+        return choose(signaling, widened & ~V(Destination::kQuiet), widened);
+      }
     }
+  }
+};
+
+/// @brief Two conversions to F16 packed into the low and high halves of a 32-bit lane.
+/// @details `low` converts the first source and `high` the second; each carries the
+/// modifier bits of its own source in bit 0.
+template <typename From> struct PackedF16 {
+  ToFloat<From, fp_format::F16> low;
+  ToFloat<From, fp_format::F16> high;
+
+  template <typename V> constexpr V operator()(V first, V second) const {
+    return low(first) | (high(second) << 16);
   }
 };
 

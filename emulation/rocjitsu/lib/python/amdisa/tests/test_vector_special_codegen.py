@@ -593,6 +593,7 @@ def test_true16_special_vop3_simd_routes_use_true16_glue():
     'name', ['v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3']
 )
 def test_packed_rtz_simd_applies_source_modifiers(name):
+    stages = 'amdgpu::conversion_pk_rtz_f16(wf, inst.inst_.abs, inst.inst_.neg)'
     probes = [simd_probe_line(name)]
     local = local_coverage_probe(name)
     if name == 'v_cvt_pkrtz_f16_f32_vop3':
@@ -601,18 +602,14 @@ def test_packed_rtz_simd_applies_source_modifiers(name):
     else:
         assert local is None
     for probe in probes:
-        assert not probe.startswith('  if (!(inst.inst_.abs | inst.inst_.neg))')
-        assert 'f32_to_f16_rtz_simd' in probe
-        for index, source in enumerate(('a', 'b')):
-            absolute = f'if (inst.inst_.abs & {1 << index}u) {source} &= ~0x80000000u;'
-            negative = f'if (inst.inst_.neg & {1 << index}u) {source} ^= 0x80000000u;'
-            assert probe.index(absolute) < probe.index(negative)
-            assert probe.index(negative) < probe.index('f32_to_f16_rtz_simd')
-    assert 'inst_.abs' not in simd_probe_line(name.replace('_vop3', '_vop2'))
+        assert stages in probe
+        assert 'f32_to_f16_rtz_simd' not in probe
+    vop2 = simd_probe_line(name.replace('_vop3', '_vop2'))
+    assert 'amdgpu::conversion_pk_rtz_f16(wf)' in vop2
 
 
 @pytest.mark.parametrize('has_abs', [False, True])
-def test_packed_rtz_vop3_modifiers_precede_conversion(has_abs):
+def test_packed_rtz_vop3_modifiers_reach_the_shared_conversion(has_abs):
     cpp = gen_vector_cvt_pk(
         ['vdst'],
         ['src0', 'src1'],
@@ -622,13 +619,10 @@ def test_packed_rtz_vop3_modifiers_precede_conversion(has_abs):
         has_abs=has_abs,
     )
     abs_field = 'inst_.abs' if has_abs else '0u'
-    for source in (0, 1):
-        modifiers = (
-            f's{source} = amdgpu::source_modifier::apply_to_float('
-            f's{source}, {source}, {abs_field}, inst_.neg);'
-        )
-        assert modifiers in cpp
-        assert cpp.index(modifiers) < cpp.index('util::f32_to_f16_rtz')
+    stages = f'const auto conversion = amdgpu::conversion_pk_rtz_f16(wf, {abs_field}, inst_.neg);'
+    assert cpp.startswith(f'  {stages}')
+    assert 'conversion(s0, s1)' in cpp
+    assert 'util::f32_to_f16_rtz' not in cpp
 
 
 @pytest.mark.parametrize('op', ['u16_f32', 'i16_f32'])

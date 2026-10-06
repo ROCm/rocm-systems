@@ -10,6 +10,7 @@ saturating packs, arithmetic, lane permutations, and packed type conversion.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute.conversion import pk_rtz_f16_expr
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     apply_output,
@@ -1463,19 +1464,19 @@ def gen_vector_cvt_pk(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));'
         )
     elif cls == 'vector_cvt_pkrtz_f16_f32':
-        L.append(
-            f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
+        # shared/conversion.h stages, resolved before the lane loop.
+        L.insert(
+            0,
+            f'  const auto conversion = {pk_rtz_f16_expr(is_vop3, has_abs, "inst_")};',
         )
         L.append(
-            f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
+            f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
         )
-        if is_vop3:
-            L.extend(vop3_src_mod('s0', 0, has_abs))
-            L.extend(vop3_src_mod('s1', 1, has_abs))
-        L.append(f'    uint32_t lo = util::f32_to_f16_rtz(s0);')
-        L.append(f'    uint32_t hi = util::f32_to_f16_rtz(s1);')
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
+            f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
+        )
+        L.append(
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1));'
         )
     elif cls == 'vector_cvt_pk':
         if op in ('fp8_f32', 'bf8_f32', 'fp8_f16', 'bf8_f16'):

@@ -763,6 +763,9 @@ inline conversion::ToFloat<From, To> conversion_to_float(const Wavefront &wf, ui
                           stages.output.omod != 0;
   stages.rounding = {stages.output.round_mode, flush_tiny,
                      std::is_same_v<To, fp_format::F16> && wf.fp16_ovfl()};
+  // gfx1100 keeps a widened signaling NaN unquieted with MODE.IEEE clear, and
+  // quiets every narrowed one.
+  stages.quiet_nan = fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode());
   return stages;
 }
 
@@ -777,6 +780,19 @@ inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const In
   constexpr int32_t kScale[] = {0, 1, 2, -1};
   stages.rounding.prescale = kScale[sdwa::output_modifier<sdwa::ResultFormat::F16>(inst, wf) & 3u];
   return stages;
+}
+
+/// @brief Resolve V_CVT_PK_RTZ_F16_F32: each F32 source rounds toward zero into one half.
+/// @details MODE.FP_ROUND is ignored. ABS/NEG bit i applies to source i; OMOD and
+/// CLAMP are not applied to the packed result.
+inline conversion::PackedF16<fp_format::F32>
+conversion_pk_rtz_f16(const Wavefront &wf, uint32_t abs = 0, uint32_t neg = 0) {
+  conversion::PackedF16<fp_format::F32> packed{
+      conversion_to_float<fp_format::F32, fp_format::F16>(wf, abs, neg),
+      conversion_to_float<fp_format::F32, fp_format::F16>(wf, abs >> 1, neg >> 1)};
+  packed.low.rounding.mode = rounding::TOWARD_ZERO;
+  packed.high.rounding.mode = rounding::TOWARD_ZERO;
+  return packed;
 }
 
 /// @brief Wrap a raw-bit operation with the instruction's source and output modifiers.
@@ -1661,6 +1677,44 @@ template <typename Tin, typename Inst, typename CvtOp>
 /// Unconstrained fallback for the b32->f64 cvt path; see the binary-path note.
 template <typename Tin, typename Inst, typename CvtOp>
 [[nodiscard]] bool try_execute_cvt_b32_to_f64_simd(Inst &, Wavefront &, CvtOp) {
+  return false;
+}
+
+/// @brief Run a raw-bit F64-source conversion on the f64->b32 cvt path.
+/// @details `stages` maps F64 encodings in 64-bit lanes to 32-bit destination
+/// encodings in the same lanes, such as a conversion::ToFloat; the store keeps
+/// their low 32 bits.
+template <typename Inst, typename Stages>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_conversion_from_f64_simd(Inst &inst, Wavefront &wf,
+                                                               const Stages &stages) {
+  return try_execute_cvt_f64_to_b32_simd<uint32_t>(inst, wf, [&stages](util::native<double> s) {
+    return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(
+        stages(std::bit_cast<util::native<uint64_t>>(s)));
+  });
+}
+
+template <typename Inst, typename Stages>
+[[nodiscard]] bool try_execute_conversion_from_f64_simd(Inst &, Wavefront &, const Stages &) {
+  return false;
+}
+
+/// @brief Run a raw-bit conversion to F64 on the b32->f64 cvt path.
+/// @details The 32-bit source encodings are zero-extended into 64-bit lanes for
+/// `stages`, which returns F64 encodings.
+template <typename Inst, typename Stages>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_conversion_to_f64_simd(Inst &inst, Wavefront &wf,
+                                                             const Stages &stages) {
+  return try_execute_cvt_b32_to_f64_simd<uint32_t>(
+      inst, wf, [&stages](util::narrow32<uint32_t> source) {
+        return std::bit_cast<util::native<double>>(
+            stages(util::stdx::static_simd_cast<util::native<uint64_t>>(source)));
+      });
+}
+
+template <typename Inst, typename Stages>
+[[nodiscard]] bool try_execute_conversion_to_f64_simd(Inst &, Wavefront &, const Stages &) {
   return false;
 }
 
@@ -5009,6 +5063,19 @@ template <bool Vop3, typename Inst>
 #else
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...)                                                 \
   if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__))             \
+  return
+#endif
+
+/// Raw-bit conversions from or to F64 (shared/conversion.h stage objects).
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(...) static_cast<void>(inst)
+#define ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(...) static_cast<void>(inst)
+#else
+#define ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(...)                                                 \
+  if (::rocjitsu::amdgpu::try_execute_conversion_from_f64_simd(inst, wf, __VA_ARGS__))             \
+  return
+#define ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(...)                                                   \
+  if (::rocjitsu::amdgpu::try_execute_conversion_to_f64_simd(inst, wf, __VA_ARGS__))               \
   return
 #endif
 

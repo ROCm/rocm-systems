@@ -2773,6 +2773,118 @@ std::vector<ArithmeticCase> integer_to_float_cases() {
   return cases;
 }
 
+// Float-to-float conversions flush a subnormal source under the source format's
+// MODE field, round once in the destination's FP_ROUND field, flush a result
+// that is tiny after rounding under the destination's FP_DENORM field, and
+// quiet NaNs keeping their leading payload bits. VOP3 ABS/NEG come first and
+// OMOD, then CLAMP, last. Results are gfx1201 captures. MODE 0x30 keeps F32
+// denormals and flushes F16/F64 ones, 0xc0 the reverse; 0xf6/0xf9 and 0xf3/0xfc
+// give the F32 and F16/F64 rounding fields different directions.
+std::vector<ArithmeticCase> float_to_float_cases() {
+  constexpr uint32_t kHigh = 0xa5a50000u;
+  std::vector<ArithmeticCase> cases;
+  const auto add = [&](const char *name, std::array<uint32_t, 2> words,
+                       std::vector<std::pair<uint32_t, uint32_t>> sources,
+                       std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode) {
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     std::move(sources),
+                     std::move(expected),
+                     mode,
+                     FE_TONEAREST});
+  };
+  const auto vop1 = [](uint16_t op) {
+    return std::array<uint32_t, 2>{rdna4::build_vop1(op, {.src0 = 256, .vdst = 6})[0], 0u};
+  };
+  const auto vop3 = [](uint16_t op, rdna4::Vop3BuilderFields fields = {}) {
+    fields.vdst = 6;
+    fields.src0 = 256;
+    return rdna4::build_vop3(op, fields);
+  };
+  const auto f32 = [](uint32_t bits) {
+    return std::vector<std::pair<uint32_t, uint32_t>>{{0, bits}};
+  };
+  const auto f32_half_dst = [](uint32_t bits) {
+    return std::vector<std::pair<uint32_t, uint32_t>>{{0, bits}, {6, 0xa5a5a5a5u}};
+  };
+  const auto f64 = [](uint64_t bits) {
+    return std::vector<std::pair<uint32_t, uint32_t>>{{0, uint32_t(bits)},
+                                                      {1, uint32_t(bits >> 32)}};
+  };
+  const auto result = [](uint32_t bits) {
+    return std::vector<std::pair<uint32_t, uint32_t>>{{6, bits}};
+  };
+  const auto result64 = [](uint64_t bits) {
+    return std::vector<std::pair<uint32_t, uint32_t>>{{6, uint32_t(bits)},
+                                                      {7, uint32_t(bits >> 32)}};
+  };
+
+  const auto f16_f32 = vop1(rdna4::kVCvtF16F32Vop1);
+  add("F16F32SubnormalMode30", f16_f32, f32_half_dst(0x387fc000u), result(kHigh), 0x30u);
+  add("F16F32SubnormalModeC0", f16_f32, f32_half_dst(0x387fc000u), result(kHigh | 0x03ffu), 0xc0u);
+  add("F16F32SignalingNan", f16_f32, f32_half_dst(0x7fa12345u), result(kHigh | 0x7f09u), 0xc0u);
+  add("F16F32TowardPositive", f16_f32, f32_half_dst(0x3f800001u), result(kHigh | 0x3c01u), 0xf6u);
+  add("F16F32OverflowTowardNegative", f16_f32, f32_half_dst(0x477ff000u), result(kHigh | 0x7bffu),
+      0xf9u);
+  add("F16F32OverflowTowardZero", f16_f32, f32_half_dst(0x477ff000u), result(kHigh | 0x7bffu),
+      0xfcu);
+  add("F16F32Neg", vop3(rdna4::kVCvtF16F32Vop3, {.neg = 1}), f32_half_dst(0x7fc00000u),
+      result(kHigh | 0xfe00u), 0xf0u);
+  add("F16F32Mul2Overflow", vop3(rdna4::kVCvtF16F32Vop3, {.omod = 1}), f32_half_dst(0x477fe000u),
+      result(kHigh | 0x7c00u), 0xf0u);
+  add("F16F32Mul2Fp16Ovfl", vop3(rdna4::kVCvtF16F32Vop3, {.omod = 1}), f32_half_dst(0x477fe000u),
+      result(kHigh | 0x7bffu), 0x8000f0u);
+  add("F16F32HighHalfTowardZero", vop3(rdna4::kVCvtF16F32Vop3, {.opsel = 8}),
+      f32_half_dst(0x3f800001u), result(0x3c00a5a5u), 0xffu);
+
+  const auto f32_f64 = vop1(rdna4::kVCvtF32F64Vop1);
+  add("F32F64SubnormalMode30", f32_f64, f64(0x36a0000000000000u), result(1u), 0x30u);
+  add("F32F64SubnormalModeC0", f32_f64, f64(0x36a0000000000000u), result(0u), 0xc0u);
+  // Rounding carries to the smallest normal, but the value is tiny at F32 precision.
+  add("F32F64TinyAfterRoundingMode30", f32_f64, f64(0x380fffffe0000000u), result(0x800000u), 0x30u);
+  add("F32F64TinyAfterRoundingModeC0", f32_f64, f64(0x380fffffe0000000u), result(0u), 0xc0u);
+
+  const auto f64_f32 = vop1(rdna4::kVCvtF64F32Vop1);
+  add("F64F32SubnormalMode30", f64_f32, f32(0x807fffffu), result64(0xb80fffffc0000000u), 0x30u);
+  add("F64F32SubnormalModeC0", f64_f32, f32(0x807fffffu), result64(0x8000000000000000u), 0xc0u);
+  add("F64F32Mul2NegativeZero", vop3(rdna4::kVCvtF64F32Vop3, {.omod = 1}), f32(0x80000000u),
+      result64(0u), 0xf0u);
+  add("F64F32Mul2Subnormal", vop3(rdna4::kVCvtF64F32Vop3, {.omod = 1}), f32(1u),
+      result64(0x36b0000000000000u), 0xf0u);
+
+  // gfx1100 quiets a widened signaling NaN only with MODE.IEEE set; the payload
+  // survives either way. The VOP1 opcode is the same on RDNA3 and RDNA4.
+  const auto add_rdna3 = [&](const char *name, uint32_t input, uint64_t bits, uint32_t mode) {
+    cases.push_back({name,
+                     ROCJITSU_CODE_ARCH_RDNA3,
+                     {f64_f32[0], 0u, 0u},
+                     f32(input),
+                     result64(bits),
+                     mode,
+                     FE_TONEAREST});
+  };
+  add_rdna3("Gfx1100F64F32SignalingNanIeee", 0x7fa12345u, 0x7ffc2468a0000000u,
+            0xf0u | amdgpu::Wavefront::IEEE_BIT);
+  add_rdna3("Gfx1100F64F32SignalingNanNoIeee", 0x7fa12345u, 0x7ff42468a0000000u, 0xf0u);
+  add_rdna3("Gfx1100F64F32NegativeSignalingNanNoIeee", 0xff800001u, 0xfff0000020000000u, 0xf0u);
+
+  const auto pk_rtz =
+      rdna4::build_vop2(rdna4::kVCvtPkRtzF16F32Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 6});
+  const auto pair = [](uint32_t low, uint32_t high) {
+    return std::vector<std::pair<uint32_t, uint32_t>>{{0, low}, {1, high}};
+  };
+  add("PkRtzSignalingNan", {pk_rtz[0], 0u}, pair(0x7f800001u, 0x80000000u), result(0x80007e00u),
+      0u);
+  add("PkRtzSubnormalMode30", {pk_rtz[0], 0u}, pair(0x387fc000u, 0u), result(0u), 0x30u);
+  add("PkRtzSubnormalModeC0", {pk_rtz[0], 0u}, pair(0x387fc000u, 0u), result(0x03ffu), 0xc0u);
+  add("PkRtzNegHigh",
+      rdna4::build_vop3(rdna4::kVCvtPkRtzF16F32Vop3,
+                        {.vdst = 6, .src0 = 256, .src1 = 257, .neg = 2}),
+      pair(0x7f800001u, 0u), result(0x80007e00u), 0xf0u);
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -3049,6 +3161,12 @@ INSTANTIATE_TEST_SUITE_P(SaturatingPackHalf, ValuConversionTest,
 
 INSTANTIATE_TEST_SUITE_P(IntegerToFloat, ValuConversionTest,
                          testing::ValuesIn(integer_to_float_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(FloatToFloat, ValuConversionTest,
+                         testing::ValuesIn(float_to_float_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

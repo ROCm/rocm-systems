@@ -6392,6 +6392,12 @@ class CodeGenerator:
                 is_float_to_integer = cls == 'vector_unary' and dtype in (
                     F32_TO_INTEGER_DTYPES | F64_TO_INTEGER_DTYPES
                 )
+                # Floating sources take ABS/NEG; floating results take OMOD/CLAMP.
+                is_float_to_float = cls == 'vector_unary' and dtype in (
+                    'f16_f32',
+                    'f32_f64',
+                    'f64_f32',
+                )
                 is_f16_input_conversion = (
                     cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
                 )
@@ -6401,6 +6407,7 @@ class CodeGenerator:
                         is_float_op
                         or is_integer_to_float
                         or is_float_to_integer
+                        or is_float_to_float
                         or is_f16_input_conversion
                     )
                     and not is_true16_mov

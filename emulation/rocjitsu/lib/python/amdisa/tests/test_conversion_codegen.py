@@ -99,3 +99,41 @@ def test_f16_integer_conversion_simd_writes_true16_halves(dtype):
     assert simd_probe_line(f'v_cvt_{dtype}_vop1').startswith(
         '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t,'
     )
+
+
+_FLOAT_TO_FLOAT = [
+    ('V_CVT_F16_F32', 'amdgpu::fp_format::F32, amdgpu::fp_format::F16'),
+    ('V_CVT_F32_F64', 'amdgpu::fp_format::F64, amdgpu::fp_format::F32'),
+    ('V_CVT_F64_F32', 'amdgpu::fp_format::F32, amdgpu::fp_format::F64'),
+]
+
+
+@pytest.mark.parametrize(('name', 'formats'), _FLOAT_TO_FLOAT)
+def test_float_to_float_vop3_passes_every_modifier_to_one_stage_object(name, formats):
+    cpp = _lower(name, 'ENC_VOP3', {'abs', 'neg', 'clamp', 'omod'})
+    stages = (
+        f'const auto conversion = amdgpu::conversion_to_float<{formats}>'
+        '(wf, inst_.abs, inst_.neg, inst_.omod, inst_.clamp);'
+    )
+    assert stages in cpp
+    for host in (
+        'static_cast<float>',
+        'static_cast<double>',
+        'f32_to_f16',
+        'apply_to_float',
+    ):
+        assert host not in cpp
+
+
+def test_f64_conversion_simd_uses_raw_lane_glue():
+    assert simd_probe_line('v_cvt_f32_f64_vop1') == (
+        '  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(amdgpu::conversion_to_float<'
+        'amdgpu::fp_format::F64, amdgpu::fp_format::F32>(wf));'
+    )
+    assert simd_probe_line('v_cvt_f64_f32_vop3') == (
+        '  ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(amdgpu::conversion_to_float<'
+        'amdgpu::fp_format::F32, amdgpu::fp_format::F64>'
+        '(wf, inst.inst_.abs, inst.inst_.neg, inst.inst_.omod, inst.inst_.clamp));'
+    )
+    f16 = simd_probe_line('v_cvt_f16_f32_vop3', true16_vop3=True)
+    assert f16.startswith('  if (amdgpu::try_execute_words_simd<1, false, true, 0>(')

@@ -27,7 +27,9 @@ F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32
 F64_TO_INTEGER_DTYPES = frozenset({'i32_f64', 'u32_f64'})
 
 # Conversions to a floating format lowered through shared/conversion.h.
-TO_FLOAT_CONVERSION_DTYPES = frozenset({'f32_i32', 'f32_u32', 'f16_i16', 'f16_u16'})
+TO_FLOAT_CONVERSION_DTYPES = frozenset(
+    {'f32_i32', 'f32_u32', 'f16_i16', 'f16_u16', 'f16_f32', 'f32_f64', 'f64_f32'}
+)
 
 # Mixed-type conversions that accept VOP3 ABS/NEG on a floating half source.
 F16_INPUT_CONVERSION_DTYPES = frozenset({'i16_f16', 'u16_f16', 'f32_f16'})

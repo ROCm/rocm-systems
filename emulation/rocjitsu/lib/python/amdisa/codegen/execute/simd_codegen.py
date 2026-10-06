@@ -240,23 +240,15 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     # float_minmax.simd_probe routes every other min/max form, VOP3 included.
     'v_max_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'max_num')),
     'v_min_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'min_num')),
-    # v_cvt_pkrtz_f16_f32 (both spellings): pack two f32 -> two f16 with
-    # round-toward-zero narrowing; proven bit-identical to the scalar helper.
-    # Inputs arrive as raw u32 lanes, bit_cast to f32. VOP3 source modifiers
-    # require a scalar fallback before using this raw-word functor.
+    # v_cvt_pkrtz_f16_f32 (both spellings): two F32 sources rounded toward
+    # zero into packed halves by the shared/conversion.h stages.
     'v_cvt_pkrtz_f16_f32_vop2': (
         'uint32_t',
-        '[](auto a, auto b) {'
-        ' auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));'
-        ' auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));'
-        ' return lo | (hi << 16); }',
+        conversion.pk_rtz_f16_expr(False, False, 'inst.inst_'),
     ),
     'v_cvt_pk_rtz_f16_f32_vop2': (
         'uint32_t',
-        '[](auto a, auto b) {'
-        ' auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));'
-        ' auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));'
-        ' return lo | (hi << 16); }',
+        conversion.pk_rtz_f16_expr(False, False, 'inst.inst_'),
     ),
     # --- f16 binary (low 16 bits f16, result zero-extended). Same f32
     # intermediate as the scalar bodies (single final round) ⇒ bit-identical. ---
@@ -757,11 +749,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'float32_t',
         '[&wf](auto a) { return ::rocjitsu::amdgpu::cvt_f32_f16_mode_simd(a, wf); }',
     ),
-    'v_cvt_f16_f32_vop1': (
-        'float32_t',
-        'uint32_t',
-        '[](auto a) { return util::f32_to_f16_simd(a); }',
-    ),
     'v_cvt_i16_f16_vop1': (
         'uint32_t',
         'uint32_t',
@@ -1029,10 +1016,6 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
 # (accepted; the A/B test skips it). INT32_MAX/MIN and UINT32_MAX are all exactly
 # representable in double, so the clamp constants cast back to the exact integers.
 SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
-    'v_cvt_f32_f64_vop1': (
-        'float32_t',
-        '[](auto s) { return util::stdx::static_simd_cast<util::narrow32<float32_t>>(s); }',
-    ),
     'v_cvt_i32_f64_vop1': (
         'int32_t',
         '[](auto s) {'
@@ -1063,10 +1046,6 @@ SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
 # (vcvtps2pd for f32; int->double for i32/u32), bit-identical to the scalar body
 # (static_cast<double>) for every input.
 SIMD_CVT_B32_TO_F64: dict[str, tuple[str, str]] = {
-    'v_cvt_f64_f32_vop1': (
-        'float32_t',
-        '[](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); }',
-    ),
     'v_cvt_f64_i32_vop1': (
         'int32_t',
         '[](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); }',
@@ -3021,7 +3000,7 @@ def _simd_probe_line(
         if spec2v3 is not None:
             cpp_t, cpp_op = spec2v3
             if template_name in _PACKED_RTZ_VOP3:
-                cpp_op = _modified_conversion_op(cpp_op, bits=32)
+                cpp_op = conversion.pk_rtz_f16_expr(True, True, 'inst.inst_')
                 return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
             if cpp_t == 'float32_t':
                 if base in ('v_add_f32', 'v_mul_f32', 'v_sub_f32', 'v_subrev_f32'):
@@ -3330,12 +3309,12 @@ def _local_coverage_probe(
         'v_cvt_pk_bf16_f32_vop3',
         'v_cvt_pkrtz_f16_f32_vop3',
     ):
+        if template_name == 'v_cvt_pkrtz_f16_f32_vop3':
+            return call(
+                2, False, 0, conversion.pk_rtz_f16_expr(True, True, 'inst.inst_')
+            )
         if 'bf16' in template_name:
             convert = 'util::pack_bf16_simd({x}, wf.fp16_ovfl())'
-        elif template_name == 'v_cvt_pkrtz_f16_f32_vop3':
-            convert = (
-                'util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>({x}))'
-            )
         else:
             convert = 'util::f32_to_f16_mode_simd(std::bit_cast<util::native<float>>({x}), wf.fp16_ovfl())'
         functor = (
@@ -3345,8 +3324,6 @@ def _local_coverage_probe(
             + convert.format(x='b')
             + ' << 16); }'
         )
-        if template_name == 'v_cvt_pkrtz_f16_f32_vop3':
-            functor = _modified_conversion_op(functor, bits=32)
         return call(2, False, 0, functor)
     if template_name == 'v_cvt_f32_bf16_vop1':
         return call(

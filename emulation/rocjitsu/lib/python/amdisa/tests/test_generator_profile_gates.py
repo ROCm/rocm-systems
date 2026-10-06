@@ -2925,12 +2925,12 @@ def test_f32_to_f16_vector_conversion_threads_fp16_ovfl():
 
 
 def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():
+    # The conversion stage object reads FP16_OVFL when it is resolved.
     cvt_probe = simd_probe_line('v_cvt_f16_f32_vop1')
-    assert cvt_probe is not None
-    assert 'if (wf.fp16_ovfl())' in cvt_probe
-    assert 'util::f32_to_f16_ovfl_simd' in cvt_probe
-    assert 'util::f32_to_f16_simd' in cvt_probe
-    assert 'ROCJITSU_TRY_SIMD_VOP1_UNARY' in cvt_probe
+    assert cvt_probe == (
+        '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, '
+        'amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F16>(wf));'
+    )
 
     add_probe = simd_probe_line('v_add_f16_vop3', true16_vop3=True)
     assert add_probe is not None

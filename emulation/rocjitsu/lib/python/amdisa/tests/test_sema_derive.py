@@ -1316,17 +1316,20 @@ class TestDeriveVectorUnary:
         assert 'util::f32_to_f16_mode(s0, wf.fp16_ovfl())' in cpp
         assert 'util::f32_to_f16_mode(s1, wf.fp16_ovfl())' in cpp
 
-    def test_cvt_f16_f32_lowering_threads_fp16_ovfl(self):
+    def test_cvt_f16_f32_lowers_to_shared_conversion(self):
         sem = derive_semantics('V_CVT_F16_F32', 'ENC_VOP3')
         assert sem is not None
         assert sem.operation == 'cvt'
         assert sem.data_type == 'f16_f32'
 
+        # The stage object reads MODE, including FP16_OVFL, when it is resolved.
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'util::f32_to_f16_mode' in cpp
-        assert 'wf.fp16_ovfl()' in cpp
-        assert 'util::f32_to_f16(std::bit_cast<float>' not in cpp
+        assert (
+            'const auto conversion = '
+            'amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>(*this, wf);'
+        ) in cpp
+        assert 'util::f32_to_f16' not in cpp
 
     def test_cvt_sr_pk_f16_bf16_f32_threads_fp16_ovfl(self):
         for name, helper in (

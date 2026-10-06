@@ -18,6 +18,9 @@ TO_FLOAT: dict[str, tuple[str, str]] = {
     'f32_u32': ('U32', 'F32'),
     'f16_i16': ('I16', 'F16'),
     'f16_u16': ('U16', 'F16'),
+    'f16_f32': ('F32', 'F16'),
+    'f32_f64': ('F64', 'F32'),
+    'f64_f32': ('F32', 'F64'),
 }
 
 # The per-instruction stage object declared before the scalar lane loop.
@@ -114,4 +117,17 @@ def simd_probe(
         return (
             f'  if (amdgpu::try_execute_words_simd<{args}>(inst, wf, {stages})) return;'
         )
+    source, result = TO_FLOAT[dtype]
+    if source == 'F64':
+        return f'  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64({stages});'
+    if result == 'F64':
+        return f'  ROCJITSU_TRY_SIMD_CONVERSION_TO_F64({stages});'
     return f'  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, {stages});'
+
+
+def pk_rtz_f16_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
+    """Resolve V_CVT_PK_RTZ_F16_F32's stages; VOP3 passes its ABS/NEG fields."""
+    if not is_vop3:
+        return 'amdgpu::conversion_pk_rtz_f16(wf)'
+    abs_field = f'{inst}.abs' if has_abs else '0u'
+    return f'amdgpu::conversion_pk_rtz_f16(wf, {abs_field}, {inst}.neg)'
