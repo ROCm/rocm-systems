@@ -16,6 +16,8 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
+#include "library/pmc/collectors/hipfile/types.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
@@ -54,6 +56,13 @@ namespace rocprofsys::trace_cache
 namespace
 {
 
+// Tests construct rocpd_processor_t without rocprofsys_init_library / USE_ROCPD.
+// post_process_metadata() normally returns early when get_use_rocpd() is false; tests
+// toggle this via detail::set_force_rocpd_metadata_registration_for_tests() (see
+// test_rocpd_processor.cpp run_processor_and_open_reader) so agent/PMC metadata still
+// registers on the production code path.
+bool g_force_rocpd_metadata_registration = false;
+
 using rocpd_helpers::make_agent_uid;
 using rocpd_helpers::make_event;
 using rocpd_helpers::make_trace_env;
@@ -81,6 +90,15 @@ generate_db_output_path(int pid)
 }
 
 }  // namespace
+
+namespace detail
+{
+void
+set_force_rocpd_metadata_registration_for_tests(bool enabled)
+{
+    g_force_rocpd_metadata_registration = enabled;
+}
+}  // namespace detail
 
 void
 rocpd_processor_t::handle(const kernel_dispatch_sample& kds)
@@ -667,6 +685,68 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
 }
 
 void
+rocpd_processor_t::handle(const hipfile_pmc_sample& hipfile_sample)
+{
+    namespace collector = pmc::collectors::hipfile;
+
+    const auto*  name         = trait::name<category::hipfile>::value;
+    const auto&  process_info = m_metadata->get_process_info();
+    const agent* agent_ptr    = nullptr;
+    try
+    {
+        agent_ptr = &m_agent_manager->get_agent_by_type_index(hipfile_sample.device_id,
+                                                              agent_type::gpu);
+    } catch(const std::out_of_range& e)
+    {
+        LOG_WARNING(
+            "hipFile PMC sample skipped: agent lookup failed for device_id={}: {}",
+            hipfile_sample.device_id, e.what());
+        return;
+    }
+
+    const auto agent_uid = make_agent_uid(*agent_ptr);
+    const auto event     = make_event(0, 0, 0, name);
+
+    const auto enabled = hipfile_sample.enabled_metric.value;
+
+    for(const auto& metric : collector::METRIC_TABLE)
+    {
+        if((enabled & (1U << metric.bit)) == 0U)
+        {
+            continue;
+        }
+
+        // track_info_t::name and pmc_info_unique_id_t::name are string_views, so both
+        // strings must outlive the insert call rather than being built in place.
+        const auto track_label =
+            collector::track_name(hipfile_sample.device_id, metric.suffix);
+        const auto pmc_identifier = collector::pmc_name(metric.suffix);
+
+        profiler_hub::writer_types::pmc_event_data_t pmc_data;
+        pmc_data.event = event;
+        pmc_data.value = metric.value(hipfile_sample.metric_values);
+
+        // Display label for the counter track; the device-independent identifier that
+        // RocPD joins on goes in the PMC unique id below.
+        profiler_hub::writer_types::track_info_t track;
+        track.name       = track_label;
+        track.node_id    = node_info::get_instance().id;
+        track.process_id = process_info.pid;
+
+        profiler_hub::writer_types::sample_data_t sample;
+        sample.timestamp = hipfile_sample.timestamp;
+        sample.track     = track;
+        pmc_data.sample  = sample;
+
+        profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
+        pmc_uid.name     = pmc_identifier;
+        pmc_uid.agent_id = agent_uid;
+
+        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+    }
+}
+
+void
 rocpd_processor_t::handle(
     [[maybe_unused]] const gpu_perf_counter_sample& gpu_perf_counter)
 {
@@ -998,7 +1078,7 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
                                      const std::shared_ptr<agent_manager>&     agent_mngr,
                                      int pid, int ppid,
                                      output_file_registry& output_registry)
-: processor_t<rocpd_processor_t>()
+: sample_processor_interface()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
 , m_output_registry(output_registry)
@@ -1109,7 +1189,7 @@ rocpd_processor_t::finalize_processing()
 void
 rocpd_processor_t::post_process_metadata()
 {
-    if(!get_use_rocpd())
+    if(!g_force_rocpd_metadata_registration && !get_use_rocpd())
     {
         LOG_TRACE("Rocpd not enabled, skipping metadata post-processing");
         return;
@@ -1318,28 +1398,25 @@ rocpd_processor_t::post_process_metadata()
     auto const pmc_info_list = m_metadata->get_pmc_info_list();
     for(const auto& pmc_info : pmc_info_list)
     {
-        constexpr std::array<agent_type, 2> cpu_gpu_types = {
-            agent_type::gpu,
-            agent_type::cpu,
-        };
-
-        const bool is_cpu_gpu_agent =
-            std::ranges::find(cpu_gpu_types, pmc_info.type) != cpu_gpu_types.end();
-
         const agent* pmc_agent_ptr = nullptr;
         try
         {
-            pmc_agent_ptr = is_cpu_gpu_agent
-                                ? &m_agent_manager->get_agent_by_type_index(
-                                      pmc_info.agent_type_index, pmc_info.type)
-                                : &m_agent_manager->get_agent_by_id(
-                                      pmc_info.agent_type_index, pmc_info.type);
-        } catch(const std::out_of_range& e)
+            pmc_agent_ptr = &m_agent_manager->get_agent_by_type_index(
+                pmc_info.agent_type_index, pmc_info.type);
+        } catch(const std::out_of_range&)
         {
-            LOG_WARNING("PMC info registration skipped: agent lookup failed for "
-                        "agent_type_index={}, type={}: {}",
-                        pmc_info.agent_type_index, to_string(pmc_info.type), e.what());
-            continue;
+            try
+            {
+                pmc_agent_ptr = &m_agent_manager->get_agent_by_id(
+                    pmc_info.agent_type_index, pmc_info.type);
+            } catch(const std::out_of_range& e)
+            {
+                LOG_WARNING("PMC info registration skipped: agent lookup failed for "
+                            "agent_type_index={}, type={}: {}",
+                            pmc_info.agent_type_index, to_string(pmc_info.type),
+                            e.what());
+                continue;
+            }
         }
 
         const auto& pmc_agent     = *pmc_agent_ptr;
@@ -1353,9 +1430,15 @@ rocpd_processor_t::post_process_metadata()
         uid.name                = pmc_info.name;
         uid.agent_id            = pmc_agent_uid;
         pmc_info_data.unique_id = uid;
+        // pmc_info_t uses string_view fields throughout, this is safe here because
+        // register_pmc_info() consumes the data synchronously (SQLite bind + step)
+        // and does NOT retain the string_view after returning. If that contract
+        // ever changes, target_arch (and the other string_view fields in pmc_info_t)
+        // must be changed to std::string.
         pmc_info_data.target_arch =
-            is_cpu_gpu_agent ? std::optional<std::string_view>{ pmc_info.target_arch }
-                             : std::nullopt;
+            pmc_info.target_arch.empty()
+                ? std::nullopt
+                : std::optional<std::string_view>{ pmc_info.target_arch };
         pmc_info_data.event_code       = pmc_info.event_code;
         pmc_info_data.instance_id      = pmc_info.instance_id;
         pmc_info_data.symbol           = pmc_info.symbol;

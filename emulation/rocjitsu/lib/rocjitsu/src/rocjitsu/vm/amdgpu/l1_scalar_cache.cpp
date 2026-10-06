@@ -172,7 +172,7 @@ void L1ScalarCache::flush_line(uint64_t addr, uint32_t vmid) {
 }
 
 VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst,
-                                    uint32_t vmid) {
+                                    uint32_t vmid, bool allow_private_batch) {
   synchronize_epoch();
   RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_);
   for (uint32_t i = 0; i < num_dwords; ++i) {
@@ -189,6 +189,11 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
 
       if (mtype == Mtype::UC) {
         flush_line(chunk_addr, vmid);
+        if (allow_private_batch && i == 0 && copied == 0 && num_dwords >= 2 && num_dwords <= 16 &&
+            (addr & 3) == 0 && num_dwords * 4 <= CacheStore::LINE_SIZE - line_offset &&
+            mtypes.cached_private_uc_hint(addr) &&
+            l2_->try_read_scalar_ram(addr, dst, num_dwords, vmid))
+          return VmAccessOutcome::Complete;
         const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
         if (outcome != VmAccessOutcome::Complete)
           return outcome;

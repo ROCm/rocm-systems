@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Selects the native platform implementation used by the rocddi core.
 //!
 //! Higher layers depend only on the private `Driver` contract and the exported
@@ -14,16 +16,17 @@ mod linux_kfd;
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
-pub(crate) use linux_kfd::{
-    DeviceState, EndpointSelector, LinuxKfdDriver as PlatformDriver, NativeAllocation,
-    NativeHostAllocation, NativeKernelQueue, NativePcSampling, NativeQueue, NativeSignalEvent,
-    NativeVirtualAddress, NativeVirtualDeviceMapping, NativeVirtualHostMapping,
-    NativeVirtualMemory,
-};
-#[cfg(target_os = "linux")]
-pub(crate) use linux_kfd::{
-    close_descriptor, descriptor_length, read_descriptor, read_descriptor_exact, write_descriptor,
-};
+pub(crate) use linux_kfd::{LinuxKfdDriver as PlatformDriver, NativeSignalEvent};
+
+/// Private selector carried by passive endpoints. Public endpoint records
+/// remain independent of the backend's OS handles and discovery cache.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum EndpointSelector {
+    LinuxKfd(linux_kfd::LinuxSelector),
+    #[allow(dead_code)]
+    Opaque(u64),
+}
+
 #[cfg(not(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")

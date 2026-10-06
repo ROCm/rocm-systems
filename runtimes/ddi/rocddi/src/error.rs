@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Error taxonomy shared by discovery and native resource operations.
 //!
 //! [`Error`] preserves detailed context for diagnostics while [`ErrorKind`] is
@@ -27,9 +29,6 @@ pub enum ErrorKind {
     Driver,
     /// A driver violated its advertised interface contract.
     DriverContract,
-    /// A failed native acquisition may still reference caller-owned backing.
-    /// The caller must retain that backing until process teardown.
-    ResourceOwnershipUncertain,
     /// Topology or other implementation data is malformed or inconsistent.
     InvalidData,
     /// A concurrent state change prevented a consistent result.
@@ -70,6 +69,14 @@ pub enum Error {
         /// Original native error including a platform error code when available.
         source: io::Error,
     },
+    /// Queue creation failed while native state may still reach caller-owned
+    /// inactive-signal or scratch backing. Frontends must retain that backing.
+    QueueBackingMayBeLive {
+        /// Queue acquisition or rollback step that left ownership uncertain.
+        operation: &'static str,
+        /// Original native failure, when one is available.
+        source: Option<io::Error>,
+    },
 }
 
 impl Error {
@@ -82,6 +89,9 @@ impl Error {
     pub fn native_error_code(&self) -> Option<i32> {
         match self {
             Self::NativeOperation { source, .. } => source.raw_os_error(),
+            Self::QueueBackingMayBeLive { source, .. } => {
+                source.as_ref().and_then(io::Error::raw_os_error)
+            }
             _ => None,
         }
     }
@@ -91,6 +101,7 @@ impl Error {
         match self {
             Self::Capacity { .. } => ErrorKind::ResourceExhausted,
             Self::Operation { kind, .. } | Self::NativeOperation { kind, .. } => *kind,
+            Self::QueueBackingMayBeLive { .. } => ErrorKind::DriverContract,
         }
     }
 }
@@ -103,6 +114,16 @@ impl fmt::Display for Error {
             Self::NativeOperation {
                 operation, source, ..
             } => write!(f, "{operation} failed: {source}"),
+            Self::QueueBackingMayBeLive { operation, source } => {
+                if let Some(source) = source {
+                    write!(
+                        f,
+                        "{operation} failed with queue backing possibly live: {source}"
+                    )
+                } else {
+                    write!(f, "{operation} failed with queue backing possibly live")
+                }
+            }
         }
     }
 }
@@ -111,6 +132,9 @@ impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             Self::NativeOperation { source, .. } => Some(source),
+            Self::QueueBackingMayBeLive { source, .. } => {
+                source.as_ref().map(|source| source as &dyn StdError)
+            }
             _ => None,
         }
     }

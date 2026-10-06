@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Generate checked GFX1201 descriptors and text for device-producer.c."""
 
 import argparse

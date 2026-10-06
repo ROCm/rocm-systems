@@ -51,8 +51,8 @@ def reg_values_of(coll, proto):
   # SendRecv is generated as two latency-protocol kernel variants, selected on the
   # host by ncclDevFuncId_P2p(useLL128) (see src/enqueue.cc / src/include/device.h):
   #   reg "0" = legacy LL latency path (built on every arch; the default)
-  #   reg "1" = LL128 latency path (activated on gfx942/gfx950 only; used when
-  #             NCCL_ALLOC_P2P_NET_LL_BUFFERS=1). The reg value is threaded into the
+  #   reg "1" = LL128 latency path (gfx942/gfx950 via NCCL_ALLOC_P2P_NET_LL_BUFFERS,
+  #             gfx1250 via NCCL_P2P_LL128_ENABLE). The reg value is threaded into the
   #             SendRecv RunWorkBatch specialization as UserRegMode to pick LL vs LL128.
   if coll == "SendRecv":
     return ["0", "1"]
@@ -447,8 +447,9 @@ def get_arch_guard(fn):
   cond = None
 
   if fn.coll == "SendRecv" and fn.reg == "1":
-      # LL128 SendRecv kernel. Only gfx942/gfx950 activate it, but gfx1250 builds it too
-      # or its unroll-32 slot would be a nullptr in the one table gfx1250 indexes.
+      # LL128 SendRecv kernel. gfx942/gfx950 activate it via ALLOC_P2P_NET_LL_BUFFERS;
+      # gfx1250 activates it via NCCL_P2P_LL128_ENABLE. Built for all three so the
+      # unroll-32 slot is not a nullptr in the table gfx1250 indexes.
       cond = "(defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && defined(ENABLE_LL128)"
   elif fn.unroll in unroll_arch_requirement:
       arch = unroll_arch_requirement[fn.unroll]
@@ -573,6 +574,14 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
 
   out = f.write
   out('#include "device.h"\n')
+  out("\n")
+
+  # funcId travels in an NCCL_DEV_WORK_BATCH_FUNC_ID_BITS-wide ncclDevWorkBatch
+  # field. RCCL indexes a per-unroll table, so the largest per-unroll function
+  # count must fit.
+  max_funcs_per_unroll = max([sum(1 for fn in primary_funcs if fn.unroll == u) for u in all_unrolls] + [0])
+  out("static_assert(%d <= (1 << NCCL_DEV_WORK_BATCH_FUNC_ID_BITS), " % max_funcs_per_unroll)
+  out('"Device function IDs must fit in ncclDevWorkBatch");\n')
   out("\n")
   out("// The key for the ncclDevFuncNameToId map is a 64-bit unsigned integer.\n")
   out("// Each field (coll, algo, proto, redop, ty, acc, pipeline) is packed into 4 bits,\n")
