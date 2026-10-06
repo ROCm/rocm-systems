@@ -124,3 +124,13 @@ def test_torch_backend_install_falls_back_to_dispatch_mode(monkeypatch):
     monkeypatch.setattr(torch_backend, "_resolve_torch", lambda: True)
     torch_backend.TorchBackend().install()
     assert hook_calls == [1]
+
+
+def test_deep_tensor_method_wraps_disabled_by_env(monkeypatch):
+    from utils.inject_roctx._backends.torch import (
+        TENSOR_METHOD_WRAPS,
+        _selected_tensor_method_wraps,
+    )
+
+    monkeypatch.setenv("ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS", "0")
+    assert _selected_tensor_method_wraps() == TENSOR_METHOD_WRAPS
