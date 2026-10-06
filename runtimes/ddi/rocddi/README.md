@@ -136,25 +136,9 @@ cmake --build /tmp/rocddi-cmake
 ```
 
 The CMake build from `runtimes/` stages the same combined shared image and
-AMDF static archive. The CI workflow checks all workspace targets for
-`aarch64-unknown-linux-gnu` with Rust 1.85 and runs the CPU-only suite on a
-native AArch64 runner. These checks cover architecture-specific source and
-host behavior. Native allocations, virtual mappings, and frontend pools use
-the queried host page size, including on 64 KiB page hosts. GPU execution on
-a 64 KiB AArch64 KFD host remains a separate qualification step.
-
-The CI workflow also pins nightly 2026-09-25 for a focused Miri check of
-callback-backed host storage. With that toolchain and its `miri` and
-`rust-src` components installed, run:
-
-```sh
-MIRIFLAGS="-Zmiri-tree-borrows -Zmiri-strict-provenance" \
-  cargo +nightly-2026-09-25 miri test --package rocddi --locked host_storage::tests
-```
-
-CI also varies Miri's scheduler seed across eight runs of the concurrent
-final-owner release test. This broadens the explored interleavings without
-claiming exhaustive schedule coverage.
+AMDF static archive. Native allocations, virtual mappings, and frontend pools
+use the queried host page size, including on 64 KiB page hosts. GPU execution
+on a 64 KiB AArch64 KFD host remains a separate qualification step.
 
 The native C probes under `ddi/libamdf/tests/abi` and the GPU examples
 under `ddi/libamdf/examples` can be built directly when those checks are
