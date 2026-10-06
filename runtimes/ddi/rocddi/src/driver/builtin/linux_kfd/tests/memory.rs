@@ -325,6 +325,7 @@ impl Fixture {
                 limit: isize::MAX as u64,
                 lds_base: 0x1000_0000_0000,
                 scratch_base: 0x2000_0000_0000,
+                sdma_next_engine: AtomicU32::new(0),
                 scratch: scratch_pool(),
                 vmem: Mutex::new(super::super::vmem::VmState::new(Allocator::default())),
                 version: uapi::Version {
@@ -357,6 +358,7 @@ impl Fixture {
             limit,
             lds_base: 0x3000_0000_0000,
             scratch_base: 0x4000_0000_0000,
+            sdma_next_engine: AtomicU32::new(0),
             scratch: scratch_pool(),
             vmem: Mutex::new(super::super::vmem::VmState::new(Allocator::default())),
             version: self.vm.version,
@@ -1043,6 +1045,7 @@ fn incompatible_vm_apertures_fail_before_native_allocation() {
         unique_id: Some(64),
         lds_base: 0x5000_0000_0000,
         scratch_base: 0x6000_0000_0000,
+        sdma_next_engine: AtomicU32::new(0),
         scratch: scratch_pool(),
         vmem: Mutex::new(super::super::vmem::VmState::new(Allocator::default())),
         version: fixture.vm.version,

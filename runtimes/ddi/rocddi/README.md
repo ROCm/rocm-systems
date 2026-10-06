@@ -111,6 +111,17 @@ written after retirement. An uncertain copy keeps staging live for process
 teardown. `supports_linear_copy` reports whether the native path is enabled
 for the activated GPU.
 
+Direct SDMA queues use byte-addressed rings and monotonic 64-bit read and
+write indices. `QueueParameters::Sdma` keeps the KFD-selected engine route.
+`QueueParameters::SdmaByEngine` uses KFD queue type 4 and either a checked
+engine ID or round-robin selection across the device's general and XGMI SDMA
+engines. The round-robin counter belongs to the activated device VM. The
+resolved ID is available in `QueueTransport::sdma_engine_id`; other queue
+formats and the KFD-selected route return `None`. The queue owner retains its
+ring, index page, and doorbell mapping through native teardown, including
+ambiguous CREATE or DESTROY outcomes. Producers own packet encoding, ring
+space, publication order, and completion waits.
+
 ### Ambiguous queue creation
 
 Native queue creation borrows frontend-owned GPU addresses. HSA supplies an
@@ -170,7 +181,8 @@ cmake --build /tmp/rocddi-cmake
 On a GFX1201 system with KFD and its DRM render node, run the opt-in native
 Rust contract tests with `cargo test -p rocddi --test cts --locked -- --ignored`.
 It copies and fills through ordinary allocations, copies through rocddi-owned
-host staging, and copies through a device virtual-memory mapping. The
+host staging and a device virtual-memory mapping, and submits a packet through
+a targeted user SDMA ring with byte-index and doorbell progress checks. The
 capability case checks expert queue scheduling against KFD 1.20 or newer and
 the GFX1201 scratch aperture against the reported XCC count.
 

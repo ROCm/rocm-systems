@@ -394,6 +394,7 @@ mod provider_contract_tests {
             ring_host_address: 0x1000,
             ring_device_address: 0x2000,
             ring_size_bytes: 4096,
+            sdma_engine_id: None,
             read_index_host_address: 0x3000,
             read_index_device_address: 0x4000,
             write_index_host_address: 0x5000,

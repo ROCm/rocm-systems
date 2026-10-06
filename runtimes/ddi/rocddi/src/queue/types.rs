@@ -56,8 +56,23 @@ pub enum QueueParameters {
         /// Fixed AQL scratch backing, or `None` for a no-scratch queue.
         scratch: Option<QueueScratch>,
     },
-    /// A byte-addressed SDMA copy queue with native engine selection.
+    /// A byte-addressed SDMA copy queue with the backend's ordinary engine
+    /// selection. Existing callers need no engine-specific policy.
     Sdma,
+    /// A byte-addressed SDMA copy queue routed to a selected native engine.
+    SdmaByEngine {
+        /// Explicit engine ID or round-robin selection within one device VM.
+        selection: SdmaEngineSelection,
+    },
+}
+
+/// Native SDMA engine selection for a targeted queue request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SdmaEngineSelection {
+    /// Select the next engine in the device's round-robin sequence.
+    Any,
+    /// Select this engine in the device's general-plus-XGMI ID space.
+    Id(u32),
 }
 
 /// Fixed scratch backing supplied for the lifetime of one AQL queue. The
@@ -124,6 +139,9 @@ pub struct QueueTransport {
     pub ring_device_address: u64,
     /// Usable ring capacity in bytes, independent of native index units.
     pub ring_size_bytes: u64,
+    /// Resolved engine ID for a targeted SDMA queue, or `None` for other
+    /// formats and the backend-selected generic SDMA format.
+    pub sdma_engine_id: Option<u32>,
     /// Host mapping of the device-maintained read index.
     pub read_index_host_address: usize,
     /// Queue-device address of the device-maintained read index.

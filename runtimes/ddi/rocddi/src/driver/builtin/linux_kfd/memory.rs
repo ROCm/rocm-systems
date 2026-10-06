@@ -420,6 +420,7 @@ impl VmBindings {
                 limit: aperture.gpuvm_limit,
                 lds_base: aperture.lds_base,
                 scratch_base: aperture.scratch_base,
+                sdma_next_engine: AtomicU32::new(0),
                 scratch: Mutex::new(ScratchPool::new(node.queues, kfd_allocator)),
                 vmem: Mutex::new(super::vmem::VmState::new(kfd_allocator)),
                 version,
@@ -458,6 +459,7 @@ pub(crate) struct DeviceVm {
     limit: u64,
     lds_base: u64,
     scratch_base: u64,
+    sdma_next_engine: AtomicU32,
     scratch: Mutex<ScratchPool>,
     pub(super) vmem: Mutex<super::vmem::VmState>,
     pub(super) version: uapi::Version,
@@ -520,6 +522,11 @@ impl DeviceVm {
 
     pub(super) fn gpu_id(&self) -> u32 {
         self.gpu_id
+    }
+
+    pub(super) fn next_sdma_engine_id(&self, count: u32) -> u32 {
+        debug_assert!(count != 0);
+        self.sdma_next_engine.fetch_add(1, Ordering::Relaxed) % count
     }
 
     pub(super) fn shares_kfd(&self, other: &Self) -> bool {
@@ -2323,6 +2330,7 @@ pub(super) fn queue_fixture_with_range(
             limit: bounds.1,
             lds_base: 0x1000_0000_0000,
             scratch_base: 0x2000_0000_0000,
+            sdma_next_engine: AtomicU32::new(0),
             scratch: Mutex::new(ScratchPool::new(
                 sysfs::NativeQueueProperties {
                     gfx_target: 120_001,

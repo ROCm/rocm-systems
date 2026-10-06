@@ -15,7 +15,7 @@ use crate::memory::AllocationDesc;
 use crate::memory::DeviceAccess;
 use crate::queue::{
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
-    QueueRequest, QueueScratch, QueueTransport,
+    QueueRequest, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
 use crate::session::SessionLifetime;
 
@@ -599,6 +599,13 @@ struct Request {
     compute: Option<ComputeStorage>,
     aql: Option<AqlControl>,
     pm4: Option<Pm4Control>,
+    sdma_target: Option<SdmaTarget>,
+}
+
+#[derive(Clone, Copy)]
+struct SdmaTarget {
+    selection: SdmaEngineSelection,
+    count: u32,
 }
 
 /// A peer VM's mappings of the queue ring and control/index allocation.
@@ -893,6 +900,25 @@ impl Request {
                 validate_sdma(properties, desc)?;
                 (1, None, None)
             }
+            QueueParameters::SdmaByEngine { .. } => {
+                validate_sdma(properties, desc)?;
+                (4, None, None)
+            }
+        };
+        let sdma_target = if let QueueParameters::SdmaByEngine { selection } = desc.parameters {
+            let count = properties
+                .sdma_engines
+                .checked_add(properties.sdma_xgmi_engines)
+                .ok_or_else(|| error(ErrorKind::InvalidData, "SDMA engine count overflows"))?;
+            if matches!(selection, SdmaEngineSelection::Id(id) if id >= count) {
+                return Err(error(
+                    ErrorKind::InvalidArgument,
+                    "selected SDMA engine ID is out of range",
+                ));
+            }
+            Some(SdmaTarget { selection, count })
+        } else {
+            None
         };
         let compute = if queue_type == 0 || queue_type == 2 {
             Some(compute_storage(properties)?)
@@ -906,6 +932,7 @@ impl Request {
             compute,
             aql,
             pm4,
+            sdma_target,
             priority: match desc.priority {
                 QueuePriority::Low => 0,
                 QueuePriority::Normal => 7,
@@ -1405,6 +1432,10 @@ impl KfdQueue {
         if request.aql.is_some() {
             vm.initialize_scratch()?;
         }
+        let selected_sdma_engine_id = request.sdma_target.map(|target| match target.selection {
+            SdmaEngineSelection::Any => vm.next_sdma_engine_id(target.count),
+            SdmaEngineSelection::Id(id) => id,
+        });
         let page =
             util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
         let allocate = |size: u64, kind, permissions| {
@@ -1510,6 +1541,7 @@ impl KfdQueue {
             ring_host_address,
             ring_device_address,
             ring_size_bytes: u64::from(request.ring_size),
+            sdma_engine_id: selected_sdma_engine_id,
             read_index_host_address: pointer_host_address + read_offset,
             read_index_device_address: pointer_device_address + read_offset as u64,
             write_index_host_address: pointer_host_address + write_offset,
@@ -1533,6 +1565,7 @@ impl KfdQueue {
             ring_size: request.ring_size,
             gpu_id: vm.gpu_id(),
             queue_type: request.queue_type,
+            sdma_engine_id: selected_sdma_engine_id.unwrap_or(0),
             percentage: 100,
             priority: request.priority,
             ..uapi::CreateQueue::default()
