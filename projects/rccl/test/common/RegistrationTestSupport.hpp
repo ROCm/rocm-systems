@@ -38,16 +38,10 @@ using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
 
-// NCCL_CTA_POLICY accepts the documented alias ZERO as well as the integer 2.
 inline bool envCtaPolicyIsZero()
 {
-    const char* p = std::getenv("NCCL_CTA_POLICY");
-    if (p == nullptr || p[0] == '\0') return false;
-    if (std::atoi(p) == 2) return true;
-    std::string s(p);
-    for (char& c : s)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return s == "ZERO";
+    const int policy = ncclGetEnvCtaPolicy();
+    return policy != NCCL_CONFIG_UNDEF_INT && (policy & NCCL_CTA_POLICY_ZERO) != 0;
 }
 
 // CAST jobs set NCCL_NET=IB-CAST (or ib-cast). Classic IB must not take this arm.
