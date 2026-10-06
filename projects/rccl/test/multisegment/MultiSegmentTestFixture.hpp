@@ -50,6 +50,15 @@ protected:
         return res == ncclSuccess && algo == RCCL_CE_REGISTERED;
     }
 
+    // ceArStagingBytes is written in ncclCeInit, which runs on the first collective.
+    size_t ceAllReduceStagingBufCapacity(int nRanks)
+    {
+        const int64_t param = rcclParamCeArStagingBytes();
+        const size_t stagingBytes = param >= 0 ? static_cast<size_t>(param)
+                                               : static_cast<size_t>(NCCL_CE_AR_STAGING_BYTES);
+        return ncclCeAllReduceStagingBufBytes(nRanks, stagingBytes);
+    }
+
     struct MultiSegmentBuffer
     {
         hipDeviceptr_t                                vaBase      = 0;
