@@ -201,13 +201,13 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
     net_.getProperties = IbNetGetProperties;
     g_ibNetDevices = [this](int* count) {
       *count = kNetDevices;
-      return devicesResult_;
+      return scene_.devicesResult;
     };
     g_ibNetGetProperties = [this](int dev, ncclNetProperties_t* props) {
       propsDev_ = dev;
-      props->name = const_cast<char*>(propName_);
+      props->name = const_cast<char*>(scene_.propName);
       props->port = kPhysPort;
-      return propsResult_;
+      return scene_.propsResult;
     };
     g_gethostname = [this](char* name, size_t len) {
       hostnameLen_ = len;
@@ -227,9 +227,9 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
       EXPECT_EQ(system, comm_->topo);
       EXPECT_EQ(rank, comm_->rank);
       EXPECT_EQ(id, nullptr);
-      localNetChannels_.push_back(channelId);
-      *dev = localNetDev_;
-      return localNetResult_;
+      scene_.localNetChannels.push_back(channelId);
+      *dev = scene_.localNetDev;
+      return scene_.localNetResult;
     };
     g_ncclDiagChildRun = [this](const char* command, int timeoutSec, char* output, int outputSize, bool* truncated) {
       EXPECT_EQ(timeoutSec, IB_BW_TIMEOUT_SEC);
@@ -240,7 +240,7 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
         clientCommands_.push_back(command);
       }
       DeliverChildOutput(probe ? help_ : clientOutput_, output, outputSize, nullptr, nullptr, truncated);
-      return probe ? probeExit_ : clientExit_;
+      return probe ? scene_.probeExit : clientExit_;
     };
     g_ncclDiagChildRunStream = [this](const char* command, int timeoutSec, char* output, int outputSize,
                                       ncclDiagChildLineFn onLine, void* ctx, bool* truncated) {
@@ -433,18 +433,6 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
     return findPair(comm_.get(), info_.data(), phase, cross, *serverRank, *clientRank);
   }
 
-  void ResetDiscoverScene() {
-    InstallHooks();
-    BuildComm(0, {{0}, {1}});
-    propName_ = "mlx5_0";
-    probeExit_ = 0;
-    devicesResult_ = ncclSuccess;
-    propsResult_ = ncclSuccess;
-    localNetResult_ = ncclSuccess;
-    localNetDev_ = kNetDev;
-    localNetChannels_.clear();
-  }
-
   // Moves the queried rank to `rank` on its own node.
   void PlaceRank(int rank) {
     comm_->rank = rank;
@@ -475,17 +463,19 @@ class DiagIbWriteBwMicrotest : public ::testing::Test {
   int topoStorage_ = 0;
   ncclNet_t net_{};
   std::size_t hostnameLen_ = 0;
-  const char* propName_ = "mlx5_0";
   int propsDev_ = -1;
-  ncclResult_t devicesResult_ = ncclSuccess;
-  ncclResult_t propsResult_ = ncclSuccess;
-  int localNetDev_ = kNetDev;
-  ncclResult_t localNetResult_ = ncclSuccess;
-  std::vector<int> localNetChannels_;
+  struct DiscoverScene {  // Discovery knobs and observations; reset only by `scene_ = DiscoverScene()`.
+    const char* propName = "mlx5_0";
+    ncclResult_t devicesResult = ncclSuccess;
+    ncclResult_t propsResult = ncclSuccess;
+    int localNetDev = kNetDev;
+    ncclResult_t localNetResult = ncclSuccess;
+    int probeExit = 0;
+    std::vector<int> localNetChannels;
+  } scene_;
   std::vector<std::string> sysfs_ = {SysPath(""), SysPath("mlx5_0"), SysPath("mlx5_1")};
   std::vector<std::string> accessed_;
   std::string help_ = kHelp;
-  int probeExit_ = 0;
   std::string clientOutput_ = kClientOutput;
   int clientExit_ = 0;
   std::string serverOutput_ = kServerOutput;
@@ -730,7 +720,7 @@ TEST_F(DiagIbWriteBwMicrotest, SegmentCount_CountsPlusSeparatedMembers) {
 
 TEST_F(DiagIbWriteBwMicrotest, ProbeCapabilities_ReadsCudaAndDmabufFlagsFromHelp) {
   LocalInfo local{};
-  probeExit_ = 3;
+  scene_.probeExit = 3;
   EXPECT_EQ(probeCapabilities(&local), 3);
   EXPECT_TRUE(local.cuda);
   EXPECT_TRUE(local.dmabuf);
@@ -760,7 +750,7 @@ TEST_F(DiagIbWriteBwMicrotest, ProbeCapabilities_RocmBuildHelpFallsBackToHostMem
 TEST_F(DiagIbWriteBwMicrotest, DiscoverLocal_RecordsHostChannelZeroDeviceAndCapabilities) {
   BuildComm(1, {{0, 1}, {2, 3}});
   comm_->nChannels = 4;
-  propName_ = "mlx5_1_dma+mlx5_0+mlx5_3";
+  scene_.propName = "mlx5_1_dma+mlx5_0+mlx5_3";
   sysfs_ = {SysPath("mlx5_1")};
   const LocalInfo local = Discover();
   EXPECT_FALSE(local.setupFailed);
@@ -771,7 +761,7 @@ TEST_F(DiagIbWriteBwMicrotest, DiscoverLocal_RecordsHostChannelZeroDeviceAndCapa
   EXPECT_EQ(local.port, kPhysPort);
   EXPECT_TRUE(local.cuda);
   EXPECT_TRUE(local.dmabuf);
-  EXPECT_EQ(localNetChannels_, (std::vector<int>{0}));
+  EXPECT_EQ(scene_.localNetChannels, (std::vector<int>{0}));
   EXPECT_EQ(propsDev_, kNetDev);
   EXPECT_EQ(local.hostname[sizeof(local.hostname) - 1], '\0');
   EXPECT_EQ(local.device[sizeof(local.device) - 1], '\0');
@@ -789,7 +779,7 @@ TEST_F(DiagIbWriteBwMicrotest, DiscoverLocal_CudaNeedsDeviceAndDmabufNeedsCommSu
   EXPECT_FALSE(local.cuda);
   EXPECT_FALSE(local.dmabuf);
   comm_->cudaDev = 0;
-  probeExit_ = 1;
+  scene_.probeExit = 1;
   local = Discover();
   EXPECT_FALSE(local.setupFailed);
   EXPECT_TRUE(local.cuda);
@@ -804,11 +794,11 @@ TEST_F(DiagIbWriteBwMicrotest, DiscoverLocal_EachSetupFailureReportsAndMarksRank
   };
   const std::vector<Case> cases = {
       {[] { g_gethostname = [](char*, size_t) { return -1; }; }, "cannot determine local hostname", false},
-      {[this] { probeExit_ = 127; }, "required external tool missing", false},
-      {[this] { probeExit_ = 124; }, "capability probe timed out", false},
+      {[this] { scene_.probeExit = 127; }, "required external tool missing", false},
+      {[this] { scene_.probeExit = 124; }, "capability probe timed out", false},
       {[this] { comm_->ncclNet = nullptr; }, "failed: selected network plugin does not support IB", false},
       {[this] { net_.name = "Socket"; }, "failed: selected network plugin does not support IB", false},
-      {[this] { devicesResult_ = ncclSystemError; }, "cannot enumerate network devices", false},
+      {[this] { scene_.devicesResult = ncclSystemError; }, "cannot enumerate network devices", false},
       {[] {
          g_ibNetDevices = [](int* count) {
            *count = 0;
@@ -818,24 +808,26 @@ TEST_F(DiagIbWriteBwMicrotest, DiscoverLocal_EachSetupFailureReportsAndMarksRank
        "failed: no usable IB device", false},
       {[this] { comm_->topo = nullptr; }, "failed: no usable IB device", false},
       {[this] { comm_->nChannels = 0; }, "invalid channel count=0", false},
-      {[this] { localNetResult_ = ncclInternalError; }, "cannot select a local network device", true},
-      {[this] { localNetDev_ = -1; }, "failed: no usable IB device", true},
-      {[this] { localNetDev_ = kNetDevices; }, "failed: no usable IB device", true},
-      {[this] { propsResult_ = ncclSystemError; }, "cannot query the selected network device", true},
-      {[this] { propName_ = nullptr; }, "failed: cannot resolve the selected IB device", true},
-      {[this] { propName_ = "+mlx5_0"; }, "failed: cannot resolve the selected IB device", true},
-      {[this] { propName_ = "mlx5_7"; }, "failed: cannot resolve the selected IB device", true},
+      {[this] { scene_.localNetResult = ncclInternalError; }, "cannot select a local network device", true},
+      {[this] { scene_.localNetDev = -1; }, "failed: no usable IB device", true},
+      {[this] { scene_.localNetDev = kNetDevices; }, "failed: no usable IB device", true},
+      {[this] { scene_.propsResult = ncclSystemError; }, "cannot query the selected network device", true},
+      {[this] { scene_.propName = nullptr; }, "failed: cannot resolve the selected IB device", true},
+      {[this] { scene_.propName = "+mlx5_0"; }, "failed: cannot resolve the selected IB device", true},
+      {[this] { scene_.propName = "mlx5_7"; }, "failed: cannot resolve the selected IB device", true},
   };
   for (std::size_t i = 0; i < cases.size(); i++) {
     SCOPED_TRACE(i);
-    ResetDiscoverScene();
+    InstallHooks();
+    BuildComm(0, {{0}, {1}});
+    scene_ = DiscoverScene();
     cases[i].arm();
     LocalInfo local{};
     const std::string out = CaptureStdout([&] { local = Discover(); });
     EXPECT_EQ(out, NetInfo(cases[i].line));
     EXPECT_TRUE(local.setupFailed);
     EXPECT_EQ(local.deviceCount, 0);
-    EXPECT_EQ(localNetChannels_.size(), cases[i].reached ? 1u : 0u);
+    EXPECT_EQ(scene_.localNetChannels.size(), cases[i].reached ? 1u : 0u);
   }
 }
 
@@ -907,6 +899,22 @@ TEST_F(DiagIbWriteBwMicrotest, BandwidthOutlier_StrictlyBeyondThirtyPercent) {
   EXPECT_FALSE(bandwidthOutlier(130, 100));
   EXPECT_TRUE(bandwidthOutlier(69.9, 100));
   EXPECT_TRUE(bandwidthOutlier(130.1, 100));
+}
+
+TEST_F(DiagIbWriteBwMicrotest, ServerListenLine_SendsReadyOnceOnListenBanner) {
+  BuildComm(0, {{0}, {1}});
+  std::vector<std::string> sends;
+  g_devrBootstrapSend = [&](void* bs, int peer, int tag, void* data, int size) {
+    EXPECT_EQ(std::make_pair(bs, tag), std::make_pair(comm_->bootstrap, IB_BW_SERVER_READY_TAG));
+    sends.push_back(std::to_string(peer) + ":" + std::string(static_cast<char*>(data), size));
+    return ncclRemoteError;
+  };
+  ServerReadyCtx ctx = {comm_.get(), 1, false};
+  serverListenLine("Waiting for server\n", &ctx);
+  EXPECT_TRUE(sends.empty());
+  serverListenLine("* Waiting for client to connect... *\n", &ctx);
+  serverListenLine("* Waiting for client to connect... *\n", &ctx);
+  EXPECT_EQ(sends, std::vector<std::string>{"1:\1"});
 }
 
 TEST_F(DiagIbWriteBwMicrotest, CommUsesCrossNic_NeedsCrossNicGraphWithChannels) {
@@ -1023,18 +1031,6 @@ TEST_F(DiagIbWriteBwMicrotest, SyncPair_ClientSendsThenAdoptsEchoServerReceivesT
   sendFailTag_ = 0;
   EXPECT_FALSE(syncPair(comm_.get(), false, 1, bandwidth));
   EXPECT_EQ(log_.back(), (IbMsg{'R', 1, kSync, ""}));
-}
-
-TEST_F(DiagIbWriteBwMicrotest, ServerListenLine_SendsReadyOnceOnListenBanner) {
-  BuildComm(0, {{0}, {1}});
-  ServerReadyCtx ctx = {comm_.get(), 1, false};
-  serverListenLine("Waiting for server\n", &ctx);
-  EXPECT_FALSE(ctx.sent);
-  sendFailTag_ = kReady;
-  serverListenLine("* Waiting for client to connect... *\n", &ctx);
-  EXPECT_TRUE(ctx.sent);
-  serverListenLine("* Waiting for client to connect... *\n", &ctx);
-  EXPECT_EQ(log_, (std::vector<IbMsg>{{'S', 1, kReady, Bytes(true)}}));
 }
 
 TEST_F(DiagIbWriteBwMicrotest, RunPair_ServerAnnouncesThenReturnsClientMeasurement) {
@@ -1328,12 +1324,12 @@ TEST_F(DiagIbWriteBwMicrotest, Run_SetupFailureOnAnyRankEndsBeforeSchedule) {
   info_[1].setupFailed = true;
   info_[3].setupFailed = true;
   EXPECT_EQ(CaptureStdout([&] { Run(); }), NetInfo("setup failed on rank 1"));
-  probeExit_ = 127;
+  scene_.probeExit = 127;
   gathers_ = 0;  // drop the first Run()'s gather; the count below covers only the next two
   EXPECT_EQ(CaptureStdout([&] { Run(); }),
             NetInfo("required external tool missing") + NetInfo("setup failed on rank 0"));
   EXPECT_TRUE(selfInfo_.setupFailed);
-  probeExit_ = 0;
+  scene_.probeExit = 0;
   PlaceRank(2);
   EXPECT_EQ(CaptureStdout([&] { Run(); }), "");
   EXPECT_EQ(gathers_, 2);
