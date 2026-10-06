@@ -116,14 +116,22 @@ def test_validate_spm_rocpd(spm_json_data, rocpd_data):
 
     assert rocpd_spm_count > 0
 
-    columns = {
+    info_columns = {
+        row[1] for row in rocpd_data.execute(f"PRAGMA table_info({pmc_table})")
+    }
+    event_columns = {
         row[1] for row in rocpd_data.execute(f"PRAGMA table_info({pmc_event_table})")
     }
-    assert {"shader_array", "wgp"}.issubset(columns)
+    assert {"xcc", "shader_engine", "shader_array", "wgp", "instance"}.issubset(
+        info_columns
+    )
+    assert not {"xcc", "shader_engine", "shader_array", "wgp", "instance"} & event_columns
 
     topology = rocpd_data.execute(
-        f"SELECT shader_engine, shader_array, wgp FROM {pmc_event_table} "
-        "WHERE sample_id IS NOT NULL"
+        f"SELECT p.shader_engine, p.shader_array, p.wgp "
+        f"FROM {pmc_event_table} e "
+        f"JOIN {pmc_table} p ON e.pmc_id = p.id AND e.guid = p.guid "
+        f"WHERE e.sample_id IS NOT NULL"
     ).fetchall()
     assert topology
     assert all(
