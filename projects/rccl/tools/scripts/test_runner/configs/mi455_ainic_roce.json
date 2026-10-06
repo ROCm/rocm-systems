@@ -221,6 +221,28 @@
         }
       ]
     },
+    "cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiThread_StressMultiRound",
+          "description": "Concurrent IB-CAST connections, each auditing its own WRR token ledger",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        },
+        {
+          "name": "Cast_MultiThread_SendRecvMultipleSizes",
+          "description": "Concurrent schedulers sweep both sides of the WRR/split boundary",
+          "test_filter": "NetIbMPITest.CastSendRecvMultipleSizes"
+        }
+      ]
+    },
     "net_ib_gdr_flush": {
       "extends": "net_ib_base",
       "timeout": 120,
@@ -855,6 +877,11 @@
           "name": "Resiliency_RecoveryUdTimeoutExhaustsAttempts",
           "description": "UD recovery timeout exhausts max attempts, device stays failed",
           "test_filter": "NetIbMPITest.RecoveryUdTimeoutExhaustsAttempts"
+        },
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
         }
       ]
     },
@@ -1942,6 +1969,16 @@
           "name": "Recorder.VerifyMultithread",
           "description": "Recorder multithreaded verification",
           "test_filter": "Recorder.VerifyMultithread"
+        },
+        {
+          "name": "Recorder.RedOpRecordJson",
+          "description": "Recorder RedOp record JSON output",
+          "test_filter": "Recorder.RedOpRecordJson"
+        },
+        {
+          "name": "Recorder.RedOpRecordBinary",
+          "description": "Recorder RedOp record binary output",
+          "test_filter": "Recorder.RedOpRecordBinary"
         },
         {
           "name": "ProxyTrace.nonEmptySingleton",
@@ -5693,7 +5730,8 @@
           "test_filter": "GinTrafficClassMPITest.DeviceHostPrecedence",
           "env_variables": {
             "NCCL_IB_SL": "",
-            "NCCL_IB_TC": ""
+            "NCCL_IB_TC": "",
+            "NCCL_GIN_IB_TC": ""
           }
         },
         {
@@ -5702,7 +5740,28 @@
           "test_filter": "GinTrafficClassMPITest.ExplicitIbEnvironmentOverrides",
           "env_variables": {
             "NCCL_IB_SL": "5",
-            "NCCL_IB_TC": "96"
+            "NCCL_IB_TC": "96",
+            "NCCL_GIN_IB_TC": ""
+          }
+        },
+        {
+          "name": "GIN_TrafficClass_GinIbTcOverridesIbTc",
+          "description": "NCCL_GIN_IB_TC overrides NCCL_IB_TC on GIN QPs only; collective network-transport QPs keep NCCL_IB_TC and both keep NCCL_IB_SL at RoCE QP RTR programming",
+          "test_filter": "GinTrafficClassMPITest.GinIbTcOverridesIbTc",
+          "env_variables": {
+            "NCCL_IB_SL": "5",
+            "NCCL_IB_TC": "96",
+            "NCCL_GIN_IB_TC": "104"
+          }
+        },
+        {
+          "name": "GIN_TrafficClass_GinIbTcOverridesDeviceHost",
+          "description": "NCCL_GIN_IB_TC alone overrides GIN devComm and host traffic classes on GIN QPs; collective network-transport QPs keep the host value at RoCE QP RTR programming",
+          "test_filter": "GinTrafficClassMPITest.GinIbTcOverridesDeviceAndHost",
+          "env_variables": {
+            "NCCL_IB_SL": "",
+            "NCCL_IB_TC": "",
+            "NCCL_GIN_IB_TC": "104"
           }
         }
       ]
@@ -5814,6 +5873,12 @@
       "description": "4 worker threads/rank, each on an independent NET/IB context and connection. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "net_ib_multithread_independent",
       "enabled": false
+    },
+    {
+      "name": "NET IB - CAST Multithread (4)",
+      "description": "4 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
+      "config": "cast_multithread",
+      "enabled": true
     },
     {
       "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",

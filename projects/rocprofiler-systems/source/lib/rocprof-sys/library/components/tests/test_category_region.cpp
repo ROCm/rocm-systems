@@ -347,9 +347,10 @@ TEST(category_region_serialization, serialize_return_arg)
 
 TEST(category_region_cache, entry_key_ordering)
 {
-    const entry_key a{ "aaa", "cat" };
-    const entry_key b{ "bbb", "cat" };  // differs by name
-    const entry_key c{ "aaa", "dog" };  // same name, differs by category
+    const entry_key a{ .name = "aaa", .category = "cat" };
+    const entry_key b{ .name = "bbb", .category = "cat" };  // differs by name
+    const entry_key c{ .name     = "aaa",
+                       .category = "dog" };  // same name, differs by category
 
     // different names are ordered by name
     EXPECT_TRUE(a < b);
@@ -360,7 +361,7 @@ TEST(category_region_cache, entry_key_ordering)
     EXPECT_FALSE(c < a);
 
     // fully equal keys: neither precedes the other
-    const entry_key a_copy{ "aaa", "cat" };
+    const entry_key a_copy{ .name = "aaa", .category = "cat" };
     EXPECT_FALSE(a < a_copy);
     EXPECT_FALSE(a_copy < a);
 }
@@ -373,12 +374,13 @@ TEST(category_region_cache, cache_start_pushes_pending_entry)
 {
     using category_t     = rocprofsys::category::host;
     const char*     name = "start_region";
-    const entry_key key{ name, rocprofsys::trait::name<category_t>::value };
+    const entry_key key{ .name     = name,
+                         .category = rocprofsys::trait::name<category_t>::value };
 
     map_name_to_args.clear();
     cache_start<category_t>(name, serialize_name_value_pairs("a", 1, "b", 2));
 
-    auto itr = map_name_to_args.find(key);
+    auto const itr = map_name_to_args.find(key);
     ASSERT_TRUE(itr != map_name_to_args.end());
     ASSERT_EQ(itr->second.size(), 1u);
 
@@ -409,11 +411,12 @@ TEST(category_region_cache, append_cache_args_adopts_first_batch_without_renumbe
 {
     using category_t     = rocprofsys::category::host;
     const char*     name = "adopt_region";
-    const entry_key key{ name, rocprofsys::trait::name<category_t>::value };
+    const entry_key key{ .name     = name,
+                         .category = rocprofsys::trait::name<category_t>::value };
 
     map_name_to_args.clear();
     // open entry that has no args yet (e.g. created by an argless start)
-    map_name_to_args[key].push_back(pending_cache_entry{ 0, {} });
+    map_name_to_args[key].push_back(pending_cache_entry{ .start_ts = 0, .args = {} });
 
     // the first batch into an empty entry is adopted verbatim (hot path): its 0-based
     // numbering is preserved and renumber_serialized_args is skipped
@@ -434,12 +437,13 @@ TEST(category_region_cache, append_cache_args_appends_and_renumbers)
 {
     using category_t     = rocprofsys::category::host;
     const char*     name = "append_region";
-    const entry_key key{ name, rocprofsys::trait::name<category_t>::value };
+    const entry_key key{ .name     = name,
+                         .category = rocprofsys::trait::name<category_t>::value };
 
     map_name_to_args.clear();
     // seed an open entry with one already-serialized arg (numbered 0)
     map_name_to_args[key].push_back(
-        pending_cache_entry{ 0, serialize_name_value_pairs("a", 1) });
+        pending_cache_entry{ .start_ts = 0, .args = serialize_name_value_pairs("a", 1) });
 
     // append two more args; their local numbering (0,1) must continue from 1 -> (1,2)
     append_cache_args<category_t>(name, serialize_name_value_pairs("b", 2, "c", 3));
@@ -464,7 +468,8 @@ TEST(category_region_cache, append_cache_args_noop_without_open_entry)
 {
     using category_t     = rocprofsys::category::host;
     const char*     name = "missing_region";
-    const entry_key key{ name, rocprofsys::trait::name<category_t>::value };
+    const entry_key key{ .name     = name,
+                         .category = rocprofsys::trait::name<category_t>::value };
 
     map_name_to_args.clear();
     // no open entry -> append is a no-op and must not create one
@@ -472,7 +477,7 @@ TEST(category_region_cache, append_cache_args_noop_without_open_entry)
     EXPECT_TRUE(map_name_to_args.find(key) == map_name_to_args.end());
 
     // empty args -> no-op even when an entry exists
-    map_name_to_args[key].push_back(pending_cache_entry{ 0, {} });
+    map_name_to_args[key].push_back(pending_cache_entry{ .start_ts = 0, .args = {} });
     append_cache_args<category_t>(name, std::string{});
     EXPECT_TRUE(map_name_to_args[key].back().args.empty());
     EXPECT_EQ(parse(map_name_to_args[key].back().args).size(), 0u);
@@ -484,14 +489,16 @@ TEST(category_region_cache, append_cache_args_drops_batch_when_existing_args_mal
 {
     using category_t     = rocprofsys::category::host;
     const char*     name = "malformed_region";
-    const entry_key key{ name, rocprofsys::trait::name<category_t>::value };
+    const entry_key key{ .name     = name,
+                         .category = rocprofsys::trait::name<category_t>::value };
 
     map_name_to_args.clear();
     // open entry whose existing args have a non-numeric leading idx field: the next
     // index cannot be determined, so a subsequent append must be dropped rather than
     // produce colliding indices.
     const std::string malformed = "bad;;string;;x;;1;;";
-    map_name_to_args[key].push_back(pending_cache_entry{ 0, malformed });
+    map_name_to_args[key].push_back(
+        pending_cache_entry{ .start_ts = 0, .args = malformed });
 
     append_cache_args<category_t>(name, serialize_name_value_pairs("b", 2));
 
@@ -512,11 +519,11 @@ TEST(category_region_cache, cache_start_keys_on_name_and_category)
     region_cache::instance().cache_start(name, "cat_b",
                                          serialize_name_value_pairs("b", 2));
 
-    const entry_key key_a{ name, "cat_a" };
-    const entry_key key_b{ name, "cat_b" };
+    const entry_key key_a{ .name = name, .category = "cat_a" };
+    const entry_key key_b{ .name = name, .category = "cat_b" };
 
-    auto itr_a = map_name_to_args.find(key_a);
-    auto itr_b = map_name_to_args.find(key_b);
+    auto const itr_a = map_name_to_args.find(key_a);
+    auto const itr_b = map_name_to_args.find(key_b);
     ASSERT_TRUE(itr_a != map_name_to_args.end());
     ASSERT_TRUE(itr_b != map_name_to_args.end());
 
@@ -548,11 +555,11 @@ TEST(category_region_cache, append_cache_args_is_scoped_to_category)
     region_cache::instance().append_cache_args(name, "cat_b",
                                                serialize_name_value_pairs("b", 2));
 
-    const entry_key key_a{ name, "cat_a" };
-    const entry_key key_b{ name, "cat_b" };
+    const entry_key key_a{ .name = name, .category = "cat_a" };
+    const entry_key key_b{ .name = name, .category = "cat_b" };
     EXPECT_TRUE(map_name_to_args.find(key_b) == map_name_to_args.end());
 
-    auto itr_a = map_name_to_args.find(key_a);
+    auto const itr_a = map_name_to_args.find(key_a);
     ASSERT_TRUE(itr_a != map_name_to_args.end());
     EXPECT_EQ(parse(itr_a->second.back().args).size(), 1u);
 
@@ -678,8 +685,8 @@ TEST_F(category_region_policy_test, cache_start_records_injected_clock_without_e
 
     region.cache_start("region", "cat", serialize_name_value_pairs("a", 1));
 
-    const entry_key key{ "region", "cat" };
-    auto            itr = region.pending_entries().find(key);
+    const entry_key key{ .name = "region", .category = "cat" };
+    auto const      itr = region.pending_entries().find(key);
     ASSERT_TRUE(itr != region.pending_entries().end());
     ASSERT_EQ(itr->second.size(), 1u);
     EXPECT_EQ(itr->second.back().start_ts, 1234u);
@@ -757,8 +764,8 @@ TEST_F(category_region_policy_test, cache_stop_pops_only_the_innermost_frame)
     region.cache_stop("region", "cat");
 
     // the outer frame remains open with its original timestamp
-    const entry_key key{ "region", "cat" };
-    auto            itr = region.pending_entries().find(key);
+    const entry_key key{ .name = "region", .category = "cat" };
+    auto const      itr = region.pending_entries().find(key);
     ASSERT_TRUE(itr != region.pending_entries().end());
     ASSERT_EQ(itr->second.size(), 1u);
     EXPECT_EQ(itr->second.back().start_ts, 100u);
@@ -827,8 +834,9 @@ TEST_F(category_region_policy_test, append_cache_args_touches_no_seams)
     EXPECT_CALL(*test_globals::g_region_sink_gmock, store_region(_, _, _, _, _, _))
         .Times(0);
 
-    const entry_key key{ "region", "cat" };
-    region.pending_entries()[key].push_back(pending_cache_entry{ 0, {} });
+    const entry_key key{ .name = "region", .category = "cat" };
+    region.pending_entries()[key].push_back(
+        pending_cache_entry{ .start_ts = 0, .args = {} });
     region.append_cache_args("region", "cat", serialize_name_value_pairs("a", 1));
 
     EXPECT_EQ(parse(region.pending_entries()[key].back().args).size(), 1u);

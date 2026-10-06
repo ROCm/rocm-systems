@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "aql_queue.h"
+
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
@@ -1159,10 +1161,389 @@ TEST_F(KfdIoctlTest, CreateQueueDoesNotReplicateSdmaQueue) {
   EXPECT_EQ(soc_->sdma_queue_scheduler().active_queues(), 0u);
 }
 
-// KFD exposes PM4 and AQL as distinct compute queue formats. Rocjitsu supports
-// general KFD compute dispatch only through AQL; its PM4 processor intentionally
-// remains limited to the supported compute-queue packet subset.
-TEST_F(KfdIoctlTest, CreateQueueRejectsUnsupportedPm4ComputeAndUnknownTypes) {
+struct KfdNativePm4Target {
+  const char *name;
+  const char *config;
+  uint32_t gpu_id;
+};
+
+class KfdNativePm4Test : public KfdIoctlTest,
+                         public ::testing::WithParamInterface<KfdNativePm4Target> {
+protected:
+  void SetUp() override { SetUpWithConfig(std::string(CONFIG_DIR) + "/" + GetParam().config); }
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    KfdTargets, KfdNativePm4Test,
+    ::testing::Values(KfdNativePm4Target{"gfx1100", "gfx1100_w7900.json", kRdna3GpuId},
+                      KfdNativePm4Target{"gfx1201", "gfx1201_r9700.json", 8716},
+                      KfdNativePm4Target{"gfx1151", "gfx1151.json", 5510}),
+    [](const ::testing::TestParamInfo<KfdNativePm4Target> &info) { return info.param.name; });
+
+class KfdAqlPm4Test : public KfdIoctlTest,
+                      public ::testing::WithParamInterface<KfdNativePm4Target> {
+protected:
+  void SetUp() override { SetUpWithConfig(std::string(CONFIG_DIR) + "/" + GetParam().config); }
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    KfdTargets, KfdAqlPm4Test,
+    ::testing::Values(KfdNativePm4Target{"gfx942", "gfx942_cdna3_kmd.json", 50148},
+                      KfdNativePm4Target{"gfx950", "gfx950_mi355x_kmd.json", kGpuId}),
+    [](const ::testing::TestParamInfo<KfdNativePm4Target> &info) { return info.param.name; });
+
+TEST_P(KfdAqlPm4Test, ExecutesEveryXcdAndRetainsBlockedIndirectBuffer) {
+  ASSERT_EQ(soc_->num_xcds(), 8u);
+  alignas(4096) std::array<hsa_kernel_dispatch_packet_t, 64> ring{};
+  alignas(4096) std::array<uint64_t, 512> data{};
+  alignas(4096) std::array<uint32_t, 1024> commands{};
+  const uint64_t data_va = reinterpret_cast<uint64_t>(data.data());
+  const uint64_t ib_va = reinterpret_cast<uint64_t>(commands.data());
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(data_va, data.data(), sizeof(data));
+  process->map_pages(ib_va, commands.data(), sizeof(commands));
+  size_t n = 0;
+  const auto emit = [&](std::initializer_list<uint32_t> words) {
+    for (const uint32_t word : words)
+      commands[n++] = word;
+  };
+  for (uint32_t xcc = 0; xcc < 8; ++xcc) {
+    // Only the selected XCD writes its slot; all eight must execute this IB.
+    const uint64_t address = data_va + (8 + xcc) * 8;
+    emit({0xc0002300, (1u << (24 + xcc)) | 5});
+    emit({0xc0033700, 5u << 8, uint32_t(address), uint32_t(address >> 32), xcc + 1});
+  }
+  // An atomic before the wait catches accidental command replay on each retry.
+  const uint64_t counter = data_va + 16 * 8;
+  emit({0xc0071e00, 15, uint32_t(counter), uint32_t(counter >> 32), 1, 0, 0, 0, 0});
+  const uint64_t gate = data_va + 17 * 8;
+  emit({0xc0053c00, (1u << 4) | 3, uint32_t(gate), uint32_t(gate >> 32), 1, UINT32_MAX, 4});
+  data[25] = 1; // Signal value at handle + 8.
+  ring[0] = rocjitsu::test::make_pm4_ib_packet(ib_va, n, data_va + 24 * 8);
+  ring[0].header |= 1 << HSA_PACKET_HEADER_BARRIER;
+  const uint64_t successor = ib_va + n * 4;
+  const size_t start = n;
+  const uint64_t output = data_va + 18 * 8;
+  emit({0xc0033700, 5u << 8, uint32_t(output), uint32_t(output >> 32), 99});
+  ring[1] = rocjitsu::test::make_pm4_ib_packet(successor, n - start);
+
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = GetParam().gpu_id;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = sizeof(ring);
+  queue.read_pointer_address = data_va;
+  queue.write_pointer_address = data_va + 8;
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  void *doorbell = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 static_cast<off_t>(queue.doorbell_offset));
+  ASSERT_NE(doorbell, MAP_FAILED);
+  std::atomic_ref<uint64_t>(data[1]).store(2, std::memory_order_release);
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell)).store(1, std::memory_order_release);
+  for (unsigned i = 0; i < 2000 && data[16] != 8; ++i) {
+    (void)engine_->step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+  for (uint32_t xcc = 0; xcc < 8; ++xcc)
+    EXPECT_EQ(data[8 + xcc], xcc + 1);
+  ASSERT_EQ(data[16], 8u);
+  for (unsigned i = 0; i < 20; ++i)
+    (void)engine_->step();
+  EXPECT_EQ(data[16], 8u);
+  EXPECT_EQ(data[18], 0u);
+  EXPECT_EQ(data[25], 1u);
+  std::atomic_ref<uint64_t>(data[17]).store(1, std::memory_order_release);
+  for (unsigned i = 0; i < 2000 && (data[18] != 99 || data[25] != 0); ++i)
+    (void)engine_->step();
+  EXPECT_EQ(data[18], 99u);
+  EXPECT_EQ(data[25], 0u);
+  EXPECT_EQ(data[16], 8u);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+}
+
+TEST_P(KfdNativePm4Test, HostDoorbellExecutesWrappedPacketHdpFlushAndIndirectBuffer) {
+  alignas(4096) std::array<uint32_t, 1024> ring{};
+  alignas(4096) std::array<uint64_t, 512> pointers{};
+  alignas(4096) std::array<uint32_t, 1024> indirect{};
+  const uint64_t output = reinterpret_cast<uint64_t>(&pointers[2]);
+  const uint64_t ib = reinterpret_cast<uint64_t>(indirect.data());
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(output & ~uint64_t(4095), pointers.data(), sizeof(pointers));
+  process->map_pages(ib, indirect.data(), sizeof(indirect));
+  // A fresh native queue starts at zero regardless of the writeback contents.
+  // Only the low 32 bits are written by PM4 consumer-pointer publication.
+  pointers[0] = 0xfeed1234deadbeefull;
+  auto &read_pointer = *reinterpret_cast<uint32_t *>(&pointers[0]);
+  std::fill_n(ring.begin(), 1022, 0x80000000u); // Type-2 NOPs advance to the wrap.
+  // WRITE_DATA straddles the ring boundary, followed by an indirect buffer.
+  const std::array<uint32_t, 9> packets{
+      0xc0033700, 5u << 8,      uint32_t(output),   uint32_t(output >> 32), 0x12345678,
+      0xc0023f00, uint32_t(ib), uint32_t(ib >> 32), (1u << 23) | 12u};
+  // The qualified NBIO/NBIF profiles share this HDP request/completion pair.
+  indirect[0] = 0xc0053c00;
+  indirect[1] = (1u << 6) | 5u;
+  indirect[2] = 0xe26;
+  indirect[3] = 0xe27;
+  indirect[4] = indirect[5] = UINT32_MAX;
+  indirect[6] = 4;
+  indirect[7] = 0xc0033700;
+  indirect[8] = 5u << 8;
+  indirect[9] = uint32_t(output + 4);
+  indirect[10] = uint32_t((output + 4) >> 32);
+  indirect[11] = 0xabcdef01;
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = GetParam().gpu_id;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = sizeof(ring);
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  // Map after queue creation, as tinygrad does for its first queue.
+  void *doorbell = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 static_cast<off_t>(queue.doorbell_offset));
+  ASSERT_NE(doorbell, MAP_FAILED);
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
+      .store(1022, std::memory_order_release);
+  for (unsigned i = 0;
+       i < 2000 && std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire) != 1022;
+       ++i) {
+    (void)engine_->step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+  ASSERT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 1022u);
+  for (size_t i = 0; i < packets.size(); ++i)
+    ring[(1022 + i) % ring.size()] = packets[i];
+  constexpr uint64_t producer = 1031;
+  std::atomic_ref<uint64_t>(pointers[1]).store(producer, std::memory_order_release);
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
+      .store(producer, std::memory_order_release);
+  for (unsigned i = 0;
+       i < 2000 && std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire) !=
+                       producer % ring.size();
+       ++i) {
+    (void)engine_->step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+  EXPECT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire),
+            producer % ring.size());
+  EXPECT_EQ(pointers[0] >> 32, 0xfeed1234u);
+  EXPECT_EQ(pointers[2], 0xabcdef0112345678ull);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(soc_->queue_registry().active_queues(), 0u);
+  for (uint32_t i = 0; i < soc_->num_xcds(); ++i)
+    EXPECT_FALSE(soc_->xcd(i)->command_processor()->doorbell_monitor_running_for_test());
+}
+
+TEST_P(KfdNativePm4Test, NativePm4PauseResumeRejectsInvalidRingAndTerminalFault) {
+  alignas(4096) std::array<uint32_t, 1024> ring{};
+  alignas(4096) std::array<uint64_t, 512> pointers{};
+  const uint64_t output = reinterpret_cast<uint64_t>(&pointers[2]);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(reinterpret_cast<uint64_t>(pointers.data()), pointers.data(),
+                     sizeof(pointers));
+  const std::array<uint32_t, 5> packet{0xc0033700, 5u << 8, uint32_t(output),
+                                       uint32_t(output >> 32), 0x12345678};
+  std::copy(packet.begin(), packet.end(), ring.begin());
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = GetParam().gpu_id;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = sizeof(ring);
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  void *doorbell = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 static_cast<off_t>(queue.doorbell_offset));
+  ASSERT_NE(doorbell, MAP_FAILED);
+  auto &read_pointer = *reinterpret_cast<uint32_t *>(&pointers[0]);
+  const auto pump = [&] {
+    for (unsigned i = 0; i < 200; ++i) {
+      (void)engine_->step();
+      std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+  };
+  kfd_ioctl_update_queue_args update{};
+  update.queue_id = queue.queue_id;
+  update.ring_base_address = queue.ring_base_address;
+  update.ring_size = queue.ring_size;
+  update.queue_percentage = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), 0);
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell)).store(5, std::memory_order_release);
+  pump();
+  EXPECT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 0u);
+  EXPECT_EQ(pointers[2], 0u);
+  update.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), 0);
+  pump();
+  EXPECT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 5u);
+  EXPECT_EQ(pointers[2], 0x12345678u);
+
+  // KFD also disables a queue with a null ring address and size, preserving
+  // its cursor so restoring the original ring resumes already-published work.
+  update.ring_base_address = 0;
+  update.ring_size = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), 0);
+  std::copy(packet.begin(), packet.end(), ring.begin() + 5);
+  ring[9] = 0x87654321;
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
+      .store(10, std::memory_order_release);
+  pump();
+  EXPECT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 5u);
+  EXPECT_EQ(pointers[2], 0x12345678u);
+  update.ring_base_address = queue.ring_base_address;
+  update.ring_size = queue.ring_size;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), 0);
+  pump();
+  EXPECT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 10u);
+  EXPECT_EQ(pointers[2], 0x87654321u);
+
+  update.ring_base_address = queue.ring_base_address + 1;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EINVAL);
+  update.ring_base_address = queue.ring_base_address;
+  update.ring_size = 3;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EINVAL);
+  update.ring_size = queue.ring_size;
+  // Invalid updates must leave the old ring live at its previous cursor.
+  std::copy(packet.begin(), packet.end(), ring.begin() + 10);
+  ring[14] = 0xabcdef01;
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
+      .store(15, std::memory_order_release);
+  pump();
+  EXPECT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 15u);
+  EXPECT_EQ(pointers[2], 0xabcdef01u);
+
+  ring[15] = 0; // Invalid type: the queue enters terminal failure.
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
+      .store(16, std::memory_order_release);
+  pump();
+  EXPECT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 15u);
+  update.queue_percentage = 0;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EINVAL);
+  update.queue_percentage = 100;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EINVAL);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(soc_->queue_registry().active_queues(), 0u);
+}
+
+TEST_P(KfdNativePm4Test, NativePm4GracefulCloseWaitsForBatchCompletion) {
+  using rocjitsu::amdgpu::QueueCloseStatus;
+  alignas(4096) std::array<uint32_t, 1024> ring{};
+  alignas(4096) std::array<uint64_t, 512> pointers{};
+  const uint64_t output = reinterpret_cast<uint64_t>(&pointers[2]);
+  const uint64_t wait_address = reinterpret_cast<uint64_t>(&pointers[3]);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(reinterpret_cast<uint64_t>(pointers.data()), pointers.data(),
+                     sizeof(pointers));
+  const std::array<uint32_t, 12> packets{0xc0033700,
+                                         5u << 8,
+                                         uint32_t(output),
+                                         uint32_t(output >> 32),
+                                         0x12345678,
+                                         0xc0053c00,
+                                         (1u << 4) | 3u,
+                                         uint32_t(wait_address),
+                                         uint32_t(wait_address >> 32),
+                                         1,
+                                         UINT32_MAX,
+                                         4};
+  std::copy(packets.begin(), packets.end(), ring.begin());
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = GetParam().gpu_id;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = sizeof(ring);
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  const auto handle = process->queue_doorbell_map_.at(queue.queue_id).queue_handle;
+  void *doorbell = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 static_cast<off_t>(queue.doorbell_offset));
+  ASSERT_NE(doorbell, MAP_FAILED);
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
+      .store(packets.size(), std::memory_order_release);
+  for (unsigned i = 0; i < 2000 && pointers[2] != 0x12345678u; ++i) {
+    (void)engine_->step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+  ASSERT_EQ(pointers[2], 0x12345678u);
+  EXPECT_EQ(soc_->queue_registry().unregister_queue(handle).status, QueueCloseStatus::Busy);
+  EXPECT_TRUE(soc_->queue_registry().contains(handle));
+  pointers[3] = 1;
+  auto &read_pointer = *reinterpret_cast<uint32_t *>(&pointers[0]);
+  for (unsigned i = 0;
+       i < 2000 &&
+       std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire) != packets.size();
+       ++i) {
+    (void)engine_->step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+  ASSERT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire),
+            packets.size());
+  EXPECT_EQ(soc_->queue_registry().unregister_queue(handle).status, QueueCloseStatus::Closed);
+  EXPECT_FALSE(soc_->queue_registry().contains(handle));
+  EXPECT_FALSE(soc_->xcd(0)->command_processor()->doorbell_monitor_running_for_test());
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+}
+
+TEST_F(KfdIoctlTest, SmallAllocationsMapTheWholeTailPage) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  alignas(4096) std::array<std::byte, 4096> host{};
+  for (const uint32_t kind : {KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, KFD_IOC_ALLOC_MEM_FLAGS_GTT}) {
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.size = 12;
+    allocation.gpu_id = kGpuId;
+    allocation.flags = kind | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    if (kind == KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
+      allocation.va_addr = reinterpret_cast<uint64_t>(host.data());
+      allocation.mmap_offset = allocation.va_addr;
+    }
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    EXPECT_EQ(allocation.size, 12u) << "Preserve the ioctl's requested size";
+    void *mapping = host.data();
+    if (kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT) {
+      mapping = driver_->mmap(nullptr, 12, PROT_READ | PROT_WRITE, MAP_SHARED,
+                              static_cast<off_t>(allocation.mmap_offset));
+      ASSERT_NE(mapping, MAP_FAILED);
+    }
+    static_cast<std::byte *>(mapping)[4095] = std::byte{0x5a};
+    const auto access = soc_->gpu_vm().snapshot_vmid(driver_->local_process_id());
+    ASSERT_TRUE(access);
+    std::byte last{};
+    EXPECT_EQ(access->read(allocation.va_addr + 4095, std::span(&last, 1)),
+              VmAccessOutcome::Complete);
+    EXPECT_EQ(last, std::byte{0x5a});
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  }
+  for (uint64_t size : {uint64_t(0), UINT64_MAX}) {
+    kfd_ioctl_alloc_memory_of_gpu_args invalid{};
+    invalid.gpu_id = kGpuId;
+    invalid.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    invalid.size = size;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &invalid), -EINVAL);
+  }
+}
+
+// Both compute formats share queue ownership; a native PM4 queue stays on one XCD.
+TEST_F(KfdIoctlTest, CreateQueueAcceptsPm4ComputeAndRejectsUnknownTypes) {
   const uint32_t num_xcds = soc_->num_xcds();
   ASSERT_GT(num_xcds, 1u);
 
@@ -1185,7 +1566,50 @@ TEST_F(KfdIoctlTest, CreateQueueRejectsUnsupportedPm4ComputeAndUnknownTypes) {
   pm4.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
   pm4.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
   pm4.queue_percentage = 100;
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), -ENOTSUP);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), 0);
+  EXPECT_EQ(registered_on_all_xcds(), 1u);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = pm4.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(registered_on_all_xcds(), 0u);
+
+  // PM4 target placement is initial queue configuration, separate from decoding.
+  ASSERT_GT(num_xcds, 2u);
+  pm4.queue_percentage = 100 | (2u << 8);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), 0);
+  EXPECT_EQ(soc_->xcd(2)->command_processor()->registered_queue_count_for_test(), 1u);
+  EXPECT_EQ(soc_->xcd(0)->command_processor()->registered_queue_count_for_test(), 0u);
+  destroy.queue_id = pm4.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(registered_on_all_xcds(), 0u);
+  pm4.queue_percentage = 100 | (num_xcds << 8);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), -EINVAL);
+
+  pm4.queue_percentage = (2u << 8) | 101;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), -EINVAL);
+  pm4.queue_percentage = 2u << 8;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &pm4), 0);
+  auto *owner = soc_->xcd(2)->command_processor();
+  EXPECT_TRUE(owner->queue_runtime_suspended_for_test(pm4.queue_id, driver_->local_process_id()));
+  kfd_ioctl_update_queue_args update{};
+  update.queue_id = pm4.queue_id;
+  update.ring_base_address = pm4.ring_base_address;
+  update.ring_size = pm4.ring_size;
+  update.queue_percentage = (2u << 8) | 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), 0);
+  EXPECT_FALSE(owner->queue_runtime_suspended_for_test(pm4.queue_id, driver_->local_process_id()));
+  update.queue_percentage = 2u << 8;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), 0);
+  EXPECT_TRUE(owner->queue_runtime_suspended_for_test(pm4.queue_id, driver_->local_process_id()));
+  update.queue_percentage = (2u << 8) | 101;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EINVAL);
+  update.queue_percentage = (num_xcds << 8) | 100;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EINVAL);
+  update.queue_percentage = (1u << 8) | 100;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EOPNOTSUPP);
+  EXPECT_TRUE(owner->queue_runtime_suspended_for_test(pm4.queue_id, driver_->local_process_id()));
+  destroy.queue_id = pm4.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
   EXPECT_EQ(registered_on_all_xcds(), 0u);
 
   kfd_ioctl_create_queue_args unknown{};
@@ -1198,6 +1622,35 @@ TEST_F(KfdIoctlTest, CreateQueueRejectsUnsupportedPm4ComputeAndUnknownTypes) {
   unknown.queue_percentage = 100;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &unknown), -ENOTSUP);
   EXPECT_EQ(registered_on_all_xcds(), 0u);
+}
+
+TEST_P(KfdNativePm4Test, QueueAdmissionIsIndependentOfDiscoveryMetadata) {
+  alignas(4096) std::array<uint32_t, 1024> ring{};
+  alignas(8) std::array<uint64_t, 2> pointers{};
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = GetParam().gpu_id;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = sizeof(ring);
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+
+  auto device = loaded_.device;
+  device.ip_versions.clear();
+  driver_->setup_topology(device, 1);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+
+  device.ip_versions = loaded_.device.ip_versions;
+  device.gfx_target_version = 110002; // Discovery does not govern queue admission.
+  driver_->setup_topology(device, 1);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  destroy.queue_id = queue.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(soc_->queue_registry().active_queues(), 0u);
 }
 
 // Replication makes every CP hold a host-accessible queue, so "does this CP have
@@ -1618,6 +2071,7 @@ TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
   kfd_ioctl_create_queue_args create{};
   create.gpu_id = kCdna5GpuId;
   create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.queue_percentage = 100;
   create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
   create.ring_size = static_cast<uint32_t>(ring.size());
   create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
@@ -2078,6 +2532,105 @@ TEST_F(KfdIoctlCdna5Test, DebuggerResumeRejectsPendingRuntimeExceptionPublicatio
     EXPECT_FALSE(
         cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
   });
+}
+
+TEST_F(KfdIoctlCdna5Test, DebuggerForwardsQueueExceptionsWithoutRuntimeAcknowledgment) {
+  constexpr uint64_t kExceptionStatusAddress = 0x600900000ULL;
+  constexpr uint32_t kExceptionEventId = 84;
+  constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  constexpr uint64_t kMathError = KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR);
+  using Page = std::array<uint8_t, 4096>;
+  alignas(rocjitsu::amdgpu::kAqlPacketBytes) Page ring{};
+  alignas(4096) Page cwsr{};
+  Page exception_page{};
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kExceptionStatusAddress, exception_page.data(), exception_page.size());
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &kExceptionStatusAddress,
+              sizeof(kExceptionStatusAddress));
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kExceptionEventId,
+              sizeof(kExceptionEventId));
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = make_debug_fd();
+  enable.enable.exception_mask = kWaveAbort | kMathError;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  alignas(4096) amd_queue_v2_t queue_descriptor{};
+  process->map_pages(reinterpret_cast<uint64_t>(&queue_descriptor), &queue_descriptor,
+                     sizeof(queue_descriptor));
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kCdna5GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.read_dispatch_id);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.write_dispatch_id);
+  create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+  create.ctx_save_restore_size = static_cast<uint32_t>(cwsr.size());
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  // An immediate deadline makes the old acknowledgment requirement fail
+  // deterministically without a wall-clock assertion or a one-second wait.
+  soc_->for_each_cp([](rocjitsu::amdgpu::CommandProcessor *cp) {
+    cp->set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds(0));
+  });
+  std::vector<uint64_t> delivered;
+  driver_->set_interrupt_callback_for_testing([&](uint32_t process_id, uint32_t event_id) {
+    if (event_id != kExceptionEventId)
+      return;
+    EXPECT_EQ(process_id, driver_->local_process_id());
+    delivered.push_back(vm_read64(kExceptionStatusAddress, process_id));
+    // ROCr clears the signal and removes its async handler after the first
+    // fatal exception. Later waves still forward their stops to this queue.
+    if (delivered.size() == 1)
+      (void)vm_write64(kExceptionStatusAddress, 0, process_id);
+  });
+  struct ObserverGuard {
+    rocjitsu::SimulatedKfd *driver;
+    ~ObserverGuard() { driver->set_interrupt_callback_for_testing(nullptr); }
+  } observer_guard{driver_};
+
+  kfd_ioctl_dbg_trap_args forward{};
+  forward.pid = static_cast<uint32_t>(getpid());
+  forward.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
+  forward.send_runtime_event.gpu_id = kCdna5GpuId;
+  forward.send_runtime_event.queue_id = create.queue_id;
+  forward.send_runtime_event.exception_mask = kWaveAbort;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+  EXPECT_EQ(vm_read64(kExceptionStatusAddress, driver_->local_process_id()), 0u);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+  EXPECT_EQ(vm_read64(kExceptionStatusAddress, driver_->local_process_id()), kWaveAbort);
+  forward.send_runtime_event.exception_mask = kMathError;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+  EXPECT_EQ(delivered, (std::vector<uint64_t>{kWaveAbort, kWaveAbort, kWaveAbort | kMathError}));
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    EXPECT_TRUE(
+        cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
+  });
+
+  // Runtime-owned delivery still requires acknowledgment before releasing its
+  // retained debugger fallback. The debugger ioctl's contract is different.
+  EXPECT_FALSE(driver_->signal_runtime_queue_exception_for_testing(
+      kCdna5GpuId, create.queue_id, driver_->local_process_id(), kWaveAbort));
+  const size_t delivered_before_unmap = delivered.size();
+  process->unmap_pages(kExceptionStatusAddress, exception_page.size());
+  EXPECT_LT(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0)
+      << "a live queue with inaccessible exception storage must not report publication success";
+  EXPECT_EQ(delivered.size(), delivered_before_unmap);
+
+  // KFD accepts a late forwarding request for a queue already destroyed by
+  // the runtime; there is no live queue to signal or storage to touch.
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = create.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+  EXPECT_EQ(delivered.size(), delivered_before_unmap);
 }
 
 TEST_F(KfdIoctlCdna5Test, RuntimeExceptionFanoutCanDrainPendingCuNotification) {
@@ -7328,7 +7881,7 @@ TEST_F(KfdIoctlCdna5Test, ScratchGrowthPreservesSpillsFromOverlappingDispatches)
   alignas(64) std::array<std::array<uint64_t, 3>, 2> pointers{};
   std::array<uint64_t, 2> registrations{};
   for (uint32_t i = 0; i < cps.size(); ++i) {
-    amdgpu::AqlQueueConfig queue{};
+    amdgpu::ComputeQueueConfig queue{};
     queue.address_space = process->gpu(0).address_space;
     queue.process_id = process_id;
     queue.queue_id = i + 1;
@@ -7767,6 +8320,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   kfd_ioctl_create_queue_args create{};
   create.gpu_id = kCdna5GpuId;
   create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.queue_percentage = 100;
   create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
   create.ring_size = static_cast<uint32_t>(ring.size());
   create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);

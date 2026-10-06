@@ -724,6 +724,48 @@ graph:
   Unit_hipStreamBeginCapture_Positive_SelfWaitOnForkedStream:
     <<: *level_2
     tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_SelfWaitWithInterveningWork:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_DestroyForkedStreamDuringCapture:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_DestroyOriginStreamDuringCapture:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_SelfWaitOnInvalidatedForkedStream:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_CycleAmongForkedStreams:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_CrossCaptureWaitIsRejected:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_BeginCaptureOnInvalidatedStream:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_DestroyNestedForkDuringCapture:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_ConcurrentForkIntoOneCapture:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_ConcurrentWaitsAccumulateDependencies:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapture:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_StreamOffenceInvalidatesWholeCapture:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_GlobalOffenceInvalidatesWholeCapture:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_InvalidationReachesSiblingForks:
+    <<: *level_2
+    tags: [capture]
   Unit_hipGraphAddMemcpyNode1D_Functional:
     <<: *level_2
     tags: [node]
@@ -936,6 +978,9 @@ graph:
   Unit_hipStreamBeginCaptureToGraph_EndingWhileCaptureInProgress:
     <<: *level_2
     tags: [capture]
+  Unit_hipStreamBeginCaptureToGraph_Positive_CaptureTeardownDestroysGraph:
+    <<: *level_2
+    tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_MultipleFlags:
     <<: *level_2
     tags: [capture]
@@ -1098,7 +1143,7 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMallocManaged:
     <<: *level_2
-    tags: [node]
+    tags: [node, managed_memory]
   Unit_hipGraphAddKernelNode_Negative:
     <<: *level_2
     tags: [node, P0]
@@ -1309,7 +1354,7 @@ graph:
     tags: [capture]
   Unit_hipLaunchHostFunc_KernelWritesManagedMem_HostNodeReads:
     <<: *level_2
-    tags: [capture]
+    tags: [capture, managed_memory]
   Unit_hipUserObjectCreate_Functional_1:
     <<: *level_2
     tags: [userobj]
@@ -1573,6 +1618,26 @@ graph:
   Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters:
     <<: *level_2
     tags: [node]
+  Unit_hipGraphKernelNodeSetAttribute_Positive_Priority:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphKernelNodeSetAttribute_Negative_Priority_OutOfRange:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphKernelNodePriority_CaptureStreamPriorityCopied:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphKernelNodeCopyAttributes_MultiAttr:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphKernelNodePriority_ForkJoinWithFlag:
+    <<: *level_2
+    tags: [node]
+    disabled: [amd_windows]
+  Unit_hipGraphKernelNodePriority_ChildGraphWithFlag:
+    <<: *level_2
+    tags: [node]
+    disabled: [amd_windows]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional:
     <<: *level_2
     tags: [query]
@@ -1780,7 +1845,7 @@ graph:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
-    tags: [node]
+    tags: [node, managed_memory]
   Unit_hipDrvGraphAddMemcpyNode_Negative:
     <<: *level_2
     tags: [node]

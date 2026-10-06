@@ -119,8 +119,8 @@ private:
 };
 
 /// @brief A bounded same-wave execution window.
-/// @details Draining before CU rescheduling keeps decoder pools, wave storage
-/// and data caches owned by the issuing thread.
+/// @details Draining before CU rescheduling keeps wave storage and data caches
+/// stable until asynchronous work finishes.
 class AsyncInstructionWindow {
   using Access = async_execution::Access;
 

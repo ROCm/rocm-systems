@@ -32,10 +32,15 @@ test_categories:
       - "MappingStages/P2pImportMapStageFails.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      - "ConnStepAcquireMicrotest.*"
       # ras/ras.cc
       - "RasMicrotest.*"
       # ras/diagnostics_checks_common.cc
       - "RasDiagnosticsCommonMicrotest.*"
+      # ras/collectives.cc
+      - "RasCollectivesMicrotest.*"
+      # ras/diagnostics.cc
+      - "RasDiagnosticsMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
       # rma/rma_proxy_launch.cc
@@ -65,8 +70,15 @@ test_categories:
       - "RmaProxyReadyTest.*"
       # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
+      # tuning/tuning.cc
+      - "TuningMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
+      - "ReclaimPlannerStateTest.*"
+      - "AsyncLaunchTest.*"
+      - "GroupJobAbortTest.*"
+      - "GroupApiWrapperTest.*"
+      - "ArgsGlobalCheckTest.*"
       # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"

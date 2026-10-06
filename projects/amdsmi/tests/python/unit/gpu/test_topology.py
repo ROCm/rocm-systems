@@ -21,7 +21,3 @@ class TestAmdSmiTopologyHandleValidation(unittest.TestCase):
     def test_p2p_status_rejects_non_handle(self):
         with self.assertRaises(amdsmi.AmdSmiParameterException):
             amdsmi.amdsmi_topo_get_p2p_status("not_a_handle", "not_a_handle")
-
-
-if __name__ == "__main__":
-    unittest.main()

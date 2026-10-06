@@ -156,6 +156,25 @@
         }
       ]
     },
+    "resiliency_gid_change": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "description": "Port failover + recovery with a merged vNIC: GID refresh on the CAST and IB paths.",
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
+        }
+      ]
+    },
     "a_netib_multithread": {
       "extends": "gtest_base",
       "timeout": 600,
@@ -196,6 +215,22 @@
           "name": "A17_NetIB_MultiThread_ProgressDoesNotSerialize",
           "description": "Gate: concurrent workers must progress at the same time. Catches a lock held across a progress call, which functional tests pass straight through.",
           "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"
+        }
+      ]
+    },
+    "a_cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "description": "A18: four worker threads per rank on independent IB-CAST connections, so several WRR schedulers advance at once.",
+      "env_variables": {
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "A18_Cast_MultiThread_StressMultiRound",
+          "description": "Concurrent CAST connections, each auditing its own WRR token ledger.",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
         }
       ]
     },
@@ -288,6 +323,35 @@
           "name": "A15_Gin_AinicSelectsCastBackend",
           "description": "GIN on AINIC uses IbCastGinIb, not the generic ncclGinIbProxy (no dual enumeration).",
           "test_filter": "GinInitMPITest.AinicSelectsCastBackend"
+        }
+      ]
+    },
+
+    "gin_device_get_flush": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "GIN device-side gin.get completed by gin.flush or gin.flushAsync + gin.wait must be visible in the same kernel. Require NCCL_NET=ib-cast.",
+      "env_variables": {
+        "NCCL_NET": "ib-cast",
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "A21_Gin_GetFlush_Visibility",
+          "description": "gin.flush makes prior gets visible in the same kernel (8 B - 4 MiB).",
+          "test_filter": "GinMPIDeviceTests.GetFlush_Visibility"
+        },
+        {
+          "name": "A22_Gin_GetFlushAsyncWait_Visibility",
+          "description": "gin.flushAsync + gin.wait makes prior gets visible in the same kernel.",
+          "test_filter": "GinMPIDeviceTests.GetFlushAsyncWait_Visibility"
+        },
+        {
+          "name": "A23_Gin_GetFlush_ConcurrentBlocks",
+          "description": "8 CTAs get + flush concurrently on one GIN context.",
+          "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks"
         }
       ]
     },
@@ -403,6 +467,52 @@
           "name": "A18_SubnetMatchesAny",
           "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set.",
           "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
+        }
+      ]
+    },
+
+    "host_api_rma_disable_intranode": {
+      "extends": "gtest_base",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "description": "NCCL_RMA_DISABLE=1 on a single node: both ranks are in the LSA team, so one-sided put/wait must still work over the copy engine. NCCL_PARAM is cached per process, so the flag has to come from the environment.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_RMA_DISABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "A21_HostApi_RmaDisableIntraNodePutUsesCe",
+          "description": "NCCL_RMA_DISABLE=1 leaves intra-node put/wait working and the data correct.",
+          "test_filter": "HostApiTest.RmaDisableIntraNodePutUsesCe"
+        }
+      ]
+    },
+
+    "host_api_rma_disable_proxy": {
+      "extends": "gtest_base",
+      "timeout": 180,
+      "description": "NCCL_RMA_DISABLE=1 across two nodes: the peer needs the RMA proxy, which the flag keeps down, so put and wait must fail with ncclInvalidUsage instead of hanging, on symmetric and non-symmetric windows.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_RMA_USE_DMABUF": "1",
+        "NCCL_RMA_DISABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "A22_HostApi_RmaDisableCrossNodePutFails_Sym",
+          "description": "Symmetric window: registration succeeds, cross-node put/wait return ncclInvalidUsage, and the communicator stays usable.",
+          "test_filter": "HostApiTest.RmaDisableCrossNodePutFails"
+        },
+        {
+          "name": "A22_HostApi_RmaDisableCrossNodePutFails_NonSym",
+          "description": "Non-symmetric window (NCCL_CUMEM_ENABLE=0): registration skips the proxy, cross-node put/wait return ncclInvalidUsage.",
+          "test_filter": "HostApiTest.RmaDisableCrossNodePutFails",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "0"
+          }
         }
       ]
     },
@@ -575,6 +685,43 @@
       ]
     },
 
+    "opt_recv_completion": {
+      "extends": "rccl_tests_base",
+      "timeout": 600,
+      "description": "Optional recv completion with CTS offload on. RCCL_IB_OPTIONAL_RECV_COMPLETION=0 so CTS offload is the only thing that enables the skip. QP sched off. Allreduce pins NCCL_PROTO so net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_CTS_OFFLOAD_ENABLED": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "0",
+        "NCCL_NET_OPTIONAL_RECV_COMPLETION": "1",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "0"
+      },
+      "tests": [
+        { "name": "B13_alltoall_optRecvCompletion", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16M -f 2 -g 1", "description": "Alltoall with optional recv completion enabled (P2P/CTS-offload comms)." },
+        { "name": "B13_allreduce_optRecvCompletion_LL", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL" }, "description": "Allreduce LL: net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION." },
+        { "name": "B13_allreduce_optRecvCompletion_LL128", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "Allreduce LL128: net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION." }
+      ]
+    },
+
+    "opt_recv_completion_no_cts": {
+      "extends": "rccl_tests_base",
+      "timeout": 600,
+      "description": "Optional recv completion with CTS offload off: the combination this PR newly makes reachable (control param on, not equivalent to useCtsOffload).",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_NET_OPTIONAL_RECV_COMPLETION": "1",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1"
+      },
+      "tests": [
+        { "name": "B13_alltoall_optRecvCompletion_noCts", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16M -f 2 -g 1", "description": "Alltoall optional recv completion with software CTS (offload off)." },
+        { "name": "B13_allreduce_optRecvCompletion_noCts_LL", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL" }, "description": "Allreduce LL with optional recv completion and CTS offload off." },
+        { "name": "B13_allreduce_optRecvCompletion_noCts_LL128", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "Allreduce LL128 with optional recv completion and CTS offload off." }
+      ]
+    },
+
     "alltoall_fullrange_guard": {
       "extends": "rccl_tests_base",
       "command_args": "-b 1K -e 16G -f 2 -g 1",
@@ -609,15 +756,20 @@
     { "config": "cts_on_depth32",        "enabled": true, "smoke": true },
     { "config": "cast_wrr",              "enabled": true, "smoke": true },
     { "config": "cast_fault_injection",  "enabled": true, "smoke": true },
+    { "config": "resiliency_gid_change", "enabled": true },
     { "config": "cast_by_order_no_cts",  "enabled": true, "smoke": true },
     { "config": "cast_grh",              "enabled": true, "smoke": true },
     { "config": "cast_subnet_routing",   "enabled": true, "smoke": true },
     { "config": "gin_proxy",             "enabled": true, "smoke": true },
     { "config": "gin_enable_gate",       "enabled": true },
     { "config": "gin_ainic_backend",     "enabled": true },
+    { "config": "gin_device_get_flush",  "enabled": true },
     { "config": "bootstrap_socket_poll", "enabled": true, "smoke": true },
     { "config": "net_ib_cast_plane_subnet", "enabled": true, "smoke": true },
     { "config": "a_netib_multithread",   "enabled": true, "smoke": true },
+    { "config": "a_cast_multithread",    "enabled": true, "smoke": true },
+    { "config": "host_api_rma_disable_intranode", "enabled": true },
+    { "config": "host_api_rma_disable_proxy",     "enabled": true },
 
     { "config": "ib_baseline",           "enabled": true, "smoke": true },
     { "config": "cast_alltoall_full",    "enabled": true, "smoke": true },
@@ -630,6 +782,8 @@
     { "config": "autodetect_off",        "enabled": true, "smoke": true },
     { "config": "rocmib_no_cts_offload", "enabled": true, "smoke": true },
     { "config": "cts_force_override",    "enabled": true, "smoke": true },
+    { "config": "opt_recv_completion",   "enabled": true, "smoke": true },
+    { "config": "opt_recv_completion_no_cts", "enabled": true, "smoke": true },
     { "config": "alltoall_fullrange_guard", "enabled": true, "smoke": true },
 
     { "config": "ionic_counters",        "enabled": true }
