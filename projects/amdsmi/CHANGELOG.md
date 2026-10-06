@@ -27,6 +27,17 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
 
+- **Fixed wrong values from PM metrics and register table queries in the Python library**.  
+  - The record names were correct, but every value was wrong.
+
+- **Fixed power readings of exactly 255 W showing as N/A in the Python library**.  
+  - A reading of exactly 255 or 65,535 in any power or voltage field was treated as unavailable.
+
+- **Fixed wrong overdrive clock and voltage values in the Python library**.  
+  - The memory clock range showed the fabric clock range, and the clock limits and voltage curve were also wrong.
+
+- **Fixed wrong CPU DIMM power and temperature values on Python 3.14 and later**.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
