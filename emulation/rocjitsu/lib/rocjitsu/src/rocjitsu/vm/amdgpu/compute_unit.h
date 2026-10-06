@@ -1521,7 +1521,7 @@ protected:
   /// @brief Whether command-processor notifications are pending.
   /// @details Inspected under @ref wave_state_mutex_.
   bool has_pending_cp_notifications() const {
-    return !pending_vm_faults_.empty() || !pending_queue_exceptions_.empty() ||
+    return !pending_dispatch_failures_.empty() || !pending_queue_exceptions_.empty() ||
            !pending_wg_completions_.empty() || pending_capacity_change_ ||
            !pending_execution_failures_.empty();
   }
@@ -1553,13 +1553,13 @@ protected:
   /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
   bool pending_capacity_change_ = false;
-  struct PendingVmFault {
+  struct PendingDispatchFailure {
     uint32_t queue_id = 0;
     uint32_t process_id = 0;
     uint32_t dispatch_id = 0;
-    VmAccessOutcome outcome = VmAccessOutcome::Faulted;
+    std::optional<VmAccessOutcome> vm_outcome;
   };
-  std::vector<PendingVmFault> pending_vm_faults_;
+  std::vector<PendingDispatchFailure> pending_dispatch_failures_;
   struct PendingExecutionFailure {
     uint32_t queue_id;
     uint32_t process_id;

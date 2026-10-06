@@ -865,6 +865,9 @@ void CommandProcessor::startup() {
 
 void CommandProcessor::shutdown() {
   stop_doorbell_monitor();
+  // An instruction failure stops the engine before peer doorbell events may
+  // run. Engine workers have joined, so finish cancelling those shards here.
+  drain_dispatch_fault_inbox();
   retry_event_pending_.store(false, std::memory_order_release);
   stall_recheck_pending_ = false;
   stall_recheck_tick_ = simdojo::TICK_MAX;
@@ -982,8 +985,7 @@ void CommandProcessor::drain_dispatch_fault_inbox() {
   }
   for (const DispatchFaultNotification &fault : faults) {
     if (!fault.on_cancelled) {
-      (void)fault_dispatch_local(fault.queue_id, fault.process_id, fault.dispatch_id,
-                                 fault.outcome);
+      (void)fault_dispatch_local(fault.queue_id, fault.process_id, fault.dispatch_id);
       continue;
     }
     {
@@ -2692,7 +2694,7 @@ bool CommandProcessor::drain_completions() {
 }
 
 bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_id,
-                                            uint64_t dispatch_id, VmAccessOutcome outcome) {
+                                            uint64_t dispatch_id) {
   bool found = false;
   {
     // A shard may still be in transit from its owner. Remove it under the leaf
@@ -2748,8 +2750,8 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
   if (state.packet_format == QueuePacketFormat::Aql && !state.commands.submissions.empty())
     fail_pm4_queue(state, state.dispatches);
   util::Logger::cp([&](auto &os) {
-    os << std::format("{}: terminal dispatch fault pid={} qid={} dispatch={} outcome={}", name(),
-                      process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
+    os << std::format("{}: terminal dispatch failure pid={} qid={} dispatch={}", name(), process_id,
+                      queue_id, dispatch_id);
   });
   erase_cluster_workgroups(static_cast<uint32_t>(dispatch_id));
   for (ComputeUnitCore *cu : cus_)
@@ -2759,21 +2761,29 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
 
 void CommandProcessor::notify_dispatch_vm_fault(uint32_t queue_id, uint32_t process_id,
                                                 uint64_t dispatch_id, VmAccessOutcome outcome) {
-  if (outcome == VmAccessOutcome::Complete || outcome == VmAccessOutcome::Unavailable ||
-      dispatch_id > std::numeric_limits<uint32_t>::max())
+  if (outcome == VmAccessOutcome::Complete || outcome == VmAccessOutcome::Unavailable)
+    return;
+  util::Logger::cp([&](auto &os) {
+    os << std::format("{}: terminal VM fault pid={} qid={} dispatch={} outcome={}", name(),
+                      process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
+  });
+  notify_dispatch_failure(queue_id, process_id, dispatch_id);
+}
+
+void CommandProcessor::notify_dispatch_failure(uint32_t queue_id, uint32_t process_id,
+                                               uint64_t dispatch_id) {
+  if (dispatch_id > std::numeric_limits<uint32_t>::max())
     return;
 
-  if (!fault_dispatch_local(queue_id, process_id, dispatch_id, outcome))
+  if (!fault_dispatch_local(queue_id, process_id, dispatch_id))
     return;
   // A fault can originate on any shard. Cross-XCD delivery uses a leaf inbox
   // and the peer's event thread, exactly like dispatch fan-out, so this path
   // never acquires another CP's queue mutex.
   for (CommandProcessor *peer : xcd_peers_) {
     if (peer != nullptr && peer != this) {
-      peer->accept_dispatch_fault({.queue_id = queue_id,
-                                   .process_id = process_id,
-                                   .dispatch_id = dispatch_id,
-                                   .outcome = outcome});
+      peer->accept_dispatch_fault(
+          {.queue_id = queue_id, .process_id = process_id, .dispatch_id = dispatch_id});
     }
   }
 }
