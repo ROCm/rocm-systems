@@ -58,11 +58,12 @@ def load_time_window_module():
     sys.modules[package_name] = package
     sys.modules[importer.__name__] = importer
 
-    # configured into the build tree by CMake; falls back to the source tree
-    test_dir = Path("@CMAKE_CURRENT_SOURCE_DIR@")
-    if not test_dir.is_absolute():
-        test_dir = Path(__file__).resolve().parent
+    test_dir = Path(__file__).resolve().parent
     source_path = test_dir.parents[1] / "source/lib/python/rocpd/time_window.py"
+    if not source_path.is_file():
+        package_spec = importlib.util.find_spec("rocpd")
+        assert package_spec is not None and package_spec.origin, "cannot locate rocpd"
+        source_path = Path(package_spec.origin).with_name("time_window.py")
     assert source_path.is_file(), f"cannot locate {source_path}"
 
     spec = importlib.util.spec_from_file_location(
@@ -132,6 +133,36 @@ def import_data():
 def intervals(import_data):
     import_data.add_timed_view("intervals", ("start", "end"), ((100, 200),))
     return import_data
+
+
+def test_loader_finds_installed_module_without_source(tmp_path, monkeypatch, intervals):
+    prefix = tmp_path / "relocated install"
+    site_packages = prefix / "lib" / "python3" / "site-packages"
+    package_dir = site_packages / "rocpd"
+    package_dir.mkdir(parents=True)
+    module_path = package_dir / "time_window.py"
+    module_path.write_bytes(Path(time_window.__file__).read_bytes())
+    (package_dir / "__init__.py").write_text(
+        'raise RuntimeError("Native ROCpd initialization must not run")\n'
+    )
+    test_path = (
+        prefix / "share" / "rocprofiler-sdk" / "tests" / "rocpd" / Path(__file__).name
+    )
+    monkeypatch.setitem(globals(), "__file__", str(test_path))
+    monkeypatch.syspath_prepend(str(site_packages))
+    monkeypatch.delitem(sys.modules, "rocpd", raising=False)
+    for name in (
+        time_window.__package__,
+        time_window.__package__ + ".importer",
+        time_window.__name__,
+    ):
+        monkeypatch.setitem(sys.modules, name, sys.modules[name])
+
+    module = load_time_window_module()
+
+    assert Path(module.__file__) == module_path
+    assert "rocpd" not in sys.modules
+    assert module.percentages2timestamp(intervals, "50%", None) == (150, 200)
 
 
 #
@@ -231,9 +262,61 @@ def test_valid_percentage_is_converted(intervals, value):
     assert time_window.percentages2timestamp(intervals, value, None) == (150, 200)
 
 
-@pytest.mark.parametrize("value", (150, 150.0))
-def test_numeric_endpoints_are_accepted(intervals, value):
-    assert time_window.percentages2timestamp(intervals, value, None) == (150, 200)
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    ((150, 150), (150.0, 150), ("150.0", 150), ("1.5e2", 150), ("150.5", 150.5)),
+)
+def test_numeric_endpoints_are_accepted(intervals, value, expected):
+    assert time_window.percentages2timestamp(intervals, value, None) == (expected, 200)
+
+
+@pytest.mark.parametrize("start_time", (2**53 + 1, 2**53 + 3))
+@pytest.mark.parametrize("mode", ("timestamps", "numeric", "markers", "percentages"))
+@pytest.mark.parametrize("inclusive", (True, False))
+def test_large_timestamp_boundaries_are_preserved(
+    import_data, capsys, start_time, mode, inclusive
+):
+    end_time = start_time + 10
+    import_data.add_timed_view("intervals", ("start", "end"), ((start_time, end_time),))
+    import_data.add_timed_view("samples", ("timestamp",), ((start_time,), (end_time,)))
+    if mode == "markers":
+        import_data.add_markers((("range", start_time, end_time),))
+        kwargs = {"start_marker": "range", "end_marker": "range"}
+    elif mode == "percentages":
+        kwargs = {"start": "0%", "end": "100%"}
+    elif mode == "numeric":
+        kwargs = {"start": start_time, "end": end_time}
+    else:
+        kwargs = {"start": str(start_time), "end": str(end_time)}
+
+    time_window.apply_time_window(import_data, inclusive=inclusive, **kwargs)
+
+    assert import_data.execute("SELECT * FROM intervals").fetchall() == [
+        (start_time, end_time)
+    ]
+    assert import_data.execute("SELECT timestamp FROM samples").fetchall() == [
+        (start_time,),
+        (end_time,),
+    ]
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize(
+    ("percentage", "offset"),
+    (("0%", 0), ("25%", 2), ("50%", 5), ("75%", 8), ("100%", 10)),
+)
+def test_percentage_offsets_preserve_integer_nanoseconds(import_data, percentage, offset):
+    start_time = 2**53 + 1
+    end_time = start_time + 10
+    import_data.add_timed_view("intervals", ("start", "end"), ((start_time, end_time),))
+
+    actual_start, actual_end = time_window.percentages2timestamp(
+        import_data, percentage, None
+    )
+
+    assert actual_start == start_time + offset
+    assert actual_end == end_time
+    assert isinstance(actual_start, int)
 
 
 @pytest.mark.parametrize("value", ("50%%", "5%0", "%50", "%", "abc%", "5 0%"))
@@ -345,11 +428,12 @@ def test_ambiguous_marker_is_reported(intervals):
         time_window.get_marker_timestamp(intervals, "begin")
 
 
-def test_marker_endpoints_read_their_own_column(intervals):
-    intervals.add_markers((("range", 120, 180),))
+@pytest.mark.parametrize(("start_time", "end_time"), ((120, 180), (2**53 + 1, 2**53 + 3)))
+def test_marker_endpoints_read_their_own_column(intervals, start_time, end_time):
+    intervals.add_markers((("range", start_time, end_time),))
 
-    assert time_window.get_marker_timestamp(intervals, "range", "start") == 120
-    assert time_window.get_marker_timestamp(intervals, "range", "end") == 180
+    assert time_window.get_marker_timestamp(intervals, "range", "start") == start_time
+    assert time_window.get_marker_timestamp(intervals, "range", "end") == end_time
 
 
 def test_end_marker_uses_the_marker_end_timestamp(import_data):

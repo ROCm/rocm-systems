@@ -41,7 +41,7 @@ class TimeWindowError(ValueError):
 
 def get_marker_timestamp(
     connection: sqlite3.Connection, marker_name: str, marker_type: str = "start"
-) -> float:
+) -> int:
     """Get the start or end timestamp of a named marker."""
     if marker_type not in ("start", "end"):
         raise ValueError(f"marker_type must be 'start' or 'end', not '{marker_type}'")
@@ -71,7 +71,7 @@ def get_marker_timestamp(
             f'ERROR: Ambiguous reference - multiple {marker_type} markers found with name "{marker_name}"'
         )
 
-    return float(result[0][0])
+    return int(result[0][0])
 
 
 def quote_identifier(identifier: str) -> str:
@@ -160,7 +160,7 @@ def _convert_time(
     is_start: bool,
     min_time: float,
     max_time: float,
-) -> float:
+) -> Union[int, float]:
     """Convert a user-supplied time specification (number or percentage) to an
     absolute nanosecond timestamp."""
     if time_str is None or time_str == "":
@@ -186,20 +186,23 @@ def _convert_time(
             raise TimeWindowError(
                 f"ERROR: Invalid {label} percentage '{time_str}' - must be finite"
             )
-        return min_time + ((max_time - min_time) * percentage)
+        return min_time + round((max_time - min_time) * percentage)
 
     try:
-        value = float(value_str)
+        value = int(value_str)
     except ValueError:
-        raise TimeWindowError(
-            f"ERROR: Invalid {label} value '{time_str}' - must be a percentage "
-            f"(e.g., '50%') or a number (nanoseconds since epoch)"
-        ) from None
+        try:
+            value = float(value_str)
+        except ValueError:
+            raise TimeWindowError(
+                f"ERROR: Invalid {label} value '{time_str}' - must be a percentage "
+                f"(e.g., '50%') or a number (nanoseconds since epoch)"
+            ) from None
 
-    if not math.isfinite(value):
-        raise TimeWindowError(
-            f"ERROR: Invalid {label} value '{time_str}' - must be a finite number"
-        )
+        if not math.isfinite(value):
+            raise TimeWindowError(
+                f"ERROR: Invalid {label} value '{time_str}' - must be a finite number"
+            )
 
     return value
 
