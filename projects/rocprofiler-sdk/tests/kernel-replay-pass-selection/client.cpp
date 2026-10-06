@@ -21,20 +21,28 @@
 // SOFTWARE.
 
 /**
- * @file tests/kernel-replay-local-context/client.cpp
+ * @file tests/kernel-replay-pass-selection/client.cpp
  *
- * @brief LD_PRELOAD tool that replays a distinctive HIP kernel and locally starts/stops
- * per-service contexts across passes.
+ * @brief LD_PRELOAD tool that replays a distinctive HIP kernel and decides, in each service's own
+ * dispatch callback, which passes that service collects on.
+ *
+ * Every pass of a replayed dispatch is submitted through the queue interceptor on the replaying
+ * thread, so each dispatch-scoped service calls its dispatch callback once per pass, on that
+ * thread, between the pass's PASS PHASE_ENTER and PHASE_EXIT. The PASS callback publishes the pass
+ * index in thread-local state and the dispatch callbacks consult it; that is the whole of per-pass
+ * service selection. The checks count, per pass, what each service delivered for the replayed
+ * kernel, and fail if any of its dispatch callbacks ran outside a pass.
  *
  * Environment:
- *   KR_LC_SERVICES    comma list: counters, att, spm, pc-sampling
- *   KR_LC_PASSES      replay pass count (default 4)
- *   KR_LC_STOP_PASS   pass index at PHASE_ENTER where listed services are locally stopped.
+ *   KR_PS_SERVICES    comma list: counters, att, spm, pc-sampling
+ *   KR_PS_PASSES      replay pass count (default 4)
+ *   KR_PS_STOP_PASS   pass from which the listed services stop collecting.
  *                     0 = before any collection, 1 = after pass 0, <0 = never stop
- *   KR_LC_START_PASS  pass index at PHASE_ENTER where listed services are locally started
- *                     again (re-enable after a local stop). <0 = never local-start.
- *                     A local start cannot promote a globally-stopped context.
- *   KR_LC_KEEP        comma list of services that are never locally started/stopped
+ *   KR_PS_START_PASS  pass from which they collect again after a stop. <0 = never.
+ *   KR_PS_KEEP        comma list of services that collect on every pass
+ *
+ * PC sampling is agent-wide rather than dispatch-scoped, so it has no dispatch callback to select
+ * passes with: it samples every pass, and its run only checks that replay completes under it.
  */
 
 #include <rocprofiler-sdk/agent.h>
@@ -50,6 +58,7 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -69,7 +78,7 @@
         if(_s != ROCPROFILER_STATUS_SUCCESS)                                                       \
         {                                                                                          \
             fprintf(stderr,                                                                        \
-                    "[lc] error '%s' @%d: %s\n",                                                   \
+                    "[kr-ps] error '%s' @%d: %s\n",                                                \
                     #call,                                                                         \
                     __LINE__,                                                                      \
                     rocprofiler_get_status_string(_s));                                            \
@@ -80,6 +89,9 @@
 namespace
 {
 constexpr uint32_t TEST_BLOCK_X = 67;
+constexpr int64_t  kMaxPasses   = 16;
+
+using pass_counts_t = std::array<std::atomic<int>, kMaxPasses>;
 
 rocprofiler_context_id_t g_replay_ctx{0};
 rocprofiler_context_id_t g_counters_ctx{0};
@@ -95,13 +107,19 @@ int64_t                 g_stop_pass     = 1;
 int64_t                 g_start_pass    = -1;
 rocprofiler_kernel_id_t g_target_kernel = UINT64_MAX;
 
-std::atomic<int> g_counter_records{0};
-std::atomic<int> g_spm_records{0};
+pass_counts_t    g_counter_records{};
+pass_counts_t    g_spm_records{};
+pass_counts_t    g_att_traced{};
 std::atomic<int> g_att_shader{0};
 std::atomic<int> g_pcs_samples{0};
-std::atomic<int> g_local_stops{0};
-std::atomic<int> g_local_starts{0};
 std::atomic<int> g_replayed{0};
+std::atomic<int> g_pass_enters{0};
+std::atomic<int> g_outside_pass{0};
+
+// Pass in flight on this thread: published at PASS PHASE_ENTER and withdrawn at PHASE_EXIT. The
+// SDK submits each pass between the two on this thread, so the service dispatch callbacks fired by
+// that submit read the pass from here; any other dispatch sees -1.
+thread_local int64_t tl_replay_pass = -1;
 
 std::set<std::string>
 parse_list(const char* env)
@@ -137,6 +155,37 @@ kept(const char* name)
     return g_keep.count(name) != 0;
 }
 
+// Whether `name` collects on `pass`: from KR_PS_STOP_PASS it stops and from KR_PS_START_PASS it
+// collects again, with the start applied first so a pass naming both ends stopped.
+bool
+collects_on(const char* name, int64_t pass)
+{
+    if(kept(name)) return true;
+    bool collecting = true;
+    for(int64_t p = 0; p <= pass; ++p)
+    {
+        if(g_start_pass >= 0 && p == g_start_pass) collecting = true;
+        if(g_stop_pass >= 0 && p == g_stop_pass) collecting = false;
+    }
+    return collecting;
+}
+
+// The pass a dispatch callback for the replayed kernel runs on, or -1 (and a recorded failure) if
+// it ran outside a pass, which would leave the tool nothing to select with.
+int64_t
+replay_pass_for(rocprofiler_kernel_id_t kernel_id)
+{
+    if(kernel_id != g_target_kernel) return -1;
+    if(tl_replay_pass < 0) g_outside_pass.fetch_add(1);
+    return tl_replay_pass;
+}
+
+void
+count_on_pass(pass_counts_t& counts, uint64_t pass)
+{
+    if(pass < static_cast<uint64_t>(kMaxPasses)) counts.at(pass).fetch_add(1);
+}
+
 std::vector<rocprofiler_agent_id_t>
 gpu_agents()
 {
@@ -163,45 +212,6 @@ uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_
 }
 
 void
-maybe_local_toggle(rocprofiler_callback_tracing_kernel_replay_data_t* p,
-                   const char*                                        name,
-                   rocprofiler_context_id_t                           ctx)
-{
-    if(ctx.handle == 0 || kept(name)) return;
-    if(!p) return;
-
-    if(g_start_pass >= 0 && static_cast<int64_t>(p->current_pass) == g_start_pass)
-    {
-        if(p->replay_start_context)
-        {
-            auto st = p->replay_start_context(ctx);
-            if(st == ROCPROFILER_STATUS_SUCCESS)
-                g_local_starts.fetch_add(1);
-            else
-                fprintf(stderr,
-                        "[lc] local_start(%s) failed: %s\n",
-                        name,
-                        rocprofiler_get_status_string(st));
-        }
-    }
-
-    if(g_stop_pass >= 0 && static_cast<int64_t>(p->current_pass) == g_stop_pass)
-    {
-        if(p->replay_stop_context)
-        {
-            auto st = p->replay_stop_context(ctx);
-            if(st == ROCPROFILER_STATUS_SUCCESS)
-                g_local_stops.fetch_add(1);
-            else
-                fprintf(stderr,
-                        "[lc] local_stop(%s) failed: %s\n",
-                        name,
-                        rocprofiler_get_status_string(st));
-        }
-    }
-}
-
-void
 kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t*, void*)
 {
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) return;
@@ -218,30 +228,41 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     }
 
     if(record.operation != ROCPROFILER_KERNEL_REPLAY_PASS) return;
-    if(record.phase != ROCPROFILER_CALLBACK_PHASE_ENTER) return;
-
-    maybe_local_toggle(p, "counters", g_counters_ctx);
-    maybe_local_toggle(p, "att", g_att_ctx);
-    maybe_local_toggle(p, "spm", g_spm_ctx);
-    maybe_local_toggle(p, "pc-sampling", g_pcs_ctx);
+    if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        g_pass_enters.fetch_add(1);
+        tl_replay_pass = static_cast<int64_t>(p->current_pass);
+    }
+    else
+    {
+        tl_replay_pass = -1;
+    }
 }
 
+// The dispatch callback tags the dispatch with the pass it selected it on, and the SDK hands that
+// user_data back with the dispatch's records, so a record is attributed to the pass that asked for
+// it rather than to whichever pass happens to be current when the record arrives.
 void
 counter_record_cb(rocprofiler_dispatch_counting_service_data_t d,
                   rocprofiler_counter_record_t*,
                   size_t,
-                  rocprofiler_user_data_t,
+                  rocprofiler_user_data_t user_data,
                   void*)
 {
-    if(d.dispatch_info.kernel_id == g_target_kernel) g_counter_records.fetch_add(1);
+    if(d.dispatch_info.kernel_id == g_target_kernel)
+        count_on_pass(g_counter_records, user_data.value);
 }
 
 void
 counter_dispatch_cb(rocprofiler_dispatch_counting_service_data_t d,
                     rocprofiler_counter_config_id_t*             config,
-                    rocprofiler_user_data_t*,
+                    rocprofiler_user_data_t*                     user_data,
                     void*)
 {
+    const auto pass = replay_pass_for(d.dispatch_info.kernel_id);
+    if(pass < 0 || !collects_on("counters", pass)) return;
+    user_data->value = static_cast<uint64_t>(pass);
+
     static std::mutex                                                    m{};
     static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t> cache{};
     const auto agent = d.dispatch_info.agent_id;
@@ -272,7 +293,7 @@ counter_dispatch_cb(rocprofiler_dispatch_counting_service_data_t d,
     }
     if(want.empty())
     {
-        fprintf(stderr, "[lc] SQ_WAVES not found\n");
+        fprintf(stderr, "[kr-ps] SQ_WAVES not found\n");
         std::abort();
     }
     rocprofiler_counter_config_id_t cfg{.handle = 0};
@@ -289,20 +310,24 @@ spm_record_cb(const rocprofiler_spm_dispatch_counting_service_data_t* d,
               const rocprofiler_spm_counter_record_t**,
               size_t,
               rocprofiler_spm_record_flag_t flags,
-              rocprofiler_user_data_t,
+              rocprofiler_user_data_t       user_data,
               void*)
 {
     if(!d) return;
     if((flags & ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END) == 0) return;
-    if(d->dispatch_info.kernel_id == g_target_kernel) g_spm_records.fetch_add(1);
+    if(d->dispatch_info.kernel_id == g_target_kernel) count_on_pass(g_spm_records, user_data.value);
 }
 
 void
 spm_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* d,
                 rocprofiler_counter_config_id_t*                        config,
-                rocprofiler_user_data_t*,
+                rocprofiler_user_data_t*                                user_data,
                 void*)
 {
+    const auto pass = replay_pass_for(d->dispatch_info.kernel_id);
+    if(pass < 0 || !collects_on("spm", pass)) return;
+    user_data->value = static_cast<uint64_t>(pass);
+
     static std::mutex                                                    m{};
     static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t> cache{};
     const auto agent = d->dispatch_info.agent_id;
@@ -334,7 +359,7 @@ spm_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* d,
     if(want.empty() && !all.empty()) want.push_back(all.front());
     if(want.empty())
     {
-        fprintf(stderr, "[lc] no SPM counters\n");
+        fprintf(stderr, "[kr-ps] no SPM counters\n");
         std::abort();
     }
     rocprofiler_spm_parameters_t param{
@@ -360,7 +385,9 @@ att_dispatch_cb(rocprofiler_agent_id_t,
                 void*,
                 rocprofiler_user_data_t*)
 {
-    if(kernel_id != g_target_kernel) return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+    const auto pass = replay_pass_for(kernel_id);
+    if(pass < 0 || !collects_on("att", pass)) return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+    count_on_pass(g_att_traced, static_cast<uint64_t>(pass));
     return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
 }
 
@@ -415,7 +442,7 @@ configure_att()
             any = true;
         else
             fprintf(stderr,
-                    "[lc] ATT configure agent %lu: %s\n",
+                    "[kr-ps] ATT configure agent %lu: %s\n",
                     static_cast<unsigned long>(id.handle),
                     rocprofiler_get_status_string(st));
     }
@@ -488,29 +515,27 @@ configure_pcs()
 }
 
 int
-expected_dispatch_records()
-{
-    // Contexts start globally active. PHASE_ENTER toggles apply before the pass
-    // dispatches. Client applies start then stop, so a same-pass pair ends stopped.
-    bool collecting = true;
-    int  n          = 0;
-    for(int pass = 0; pass < static_cast<int>(g_passes); ++pass)
-    {
-        if(g_start_pass >= 0 && pass == static_cast<int>(g_start_pass)) collecting = true;
-        if(g_stop_pass >= 0 && pass == static_cast<int>(g_stop_pass)) collecting = false;
-        if(collecting) ++n;
-    }
-    return n;
-}
-
-int
 tool_init(rocprofiler_client_finalize_t, void*)
 {
-    g_services   = parse_list(std::getenv("KR_LC_SERVICES"));
-    g_keep       = parse_list(std::getenv("KR_LC_KEEP"));
-    g_passes     = env_i64("KR_LC_PASSES", 4);
-    g_stop_pass  = env_i64("KR_LC_STOP_PASS", 1);
-    g_start_pass = env_i64("KR_LC_START_PASS", -1);
+    g_services   = parse_list(std::getenv("KR_PS_SERVICES"));
+    g_keep       = parse_list(std::getenv("KR_PS_KEEP"));
+    g_passes     = env_i64("KR_PS_PASSES", 4);
+    g_stop_pass  = env_i64("KR_PS_STOP_PASS", 1);
+    g_start_pass = env_i64("KR_PS_START_PASS", -1);
+
+    if(g_services.empty())
+    {
+        fprintf(stderr, "[kr-ps] KR_PS_SERVICES is empty\n");
+        return -1;
+    }
+    if(g_passes < 2 || g_passes > kMaxPasses)
+    {
+        fprintf(stderr,
+                "[kr-ps] KR_PS_PASSES=%ld is outside [2, %ld]\n",
+                static_cast<long>(g_passes),
+                static_cast<long>(kMaxPasses));
+        return -1;
+    }
 
     RC(rocprofiler_create_context(&g_replay_ctx));
     RC(rocprofiler_configure_callback_tracing_service(g_replay_ctx,
@@ -520,11 +545,6 @@ tool_init(rocprofiler_client_finalize_t, void*)
                                                       kernel_replay_cb,
                                                       nullptr));
 
-    if(g_services.empty())
-    {
-        fprintf(stderr, "[lc] KR_LC_SERVICES is empty\n");
-        return -1;
-    }
     if(wants("counters") && !configure_counters()) return -1;
     if(wants("att") && !configure_att()) return -1;
     if(wants("spm") && !configure_spm()) return -1;
@@ -540,66 +560,85 @@ tool_fini(void*)
     if(g_pcs_buffer.handle != 0) rocprofiler_flush_buffer(g_pcs_buffer);
 
     bool ok = true;
-    if(g_replayed.load() < 1)
+    if(g_replayed.load() != 1)
     {
-        fprintf(stderr, "[lc] FAIL: no replayed dispatch (workgroup %u)\n", TEST_BLOCK_X);
+        fprintf(stderr,
+                "[kr-ps] FAIL: expected one replayed dispatch (workgroup %u), saw %d\n",
+                TEST_BLOCK_X,
+                g_replayed.load());
+        ok = false;
+    }
+    if(g_pass_enters.load() != static_cast<int>(g_passes))
+    {
+        fprintf(stderr,
+                "[kr-ps] FAIL: expected %ld passes, saw %d\n",
+                static_cast<long>(g_passes),
+                g_pass_enters.load());
+        ok = false;
+    }
+    if(g_outside_pass.load() != 0)
+    {
+        fprintf(stderr,
+                "[kr-ps] FAIL: %d dispatch callbacks for the replayed kernel ran outside a pass\n",
+                g_outside_pass.load());
         ok = false;
     }
 
-    auto check_exact = [&](const char* name, bool keep, int got) {
-        int want = keep ? static_cast<int>(g_passes) : expected_dispatch_records();
-        fprintf(stderr, "[lc] %s records=%d expected=%d keep=%d\n", name, got, want, keep);
-        if(got != want)
+    auto check_passes = [&](const char* service, const char* what, const pass_counts_t& got) {
+        for(int64_t pass = 0; pass < g_passes; ++pass)
         {
-            fprintf(stderr, "[lc] FAIL: %s record count\n", name);
-            ok = false;
+            const int want = collects_on(service, pass) ? 1 : 0;
+            const int have = got.at(pass).load();
+            fprintf(stderr,
+                    "[kr-ps] %s pass=%ld %s=%d expected=%d\n",
+                    service,
+                    static_cast<long>(pass),
+                    what,
+                    have,
+                    want);
+            if(have != want)
+            {
+                fprintf(stderr,
+                        "[kr-ps] FAIL: %s %s on pass %ld\n",
+                        service,
+                        what,
+                        static_cast<long>(pass));
+                ok = false;
+            }
         }
     };
 
-    if(wants("counters")) check_exact("counters", kept("counters"), g_counter_records.load());
-    if(wants("spm")) check_exact("spm", kept("spm"), g_spm_records.load());
+    if(wants("counters")) check_passes("counters", "records", g_counter_records);
+    if(wants("spm")) check_passes("spm", "records", g_spm_records);
 
     if(wants("att"))
     {
-        const int  got         = g_att_shader.load();
-        const bool keep        = kept("att");
-        const bool expect_data = keep || expected_dispatch_records() > 0;
-        fprintf(stderr, "[lc] att shader_callbacks=%d expect_data=%d\n", got, expect_data);
-        if(expect_data && got == 0)
+        check_passes("att", "traced_dispatches", g_att_traced);
+
+        bool any_traced = false;
+        for(int64_t pass = 0; pass < g_passes; ++pass)
+            any_traced = any_traced || collects_on("att", pass);
+
+        const int got = g_att_shader.load();
+        fprintf(stderr, "[kr-ps] att shader_callbacks=%d expect_data=%d\n", got, any_traced);
+        if(any_traced && got == 0)
         {
-            fprintf(stderr, "[lc] FAIL: ATT produced no shader data\n");
+            fprintf(stderr, "[kr-ps] FAIL: ATT produced no shader data\n");
             ok = false;
         }
-        if(!expect_data && got != 0)
+        if(!any_traced && got != 0)
         {
-            fprintf(stderr, "[lc] FAIL: ATT ran while locally stopped from pass 0\n");
+            fprintf(stderr, "[kr-ps] FAIL: ATT produced shader data with no pass selected\n");
             ok = false;
         }
     }
 
     if(wants("pc-sampling"))
-    {
         fprintf(stderr,
-                "[lc] pc-sampling samples=%d local_starts=%d local_stops=%d "
-                "(agent-wide service; local start/stop is a no-op for collection)\n",
-                g_pcs_samples.load(),
-                g_local_starts.load(),
-                g_local_stops.load());
-        const bool should_stop  = g_stop_pass >= 0 && !kept("pc-sampling");
-        const bool should_start = g_start_pass >= 0 && !kept("pc-sampling");
-        if(should_stop && g_local_stops.load() < 1)
-        {
-            fprintf(stderr, "[lc] FAIL: pc-sampling local_stop was not invoked successfully\n");
-            ok = false;
-        }
-        if(should_start && g_local_starts.load() < 1)
-        {
-            fprintf(stderr, "[lc] FAIL: pc-sampling local_start was not invoked successfully\n");
-            ok = false;
-        }
-    }
+                "[kr-ps] pc-sampling samples=%d (agent-wide service: samples every pass)\n",
+                g_pcs_samples.load());
 
-    fprintf(stderr, ok ? "[lc] PASS\n" : "[lc] FAIL\n");
+    fprintf(stderr, ok ? "[kr-ps] PASS\n" : "[kr-ps] FAIL\n");
 }
 }  // namespace
 
@@ -607,7 +646,7 @@ extern "C" rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t, const char*, uint32_t priority, rocprofiler_client_id_t* id)
 {
     if(priority > 0) return nullptr;
-    id->name        = "kr-local-context";
+    id->name        = "kr-pass-selection";
     static auto cfg = rocprofiler_tool_configure_result_t{
         sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini, nullptr};
     return &cfg;
