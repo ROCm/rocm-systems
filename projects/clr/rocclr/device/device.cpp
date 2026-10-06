@@ -498,13 +498,9 @@ void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const*
     return;
   }
 
-  // Batched copies usually address only a few base allocations, so cache the
-  // resolved [base, end) ranges to skip the per-pointer map lookup. Safe because
-  // the shared_lock blocks Add/RemoveMemObj for the whole loop and global-map
-  // ranges never overlap, so a range hit is unambiguous. Only global-map hits are
-  // cached; the Windows overlapping VA map is reached only on a global miss below.
-  constexpr int kRangeCacheSize = 16;  // covers full all-to-all multi-GPU batches
+  constexpr int kRangeCacheSize = 16;  // src + dst base pointers across up to 8 GPUs
   constexpr int kWarmupProbes = 64;
+  constexpr int kMinHitPercent = 25;   // give up below this hit rate after warmup
   struct RangeEntry {
     uintptr_t base;
     uintptr_t end;
@@ -548,8 +544,8 @@ void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const*
       }
     }
 
-    // Give up if the batch doesn't reuse allocations (<25% hits after warmup).
-    if (cache_active && probes >= kWarmupProbes && hits * 4 < probes) {
+    // Give up if the batch doesn't reuse allocations after the warmup.
+    if (cache_active && probes >= kWarmupProbes && (hits * (100 / kMinHitPercent) < probes)) {
       cache_active = false;
     }
     return result;
