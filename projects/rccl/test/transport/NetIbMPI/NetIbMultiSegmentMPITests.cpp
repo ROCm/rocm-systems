@@ -262,6 +262,8 @@ protected:
         else
             PostSendWithRetry(pair.sendComm, lastBuf_->ptr, lastBuf_->totalSize, tag, mh, &req, /*optRecvHint=*/true);
         EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+        // The hinted recv completes without waiting for data; verify only once the send has completed.
+        MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0) {
             EXPECT_EQ(sz, 0) << "a hinted 1-recv must take the optional-completion skip path";
             EXPECT_TRUE(VerifyDevice(lastBuf_->ptr, lastBuf_->totalSize, seed))

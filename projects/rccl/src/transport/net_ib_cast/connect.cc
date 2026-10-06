@@ -38,6 +38,10 @@ struct ncclIbDevExtraProps {
 NCCL_PARAM(IbCastQpsPerConn, "IB_QPS_PER_CONNECTION", 2);
 extern int64_t rcclParamIbCastQpsPerP2p();
 extern int64_t rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering();
+extern int64_t ncclParamMultiSegmentRegister();
+
+// NCCL_MULTI_SEGMENT_REGISTER=0 keeps the legacy connect metadata and CTS MR.
+static bool IbCastAdvertiseMultiSeg() { return ncclParamMultiSegmentRegister() != 0; }
 
 // Calculate number of QPs based on P2P flag and device counts
 static int IbCastCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const char* funcName) {
@@ -1502,7 +1506,7 @@ ib_recv_dev_list:
 
     // Prepare my CTS FIFO + multi-seg side table (one covering MR).
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo,
-                                  sizeof(comm->ctsFifo) + sizeof(comm->segLayoutFifo),
+                                  sizeof(comm->ctsFifo) + (IbCastAdvertiseMultiSeg() ? sizeof(comm->segLayoutFifo) : 0),
                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     devInfo->rkey = commDev->ctsFifoMr->rkey;
@@ -1562,7 +1566,7 @@ ib_recv_dev_list:
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
-  ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
+  if (IbCastAdvertiseMultiSeg()) ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
@@ -2598,7 +2602,7 @@ ib_recv:
   meta.optRecvCompletion = rComm->base.optRecvCompletion;
   rComm->base.optRecvCompletion = rComm->base.optRecvCompletion && remMeta.optRecvCompletion;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
-  ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
+  if (IbCastAdvertiseMultiSeg()) ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
