@@ -163,7 +163,7 @@ def main() -> int:
     )
     if args.arch == "gfx942":
         # Phase 1 SPP: 14 passes, packable_multi==0, SLOT fill +0.
-        # Phase 2: SLOT_LIMIT parents are analyze composites (0 HW PMC parents).
+        # Phase 2: SPU parents are analyze composites (0 HW PMC parents).
         ok = (
             spp["packable_multi"] == 0
             and spp["passes"] == 14

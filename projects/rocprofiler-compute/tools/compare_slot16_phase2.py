@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
-"""Compare the 16 former SLOT_LIMIT metrics before vs after Phase 2.
+"""Compare the 16 former SPU metrics before vs after Phase 2.
 
 Parses ``rocprof-compute analyze --view table`` logs and writes CSV + HTML.
 """
@@ -79,7 +79,7 @@ def main() -> int:
     )
     parser.add_argument("--before-suffix", default="_spp.log")
     parser.add_argument("--after-suffix", default="_spp.log")
-    parser.add_argument("--title", default="SLOT_LIMIT-16 before/after Phase 2")
+    parser.add_argument("--title", default="SPU-16 before/after Phase 2")
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -147,7 +147,7 @@ def main() -> int:
         f"<h1>{html.escape(args.title)}</h1>",
         "<p>Before = Phase 1 SPP analyze (pre Phase 2 YAML). "
         "After = Phase 2 <code>COLLECT_SUM</code>/<code>COLLECT_RATIO</code> "
-        "parents. Same 16 SLOT_LIMIT metric IDs from the gfx942 impact report.</p>",
+        "parents. Same 16 SPU metric IDs from the gfx942 impact report.</p>",
         f"<p>Rows: {len(rows)}; changed (|rel|&gt;0): {len(changed)}; "
         f"missing either side: {len(missing)}</p>",
         "<table><thead><tr>",
