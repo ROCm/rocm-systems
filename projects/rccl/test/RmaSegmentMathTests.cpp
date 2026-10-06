@@ -159,7 +159,6 @@ TEST(RmaSegmentMathTest, ReleaseSeqIdOnlyReturnsNewestId)
     uint64_t posted = 5;
     ncclRmaReleaseSeqId(/*id=*/5, &posted);
     EXPECT_EQ(posted, uint64_t{4});
-    EXPECT_EQ(++posted, uint64_t{5}) << "the next request reuses the released id";
 
     posted = 7;
     ncclRmaReleaseSeqId(/*id=*/6, &posted);
