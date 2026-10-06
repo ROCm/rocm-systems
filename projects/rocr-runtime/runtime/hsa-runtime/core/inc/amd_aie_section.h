@@ -37,7 +37,7 @@ enum class AieKernelKind : uint32_t {
 
   /// @brief Number of on-disk kinds, and the bound the loader validates against.
   Count,
-  /// @brief No hardware context has been built for any kind yet. Queue state only --
+  /// @brief No hardware context has been built for any kind yet. Queue state only; it is
   /// never written to disk, which is why it can share a value with @ref Count.
   Undecided = Count,
 };
@@ -72,9 +72,10 @@ struct aie_section_header {
 struct aie_kernel_entry {
   /// @brief Kernel name offset, relative to string_table_offset; NUL-terminated.
   uint32_t name_offset;
-  /// @brief Section-relative offset of the instruction blob; required.
+  /// @brief Section-relative offset of the instruction blob (PdiInsts) or of the nested full ELF
+  /// (FullElf); required.
   uint32_t insts_offset;
-  /// @brief Instruction blob size in bytes; required, > 0.
+  /// @brief Size in bytes of the blob at @c insts_offset; required, > 0.
   uint32_t insts_size;
   /// @brief Section-relative offset of the PDI blob; 0 if no PDI.
   uint32_t pdi_offset;
@@ -82,7 +83,8 @@ struct aie_kernel_entry {
   uint32_t pdi_size;
   /// @brief Kernel argument buffer size in bytes.
   uint32_t kernarg_size;
-  /// @brief Number of NPU columns the kernel uses.
+  /// @brief Number of columns of the NPU partition the kernel was compiled for. This is the
+  /// partition width, not the number of columns the design occupies.
   uint32_t num_cols;
   /// @brief Payload kind; see @ref AieKernelKind.
   AieKernelKind kind;
@@ -113,14 +115,14 @@ struct AieKernelDescriptor {
   uint32_t pdi_bo_handle;
   /// @brief Kernel argument buffer size in bytes.
   uint32_t kernarg_size;
-  /// @brief Number of NPU columns the kernel uses. The loader has checked it is at least 1 and
-  /// no more than the agent has; dispatch sizes the hardware context to the most any kernel in
-  /// it declares.
+  /// @brief Number of columns of the NPU partition the kernel was compiled for. The loader has
+  /// checked it is at least 1 and no more than the agent has; dispatch sizes the hardware context
+  /// to the most any kernel in it declares.
   uint32_t num_cols;
   /// @brief Pristine control code, in host memory. FullElf only; empty for PdiInsts.
   ///
-  /// The NPU never fetches this -- it is only ever a memcpy source for the per-dispatch
-  /// buffer the driver allocates -- so it needs neither device memory nor alignment.
+  /// The NPU never fetches this. It is only a memcpy source for the per-dispatch buffer the
+  /// driver allocates, so it needs neither device memory nor alignment.
   std::vector<uint8_t> ctrl_code;
   /// @brief A PDI a FullElf kernel loads.
   struct Pdi {
@@ -147,10 +149,9 @@ struct AieKernelDescriptor {
   uint32_t num_pdis = 0;
   /// @brief Patch sites per argument the control code references; FullElf only, empty otherwise.
   ///
-  /// Nested rather than flattened with a separate index: this is built once at load and read once
-  /// per dispatch, so the flattening bought nothing, while the index it needed could disagree with
-  /// the sites it indexed and so had to be re-validated on every dispatch. The outer size is the
-  /// argument count.
+  /// Indexed by argument; the outer size is the argument count. Nested rather than flattened
+  /// because a flat layout needs a separate index that could disagree with the sites and would
+  /// have to be re-validated on every dispatch.
   std::vector<std::vector<aie_elf::PatchSite>> arg_sites;
 };
 

@@ -100,10 +100,12 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   uint32_t reserved2;
 
   /**
-   * Opaque kernel object handle obtained from HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT.
+   * Opaque kernel object handle, as returned by ::HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT for a
+   * kernel symbol of an executable loaded on the agent that owns the queue. The executable must
+   * not be destroyed until the dispatch has completed.
    *
-   * Selects the dispatch type, PDI plus instruction sequence, or full ELF, from the
-   * loaded code object.
+   * The kernel's code object selects the dispatch type: PDI plus instruction sequence, or full
+   * ELF. Full ELF is supported only on aie2p agents.
    *
    * The packets submitted by one doorbell ring fix the dispatch type for the batch, and a
    * packet of the other type in the same batch is rejected. A later batch on the same queue
