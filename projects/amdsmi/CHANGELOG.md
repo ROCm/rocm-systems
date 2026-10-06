@@ -6,7 +6,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.2.0
 
+### Added
+
+- **Added a read-only Linux Go module**.
+  - Provides GPU discovery, identity, telemetry, current partition metadata, and ECC/RAS queries with native units and field availability preserved.
+
 ### Resolved Issues
+
+- **Fixed nearest-GPU topology results**.
+  - Uses a strict comparator for ascending hop count, then ascending link weight. Equal-hop, equal-weight peers compare equal; their relative order is unspecified.
+  - Reports only the stored handle count. The former count could exceed the fixed array capacity and cause downstream consumers to read out of bounds.
+  - Resets processor discovery capacity for each socket so an earlier socket's device count does not limit later sockets.
+  - Rejects a discovery count exceeding its buffer capacity with `AMDSMI_STATUS_UNEXPECTED_SIZE` before reading entries.
 
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.

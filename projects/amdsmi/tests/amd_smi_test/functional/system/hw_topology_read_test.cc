@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -80,6 +81,34 @@ void TestHWTopologyRead::Run(void) {
     ASSERT_EQ(amdsmi_topo_get_p2p_status(processor_handles_[0], processor_handles_[0], &null_type,
                                          nullptr),
               AMDSMI_STATUS_INVAL);
+  }
+
+  for (uint32_t src = 0; src < num_devices; ++src) {
+    for (uint32_t type = AMDSMI_LINK_TYPE_INTERNAL; type <= AMDSMI_LINK_TYPE_UNKNOWN; ++type) {
+      amdsmi_topology_nearest_t nearest{};
+      const auto link_type = static_cast<amdsmi_link_type_t>(type);
+      err = amdsmi_get_link_topology_nearest(processor_handles_[src], link_type, &nearest);
+      if (err == AMDSMI_STATUS_NOT_SUPPORTED) continue;
+      ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
+      ASSERT_LE(nearest.count, AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP);
+
+      std::pair<uint64_t, uint64_t> previous{0, 0};
+      for (uint32_t peer = 0; peer < nearest.count; ++peer) {
+        SCOPED_TRACE(::testing::Message() << src << ":" << type << ":" << peer);
+        uint64_t hops = 0, weight = 0;
+        amdsmi_link_type_t actual_type = AMDSMI_LINK_TYPE_UNKNOWN;
+        ASSERT_EQ(amdsmi_topo_get_link_type(processor_handles_[src], nearest.processor_list[peer],
+                                            &hops, &actual_type),
+                  AMDSMI_STATUS_SUCCESS);
+        EXPECT_EQ(actual_type, link_type);
+        ASSERT_EQ(amdsmi_topo_get_link_weight(processor_handles_[src], nearest.processor_list[peer],
+                                              &weight),
+                  AMDSMI_STATUS_SUCCESS);
+        const auto current = std::make_pair(hops, weight);
+        EXPECT_LE(previous, current);
+        previous = current;
+      }
+    }
   }
 
   // gpu_link_t gpu_links[num_devices][num_devices];

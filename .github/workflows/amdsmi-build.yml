@@ -16,11 +16,15 @@ on:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - '!projects/amdsmi/go/**'
+      - '!projects/amdsmi/tests/go/**'
       - '.github/workflows/amdsmi-build.yml'
   push:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - '!projects/amdsmi/go/**'
+      - '!projects/amdsmi/tests/go/**'
       - '.github/workflows/amdsmi-build.yml'
   workflow_dispatch:
 
