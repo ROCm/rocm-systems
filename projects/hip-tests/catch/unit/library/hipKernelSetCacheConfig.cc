@@ -18,17 +18,16 @@ void LoadLibraryKernel(hipLibrary_t* library, hipKernel_t* kernel) {
 }  // namespace
 
 HIP_TEST_CASE(Unit_hipKernelSetCacheConfig_Positive) {
-  HIP_CHECK(hipSetDevice(0));
   hipLibrary_t library = nullptr;
   hipKernel_t kernel = nullptr;
-  LoadLibraryKernel(&library, &kernel);
   hipFuncCache_t carveouts[] = { hipFuncCachePreferNone,
-                                  hipFuncCachePreferShared,
-                                  hipFuncCachePreferL1,
-                                  hipFuncCachePreferEqual };
+                                 hipFuncCachePreferShared,
+                                 hipFuncCachePreferL1,
+                                 hipFuncCachePreferEqual };
   hipDevice_t device;
   int currentDevice = -1;
 
+  LoadLibraryKernel(&library, &kernel);
   HIP_CHECK(hipGetDevice(&currentDevice));
   HIP_CHECK(hipDeviceGet(&device, currentDevice));
 
@@ -36,5 +35,18 @@ HIP_TEST_CASE(Unit_hipKernelSetCacheConfig_Positive) {
     HIP_CHECK(hipKernelSetCacheConfig(kernel, carveout, device));
   }
 }
+
+HIP_TEST_CASE(Unit_hipKernelSetCacheConfig_Negative) {
+  hipLibrary_t library = nullptr;
+  hipKernel_t kernel = nullptr;
+  int currentDevice = -1;
+  hipDevice_t device;
+
+  LoadLibraryKernel(&library, &kernel);
+  HIP_CHECK(hipLibraryUnload(library));
+  HIP_CHECK(hipGetDevice(&currentDevice));
+  HIP_CHECK(hipDeviceGet(&device, currentDevice));
+  HIP_CHECK_ERROR(hipKernelSetCacheConfig(kernel, hipFuncCachePreferEqual, device),
+                  hipErrorInvalidResourceHandle);
+}
 #endif
-// TODO g-h-c implement contract test

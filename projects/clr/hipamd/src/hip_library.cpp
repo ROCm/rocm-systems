@@ -644,6 +644,8 @@ hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hi
     if (status != hipSuccess) {
       HIP_RETURN(status);
     }
+  } else {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
   }
 
   amd::Kernel* amdKernel = hip::asKernel(targetKernel);
