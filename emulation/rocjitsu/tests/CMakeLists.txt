@@ -734,6 +734,7 @@ add_executable(
     plugin_loader_test.cpp
     race-detector/race_detector_counter_capacity_tests.cpp
     race-detector/race_detector_event_registry_test.cpp
+    race-detector/race_detector_lds_history_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
     race-detector/race_log_expectation_test.cpp
