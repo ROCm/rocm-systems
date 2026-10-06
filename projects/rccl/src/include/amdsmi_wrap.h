@@ -865,14 +865,50 @@ inline void amdSmiFabricTelemetryRecordMover(amdsmiFabricTelemetryMover* top, in
 }
 
 /**
+ * @brief Identity of the instance a counter belongs to
+ *
+ * Folds the category and the instance label into one value, so a baseline slot can
+ * be checked against the counter now occupying it. The instance has to be part of
+ * this: two instances of the same kind carry identical item IDs, so an ID alone
+ * would not tell netport6 from netport7.
+ *
+ * @param[in] category Category the instance belongs to
+ * @param[in] instanceName Instance label, which need not be NUL terminated
+ * @return Hash of the two, for use with amdSmiFabricTelemetryItemKey()
+ */
+inline uint64_t amdSmiFabricTelemetryInstanceKey(unsigned category, const char* instanceName) {
+  uint64_t hash = 14695981039346656037ull ^ category; // FNV-1a basis
+  for (size_t i = 0; i < kAmdSmiFabricTelemetryLabelSize && instanceName[i] != '\0'; i++) {
+    hash = (hash ^ (unsigned char)instanceName[i]) * 1099511628211ull;
+  }
+  return hash;
+}
+
+/**
+ * @brief Identity of one counter within a sample
+ *
+ * @param[in] instanceKey Result of amdSmiFabricTelemetryInstanceKey()
+ * @param[in] telemId Counter ID within that instance
+ * @return Hash identifying the counter
+ */
+inline uint64_t amdSmiFabricTelemetryItemKey(uint64_t instanceKey, uint64_t telemId) {
+  return (instanceKey ^ telemId) * 1099511628211ull;
+}
+
+/**
  * @brief Running per-device reference point that samples are compared against
  *
  * `values` holds the previous sample flattened in category/instance/item traversal
- * order. The firmware layout is fixed for a given device, so a flat index is a
- * stable counter identity and avoids building a per-counter map on every tick.
+ * order, which keeps the per-tick cost to a walk rather than a per-counter map
+ * lookup. A flat index is only a valid counter identity while the sample keeps its
+ * shape, so `keys` records which counter each slot describes. Comparing it catches
+ * any reshuffle, including ones that leave the total count unchanged and so would
+ * be invisible to a size check: a category losing an item while another gains one,
+ * or instances being reordered.
  */
 struct amdsmiFabricTelemetryBaseline {
   std::vector<uint64_t> values;
+  std::vector<uint64_t> keys; //!< amdSmiFabricTelemetryItemKey() of the counter in each slot
   uint64_t generation[AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX];
   bool established; //!< False until a full sample has been recorded to compare against
 };
@@ -914,6 +950,7 @@ inline int amdSmiFabricTelemetryDiff(const amdsmi_fabric_telemetry_t* telemetry,
   const size_t previousCount = baseline->values.size();
   size_t flat = 0;
   int reportCount = 0;
+  bool reshuffled = false;
 
   for (unsigned cat = 0; cat < AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX; cat++) {
     const amdsmi_fabric_telemetry_dataset_t* dataset = telemetry->datasets[cat];
@@ -931,19 +968,27 @@ inline int amdSmiFabricTelemetryDiff(const amdsmi_fabric_telemetry_t* telemetry,
     report->generation = dataset->generation_count;
     report->stale = stale;
 
-    for (unsigned i = 0; i < dataset->instance_count; i++) {
+    for (unsigned i = 0; dataset->instances != nullptr && i < dataset->instance_count; i++) {
       const amdsmi_fabric_telemetry_instance_t* inst = &dataset->instances[i];
       if (inst->items == nullptr) continue;
+      const uint64_t instanceKey = amdSmiFabricTelemetryInstanceKey(cat, inst->name.text);
 
       for (unsigned k = 0; k < inst->item_count; k++) {
         const uint64_t value = inst->items[k].value;
+        const uint64_t key = amdSmiFabricTelemetryItemKey(instanceKey, inst->items[k].id);
         report->itemCount++;
 
         if (flat >= baseline->values.size()) {
           baseline->values.push_back(value);
+          baseline->keys.push_back(key);
           flat++;
           continue;
         }
+        // This slot now describes a different counter, so its recorded value belongs
+        // to an unrelated one. Noted rather than acted on here; the whole baseline is
+        // discarded below, which is simpler than reasoning about a partial shift.
+        if (baseline->keys[flat] != key) reshuffled = true;
+        baseline->keys[flat] = key;
         const uint64_t prev = baseline->values[flat];
         baseline->values[flat] = value;
         flat++;
@@ -964,13 +1009,15 @@ inline int amdSmiFabricTelemetryDiff(const amdsmi_fabric_telemetry_t* telemetry,
   // Trim entries describing counters the sample no longer carries. Growth already
   // appended, so this only ever shrinks.
   baseline->values.resize(flat);
+  baseline->keys.resize(flat);
 
-  // A category appearing or disappearing shifts every flat index after it, so any
-  // delta computed above compared unrelated counters. Compare against the count from
-  // before this walk, since the walk itself grows the vector. A rebaseline walk is
-  // exempt: it reported nothing to begin with, and the vector now holds the sample
-  // exactly, so it becomes the new reference point.
-  if (!rebaseline && flat != previousCount) {
+  // Any change in shape shifts flat indices, so the deltas computed above compared
+  // unrelated counters. Both halves are needed: the key check catches reshuffles
+  // within the walked slots, and the count check catches a sample that grew or shrank
+  // past them. The count comes from before this walk, since the walk itself appends.
+  // A rebaseline walk is exempt: it reported nothing to begin with, and the vectors
+  // now hold the sample exactly, so it becomes the new reference point.
+  if (!rebaseline && (reshuffled || flat != previousCount)) {
     baseline->established = false;
     for (int r = 0; r < reportCount; r++) {
       reports[r].changedCount = 0;

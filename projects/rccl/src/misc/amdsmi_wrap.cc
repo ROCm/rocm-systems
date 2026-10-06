@@ -894,7 +894,7 @@ struct FabricTelemetryDevice {
   amdsmi_fabric_telemetry_t* telemetry;
   amdsmiFabricTelemetryBaseline baseline;        // previous tick, for the periodic report
   amdsmiFabricTelemetryBaseline sessionBaseline; // first sample, for the report at destroy
-  bool warnedSampleFailure; // a device that starts failing fails every tick; say so once
+  bool warnedSampleFailure; // a device that starts failing fails every tick; warn once per run of them
 };
 
 // Serializes acquire against release so a session cannot be started while the
@@ -909,6 +909,7 @@ std::vector<FabricTelemetryDevice> telemetryDevices;
 std::thread telemetrySamplerThread;
 int64_t telemetryIntervalMs = 0;
 bool telemetryStopFlag = false;
+bool telemetryAtexitRegistered = false;
 // The process-wide preconditions are checked once. Nothing they test can start
 // working later, so re-checking per communicator would only repeat the warnings.
 bool telemetryPreflightDone = false;
@@ -1003,8 +1004,8 @@ void fabricTelemetrySamplerMain() {
       if (status != AMDSMI_STATUS_SUCCESS) {
         if (!dev.warnedSampleFailure) {
           dev.warnedSampleFailure = true;
-          WARN("fabric telemetry: sampling GPU %u returned %s, suppressing further reports for this device",
-               dev.index, fabricTelemetryStatusString(status));
+          WARN("fabric telemetry: sampling GPU %u returned %s, not warning again until it succeeds", dev.index,
+               fabricTelemetryStatusString(status));
         }
         continue;
       }
@@ -1058,7 +1059,7 @@ bool fabricTelemetryPreflightLocked() {
 // Returns false with nothing added if this device cannot supply telemetry, which
 // leaves the rest of the session alone.
 bool fabricTelemetryAddDeviceLocked(uint32_t index, uint64_t commHash, int rank) {
-  if ((int)index >= amdsmiFabricDeviceCount || !amdsmiFabricDevices[index].fabricSupported) return false;
+  if (index >= (uint32_t)amdsmiFabricDeviceCount || !amdsmiFabricDevices[index].fabricSupported) return false;
 
   FabricTelemetryDevice dev = {};
   dev.index = index;
@@ -1106,6 +1107,35 @@ bool fabricTelemetryAddDeviceLocked(uint32_t index, uint64_t commHash, int rank)
   return true;
 }
 
+// Stops the session from atexit(). An application may exit with communicators still
+// alive, which leaves telemetrySamplerThread joinable; destroying a joinable
+// std::thread calls std::terminate, so without this the process aborts at exit
+// whenever telemetry is on. RAS joins rasThread the same way.
+//
+// Registered only once the sampler exists, so it runs ahead of the atexit handlers
+// and static destructors registered earlier, including amd_smi's own teardown. That
+// ordering is what makes the frees below safe.
+void fabricTelemetryTerminate() {
+  std::lock_guard<std::mutex> lifecycle(telemetryLifecycleLock);
+
+  std::thread sampler;
+  {
+    std::lock_guard<std::mutex> lock(telemetryLock);
+    if (!telemetrySamplerThread.joinable()) return;
+    telemetryStopFlag = true;
+    sampler = std::move(telemetrySamplerThread);
+  }
+
+  telemetryStopCv.notify_all();
+  sampler.join();
+
+  // No closing reports here. Exit-time logging is unreliable, and the point of this
+  // path is only to leave no joinable thread behind.
+  std::lock_guard<std::mutex> lock(telemetryLock);
+  for (FabricTelemetryDevice& dev : telemetryDevices) fabricTelemetryFreeDeviceLocked(&dev);
+  telemetryDevices.clear();
+}
+
 } // namespace
 
 ncclResult_t amd_smi_fabricTelemetryAcquire(uint32_t deviceIndex, uint64_t commHash, int rank, bool* acquired) {
@@ -1133,6 +1163,16 @@ ncclResult_t amd_smi_fabricTelemetryAcquire(uint32_t deviceIndex, uint64_t commH
   if (!telemetrySamplerThread.joinable()) {
     telemetryStopFlag = false;
     telemetrySamplerThread = std::thread(fabricTelemetrySamplerMain);
+    ncclSetThreadName(telemetrySamplerThread, "RCCL FabricTelem");
+    // Once per process: atexit registrations cannot be undone, and the handler is a
+    // no-op when the session has already been stopped by the last release.
+    if (!telemetryAtexitRegistered) {
+      telemetryAtexitRegistered = true;
+      if (atexit(fabricTelemetryTerminate) != 0) {
+        WARN("fabric telemetry: could not register the exit handler; a process that exits without "
+             "destroying its communicators will abort");
+      }
+    }
     INFO(NCCL_INIT, "fabric telemetry: sampling all %u categories every %ldms",
          (unsigned)AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX, telemetryIntervalMs);
   }

@@ -85,6 +85,13 @@ public:
         inst->items                              = nullptr;
     }
 
+    // Drops the instance array while leaving instance_count set, the shape amd_smi
+    // leaves behind for a category it counted but could not populate.
+    void ClearInstances(unsigned category)
+    {
+        telemetry_.datasets[category]->instances = nullptr;
+    }
+
     void SetLabel(unsigned category, size_t instance, const char* text, size_t length)
     {
         memcpy(telemetry_.datasets[category]->instances[instance].name.text, text, length);
@@ -182,6 +189,7 @@ TEST(AmdSmiFabricTelemetryInterval, NonPositivePeriodDisablesSampling)
 
 TEST(AmdSmiFabricTelemetryInterval, PeriodBelowFloorIsClampedToFloor)
 {
+    EXPECT_EQ(kAmdSmiFabricTelemetryMinIntervalMs, 100) << "env-variables.rst documents a 100ms floor";
     EXPECT_EQ(amdSmiFabricTelemetryResolveIntervalMs(1), kAmdSmiFabricTelemetryMinIntervalMs);
     EXPECT_EQ(amdSmiFabricTelemetryResolveIntervalMs(kAmdSmiFabricTelemetryMinIntervalMs - 1),
               kAmdSmiFabricTelemetryMinIntervalMs);
@@ -476,6 +484,68 @@ TEST(AmdSmiFabricTelemetryDiff, ShrinkingSampleInvalidatesBaseline)
     EXPECT_EQ(baseline.values.size(), 2u);
 }
 
+// The shape changed but the counter total did not, so a size comparison alone sees
+// nothing wrong. One category gave up a counter and another took one on, which slides
+// every slot after the shrink down by one and lines each survivor up against its
+// neighbour's history.
+TEST(AmdSmiFabricTelemetryDiff, ShiftThatKeepsTheTotalCountReportsNoFabricatedDeltas)
+{
+    FakeSample first;
+    first.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 100, {{10, 20}});
+    first.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{1, 2}});
+
+    amdsmiFabricTelemetryBaseline baseline{};
+    Reports                       reports;
+    ASSERT_EQ(amdSmiFabricTelemetryDiff(first.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_TRUE(baseline.established);
+    ASSERT_EQ(baseline.values.size(), 4u);
+
+    // Four counters before and four after, but NetPort's now start a slot earlier:
+    // its 2 lands where its 1 was and its 3 where its 2 was, each a fabricated +1.
+    FakeSample shifted;
+    shifted.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 101, {{10}});
+    shifted.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 101, {{1, 2, 3}});
+
+    ASSERT_EQ(amdSmiFabricTelemetryDiff(shifted.Get(), &baseline, FakeTelemName, reports), 2);
+    EXPECT_EQ(baseline.values.size(), 4u) << "the shift is invisible to a count comparison";
+    EXPECT_FALSE(baseline.established);
+    EXPECT_EQ(reports[0].changedCount, 0);
+    EXPECT_EQ(reports[1].changedCount, 0) << "neighbouring counters must not be diffed against each other";
+
+    // Re-established on the new shape, and diffing its own history again.
+    ASSERT_EQ(amdSmiFabricTelemetryDiff(shifted.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_TRUE(baseline.established);
+    shifted.SetValue(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 2, 9);
+    shifted.SetGeneration(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 102);
+    ASSERT_EQ(amdSmiFabricTelemetryDiff(shifted.Get(), &baseline, FakeTelemName, reports), 2);
+    ASSERT_EQ(reports[1].moverCount, 1);
+    EXPECT_EQ(reports[1].movers[0].delta, 6u);
+}
+
+// Counter IDs repeat across instances of the same kind, so a slot's identity has to
+// include which instance it came from. Here the sample keeps its counts and its IDs
+// and only re-labels an instance, as a device would after re-enumerating a link.
+TEST(AmdSmiFabricTelemetryDiff, InstanceBeingRelabelledReportsNoFabricatedDeltas)
+{
+    FakeSample first;
+    first.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{10}, {20}}, "netport");
+
+    amdsmiFabricTelemetryBaseline baseline{};
+    Reports                       reports;
+    ASSERT_EQ(amdSmiFabricTelemetryDiff(first.Get(), &baseline, FakeTelemName, reports), 1);
+    ASSERT_TRUE(baseline.established);
+
+    // Same two instances by position and by counter ID, but the first is a different
+    // port, so its 30 is not 20 counts on from the 10 recorded for netport0.
+    FakeSample relabelled;
+    relabelled.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 101, {{30}, {20}}, "netport");
+    relabelled.SetLabel(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, "netport7", sizeof("netport7"));
+
+    ASSERT_EQ(amdSmiFabricTelemetryDiff(relabelled.Get(), &baseline, FakeTelemName, reports), 1);
+    EXPECT_FALSE(baseline.established);
+    EXPECT_EQ(reports[0].changedCount, 0) << "a counter from another instance is not this one's history";
+}
+
 TEST(AmdSmiFabricTelemetryDiff, OnlyPresentCategoriesAreReported)
 {
     FakeSample sample;
@@ -529,6 +599,24 @@ TEST(AmdSmiFabricTelemetryDiff, InstanceWithNoItemsIsSkipped)
 
     // Only the populated instance contributes.
     EXPECT_EQ(reports[0].itemCount, 2);
+    EXPECT_EQ(baseline.values.size(), 2u);
+}
+
+// A non-zero instance_count with no instance array would otherwise be walked as if
+// the pointer were valid.
+TEST(AmdSmiFabricTelemetryDiff, CategoryWithNoInstanceArrayIsReportedEmpty)
+{
+    FakeSample sample;
+    sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE, 100, {{1, 2}});
+    sample.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{3, 4}});
+    sample.ClearInstances(AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE);
+
+    amdsmiFabricTelemetryBaseline baseline{};
+    Reports                       reports;
+    ASSERT_EQ(amdSmiFabricTelemetryDiff(sample.Get(), &baseline, FakeTelemName, reports), 2);
+
+    EXPECT_EQ(reports[0].itemCount, 0) << "the category is still reported, just with nothing in it";
+    EXPECT_EQ(reports[1].itemCount, 2) << "the category after it must still be walked";
     EXPECT_EQ(baseline.values.size(), 2u);
 }
 

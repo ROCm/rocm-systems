@@ -308,15 +308,19 @@ unchanged traffic. When a device's last communicator is destroyed it is reported
 once more, measured over the whole time it was sampled, so a run too short for
 the firmware to publish more than once still produces output.
 
-Telemetry also needs read access to the IFoE config character device, which
-ships root-only. Granting the ``render`` group access is enough::
+Telemetry also needs access to the IFoE config character device, which ships
+root-only. It is a request/response channel rather than a readable file, so
+amd-smi opens it ``O_RDWR`` and read-only permission is not sufficient. Granting
+the ``render`` group read and write is enough::
 
     # /etc/udev/rules.d/70-amdgpu-ualoe-telemetry.rules
     SUBSYSTEM=="misc", KERNEL=="cbl-cfg-*", GROUP="render", MODE="0660"
 
 Without that access ``amdsmi_get_fabric_telemetry_data`` returns
 ``NOT_SUPPORTED``. RCCL logs which device it skipped and why, and
-initialization continues normally.
+initialization continues normally. That line is logged at ``INFO``, so unlike
+the missing-``RCCL_USE_AMD_SMI_LIB`` case above, ``WARN`` alone will not explain
+this one.
 
 Algorithm and protocol control
 ==============================

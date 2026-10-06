@@ -340,4 +340,47 @@ TEST(AmdSmiWrapFabricPaths, LibraryPathMatchesSysfs)
     );
 }
 
+// ---------------------------------------------------------------------------
+// Fabric telemetry gating
+//
+// commAlloc() calls amd_smi_fabricTelemetryAcquire() unconditionally and decides
+// whether to release later from the out-param alone, so a path that returns early
+// without clearing it would leave the reference count unbalanced. Both gates are
+// read through RCCL_PARAM, which caches on first use, so each needs its own
+// process.
+// ---------------------------------------------------------------------------
+
+TEST(AmdSmiFabricTelemetryAcquire, DisabledByDefaultAcquiresNothing)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "DisabledByDefaultAcquiresNothing",
+        []() {
+            bool acquired = true; // must be cleared even on the early return
+            EXPECT_EQ(amd_smi_fabricTelemetryAcquire(0, 0xabcd, 0, &acquired), ncclSuccess);
+            EXPECT_FALSE(acquired) << "telemetry is opt-in, so an unset enable must acquire nothing";
+
+            // What commFree() skips for such a comm, called anyway: releasing a device
+            // that was never acquired has to be harmless rather than underflow a count.
+            EXPECT_EQ(amd_smi_fabricTelemetryRelease(0), ncclSuccess);
+        },
+        {{"RCCL_USE_AMD_SMI_LIB", "1"}, {"RCCL_FABRIC_TELEMETRY_ENABLE", "0"}}
+    );
+}
+
+TEST(AmdSmiFabricTelemetryAcquire, EnabledWithoutAmdSmiLibAcquiresNothing)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "EnabledWithoutAmdSmiLibAcquiresNothing",
+        []() {
+            // The counters are only reachable through amd_smi, so enabling telemetry
+            // while RCCL is on its sysfs path has to be declined, not attempted.
+            bool acquired = true;
+            EXPECT_EQ(amd_smi_fabricTelemetryAcquire(0, 0xabcd, 0, &acquired), ncclSuccess);
+            EXPECT_FALSE(acquired);
+            EXPECT_EQ(amd_smi_fabricTelemetryRelease(0), ncclSuccess);
+        },
+        {{"RCCL_USE_AMD_SMI_LIB", "0"}, {"RCCL_FABRIC_TELEMETRY_ENABLE", "1"}}
+    );
+}
+
 } // namespace RcclUnitTesting
