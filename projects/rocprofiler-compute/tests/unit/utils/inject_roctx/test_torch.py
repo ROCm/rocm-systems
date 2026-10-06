@@ -107,3 +107,20 @@ def test_torch_backend_install_skips_dispatcher_when_collector_loads(monkeypatch
     monkeypatch.setattr(torch_backend, "_resolve_torch", lambda: True)
     torch_backend.TorchBackend().install()
     assert hook_calls == []
+
+
+def test_torch_backend_install_falls_back_to_dispatch_mode(monkeypatch):
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    noop_torch_structural_wraps(monkeypatch, torch_backend)
+    monkeypatch.setattr(torch_backend.torch_trace_collector, "install", lambda: False)
+    hook_calls = []
+    monkeypatch.setattr(
+        torch_backend,
+        "install_dispatcher_hook",
+        lambda: hook_calls.append(1),
+    )
+    monkeypatch.setattr(torch_backend, "_ROCTX_AVAILABLE", True)
+    monkeypatch.setattr(torch_backend, "_resolve_torch", lambda: True)
+    torch_backend.TorchBackend().install()
+    assert hook_calls == [1]
