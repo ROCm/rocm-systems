@@ -100,5 +100,6 @@ markers = [
     "iteration_multiplexing_stochastic",
     "torch_ops",
     "torch_trace",
+    "triton_trace",
     "experimental_feature",
 ]
