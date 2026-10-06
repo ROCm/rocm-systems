@@ -906,6 +906,7 @@ std::mutex telemetryLifecycleLock;
 std::mutex telemetryLock; // guards everything below; always taken before fabricLock
 std::condition_variable telemetryStopCv;
 std::vector<FabricTelemetryDevice> telemetryDevices;
+std::vector<uint32_t> telemetryFailedDevices; // probed once and found unusable; see the add path
 std::thread telemetrySamplerThread;
 int64_t telemetryIntervalMs = 0;
 bool telemetryStopFlag = false;
@@ -1058,7 +1059,7 @@ bool fabricTelemetryPreflightLocked() {
 // Caller holds telemetryLock, and the device is not already in telemetryDevices.
 // Returns false with nothing added if this device cannot supply telemetry, which
 // leaves the rest of the session alone.
-bool fabricTelemetryAddDeviceLocked(uint32_t index, uint64_t commHash, int rank) {
+bool fabricTelemetryProbeDeviceLocked(uint32_t index, uint64_t commHash, int rank) {
   if (index >= (uint32_t)amdsmiFabricDeviceCount || !amdsmiFabricDevices[index].fabricSupported) return false;
 
   FabricTelemetryDevice dev = {};
@@ -1104,6 +1105,23 @@ bool fabricTelemetryAddDeviceLocked(uint32_t index, uint64_t commHash, int rank)
   FabricTelemetryDevice* added = &telemetryDevices.back();
   fabricTelemetryReportLocked(added, &added->baseline, "");
   fabricTelemetryReportLocked(added, &added->sessionBaseline, " since start");
+  return true;
+}
+
+// Caller holds telemetryLock. Probes a device once per process and remembers a
+// failure, because the probe is not cheap -- finding the handle walks every socket
+// and processor, then telemetry is allocated, read and freed -- and nothing it tests
+// can start working later. Without this, every later communicator on an unusable GPU
+// pays for it again and repeats the explanation in the log.
+bool fabricTelemetryAddDeviceLocked(uint32_t index, uint64_t commHash, int rank) {
+  if (std::find(telemetryFailedDevices.begin(), telemetryFailedDevices.end(), index) !=
+      telemetryFailedDevices.end()) {
+    return false;
+  }
+  if (!fabricTelemetryProbeDeviceLocked(index, commHash, rank)) {
+    telemetryFailedDevices.push_back(index);
+    return false;
+  }
   return true;
 }
 

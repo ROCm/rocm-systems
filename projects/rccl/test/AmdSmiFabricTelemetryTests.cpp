@@ -41,18 +41,20 @@ class FakeSample
 {
 public:
     // Adds one category. Each entry of `instanceValues` becomes an instance, and
-    // its contents become that instance's counters. Counter IDs are assigned
-    // 1-based across the category so FakeTelemName() can name them.
+    // its contents become that instance's counters. Counter IDs restart at 1 in
+    // every instance, as the firmware's do: instances of the same kind report the
+    // same set of counters, so an ID is only unique within one. FakeTelemName()
+    // names them.
     void AddCategory(unsigned category, uint64_t generation,
                      const std::vector<std::vector<uint64_t>>& instanceValues,
                      const char* labelPrefix = "inst")
     {
         auto instances = std::make_unique<std::vector<amdsmi_fabric_telemetry_instance_t>>();
-        uint64_t nextId = 1;
 
         for(size_t i = 0; i < instanceValues.size(); i++)
         {
-            auto items = std::make_unique<std::vector<amdsmi_fabric_telemetry_item_t>>();
+            auto     items  = std::make_unique<std::vector<amdsmi_fabric_telemetry_item_t>>();
+            uint64_t nextId = 1;
             for(uint64_t value : instanceValues[i])
                 items->push_back({nextId++, value});
 
@@ -100,6 +102,11 @@ public:
     void SetValue(unsigned category, size_t instance, size_t item, uint64_t value)
     {
         telemetry_.datasets[category]->instances[instance].items[item].value = value;
+    }
+
+    uint64_t ItemId(unsigned category, size_t instance, size_t item) const
+    {
+        return telemetry_.datasets[category]->instances[instance].items[item].id;
     }
 
     void SetGeneration(unsigned category, uint64_t generation)
@@ -529,6 +536,11 @@ TEST(AmdSmiFabricTelemetryDiff, InstanceBeingRelabelledReportsNoFabricatedDeltas
 {
     FakeSample first;
     first.AddCategory(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 100, {{10}, {20}}, "netport");
+
+    // The premise: the two ports report the same counter, so the label is all that
+    // separates them.
+    ASSERT_EQ(first.ItemId(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 0, 0),
+              first.ItemId(AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT, 1, 0));
 
     amdsmiFabricTelemetryBaseline baseline{};
     Reports                       reports;

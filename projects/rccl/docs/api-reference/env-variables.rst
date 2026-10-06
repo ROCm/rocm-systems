@@ -316,6 +316,13 @@ the ``render`` group read and write is enough::
     # /etc/udev/rules.d/70-amdgpu-ualoe-telemetry.rules
     SUBSYSTEM=="misc", KERNEL=="cbl-cfg-*", GROUP="render", MODE="0660"
 
+.. note::
+
+   On a ROCm host ``render`` is every GPU user and container, and a file in
+   ``/etc/udev/rules.d`` persists across reboots, so the rule outlives the run
+   that motivated it. Install it to diagnose a fabric and remove it afterwards,
+   rather than carrying it in a deployment.
+
 Without that access ``amdsmi_get_fabric_telemetry_data`` returns
 ``NOT_SUPPORTED``. RCCL logs which device it skipped and why, and
 initialization continues normally. That line is logged at ``INFO``, so unlike
