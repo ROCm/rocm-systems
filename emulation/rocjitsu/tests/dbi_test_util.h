@@ -24,7 +24,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <array>
@@ -164,7 +164,7 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
     bool unterminated_kd_name = false, bool wrap_section_header_table = false,
     bool wrap_symtab_range = false, bool kd_crosses_section = false, bool wave32 = false,
     bool kernarg_segment_ptr = false, uint32_t kernarg_size = 0, uint64_t entry_text_offset = 0) {
-  namespace kd = rocr::llvm::amdhsa;
+  namespace kd = rocjitsu::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
   constexpr uint64_t text_offset = 0x100;
@@ -250,8 +250,7 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, accum_offset);
   // RDNA opts into Wave32 through this bit; a clear bit is Wave64. CDNA has no
   // such field, so setting it there would describe a kernel that cannot exist.
-  // Braced deliberately: AMDHSA_BITS_SET expands to two unbraced statements, so
-  // an unbraced `if` would run the second one unconditionally.
+  // RDNA uses this bit only for Wave32 descriptors.
   if (wave32) {
     AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
                     1);
@@ -443,7 +442,7 @@ make_gfx950_kd_crossing_section_elf(const std::vector<uint32_t> &text_words,
 inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_t> &text_words,
                                                        uint32_t private_bytes,
                                                        uint32_t granulated_sgpr_count = 3) {
-  namespace kd = rocr::llvm::amdhsa;
+  namespace kd = rocjitsu::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
   constexpr uint64_t text_offset = 0x100;

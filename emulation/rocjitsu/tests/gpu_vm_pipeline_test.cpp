@@ -668,7 +668,7 @@ TEST(GpuVmPipeline, CompletionRetryOnOneQueueDoesNotStarveAnotherQueue) {
   constexpr uint32_t kEndpgm = S_ENDPGM_GFX12;
 
   ASSERT_EQ(sim.write_kernel(kKernelAddress, &kEndpgm, 1), kKernelAddress);
-  std::array<std::byte, sizeof(rocr::llvm::amdhsa::kernel_descriptor_t) + sizeof(kEndpgm)>
+  std::array<std::byte, sizeof(rocjitsu::amdhsa::kernel_descriptor_t) + sizeof(kEndpgm)>
       kernel_image{};
   sim.memory->read_block(
       kKernelAddress,

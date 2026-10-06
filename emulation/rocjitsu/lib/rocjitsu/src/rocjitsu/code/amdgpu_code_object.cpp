@@ -9,7 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 #include "rocjitsu/isa/target_registry.h"
 
-#include "hsa/AMDHSAKernelDescriptor.h" // Check SGPR allocation
+#include "rocjitsu/code/kernel_descriptor_abi.h" // Check SGPR allocation
 
 #include <algorithm>
 #include <cstring>
@@ -336,7 +336,7 @@ namespace {
 std::optional<uint32_t>
 AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch,
                                         std::span<const KernelDescriptorInfo> kernels) {
-  namespace kd = rocr::llvm::amdhsa;
+  namespace kd = rocjitsu::amdhsa;
 
   std::optional<uint32_t> min_count;
   for (const KernelDescriptorInfo &kernel : kernels) {

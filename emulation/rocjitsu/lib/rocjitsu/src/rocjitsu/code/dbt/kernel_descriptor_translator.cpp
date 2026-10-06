@@ -24,7 +24,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
@@ -40,8 +40,8 @@ namespace rocjitsu {
 
 namespace {
 
-using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
-namespace kd = rocr::llvm::amdhsa;
+using KD = rocjitsu::amdhsa::kernel_descriptor_t;
+namespace kd = rocjitsu::amdhsa;
 
 static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
 

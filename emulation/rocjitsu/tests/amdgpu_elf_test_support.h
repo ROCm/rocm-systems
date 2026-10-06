@@ -14,7 +14,7 @@
 
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <cstddef>
@@ -27,7 +27,7 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu::test_support {
 
-using TestKernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
+using TestKernelDescriptor = rocjitsu::amdhsa::kernel_descriptor_t;
 inline constexpr size_t kKernelDescriptorSize = sizeof(TestKernelDescriptor);
 
 enum class TestRuntimeTextRelocation : uint8_t {

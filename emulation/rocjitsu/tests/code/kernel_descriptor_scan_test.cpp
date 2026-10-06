@@ -25,7 +25,7 @@ namespace rocjitsu {
 namespace {
 
 using namespace rocjitsu::test;
-using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
 // scan the fixture image using its own .text section coordinates.
 std::vector<KernelDescriptorInfo> scan_via_text_section(const std::vector<uint8_t> &image) {
@@ -133,10 +133,10 @@ TEST(KernelDescriptorScan, NoMatchingTextSectionReturnsEmpty) {
 // RDNA opts into Wave32 via COMPUTE_PGM_RSRC1's ENABLE_WAVEFRONT_SIZE32; a clear bit
 // means Wave64. CDNA is always Wave64, gfx1250 always Wave32.
 TEST(KernelWavefrontSize, Rdna4HonorsEnableWavefrontSize32Bit) {
-  rocr::llvm::amdhsa::kernel_descriptor_t desc{};
+  rocjitsu::amdhsa::kernel_descriptor_t desc{};
   EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, desc), 64); // bit clear
   AMDHSA_BITS_SET(desc.kernel_code_properties,
-                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+                  rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
   EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, desc), 32); // bit set
   EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_CDNA4, desc), 64);
   EXPECT_EQ(kernel_wavefront_size(ROCJITSU_CODE_ARCH_CDNA5, desc), 32);
@@ -160,14 +160,14 @@ TEST(KernelDescriptorVgprGranule, RdnaIsWaveSizeDependent) {
 TEST(KernelDescriptorVgprGranule, Rdna4Wave64ZeroGranulatedCountDeclaresFourVgprs) {
   constexpr uint32_t granulated = 0;
 
-  rocr::llvm::amdhsa::kernel_descriptor_t wave64{}; // ENABLE_WAVEFRONT_SIZE32 clear
+  rocjitsu::amdhsa::kernel_descriptor_t wave64{}; // ENABLE_WAVEFRONT_SIZE32 clear
   const uint32_t g64 = descriptor_vgpr_granularity_for_wavefront(
       ROCJITSU_CODE_ARCH_RDNA4, kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, wave64));
   EXPECT_EQ((granulated + 1) * g64, 4u);
 
-  rocr::llvm::amdhsa::kernel_descriptor_t wave32{};
+  rocjitsu::amdhsa::kernel_descriptor_t wave32{};
   AMDHSA_BITS_SET(wave32.kernel_code_properties,
-                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+                  rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
   const uint32_t g32 = descriptor_vgpr_granularity_for_wavefront(
       ROCJITSU_CODE_ARCH_RDNA4, kernel_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4, wave32));
   EXPECT_EQ((granulated + 1) * g32, 8u);
@@ -178,7 +178,7 @@ TEST(KernelDescriptorVgprGranule, Rdna4Wave64ZeroGranulatedCountDeclaresFourVgpr
 // Every consumer that loads through the pointer needs this index, so a wrong sum
 // reads an unrelated register rather than failing.
 TEST(KernargSegmentPtr, SlotIsTheWidthOfTheEnabledPredecessors) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   EXPECT_EQ(kernarg_segment_ptr_slot(KD{}), 0);
 
@@ -210,7 +210,7 @@ TEST(KernargSegmentPtr, SlotIsTheWidthOfTheEnabledPredecessors) {
 // it is. Keeping them distinct lets a caller inserting the pointer ask for the
 // index before setting the bit, without suppressing a nullopt it knows is wrong.
 TEST(KernargSegmentPtr, SgprIsEmptyUntilTheDescriptorEnablesThePointer) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   KD desc{};
   AMDHSA_BITS_SET(desc.kernel_code_properties,
@@ -234,11 +234,11 @@ TEST(KernargPreload, LengthAndOffsetDecodeIndependently) {
   EXPECT_EQ(kernarg_preload_length(desc), 0u);
   EXPECT_EQ(kernarg_preload_offset(desc), 0u);
 
-  AMDHSA_BITS_SET(desc.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 3);
+  AMDHSA_BITS_SET(desc.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 3);
   EXPECT_EQ(kernarg_preload_length(desc), 3u);
   EXPECT_EQ(kernarg_preload_offset(desc), 0u);
 
-  AMDHSA_BITS_SET(desc.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 5);
+  AMDHSA_BITS_SET(desc.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 5);
   EXPECT_EQ(kernarg_preload_length(desc), 3u);
   EXPECT_EQ(kernarg_preload_offset(desc), 5u);
 }
@@ -257,22 +257,22 @@ TEST(KernelDescriptorScan, InitialSgprCountFoldsTheSystemBlockOntoTheUserBlock) 
 
   KD ids = none;
   AMDHSA_BITS_SET(ids.compute_pgm_rsrc2,
-                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+                  rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
   AMDHSA_BITS_SET(ids.compute_pgm_rsrc2,
-                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
+                  rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
   EXPECT_EQ(kernel_descriptor_initial_sgpr_count(kArch, ids), 8u);
 
   // WORKGROUP_INFO follows the enabled dimensions and is the term the DBI copy
   // of this walk was missing before it was shared.
   KD info = ids;
   AMDHSA_BITS_SET(info.compute_pgm_rsrc2,
-                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1);
+                  rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1);
   EXPECT_EQ(kernel_descriptor_initial_sgpr_count(kArch, info), 9u);
 
   // ENABLE_PRIVATE_SEGMENT is deliberately excluded.
   KD priv = info;
   AMDHSA_BITS_SET(priv.compute_pgm_rsrc2,
-                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1);
+                  rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1);
   EXPECT_EQ(kernel_descriptor_initial_sgpr_count(kArch, priv), 9u);
 }
 

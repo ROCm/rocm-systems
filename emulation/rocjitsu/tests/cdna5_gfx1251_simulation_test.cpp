@@ -21,7 +21,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -78,7 +78,7 @@ private:
 class Gfx1251SimulatorInstructionTest : public testing::TestWithParam<Gfx1251E2eCase> {};
 
 TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutput) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   const Gfx1251E2eCase &test_case = GetParam();
   constexpr uint64_t kCodeObjectBase = 0x100000;
@@ -278,7 +278,7 @@ INSTANTIATE_TEST_SUITE_P(AllNineInstructions, Gfx1251SimulatorInstructionTest,
                          });
 
 TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kCodeObjectBase = 0x100000;
   constexpr uint64_t kOutputAddress = 0x2000;

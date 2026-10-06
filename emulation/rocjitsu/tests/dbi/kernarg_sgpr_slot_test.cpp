@@ -30,7 +30,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -43,7 +43,7 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace {
 
-namespace kd = rocr::llvm::amdhsa;
+namespace kd = rocjitsu::amdhsa;
 
 // The enable bits ahead of the kernarg pointer in the user-SGPR order. Nothing
 // past the kernarg pointer can move it. Each is a one-bit mask, so the mask

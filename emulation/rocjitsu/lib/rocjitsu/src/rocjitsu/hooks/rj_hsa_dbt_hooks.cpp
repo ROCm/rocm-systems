@@ -16,7 +16,7 @@
 /// hook returns an HSA error instead of retrying the original reader, because
 /// the original ELF may target a different GPU ISA.
 
-#include "hsa/hsa_api_trace_minimal.h"
+#include "hsa/hsa_api_trace.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -71,7 +71,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 // Test seams live outside the anonymous namespace so the test-only translation
@@ -1059,7 +1059,7 @@ void clear_virtual_lds_dispatch_queues();
   X(amd_queue_intercept_register, amd_ext_,                                                        \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_queue_intercept_register_fn),      \
                         &AmdExtTable::hsa_amd_queue_intercept_register_fn),                        \
-    hsa_amd_queue_intercept_register_fn, hsa_amd_queue_intercept_register_fn_t)
+    hsa_amd_queue_intercept_register_fn, decltype(&hsa_amd_queue_intercept_register))
 
 /// @brief HSA table entries patched by the DBT hook.
 ///
@@ -1121,75 +1121,75 @@ void clear_virtual_lds_dispatch_queues();
     rj_executable_load_agent_code_object, decltype(hsa_executable_load_agent_code_object) *)       \
   X(amd_memory_pool_get_info, amd_ext_, amd_ext_ != nullptr, true,                                 \
     hsa_amd_memory_pool_get_info_fn, rj_amd_memory_pool_get_info,                                  \
-    hsa_amd_memory_pool_get_info_fn_t)                                                             \
+    decltype(&hsa_amd_memory_pool_get_info))                                                       \
   X(amd_agent_iterate_memory_pools, amd_ext_, amd_ext_ != nullptr, true,                           \
     hsa_amd_agent_iterate_memory_pools_fn, rj_amd_agent_iterate_memory_pools,                      \
-    hsa_amd_agent_iterate_memory_pools_fn_t)                                                       \
+    decltype(&hsa_amd_agent_iterate_memory_pools))                                                 \
   X(amd_memory_pool_allocate, amd_ext_, amd_ext_ != nullptr, true,                                 \
     hsa_amd_memory_pool_allocate_fn, rj_amd_memory_pool_allocate,                                  \
-    hsa_amd_memory_pool_allocate_fn_t)                                                             \
+    decltype(&hsa_amd_memory_pool_allocate))                                                       \
   X(amd_memory_pool_free, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_pool_free_fn,        \
-    rj_amd_memory_pool_free, hsa_amd_memory_pool_free_fn_t)                                        \
+    rj_amd_memory_pool_free, decltype(&hsa_amd_memory_pool_free))                                  \
   X(amd_profiling_set_profiler_enabled, amd_ext_, amd_ext_ != nullptr, true,                       \
     hsa_amd_profiling_set_profiler_enabled_fn, rj_amd_profiling_set_profiler_enabled,              \
-    hsa_amd_profiling_set_profiler_enabled_fn_t)                                                   \
+    decltype(&hsa_amd_profiling_set_profiler_enabled))                                             \
   X(amd_profiling_get_dispatch_time, amd_ext_, amd_ext_ != nullptr, true,                          \
     hsa_amd_profiling_get_dispatch_time_fn, rj_amd_profiling_get_dispatch_time,                    \
-    hsa_amd_profiling_get_dispatch_time_fn_t)                                                      \
+    decltype(&hsa_amd_profiling_get_dispatch_time))                                                \
   X(amd_profiling_convert_tick_to_system_domain, amd_ext_, amd_ext_ != nullptr, true,              \
     hsa_amd_profiling_convert_tick_to_system_domain_fn,                                            \
     rj_amd_profiling_convert_tick_to_system_domain,                                                \
-    hsa_amd_profiling_convert_tick_to_system_domain_fn_t)                                          \
+    decltype(&hsa_amd_profiling_convert_tick_to_system_domain))                                    \
   X(amd_agent_memory_pool_get_info, amd_ext_, amd_ext_ != nullptr, true,                           \
     hsa_amd_agent_memory_pool_get_info_fn, rj_amd_agent_memory_pool_get_info,                      \
-    hsa_amd_agent_memory_pool_get_info_fn_t)                                                       \
+    decltype(&hsa_amd_agent_memory_pool_get_info))                                                 \
   X(amd_agents_allow_access, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_agents_allow_access_fn,  \
-    rj_amd_agents_allow_access, hsa_amd_agents_allow_access_fn_t)                                  \
+    rj_amd_agents_allow_access, decltype(&hsa_amd_agents_allow_access))                            \
   X(amd_memory_async_copy, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_async_copy_fn,      \
-    rj_amd_memory_async_copy, hsa_amd_memory_async_copy_fn_t)                                      \
+    rj_amd_memory_async_copy, decltype(&hsa_amd_memory_async_copy))                                \
   X(amd_memory_async_copy_on_engine, amd_ext_, amd_ext_ != nullptr, true,                          \
     hsa_amd_memory_async_copy_on_engine_fn, rj_amd_memory_async_copy_on_engine,                    \
-    hsa_amd_memory_async_copy_on_engine_fn_t)                                                      \
+    decltype(&hsa_amd_memory_async_copy_on_engine))                                                \
   X(amd_memory_async_copy_rect, amd_ext_, amd_ext_ != nullptr, true,                               \
     hsa_amd_memory_async_copy_rect_fn, rj_amd_memory_async_copy_rect,                              \
-    hsa_amd_memory_async_copy_rect_fn_t)                                                           \
+    decltype(&hsa_amd_memory_async_copy_rect))                                                     \
   X(amd_memory_copy_engine_status, amd_ext_, amd_ext_ != nullptr, true,                            \
     hsa_amd_memory_copy_engine_status_fn, rj_amd_memory_copy_engine_status,                        \
-    hsa_amd_memory_copy_engine_status_fn_t)                                                        \
+    decltype(&hsa_amd_memory_copy_engine_status))                                                  \
   X(amd_memory_lock, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_lock_fn,                  \
-    rj_amd_memory_lock, hsa_amd_memory_lock_fn_t)                                                  \
+    rj_amd_memory_lock, decltype(&hsa_amd_memory_lock))                                            \
   X(amd_memory_lock_to_pool, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_lock_to_pool_fn,  \
-    rj_amd_memory_lock_to_pool, hsa_amd_memory_lock_to_pool_fn_t)                                  \
+    rj_amd_memory_lock_to_pool, decltype(&hsa_amd_memory_lock_to_pool))                            \
   X(amd_svm_prefetch_async, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_svm_prefetch_async_fn,    \
-    rj_amd_svm_prefetch_async, hsa_amd_svm_prefetch_async_fn_t)                                    \
+    rj_amd_svm_prefetch_async, decltype(&hsa_amd_svm_prefetch_async))                              \
   X(amd_pointer_info, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_pointer_info_fn,                \
-    rj_amd_pointer_info, hsa_amd_pointer_info_fn_t)                                                \
+    rj_amd_pointer_info, decltype(&hsa_amd_pointer_info))                                          \
   X(amd_vmem_set_access, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_vmem_set_access_fn,          \
-    rj_amd_vmem_set_access, hsa_amd_vmem_set_access_fn_t)                                          \
+    rj_amd_vmem_set_access, decltype(&hsa_amd_vmem_set_access))                                    \
   X(amd_vmem_get_access, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_vmem_get_access_fn,          \
-    rj_amd_vmem_get_access, hsa_amd_vmem_get_access_fn_t)                                          \
+    rj_amd_vmem_get_access, decltype(&hsa_amd_vmem_get_access))                                    \
   X(amd_agent_set_async_scratch_limit, amd_ext_, amd_ext_ != nullptr, true,                        \
     hsa_amd_agent_set_async_scratch_limit_fn, rj_amd_agent_set_async_scratch_limit,                \
-    hsa_amd_agent_set_async_scratch_limit_fn_t)                                                    \
+    decltype(&hsa_amd_agent_set_async_scratch_limit))                                              \
   X(amd_memory_get_preferred_copy_engine, amd_ext_, amd_ext_ != nullptr, true,                     \
     hsa_amd_memory_get_preferred_copy_engine_fn, rj_amd_memory_get_preferred_copy_engine,          \
-    hsa_amd_memory_get_preferred_copy_engine_fn_t)                                                 \
+    decltype(&hsa_amd_memory_get_preferred_copy_engine))                                           \
   X(amd_memory_fill, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_fill_fn,                  \
-    rj_amd_memory_fill, hsa_amd_memory_fill_fn_t)                                                  \
+    rj_amd_memory_fill, decltype(&hsa_amd_memory_fill))                                            \
   X(amd_memory_async_batch_copy, amd_ext_,                                                         \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_memory_async_batch_copy_fn),       \
                         &AmdExtTable::hsa_amd_memory_async_batch_copy_fn),                         \
     true, hsa_amd_memory_async_batch_copy_fn, rj_amd_memory_async_batch_copy,                      \
-    hsa_amd_memory_async_batch_copy_fn_t)                                                          \
+    decltype(&hsa_amd_memory_async_batch_copy))                                                    \
   X(amd_agent_preload, amd_ext_,                                                                   \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_agent_preload_fn),                 \
                         &AmdExtTable::hsa_amd_agent_preload_fn),                                   \
-    true, hsa_amd_agent_preload_fn, rj_amd_agent_preload, hsa_amd_agent_preload_fn_t)              \
+    true, hsa_amd_agent_preload_fn, rj_amd_agent_preload, decltype(&hsa_amd_agent_preload))        \
   X(amd_queue_intercept_create, amd_ext_,                                                          \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_queue_intercept_create_fn),        \
                         &AmdExtTable::hsa_amd_queue_intercept_create_fn),                          \
     true, hsa_amd_queue_intercept_create_fn, rj_amd_queue_intercept_create,                        \
-    hsa_amd_queue_intercept_create_fn_t)
+    decltype(&hsa_amd_queue_intercept_create))
 
 /// @brief Process-local HSA API table patch state for the rocjitsu DBT tool.
 ///
@@ -1991,7 +1991,7 @@ private:
 
   /// @brief Collected memory pools for one HSA agent.
   struct PoolList {
-    hsa_amd_memory_pool_get_info_fn_t get_info = nullptr;
+    decltype(&hsa_amd_memory_pool_get_info) get_info = nullptr;
     std::vector<PoolInfo> pools;
   };
 
@@ -2715,7 +2715,7 @@ public:
   /// @brief Rewrite a contiguous packet batch delivered by ROCR's intercept queue.
   void rewrite_intercept_packets(hsa_queue_t *queue, const void *pkts, uint64_t pkt_count,
                                  uint64_t user_pkt_index,
-                                 hsa_amd_queue_intercept_packet_writer_t writer) {
+                                 hsa_amd_queue_intercept_packet_writer writer) {
     if (writer == nullptr || pkts == nullptr || pkt_count == 0)
       return;
     static_assert(sizeof(hsa_kernel_dispatch_packet_t) == 64,
@@ -3313,7 +3313,7 @@ void clear_virtual_lds_dispatch_queues() { VirtualLdsDispatchQueueRegistry::inst
 
 /// @brief ROCR intercept-queue callback that rewrites virtual-LDS packets pre-submit.
 void virtual_lds_packet_interceptor(const void *pkts, uint64_t pkt_count, uint64_t user_pkt_index,
-                                    void *data, hsa_amd_queue_intercept_packet_writer_t writer) {
+                                    void *data, hsa_amd_queue_intercept_packet_writer writer) {
   auto *queue = static_cast<hsa_queue_t *>(data);
   static std::atomic<uint32_t> intercept_trace_count{0};
   if (intercept_trace_count.fetch_add(1, std::memory_order_relaxed) < 128) {
@@ -3885,7 +3885,7 @@ hsa_status_t HSA_API rj_amd_agent_memory_pool_get_info(hsa_agent_t agent,
     // ROCR converts the AMD pool handle back to an internal region before
     // answering agent/pool access queries. Keep null synthetic handles from
     // crossing that ABI boundary; they are invalid AMD memory pools.
-    return HSA_STATUS_ERROR_INVALID_MEMORY_POOL;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL);
   }
   hsa_agent_t mapped = mapped_agent(agent);
   hsa_amd_memory_pool_t mapped_pool = mapped_memory_pool(memory_pool);

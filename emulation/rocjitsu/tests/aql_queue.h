@@ -14,8 +14,8 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/amd_ext_aql_packet.h"
 #include "hsa/hsa.h"
+#include "rocjitsu/vm/amdgpu/aql/amd_vendor_packets.h"
 RJ_DIAGNOSTIC_POP
 
 #include <array>

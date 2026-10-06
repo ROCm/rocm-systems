@@ -24,7 +24,7 @@
 namespace rocjitsu {
 namespace {
 
-namespace kd = rocr::llvm::amdhsa;
+namespace kd = rocjitsu::amdhsa;
 using KD = kd::kernel_descriptor_t;
 
 constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;

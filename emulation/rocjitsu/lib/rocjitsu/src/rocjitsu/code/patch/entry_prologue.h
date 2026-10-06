@@ -13,7 +13,7 @@
 #include "rocjitsu/isa/register_set.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <cstdint>
@@ -43,7 +43,7 @@ struct DbiEntryStorage {
 /// allocation total whose tail can hold VCC, flat scratch, XNACK and granularity
 /// padding, so starting new storage there can land in special-SGPR territory.
 [[nodiscard]] uint32_t dbi_entry_storage_floor(KernelBlockScope blocks,
-                                               const rocr::llvm::amdhsa::kernel_descriptor_t &desc,
+                                               const amdhsa::kernel_descriptor_t &desc,
                                                rj_code_arch_t arch);
 
 /// @brief Choose the SGPR run the entry prologue owns, or fail closed.
@@ -63,7 +63,7 @@ struct DbiEntryStorage {
 ///          aligned run of @ref kDbiEntryStorageRegisters above the floor, or
 ///          when @p blocks has `s_movrel*` access that the floor cannot bound.
 [[nodiscard]] std::optional<DbiEntryStorage>
-plan_dbi_entry_storage(KernelBlockScope blocks, const rocr::llvm::amdhsa::kernel_descriptor_t &desc,
+plan_dbi_entry_storage(KernelBlockScope blocks, const amdhsa::kernel_descriptor_t &desc,
                        rj_code_arch_t arch, uint32_t kernel_sgpr_count, const RegisterSet &reserved,
                        std::string *error_out = nullptr);
 
@@ -108,7 +108,7 @@ struct DbiEntryPrologue {
 /// @throws util::UnimplementedInst for a non-AMDGPU architecture, matching the
 ///         builders it emits through. Every other rejection is fail-closed.
 [[nodiscard]] std::optional<DbiEntryPrologue>
-build_dbi_entry_prologue(const rocr::llvm::amdhsa::kernel_descriptor_t &desc, rj_code_arch_t arch,
+build_dbi_entry_prologue(const amdhsa::kernel_descriptor_t &desc, rj_code_arch_t arch,
                          DbiEntryStorage storage, std::string *error_out = nullptr);
 
 /// @brief Everything a caller needs to place a prologue in one kernel: the
@@ -139,7 +139,7 @@ struct DbiEntryProloguePlan {
 ///         builders @ref build_dbi_entry_prologue emits through.
 [[nodiscard]] std::optional<DbiEntryProloguePlan>
 plan_dbi_entry_prologue(KernelBlockScope blocks,
-                        const rocr::llvm::amdhsa::kernel_descriptor_t &desc, rj_code_arch_t arch,
+                        const amdhsa::kernel_descriptor_t &desc, rj_code_arch_t arch,
                         uint32_t kernel_sgpr_count, const RegisterSet &reserved,
                         std::string *error_out = nullptr);
 

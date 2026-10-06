@@ -51,7 +51,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
 
 #include <cstdint>
@@ -123,7 +123,7 @@ public:
   /// That path writes nothing when the dispatch carries no kernarg address.
   void set_kernarg(std::vector<uint8_t> bytes,
                    uint32_t properties =
-                       rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                       rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
                    uint32_t user_sgpr_count = 2) {
     kernarg_bytes_ = std::move(bytes);
     kernarg_properties_ = properties;
@@ -152,7 +152,7 @@ public:
   /// @note The descriptor is synthesized, not the patched object's -- see the
   ///   file-level warning.
   uint64_t write_kernel(uint64_t addr, const std::vector<uint32_t> &code, uint32_t private_bytes) {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset =
         static_cast<int64_t>(sizeof(kernel_descriptor_t) + entry_offset_);
