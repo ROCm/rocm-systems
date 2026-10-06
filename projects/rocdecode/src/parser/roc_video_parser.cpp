@@ -135,7 +135,8 @@ ParserResult RocVideoParser::GetNalUnit() {
     // wrapping, both operands being uint32_t, and it does not depend on the callers resetting
     // start_code_num_ for the return below to be reached.
     if (pic_data_size_ < 3) {
-        return PARSER_NOT_FOUND;
+        ErrorLog(g_rocdec_logger, "Picture data is " + ROCDEC_TOSTR(pic_data_size_) + " bytes, too short to hold a start code.");
+        return PARSER_INVALID_FORMAT;
     }
 
     // Search for the next start code
@@ -171,7 +172,7 @@ ParserResult RocVideoParser::GetNalUnit() {
         (start_code_found && next_start_code_offset_ < curr_start_code_offset_)) {
         ErrorLog(g_rocdec_logger, "Start code offsets are out of order for the current picture.");
         nal_unit_size_ = 0;
-        return PARSER_NOT_FOUND;
+        return PARSER_INVALID_FORMAT;
     }
     if (start_code_found) {
         nal_unit_size_ = next_start_code_offset_ - curr_start_code_offset_;

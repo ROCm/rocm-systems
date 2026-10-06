@@ -585,6 +585,12 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
             ErrorLog(g_rocdec_logger, ROCDEC_STR("Error: no start code found in the frame data."));
             FunctionExitLog(g_rocdec_logger);
             return ret;
+        } else if (ret == PARSER_INVALID_FORMAT) {
+            // The frame data cannot be walked; GetNalUnit() has logged why. This has to return
+            // rather than fall through, because the loop below is while (1) and GetNalUnit()
+            // would report the same thing on every pass.
+            FunctionExitLog(g_rocdec_logger);
+            return ret;
         }
         // Parse the NAL unit
         if (nal_unit_size_ >= 5) {

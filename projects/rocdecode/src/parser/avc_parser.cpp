@@ -120,6 +120,11 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
         if (ret == PARSER_NOT_FOUND) {
             ErrorLog(g_rocdec_logger, ROCDEC_STR("Error: no start code found in the frame data."));
             return ret;
+        } else if (ret == PARSER_INVALID_FORMAT) {
+            // The frame data cannot be walked; GetNalUnit() has logged why. This has to return
+            // rather than fall through, because the loop below is while (1) and GetNalUnit()
+            // would report the same thing on every pass.
+            return ret;
         }
 
         // Parse the NAL unit
