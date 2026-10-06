@@ -621,3 +621,24 @@ def test_list_torch_operators_prints_call_tree(
     assert not (
         Path(torch_trace_profiled_workload) / "ml_api_trace" / "consolidated.csv"
     ).exists()
+
+
+@pytest.mark.torch_trace
+def test_torch_operator_addmm_selects_kernels(
+    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--torch-operator",
+        "*addmm*",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Matched PyTorch Operators:" in out
+    assert "aten::addmm" in out
+    assert "nn.Module.Linear.forward" in out
+    assert "operator filter selected" in out
