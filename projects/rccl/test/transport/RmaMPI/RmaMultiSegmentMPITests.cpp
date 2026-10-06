@@ -1716,6 +1716,8 @@ protected:
         Chain    chain;
         int      ctx       = 0;
         bool     aggregate = false;
+        void*    sigMh     = nullptr;  // nullptr selects sig_
+        uint64_t sigOff    = 0;
     };
 
     struct Region
@@ -1837,7 +1839,7 @@ protected:
         return op;
     }
 
-    // Puts and signals go to SendPeer() and signal sig_ word 0; gets read from it.
+    // Puts and signals go to SendPeer(); gets read from it.
     ncclResult_t Post(const Op& op, void** req)
     {
         const uint32_t flags = op.aggregate ? ncclRmaOptFlagsAggregateRequests : ncclRmaOptFlagsDefault;
@@ -1853,7 +1855,8 @@ protected:
                               c.localOff, op.localMh, SendPeer(), flags, req);
         case OpKind::PutSignal:
             return rma_->iputSignal(rmaCtx_, op.ctx, c.localOff, op.localMh, c.size,
-                                    c.remoteOff, op.remoteMh, SendPeer(), /*signalOff=*/0, sigMh_,
+                                    c.remoteOff, op.remoteMh, SendPeer(), op.sigOff,
+                                    op.sigMh ? op.sigMh : sigMh_,
                                     /*signalValue=*/0, NCCL_NET_SIGNAL_OP_INC,
                                     /*isStrongSignal=*/false, flags, req);
         }
@@ -1891,6 +1894,14 @@ protected:
         ADD_FAILURE() << "request was not complete on its first test()";
         (void)PollUntilDone(req);
         return false;
+    }
+
+    // Deregisters now rather than in TearDown.
+    ncclResult_t DeregMr(void* mh)
+    {
+        auto it = std::find(registeredMhandles_.begin(), registeredMhandles_.end(), mh);
+        if (it != registeredMhandles_.end()) registeredMhandles_.erase(it);
+        return rma_->deregMrSym(collComm_, mh);
     }
 
     // One D2H copy; reports the first byte that differs from the expectation.
@@ -2134,6 +2145,164 @@ TEST_F(RmaMultiSegmentPostMPITest, ContextBatchesDrainIndependently)
     std::stable_sort(waitIdx.begin(), waitIdx.end(),
                      [&](size_t a, size_t b) { return ops[a].ctx > ops[b].ctx; });
     RunAndVerify(ops, waitIdx, {IntoDst(chains)}, signals);
+}
+
+// A zero-size op on a context's fresh comm has no predecessor and completes at
+// once, even while another context has queued work. A signal-only put routes
+// to the segment holding its offset in a multi-segment signal window.
+TEST_F(RmaMultiSegmentPostMPITest, ZeroSizeOnFreshContextAndSignalOnlyIntoLaterSegment)
+{
+    numContexts_ = 2;
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+    MultiSegmentVmmBuffer* sw = AllocSym(3, kSegRequestBytes);
+    if (SyncSkip(sw == nullptr)) GTEST_SKIP() << "multi-segment signal window allocation unavailable";
+    FillSentinel(sw->ptr, sw->totalSize, 0);
+    void* swMh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(sw->ptr, sw->totalSize, &swMh));
+
+    const std::vector<Chain> chains = PlanChains(*src_, {3});
+    ASSERT_EQ(chains.size(), 1u);
+    const Chain none{};
+    const size_t seg = sw->segSize;
+    const uint64_t sigOffs[] = {seg - 8, seg, 2 * seg + 64};
+    FillSentinel(dst_->ptr, dst_->totalSize, kSentinel);
+    Barrier();
+
+    bool ok = true;
+    void* queued = nullptr;
+    void* fresh  = nullptr;
+    ok = Post(MakeOp(OpKind::Put, srcMh_, dstMh_, chains[0], 0, /*aggregate=*/true), &queued) == ncclSuccess;
+    ok = Post(MakeOp(OpKind::Get, dstMh_, srcMh_, none, 1, /*aggregate=*/true), &fresh) == ncclSuccess && ok;
+    ok = DoneOnFirstTest(fresh) && ok;
+    ok = PollUntilDone(queued) && ok;
+    for (uint64_t off : sigOffs)
+    {
+        Op op = MakeOp(OpKind::PutSignal, srcMh_, dstMh_, none, 1, /*aggregate=*/true);
+        op.sigMh  = swMh;
+        op.sigOff = off;
+        void* req = nullptr;
+        ok = Post(op, &req) == ncclSuccess && PollUntilDone(req) && ok;
+    }
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(ok)) << "post or wait failed on at least one rank";
+    Barrier();
+
+    ExpectRegions(IntoDst(chains));
+    std::vector<uint64_t> words(sw->totalSize / sizeof(uint64_t));
+    ASSERT_EQ(hipSuccess, hipMemcpy(words.data(), sw->ptr, sw->totalSize, hipMemcpyDeviceToHost));
+    for (uint64_t off : sigOffs)
+    {
+        EXPECT_EQ(words[off / sizeof(uint64_t)], 1u) << "signal missing at offset " << off;
+        words[off / sizeof(uint64_t)] = 0;
+    }
+    EXPECT_EQ(std::count(words.begin(), words.end(), uint64_t{0}), static_cast<long>(words.size()))
+        << "stray signal writes in the multi-segment signal window";
+    Barrier();
+}
+
+// Rejected ops return before taking a request slot or a sequence id. Only even
+// ranks reject, 2x the slot pool in total, between queued ops of their own.
+TEST_F(RmaMultiSegmentPostMPITest, RejectedOpsLeaveNoSlotOrSequenceGap)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    constexpr int kIbRequestSlots = 256;  // NET_IB_MAX_REQUESTS
+    constexpr int kBurst          = 64;
+    const bool    rejecter        = worldRank_ % 2 == 0;
+    const size_t  total           = src_->totalSize;
+    const std::vector<Chain> chains = PlanChains(*src_, {3, 2, 4});
+    ASSERT_EQ(chains.size(), 3u);
+
+    for (bool aggregate : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate);
+        FillSentinel(dst_->ptr, dst_->totalSize, kSentinel);
+        Barrier();
+
+        bool ok = true;
+        auto post = [&](const Op& op) {
+            void* req = nullptr;
+            ok = Post(op, &req) == ncclSuccess && req && ok;
+            return req;
+        };
+        auto rejected = [&](int i) {
+            Op op = MakeOp(OpKind::Put, srcMh_, dstMh_, {0, 0, total + 1}, 0, aggregate);
+            if (i % 4 == 1) op = MakeOp(OpKind::Get, dstMh_, srcMh_, {0, 1, total}, 0, aggregate);
+            if (i % 4 == 2)
+            {
+                op = MakeOp(OpKind::PutSignal, srcMh_, dstMh_, chains[0], 0, aggregate);
+                op.sigOff = 4;
+            }
+            void* req = nullptr;
+            const ncclResult_t r = i % 4 == 3
+                ? rma_->iputSignal(rmaCtx_, 0, 0, srcMh_, 0, 0, dstMh_, SendPeer(), 0, sigMh_, 0,
+                                   /*signalOp=*/0xFF, false, ncclRmaOptFlagsDefault, &req)
+                : Post(op, &req);
+            return r != ncclSuccess && req == nullptr;
+        };
+
+        void* first = post(MakeOp(OpKind::Put, srcMh_, dstMh_, chains[0], 0, aggregate));
+        int accepted = 0;
+        for (int i = 0; rejecter && i < kIbRequestSlots; i++) accepted += !rejected(i);
+        EXPECT_EQ(accepted, 0) << "invalid ops were accepted";
+        void* zero = post(MakeOp(OpKind::Put, srcMh_, dstMh_, Chain{}, 0, aggregate));
+        ok = PollUntilDone(zero) && ok;
+        ok = DoneOnFirstTest(first) && ok;
+
+        std::vector<void*> reqs;
+        for (int i = 0; i < kBurst; i++)
+            reqs.push_back(post(MakeOp(OpKind::Put, srcMh_, dstMh_, chains[1 + i % 2], 0, aggregate)));
+        for (auto it = reqs.rbegin(); it != reqs.rend(); ++it)
+            if (*it) ok = PollUntilDone(*it) && ok;
+
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(ok)) << "post or wait failed on at least one rank";
+        Barrier();
+        ExpectRegions(IntoDst(chains));
+        Barrier();
+        if (HasFailure()) return;
+    }
+}
+
+// Every registration reuses the comm's consensus buffer and builds fresh
+// per-rank tables. Many cycles over changing layouts must each move intact data.
+TEST_F(RmaMultiSegmentPostMPITest, RegistrationChurnKeepsTransfersIntact)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const int cycles = MPIHelpers::getEnvParam<int>("RCCL_TEST_RMA_REG_CYCLES", 100);
+    struct Layout { MultiSegmentVmmBuffer* src; MultiSegmentVmmBuffer* dst; };
+    std::vector<Layout> layouts;
+    for (int nSeg : {2, 7, NCCL_RMA_MAX_SEGMENTS})
+    {
+        Layout l{};
+        if (!AllocSymPair(&l.src, &l.dst, nSeg, kSegRequestBytes))
+            GTEST_SKIP() << nSeg << "-segment VMM allocation unavailable";
+        FillBuf(l.src->ptr, l.src->totalSize, SeedOf(worldRank_));
+        layouts.push_back(l);
+    }
+
+    for (int i = 0; i < cycles; i++)
+    {
+        const Layout& l = layouts[i % layouts.size()];
+        SCOPED_TRACE(::testing::Message() << "cycle " << i << " nSeg " << l.src->nSegments);
+        void *srcMh = nullptr, *dstMh = nullptr;
+        ASSERT_EQ(ncclSuccess, RegMr(l.src->ptr, l.src->totalSize, &srcMh));
+        ASSERT_EQ(ncclSuccess, RegMr(l.dst->ptr, l.dst->totalSize, &dstMh));
+        const Chain c{0, 0, l.src->totalSize};
+        RunAndVerify({MakeOp(OpKind::Put, srcMh, dstMh, c, 0, /*aggregate=*/i % 2 == 1)}, {0},
+                     {{l.dst->ptr, l.dst->totalSize, {PutRegion(c)}, SeedOf(RecvPeer())}}, 0);
+        EXPECT_EQ(ncclSuccess, DeregMr(srcMh));
+        EXPECT_EQ(ncclSuccess, DeregMr(dstMh));
+        if (HasFailure()) return;
+    }
 }
 
 } // namespace RCCLRmaTests
