@@ -163,8 +163,10 @@ jobs:
             --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
             --rccl
 
+      # The step now covers a baseline run and a candidate run inside one
+      # allocation, plus however long that allocation waits in the queue.
       - name: Run MADEngine workload
-        timeout-minutes: 210
+        timeout-minutes: 360
         env:
           NCCL_DEBUG: WARN
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
