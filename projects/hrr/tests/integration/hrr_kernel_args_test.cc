@@ -190,7 +190,7 @@ TEST_CASE("Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime", "[.][hrr]") {
   struct Run { bool dumped, noticed; };
   auto capture = [](const char* debug_args) {
     ScopedDir cap(fs::temp_directory_path() / "hrr_kernel_args_debug.hrr");
-    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true,
+    hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true,
                               /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     if (debug_args) {
