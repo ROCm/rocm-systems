@@ -254,12 +254,17 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     fma_true16 = simd_probe_line('v_fma_f16_vop3', true16_vop3=True)
     assert fma_generic == '  ROCJITSU_TRY_SIMD_FMA_VOP3_FP16();'
     assert fma_true16 == '  ROCJITSU_TRY_SIMD_FMA_VOP3_TRUE16_FP16();'
+    # F16 FIXUP passes raw halves and FP16_OVFL to the shared helper.
     div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
-    assert 'if (!wf.fp16_ovfl())' not in div_fixup
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
+    assert div_fixup.startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP(amdgpu::fp_format::F16, '
+    )
+    assert 'amdgpu::div_fixup_f16(q, d, n,' in div_fixup
+    assert 'wf.fp16_ovfl()' in div_fixup
     div_fixup_true16 = simd_probe_line('v_div_fixup_f16_vop3', true16_vop3=True)
-    assert 'if (!wf.fp16_ovfl())' not in div_fixup_true16
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup_true16
+    assert div_fixup_true16.startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(amdgpu::fp_format::F16, '
+    )
     fmac_generic = simd_probe_line('v_fmac_f16_vop3')
     fmac_true16 = simd_probe_line('v_fmac_f16_vop3', true16_vop3=True)
     assert fmac_generic == '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP16();'
@@ -513,20 +518,18 @@ def test_vop3_div_fixup_f16_uses_true16_sources_and_destination():
     body = gen_vector_div_fixup(['vdst'], ['src0', 'src1', 'src2'], 'f16', is_vop3=True)
 
     assert 'uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
-    assert 'util::f16_to_f32(static_cast<uint16_t>(' in body
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
+    # Raw halves through the shared source and output modifier stages.
+    assert 'util::f16_to_f32' not in body
+    assert 'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(' in body
+    assert 'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl());' in body
     assert (
-        'uint32_t result_bits = amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl());'
-        in body
+        'write_vop3_true16_dst(vdst, wf, lane, opsel, '
+        'amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(result, output_policy), '
+        'true)' in body
     )
-    assert (
-        'result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
-        in body
-    )
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
-    assert 'std::bit_cast<float>(src0.read_lane' not in body
 
 
 def test_vop3_pack_and_pknorm_f16_use_true16_source_halves():
@@ -572,8 +575,7 @@ def test_true16_special_vop3_simd_routes_use_true16_glue():
         'v_cvt_pk_norm_i16_f16_vop3'
     )
     div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
-    assert 'if (!wf.fp16_ovfl())' not in div_fixup
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_RAW_FP' in div_fixup
 
 
 @pytest.mark.parametrize(

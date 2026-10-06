@@ -2797,6 +2797,61 @@ std::vector<ArithmeticCase> div_fmas_cases() {
   return cases;
 }
 
+// V_DIV_FIXUP_F16 on raw halves, from gfx1201 captures. A nonfinite quotient
+// for finite operands overflows under the F16 rounding mode, and FP16_OVFL
+// (MODE bit 23) then gives the largest finite value; a true infinity stays.
+// OMOD and CLAMP use the shared output modifiers.
+std::vector<ArithmeticCase> div_fixup_f16_cases() {
+  constexpr uint32_t kHigh = 0xa5a50000u, kSourceHigh = 0x12340000u;
+  const auto fixup = [](uint8_t omod, uint8_t opsel = 0) {
+    return rdna4::build_vop3(
+        rdna4::kVDivFixupF16Vop3,
+        {.vdst = 6, .opsel = opsel, .src0 = 256, .src1 = 257, .src2 = 258, .omod = omod});
+  };
+  const auto f16_case = [&](const std::string &name, std::array<uint32_t, 2> words,
+                            std::array<uint16_t, 3> sources, uint32_t mode, uint16_t result) {
+    return ArithmeticCase{name,
+                          ROCJITSU_CODE_ARCH_RDNA4,
+                          {words[0], words[1], 0u},
+                          {{0, kSourceHigh | sources[0]},
+                           {1, kSourceHigh | sources[1]},
+                           {2, kSourceHigh | sources[2]},
+                           {6, kHigh}},
+                          {{6, kHigh | result}},
+                          mode,
+                          FE_TONEAREST};
+  };
+  constexpr uint32_t kOvfl = 0x00800000u;
+  std::vector<ArithmeticCase> cases{
+      f16_case("OverflowNearestEven", fixup(0), {0x7c00u, 0x3c00u, 0x3c00u}, 0xf0u, 0x7c00u),
+      f16_case("OverflowFp16Ovfl", fixup(0), {0x7c00u, 0x3c00u, 0x3c00u}, kOvfl | 0xf0u, 0x7bffu),
+      f16_case("OverflowTowardZero", fixup(0), {0x7c00u, 0x3c00u, 0x3c00u}, 0xffu, 0x7bffu),
+      f16_case("NegativeOverflowFp16Ovfl", fixup(0), {0x7c00u, 0xbc00u, 0x3c00u}, kOvfl | 0xf0u,
+               0xfbffu),
+      f16_case("NegativeOverflowTowardPositive", fixup(0), {0x7c00u, 0xbc00u, 0x3c00u}, 0xf5u,
+               0xfbffu),
+      f16_case("DivideByZeroStaysInfiniteFp16Ovfl", fixup(0), {0x3c00u, 0x0000u, 0x3c00u},
+               kOvfl | 0xf0u, 0x7c00u),
+      f16_case("NumeratorNanQuieted", fixup(0), {0x3c00u, 0x3c00u, 0x7c01u}, 0xf0u, 0x7e01u),
+      // MODE 0x30 flushes the F16 subnormal operands, so 0 / 0 gives the default NaN.
+      f16_case("FlushedZeroOverZeroMode30", fixup(0), {0x3c00u, 0x0001u, 0x0001u}, 0x30u, 0xfe00u),
+      f16_case("SubnormalOperandsModeF0", fixup(0), {0x3c00u, 0x0001u, 0x0001u}, 0xf0u, 0x3c00u),
+      f16_case("Mul2SubnormalQuotient", fixup(1), {0x83ffu, 0x3c00u, 0x3c00u}, 0xf0u, 0x0000u),
+      f16_case("Div2NegativeUnderflow", fixup(3), {0x0400u, 0xbc00u, 0x3c00u}, 0xf0u, 0x8000u),
+      f16_case("Mul2OverflowTowardZero", fixup(1), {0x7bffu, 0x3c00u, 0x3c00u}, 0xffu, 0x7bffu),
+      f16_case("Mul2OverflowNearestEven", fixup(1), {0x7bffu, 0x3c00u, 0x3c00u}, 0xf0u, 0x7c00u),
+  };
+  // OPSEL selects every source high half and writes the destination high half.
+  cases.push_back({"HighHalvesFp16Ovfl",
+                   ROCJITSU_CODE_ARCH_RDNA4,
+                   {fixup(0, 0xf)[0], fixup(0, 0xf)[1], 0u},
+                   {{0, 0x7c001234u}, {1, 0xbc001234u}, {2, 0x3c001234u}, {6, 0x0000a5a5u}},
+                   {{6, 0xfbffa5a5u}},
+                   kOvfl | 0xf0u,
+                   FE_TONEAREST});
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2946,6 +3001,12 @@ INSTANTIATE_TEST_SUITE_P(FmaF64, ValuRoundedResultModifierTest,
 
 INSTANTIATE_TEST_SUITE_P(DivFmas, ValuRoundedResultModifierTest,
                          testing::ValuesIn(div_fmas_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(DivFixupF16, ValuRoundedResultModifierTest,
+                         testing::ValuesIn(div_fixup_f16_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

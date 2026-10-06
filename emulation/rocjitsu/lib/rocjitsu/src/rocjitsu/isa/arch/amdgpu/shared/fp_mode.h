@@ -1211,14 +1211,6 @@ inline uint64_t scale_u53_f64_rtz(uint64_t significand, int exponent) {
 
 namespace rocjitsu::amdgpu {
 
-/// @brief Preserve the FIXUP NaN payload when narrowing its promoted result.
-inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((bits & 0x7fffffffu) > 0x7f800000u)
-    return static_cast<uint16_t>(((bits >> 16) & 0x8000u) | 0x7c00u | ((bits >> 13) & 0x3ffu));
-  return util::f32_to_f16_mode(value, fp16_ovfl);
-}
-
 /// @brief Scale by an integer power of two with explicit guest rounding and flushing.
 template <typename Float>
 inline Float ldexp(Float value, int32_t adjustment, uint32_t rounding, uint32_t denorm) {

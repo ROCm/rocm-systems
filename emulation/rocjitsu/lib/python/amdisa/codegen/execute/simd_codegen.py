@@ -2140,13 +2140,14 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_med3_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }',
     'v_minmax_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
     'v_maxmin_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
-    'v_div_fixup_f16_vop3': (
-        '[&wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); }, true'
-    ),
-    'v_div_fixup_legacy_f16_vop3': (
-        '[&wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); }, true'
-    ),
 }
+
+# F16 FIXUP works on raw halves; the shared wrapper supplies ABS/NEG, OMOD and CLAMP.
+_DIV_FIXUP_F16 = frozenset({'v_div_fixup_f16_vop3', 'v_div_fixup_legacy_f16_vop3'})
+_DIV_FIXUP_F16_OP = (
+    '[&wf](auto q, auto d, auto n) { return amdgpu::div_fixup_f16(q, d, n, '
+    'wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()); }'
+)
 
 SIMD_VOP3_FMA_MODE_FP16 = {'v_fma_f16_vop3'}
 SIMD_VOP3_FMA_MODE_FP64 = {'v_fma_f64_vop3'}
@@ -2875,6 +2876,12 @@ def _simd_probe_line(
             else ''
         )
         return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32({spec3tf32}{policy});'
+    if template_name in _DIV_FIXUP_F16:
+        # Without true16 half selection, F16 uses unsigned 32-bit lanes like F32.
+        macro = 'VOP3_TERNARY_TRUE16_RAW_FP16' if true16_vop3 else 'VOP3_TERNARY_RAW_FP'
+        return (
+            f'  ROCJITSU_TRY_SIMD_{macro}(amdgpu::fp_format::F16, {_DIV_FIXUP_F16_OP});'
+        )
     spec3tf16 = SIMD_VOP3_TERNARY_FP16.get(template_name)
     if spec3tf16 is not None:
         macro = (

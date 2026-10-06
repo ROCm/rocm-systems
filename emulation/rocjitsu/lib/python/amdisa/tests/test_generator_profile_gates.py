@@ -3416,14 +3416,11 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
     div_fixup = _shared_execute_body(
         execute_shared, 'v_div_fixup_f16_vop3', 'v_div_fixup_f32_vop3'
     )
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16' in div_fixup
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in div_fixup
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in div_fixup
     assert 'read_vop3_true16_src(inst.src2, wf, lane, opsel, 2)' in div_fixup
-    assert (
-        'write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result_bits, true)'
-        in div_fixup
-    )
+    assert 'write_vop3_true16_dst(\n        inst.vdst, wf, lane, opsel,' in div_fixup
 
     pack = _shared_execute_body(
         execute_shared, 'v_pack_b32_f16_vop3', 'v_perm_b32_vop3'

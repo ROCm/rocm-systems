@@ -876,55 +876,28 @@ def gen_vector_div_fixup(
     """Generate V_DIV_FIXUP body (corrects division result)."""
     if dtype != 'f16':
         return _gen_division_result(dst, src, dtype, 'fixup', is_vop3, has_abs)
-    L = []
-    opsel = _default_vop3_opsel_expr(dst + src) if is_vop3 and dtype == 'f16' else None
-    L.append('  uint64_t exec = wf.exec();')
-    if opsel is not None:
-        L.append(f'  uint32_t opsel = {opsel};')
+    # F16 FIXUP is VOP3 only. It works on the raw halves; ABS/NEG, OMOD and
+    # CLAMP use the shared modifier stages.
+    opsel = _default_vop3_opsel_expr(dst + src)
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    L = ['  uint64_t exec = wf.exec();', f'  uint32_t opsel = {opsel};']
+    L.append(output_policy_decl('f16'))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    if is_vop3:
+    for index, name in enumerate(('quotient', 'denominator', 'numerator')):
         L.append(
-            f'    float p = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[0], "opsel", 0)}));'
+            f'    const uint32_t {name} = amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+            f'{_read_vop3_true16_src(src[index], "opsel", index)} & 0xffffu, {index}u, '
+            f'{abs_field}, inst_.neg);'
         )
-        L.append(
-            f'    float b = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[1], "opsel", 1)}));'
-        )
-        L.append(
-            f'    float c = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[2], "opsel", 2)}));'
-        )
-    else:
-        L.append(
-            f'    float p = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));'
-        )
-        L.append(
-            f'    float b = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)));'
-        )
-        L.append(
-            f'    float c = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane)));'
-        )
-    if is_vop3:
-        L.extend(vop3_src_mod('p', 0, has_abs))
-        L.extend(vop3_src_mod('b', 1, has_abs))
-        L.extend(vop3_src_mod('c', 2, has_abs))
     L.append(
-        '    float result = amdgpu::div_fixup_f16(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());'
+        '    const uint32_t result = amdgpu::div_fixup_f16(quotient, denominator, numerator, '
+        'wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl());'
     )
-    if is_vop3:
-        L.extend(vop3_dst_mod('result', omod_result_type='f16'))
-        L.append(
-            '    uint32_t result_bits = amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl());'
-        )
-        L.append(
-            '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
-        )
-        L.append(
-            f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, opsel, result_bits, true);'
-        )
-    else:
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl()));'
-        )
+    L.append(
+        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, opsel, '
+        f'{apply_output("f16", "result")}, true);'
+    )
     L.append('  }')
     return '\n'.join(L)
 

@@ -9,6 +9,9 @@
 /// Denorm bits: bit 0 preserves inputs; bit 1 preserves outputs. FMAS always
 /// preserves its inputs, and FIXUP preserves its provisional quotient.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "util/big_int.h"
 
 #include <bit>
@@ -273,40 +276,49 @@ inline Float div_fixup(Float quotient, Float denominator, Float numerator, uint3
   return std::bit_cast<Float>(Bits(sign | (p & ~F::sign)));
 }
 
-/// @brief Half-precision FIXUP in the exact promoted F32 domain.
-/// Nonfinite provisional values use the guest overflow result for finite
-/// operands. The F32/F64 extreme-exponent underflow shortcut does not apply.
-inline float div_fixup_f16(float quotient, float denominator, float numerator,
-                           uint32_t rounding = 0, uint32_t denorm = 3) {
-  uint32_t denominator_bits = std::bit_cast<uint32_t>(denominator);
-  uint32_t numerator_bits = std::bit_cast<uint32_t>(numerator);
-  if (!(denorm & 1u)) {
-    // Inputs are promoted F16, whose minimum normal has F32 bits 0x38800000.
-    if ((denominator_bits & 0x7fffffffu) < 0x38800000u)
-      denominator_bits &= 0x80000000u;
-    if ((numerator_bits & 0x7fffffffu) < 0x38800000u)
-      numerator_bits &= 0x80000000u;
-  }
-  const uint32_t denominator_magnitude = denominator_bits & 0x7fffffffu;
-  const uint32_t numerator_magnitude = numerator_bits & 0x7fffffffu;
-  const uint32_t sign = (denominator_bits ^ numerator_bits) & 0x80000000u;
-  if (numerator_magnitude > 0x7f800000u)
-    return std::bit_cast<float>(numerator_bits | 0x00400000u);
-  if (denominator_magnitude > 0x7f800000u)
-    return std::bit_cast<float>(denominator_bits | 0x00400000u);
-  if ((denominator_magnitude == 0 && numerator_magnitude == 0) ||
-      (denominator_magnitude == 0x7f800000u && numerator_magnitude == 0x7f800000u))
-    return std::bit_cast<float>(0xffc00000u);
-  if (denominator_magnitude == 0 || numerator_magnitude == 0x7f800000u)
-    return std::bit_cast<float>(sign | 0x7f800000u);
-  if (numerator_magnitude == 0 || denominator_magnitude == 0x7f800000u)
-    return std::bit_cast<float>(sign);
-  const uint32_t magnitude = std::bit_cast<uint32_t>(quotient) & 0x7fffffffu;
-  if (magnitude >= 0x7f800000u) {
-    const bool to_infinity = rounding == 0 || (rounding == 1 && !sign) || (rounding == 2 && sign);
-    return std::bit_cast<float>(sign | (to_infinity ? 0x7f800000u : 0x477fe000u));
-  }
-  return std::bit_cast<float>(magnitude | sign);
+/// @brief Half-precision FIXUP on raw encodings, in scalar or SIMD lanes.
+/// @details F16 occupies the low half of a 32-bit lane. MODE input flushing
+/// applies to the denominator and numerator; the provisional quotient is kept.
+/// The F32/F64 extreme-exponent underflow shortcut does not apply.
+///
+/// | Operands, after input flushing         | Result                            |
+/// |----------------------------------------|-----------------------------------|
+/// | Numerator NaN, else denominator NaN    | That NaN, quieted                 |
+/// | 0 / 0 or infinity / infinity           | Default NaN 0xfe00                |
+/// | x / 0 or infinity / x                  | Infinity with the quotient sign   |
+/// | 0 / x or x / infinity                  | Zero with the quotient sign       |
+/// | Quotient infinite or NaN               | Overflow under the rounding mode  |
+/// | Otherwise                              | Quotient magnitude, quotient sign |
+///
+/// An overflow is not a true infinity, so FP16_OVFL turns it into the largest
+/// finite value (checked on gfx1201).
+template <typename V>
+constexpr V div_fixup_f16(V quotient, V denominator, V numerator, uint32_t rounding,
+                          uint32_t denorm, bool fp16_ovfl) {
+  using F16 = fp_format::F16;
+  using comparison::detail::choose;
+  const auto input = input_denormal::Policy::make(denorm);
+  const V d = input_denormal::prepare<F16>(denominator, input);
+  const V n = input_denormal::prepare<F16>(numerator, input);
+  const V dm = d & F16::kMagnitude, nm = n & F16::kMagnitude;
+  const V zero(0u), infinity(F16::kInfinity), largest(F16::kInfinity - 1);
+  const V sign = (d ^ n) & F16::kSign;
+  const auto negative = sign != zero;
+  const bool positive_overflows = rounding == 0 || rounding == 1;
+  const bool negative_overflows = rounding == 0 || rounding == 2;
+  V overflow = choose(negative, V(negative_overflows ? infinity : largest),
+                      V(positive_overflows ? infinity : largest));
+  if (fp16_ovfl)
+    overflow = largest;
+  const V magnitude = quotient & F16::kMagnitude;
+  // Lowest priority first: each later choice overrides the ones before it.
+  V result = sign | choose(magnitude >= infinity, overflow, magnitude);
+  result = choose(nm == zero || dm == infinity, sign, result);
+  result = choose(dm == zero || nm == infinity, sign | infinity, result);
+  result = choose((dm == zero && nm == zero) || (dm == infinity && nm == infinity),
+                  V(F16::kSign | F16::kInfinity | F16::kQuiet), result);
+  result = choose(dm > infinity, d | F16::kQuiet, result);
+  return choose(nm > infinity, n | F16::kQuiet, result);
 }
 
 /// @brief Apply FIXUP OMOD using guest rounding only when scaling overflows.

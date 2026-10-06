@@ -2850,8 +2850,7 @@ template <typename Inst, typename FmaOp>
 template <bool True16, typename Inst, typename FmaOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop3_fp16_simd(Inst &inst, Wavefront &wf,
-                                                             FmaOp tern_op,
-                                                             bool preserve_nan_payload = false) {
+                                                             FmaOp tern_op) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
@@ -2865,11 +2864,7 @@ template <bool True16, typename Inst, typename FmaOp>
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto narrow = [&](util::native<float> value) {
-    if (!preserve_nan_payload)
-      return util::f32_to_f16_mode_simd(value, wf.fp16_ovfl());
-    return util::native<uint32_t>([&](auto index) {
-      return narrow_div_fixup_f16(static_cast<float>(value[index]), wf.fp16_ovfl());
-    });
+    return util::f32_to_f16_mode_simd(value, wf.fp16_ovfl());
   };
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
@@ -2924,7 +2919,7 @@ template <bool True16, typename Inst, typename FmaOp>
 }
 
 template <bool True16, typename Inst, typename FmaOp>
-[[nodiscard]] bool try_execute_ternary_vop3_fp16_simd(Inst &, Wavefront &, FmaOp, bool = false) {
+[[nodiscard]] bool try_execute_ternary_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -3460,18 +3455,6 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 template <typename Tin, typename Tout, typename Inst, typename UnOp>
 [[nodiscard]] bool try_execute_unary_vop3_fp_simd(Inst &, Wavefront &, UnOp, bool = false) {
   return false;
-}
-
-/// @brief Apply the F16 special cases before the shared modifier/writeback path.
-inline util::native<float> div_fixup_f16_promoted_simd(util::native<float> quotient,
-                                                       util::native<float> denominator,
-                                                       util::native<float> numerator,
-                                                       uint32_t rounding, uint32_t denorm) {
-  return util::native<float>([&](auto index) {
-    return div_fixup_f16(static_cast<float>(quotient[index]),
-                         static_cast<float>(denominator[index]),
-                         static_cast<float>(numerator[index]), rounding, denorm);
-  });
 }
 
 /// @brief Batch operand access through the shared FIXUP and guest OMOD helpers.
