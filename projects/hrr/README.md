@@ -19,6 +19,8 @@ HRR Capture is now disabled by default on AMD platforms. The feature will be sec
 HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 ```
 
+A process that initialises HIP with capture on says so once on stderr, whatever `AMD_LOG_LEVEL` is set to: the line begins with `[HRR capture] Recording` and names the process's own directory in the archive, such as `./my_capture.hrr/pid-4242`. Child processes record to their own `pid-*` directories in the same archive. A child started with `exec` prints a line of its own; a child created with `fork()` after HIP has started does not.
+
 Use the in-tree `libamdhip64` from the **same source commit** when testing capture changes:
 
 ```bash

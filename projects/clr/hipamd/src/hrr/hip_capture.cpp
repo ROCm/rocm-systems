@@ -2499,6 +2499,16 @@ void hip_capture_init() {
     hip::PlatformState::Instance().StatCO().ForEachGlobalVar(record_registered_var);
 
     std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
+
+    // Deliberately not gated on AMD_LOG_LEVEL: whoever runs the process must be
+    // able to see that it is being recorded. The path must match the pid-<pid>
+    // directory writer::open() creates. A fork() child records to a sibling
+    // pid-<pid> directory without printing, because hip::init() does not run again.
+    fprintf(stderr,
+            "[HRR capture] Recording this process's HIP calls, with their host buffers, kernel "
+            "arguments and code objects, to %s/pid-%d (child processes record to their own "
+            "pid-* directories in %s)\n",
+            hip_capture_output_dir(), amd::Os::getProcessId(), hip_capture_output_dir());
   #else
     // HRR capture is disabled
     // below to avoid -Wunused-function / -Wunused-variable
@@ -2514,8 +2524,8 @@ void hip_capture_shutdown() {
   hrr_cap::writer::flush(hip_capture_output_dir());
   hrr_cap::writer::close();
 
-  LogPrintfInfo("[HRR capture] Wrote %llu events, %llu blobs to: %s",
-               static_cast<unsigned long long>(hrr_cap::writer::event_count()),
-               static_cast<unsigned long long>(hrr_cap::writer::blob_count()),
-               hip_capture_output_dir());
+  LogPrintfInfo("[HRR capture] Wrote %llu events, %llu blobs to: %s/pid-%d",
+                static_cast<unsigned long long>(hrr_cap::writer::event_count()),
+                static_cast<unsigned long long>(hrr_cap::writer::blob_count()),
+                hip_capture_output_dir(), amd::Os::getProcessId());
 }
