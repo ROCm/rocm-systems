@@ -215,7 +215,7 @@ in the following table.
           which the RAS diagnostics report a GPU. Uncorrectable and deferred
           errors are always reported.
       - | ``0``: Corrected errors are not reported (default).
-        | ``N`` > 0: Ranks with at least ``N`` corrected errors are reported.
+        | ``N`` > 0: Ranks with at least ``N`` correctable errors are reported.
 
 .. _check-mode:
 

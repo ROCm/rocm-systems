@@ -17,6 +17,7 @@
 #include "amdsmi_wrap.h"
 #include "alt_rsmi.h"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "utils.h"
 
 #include <cerrno>
 #include <cstdlib>
@@ -205,6 +206,31 @@ TEST_F(AmdSmiWrapTest, PciBusIdRoundTripsToDeviceIndex)
         ASSERT_EQ(amd_smi_getDeviceIndexByPciBusId(busId, &deviceIndex), ncclSuccess)
             << "bus ID " << busId;
         EXPECT_EQ(deviceIndex, i) << "bus ID " << busId << " resolved to the wrong device";
+    }
+}
+
+// The RAS diagnostics name a GPU by its busIdToInt64() value, which amd_smi_diag* decode back into a BDF, so
+// every device's bus ID has to reach a GPU that AMD SMI knows. A partition (non-zero PCI function) may be known
+// only through its physical GPU on function 0, which is what the diagnostics fall back to.
+TEST_F(AmdSmiWrapTest, DiagnosticsQueriesResolveEveryDeviceBusId)
+{
+    requireDevices(1);
+    if(amd_smi_diagInit() != ncclSuccess)
+        GTEST_SKIP() << "amd_smi_diagInit() failed: no AMD SMI library";
+
+    for(uint32_t i = 0; i < numDevices_; i++)
+    {
+        char busIdString[32] = {0};
+        ASSERT_EQ(amd_smi_getDevicePciBusIdString(i, busIdString, sizeof(busIdString)), ncclSuccess);
+        int64_t busId = 0;
+        ASSERT_EQ(busIdToInt64(busIdString, &busId), ncclSuccess) << "bus ID " << busIdString;
+
+        char model[256] = {0};
+        ncclResult_t res = amd_smi_diagGpuModel(busId, model, sizeof(model));
+        if(res != ncclSuccess && (busId & 0xf) != 0)
+            res = amd_smi_diagGpuModel(busId & ~INT64_C(0xf), model, sizeof(model));
+        EXPECT_EQ(res, ncclSuccess) << "bus ID " << busIdString;
+        EXPECT_GT(strlen(model), 0u) << "bus ID " << busIdString;
     }
 }
 
