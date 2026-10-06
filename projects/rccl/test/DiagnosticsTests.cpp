@@ -42,12 +42,14 @@ static constexpr size_t kAllReduceElems  = 1 << 20;
 
 static const char* const kDiagPrefix  = "NCCL DIAG ";
 static const char* const kDiagHeader  = "NCCL DIAG === NCCL Diagnostics ===";
-static const char* const kDiagSummary = "NCCL DIAG [OK]   p2p: all ";
+static const char* const kDiagSummary
+    = "NCCL DIAG [OK]   p2p: verified P2P access in both directions between every GPU pair";
+static const char* const kDiagPartialSummary = "GPU-to-GPU peer accesses passed verification";
 
 // Report lines that indicate a failed or incomplete check (src/diagnostics.cc, src/diagnostics/p2p.cc).
 static const char* const kDiagFailureMarkers[] = {
     "transport detect returned",
-    "p2p: active check returned",
+    "p2p: check returned",
     "p2p: setup failed",
     "p2p: destination buffer unavailable",
     "p2p: local CUDA setup failed",
@@ -106,10 +108,11 @@ static DiagReport parseDiagReport(const std::string& captured)
     return report;
 }
 
-// Directed edge count from "NCCL DIAG [OK]   p2p: all <N> directed GPU P2P edges verified", or -1.
+// Directed edge count (one peer access per direction) from the [OK] p2p summary, or -1.
 static int okEdgeCount(const std::string& line)
 {
-    static const std::regex re("p2p: all ([0-9]+) directed GPU P2P edges verified");
+    static const std::regex re("p2p: verified P2P access in both directions between every GPU pair "
+                               "\\(([0-9]+) peer accesses\\)");
     std::smatch m;
     return std::regex_search(line, m, re) ? std::stoi(m[1].str()) : -1;
 }
@@ -164,9 +167,7 @@ static void expectEdgeSummaries(const DiagReport& report, const std::vector<std:
     const int nGroups = static_cast<int>(groups.size());
     const bool full   = std::all_of(groups.begin(), groups.end(), xgmiFullMesh);
 
-    EXPECT_EQ(report.count("directed GPU P2P edges verified"), report.count(kDiagSummary))
-        << "partial p2p summary:\n"
-        << report.dump();
+    EXPECT_EQ(report.count(kDiagPartialSummary), 0) << "partial p2p summary:\n" << report.dump();
     if(full)
         ASSERT_EQ(report.count(kDiagSummary), nGroups) << report.dump();
     else if(report.count(kDiagSummary) == 0)
@@ -463,7 +464,8 @@ TEST_F(Diagnostics, P2pDisabledReportsNoEdges)
         const DiagReport report = parseDiagReport(out);
         EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
         EXPECT_EQ(report.count("NCCL diagnostics completed in"), 1) << report.dump();
-        EXPECT_EQ(report.count("directed GPU P2P edges verified"), 0) << report.dump();
+        EXPECT_EQ(report.count(kDiagSummary), 0) << report.dump();
+        EXPECT_EQ(report.count(kDiagPartialSummary), 0) << report.dump();
         EXPECT_TRUE(report.failures().empty()) << report.dump();
         checkAllReduce(comms);
     }}});
@@ -528,22 +530,25 @@ TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
 // cases skipping on a host without enough GPUs. The lines follow src/diagnostics.cc and src/diagnostics/p2p.cc.
 TEST_F(Diagnostics, ReportParserOnFixedCapture)
 {
-    const std::string captured = "application output before init\n"
-                                 "node01:4242 NCCL DIAG === NCCL Diagnostics ===\n"
-                                 "node01:4242 NCCL DIAG [OK]   p2p: all 56 directed GPU P2P edges verified\n"
-                                 "NCCL INFO unrelated log line\n"
-                                 "node01:4242 NCCL DIAG [INFO] p2p: 3/12 directed GPU P2P edges verified\n"
-                                 "node01:4242 NCCL DIAG [INFO] p2p: write mismatch srcRank=0 dstRank=1\n"
-                                 "node01:4242 NCCL DIAG NCCL diagnostics completed in 37.1 ms across 8 ranks\n";
+    const std::string captured
+        = "application output before init\n"
+          "node01:4242 NCCL DIAG === NCCL Diagnostics ===\n"
+          "node01:4242 NCCL DIAG [OK] net bw: skipped (single host or no network transport)\n"
+          "node01:4242 NCCL DIAG [OK]   p2p: verified P2P access in both directions between every GPU pair "
+          "(56 peer accesses)\n"
+          "NCCL INFO unrelated log line\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: only 3/12 GPU-to-GPU peer accesses passed verification\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: write mismatch srcRank=0 dstRank=1\n"
+          "node01:4242 NCCL DIAG NCCL diagnostics completed in 37.1 ms across 8 ranks\n";
     const DiagReport report = parseDiagReport(captured);
 
-    ASSERT_EQ(report.lines.size(), 5u) << report.dump();
+    ASSERT_EQ(report.lines.size(), 6u) << report.dump();
     EXPECT_EQ(report.lines.front(), kDiagHeader);
     EXPECT_EQ(report.count(kDiagHeader), 1);
     EXPECT_EQ(report.count(kDiagSummary), 1);
-    EXPECT_EQ(report.count("directed GPU P2P edges verified"), 2);
-    EXPECT_EQ(okEdgeCount(report.lines[1]), 56);
-    EXPECT_EQ(okEdgeCount(report.lines[2]), -1);
+    EXPECT_EQ(report.count(kDiagPartialSummary), 1);
+    EXPECT_EQ(okEdgeCount(report.lines[2]), 56);
+    EXPECT_EQ(okEdgeCount(report.lines[3]), -1);
     ASSERT_EQ(report.failures().size(), 1u) << report.dump();
     EXPECT_NE(report.failures().front().find("p2p: write mismatch"), std::string::npos);
     EXPECT_TRUE(parseDiagReport("no report here\n").lines.empty());
@@ -552,7 +557,7 @@ TEST_F(Diagnostics, ReportParserOnFixedCapture)
     const std::string failing
         = "node01:4242 NCCL DIAG === NCCL Diagnostics ===\n"
           "node01:4242 NCCL DIAG [INFO] transport detect returned 3\n"
-          "node01:4242 NCCL DIAG [INFO] p2p: active check returned 3\n"
+          "node01:4242 NCCL DIAG [INFO] p2p: check returned 3\n"
           "node01:4242 NCCL DIAG [INFO] p2p: setup failed on rank 2 result=1\n"
           "node01:4242 NCCL DIAG [INFO] p2p: destination buffer unavailable srcRank=0 dstRank=1 reason=noDescriptor\n"
           "node01:4242 NCCL DIAG [INFO] p2p: local CUDA setup failed srcRank=0 dstRank=1 reason=localCuda\n"
