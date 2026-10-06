@@ -11,7 +11,7 @@
 - [Analysis config YAML redesign](../design/analysis-config-redesign/hld-analysis-config-redesign.md#layer-details) — Layer 1.5 collectables. This plan uses that idea on today’s panel YAML.
 - [Three-layer analysis config LLD](../design/analysis-config-redesign/lld-index.md) and [metric library LLD](../design/analysis-config-redesign/lld-phase1-metric-library.md) — the migration this plan does not do.
 
-This is the overall plan. The packing algorithm and flowchart are in [Metric grouping (SPP / SPU)](<[HLD]Single-pass packable and unpackable - Metrics Grouping Algorithm.md>).
+This is the overall plan. The packing algorithm and flowchart are in [Metric grouping (SPP / SPU)](<lld-metrics grouping algorithm.md>).
 
 Full historical plan drafts are preserved on branch
 `users/feizheng10/aiprofcomp-865-docs-backup`.
@@ -77,7 +77,7 @@ Ratio metrics are expressions over PMC counters. With **multiple perfmon replays
 
 #### Collection — single-pass packing
 
-Replace the shipping heuristic as the default allocator. The normative steps, flowchart, TCC series affinity, and packing gates are in [Metric grouping (SPP / SPU)](<[HLD]Single-pass packable and unpackable - Metrics Grouping Algorithm.md>).
+Replace the shipping heuristic as the default allocator. The normative steps, flowchart, TCC series affinity, and packing gates are in [Metric grouping (SPP / SPU)](<lld-metrics grouping algorithm.md>).
 
 **Primary packing code:** `counter_grouping_single_pass.py`, `counter_grouping_buckets.py`, `soc_base.py`.
 
