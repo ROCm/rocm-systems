@@ -1127,10 +1127,13 @@ Triton trace
 ============
 
 In addition to PyTorch, ROCm Compute Profiler can map performance counters to
-Triton kernels (including Triton kernels launched by ``torch.compile`` /
-Inductor). This is enabled with the ``--triton-trace`` option and shares the
-same ``ml_api_trace`` output, ``Backend`` attribution, and analysis flow as Torch
-trace.
+Triton kernels launched through Triton's Python runtime. This is enabled with
+the ``--triton-trace`` option and shares the same ``ml_api_trace`` output,
+``Backend`` attribution, and analysis flow as Torch trace.
+
+``torch.compile`` / Inductor launches fused kernels through PyTorch's static
+launcher, not that runtime, so those launches do not emit ``|triton`` ranges.
+Use ``--torch-trace``; the GPU kernels nest under ``torch.compile.<fn>``.
 
 .. warning::
 
