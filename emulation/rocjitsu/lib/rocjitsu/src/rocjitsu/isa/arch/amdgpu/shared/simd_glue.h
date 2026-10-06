@@ -3521,7 +3521,7 @@ template <typename Inst>
       if ((chunk >> i) & 1u)
         r[i] = div_fmas(static_cast<T>(a[i]), static_cast<T>(b[i]), static_cast<T>(c[i]),
                         ((vcc >> (base + i)) & 1u) != 0, wf.fp_round_mode_f32(),
-                        wf.fp_denorm_mode_f32());
+                        wf.fp_denorm_mode_f32(), output_policy.omod != 0);
     }
     // Scale the rounded quotient, then clamp (checked on gfx1201).
     const auto bits = std::bit_cast<util::native<uint32_t>>(r);
@@ -3568,7 +3568,7 @@ template <typename Inst>
       if ((chunk >> i) & 1u)
         r[i] = div_fmas(static_cast<T>(a[i]), static_cast<T>(b[i]), static_cast<T>(c[i]),
                         ((vcc >> (base + i)) & 1u) != 0, wf.fp_round_mode_f16_f64(),
-                        wf.fp_denorm_mode_f16_f64());
+                        wf.fp_denorm_mode_f16_f64(), output_policy.omod != 0);
     }
     // Scale the rounded quotient, then clamp (checked on gfx1201).
     const auto bits = std::bit_cast<util::native<uint64_t>>(r);

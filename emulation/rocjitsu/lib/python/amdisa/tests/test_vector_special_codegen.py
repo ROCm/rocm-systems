@@ -24,6 +24,7 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_bitop3,
     gen_vector_cvt_pk,
     gen_vector_div_fixup,
+    gen_vector_div_fmas,
     gen_vector_mad_32_16,
     gen_vector_movrel,
     gen_vector_mullit,
@@ -667,3 +668,11 @@ def test_f64_multiply_simd_passes_omod_to_the_tininess_check():
     assert 'amdgpu::mul_f64_simd(a, b, wf,' in probe
     assert 'effective_vop3_omod_f64(wf, inst.inst_.omod) != 0' in probe
     assert 'native_arithmetic_matches' in probe
+
+
+@pytest.mark.parametrize('dtype', ['f32', 'f64'])
+def test_div_fmas_passes_omod_to_the_tininess_check(dtype: str):
+    vop3 = gen_vector_div_fmas(['vdst'], ['src0', 'src1', 'src2'], dtype, True, True)
+    vop2 = gen_vector_div_fmas(['vdst'], ['src0', 'src1', 'src2'], dtype, False, False)
+    assert 'output_policy.omod != 0);' in vop3
+    assert 'omod' not in vop2

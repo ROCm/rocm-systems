@@ -10190,7 +10190,7 @@ inline void execute_v_div_fmas_f32_vop3([[maybe_unused]] Inst &inst,
     float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
     s2 = amdgpu::source_modifier::apply_to_float(s2, 2, inst.inst_.abs, inst.inst_.neg);
     float result = div_fmas(s0, s1, s2, (vcc & (1ULL << lane)) != 0, wf.fp_round_mode_f32(),
-                            wf.fp_denorm_mode_f32());
+                            wf.fp_denorm_mode_f32(), output_policy.omod != 0);
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane,
         amdgpu::output_modifier::apply<amdgpu::fp_format::F32>(std::bit_cast<uint32_t>(result),
@@ -10216,7 +10216,7 @@ inline void execute_v_div_fmas_f64_vop3([[maybe_unused]] Inst &inst,
     double s2 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src2, lane));
     s2 = amdgpu::source_modifier::apply_to_float(s2, 2, inst.inst_.abs, inst.inst_.neg);
     double result = div_fmas(s0, s1, s2, (vcc & (1ULL << lane)) != 0, wf.fp_round_mode_f16_f64(),
-                             wf.fp_denorm_mode_f16_f64());
+                             wf.fp_denorm_mode_f16_f64(), output_policy.omod != 0);
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
         amdgpu::output_modifier::apply<amdgpu::fp_format::F64>(std::bit_cast<uint64_t>(result),

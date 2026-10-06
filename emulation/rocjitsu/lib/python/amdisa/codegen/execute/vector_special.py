@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
+    OUTPUT_POLICY,
     apply_output,
     output_policy_decl,
     vop3_src_mod,
@@ -1028,8 +1029,12 @@ def _gen_division_result(
         if is_vop3:
             L.extend(vop3_src_mod(f's{index}', index, has_abs))
     post_scale = '(vcc & (1ULL << lane)) != 0, ' if operation == 'fmas' else ''
+    # FMAS: an active OMOD flushes a result that is tiny after rounding.
+    force_flush = (
+        f', {OUTPUT_POLICY}.omod != 0' if operation == 'fmas' and is_vop3 else ''
+    )
     L.append(
-        f'    {fp_type} result = div_{operation}(s0, s1, s2, {post_scale}wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}());'
+        f'    {fp_type} result = div_{operation}(s0, s1, s2, {post_scale}wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}(){force_flush});'
     )
     result = f'std::bit_cast<{bits}>(result)'
     if is_vop3:

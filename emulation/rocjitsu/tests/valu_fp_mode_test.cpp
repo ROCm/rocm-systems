@@ -35,6 +35,7 @@ struct ArithmeticCase {
   int host_rounding;
   uint32_t mxcsr_mask = 0;
   uint32_t mxcsr_bits = 0;
+  uint64_t vcc = 0;
 };
 
 void PrintTo(const ArithmeticCase &test, std::ostream *stream) { *stream << test.name; }
@@ -2757,6 +2758,45 @@ std::vector<ArithmeticCase> fma_f64_policy_cases() {
   };
 }
 
+// V_DIV_FMAS judges tininess after rounding like other arithmetic, including
+// a post-scaled (VCC) result and under OMOD. Results are gfx1201 captures.
+std::vector<ArithmeticCase> div_fmas_cases() {
+  const auto fmas_f32 = [](uint8_t omod) {
+    return rdna4::build_vop3(rdna4::kVDivFmasF32Vop3,
+                             {.vdst = 6, .src0 = 256, .src1 = 257, .src2 = 258, .omod = omod});
+  };
+  const auto f32_case = [](const std::string &name, std::array<uint32_t, 2> words,
+                           std::array<uint32_t, 3> sources, uint32_t mode, uint32_t result) {
+    return ArithmeticCase{name,
+                          ROCJITSU_CODE_ARCH_RDNA4,
+                          {words[0], words[1], 0u},
+                          {{0, sources[0]}, {1, sources[1]}, {2, sources[2]}},
+                          {{6, result}},
+                          mode,
+                          FE_TONEAREST};
+  };
+  const auto fmas_f64 = rdna4::build_vop3(rdna4::kVDivFmasF64Vop3,
+                                          {.vdst = 6, .src0 = 256, .src1 = 258, .src2 = 260});
+  // -(2^-126 - 2^-149) minus a tiny product, rounded toward -infinity (MODE
+  // 0x?a), reaches the smallest normal only on the subnormal grid.
+  const std::array<uint32_t, 3> f32_boundary{0x807fffffu, 0x00000001u, 0x807fffffu};
+  const std::array<uint64_t, 3> f64_boundary{0x800fffffffffffffu, 0x0010000000000000u,
+                                             0x800fffffffffffffu};
+  std::vector<ArithmeticCase> cases{
+      f32_case("F32TinyTowardNegativeModeCa", fmas_f32(0), f32_boundary, 0xcau, 0x80000000u),
+      f32_case("F32TinyTowardNegativeModeFa", fmas_f32(0), f32_boundary, 0xfau, 0x80800000u),
+      f32_case("F32SubnormalModeF0", fmas_f32(0), f32_boundary, 0xf0u, 0x807fffffu),
+      f64_case("F64TinyTowardNegativeMode7a", fmas_f64, f64_boundary, 0x7au, 0x8000000000000000u),
+      f64_case("F64TinyTowardNegativeModeFa", fmas_f64, f64_boundary, 0xfau, 0x8010000000000000u),
+  };
+  // VCC post-scales by 2^-64; OMOD then flushes the tiny quotient.
+  ArithmeticCase post_scaled = f32_case("F32PostScaledMul2TinyModeF0", fmas_f32(1),
+                                        {0x3f8983e4u, 0x206e4950u, 0x00000001u}, 0xf0u, 0u);
+  post_scaled.vcc = ~uint64_t{0};
+  cases.push_back(std::move(post_scaled));
+  return cases;
+}
+
 void expect_arithmetic_case(const ArithmeticCase &test) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
@@ -2779,6 +2819,7 @@ void expect_arithmetic_case(const ArithmeticCase &test) {
   const uint64_t full_exec = wave->wf_size() == 64 ? ~uint64_t{0} : 0xffffffffu;
   for (uint64_t exec : {uint64_t{1}, full_exec}) {
     wave->set_exec(exec);
+    wave->set_vcc(test.vcc);
     wave->set_mode_raw(test.mode);
     for (const std::pair<uint32_t, uint32_t> &destination : test.expected)
       for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
@@ -2899,6 +2940,12 @@ INSTANTIATE_TEST_SUITE_P(Tininess, ValuRoundedResultModifierTest,
 
 INSTANTIATE_TEST_SUITE_P(FmaF64, ValuRoundedResultModifierTest,
                          testing::ValuesIn(fma_f64_policy_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(DivFmas, ValuRoundedResultModifierTest,
+                         testing::ValuesIn(div_fmas_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

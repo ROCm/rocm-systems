@@ -182,9 +182,13 @@ inline DivisionScaleResult<Float> div_scale(Float value, Float denominator, Floa
 /// exact cancellation. Widely separated terms contribute a sticky bit. Scaling
 /// is fused with the final rounding, avoiding premature overflow and double
 /// rounding when the quotient becomes subnormal. FMAS preserves input denormals.
+/// Output flushing judges tininess after rounding; an active VOP3 OMOD flushes a
+/// tiny result even when MODE keeps output denormals (force_output_flush).
 template <typename Float>
 inline Float div_fmas(Float first, Float second, Float third, bool post_scale, uint32_t rounding,
-                      uint32_t denorm) {
+                      uint32_t denorm, bool force_output_flush = false) {
+  if (force_output_flush)
+    denorm &= ~2u;
   using F = DivisionFormat<Float>;
   using Bits = typename F::Bits;
   const Bits a = std::bit_cast<Bits>(first), b = std::bit_cast<Bits>(second),
@@ -219,9 +223,9 @@ inline Float div_fmas(Float first, Float second, Float third, bool post_scale, u
     return std::bit_cast<Float>(Bits(negative ? F::sign : 0));
   }
   if (product == 0)
-    return div_round<Float>(addend, se + adjustment, addend_negative, rounding, denorm);
+    return div_round<Float>(addend, se + adjustment, addend_negative, rounding, denorm, true);
   if (addend == 0)
-    return div_round<Float>(product, pe + adjustment, product_negative, rounding, denorm);
+    return div_round<Float>(product, pe + adjustment, product_negative, rounding, denorm, true);
   const int pt = div_top_bit(product), ct = div_top_bit(addend);
   const int exponent = pe + pt > se + ct ? pe + pt : se + ct;
   product = div_shift_right_jam(product << (126 - pt), exponent - pe - pt);
@@ -233,7 +237,7 @@ inline Float div_fmas(Float first, Float second, Float third, bool post_scale, u
   const util::uint128_t sum = product_negative == addend_negative ? product + addend
                               : product >= addend                 ? product - addend
                                                                   : addend - product;
-  return div_round<Float>(sum, exponent - 126 + adjustment, negative, rounding, denorm);
+  return div_round<Float>(sum, exponent - 126 + adjustment, negative, rounding, denorm, true);
 }
 
 /// @brief Repair quotient sign and exceptional cases using the original inputs.
