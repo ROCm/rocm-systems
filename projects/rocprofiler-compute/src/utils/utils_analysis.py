@@ -26,6 +26,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.metrics.pass_provenance import natural_pass_sort_key
 from utils.ml_api_trace_errors import (
     KernelSequenceLengthMismatchError,
     LauncherThreadNotFoundError,
@@ -2025,8 +2026,6 @@ def _merge_counters_with_pass_provenance(
     pass_layout: "PassLayout",
 ) -> Dict[str, Any]:
     """Build base + shadow counter columns for one dispatch group."""
-    from utils.metrics.pass_provenance import natural_pass_sort_key
-
     merged: Dict[str, Any] = {}
     for counter_name, counter_rows in group_df.groupby("Counter_Name", sort=False):
         values_by_pass: Dict[str, Any] = {}
