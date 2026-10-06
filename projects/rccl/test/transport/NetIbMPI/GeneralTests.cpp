@@ -104,6 +104,7 @@ TEST_F(NetIbMPITest, CastPortSpeedMatchesIb) {
     ncclNetCommConfig_t commConfig = {};
     commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
     if (netIbCast.init(&castCtx, 0, &commConfig, nullptr, nullptr) != ncclSuccess) {
+        netIbCast.finalize(castCtx);  // castCtx is still null; pairs the netRefCount taken by init's device probe
         GTEST_SKIP() << "IB-CAST plugin failed to initialize on this host";
     }
     struct CastFinalizer {
@@ -130,11 +131,17 @@ TEST_F(NetIbMPITest, CastPortSpeedMatchesIb) {
     }
 
     if (MPIEnvironment::world_rank == 0) {
-        void* verbs = dlopen("libibverbs.so.1", RTLD_NOW | RTLD_NOLOAD);
-        const char* path = !verbs ? "unknown (libibverbs.so.1 not loaded)"
-                         : dlvsym(verbs, "ibv_query_port_speed", "IBVERBS_1.16") ? "ibv_query_port_speed available"
-                         : "ibv_query_port_speed missing, active_speed/active_width fallback";
-        if (verbs) dlclose(verbs);
+        const char* queryEnv = getenv("NCCL_IB_QUERY_PORT_SPEED");
+        const char* path;
+        if (queryEnv && strcmp(queryEnv, "0") == 0) {
+            path = "ibv_query_port_speed disabled (NCCL_IB_QUERY_PORT_SPEED=0), active_speed/active_width fallback";
+        } else {
+            void* verbs = dlopen("libibverbs.so.1", RTLD_NOW | RTLD_NOLOAD);
+            path = !verbs ? "unknown (libibverbs.so.1 not loaded)"
+                 : dlvsym(verbs, "ibv_query_port_speed", "IBVERBS_1.16") ? "ibv_query_port_speed available"
+                 : "ibv_query_port_speed missing, active_speed/active_width fallback";
+            if (verbs) dlclose(verbs);
+        }
         TEST_INFO("Port speed source: %s; %d device(s) compared", path, matched);
     }
     if (matched == 0) GTEST_SKIP() << "No device name common to IB and IB-CAST";
