@@ -4084,6 +4084,8 @@ class CodeGenerator:
             if supports_fixed_size_embedding:
                 size_line += ' }'
                 validation_body += ' }'
+            if profile.vskip_affected_encoding(enc_upper):
+                size_line += ' flags_ |= VSKIP_AFFECTED;'
             validation_body += ' return Result::success();'
             if has_encoding_validation:
                 public_members.append(
@@ -6776,6 +6778,14 @@ class CodeGenerator:
             if sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
                 return self._sleep_body(sem)
             return self._trap_control_body(sem) or '  (void)wf;'
+
+        if cls == 'set_vskip':
+            return (
+                '  const uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);\n'
+                '  const uint32_t bit = amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 31u;\n'
+                '  const uint32_t vskip = ((source >> bit) & 1u) * Wavefront::VSKIP_BIT;\n'
+                '  wf.set_mode_raw((wf.mode_raw() & ~Wavefront::VSKIP_BIT) | vskip);'
+            )
 
         if cls == 'gpr_idx':
             if op == 'on':

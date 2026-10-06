@@ -658,6 +658,7 @@ add_executable(
     pseudo_scalar_exec_test.cpp
     valu_fp_mode_test.cpp
     scalar_scc_test.cpp
+    vskip_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp

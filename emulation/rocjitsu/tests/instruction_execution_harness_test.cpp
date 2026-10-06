@@ -396,7 +396,6 @@ inline bool should_skip_inst(std::string_view mn) {
   return mnemonic_has_any_prefix(mn, SKIP_PREFIXES);
 }
 
-constexpr std::array<std::string_view, 1> EXPECTED_CDNA_UNIMPLEMENTED = {"s_setvskip"};
 constexpr std::array<std::string_view, 3> EXPECTED_RDNA1_UNIMPLEMENTED = {
     "s_subvector_loop_begin", "s_subvector_loop_end", "s_get_waveid_in_workgroup"};
 constexpr std::array<std::string_view, 2> EXPECTED_RDNA2_UNIMPLEMENTED = {"s_subvector_loop_begin",
@@ -409,8 +408,8 @@ struct HarnessExpectation {
 };
 
 constexpr HarnessExpectation HARNESS_EXPECTATIONS[] = {
-    {"cdna1", EXPECTED_CDNA_UNIMPLEMENTED},  {"cdna2", EXPECTED_CDNA_UNIMPLEMENTED},
-    {"cdna3", EXPECTED_CDNA_UNIMPLEMENTED},  {"cdna4", EXPECTED_CDNA_UNIMPLEMENTED},
+    {"cdna1", EXPECTED_NO_UNIMPLEMENTED},    {"cdna2", EXPECTED_NO_UNIMPLEMENTED},
+    {"cdna3", EXPECTED_NO_UNIMPLEMENTED},    {"cdna4", EXPECTED_NO_UNIMPLEMENTED},
     {"rdna1", EXPECTED_RDNA1_UNIMPLEMENTED}, {"rdna2", EXPECTED_RDNA2_UNIMPLEMENTED},
     {"rdna3", EXPECTED_NO_UNIMPLEMENTED},    {"rdna3_5", EXPECTED_NO_UNIMPLEMENTED},
     {"rdna4", EXPECTED_NO_UNIMPLEMENTED},    {"gfx1250", EXPECTED_NO_UNIMPLEMENTED},
