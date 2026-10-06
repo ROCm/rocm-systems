@@ -116,7 +116,9 @@ static ncclResult_t DefaultTopoGetLocalNet(struct ncclTopoSystem*, int, int, int
   if (id != nullptr) {
     *id = 0;
   }
-  *dev = 0;
+  if (dev != nullptr) {
+    *dev = 0;
+  }
   return ncclSuccess;
 }
 std::function<ncclResult_t(struct ncclTopoSystem*, int, int, int64_t*, int*)> g_ncclTopoGetLocalNet =
