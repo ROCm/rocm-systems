@@ -64,7 +64,17 @@ class TestCpuClock(unittest.TestCase):
     def test_get_cpu_current_io_bandwidth(self):
         self.common.print_func_name("")
         for i, cpu in enumerate(self.common.skip_without_cpu()):
-            for encoding_name, encoding, encoding_cond in common.IO_BW_ENCODINGS:
+            # Link names are only legal if the platform's encoding table lists them,
+            # and that table is selected by HSMP protocol version.
+            try:
+                proto_ver = amdsmi.amdsmi_get_cpu_hsmp_proto_ver(cpu)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                self.skipTest(f"HSMP protocol version unavailable: {e}")
+            links = common.io_bw_encodings_for_proto_ver(proto_ver)
+            if not links:
+                self.skipTest(f"HSMP protocol version {proto_ver} defines no IO link encodings")
+
+            for encoding_name, encoding, encoding_cond in links:
                 msg = f"\t### amdsmi_get_cpu_current_io_bandwidth(cpu={i}, encoding={encoding} encoding_name={encoding_name}):"
                 try:
                     ret = amdsmi.amdsmi_get_cpu_current_io_bandwidth(cpu, encoding, encoding_name)

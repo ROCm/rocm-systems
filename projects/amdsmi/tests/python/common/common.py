@@ -165,6 +165,34 @@ VERBOSITY_QUIET = 0  # -q / --quiet
 VERBOSITY_NORMAL = 1  # default (dot-per-test)
 VERBOSITY_VERBOSE = 2  # -v / --verbose (per-test result lines)
 
+# amdsmi_get_cpu_current_io_bandwidth(handle, encoding: int, link_name: str) takes a
+# bandwidth-type int and a link-ID string. esmi validates the name against the platform
+# link-encoding table (sm->lencode, selected per HSMP protocol version in e_smi_plat.c),
+# so a name legal on one platform is rejected with INVAL on another. Protocol versions
+# below 5 have no table at all, hence every name is rejected there. Bandwidth types are
+# 1 (Aggregate), 2 (Read), 4 (Write); IO bandwidth only uses AGG, Read/Write apply to
+# XGMI bandwidth.
+_IO_BW_LINKS_PROTO_VER5 = ("P0", "P1", "P2", "P3", "P4", "P5", "G0", "G1", "G2", "G3")
+_IO_BW_LINKS_PROTO_VER6 = ("P2", "P3", "G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7")
+IO_BW_AGG_TYPE = 1  # AGG: the bandwidth type used for IO bandwidth
+
+
+def io_bw_encodings_for_proto_ver(proto_ver):
+    """``[(link_name, bw_type, expected)]`` valid on *proto_ver*; empty below ver5.
+
+    Consumers pass element 0 as ``link_name`` and element 1 as the encoding int.
+    Protocol version 6 (MI300) has its own link set; version 7 and anything newer
+    reuse the version 5 set, matching the ``default:`` branch of
+    ``init_platform_info()``.
+    """
+    if proto_ver == 6:
+        link_names = _IO_BW_LINKS_PROTO_VER6
+    elif proto_ver >= 5:
+        link_names = _IO_BW_LINKS_PROTO_VER5
+    else:
+        link_names = ()
+    return [(link_name, IO_BW_AGG_TYPE, PASS) for link_name in link_names]
+
 
 def build_type_lists():
     """Enum-derived test-parameter lists, each ``[(name, enum_value, expected)]``.
@@ -191,34 +219,10 @@ def build_type_lists():
         for member in amdsmi.AmdSmiClkLimitType
     ]
 
-    # amdsmi_get_cpu_current_io_bandwidth(handle, encoding: int, link_name: str) takes a
-    # bandwidth-type int and a link-ID string (see amdsmi_interface). The valid values come
-    # from the amdsmi_link_id_bw_type_t struct in amdsmi.h: link names P0-P4/G0-G7, and
-    # bandwidth types 1 (Aggregate), 2 (Read), 4 (Write). For IO bandwidth only AGG (1) is
-    # used; Read/Write (2/4) apply to XGMI bandwidth. Each tuple is
-    # (link_name, bw_type, expected): the consumers pass element 0 as link_name and element
-    # 1 as the encoding int. This mirrors the public interface contract rather than scraping
-    # wrapper *_BW0 symbols (the old scrape passed the symbol name, e.g. "AGG_BW0", as
-    # link_name, which is not a valid link ID).
-    io_bw_agg_type = 1  # AGG: the bandwidth type used for IO bandwidth
-    io_bw_encodings = [
-        (link_name, io_bw_agg_type, PASS)
-        for link_name in (
-            "P0",
-            "P1",
-            "P2",
-            "P3",
-            "P4",
-            "G0",
-            "G1",
-            "G2",
-            "G3",
-            "G4",
-            "G5",
-            "G6",
-            "G7",
-        )
-    ]
+    # Protocol version 5 is the default view for callers that cannot query the host
+    # (the benchmark suites); tests with a CPU handle resolve the real set through
+    # io_bw_encodings_for_proto_ver().
+    io_bw_encodings = io_bw_encodings_for_proto_ver(5)
 
     gpu_blocks = []
     for member in amdsmi.AmdSmiGpuBlock:
