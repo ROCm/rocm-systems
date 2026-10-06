@@ -66,6 +66,9 @@ ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* 
 int ncclIbCastTestGidSameSubnet(const uint8_t localGid[16], const uint8_t remoteGid[16], int prefixLen);
 int ncclIbCastTestSubnetMatchesAny(const uint8_t localGid[16], const uint8_t* remoteGids, int nRemote, int prefixLen);
 
+/* IbCastSpeed(active_speed|active_speed_ex bitmask) -> Mb/s, via the static ibvSpeeds[] table. */
+int ncclIbCastTestSpeed(int speed);
+
 /* GRH (global route header) state per active QP, read back from the driver.
  * isGlobal is queried from the live QP via ibv_query_qp (ah_attr.is_global), so
  * it reflects what the driver actually programmed at RTR, not just intent.
