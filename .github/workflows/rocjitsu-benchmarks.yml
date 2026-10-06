@@ -136,10 +136,7 @@ jobs:
   publish:
     name: Publish dashboard data
     needs: benchmark
-    if: >-
-      ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' &&
-          ((github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
-           (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/'))) }}
+    if: ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
