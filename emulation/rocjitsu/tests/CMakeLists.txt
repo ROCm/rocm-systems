@@ -675,6 +675,7 @@ add_executable(
     gfx12_dot_test.cpp
     packed_wmma_test.cpp
     atomic_semantics_and_decode_test.cpp
+    scalar_atomic_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
