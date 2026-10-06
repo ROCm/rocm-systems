@@ -58,7 +58,6 @@
 #include "library/kokkosp.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
-#include "library/rocprofiler-sdk/roctx_client.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -871,7 +870,7 @@ rocprofsys_init_tooling_hidden(void)
                     control::scope::sampling);
             }
 
-            rocprofiler_sdk::create_roctx_client();
+            rocprofiler_sdk::create_roctx_trigger();
         }
 
         state::process::set(

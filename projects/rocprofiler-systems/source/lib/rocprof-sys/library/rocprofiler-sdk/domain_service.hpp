@@ -6,6 +6,8 @@
 #include "common/string_utility.hpp"
 #include "library/rocprofiler-sdk/buffered_domain.hpp"
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
+#include "library/rocprofiler-sdk/callback/roctx/control_api.hpp"
+#include "library/rocprofiler-sdk/callback/roctx/core_api.hpp"
 #include "library/rocprofiler-sdk/callback_domain.hpp"
 #include "library/rocprofiler-sdk/domain_registry.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
@@ -29,7 +31,6 @@
 
 namespace rocprofsys
 {
-
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 class domain_service
@@ -75,6 +76,7 @@ public:
 
         configure_pending_external_correlation_id();
         configure_code_object_domain();
+        configure_roctx_domains();
     }
 
     void flush() const
@@ -123,6 +125,19 @@ public:
         }
     }
 
+    /// Starts the roctx marker context if roctx tracing was configured. Unlike
+    /// start()/pause() this context is not part of the pausable main context: the
+    /// roctxProfilerPause/Resume and region callbacks must keep firing while the main
+    /// context is paused, otherwise profiling could never be resumed from roctx.
+    void start_roctx()
+    {
+        if(SdkBackend::context_is_valid(m_roctx_context) &&
+           !SdkBackend::context_is_active(m_roctx_context))
+        {
+            SdkBackend::start_context(m_roctx_context);
+        }
+    }
+
 private:
     std::vector<domains::domain_info>                 m_available_domains;
     std::vector<domains::domain_configuration>        m_configuration;
@@ -132,12 +147,15 @@ private:
                              m_correlation_domains;
     SdkBackend::context_id_t m_context{};
     SdkBackend::context_id_t m_code_object_context{};
+    SdkBackend::context_id_t m_roctx_context{};
 
-    // The always-on code_object domain is appended after the configured callback domains.
+    // The always-on code_object domain is appended after the configured callback
+    // domains.
     static constexpr std::size_t k_always_on_callback_domains = 1;
 
     // code_object is not in the registry, so it is never user-selectable: it always
-    // runs, on its own context, so kernel names resolve even while m_context is paused.
+    // runs, on its own context, so kernel names resolve even while m_context is
+    // paused.
     void configure_code_object_domain()
     {
         SdkBackend::create_context(&m_code_object_context);
@@ -234,6 +252,48 @@ private:
         {
             m_correlation_domains.emplace_back(*definition.correlation_dependency);
         }
+
+        if(definition.on_configure)
+        {
+            definition.on_configure();
+        }
+    }
+
+    // The marker domains are not in the registry, so they are never user-selectable:
+    // they follow Externals::is_roctx_enabled() and run on their own context. The
+    // context is only created and wired up here; start_roctx() starts it.
+    void configure_roctx_domains()
+    {
+        if(!Externals::is_roctx_enabled())
+        {
+            return;
+        }
+
+        LOG_DEBUG("Configuring roctx marker domains");
+        SdkBackend::create_context(&m_roctx_context);
+
+        configure_roctx_domain(
+            domains::callback::roctx::k_core_api<SdkBackend, Externals>, {});
+
+        if(Externals::get_roctx_pause_resume_enabled())
+        {
+            configure_roctx_domain(
+                domains::callback::roctx::k_control_api<SdkBackend, Externals>,
+                { SdkBackend::MARKER_CONTROL_API_ID_roctxProfilerPause,
+                  SdkBackend::MARKER_CONTROL_API_ID_roctxProfilerResume });
+        }
+    }
+
+    void configure_roctx_domain(
+        const domains::callback_domain_definition<SdkBackend>& definition,
+        std::vector<typename SdkBackend::tracing_operation_t>  operations)
+    {
+        LOG_DEBUG("Configuring roctx domain '{}' ({} operation(s))", definition.meta.name,
+                  operations.size());
+
+        m_callback_domains.emplace_back(definition, m_roctx_context,
+                                        std::move(operations));
+        m_callback_domains.back().configure();
 
         if(definition.on_configure)
         {

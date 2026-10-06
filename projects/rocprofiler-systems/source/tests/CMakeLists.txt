@@ -11,6 +11,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:control-posix-clock-tests>
     $<TARGET_OBJECTS:control-steady-clock-tests>
     $<TARGET_OBJECTS:control-session-scope-tests>
+    $<TARGET_OBJECTS:control-roctx-trigger-tests>
     $<TARGET_OBJECTS:trace-period-config-tests>
     $<TARGET_OBJECTS:track-registry-tests>
     $<TARGET_OBJECTS:packet-framing-tests>

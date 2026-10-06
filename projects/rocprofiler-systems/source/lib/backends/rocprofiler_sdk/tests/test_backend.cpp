@@ -842,4 +842,24 @@ TEST_F(backend_test, check_version_compatibility_throws_on_runtime_version_misma
     EXPECT_THROW(sut_v::check_version_compatibility(), std::runtime_error);
 }
 
+TEST_F(backend_test, marker_constants_forward_wrapper_values)
+{
+    EXPECT_EQ(sut::CALLBACK_TRACING_MARKER_CONTROL_API,
+              mock_sdk::CALLBACK_TRACING_MARKER_CONTROL_API);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxMarkA,
+              mock_sdk::MARKER_CORE_API_ID_roctxMarkA);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangePushA,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangePushA);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangePop,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangePop);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangeStartA,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangeStartA);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangeStop,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangeStop);
+    EXPECT_EQ(sut::MARKER_CONTROL_API_ID_roctxProfilerPause,
+              mock_sdk::MARKER_CONTROL_API_ID_roctxProfilerPause);
+    EXPECT_EQ(sut::MARKER_CONTROL_API_ID_roctxProfilerResume,
+              mock_sdk::MARKER_CONTROL_API_ID_roctxProfilerResume);
+}
+
 }  // namespace rocprofsys::backends::rocprofiler_sdk::testing

@@ -48,3 +48,19 @@ target_include_directories(
     control-session-scope-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
 )
+
+add_library(control-roctx-trigger-tests OBJECT test_roctx_trigger.cpp)
+
+target_link_libraries(
+    control-roctx-trigger-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-common-library
+        rocprofiler-systems-logger
+)
+
+target_include_directories(
+    control-roctx-trigger-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
+)
