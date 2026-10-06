@@ -1,0 +1,111 @@
+name: docker_image_debug
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: 'OS version to export'
+        required: true
+        default: 'ubuntu-22.04'
+        type: choice
+        options:
+          - ubuntu-22.04
+          - rhel-8.8
+          - rhel-9.5
+          - sles-15.6
+      gpu:
+        description: 'GPU target'
+        required: true
+        default: 'gfx94X'
+        type: choice
+        options:
+          - gfx94X
+          - gfx950
+          - gfx110X
+          - gfx120X
+
+jobs:
+  export-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+          password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+
+      - name: Pull the private image
+        run: |
+          IMAGE="docker.io/rocm/rocprofiler-private:${{ inputs.os }}-${{ inputs.gpu }}-latest"
+          echo "Pulling image: $IMAGE"
+          docker pull "$IMAGE"
+
+      - name: Inspect image (quick check)
+        run: |
+          IMAGE="docker.io/rocm/rocprofiler-private:${{ inputs.os }}-${{ inputs.gpu }}-latest"
+          echo "=== Running quick inspection ==="
+          docker run --rm "$IMAGE" /bin/bash -c '
+            echo "=== /usr/local/bin contents ===";
+            ls -la /usr/local/bin 2>/dev/null || echo "Directory not found";
+            echo "";
+            echo "=== Git locations ===";
+            which -a git 2>/dev/null || echo "git not found in PATH";
+            echo "";
+            echo "=== Git versions ===";
+            echo -n "/usr/local/bin/git: ";
+            /usr/local/bin/git --version 2>/dev/null || echo "not found";
+            echo -n "/usr/bin/git: ";
+            /usr/bin/git --version 2>/dev/null || echo "not found";
+            echo -n "Default git: ";
+            git --version 2>/dev/null || echo "not in PATH";
+            echo "";
+            echo "=== PATH ===";
+            echo $PATH;
+          '
+
+      - name: Save image to tar file
+        run: |
+          IMAGE="docker.io/rocm/rocprofiler-private:${{ inputs.os }}-${{ inputs.gpu }}-latest"
+          OUTPUT="rocprofiler-${{ inputs.os }}-${{ inputs.gpu }}.tar"
+
+          echo "Saving image to tar file..."
+          docker save "$IMAGE" -o "$OUTPUT"
+
+          echo "Compressing (this may take a few minutes)..."
+          gzip "$OUTPUT"
+
+          echo "Final size:"
+          ls -lh "${OUTPUT}.gz"
+
+      - name: Upload image as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocprofiler-image-${{ inputs.os }}-${{ inputs.gpu }}-run-${{ github.run_id }}
+          path: rocprofiler-${{ inputs.os }}-${{ inputs.gpu }}.tar.gz
+          retention-days: 7
+          compression-level: 0
+
+      - name: Output download instructions
+        run: |
+          echo "================================================"
+          echo "Image exported successfully!"
+          echo "================================================"
+          echo ""
+          echo "To download this artifact:"
+          echo ""
+          echo "Option 1 - Via GitHub Web UI:"
+          echo "  1. Go to: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "  2. Scroll to 'Artifacts' section"
+          echo "  3. Click to download"
+          echo ""
+          echo "Option 2 - Via GitHub CLI:"
+          echo "  gh run download ${{ github.run_id }} --repo ${{ github.repository }}"
+          echo ""
+          echo "To load the image locally:"
+          echo "  gunzip rocprofiler-${{ inputs.os }}-${{ inputs.gpu }}.tar.gz"
+          echo "  docker load -i rocprofiler-${{ inputs.os }}-${{ inputs.gpu }}.tar"
+          echo ""
+          echo "To run the image:"
+          echo "  docker run -it --rm docker.io/rocm/rocprofiler-private:${{ inputs.os }}-${{ inputs.gpu }}-latest /bin/bash"
+          echo ""
+          echo "================================================"
