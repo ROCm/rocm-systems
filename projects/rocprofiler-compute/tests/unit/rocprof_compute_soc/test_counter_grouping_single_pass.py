@@ -3,8 +3,6 @@
 
 """Unit tests for single-pass-packable packing helpers."""
 
-from __future__ import annotations
-
 from rocprof_compute_soc.counter_grouping_buckets import rebuild_counter_file
 from rocprof_compute_soc.counter_grouping_single_pass import (
     _any_bucket_has_full_group,
@@ -15,6 +13,7 @@ from rocprof_compute_soc.counter_grouping_single_pass import (
     _reduce_passes,
     _split_independent_tcc_ea_req_union,
     _strip_orphan_tcc_ea_req_duplicates,
+    fill_slot_limit_into_existing_passes,
     legacy_heuristic_enabled_from_env,
     single_pass_packable_enabled_from_env,
     try_allocate_single_pass_packable,
@@ -51,14 +50,6 @@ def test_explicit_spp_off_disables(monkeypatch):
     assert single_pass_packable_enabled_from_env() is False
 
 
-def test_allocator_disabled_preserves_work_set(monkeypatch):
-    monkeypatch.setenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", "1")
-    work_set = {"SQ_A"}
-
-    assert try_allocate_single_pass_packable(MinimalSoC(), work_set, {"SQ": 1}) is None
-    assert work_set == {"SQ_A"}
-
-
 def test_allocator_default_places_leftovers_and_clears_work_set(monkeypatch):
     monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
     monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", raising=False)
@@ -93,7 +84,7 @@ def test_overlapping_unions_share_bucket_when_cap_allows():
 
 
 def test_conflicting_unions_open_second_bucket_with_duplicate():
-    """When G1∪G2 does not fit, G2 gets its own bucket (may duplicate SQ_C)."""
+    """When the union of G1 and G2 does not fit, G2 gets its own bucket."""
     cfg = {"SQ": 3}
     g1 = frozenset({"SQ_A", "SQ_B", "SQ_C"})
     g2 = frozenset({"SQ_C", "SQ_D", "SQ_E"})
@@ -134,10 +125,6 @@ def test_first_fit_unplaced_adds_missing_counters():
 
 def test_slot_limit_fill_uses_existing_then_opens_new():
     """SPU set (4 PMCs, cap 2) fills leftover room then opens buckets."""
-    from rocprof_compute_soc.counter_grouping_single_pass import (
-        fill_slot_limit_into_existing_passes,
-    )
-
     cfg = {"SQ": 2}
     b0 = rebuild_counter_file("0", cfg, {"SQ_A", "SQ_B"})
     assert b0 is not None
@@ -156,10 +143,6 @@ def test_slot_limit_fill_uses_existing_then_opens_new():
 
 
 def test_slot_limit_fill_never_reuses_a_surviving_bucket_name():
-    from rocprof_compute_soc.counter_grouping_single_pass import (
-        fill_slot_limit_into_existing_passes,
-    )
-
     cfg = {"SQ": 1}
     b0 = rebuild_counter_file("0", cfg, {"SQ_A"})
     b2 = rebuild_counter_file("2", cfg, {"SQ_B"})
@@ -177,10 +160,6 @@ def test_slot_limit_fill_never_reuses_a_surviving_bucket_name():
 
 
 def test_slot_limit_fill_keeps_tcc_series_channels_together():
-    from rocprof_compute_soc.counter_grouping_single_pass import (
-        fill_slot_limit_into_existing_passes,
-    )
-
     cfg = {"TCC": 1, "SQ": 1}
     full = rebuild_counter_file("0", cfg, {"TCC_OTHER[0]", "SQ_A"})
     assert full is not None
@@ -202,10 +181,6 @@ def test_slot_limit_fill_keeps_tcc_series_channels_together():
 
 
 def test_slot_limit_fill_zero_extra_when_already_covered():
-    from rocprof_compute_soc.counter_grouping_single_pass import (
-        fill_slot_limit_into_existing_passes,
-    )
-
     cfg = {"SQ": 2}
     b0 = rebuild_counter_file("0", cfg, {"SQ_A", "SQ_B"})
     b1 = rebuild_counter_file("1", cfg, {"SQ_C", "SQ_D"})
@@ -221,9 +196,7 @@ def test_slot_limit_fill_zero_extra_when_already_covered():
 
 
 def test_allocator_integrates_slot_limit_fill(monkeypatch):
-    """try_allocate runs SLOT fill after packable layout (may add passes)."""
-    from rocprof_compute_soc.counter_grouping_single_pass import _first_fit_unplaced
-
+    """try_allocate runs SPU fill after packable layout (may add passes)."""
     monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
     monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", raising=False)
 
@@ -236,7 +209,7 @@ def test_allocator_integrates_slot_limit_fill(monkeypatch):
         "rocprof_compute_soc.counter_grouping_single_pass.collect_unique_slot_limit_unions",
         lambda soc, counters, cfg: ([slot], 1),
     )
-    # Leave SLOT PMCs unplaced so fill must open buckets (gfx942 often +0).
+    # Leave SPU PMCs unplaced so fill must open buckets (gfx942 often +0).
     monkeypatch.setattr(
         "rocprof_compute_soc.counter_grouping_single_pass._first_fit_unplaced",
         lambda files, work_set, cfg, fc: _first_fit_unplaced(

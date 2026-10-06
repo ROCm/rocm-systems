@@ -3,8 +3,6 @@
 
 """Unit tests for same-pass analyze provenance and binding."""
 
-from __future__ import annotations
-
 import pandas as pd
 
 from utils.file_io import load_df_pmc
