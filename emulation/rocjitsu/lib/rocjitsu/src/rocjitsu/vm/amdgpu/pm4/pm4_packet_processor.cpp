@@ -96,6 +96,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         context.flush_caches();
         if (submission.complete)
           submission.complete(true);
+        // Completion can release an earlier queue in this same service pass.
+        context.wake();
         state.submissions.pop_front();
         queue.command_access.reset();
         if (!state.submissions.empty())
@@ -140,7 +142,12 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       ib.dwords -= count;
       // Save root retirement before an IB command replaces the front frame.
       const uint32_t root_ring_bytes = ib.ring_bytes;
-      const uint64_t root_cursor = ib.address / 4;
+      uint64_t root_cursor = ib.address / 4;
+      const auto skip_commands = [&](uint32_t dwords) {
+        ib.address += uint64_t{dwords} * 4;
+        ib.dwords -= dwords;
+        root_cursor = ib.address / 4;
+      };
       const auto require = [&](size_t size) {
         if (words.size() != size)
           throw std::runtime_error(std::format("PM4 opcode {:#x} expects {} payload words, got {}",
@@ -161,6 +168,19 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       switch (static_cast<Pm4Opcode>(opcode)) {
       case Pm4Opcode::Nop:
         break;
+      case Pm4Opcode::PredExec: {
+        require(1);
+        if ((context.arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+             context.arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+            (words[0] & 0x00ffc000) || context.xcc_id >= 8)
+          throw std::runtime_error("unsupported PRED_EXEC control or target");
+        const uint32_t skip = words[0] & 0x3fff;
+        if (skip > ib.dwords)
+          throw std::runtime_error("PRED_EXEC exceeds its indirect buffer");
+        if (!(words[0] & (1u << (24 + context.xcc_id))))
+          skip_commands(skip);
+        break;
+      }
       case Pm4Opcode::ContextControl:
       case Pm4Opcode::PfpSyncMe:
         if (!submission.graphics_engine)
@@ -207,10 +227,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         if (access->read(address(0), {reinterpret_cast<std::byte *>(&value), sizeof(value)}) !=
             VmAccessOutcome::Complete)
           throw std::runtime_error("PM4 COND_EXEC read failed");
-        if (!value) {
-          ib.address += uint64_t{words[3]} * 4;
-          ib.dwords -= words[3];
-        }
+        if (!value)
+          skip_commands(words[3]);
         break;
       }
       case Pm4Opcode::SetPredication: {
@@ -347,20 +365,36 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       }
       case Pm4Opcode::WaitRegMem: {
         require(6);
-        if (((words[0] >> 4) & 3) != 1)
-          throw std::runtime_error("unsupported WAIT_REG_MEM register space");
         context.flush_caches();
         uint32_t value = 0;
-        const auto loaded =
-            access->read(address(1), {reinterpret_cast<std::byte *>(&value), sizeof(value)});
-        if (loaded == VmAccessOutcome::Unavailable) {
-          ib.address -= count * 4;
-          ib.dwords += count;
-          context.retry();
-          return;
+        const uint32_t space = (words[0] >> 4) & 3;
+        const uint32_t operation = (words[0] >> 6) & 3;
+        if (space == 0 && operation == 1 &&
+            (context.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+             context.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+             context.arch == ROCJITSU_CODE_ARCH_CDNA3 || context.arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+             context.arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+            words[1] == 0xe26 && words[2] == 0xe27) {
+          // NBIO 4.3/7.9/7.11 and NBIF 6.3 share this HDP_FLUSH_REQ/DONE pair.
+          // WR_WAIT_WR_REG requests host-data
+          // visibility and waits for the same engine bits in the done register.
+          // Host mappings are coherent; the synchronous cache flush above
+          // completes the modeled request before its acknowledgement.
+          value = words[3];
+        } else if (space == 1 && (operation == 0 || operation == 3)) {
+          const auto loaded =
+              access->read(address(1), {reinterpret_cast<std::byte *>(&value), sizeof(value)});
+          if (loaded == VmAccessOutcome::Unavailable) {
+            ib.address -= count * 4;
+            ib.dwords += count;
+            context.retry();
+            return;
+          }
+          if (loaded != VmAccessOutcome::Complete)
+            throw std::runtime_error("PM4 WAIT_REG_MEM read failed");
+        } else {
+          throw std::runtime_error("unsupported WAIT_REG_MEM register space or operation");
         }
-        if (loaded != VmAccessOutcome::Complete)
-          throw std::runtime_error("PM4 WAIT_REG_MEM read failed");
         value &= words[4];
         uint32_t reference = words[3] & words[4];
         bool ready;
@@ -566,7 +600,13 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         break;
       }
       case Pm4Opcode::AcquireMem: // ACQUIRE_MEM: earlier dispatches and DMA are already retired.
-        require(7);
+        // GFX9 carries CP_COHER_CNTL in ordinal 2 and ends with POLL_INTERVAL.
+        // Later generations append a GCR control word.
+        require(
+            (context.arch == ROCJITSU_CODE_ARCH_CDNA1 || context.arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+             context.arch == ROCJITSU_CODE_ARCH_CDNA3 || context.arch == ROCJITSU_CODE_ARCH_CDNA4)
+                ? 6
+                : 7);
         context.flush_caches();
         break;
       case Pm4Opcode::EventWrite: {
@@ -719,6 +759,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         return;
     }
     if (!state.submissions.empty()) {
+      // Yielding the packet budget is runnable work, not an external wait.
+      context.wake();
       context.retry();
     }
   } catch (const std::exception &error) {

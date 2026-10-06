@@ -239,6 +239,12 @@ static hipError_t DefaultHipDeviceCanAccessPeer(int* canAccessPeer, int, int)
 }
 std::function<hipError_t(int*, int, int)> g_hipDeviceCanAccessPeer = DefaultHipDeviceCanAccessPeer;
 
+static hipError_t DefaultHipDeviceEnablePeerAccess(int, unsigned int) { return hipErrorInvalidValue; }
+std::function<hipError_t(int, unsigned int)> g_hipDeviceEnablePeerAccess = DefaultHipDeviceEnablePeerAccess;
+
+static hipError_t DefaultHipDeviceDisablePeerAccess(int) { return hipErrorInvalidValue; }
+std::function<hipError_t(int)> g_hipDeviceDisablePeerAccess = DefaultHipDeviceDisablePeerAccess;
+
 // --- deep-path result seams (commAlloc/devCommSetup) --------------------
 // Default to failure so any call a test hasn't opted into surfaces as an
 // unexpected call; a test sets the relevant seam to hipSuccess to enable the
@@ -578,6 +584,8 @@ void ResetHipFakes()
     g_hipSetDevice                  = DefaultHipSetDevice;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
     g_hipDeviceCanAccessPeer        = DefaultHipDeviceCanAccessPeer;
+    g_hipDeviceEnablePeerAccess     = DefaultHipDeviceEnablePeerAccess;
+    g_hipDeviceDisablePeerAccess    = DefaultHipDeviceDisablePeerAccess;
     g_deviceCount                   = 8;
     g_currentDevice                 = 0;
     g_hipDeviceGetAttribute         = DefaultHipDeviceGetAttribute;
@@ -653,9 +661,14 @@ hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int dev1, int dev2)
     return g_hipDeviceCanAccessPeer(canAccessPeer, dev1, dev2);
 }
 
-hipError_t hipDeviceEnablePeerAccess(int, unsigned int)
+hipError_t hipDeviceEnablePeerAccess(int peerDevice, unsigned int flags)
 {
-    return hipErrorInvalidValue;
+    return g_hipDeviceEnablePeerAccess(peerDevice, flags);
+}
+
+hipError_t hipDeviceDisablePeerAccess(int peerDevice)
+{
+    return g_hipDeviceDisablePeerAccess(peerDevice);
 }
 
 hipError_t hipDeviceGet(hipDevice_t* device, int)

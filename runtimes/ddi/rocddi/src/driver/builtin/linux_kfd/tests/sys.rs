@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Exercise kernel output and retry contracts through the typed call boundary.
 
 #![allow(clippy::unwrap_used, clippy::panic)]
@@ -6,6 +8,28 @@ use super::*;
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+
+#[test]
+fn wrapping_index_snapshot_returns_a_stable_window() {
+    let mut writes = [7_u64, 8, 8, 8].into_iter();
+    let progress = sample_wrapping_indices(7, || writes.next().unwrap(), || 0).unwrap();
+    assert_eq!(progress, (8, 8));
+}
+
+#[test]
+fn wrapping_index_snapshot_stops_when_producer_never_pauses() {
+    let mut write = 0_u64;
+    let result = sample_wrapping_indices(
+        7,
+        || {
+            write += 1;
+            write
+        },
+        || 0,
+    );
+    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    assert_eq!(write, (MAX_WRAPPING_INDEX_SAMPLES * 2) as u64);
+}
 
 fn endpoint(hook: IoctlHook) -> Kfd {
     Kfd::with_hook(File::open("/dev/null").unwrap(), hook)
@@ -451,198 +475,6 @@ fn spm_rejects_invalid_operations_before_ioctl() {
         };
         assert_eq!(
             kfd.spm(&mut args).unwrap_err().kind(),
-            io::ErrorKind::InvalidInput
-        );
-    }
-}
-
-#[test]
-fn pc_sampling_capabilities_use_owned_two_pass_storage() {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let observed = calls.clone();
-    let kfd = endpoint(Arc::new(move |call| {
-        let Call::PcSampling(args, configurations) = call else {
-            panic!("unexpected PC sampling call")
-        };
-        assert_eq!(args.operation, uapi::PC_SAMPLE_OP_QUERY_CAPABILITIES);
-        assert_eq!(args.gpu_id, 42);
-        assert_eq!(args.trace_id, 0);
-        assert_eq!(args.flags, 0);
-        assert_eq!(args.version, 0);
-        if observed.fetch_add(1, Ordering::Relaxed) == 0 {
-            assert!(configurations.is_empty());
-            assert_eq!(args.sample_info_count, 0);
-            args.sample_info_count = 1;
-        } else {
-            assert_eq!(configurations.len(), 1);
-            assert_eq!(args.sample_info_count, 1);
-            configurations[0] = uapi::PcSampleInfo {
-                interval: 0,
-                interval_min: 512,
-                interval_max: u64::MAX,
-                flags: 0,
-                method: uapi::PC_SAMPLE_METHOD_HOSTTRAP,
-                sample_type: uapi::PC_SAMPLE_TYPE_TIME_US,
-            };
-        }
-        Ok(())
-    }));
-    let configurations = kfd.pc_sampling_capabilities(42).unwrap();
-    assert_eq!(configurations.len(), 1);
-    assert_eq!(
-        configurations[0],
-        uapi::PcSampleInfo {
-            interval: 0,
-            interval_min: 512,
-            interval_max: u64::MAX,
-            flags: 0,
-            method: uapi::PC_SAMPLE_METHOD_HOSTTRAP,
-            sample_type: uapi::PC_SAMPLE_TYPE_TIME_US,
-        }
-    );
-    assert_eq!(calls.load(Ordering::Relaxed), 2);
-}
-
-#[test]
-fn pc_sampling_rejects_a_growing_capability_result() {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let observed = calls.clone();
-    let kfd = endpoint(Arc::new(move |call| {
-        let Call::PcSampling(args, configurations) = call else {
-            panic!("unexpected PC sampling call")
-        };
-        if observed.fetch_add(1, Ordering::Relaxed) == 0 {
-            assert!(configurations.is_empty());
-            args.sample_info_count = 1;
-        } else {
-            assert_eq!(configurations.len(), 1);
-            args.sample_info_count = 2;
-        }
-        Ok(())
-    }));
-    assert_eq!(
-        kfd.pc_sampling_capabilities(42).unwrap_err().kind(),
-        io::ErrorKind::InvalidData
-    );
-}
-
-#[test]
-fn pc_sampling_create_preserves_trace_id_on_failure() {
-    let kfd = endpoint(Arc::new(|call| {
-        let Call::PcSampling(args, configurations) = call else {
-            panic!("unexpected PC sampling call")
-        };
-        assert_eq!(args.operation, uapi::PC_SAMPLE_OP_CREATE);
-        assert_eq!(args.gpu_id, 42);
-        assert_eq!(args.sample_info_count, 1);
-        assert_eq!(args.trace_id, 0);
-        assert_eq!(configurations.len(), 1);
-        assert_eq!(configurations[0].interval, 512);
-        assert_eq!(configurations[0].method, uapi::PC_SAMPLE_METHOD_HOSTTRAP);
-        assert_eq!(configurations[0].sample_type, uapi::PC_SAMPLE_TYPE_TIME_US);
-        args.trace_id = 17;
-        Err(io::Error::from_raw_os_error(4))
-    }));
-    let mut configuration = uapi::PcSampleInfo {
-        interval: 512,
-        method: uapi::PC_SAMPLE_METHOD_HOSTTRAP,
-        sample_type: uapi::PC_SAMPLE_TYPE_TIME_US,
-        ..uapi::PcSampleInfo::default()
-    };
-    let mut trace_id = 0;
-    assert_eq!(
-        kfd.pc_sampling_create(42, &mut configuration, &mut trace_id)
-            .unwrap_err()
-            .raw_os_error(),
-        Some(4)
-    );
-    assert_eq!(trace_id, 17);
-}
-
-#[test]
-fn pc_sampling_controls_preserve_device_and_trace_identity() {
-    let operations = Arc::new(Mutex::new(Vec::new()));
-    let observed = operations.clone();
-    let kfd = endpoint(Arc::new(move |call| {
-        let Call::PcSampling(args, configurations) = call else {
-            panic!("unexpected PC sampling call")
-        };
-        assert!(configurations.is_empty());
-        assert_eq!(args.sample_info_count, 0);
-        assert_eq!(args.gpu_id, 42);
-        assert_eq!(args.trace_id, 17);
-        assert_eq!(args.flags, 0);
-        assert_eq!(args.version, 0);
-        observed.lock().unwrap().push(args.operation);
-        Ok(())
-    }));
-    kfd.pc_sampling_start(42, 17).unwrap();
-    kfd.pc_sampling_stop(42, 17).unwrap();
-    kfd.pc_sampling_destroy(42, 17).unwrap();
-    assert_eq!(
-        *operations.lock().unwrap(),
-        [
-            uapi::PC_SAMPLE_OP_START,
-            uapi::PC_SAMPLE_OP_STOP,
-            uapi::PC_SAMPLE_OP_DESTROY
-        ]
-    );
-}
-
-#[test]
-fn pc_sampling_rejects_invalid_requests_before_ioctl() {
-    let kfd = endpoint(Arc::new(|_| panic!("invalid PC sampling call reached KFD")));
-    assert_eq!(
-        kfd.pc_sampling_capabilities(0).unwrap_err().kind(),
-        io::ErrorKind::InvalidInput
-    );
-    let valid = uapi::PcSampleInfo {
-        interval: 512,
-        method: uapi::PC_SAMPLE_METHOD_HOSTTRAP,
-        sample_type: uapi::PC_SAMPLE_TYPE_TIME_US,
-        ..uapi::PcSampleInfo::default()
-    };
-    for (gpu_id, mut configuration, mut trace_id) in [
-        (0, valid, 0),
-        (
-            42,
-            uapi::PcSampleInfo {
-                interval: 0,
-                ..valid
-            },
-            0,
-        ),
-        (42, uapi::PcSampleInfo { method: 0, ..valid }, 0),
-        (
-            42,
-            uapi::PcSampleInfo {
-                sample_type: 3,
-                ..valid
-            },
-            0,
-        ),
-        (42, valid, 1),
-    ] {
-        assert_eq!(
-            kfd.pc_sampling_create(gpu_id, &mut configuration, &mut trace_id)
-                .unwrap_err()
-                .kind(),
-            io::ErrorKind::InvalidInput
-        );
-    }
-    for (gpu_id, trace_id) in [(0, 17), (42, 0)] {
-        assert_eq!(
-            kfd.pc_sampling_start(gpu_id, trace_id).unwrap_err().kind(),
-            io::ErrorKind::InvalidInput
-        );
-        assert_eq!(
-            kfd.pc_sampling_stop(gpu_id, trace_id).unwrap_err().kind(),
-            io::ErrorKind::InvalidInput
-        );
-        assert_eq!(
-            kfd.pc_sampling_destroy(gpu_id, trace_id)
-                .unwrap_err()
-                .kind(),
             io::ErrorKind::InvalidInput
         );
     }

@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: MIT -->
+
 # ABCE — Accelerated Blit Copy Engine
 
 **Status: draft, circulated for comment.** Nothing in the tree consumes ABCE yet; it is a
