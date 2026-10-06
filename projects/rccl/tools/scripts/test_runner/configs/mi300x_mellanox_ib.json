@@ -992,6 +992,7 @@
         {"name": "HostApi_WaitSignalMultipleDescriptors", "description": "Host API: wait signal multiple descriptors", "test_filter": "HostApiTest.WaitSignalMultipleDescriptors"},
         {"name": "HostApi_LargePut", "description": "Host API: large put", "test_filter": "HostApiTest.LargePut"},
         {"name": "HostApi_AllToAllPut", "description": "Host API: all-to-all put", "test_filter": "HostApiTest.AllToAllPut"},
+        {"name": "HostApi_DenseAllToAllPutSignal", "description": "Host API: dense all-to-all put/signal, uniform and uneven sizes", "test_filter": "HostApiTest.DenseAllToAllPutSignal"},
         {"name": "HostApi_SignalImpliesPriorPutsDelivered", "description": "Host API: signal implies prior puts delivered", "test_filter": "HostApiTest.SignalImpliesPriorPutsDelivered"},
         {"name": "HostApi_PutSignalInvalidCtx", "description": "Host API: put signal invalid ctx", "test_filter": "HostApiTest.PutSignalInvalidCtx"},
         {"name": "HostApi_WaitSignalNullDescs", "description": "Host API: wait signal null descs", "test_filter": "HostApiTest.WaitSignalNullDescs"},
@@ -1054,6 +1055,20 @@
       "tests": [
         {"name": "HostApi_RmaDisableCrossNodePutFails_Sym", "description": "Host API: NCCL_RMA_DISABLE=1, symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of hanging", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails"},
         {"name": "HostApi_RmaDisableCrossNodePutFails_NonSym", "description": "Host API: NCCL_RMA_DISABLE=1, non-symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of using the proxy", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails", "env_variables": {"NCCL_CUMEM_ENABLE": "0"}}
+      ]
+    },
+    "host_api_dense_a2a_8rank": {
+      "extends": "net_ib_base",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "description": "Dense all-to-all ncclPutSignal on all 8 GPUs of one node. Only with 4+ ranks does the uneven profile make the copy engine split its batches into chunks, which the 2-rank Host API suites never reach.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "0",
+        "RCCL_RMA_USE_DMABUF": "1"
+      },
+      "tests": [
+        {"name": "HostApi_DenseAllToAllPutSignal_8rank", "description": "Host API: dense all-to-all put/signal on 8 GPUs (copy-engine chunking)", "test_filter": "HostApiTest.DenseAllToAllPutSignal"}
       ]
     },
 
@@ -5157,6 +5172,15 @@
       "name": "Host API Tests - Default",
       "description": "Host API tests with default memory support",
       "config": "host_api_tests_default",
+      "enabled": true
+    },
+    {
+      "name": "Host API Tests - Dense All-to-All (8 GPUs)",
+      "description": "Dense all-to-all put/signal over the copy engine on one node, covering chunked batches",
+      "config": "host_api_dense_a2a_8rank",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
       "enabled": true
     },
     {

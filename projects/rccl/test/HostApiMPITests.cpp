@@ -24,6 +24,8 @@
  *   M1  - TwoCommunicatorsIndependentWindows: two comms, independent windows
  *   M2  - StressManySmallPuts:     100×64-byte PUTs, opCnt=100 wait
  *   P6  - PutToSelf:              PUT to own window (peer=self loopback)
+ *   P7  - DenseAllToAllPutSignal: every rank puts to every peer in one group,
+ *                                 uniform and uneven sizes
  *   W3  - DoubleDeregister:       ncclCommWindowDeregister twice on same handle
  *   W4  - DestroyCommWithoutDeregister: window auto-freed during commFree
  *   R1  - RmaDisableIntraNodePutUsesCe: NCCL_RMA_DISABLE=1 leaves LSA puts working
@@ -69,6 +71,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <chrono>
+#include <vector>
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
@@ -1427,6 +1430,125 @@ TEST_F(HostApiTest, AllToAllPut)
     ASSERT_MPI_TRUE(ok);
 
     TEST_INFO("P5 rank %d: AllToAllPut passed (recv from rank %d).", myRank, recvFrom);
+}
+
+// ============================================================================
+// P7 — DenseAllToAllPutSignal
+// ============================================================================
+
+namespace
+{
+constexpr int     kA2aPutsPerPeer  = 2;
+// Put k reads its source k * kA2aSrcShift bytes in, so each put carries its own pattern.
+constexpr size_t  kA2aSrcShift     = 64;
+constexpr size_t  kA2aGuard        = 4096;
+constexpr uint8_t kA2aSentinel     = 0xA5;
+constexpr size_t  kA2aUniformBytes = 4u << 20;
+// Around the default NCCL_CE_CHUNK_SIZE (8 MiB), none a multiple of it.
+constexpr size_t  kA2aUnevenBytes[] = {(3u << 20) + 4096, (9u << 20) + 12288, (12u << 20) + 262144};
+constexpr size_t  kA2aSlot          = 13u << 20;
+static_assert(kA2aUnevenBytes[2] + kA2aSrcShift * kA2aPutsPerPeer + kA2aGuard <= kA2aSlot,
+              "a slot must hold the largest put plus its guard");
+
+size_t a2aPutBytes(bool uneven, int src, int dst, int k)
+{
+    return uneven ? kA2aUnevenBytes[(src + dst + k) % 3] : kA2aUniformBytes;
+}
+
+// Slot 0 is the send region; put k from rank src lands in its own slot.
+size_t a2aRecvOffset(int src, int k)
+{
+    return kA2aSlot * (1 + src * kA2aPutsPerPeer + k);
+}
+} // namespace
+
+/**
+ * @test HostApiTest.DenseAllToAllPutSignal
+ * @brief Every rank puts twice to every other rank in one group, then waits for
+ *        all of them (AICOMRCCL-1964).
+ *
+ * Runs once with uniform sizes and once with uneven sizes around the copy-engine
+ * chunk size; with 4+ ranks on one node the uneven profile is what makes the
+ * copy engine split its batches into chunks. Each put lands in its own slot with
+ * its own pattern, and the guard after it must stay untouched.
+ *
+ * A signal that overtook its data is caught only if the copy is still in flight
+ * when the receiver reads the slot back, so that ordering is checked
+ * probabilistically.
+ */
+TEST_F(HostApiTest, DenseAllToAllPutSignal)
+{
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/0, kNoPowerOfTwoRequired,
+                                  /*min_nodes=*/1, kRequireSingleNode))
+    {
+        GTEST_SKIP() << "Need at least 2 MPI processes on a single node";
+    }
+
+    const int    myRank  = rank();
+    const int    nRanks_ = nRanks();
+    ncclComm_t   comm    = getActiveCommunicator();
+    hipStream_t  stream  = getActiveStream();
+    const size_t winSize = kA2aSlot * (1 + nRanks_ * kA2aPutsPerPeer);
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, winSize));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, winSize, &win, winMode());
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    uint8_t* base = static_cast<uint8_t*>(winBuf);
+
+    std::vector<ncclWaitSignalDesc_t> descs;
+    for(int peer = 0; peer < nRanks_; ++peer)
+    {
+        if(peer != myRank)
+            descs.push_back({/*opCnt=*/kA2aPutsPerPeer, peer, kSigIdx, kCtx});
+    }
+
+    for(bool uneven : {false, true})
+    {
+        FillSentinel(base, winSize, kA2aSentinel);
+        FillBuf(base, kA2aSlot, myRank);
+        ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+
+        ncclResult_t putRes = ncclGroupStart();
+        for(int peer = 0; peer < nRanks_ && putRes == ncclSuccess; ++peer)
+        {
+            if(peer == myRank) continue;
+            for(int k = 0; k < kA2aPutsPerPeer && putRes == ncclSuccess; ++k)
+            {
+                putRes = ncclPutSignal(base + k * kA2aSrcShift, a2aPutBytes(uneven, myRank, peer, k), ncclUint8,
+                                       peer, win, a2aRecvOffset(myRank, k),
+                                       kSigIdx, kCtx, kFlags, comm, stream);
+            }
+        }
+        ncclResult_t endRes = ncclGroupEnd();
+        if(putRes == ncclSuccess) putRes = endRes;
+        ASSERT_MPI_EQ(ncclSuccess, putRes);
+
+        ncclResult_t waitRes = ncclWaitSignal(static_cast<int>(descs.size()), descs.data(), comm, stream);
+        ASSERT_MPI_EQ(ncclSuccess, waitRes);
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+        bool ok = true;
+        for(int src = 0; src < nRanks_ && ok; ++src)
+        {
+            if(src == myRank) continue;
+            for(int k = 0; k < kA2aPutsPerPeer && ok; ++k)
+            {
+                const size_t   bytes = a2aPutBytes(uneven, src, myRank, k);
+                const uint8_t* slot  = base + a2aRecvOffset(src, k);
+                ok = VerifyBuf(slot, bytes, static_cast<int>(src + k * kA2aSrcShift)) &&
+                     AllSentinel(slot + bytes, kA2aGuard, kA2aSentinel);
+            }
+        }
+        ASSERT_MPI_TRUE(ok);
+
+        TEST_INFO("P7 rank %d: DenseAllToAllPutSignal passed (%s sizes).", myRank, uneven ? "uneven" : "uniform");
+    }
 }
 
 // ============================================================================
