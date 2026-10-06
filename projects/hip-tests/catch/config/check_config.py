@@ -51,11 +51,11 @@ def main():
                 else:
                     invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
                     continue
-                # A populated skip section (non-empty targets) must record why
-                # the case is skipped (AIRUNTIME-2744 — now enforced). An empty
-                # section (targets: []) is a no-op and needs no reason, so the
-                # flat-list form is only valid when it is empty.
-                if targets and not str(reason).strip():
+                # A populated skip section (non-empty targets) must record a
+                # non-empty string 'reason'; a non-scalar (list/mapping) or
+                # non-string reason is treated as missing. An empty section
+                # (targets: []) is a no-op and needs no reason.
+                if targets and not (isinstance(reason, str) and reason.strip()):
                     missing_reasons.append(f"  {group}/{case_name}: '{field}'")
 
     if missing:
