@@ -52,19 +52,24 @@ function(ROCPROFILER_SYSTEMS_FIND_PYTHON _VAR)
     set(${_VAR}_EXECUTABLE "${Python3_EXECUTABLE}" PARENT_SCOPE)
     set(${_VAR}_VERSION "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}" PARENT_SCOPE)
 
-    # Derive the interpreter's root dir (sys.prefix) from its path rather than spawning a
-    # Python subprocess: the directory containing bin/<executable> is sys.prefix for every
-    # layout this project builds against (system install, conda env, venv). TheRock's
-    # superbuild relies on this same derivation when forwarding Python root dirs to this
-    # project. Resolve symlinks first so a relocated/aliased executable (e.g. a plain
-    # `/usr/local/bin/python -> /opt/some-env/bin/python` symlink) still yields the real
-    # prefix; this does NOT handle exec-based shims (e.g. pyenv), which have no resolvable
-    # filesystem relationship to the real interpreter -- unsupported here, as nothing in
-    # this project's build/CI uses them.
-    get_filename_component(_real_executable "${Python3_EXECUTABLE}" REALPATH)
-    cmake_path(GET _real_executable PARENT_PATH _bin_dir)
-    cmake_path(GET _bin_dir PARENT_PATH _root_dir)
-    set(${_VAR}_ROOT_DIR "${_root_dir}" PARENT_SCOPE)
+    # Ask the interpreter for sys.prefix. The executable path is not a reliable substitute:
+    # a virtual environment's bin/python is normally a symlink to the base interpreter,
+    # while sys.prefix remains the virtual environment directory.
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" "-c" "import sys; print(sys.prefix)"
+        RESULT_VARIABLE _PYTHON_RESULT
+        OUTPUT_VARIABLE _PYTHON_ROOT_DIR
+        ERROR_VARIABLE _PYTHON_ERROR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT _PYTHON_RESULT EQUAL 0)
+        rocprofiler_systems_message(
+            WARNING
+            "Failed to determine Python prefix: ${_PYTHON_ERROR}"
+        )
+        set(_PYTHON_ROOT_DIR "")
+    endif()
+    set(${_VAR}_ROOT_DIR "${_PYTHON_ROOT_DIR}" PARENT_SCOPE)
 endfunction()
 #
 # Internal: unset cached Python3 discovery variables so a subsequent find_package(Python3)
