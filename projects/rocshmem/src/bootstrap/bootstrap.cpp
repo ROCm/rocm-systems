@@ -460,7 +460,6 @@ void TcpBootstrap::Impl::netInit(std::string ipPortPair, std::string interface,
 
   char line[SOCKET_NAME_MAXLEN + MAX_IF_NAME_SIZE + 2];
   std::snprintf(line, sizeof(line), " %s:", netIfName);
-  SocketToString(&netIfAddr, line + strlen(line),
   SocketToString(&netIfAddr, line + strlen(line), sizeof(line) - strlen(line));
   LOG_INFO("TcpBootstrap : Using%s", line);
 }
