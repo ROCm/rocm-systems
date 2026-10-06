@@ -433,6 +433,13 @@ static ncclResult_t postTuneRmaTaskAppend(struct ncclComm* comm, const struct nc
              comm->config.numRmaCtx);
         return ncclInvalidArgument;
       }
+      // peer indexes signalsHost via ncclRmaSignalSlot(nRanks, sigIdx, peer). ArgsCheck never
+      // sees these descriptors (ncclWaitSignal passes root = 0).
+      if (signalDescs[i].peer < 0 || signalDescs[i].peer >= comm->nRanks) {
+        WARN("ncclWaitSignal: descriptor %d has invalid peer %d (must be in [0, %d))", i, signalDescs[i].peer,
+             comm->nRanks);
+        return ncclInvalidArgument;
+      }
     }
   }
 

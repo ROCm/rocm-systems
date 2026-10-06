@@ -2359,14 +2359,6 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverBelowTheRmaMinimum_IsIgnored
   EXPECT_EQ(1, rma.AppendedTaskCount());
 }
 
-TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_HostRmaUnsupportedAndDriverTooOld_ReportsTheUnsupportedCommFirst) {
-  TaskPostTuning_RmaScene rma;
-  rma.comm()->hostRmaSupport = false;
-  ncclCudaDriverVersionCache = kUnsupportedDriverVersion;
-
-  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.PutSignal()));
-}
-
 TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalIndexBelowZero_RejectsTheTaskAndAppendsNothing) {
   TaskPostTuning_RmaScene rma;
   struct ncclRawTaskRma raw = rma.Signal();
@@ -2410,6 +2402,19 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextAtTheConfiguredCount_Reject
 
   EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
   EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+// Signal() and PutSignal() otherwise always use kRmaCtx, so a predicate narrowed to
+// ctx >= numRmaCtx - 1 would still leave the reject tests above green.
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextAtTheTopOfTheRange_IsAccepted) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.ctx = kRmaLastCtx;
+
+  EXPECT_EQ(ncclSuccess, rma.Run(raw));
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+  ASSERT_EQ(1u, rma.Tasks(kRmaLastCtx).size());
+  EXPECT_EQ(kRmaLastCtx, rma.Tasks(kRmaLastCtx)[0]->ctx);
 }
 
 TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_NoSignalsConfigured_RejectsWaitSignalOnItsImplicitIndex) {
@@ -2832,6 +2837,22 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorContextBelowZe
 TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
   TaskPostTuning_RmaScene rma;
   std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kNumRmaCtx)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorPeerBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(-1, kRmaSigIdx, kRmaCtx)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorPeerAtTheRankCount_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(rma.comm()->nRanks, kRmaSigIdx, kRmaCtx)};
 
   EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
   EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));

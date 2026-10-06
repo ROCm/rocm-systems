@@ -21,7 +21,7 @@
  *   E2  - PutSignalNullWindow:     null peerWin  → error
  *   E3  - PutSignalOffsetOutOfBounds: offset past end → error (or skip)
  *   E4  - PutSignalInvalidSigIdx:  sigIdx=1 on default numRmaSig=1 → error
- *   MS1 - PutSignalMultiSigIdx:    numRmaSig=2, two independent waits
+ *   MS1 - PutSignalMultiSigIdx:    numRmaSig=2 unclamped, sigIdx=1 accepted
  *   MC1 - PutSignalMultiCtx:       numRmaCtx=2, striped puts + waits
  *   M1  - TwoCommunicatorsIndependentWindows: two comms, independent windows
  *   M2  - StressManySmallPuts:     100×64-byte PUTs, opCnt=100 wait
@@ -133,56 +133,13 @@ class HostApiConfigTest : public HostApiTest
 protected:
     int wantNumRmaSig_ = 1;
     int wantNumRmaCtx_ = 1;
+    ncclConfig_t config_ = NCCL_CONFIG_INITIALIZER;
 
-    ncclResult_t createTestCommunicator() override
+    ncclConfig_t* communicatorConfig() override
     {
-        int world_rank = MPIEnvironment::world_rank;
-        int world_size = MPIEnvironment::world_size;
-
-        if(world_rank == 0)
-        {
-            RCCL_TEST_CHECK(ncclGetUniqueId(&nccl_id_));
-        }
-        MPI_Bcast(&nccl_id_, sizeof(ncclUniqueId), MPI_BYTE, 0, MPI_COMM_WORLD);
-
-        ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-        config.numRmaSig    = wantNumRmaSig_;
-        config.numRmaCtx    = wantNumRmaCtx_;
-
-        RCCL_TEST_CHECK(ncclGroupStart());
-        auto group_guard = makeScopeGuard([]() { (void)ncclGroupEnd(); });
-
-        RCCL_TEST_CHECK(
-            ncclCommInitRankConfig(&test_comm_, world_size, nccl_id_, world_rank, &config));
-
-        auto comm_guard = makeScopeGuard(
-            [this]()
-            {
-                if(test_comm_)
-                {
-                    (void)ncclCommDestroy(test_comm_);
-                    test_comm_ = nullptr;
-                }
-            });
-
-        RCCL_TEST_CHECK(ncclGroupEnd());
-        group_guard.dismiss();
-
-        HIP_TEST_CHECK(hipStreamCreate(&test_stream_));
-        auto stream_guard = makeScopeGuard(
-            [this]()
-            {
-                if(test_stream_)
-                {
-                    (void)hipStreamDestroy(test_stream_);
-                    test_stream_ = nullptr;
-                }
-            });
-
-        MPI_Barrier(MPI_COMM_WORLD);
-        comm_guard.dismiss();
-        stream_guard.dismiss();
-        return ncclSuccess;
+        config_.numRmaSig = wantNumRmaSig_;
+        config_.numRmaCtx = wantNumRmaCtx_;
+        return &config_;
     }
 };
 
@@ -1128,10 +1085,13 @@ TEST_F(HostApiTest, PutSignalInvalidSigIdx)
 
 /**
  * @test HostApiMultiSigTest.PutSignalMultiSigIdx
- * @brief Two independent signal streams (sigIdx 0 and 1) on numRmaSig=2.
+ * @brief numRmaSig=2 survives ncclCommInitRankConfig unclamped, and sigIdx=1 is accepted.
  *
- * Rank 0 issues two puts to distinct window offsets with different sigIdx.
- * Rank 1 waits on each stream separately, then verifies both payloads.
+ * Rank 0 issues two puts to distinct window offsets, one with sigIdx 0 and one
+ * with sigIdx 1. Rank 1 waits on each descriptor, then verifies both payloads.
+ * The proxy accumulates one host counter per signal slot, so a shared counter
+ * reaching 2 would also satisfy both opCnt=1 waits. This does not prove the
+ * two sigIdx values are independent streams.
  */
 TEST_F(HostApiMultiSigTest, PutSignalMultiSigIdx)
 {
