@@ -938,3 +938,94 @@ def test_doctor_checks_env_dump_excludes_unrelated_rocm_vars(checks):
         "ROCPROFILER_METRICS_PATH",
         "ROCP_TOOL_LIBRARIES",
     }
+
+
+# ----------------------------------------------------------------------
+# running as root
+# ----------------------------------------------------------------------
+def _root(**overrides):
+    """A healthy machine seen from a root process (root's own groups only)."""
+    kwargs = dict(uid=0, username="root", groups=[0], cap_eff=(1 << 38) | (1 << 21))
+    kwargs.update(overrides)
+    return make_healthy_accessor(**kwargs)
+
+
+def test_doctor_checks_run_as_user_normal_user_passes(checks):
+    result = checks["environ"].check_run_as_user(make_healthy_accessor())
+    assert result.status == checks["status"].STATUS_PASS
+    assert "tester (uid 1000)" in result.detail
+
+
+def test_doctor_checks_run_as_user_under_sudo_warns(checks):
+    """sudo hides the real user's device-access problems and resets the
+    environment; the report must say whose session it describes."""
+    accessor = _root(env={"SUDO_USER": "alice", "USER": "root"})
+    result = checks["environ"].check_run_as_user(accessor)
+    assert result.status == checks["status"].STATUS_WARN
+    assert "on behalf of alice" in result.detail
+    assert "Re-run without sudo" in result.remediation
+    assert result.data["elevated_from"] == "alice"
+
+
+def test_doctor_checks_run_as_user_after_su_warns(checks):
+    """su sets no SUDO_USER, but the audit login uid survives it."""
+    accessor = _root(file_contents={"/proc/self/loginuid": "1003\n"})
+    result = checks["environ"].check_run_as_user(accessor)
+    assert result.status == checks["status"].STATUS_WARN
+    assert "uid 1003" in result.detail
+
+
+@pytest.mark.parametrize(
+    "loginuid,where", [("4294967295", "container or service"), ("0", "root login")]
+)
+def test_doctor_checks_run_as_user_genuine_root_passes(checks, loginuid, where):
+    accessor = _root(file_contents={"/proc/self/loginuid": loginuid + "\n"})
+    result = checks["environ"].check_run_as_user(accessor)
+    assert result.status == checks["status"].STATUS_PASS, where
+    assert result.data["elevated_from"] is None
+
+
+def test_doctor_checks_group_checks_pass_for_root(checks):
+    """Root bypasses device permissions; telling it to join render/video (or
+    warning that a container image lacks those groups) is noise."""
+    for accessor in (_root(), _root(group_gids={}, group_members={})):
+        for check in (
+            checks["driver"].check_render_group,
+            checks["driver"].check_video_group,
+        ):
+            result = check(accessor)
+            assert result.status == checks["status"].STATUS_PASS
+            assert "running as root" in result.detail
+            assert "usermod" not in result.remediation
+
+
+def test_doctor_checks_kfd_unreadable_as_root_points_at_user_namespaces(checks):
+    accessor = _root(cannot_write=["/dev/kfd"])
+    result = checks["driver"].check_kfd_readable(accessor)
+    assert result.status == checks["status"].STATUS_FAIL
+    assert "even though this process runs as root" in result.detail
+    assert "usermod" not in result.remediation
+    assert "user namespaces" in result.remediation
+
+
+def test_doctor_checks_root_in_container_reports_no_privilege_noise(checks):
+    """End to end: root in a ROCm container image with the devices passed
+    through and no render/video groups defined is a healthy setup."""
+    from rocprofv3 import doctor
+
+    accessor = _root(
+        group_gids={},
+        group_members={},
+        files=list(make_healthy_accessor()._files) + ["/.dockerenv"],
+        file_contents=dict(
+            make_healthy_accessor()._file_contents,
+            **{"/proc/self/loginuid": "4294967295\n"},
+        ),
+    )
+    outcomes = doctor.run(accessor, only=["driver", "container", "environ.run-as-user"])
+    noisy = [
+        check.id
+        for check, result in outcomes
+        if result.status in (doctor.STATUS_WARN, doctor.STATUS_FAIL)
+    ]
+    assert noisy == []
