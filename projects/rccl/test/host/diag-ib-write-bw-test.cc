@@ -1168,32 +1168,40 @@ TEST_F(DiagIbWriteBwMicrotest, RunPair_ClientFailuresReportWithMemoryKind) {
 }
 
 TEST_F(DiagIbWriteBwMicrotest, RunPair_FailedExchangeReportsPeer) {
-  BuildTwoNodePair(2);
-  inbox_[kReady] = {Bytes(true)};
-  std::string out;
-  EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), -1);
-  EXPECT_EQ(out, NetInfo("cannot exchange the measurement with rank 0"));
-  ASSERT_FALSE(log_.empty());
-  EXPECT_EQ(log_.back(), (IbMsg{'R', 0, kSync, ""}));
+  for (const auto& [rank, peer] : {std::pair<int, int>{2, 0}, {0, 2}}) {
+    SCOPED_TRACE(rank);
+    ResetPairScene(rank);
+    inbox_[kReady] = {Bytes(true)};
+    std::string out;
+    EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), -1);
+    EXPECT_EQ(out, NetInfo("cannot exchange the measurement with rank " + std::to_string(peer)));
+    ASSERT_FALSE(log_.empty());
+    EXPECT_EQ(log_.back(), (IbMsg{'R', peer, kSync, ""}));
+  }
 }
 
 TEST_F(DiagIbWriteBwMicrotest, RunPair_InvalidQpsReturnsBeforeAnyPeerExchange) {
-  BuildTwoNodePair(2);
-  params_["IB_QPS_PER_CONNECTION"] = 0;
-  inbox_[kReady] = {Bytes(true)};
-  std::string out;
-  EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), -1);
-  EXPECT_EQ(out, NetInfo("invalid qps parameter=0"));
-  // A peer whose own qps is valid then blocks on the skipped status byte and pair sync; a fix flips this pin.
-  EXPECT_TRUE(log_.empty());
+  for (int rank : {2, 0}) {
+    SCOPED_TRACE(rank);
+    ResetPairScene(rank);
+    params_["IB_QPS_PER_CONNECTION"] = 0;
+    inbox_[kReady] = {Bytes(true)};
+    std::string out;
+    EXPECT_DOUBLE_EQ(RunPair(0, 2, false, &out), -1);
+    EXPECT_EQ(out, NetInfo("invalid qps parameter=0"));
+    // A peer whose own qps is valid then blocks on the skipped status byte and pair sync; a fix flips this pin.
+    EXPECT_TRUE(log_.empty());
+    EXPECT_TRUE(serverCommands_.empty());
+    EXPECT_TRUE(clientCommands_.empty());
+  }
 }
 
 TEST_F(DiagIbWriteBwMicrotest, RunSchedule_ServesThenMeasuresAndAveragesBothPhases) {
   BuildTwoNodePair(0);
   inbox_[kReady] = {Bytes(true)};
-  inbox_[kSync] = {Bytes(90.0), Bytes(97.25)};
+  inbox_[kSync] = {Bytes(97.25), Bytes(0.0)};
   EXPECT_TRUE(RunSchedule(false, false));
-  EXPECT_DOUBLE_EQ(result_.direct, (90.0 + 97.25) / 2);
+  EXPECT_DOUBLE_EQ(result_.direct, (97.25 + 0.0) / 2);
   EXPECT_DOUBLE_EQ(result_.cross, -1);
   EXPECT_TRUE(allPairsRan_);
   EXPECT_EQ(myVotes_, (std::vector<bool>{true, true, true}));
@@ -1204,9 +1212,9 @@ TEST_F(DiagIbWriteBwMicrotest, RunSchedule_ServesThenMeasuresAndAveragesBothPhas
 TEST_F(DiagIbWriteBwMicrotest, RunSchedule_CrossPhaseFeedsCrossAndFailedPairClearsComplete) {
   BuildTwoNodePair(0);
   inbox_[kReady] = {Bytes(true)};
-  inbox_[kSync] = {Bytes(0.0), Bytes(-1.0)};
+  inbox_[kSync] = {Bytes(42.5), Bytes(-1.0)};
   EXPECT_TRUE(RunSchedule(true, true));
-  EXPECT_DOUBLE_EQ(result_.cross, 0.0);
+  EXPECT_DOUBLE_EQ(result_.cross, 42.5);
   EXPECT_DOUBLE_EQ(result_.direct, -1);
   EXPECT_FALSE(allPairsRan_);
   EXPECT_EQ(myVotes_, (std::vector<bool>{true, true, false}));
