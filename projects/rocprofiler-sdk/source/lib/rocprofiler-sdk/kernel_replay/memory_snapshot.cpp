@@ -117,23 +117,11 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
 
     if(kind != HSA_SYMBOL_KIND_VARIABLE) return HSA_STATUS_SUCCESS;
 
-    // VARIABLE_IS_CONST is not reliable across ROCr versions, so use the variable segment, which
-    // identifies symbols in readonly memory independently of that attribute.
-    hsa_variable_segment_t segment{};
-    if(core->hsa_executable_symbol_get_info_fn(
-           symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SEGMENT, &segment) != HSA_STATUS_SUCCESS)
-    {
-        out->incomplete = true;
-        return HSA_STATUS_SUCCESS;
-    }
-
-    if(segment == HSA_VARIABLE_SEGMENT_READONLY) return HSA_STATUS_SUCCESS;
-    if(segment != HSA_VARIABLE_SEGMENT_GLOBAL)
-    {
-        out->incomplete = true;
-        return HSA_STATUS_SUCCESS;
-    }
-
+    // __constant__ variables are captured too; restoring them is harmless. Symbol info cannot
+    // single them out: clang places them in writable .data alongside the __device__ globals, ROCr
+    // reports HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_IS_CONST inverted (true for writable sections),
+    // and HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SEGMENT is GLOBAL for every variable in an LLVM-built
+    // code object, so filtering on either attribute drops the __device__ globals or skips nothing.
     uint64_t addr = 0;
     uint32_t size = 0;
     if(core->hsa_executable_symbol_get_info_fn(
