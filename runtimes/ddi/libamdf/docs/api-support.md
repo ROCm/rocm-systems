@@ -1,10 +1,11 @@
+<!-- SPDX-License-Identifier: MIT -->
+
 # AMDF API support and implementation map
 
-As of 2026-09-24, audited from the current rocddi/libamdf tree, including the
-queue-format implementation and native execution qualification in the
-validation record.
+This map describes the implementation in this tree. Hardware results are
+recorded separately in the [validation record](../tests/README.md).
 
-The [vendored headers](../../../api-headers/README.md) synchronized from
+The [vendored headers](../../../../api-headers/README.md) synchronized from
 `hrx-system@4aa34130de44c45d68a48575cebfd0ff0610c461` define the sole public contract.
 This page records implementation support; it does not define another ABI or
 promise every service described by those headers. The libamdf frontend translates
@@ -62,7 +63,7 @@ parents and excludes concurrent destruction. Memory and queue use through raw
 device addresses remains the caller's lifetime responsibility. Internal native
 owners preserve only the dependencies needed to finish their own cleanup.
 
-All native control enters the private [Driver](../../rocddi/src/driver.rs).
+All native control enters the private [Driver](../../../src/driver.rs).
 Cached endpoint, family, scope, device, memory, host-mapping, queue, mapping,
 and address queries read retained state without allocation, locking, lazy
 initialization, or ownership-counter updates. Pair queries compose only the two
@@ -81,74 +82,19 @@ Callback allocation failure must leave no partially published object. There is
 no global allocator selector, task scheduler, journal, pool cache, or allocation
 registry for general allocations; the instance has a cold list only for
 recognizing its own SYSTEM host views during registration. The HSA runtime is a
-peer at `runtimes/hsa/libhsa`. HIP,
+peer under `hsa/libhsa/`. HIP,
 CUDA-like pool reuse, graphs, and recovery remain frontend or consumer policy.
 
 ## Qualification boundaries
 
-[Validation records](../tests/README.md) distinguish source checks, CPU ABI
-execution, native GPU construction, and hardware workload execution. Existing
-native evidence covers Linux x86-64/GFX1201 with SDMA IP 7.0.1. The qualified
-workloads are direct PM4 SYSTEM-memory copies, host-produced SDMA SYSTEM-memory
-copies, private and host-visible LOCAL SDMA and PM4 round trips,
-registered-host SDMA copies, DMA-BUF subrange copies, and scratch-backed AQL copy-add dispatches
-using SYSTEM and LOCAL memory on the current source. The current qualified DMA-BUF import path completed
-READ-only SDMA subrange copies, cross-process attachment, and re-export under
-both native lifetimes. Import advertisement requires the DRM GEM handle-list and
-creation-info ioctls; drivers without either capability leave IMPORT
-unadvertised. The 2026-09-24 native GPU memory smoke passed under both lifetimes.
-A rebuilt AQL example passed 50 fresh dynamic runs in each lifetime on
-this source, including scratch-backed dispatches, three priorities, multiple producers,
-and barrier-bit ordering. PROCESS and INSTANCE also passed empty native
-queue creation for all three advertised PM4/AQL/SDMA families and both
-advertised same-device producer mappings.
-The 2026-09-24 pinned dynamic GPU CTS passed under PROCESS and INSTANCE
-(57 passed, 6 skipped for each) on the current source. An INSTANCE
-registration additionally executes 64 SDMA copies and eight ring wraps from
-caller-owned pages. The registration workload verifies feature reporting in both
-lifetimes, subpage offsets, page-cover metadata, exact
-device access, independent GPU addresses, retained caller host addresses,
-directional cache pairs, completion, consumption, results, and caller ownership.
-The SDMA LOCAL workload verifies private-map rejection, public WC mapping,
-prospective and concrete host/device cache pairs, CPU and SDMA access to public
-VRAM, exact device access, completion, consumption, results, and cleanup under
-both lifetimes. The PM4 LOCAL workload verifies those same memory and cache-pair
-properties with conservative GCR barriers, 16 checked copies and ring wraparound
-under both lifetimes. The AQL workload covers
-single- and four-thread multiple producers, including unpublished reservations,
-deterministic out-of-order publication, MMIO doorbell ordering, and recovery
-after publishing
-the missing frontier packet. A zero-dependency barrier-AND with its barrier bit
-set blocks a following dispatch behind an intentionally gated predecessor; an
-otherwise identical unbarriered pair demonstrates concurrent progress. Fresh
-single-producer queues execute at low, normal, and high priority and report the
-requested selection; native tests verify exact KFD priority values 0, 7, and 15.
-It uses fixed queue-lifetime scratch for one wave per shader engine, bounds each
-producer by its prior kernel completion, and proves scratch memory cannot be
-destroyed while borrowed. Both workloads check queue consumption and results
-separately. Priority execution does not establish a relative service, fairness,
-or latency guarantee. Nonzero barrier dependencies and barrier-OR remain
-unqualified because AMDF supplies no signal-allocation service.
-Linux AArch64 is selected in the backend source. The complete Rust workspace
-passes an MSRV cross-target source check, and both Rust libraries complete
-target code generation. That does not qualify AArch64 native C linking, device
-transport, cache maintenance, or GPU execution. Registration and
-provider-owned host-visible allocations retain their architecture-specific
-cache-recipe qualification gates.
+The [validation record](../tests/README.md) identifies the GFX1201 binary,
+hardware and driver used for recorded GPU results, with runnable checks and
+unqualified cases. The implementation supports Linux x86-64 and AArch64 builds;
+GPU execution has been checked on one x86-64 GFX1201 host.
 
-Kernel queues outside Linux x86-64/GFX1201, dynamic scratch growth beyond
-the fixed-backing GPU v1 contract, foreign,
-distinct-GPU, or LOCAL external-memory construction, LOCAL peer and broader
-device cache-pair recipes, and XDNA are unimplemented.
-Same-device device-producer creation, mapping, and 64-packet AQL and SDMA
-execution are hardware-qualified under both native lifetimes. Peer-device
-production, multi-device activation and SYSTEM access, and topology-qualified
-LOCAL peer mapping are implemented and unit tested, but this one-GPU host
-cannot execution-qualify multi-GPU paths. Recorded SDMA timings are
-observations, not throughput, latency, or jitter guarantees. Loss
-events and reset-epoch publication passed isolated read-only SDMA fault
-execution under both native lifetimes. Inherited-process rejection,
-foreign-runtime non-interference, and ambiguous-cleanup state are source
-tested. No live reset, hot-unplug, multi-device hardware, cross-runtime
-stress, AArch64 GPU execution,
-or full frontend-compatibility claim follows from the current tests.
+The XDNA extension is absent. Kernel queues on other GPU targets,
+foreign or LOCAL memory import, dynamic AQL scratch growth, and dependency
+bearing AQL barriers remain unsupported. Peer-device queue production,
+multiple GPU execution, live reset and unplug, AArch64 GPU execution, and
+cross-runtime stress need hardware qualification. The current two shared
+libraries cannot share rocddi process state in one process.

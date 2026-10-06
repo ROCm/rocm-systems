@@ -140,8 +140,13 @@ TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 # Write results outside the repo tree (default: $HOME) so they do not clutter
 # `git status`. Override the base dir with ROCDECODE_VALIDATION_RESULTS_DIR.
 RESULTS_BASE="${ROCDECODE_VALIDATION_RESULTS_DIR:-$HOME/rocDecode_validation_results}"
-RESULTS_DIR="$RESULTS_BASE/$TIMESTAMP"
-mkdir -p "$RESULTS_DIR"
+mkdir -p "$RESULTS_BASE"
+# The timestamp is only second resolution and mkdir -p is happy with a directory that already
+# exists, so two runs started in the same second would share this directory and everything
+# derived from it: the CTest log, the per codec output files and the per codec directories
+# handed to the conformance script. Let mktemp pick the name so it is unique by construction.
+# The timestamp stays in it for readability.
+RESULTS_DIR=$(mktemp -d "$RESULTS_BASE/${TIMESTAMP}.XXXXXX") || exit 1
 
 # ANSI colors
 GREEN='\033[0;32m'
@@ -204,12 +209,27 @@ if [[ $SKIP_CONFORMANCE -eq 0 ]]; then
     fi
     echo "=== Running Conformance: $CODEC ==="
     OUT="$RESULTS_DIR/conformance_${CODEC}_output.txt"
+    # Give each codec its own results directory under this run. Without it every codec, and
+    # every other sweep on the machine, shares the script's default directory and appends to one
+    # rocDecode_output.log, so the pass counts are taken over another run's output.
     python3 run_rocDecode_Conformance.py \
       --rocDecode_directory "$SCRIPT_DIR/.." \
       --files_directory "$DIR" \
+      --results_directory "$RESULTS_DIR/$CODEC" \
       2>&1 | tee "$OUT"
-    if grep -q "The number of failing streams is 0" "$OUT" && \
-       grep -q "The number of streams that did not finish decoding is 0" "$OUT"; then
+    # A pass count above the stream count cannot come from decoding; it means the tally was taken
+    # over output that is not all from this run. Call that out rather than letting it land as an
+    # ordinary pass or failure, which is how it reads otherwise.
+    TOTAL_STREAMS=$(grep -oE "completed on the [0-9]+ streams" "$OUT" | grep -oE "[0-9]+" | tail -1)
+    PASSING_STREAMS=$(grep -oE "number of passing streams is [0-9]+" "$OUT" | grep -oE "[0-9]+" | tail -1)
+    if [[ -n "$TOTAL_STREAMS" && -n "$PASSING_STREAMS" && "$PASSING_STREAMS" -gt "$TOTAL_STREAMS" ]]; then
+      echo "ERROR: $CODEC reported $PASSING_STREAMS passing streams out of $TOTAL_STREAMS."
+      echo "       The tally is inconsistent, so these results are not usable. This happens when"
+      echo "       another conformance run shares the results directory; re-run with nothing else"
+      echo "       decoding on this machine."
+      RESULTS["Conformance $CODEC"]="FAILED"
+    elif grep -q "The number of failing streams is 0" "$OUT" && \
+         grep -q "The number of streams that did not finish decoding is 0" "$OUT"; then
       RESULTS["Conformance $CODEC"]="PASSED"
     else
       RESULTS["Conformance $CODEC"]="FAILED"

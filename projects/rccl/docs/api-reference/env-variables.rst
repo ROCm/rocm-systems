@@ -132,6 +132,7 @@ in the following table.
         | ``ERROR``: These messages report when a fatal condition has occurred in RCCL and the operation can't continue.
         | ``VERSION``: ``librccl`` version info is printed during the initialization phase.
         | ``WARN``: Prints warnings about unusual conditions that could lead to unexpected results.
+        | ``ATTN``: Prints ``WARN`` messages plus notices that need attention, such as a plugin named in ``NCCL_*_PLUGIN`` that could not be loaded or initialized. ``INFO`` also prints these notices.
         | ``INFO``: Prints standard logging messages about status and operations performed.
         | ``ABORT``: Unused.
         | ``TRACE``: Prints trace-level logging of function calls and parameters. Only active when ``librccl`` is built using ``ENABLE_TRACE``.
@@ -167,7 +168,7 @@ in the following table.
 
     * - | ``NCCL_DEBUG_TIMESTAMP_LEVELS``
         | The timestamp levels for ``NCCL_DEBUG``.
-      - | A set of ``NCCL_DEBUG`` levels can have a timestamp prepended set as a comma-separated list which can be inverted using the ``^`` prefix. The default set is ``WARN``.
+      - | A set of ``NCCL_DEBUG`` levels can have a timestamp prepended set as a comma-separated list which can be inverted using the ``^`` prefix. The default set is ``WARN`` and ``ATTN``.
 
     * - | ``NCCL_DEBUG_TIMESTAMP_FORMAT``
         | The timestamp format for ``NCCL_DEBUG``.
@@ -623,6 +624,16 @@ variables are collected in the following table.
       - | ``0``: JSON output (default).
         | ``1``: Prometheus textfile output.
 
+    * - | ``NCCL_INSPECTOR_PROM_DUMP_STATS``
+        | In Prometheus mode, also emits per-device ring-buffer counters:
+        | ``nccl_collectives_total``, ``nccl_collectives_dropped_total``,
+        | ``nccl_p2p_total`` and ``nccl_p2p_dropped_total``. They are
+        | cumulative, so ``rate(dropped) / rate(total)`` gives the fraction of
+        | operations lost. JSON output always carries the same counts in its
+        | ``dump_stats`` record.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
     * - | ``NCCL_INSPECTOR_CLUSTER``
         | Overrides the Prometheus ``cluster`` label. When unset, the Inspector
         | uses ``SLURM_CLUSTER_NAME``. Set this when that name is missing.
@@ -671,12 +682,15 @@ variables are collected in the following table.
 
     * - | ``NCCL_INSPECTOR_DUMP_COLL_RING_SIZE``
         | Per-communicator capacity of the ring buffer holding completed
-        | collectives waiting to be dumped.
+        | collectives waiting to be dumped. When it fills, the oldest entries
+        | are overwritten and counted as dropped, with a single warning per
+        | process.
       - | Integer number of entries (default: ``1024``).
 
     * - | ``NCCL_INSPECTOR_DUMP_P2P_RING_SIZE``
         | Per-communicator capacity of the ring buffer holding completed
-        | point-to-point operations waiting to be dumped.
+        | point-to-point operations waiting to be dumped. Overflow is handled
+        | as for ``NCCL_INSPECTOR_DUMP_COLL_RING_SIZE``.
       - | Integer number of entries (default: ``1024``).
 
     * - | ``NCCL_INSPECTOR_COLL_POOL_SIZE``
@@ -707,7 +721,8 @@ variables are collected in the following table.
     * - | ``NCCL_INSPECTOR_OTEL_VERBOSE``
         | Selects per-collective metric points instead of aggregated ones. The
         | per-collective form additionally reports
-        | ``nccl_collective_algobw_gbs``.
+        | ``nccl_collective_algobw_gbs`` and the per-device ring-buffer
+        | counters described under ``NCCL_INSPECTOR_PROM_DUMP_STATS``.
       - | ``0``: Aggregated (default).
         | ``1``: Per collective.
 
@@ -737,6 +752,9 @@ interface to v7, which adds two things a plugin can consume:
   ``initial_sync``, ``compute`` and ``final_sync`` span per kernel channel, each
   timed by the GPU globaltimer. A phase is a child of a kernel-channel event, so
   RCCL enables ``ncclProfileKernelCh`` implicitly whenever the phase bit is set.
+  Only symmetric kernels emit phases, which requires buffers registered as
+  symmetric windows. Regular collective and point-to-point kernels report
+  kernel-channel events without phases.
 * **Symmetric-kernel variant metadata.** Collective events carry the symmetric
   kernel variant that ran and a flag marking whether the collective was served
   symmetrically. The in-tree example surfaces these as the ``KernelVariant`` and
@@ -775,7 +793,8 @@ plugin must export ``ncclProfiler_v7`` to receive them.
         | ``4096``: CE collective
         | ``8192``: CE synchronization
         | ``16384``: CE batch
-        | ``32768``: Kernel phase (v7; implies kernel channel)
+        | ``32768``: Kernel phase (v7, symmetric kernels only; implies kernel
+          channel)
         | ``65536``: RCCL proxy diagnostics
         | Combine by adding, so ``32771`` selects group, collective and kernel
           phase. Default: ``0``

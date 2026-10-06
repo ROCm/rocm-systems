@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /* GFX1201 SDMA qualification for caller-owned host pages. PROCESS uses KFD
  * registration; INSTANCE uses a DRM GEM USERPTR mapping in its acquired VM.
  * Both keep ownership of every page with this caller. */

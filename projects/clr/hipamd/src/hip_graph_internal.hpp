@@ -2017,6 +2017,9 @@ class GraphKernelNode : public GraphNode {
     status = ihipLaunchKernelCommand(
         command, func, launch_params, stream, kernelParams_.kernelParams, kernelParams_.extra,
         kernelEvents_.startEvent_, kernelEvents_.stopEvent_, flags, coopKernel_, 0, 0, 0, 0, 0);
+    if (status != hipSuccess) {
+      return status;
+    }
     if (signal_is_required_) {
       // Optimize the barriers by adding a signal into the dispatch packet directly
       command->SetProfiling();
@@ -2105,6 +2108,12 @@ class GraphKernelNode : public GraphNode {
       dim3 clusterDim = {params->clusterDim.x, params->clusterDim.y, params->clusterDim.z};
       if (clusterDim.x == 0 || clusterDim.y == 0 || clusterDim.z == 0) {
         return hipErrorInvalidConfiguration;
+      }
+      hipFunction_t func = resolvedFunc_ ? resolvedFunc_ : getFunc(kernelParams_, dev_id_);
+      if (hipError_t status =
+              ihipResolveGraphClusterDimensions(func, dev_id_, kernelParams_.gridDim, &clusterDim);
+          status != hipSuccess) {
+        return status;
       }
       const amd::Device* device = g_devices[dev_id_]->devices()[0];
       amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,

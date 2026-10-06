@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: MIT
+
 //! AMD GPU-specific capabilities layered over an activated device.
 //!
 //! The root [`Device`] contract is endpoint-kind neutral. Queue transports, GPU
 //! faults, trap handlers, stream performance
-//! monitoring, PC sampling, scratch apertures, and MMIO remap pages are exposed
+//! monitoring, scratch apertures, and MMIO remap pages are exposed
 //! through this explicit view so CPU and NPU backends do not inherit GPU-only
 //! requirements.
 
@@ -56,7 +58,8 @@ pub mod event {
     #[cfg(target_os = "linux")]
     pub mod linux {
         pub use crate::event::{
-            GpuMemoryFault, SignalEvent, SignalEventInfo, create_signal_event, poll_memory_fault,
+            GpuMemoryFault, SignalEvent, SignalEventInfo, SignalEventPage, create_signal_event,
+            poll_memory_fault,
         };
     }
 }
