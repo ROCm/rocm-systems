@@ -169,6 +169,9 @@ typedef enum rocprofiler_hsa_amd_ext_api_id_t  // NOLINT(performance-enum-size)
 #    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x15
     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_get_vmem_info,
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x16
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_enable_high_precision_timestamps,
+#    endif
 #endif
 
     ROCPROFILER_HSA_AMD_EXT_API_ID_LAST,
