@@ -117,7 +117,7 @@ def _run_spp_default(arch: str) -> dict[str, int | float]:
                 soc, counters, perfmon_config
             )
             packable_multi = _count_packable_multi(files, unions)
-            # Product narrative: with_pmc − SLOT_LIMIT (inspector taxonomy).
+            # Product narrative: with_pmc minus SPU parents (inspector taxonomy).
             product_single_pass = packable_n  # allocator packable count
     finally:
         _restore_env(backup)
@@ -152,7 +152,7 @@ def main() -> int:
     for key, val in baseline.items():
         print(f"  {key}: {val}")
     print()
-    print("Default single-pass-packable (+ SLOT_LIMIT fill)")
+    print("Default single-pass-packable (+ SPU residual fill)")
     for key, val in spp.items():
         print(f"  {key}: {val}")
     print()
