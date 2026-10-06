@@ -18,6 +18,23 @@ def fake_tensor(shape=(2, 4), dtype_name="torch.float32"):
     return SimpleNamespace(shape=shape, dtype=FakeDType(dtype_name))
 
 
+def noop_torch_structural_wraps(monkeypatch, torch_backend):
+    for name in (
+        "patch_distributed_collectives",
+        "patch_process_group_methods",
+        "patch_cuda_graph",
+        "patch_compile_callable",
+        "install_tensor_backward_wrapper",
+        "inject_roctx_into_optimizer",
+        "install_function_apply_wrappers",
+        "install_tensor_method_wrappers",
+        "install_extra_structural_wrappers",
+        "inject_roctx_into_model",
+        "inject_roctx_into_module_methods",
+    ):
+        monkeypatch.setattr(torch_backend, name, lambda *args, **kwargs: None)
+
+
 def test_format_wrap_args_renders_tensors_and_skips_non_tensors():
     tensor = fake_tensor()
     rendered = format_wrap_args((tensor, "skip"), {"bias": tensor, "flag": True})
@@ -73,3 +90,20 @@ def test_inject_roctx_into_model_pushes_class_forward(monkeypatch):
         assert ("nn.Module.Linear.forward", "torch") in pushes
     finally:
         torch.nn.Module.__call__ = original_call
+
+
+def test_torch_backend_install_skips_dispatcher_when_collector_loads(monkeypatch):
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    noop_torch_structural_wraps(monkeypatch, torch_backend)
+    monkeypatch.setattr(torch_backend.torch_trace_collector, "install", lambda: True)
+    hook_calls = []
+    monkeypatch.setattr(
+        torch_backend,
+        "install_dispatcher_hook",
+        lambda: hook_calls.append(1),
+    )
+    monkeypatch.setattr(torch_backend, "_ROCTX_AVAILABLE", True)
+    monkeypatch.setattr(torch_backend, "_resolve_torch", lambda: True)
+    torch_backend.TorchBackend().install()
+    assert hook_calls == []
