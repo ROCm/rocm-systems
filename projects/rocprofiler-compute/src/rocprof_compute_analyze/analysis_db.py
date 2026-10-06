@@ -66,7 +66,7 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.common import EVAL_BUILTINS, ValuDualIssueDetector
-from utils.metrics.expression import build_eval_string, transform_expression
+from utils.metrics.expression import transform_expression
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -76,10 +76,10 @@ from utils.metrics.noise_clamper import (
 from utils.metrics.pass_provenance import (
     PASS_VAR_SEP,
     PassLayout,
-    bind_expression,
     bind_expression_dataframe,
     extract_row_refs,
     legacy_pass_merge_enabled,
+    ordered_scoped_builtin_bindings,
     pass_scoped_builtins,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
@@ -1094,32 +1094,9 @@ class db_analysis(OmniAnalyze_Base):
         for pass_key in sorted(used_passes, key=lambda key: pass_layout.ordinal(key)):
             ordinal = pass_layout.ordinal(pass_key)
             pass_locals: dict[str, Any] = {}
-            # PER_XCD first so dependents can resolve ammolite__*__passN lookups.
-            for variable_key, variable_value in build_in_vars.items():
-                if "PER_XCD" not in variable_key:
-                    continue
-                bound = bind_expression(
-                    build_eval_string(variable_value),
-                    pass_key,
-                    pass_layout,
-                    scoped,
-                )
-                pass_locals[f"{variable_key}__pass{ordinal}"] = db_analysis.evaluate(
-                    variable_key,
-                    bound,
-                    pmc_df,
-                    {**sys_info, **pass_locals},
-                    parse=False,
-                )
-            for variable_key, variable_value in build_in_vars.items():
-                if "PER_XCD" in variable_key:
-                    continue
-                bound = bind_expression(
-                    build_eval_string(variable_value),
-                    pass_key,
-                    pass_layout,
-                    scoped,
-                )
+            for variable_key, bound in ordered_scoped_builtin_bindings(
+                build_in_vars, pass_key, pass_layout, scoped
+            ):
                 pass_locals[f"{variable_key}__pass{ordinal}"] = db_analysis.evaluate(
                     variable_key,
                     bound,
