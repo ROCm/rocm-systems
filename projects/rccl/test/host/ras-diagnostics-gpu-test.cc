@@ -31,6 +31,9 @@ namespace {
 int64_t g_eccThreshold = 0;
 ncclResult_t g_driverResult = ncclSuccess;
 int g_driverVersion = 0;
+ncclResult_t g_nvidiaDriverResult = ncclSuccess;
+std::string g_nvidiaDriverVersion;
+std::vector<unsigned int> g_nvidiaDriverBufferSizes;
 std::vector<std::string> g_paramEnvs;
 std::vector<int64_t> g_paramDefaults;
 
@@ -94,6 +97,18 @@ ncclResult_t DiagnosticsGpuTestCudaDriverVersion(int* version) {
   *version = 0x5EED;
   if (g_driverResult != ncclSuccess) return g_driverResult;
   *version = g_driverVersion;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclNvmlSystemGetDriverVersion(char* version, unsigned int length) {
+  g_nvidiaDriverBufferSizes.push_back(length);
+  if (g_nvidiaDriverResult != ncclSuccess) {
+    // An unsuccessful query must not leave partial output in the collected POD.
+    memset(version, '!', length);
+    return g_nvidiaDriverResult;
+  }
+  g_nvidiaDriverVersion.copy(version, length);
+  if (g_nvidiaDriverVersion.size() < length) version[g_nvidiaDriverVersion.size()] = '\0';
   return ncclSuccess;
 }
 
@@ -212,6 +227,12 @@ rasDiagnosticsCudaDriverVersionData DriverVersion(uint32_t version) {
   return rasDiagnosticsCudaDriverVersionData{version};
 }
 
+rasDiagnosticsNvidiaDriverVersionData NvidiaDriverVersion(const char* version) {
+  rasDiagnosticsNvidiaDriverVersionData data{};
+  snprintf(data.version, sizeof(data.version), "%s", version);
+  return data;
+}
+
 rasDiagnosticsEccData EccData(bool available, uint64_t correctedSram = 0, uint64_t uncorrectedSram = 0,
                               uint64_t correctedDram = 0, uint64_t uncorrectedDram = 0) {
   return rasDiagnosticsEccData{correctedSram, uncorrectedSram, correctedDram, uncorrectedDram,
@@ -230,6 +251,9 @@ void ResetState() {
   g_paramDefaults.clear();
   g_driverResult = ncclSuccess;
   g_driverVersion = 0;
+  g_nvidiaDriverResult = ncclSuccess;
+  g_nvidiaDriverVersion.clear();
+  g_nvidiaDriverBufferSizes.clear();
   g_deviceCountResult = ncclSuccess;
   g_deviceCount = 0;
   g_handleResult = ncclSuccess;
@@ -316,8 +340,9 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
 }  // namespace
 
 TEST_F(RasDiagnosticsGpuMicrotest, SummariesValidateArguments) {
-  const std::array<rasDiagnosticsSummarizeFn, 4> summaries = {rasDiagnosticsGpuModelSummarize,
+  const std::array<rasDiagnosticsSummarizeFn, 5> summaries = {rasDiagnosticsGpuModelSummarize,
                                              rasDiagnosticsCudaDriverVersionSummarize,
+                                             rasDiagnosticsNvidiaDriverVersionSummarize,
                                              rasDiagnosticsEccSummarize,
                                              rasDiagnosticsNvLinkSummarize};
   rasDiagnosticsReporter invalid{};
@@ -411,6 +436,36 @@ TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionCollectHandlesSuccessFailureAndZ
   g_driverResult = ncclSystemError;
   ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsCudaDriverVersionCollectLocal, &data));
   EXPECT_EQ(RAS_DIAG_CUDA_DRIVER_VERSION_UNKNOWN, data.version);
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, NvidiaDriverVersionCollectClearsFailedOutputAndTerminatesFullBuffers) {
+  OwnedComm owned(0x100, 0x101, 0x102, 0);
+  owned.comm->nRanks = 1;
+  InstallNcclComms({owned.comm.get()});
+  rasDiagnosticsNvidiaDriverVersionData data{};
+
+  g_nvidiaDriverVersion = "580.82.07";
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvidiaDriverVersionCollectLocal, &data));
+  EXPECT_STREQ("580.82.07", data.version);
+  for (size_t i = g_nvidiaDriverVersion.size(); i < sizeof(data.version); ++i) EXPECT_EQ('\0', data.version[i]);
+
+  g_nvidiaDriverResult = ncclSystemError;
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvidiaDriverVersionCollectLocal, &data));
+  for (char byte : data.version) EXPECT_EQ('\0', byte);
+
+  g_nvidiaDriverResult = ncclSuccess;
+  g_nvidiaDriverVersion.assign(sizeof(data.version), 'V');
+  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvidiaDriverVersionCollectLocal, &data));
+  EXPECT_EQ(std::string(sizeof(data.version) - 1, 'V'), std::string(data.version, sizeof(data.version) - 1));
+  EXPECT_EQ('\0', data.version[sizeof(data.version) - 1]);
+  EXPECT_EQ((std::vector<unsigned int>(3, NVML_SYSTEM_DRIVER_VERSION_BUFFER_SIZE)), g_nvidiaDriverBufferSizes);
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, NvidiaDriverVersionCollectRejectsInvalidArguments) {
+  rasDiagnosticsLocalData data{};
+  EXPECT_EQ(ncclInternalError, rasDiagnosticsNvidiaDriverVersionCollectLocal(nullptr, &data));
+  EXPECT_EQ(ncclInternalError, rasDiagnosticsNvidiaDriverVersionCollectLocal(&ctx, nullptr));
+  EXPECT_TRUE(g_nvidiaDriverBufferSizes.empty());
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, EccCollectRequiresEveryCounter) {
@@ -578,15 +633,18 @@ TEST_F(RasDiagnosticsGpuMicrotest, CollectLocalBuildsOneRecordForEachCheck) {
   g_deviceCount = 1;
   g_deviceName = "MI300X";
   g_driverVersion = 70002000;
+  g_nvidiaDriverVersion = "580.82.07";
 
-  const std::array<rasDiagnosticsCollectLocalFn, 4> collectors = {rasDiagnosticsGpuModelCollectLocal,
+  const std::array<rasDiagnosticsCollectLocalFn, 5> collectors = {rasDiagnosticsGpuModelCollectLocal,
                                                                   rasDiagnosticsCudaDriverVersionCollectLocal,
                                                                   rasDiagnosticsEccCollectLocal,
-                                                                  rasDiagnosticsNvLinkCollectLocal};
-  const std::array<size_t, 4> payloadSizes = {sizeof(rasDiagnosticsGpuModelData),
+                                                                  rasDiagnosticsNvLinkCollectLocal,
+                                                                  rasDiagnosticsNvidiaDriverVersionCollectLocal};
+  const std::array<size_t, 5> payloadSizes = {sizeof(rasDiagnosticsGpuModelData),
                                               sizeof(rasDiagnosticsCudaDriverVersionData),
                                               sizeof(rasDiagnosticsEccData),
-                                              sizeof(rasDiagnosticsNvLinkData)};
+                                              sizeof(rasDiagnosticsNvLinkData),
+                                              sizeof(rasDiagnosticsNvidiaDriverVersionData)};
   for (size_t index = 0; index < collectors.size(); index++) {
     rasDiagnosticsLocalData data{};
     const auto result = collectors[index](&ctx, &data);
@@ -608,10 +666,12 @@ TEST_F(RasDiagnosticsGpuMicrotest, CollectLocalBuildsOneRecordForEachCheck) {
       EXPECT_EQ(70002000u, reinterpret_cast<const rasDiagnosticsCudaDriverVersionData*>(payload)->version);
     } else if (index == 2) {
       EXPECT_EQ(1, reinterpret_cast<const rasDiagnosticsEccData*>(payload)->available);
-    } else {
+    } else if (index == 3) {
       const auto* nvLink = reinterpret_cast<const rasDiagnosticsNvLinkData*>(payload);
       EXPECT_EQ(0, nvLink->nLinks);
       EXPECT_EQ(0, nvLink->nInactive);
+    } else {
+      EXPECT_STREQ("580.82.07", reinterpret_cast<const rasDiagnosticsNvidiaDriverVersionData*>(payload)->version);
     }
   }
 }
@@ -673,6 +733,44 @@ TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionSummaryCoversKnownUnknownMismatc
             state.lines[0]);
 
   ExpectIncomplete(rasDiagnosticsCudaDriverVersionSummarize, "CUDA driver version", 4, DriverVersion(1));
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, NvidiaDriverVersionSummaryReportsAvailabilityMismatchAndIncomplete) {
+  auto records = BuildRecords<rasDiagnosticsNvidiaDriverVersionData>(
+    {{MakeRank(2, 0, 1), NvidiaDriverVersion("")},
+     {MakeRank(1, 1, 2), NvidiaDriverVersion("580.82.07")},
+     {MakeRank(1, 0, 2), NvidiaDriverVersion("580.82.07")}});
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvidiaDriverVersionSummarize(
+                          &ctx, &reporter, records.data(), static_cast<int>(records.size())));
+  ASSERT_EQ(2u, state.lines.size());
+  EXPECT_EQ("[OK]   NVIDIA graphics driver version: 580.82.07 consistent across 2 ranks in comm 0x1", state.lines[0]);
+  EXPECT_EQ("[INFO] NVIDIA graphics driver version: unavailable via NVML across 1 ranks in comm 0x2", state.lines[1]);
+
+  for (const char* expected : {"580.82.07", ""}) {
+    state.lines.clear();
+    records = BuildRecords<rasDiagnosticsNvidiaDriverVersionData>(
+      {{MakeRank(3, 1, 2), NvidiaDriverVersion("580.95.05")},
+       {MakeRank(3, 0, 2), NvidiaDriverVersion(expected)}});
+    ASSERT_EQ(ncclSuccess, rasDiagnosticsNvidiaDriverVersionSummarize(
+                            &ctx, &reporter, records.data(), static_cast<int>(records.size())));
+    ASSERT_EQ(1u, state.lines.size());
+    EXPECT_EQ(std::string("[INFO] NVIDIA graphics driver version: mismatch across 2 ranks in comm 0x3, "
+                          "rank(s) {1} differ from rank 0 (") +
+                (expected[0] != '\0' ? expected : "unavailable via NVML") + ")", state.lines[0]);
+  }
+  ExpectIncomplete(rasDiagnosticsNvidiaDriverVersionSummarize, "NVIDIA graphics driver version",
+                   0xabc, NvidiaDriverVersion("580.82.07"));
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, NvidiaDriverVersionSummaryBoundsUnterminatedPeerData) {
+  rasDiagnosticsNvidiaDriverVersionData version;
+  memset(version.version, 'V', sizeof(version.version));
+  auto records = BuildRecords<rasDiagnosticsNvidiaDriverVersionData>({{MakeRank(1, 0, 1), version}});
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsNvidiaDriverVersionSummarize(
+                          &ctx, &reporter, records.data(), static_cast<int>(records.size())));
+  ASSERT_EQ(1u, state.lines.size());
+  EXPECT_EQ("[OK]   NVIDIA graphics driver version: " + std::string(sizeof(version.version) - 1, 'V') +
+              " consistent across 1 ranks in comm 0x1", state.lines[0]);
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, EccSummaryCoversAvailabilityHealthyAndErrorCases) {
@@ -846,6 +944,16 @@ TEST_F(RasDiagnosticsGpuMicrotest, EveryReporterFailurePropagates) {
   ExpectReporterFailure<rasDiagnosticsCudaDriverVersionData>(
     rasDiagnosticsCudaDriverVersionSummarize,
     {{MakeRank(11, 0, 2), DriverVersion(70002000)}, {MakeRank(11, 1, 2), DriverVersion(70003000)}});
+
+  ExpectReporterFailure<rasDiagnosticsNvidiaDriverVersionData>(
+    rasDiagnosticsNvidiaDriverVersionSummarize, {{MakeRank(22, 0, 2), NvidiaDriverVersion("580.82.07")}});
+  ExpectReporterFailure<rasDiagnosticsNvidiaDriverVersionData>(
+    rasDiagnosticsNvidiaDriverVersionSummarize, {{MakeRank(23, 0, 1), NvidiaDriverVersion("")}});
+  ExpectReporterFailure<rasDiagnosticsNvidiaDriverVersionData>(
+    rasDiagnosticsNvidiaDriverVersionSummarize, {{MakeRank(24, 0, 1), NvidiaDriverVersion("580.82.07")}});
+  ExpectReporterFailure<rasDiagnosticsNvidiaDriverVersionData>(
+    rasDiagnosticsNvidiaDriverVersionSummarize,
+    {{MakeRank(25, 0, 2), NvidiaDriverVersion("580.82.07")}, {MakeRank(25, 1, 2), NvidiaDriverVersion("580.95.05")}});
 
   ExpectReporterFailure<rasDiagnosticsEccData>(rasDiagnosticsEccSummarize,
                                                {{MakeRank(12, 0, 2), EccData(true)}});

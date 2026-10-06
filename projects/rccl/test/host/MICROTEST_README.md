@@ -113,7 +113,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     sentinel remains covered by enabled dispatch and peer-payload tests.
   - `ras/diagnostics_gpu.cc` (`RAS_DIAGNOSTICS_GPU_CC_PATH`, from
     `ras-diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`. Covers
-    GPU inventory, driver-version, ECC, and NVLink collection and summaries.
+    GPU inventory, CUDA and NVIDIA graphics driver versions, ECC, and NVLink
+    collection and summaries, including failed NVML queries and bounded
+    driver-version strings.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
