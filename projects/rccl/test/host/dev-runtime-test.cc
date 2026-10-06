@@ -3881,7 +3881,7 @@ TEST_F(DevrWindowRegisterInGroupTest, ProbeFailure_AllgathersBeforeReturning) {
   EXPECT_EQ(out, nullptr);
 }
 
-#if NCCL_VER_GE(HIP_VERSION, ROCM_VER_7_12_60540)
+#if NCCL_VER_GE(HIP_VERSION, ROCM_VER_7_12_60540) && NCCL_CUMEM_HOST_GATE
 // The retain walk, not the first page, decides a mixed window. A device page
 // followed by a host page must still reject before cudaIpcGetMemHandle.
 TEST_F(DevrWindowRegisterInGroupTest, DeviceFirstPageHostTail_AllgathersThenRejects) {
@@ -3931,7 +3931,7 @@ TEST_F(DevrWindowRegisterInGroupTest, DeviceFirstPageHostTail_AllgathersThenReje
   EXPECT_EQ(gather.calls, 1);
   EXPECT_EQ(out, nullptr);
 }
-#else
+#elif !NCCL_VER_GE(HIP_VERSION, ROCM_VER_7_12_60540)
 // 7.0.2.x cannot retain. The same mixed window is classified by MEMORY_TYPE
 // on each mapping, not by the first page alone.
 TEST_F(DevrWindowRegisterInGroupTest, DeviceFirstPageHostTail_AllgathersThenRejects) {
