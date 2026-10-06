@@ -544,4 +544,41 @@ TEST(P2pMaxNchannelsSingleNodeTests, Gfx950_SingleNode8Rank_MloPartFitsPeersInOn
         });
 }
 
+// A pinned nChannelsPerNetPeer is what makes the net-bound branch decline to run, so the else
+// is reached multi-node as well as single-node. The MLOPart reduction must not take that as its
+// cue: ncclTopoGetNchannels() hands the pinned value back as the count for every remote peer, so
+// halving here would quietly undo the pin the branch above stepped aside for. Sizing against the
+// on-package fabric is a single-node argument; multi-node the network is the bottleneck.
+//
+// Both legs pin the knob, so neither reaches the net-bound branch, and the per-peer count must
+// come out the same whether or not the ranks are partitions. Without the nNodes test the
+// partitioned leg is halved and the two diverge.
+TEST(P2pMaxNchannelsMultiNodeTests, MultiNode_PinnedNetPeerChannelsSurviveMloPart)
+{
+    RUN_ISOLATED_TEST(
+        "MultiNode_PinnedNetPeerChannelsSurviveMloPart",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            int perPeer[2] = {-1, -1};
+            int pool[2]    = {-1, -1};
+            const bool mloPart[2] = {true, false};
+            for(int i = 0; i < 2; i++)
+            {
+                P2pChannelsComm fixture;
+                fixture.initMultiNode("gfx950", /*nNodes=*/2, /*nRanks=*/16, /*localGpus=*/8,
+                                      /*nChannels=*/64, /*seedP2pPerPeer=*/32);
+                fixture.comm->hasMloPart = mloPart[i];
+                // Enough declared peers that the loop would bite if it ran.
+                fixture.comm->p2pMaxPeers = 16;
+                fixture.comm->config.nChannelsPerNetPeer = 32;
+                ASSERT_EQ(fixture.computeP2pChannels(&pool[i]), ncclSuccess);
+                perPeer[i] = fixture.comm->p2pnChannelsPerPeer;
+            }
+            EXPECT_EQ(perPeer[0], perPeer[1])
+                << "a pinned nChannelsPerNetPeer was reduced on the partitioned comm";
+            EXPECT_EQ(pool[0], pool[1]);
+        });
+}
+
 }  // namespace RcclUnitTesting
