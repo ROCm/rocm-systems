@@ -399,6 +399,7 @@ public:
 
   /// @brief Return the command processor that owns this CU's dispatch stream.
   CommandProcessor *command_processor() { return cp_; }
+  const CommandProcessor *command_processor() const { return cp_; }
 
   /// @brief Override the cluster LDS multicast backend.
   ///
@@ -539,6 +540,11 @@ public:
 
   /// @brief Return this CU's index within its shader array when the width is known.
   uint32_t shader_array_cu_id() const { return shader_array_cu_id_; }
+
+  /// @brief Return this CU's shader-array index, or zero when the width is unknown.
+  uint32_t shader_array_id() const {
+    return cus_per_shader_array_ ? shader_engine_cu_index_ / cus_per_shader_array_ : 0;
+  }
 
   /// @brief Return the first scratch scoreboard slot owned by this CU.
   uint32_t scratch_scoreboard_base() const { return scratch_scoreboard_base_; }
@@ -1463,6 +1469,9 @@ inline bool InstructionComputeUnitView::observes_register_access() const {
 inline bool InstructionComputeUnitView::debug_active() const { return raw_cu().debug_active(); }
 inline uint32_t InstructionComputeUnitView::cus_per_shader_array() const {
   return raw_cu().cus_per_shader_array();
+}
+inline uint32_t InstructionComputeUnitView::shader_array_id() const {
+  return raw_cu().shader_array_id();
 }
 inline uint32_t InstructionComputeUnitView::shader_array_cu_id() const {
   return raw_cu().shader_array_cu_id();
