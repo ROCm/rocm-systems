@@ -238,7 +238,7 @@ ROCR finds these sections by name, except for the string tables. It finds each s
 | `.rela.dyn` | For relocations | `Elf32_Rela` entries. `sh_entsize` must be 12. |
 | `SHT_GROUP` sections | Yes, 1 or more | One group for each kernel instance. |
 | `.ctrltext*` | One in each group | The control code. Must be `SHT_PROGBITS` and not empty. |
-| `.pdi*` | One for each kernel | The PDI. The name must be equal to the name of the PDI relocation symbol. |
+| `.pdi*` | One for each PDI that a kernel loads | The PDI. A PDI relocation symbol names it. More than one section can have the same name only if their contents are the same. |
 | `.note.xrt.configuration` | No (packer only) | The partition column count. See section 8. |
 
 ROCR reads relocations only if `.rela.dyn`, `.dynsym` and `.dynstr` are all present. If one of them is missing, no kernel has a PDI patch site. The loader then refuses each kernel.
@@ -279,14 +279,14 @@ The symbol name gives the meaning of the patch site:
 
 | Symbol name | Meaning | Required scheme |
 | --- | --- | --- |
-| Starts with `.pdi` | The device address of the PDI in the section with this name. | 8 (`Address64`) |
+| Starts with `.pdi` | The device address of the PDI in the section with this name. If more than one section has this name, their contents must be the same, or ROCR refuses the ELF. | 8 (`Address64`) |
 | Decimal digits only, 0 to 4095 | The address of kernel argument N. | 5 (`ShimDma48`) |
 | Any other name | Not supported (for example scratch pads or control packets). ROCR refuses the ELF. | — |
 
 ROCR applies these limits:
 
-- One PDI section for each kernel, and one PDI patch site for each kernel.
-- The PDI patch site offset must not be 0, must be a multiple of 4, and `offset + 8` must not be more than the control-code size.
+- A kernel can have more than one PDI patch site, and the sites can name different PDI sections. For example, the control code from MLIR-AIR loads an empty PDI before and after the design runs. ROCR copies each different PDI into device memory one time for each kernel. Sites that name PDIs with the same contents use one copy.
+- Each PDI patch site offset must not be 0, must be a multiple of 4, and `offset + 8` must not be more than the control-code size.
 - Each argument patch site offset must be a multiple of 4, and `offset + 12` must not be more than the control-code size.
 - An argument can have more than one patch site. An argument index can have no patch site.
 - The number of kernel arguments is the highest argument index plus 1.
@@ -298,7 +298,7 @@ Preemption save and restore sections, control packets and scalar arguments are n
 
 The driver applies the patches at dispatch time, on a new copy of the control code. It never patches the original copy, because `ShimDma48` adds to the existing value.
 
-**`Address64` (8), for the PDI.** The driver writes the 64-bit device address of the PDI BO at the patch site. The low word is first. This is a store, not an addition.
+**`Address64` (8), for a PDI.** The driver writes the 64-bit device address of the PDI BO at each patch site of that PDI. The low word is first. This is a store, not an addition.
 
 **`ShimDma48` (5), for arguments.** The patch site is three 32-bit words, `w[0]`, `w[1]` and `w[2]`. The driver does these steps, with `addr = argument address + addend`:
 
@@ -376,7 +376,7 @@ The kernel descriptor is a host structure. It is not part of the file format. It
    1. Refuse a `kind` of 2 or more.
    2. Refuse `num_cols` of 0, or more than the agent columns.
    3. `PdiInsts`: refuse an entry with no PDI. Copy the instruction blob and the PDI blob into device memory. Get the BO handles.
-   4. `FullElf`: parse the full ELF (one time for each distinct blob). Find the kernel by name. Examine `kernarg_size`. Copy the PDI into device memory and get its BO handle. Keep the control code and the patch sites in host memory.
+   4. `FullElf`: parse the full ELF (one time for each distinct blob). Find the kernel by name. Examine `kernarg_size`. Copy each different PDI into device memory and get its BO handle. Keep the control code and the patch sites in host memory.
 6. Publish the symbols. Before this step, a failure releases all device memory from steps 5.3 and 5.4.
 
 Device memory for blobs comes from the device SVM region (the device heap). Each buffer has 64-byte alignment. The loader copies each distinct blob one time. It identifies a blob by its address and size in the hsaco buffer. After the copy, the loader flushes the CPU cache for the buffer one time.
@@ -415,6 +415,7 @@ The table shows which tool examines each rule. "—" means that the tool does no
 | Full ELF groups are COMDAT | Yes | Yes | — |
 | Full ELF groups without `.ctrltext` are not kernels | Yes | Yes | — |
 | Full ELF patch sites in range | Yes | — | — |
+| Full ELF PDI section names are not ambiguous | Yes | — | — |
 
 ## 12. The packer command line
 

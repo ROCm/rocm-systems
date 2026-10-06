@@ -1721,7 +1721,6 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     desc->kind = ki->kind;
     desc->kernarg_size = ki->kernarg_size;
     desc->num_cols = ki->num_cols;
-    desc->pdi_patch_offset = 0;
 
     if (ki->kind == AMD::AieKernelKind::PdiInsts) {
       // The section format allows an entry to carry no PDI, but a PDI is what configures the
@@ -1759,7 +1758,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       desc->insts_bo_va = nullptr;
       desc->insts_size = 0;
       desc->insts_bo_handle = 0;
-      desc->pdi_bo_handle = 0;
+      desc->pdi_bo_handle = 0;  // the PDIs are in desc->pdis
 
       auto it = parsed_elfs.find(ki->insts_data);
       if (it == parsed_elfs.end()) {
@@ -1803,29 +1802,33 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       }
       desc->kernarg_size = elf_kernarg_size;
 
-      // A kernel with no PDI patch site has no PDI to patch; nothing downstream can dispatch it.
-      // Parse() rejects a patch offset of 0, so a zero offset means the site is absent.
-      if (kernel.pdi_patch_offset == 0) {
+      // A kernel that loads no PDI leaves the array unconfigured; nothing downstream can dispatch
+      // it.
+      if (kernel.pdis.empty()) {
         log_warning_n(10, "AIE: kernel '%s' has no PDI patch site in its control code.\n",
                       kernel_name.c_str());
         return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
       }
 
-      // Unlike the control code, the PDI is fetched by the NPU, so it needs device memory.
-      void* pdi_dev = nullptr;
-      if (auto s = place_blob(kernel.pdi.data(), kernel.pdi.size(), &pdi_dev);
-          s != HSA_STATUS_SUCCESS) {
-        return s;
-      }
-      if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
-        return s;
-      }
-
-      // The control code's PDI site keeps whatever the ELF shipped. Turning a BO handle into the
+      // Unlike the control code, the PDIs are fetched by the NPU, so they need device memory.
+      // The control code's PDI sites keep whatever the ELF shipped. Turning a BO handle into the
       // address the NPU fetches from is the driver's to do, so it patches each dispatch's copy --
       // that keeps device addresses out of the loader and out of core's memory handles entirely.
-      // Parse() already validated the offset is non-zero, 4-byte aligned and within range.
-      desc->pdi_patch_offset = kernel.pdi_patch_offset;
+      // Parse() already validated every offset is non-zero, 4-byte aligned and within range.
+      desc->num_pdis = static_cast<uint32_t>(kernel.pdis.size());
+      desc->pdis = std::make_unique<AMD::AieKernelDescriptor::Pdi[]>(desc->num_pdis);
+      for (uint32_t p = 0; p < desc->num_pdis; ++p) {
+        AMD::aie_elf::Pdi& pdi = kernel.pdis[p];
+        void* pdi_dev = nullptr;
+        if (auto s = place_blob(pdi.bytes.data(), pdi.bytes.size(), &pdi_dev);
+            s != HSA_STATUS_SUCCESS) {
+          return s;
+        }
+        if (auto s = resolve_handle(pdi_dev, &desc->pdis[p].bo_handle); s != HSA_STATUS_SUCCESS) {
+          return s;
+        }
+        desc->pdis[p].patch_offsets = std::move(pdi.patch_offsets);
+      }
 
       // The control code is only ever a memcpy source for a per-dispatch buffer, so it stays in
       // ordinary host memory rather than a device segment. Moved, not copied: the parsed kernel

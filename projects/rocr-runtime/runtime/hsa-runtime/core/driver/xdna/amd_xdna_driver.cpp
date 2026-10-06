@@ -1844,10 +1844,10 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
 /// both run with whichever was patched last. Pooling these buffers is a measurement-gated
 /// follow-up, deliberately not done here.
 ///
-/// The PDI's device address is patched into this dispatch's copy here, not by the loader: only the
-/// driver can turn a BO handle into an address the NPU fetches from. The address itself is fixed
-/// for the BO's lifetime, so it is resolved once and cached on the descriptor. The PDI BO is also
-/// listed so the driver keeps it resident for the dispatch.
+/// The PDIs' device addresses are patched into this dispatch's copy here, not by the loader: only
+/// the driver can turn a BO handle into an address the NPU fetches from. Each address is fixed for
+/// its BO's lifetime, so it is resolved once and cached on the descriptor. The PDI BOs are also
+/// listed so the driver keeps them resident for the dispatch.
 ///
 /// @param[in] fd driver file descriptor
 /// @param[in] heap_base device heap mapping base, for the control-code allocation
@@ -1899,26 +1899,30 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   // previous result would accumulate.
   std::memcpy(ctrl.ptr(), desc.ctrl_code.data(), desc.ctrl_code.size());
 
-  // The PDI's device address. A BO's device address is fixed for its lifetime, so resolve it on
-  // the first dispatch and cache it on the descriptor rather than paying an ioctl per dispatch.
-  // Two threads can race here and both store the same value, which is harmless.
-  uint64_t pdi_dev_addr = desc.pdi_dev_addr.load(std::memory_order_relaxed);
-  if (pdi_dev_addr == 0) {
-    err = GetBODevAddr(fd, desc.pdi_bo_handle, &pdi_dev_addr);
-    if (err != HSA_STATUS_SUCCESS) {
-      return err;
-    }
+  for (uint32_t p = 0; p < desc.num_pdis; ++p) {
+    const AieKernelDescriptor::Pdi& pdi = desc.pdis[p];
+    // The PDI's device address. A BO's device address is fixed for its lifetime, so resolve it on
+    // the first dispatch and cache it on the descriptor rather than paying an ioctl per dispatch.
+    // Two threads can race here and both store the same value, which is harmless.
+    uint64_t pdi_dev_addr = pdi.dev_addr.load(std::memory_order_relaxed);
     if (pdi_dev_addr == 0) {
-      log_warning_n(10, "AIE: full-ELF PDI must be allocated from device memory.\n");
-      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+      err = GetBODevAddr(fd, pdi.bo_handle, &pdi_dev_addr);
+      if (err != HSA_STATUS_SUCCESS) {
+        return err;
+      }
+      if (pdi_dev_addr == 0) {
+        log_warning_n(10, "AIE: full-ELF PDI must be allocated from device memory.\n");
+        return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+      }
+      pdi.dev_addr.store(pdi_dev_addr, std::memory_order_relaxed);
     }
-    desc.pdi_dev_addr.store(pdi_dev_addr, std::memory_order_relaxed);
+    // Write it where the ELF asked. Unlike the argument sites this is a plain store, not an
+    // additive fold, but it still goes into the fresh copy rather than the pristine one. A site is
+    // the low dword then the high dword, which on a little-endian host is the address's own bytes.
+    for (const uint32_t offset : pdi.patch_offsets) {
+      std::memcpy(static_cast<uint8_t*>(ctrl.ptr()) + offset, &pdi_dev_addr, sizeof(pdi_dev_addr));
+    }
   }
-  // Write it where the ELF asked. Unlike the argument sites this is a plain store, not an additive
-  // fold, but it still goes into the fresh copy rather than the pristine one. The site is the low
-  // dword then the high dword, which on a little-endian host is the address's own bytes.
-  std::memcpy(static_cast<uint8_t*>(ctrl.ptr()) + desc.pdi_patch_offset, &pdi_dev_addr,
-              sizeof(pdi_dev_addr));
 
   const auto* kernarg_address = static_cast<const uint64_t*>(pkt->kernarg_address);
   for (size_t arg = 0; arg < desc.arg_sites.size(); ++arg) {
@@ -1931,11 +1935,12 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   FlushCpuCache(ctrl.ptr(), 0, desc.ctrl_code.size());
 
   bo_handles->push_back(ctrl.bo.handle);
-  // The PDI is reached only through the address written into the control code above, so the
-  // command still has to list it for the driver to keep it resident. Unconditional: the loader
-  // refuses a full-ELF kernel whose control code has no PDI patch site, and the resolve above
-  // has already used the handle.
-  bo_handles->push_back(desc.pdi_bo_handle);
+  // The PDIs are reached only through the addresses written into the control code above, so the
+  // command still has to list them for the driver to keep them resident. The loader refuses a
+  // full-ELF kernel that loads no PDI, so there is always at least one.
+  for (uint32_t p = 0; p < desc.num_pdis; ++p) {
+    bo_handles->push_back(desc.pdis[p].bo_handle);
+  }
 
   const uint32_t cmd_dwords = 1 +  // CU mask
       sizeof(ert_npu_preempt_data) / sizeof(uint32_t) + ELF_CMD_ARG_DWORDS;
@@ -2313,9 +2318,9 @@ static hsa_status_t SubmitFullElfChain(int fd, void* dev_heap_vaddr,
   ctrl_buffers.reserve(num_pkts);
   MAKE_SCOPE_GUARD([&] { FreeDeviceBuffers(fd, dev_heap_vaddr, &ctrl_buffers); });
 
-  // BO handles listed per packet: the control code and the PDI, plus one per kernarg. So
-  // 2 + num_kernargs is the per-packet worst case, and this covers it for the two-argument
-  // designs in hand. A kernel with more arguments than that reallocates -- a hint, not a bound,
+  // BO handles listed per packet: the control code and each distinct PDI (usually one), plus one
+  // per kernarg. So 2 + num_kernargs is the usual per-packet count, and this covers it for the
+  // two-argument designs in hand. A kernel with more than that reallocates -- a hint, not a bound,
   // since a batch's packets need not agree on it.
   std::vector<uint32_t> bo_handles;
   bo_handles.reserve(num_pkts * 4);
