@@ -62,10 +62,6 @@ rocprofiler_test_c_range_offset_current_pass(void);
 size_t
 rocprofiler_test_c_range_offset_total_passes(void);
 size_t
-rocprofiler_test_c_range_offset_local_start_context(void);
-size_t
-rocprofiler_test_c_range_offset_local_stop_context(void);
-size_t
 rocprofiler_test_c_range_offset_agent_id(void);
 size_t
 rocprofiler_test_c_range_offset_dispatch_count(void);
@@ -139,12 +135,7 @@ TEST(range_replay_abi, members_are_in_declaration_order)
     EXPECT_LT(offsetof(range_data_t, pass_count_cb), offsetof(range_data_t, replay_continue_cb));
     EXPECT_LT(offsetof(range_data_t, replay_continue_cb), offsetof(range_data_t, current_pass));
     EXPECT_LT(offsetof(range_data_t, current_pass), offsetof(range_data_t, total_passes));
-    EXPECT_LT(offsetof(range_data_t, total_passes),
-              offsetof(range_data_t, replay_local_start_context_cb));
-    EXPECT_LT(offsetof(range_data_t, replay_local_start_context_cb),
-              offsetof(range_data_t, replay_local_stop_context_cb));
-    EXPECT_LT(offsetof(range_data_t, replay_local_stop_context_cb),
-              offsetof(range_data_t, agent_id));
+    EXPECT_LT(offsetof(range_data_t, total_passes), offsetof(range_data_t, agent_id));
     EXPECT_LT(offsetof(range_data_t, agent_id), offsetof(range_data_t, dispatch_count));
     EXPECT_LT(offsetof(range_data_t, dispatch_count), offsetof(range_data_t, status));
     EXPECT_LT(offsetof(range_data_t, status), offsetof(range_data_t, divergence_count));
@@ -166,14 +157,8 @@ TEST(range_replay_abi, members_do_not_overlap_and_fit)
         offsetof(range_data_t, replay_continue_cb) + sizeof(range_data_t{}.replay_continue_cb));
     EXPECT_GE(offsetof(range_data_t, total_passes),
               offsetof(range_data_t, current_pass) + sizeof(range_data_t{}.current_pass));
-    EXPECT_GE(offsetof(range_data_t, replay_local_start_context_cb),
-              offsetof(range_data_t, total_passes) + sizeof(range_data_t{}.total_passes));
-    EXPECT_GE(offsetof(range_data_t, replay_local_stop_context_cb),
-              offsetof(range_data_t, replay_local_start_context_cb) +
-                  sizeof(range_data_t{}.replay_local_start_context_cb));
     EXPECT_GE(offsetof(range_data_t, agent_id),
-              offsetof(range_data_t, replay_local_stop_context_cb) +
-                  sizeof(range_data_t{}.replay_local_stop_context_cb));
+              offsetof(range_data_t, total_passes) + sizeof(range_data_t{}.total_passes));
     EXPECT_GE(offsetof(range_data_t, dispatch_count),
               offsetof(range_data_t, agent_id) + sizeof(range_data_t{}.agent_id));
     EXPECT_GE(offsetof(range_data_t, status),
@@ -198,22 +183,16 @@ TEST(range_replay_abi, counters_are_64_bit)
     EXPECT_EQ(sizeof(range_data_t{}.divergence_count), 8u);
 }
 
-// The four callback members are function pointers the tool either reads or writes. Their exact
-// signatures are the contract; a changed parameter list here is an ABI break that the compiler
-// would not otherwise flag at the tool. The two context toggles must match kernel replay's
-// signature exactly, because a tool that drives both services reuses the same functions.
+// The two callback members are function pointers the tool writes. Their exact signatures are the
+// contract; a changed parameter list here is an ABI break that the compiler would not otherwise
+// flag at the tool.
 TEST(range_replay_abi, callback_signatures_are_pinned)
 {
     using pass_count_fn = uint64_t (*)(uint64_t, rocprofiler_user_data_t);
     using continue_fn   = int (*)(uint64_t, uint64_t, uint64_t, rocprofiler_user_data_t);
-    using toggle_fn     = rocprofiler_status_t (*)(rocprofiler_context_id_t);
 
     EXPECT_TRUE((std::is_same<decltype(range_data_t{}.pass_count_cb), pass_count_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(range_data_t{}.replay_continue_cb), continue_fn>::value));
-    EXPECT_TRUE(
-        (std::is_same<decltype(range_data_t{}.replay_local_start_context_cb), toggle_fn>::value));
-    EXPECT_TRUE(
-        (std::is_same<decltype(range_data_t{}.replay_local_stop_context_cb), toggle_fn>::value));
 }
 
 // A zeroed record must mean "do not replay this range". The header documents a NULL pass_count_cb
@@ -224,8 +203,6 @@ TEST(range_replay_abi, zero_initialized_record_opts_out_of_replay)
     range_data_t rec = {};
     EXPECT_EQ(rec.pass_count_cb, nullptr);
     EXPECT_EQ(rec.replay_continue_cb, nullptr);
-    EXPECT_EQ(rec.replay_local_start_context_cb, nullptr);
-    EXPECT_EQ(rec.replay_local_stop_context_cb, nullptr);
     EXPECT_EQ(rec.current_pass, 0u);
     EXPECT_EQ(rec.total_passes, 0u);
     EXPECT_EQ(rec.dispatch_count, 0u);
@@ -462,10 +439,6 @@ TEST(range_replay_abi, c_and_cxx_agree_on_every_field_offset)
               offsetof(range_data_t, replay_continue_cb));
     EXPECT_EQ(rocprofiler_test_c_range_offset_current_pass(), offsetof(range_data_t, current_pass));
     EXPECT_EQ(rocprofiler_test_c_range_offset_total_passes(), offsetof(range_data_t, total_passes));
-    EXPECT_EQ(rocprofiler_test_c_range_offset_local_start_context(),
-              offsetof(range_data_t, replay_local_start_context_cb));
-    EXPECT_EQ(rocprofiler_test_c_range_offset_local_stop_context(),
-              offsetof(range_data_t, replay_local_stop_context_cb));
     EXPECT_EQ(rocprofiler_test_c_range_offset_agent_id(), offsetof(range_data_t, agent_id));
     EXPECT_EQ(rocprofiler_test_c_range_offset_dispatch_count(),
               offsetof(range_data_t, dispatch_count));
@@ -514,8 +487,6 @@ TEST(range_replay_abi, close_record_written_by_c_reads_back_in_cxx)
     // one of C's writes landing on top of a neighbouring member.
     EXPECT_EQ(rec.pass_count_cb, nullptr);
     EXPECT_EQ(rec.replay_continue_cb, nullptr);
-    EXPECT_EQ(rec.replay_local_start_context_cb, nullptr);
-    EXPECT_EQ(rec.replay_local_stop_context_cb, nullptr);
     EXPECT_EQ(rec.current_pass, 0u);
     EXPECT_EQ(rec.total_passes, 0u);
 }

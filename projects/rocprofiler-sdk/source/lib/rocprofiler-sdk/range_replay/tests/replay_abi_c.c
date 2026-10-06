@@ -83,18 +83,6 @@ rocprofiler_test_c_range_offset_total_passes(void)
 }
 
 size_t
-rocprofiler_test_c_range_offset_local_start_context(void)
-{
-    return offsetof(range_data_c_t, replay_local_start_context_cb);
-}
-
-size_t
-rocprofiler_test_c_range_offset_local_stop_context(void)
-{
-    return offsetof(range_data_c_t, replay_local_stop_context_cb);
-}
-
-size_t
 rocprofiler_test_c_range_offset_agent_id(void)
 {
     return offsetof(range_data_c_t, agent_id);

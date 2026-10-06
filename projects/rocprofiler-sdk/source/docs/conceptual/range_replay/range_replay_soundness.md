@@ -130,7 +130,7 @@ take per-agent WRITER lock
   verify the tracked allocation set still matches the entry snapshot's
   snap()  -> the EXIT snapshot: the state the application must resume with
   reserve the kernarg staging block (the agent's retained block when it fits)
-  install the localized-context-control guard; mark this thread replaying
+  mark this thread replaying
   for pass = 1 ..:
       restore(entry snapshot)
       PASS PHASE_ENTER

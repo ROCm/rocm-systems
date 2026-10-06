@@ -83,7 +83,10 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
  * - @ref ROCPROFILER_RANGE_REPLAY_PASS: @c range_id, @c current_pass, @c total_passes,
  *   @c agent_id and @c dispatch_count are populated. @c current_pass is 1-based here: pass 0 is
  *   the application's own execution of the range, which the SDK observes rather than drives, so
- *   only re-executed passes raise a PASS callback.
+ *   only re-executed passes raise a PASS callback. The re-executed dispatches of a pass go through
+ *   each service's dispatch callback on the thread that called @ref rocprofiler_range_replay_end,
+ *   between that pass's PHASE_ENTER and PHASE_EXIT, so a tool picks what a dispatch-scoped service
+ *   collects on each pass from its own dispatch callback, exactly as under kernel replay.
  * - @ref ROCPROFILER_RANGE_REPLAY_CLOSE: delivered from @ref rocprofiler_range_replay_end after
  *   the last pass. @c status says whether the range was replayed or why it was declined, and
  *   @c divergence_count reports how many snapshot regions differed between the application's
@@ -123,9 +126,6 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     uint64_t current_pass;
     uint64_t total_passes;
 
-    rocprofiler_status_t (*replay_local_start_context_cb)(rocprofiler_context_id_t context_id);
-    rocprofiler_status_t (*replay_local_stop_context_cb)(rocprofiler_context_id_t context_id);
-
     rocprofiler_agent_id_t            agent_id;
     uint64_t                          dispatch_count;
     rocprofiler_range_replay_status_t status;
@@ -149,13 +149,6 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     ///
     /// @var total_passes
     /// @brief [PASS] Total passes if known (the value @c pass_count_cb returned), else 0.
-    ///
-    /// @var replay_local_start_context_cb
-    /// @var replay_local_stop_context_cb
-    /// @brief [PASS] Localized context control, with the same semantics as the kernel replay
-    /// toggles: valid only during PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER, sticky across passes
-    /// of this range, scoped to the range's replay loop, and unable to promote a context that is
-    /// globally inactive. @see rocprofiler-sdk/experimental/kernel_replay.h
     ///
     /// @var agent_id
     /// @brief [PASS, CLOSE] Agent the range was bound to, or a zero handle when no dispatch was

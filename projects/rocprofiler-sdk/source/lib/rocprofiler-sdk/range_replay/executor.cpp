@@ -24,12 +24,10 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
-#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/replay_window.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/range_replay/digest.hpp"
@@ -379,12 +377,6 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
     const auto staged_at = phase_clock::now();
 
     auto packets = build_pass_packets(ctx.record.dispatches());
-
-    // Localized context control for this range's replay loop (shared with kernel replay): connects
-    // the tool's PASS toggles to the services that read them at dispatch, without touching global
-    // context state.
-    auto local_ctx_tls_guard =
-        kernel_replay::scoped_local_context_control{context::get_active_contexts()};
 
     // Mark the thread as replaying for the duration: the queue path uses it to skip re-recording
     // the packets we submit and to skip the per-agent reader lock we already hold as a writer.

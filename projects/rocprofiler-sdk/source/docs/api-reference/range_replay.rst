@@ -82,8 +82,9 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_range_replay_data_t*``
        ``rocprofiler_range_replay_begin()``; the range has not executed yet.
    * - ``ROCPROFILER_RANGE_REPLAY_PASS``
      - ``PHASE_ENTER``
-     - Read ``current_pass`` / ``total_passes``. Optionally call
-       ``replay_local_start_context_cb`` / ``replay_local_stop_context_cb``.
+     - Read ``current_pass`` / ``total_passes``. Publish the pass where the tool's service dispatch
+       callbacks can read it (for example in thread-local state); they run on this thread for the
+       replayed dispatches of this pass and decide what each service collects on it.
    * - ``ROCPROFILER_RANGE_REPLAY_PASS``
      - ``PHASE_EXIT``
      - Pass complete; ``replay_continue_cb`` (if set) runs after this.
@@ -93,8 +94,9 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_range_replay_data_t*``
        opened range, including for a range that was declined before any pass ran.
 
 ``current_pass`` is 1-based: pass 0 is the application's own execution of the range, which the SDK
-observes rather than drives, so it raises no ``PASS`` callback. A tool that wants a particular counter
-group collected on the live run must have it active before ``rocprofiler_range_replay_begin()``.
+observes rather than drives, so it raises no ``PASS`` callback. Its dispatches reach the tool's
+service dispatch callbacks with no pass published, so a tool that wants a particular counter group
+collected on the live run returns it whenever no replayed pass is current.
 
 Pass count
 ----------

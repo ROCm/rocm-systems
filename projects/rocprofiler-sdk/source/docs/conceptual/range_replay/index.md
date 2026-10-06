@@ -23,8 +23,9 @@ recording once per extra pass.
 
 Range replay is **experimental**. The public header is
 `rocprofiler-sdk/experimental/range_replay.h`. It shares kernel replay's device-memory snapshot,
-its per-agent replay window, and its pass-count and localized-context-toggle semantics, so a tool
-that already drives kernel replay reuses most of its pass logic unchanged.
+its per-agent replay window, its pass-count semantics, and its way of selecting services per pass
+from their own dispatch callbacks, so a tool that already drives kernel replay reuses most of its
+pass logic unchanged.
 
 ## Record live, then replay
 
@@ -45,7 +46,7 @@ rocprofiler_range_replay_end()
     take the per-agent writer lock, drain the agent
     for pass = 1 .. N-1:
         restore the entry snapshot
-        PASS PHASE_ENTER          ->  tool may toggle its contexts for this pass
+        PASS PHASE_ENTER          ->  tool publishes the pass for its dispatch callbacks
         re-submit the recorded dispatches, serialized
         PASS PHASE_EXIT
         ask the tool whether to continue
@@ -54,8 +55,8 @@ rocprofiler_range_replay_end()
 
 Because pass 0 is the application's own run, it raises no `PASS` callback: there is nothing for the
 tool to configure, since the dispatches have already been submitted by the time the SDK sees them.
-A tool that wants pass 0 measured configures its services normally and uses the `PASS` toggles only
-to change what is collected on the *re-executed* passes.
+A tool that wants pass 0 measured configures its services normally, and its dispatch callbacks
+change what is collected only on the *re-executed* passes, for which a pass is published.
 
 ## Soundness is checked, not enforced
 
@@ -91,8 +92,7 @@ experimental/range_replay.h           public payload struct, status enum, begin/
         +-- hsa/queue.cpp             recording hook, foreign-dispatch detection
         +-- hsa/async_copy.cpp        device-write detection
         |
-        +-- kernel_replay/            reused unchanged: memory_tracker, memory_snapshot,
-                                      local_context
+        +-- kernel_replay/            reused unchanged: memory_tracker, memory_snapshot
 ```
 
 `range_state.cpp` and `digest.cpp` are deliberately free of GPU dependencies. The eligibility
@@ -156,7 +156,7 @@ interesting counters are.
 
 - **[Callback API and tool configuration](range_replay_callback_api.md)** — the
   `ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY` domain, its three operations, the payload struct,
-  pass-count semantics, the localized context toggles, and how a tool configures range replay.
+  pass-count semantics, selecting services per pass, and how a tool configures range replay.
 - **[Soundness and declining](range_replay_soundness.md)** — what makes a range replayable, the
   decline decision table and why each condition is checked, the cross-thread decline channel, the
   kernarg-recycling problem, the interceptor passthrough gate, and the optional divergence check.

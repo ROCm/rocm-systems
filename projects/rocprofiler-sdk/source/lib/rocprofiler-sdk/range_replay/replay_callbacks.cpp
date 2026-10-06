@@ -23,11 +23,9 @@
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 
 #include "lib/common/logging.hpp"
-#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -194,26 +192,14 @@ execute_pass_phase_enter(const range_plan_t&     plan,
     pass_data.current_pass = current_pass;
     pass_data.total_passes = plan.indefinite ? 0 : plan.total_passes;
 
-    // Localized context control, shared with kernel replay: the tool may enable/disable a context
-    // for this range's replay loop from its PASS PHASE_ENTER callback. Legal only while armed, so
-    // the arm window brackets the tool callback and is closed by a scope guard (a throwing tool
-    // callback must not leave the toggles armed).
-    pass_data.replay_local_start_context_cb = &kernel_replay::replay_local_enable_context;
-    pass_data.replay_local_stop_context_cb  = &kernel_replay::replay_local_disable_context;
-
-    {
-        kernel_replay::set_toggles_armed(true);
-        const auto _disarm =
-            common::scope_destructor{[]() { kernel_replay::set_toggles_armed(false); }};
-        tracing::execute_phase_enter_callbacks(out_pass_state.contexts,
-                                               thr_id,
-                                               internal_corr_id,
-                                               out_pass_state.external_correlation_ids,
-                                               ancestor_corr_id,
-                                               ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY,
-                                               ROCPROFILER_RANGE_REPLAY_PASS,
-                                               pass_data);
-    }
+    tracing::execute_phase_enter_callbacks(out_pass_state.contexts,
+                                           thr_id,
+                                           internal_corr_id,
+                                           out_pass_state.external_correlation_ids,
+                                           ancestor_corr_id,
+                                           ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY,
+                                           ROCPROFILER_RANGE_REPLAY_PASS,
+                                           pass_data);
 }
 
 void

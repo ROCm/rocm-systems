@@ -46,7 +46,7 @@
 // Each dispatch reads what its predecessor wrote, so a pass that skipped, reordered, or started
 // from an unrestored state produces a different number. Named to match kKernelName.
 __global__ void
-rr_local_context_step(int* acc, int add)
+rr_pass_selection_step(int* acc, int add)
 {
     if(threadIdx.x == 0) *acc = (*acc * 3) + add;
 }
@@ -83,7 +83,7 @@ main()
 
     for(uint64_t add = 1; add <= kRangeDispatches; ++add)
     {
-        rr_local_context_step<<<1, 64>>>(acc, static_cast<int>(add));
+        rr_pass_selection_step<<<1, 64>>>(acc, static_cast<int>(add));
         HIP_CHECK(hipGetLastError());
     }
 

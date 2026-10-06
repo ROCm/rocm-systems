@@ -35,7 +35,7 @@ constexpr uint64_t kRangeDispatches = 3;
 // Name of main.cpp's kernel. The tool finds its kernel ids by this name as code objects load,
 // because the thread trace dispatch callback reports only a kernel id, and range replay's CONFIG
 // callback, unlike kernel replay's, carries no dispatch to learn one from.
-constexpr const char* kKernelName = "rr_local_context_step";
+constexpr const char* kKernelName = "rr_pass_selection_step";
 
 // acc = acc*3 + add for add = 1, 2, 3 from a zeroed buffer: 0 -> 1 -> 5 -> 18.
 constexpr int kExpectedResult = 18;
