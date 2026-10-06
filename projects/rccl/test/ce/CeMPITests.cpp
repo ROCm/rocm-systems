@@ -247,17 +247,35 @@ protected:
         }
     }
 
-    bool isCeAllReduceExpected() const
+    // True when RCCL picks the symmetric kernel for these operands; symk beats registered CE when both are eligible.
+    bool isSymkAllReduceSelected(const void* sendbuff, void* recvbuff, size_t count, ncclRedOp_t op)
     {
-        // CE AllReduce is single-node only (ceAllReduceFits / nNodes>1 gate).
-        return isCeAllReduceDispatchConfigured() && !isMultiNodeTest();
+        int algo = 0, proto = 0, nChannels = 0;
+        EXPECT_EQ(ncclSuccess,
+                  rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, count, ncclFloat32, op,
+                                      sendbuff, recvbuff, /*graphCapturing=*/0, &algo, &proto, &nChannels));
+        return algo == static_cast<int>(RCCL_SYMMETRIC);
     }
 
-    void assertCEAllReducePathTaken(const char* context)
+    bool isCeAllReduceExpected(bool symkSelected) const
+    {
+        // CE AllReduce is single-node only (ceAllReduceFits / nNodes>1 gate).
+        return isCeAllReduceDispatchConfigured() && !isMultiNodeTest() && !symkSelected;
+    }
+
+    void assertCEAllReducePathTaken(bool symkSelected, const char* context)
     {
         const std::string log = readAllLogs();
 
-        if(isCeAllReduceExpected())
+        int rank = -1;
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        // Only rank 0 logs the selected AllReduce backend.
+        if(symkSelected && rank == 0)
+        {
+            EXPECT_NE(log.find("AllReduce impl selected: algo SYM"), std::string::npos)
+                << context << ": symk was predicted but the live AllReduce did not log \"algo SYM\"";
+        }
+        if(isCeAllReduceExpected(symkSelected))
         {
             EXPECT_TRUE(ceLogShowsAllReducePath(log))
                 << context
@@ -711,9 +729,9 @@ protected:
     // own INFO line. minChunksPerShard = 0 skips the check; >= 2 requires the
     // multi-chunk pipeline to have run rather than the single-shot path, which
     // logs the same CE marker and would otherwise pass unnoticed.
-    void assertCEAllReduceChunking(size_t minChunksPerShard, const char* context)
+    void assertCEAllReduceChunking(bool symkSelected, size_t minChunksPerShard, const char* context)
     {
-        if(!isCeAllReduceExpected() || minChunksPerShard == 0)
+        if(!isCeAllReduceExpected(symkSelected) || minChunksPerShard == 0)
             return;
 
         const size_t chunksPerShard = ceLogChunksPerShard(readAllLogs());
@@ -744,6 +762,7 @@ protected:
         ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, recvSym));
 
         fillRankScalar(sendSym.ptr, alignedCount, rank);
+        const bool symkSelected = isSymkAllReduceSelected(sendSym.ptr, recvSym.ptr, alignedCount, op);
 
         ASSERT_EQ(ncclSuccess,
                   ncclAllReduce(sendSym.ptr, recvSym.ptr, alignedCount, ncclFloat32, op,
@@ -758,8 +777,8 @@ protected:
                 << "Rank " << rank << ": CE AllReduce Sum verification failed";
         }
 
-        assertCEAllReducePathTaken(testId);
-        assertCEAllReduceChunking(minChunksPerShard, testId);
+        assertCEAllReducePathTaken(symkSelected, testId);
+        assertCEAllReduceChunking(symkSelected, minChunksPerShard, testId);
     }
 };
 
