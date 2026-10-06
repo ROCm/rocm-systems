@@ -18,7 +18,7 @@ all_unrolls   = ["1", "2", "4", "8", "16", "32"]
 # Unroll factors whose device functions are compiled for one arch only, and the single
 # source of truth for that restriction: get_arch_guard(), the specialized_files.txt guard
 # the device linker filters on, the local-arch unroll set, and the ncclDevFuncUnrollArch[]
-# table the host checks before selecting an unroll. --all_unrolls clears it.
+# table the host checks before selecting an unroll. --all_unrolls does not clear it.
 unroll_arch_requirement = {
   "32": "gfx1250",
 }
@@ -132,7 +132,8 @@ def paste(sep, *args):
 is_ifc             = 1 if sys.argv[2] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[4] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[5] == "ON" else 0
-# BUILD_ALL_UNROLLS / install.sh --all_unrolls: generate every unroll for the targeted archs.
+# BUILD_ALL_UNROLLS / install.sh --all_unrolls: also generate unroll 8 and 16.
+# Off by default, so a normal build does not compile those factors.
 build_all_unrolls  = 1 if sys.argv[6] == "ON" else 0
 
 func_pattern = sys.argv[7:8]
@@ -306,12 +307,15 @@ def calc_unroll_and_pipeline_for_local_arch():
 # except for gfx950. For gfx950, we also disable pipelining.
 local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
 
-# --all_unrolls widens the unroll set and compiles every one for the targeted archs, so the
-# pin no longer holds. The arch's pipeline decision stands. Must follow the call above, the
-# only reader of unrolls_requiring_arch.
+# --all_unrolls appends unroll 8 and 16 to the per-arch default. The default set and
+# any arch pin stay as calc_unroll_and_pipeline_for_local_arch decided them, and the
+# arch's pipeline decision stands. A build without the flag does not compile 8 or 16.
+# Must follow the call above, the only reader of unrolls_requiring_arch.
 if build_all_unrolls:
-  local_unroll = all_unrolls
-  unroll_arch_requirement.clear()
+  local_unroll = list(local_unroll)
+  for unroll in ("8", "16"):
+    if unroll not in local_unroll:
+      local_unroll.append(unroll)
 
 # rocSHMEM/GDA-based collectives: only generated when ENABLE_ROCSHMEM build is requested
 gda_colls = {"AlltoAllGda", "AlltoAllvGda"}

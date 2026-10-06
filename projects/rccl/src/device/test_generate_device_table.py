@@ -245,26 +245,54 @@ class DeviceTableGenerationTest(unittest.TestCase):
                 % (unroll, base_unroll),
             )
 
-    def test_all_unrolls_opt_in_generates_every_unroll(self):
-        # BUILD_ALL_UNROLLS fills in the skipped unrolls and drops the gfx1250 restriction.
+    def test_default_build_omits_unroll_8_and_16(self):
+        # Multi-arch default is 1/2/4 plus gfx1250-pinned 32. Unroll 8 and 16 stay
+        # out, so a default build does not compile them.
+        self.assertEqual({"1", "2", "4", "32"}, set(_unroll_tables(self.header)))
+        generated = self._unroll_table("ncclDevFuncUnrollGenerated", r"true|false")
+        self.assertEqual(
+            {
+                "1": "true",
+                "2": "true",
+                "4": "true",
+                "8": "false",
+                "16": "false",
+                "32": "true",
+            },
+            generated,
+        )
+        pinned = self._unroll_table("ncclDevFuncUnrollArch", r'nullptr|"gfx\w+"')
+        self.assertEqual('"gfx1250"', pinned["32"])
+        self.assertEqual("nullptr", pinned["8"])
+        self.assertEqual("nullptr", pinned["16"])
+
+    def test_all_unrolls_adds_8_and_16_without_unpinning(self):
+        # BUILD_ALL_UNROLLS appends 8 and 16 to the per-arch default. Unroll 32
+        # stays compiled for gfx1250 only, and the other defaults stay generated.
         with tempfile.TemporaryDirectory(prefix="rccl_devtable_all_") as tmpdir:
             header = _generate(tmpdir, all_unrolls="ON")
             host = _read_generated(tmpdir, "host_table.cpp")
         self.assertEqual({"1", "2", "4", "8", "16", "32"}, set(_unroll_tables(header)))
-        # Both host tables flip under the flag, and no other test reads them on this path.
         generated = self._unroll_table("ncclDevFuncUnrollGenerated", r"true|false", host)
         self.assertEqual(
             ["true"] * 6,
             list(generated.values()),
-            "BUILD_ALL_UNROLLS must mark every unroll generated",
+            "BUILD_ALL_UNROLLS must mark the default unrolls plus 8 and 16 generated",
         )
         pinned = self._unroll_table("ncclDevFuncUnrollArch", r'nullptr|"gfx\w+"', host)
         self.assertEqual(
-            ["nullptr"] * 6,
-            list(pinned.values()),
-            "BUILD_ALL_UNROLLS compiles every unroll for the target, so none stays pinned",
+            {
+                "1": "nullptr",
+                "2": "nullptr",
+                "4": "nullptr",
+                "8": "nullptr",
+                "16": "nullptr",
+                "32": '"gfx1250"',
+            },
+            pinned,
+            "BUILD_ALL_UNROLLS must leave the gfx1250 pin on unroll 32",
         )
-        self.assertNotIn(
+        self.assertIn(
             "#if (defined(__gfx1250__) || defined(__gfx1250_strict__))\n", header
         )
 

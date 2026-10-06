@@ -345,12 +345,14 @@ def test_all_unrolls_opt_in_adds_the_skipped_unrolls(tmp_path_factory, generated
     )
 
     counts = _count_by(records, "unroll")
-    assert set(counts) == {"1", "2", "4", "8", "16", "32"}, (
-        "--all_unrolls did not generate every unroll: %s" % sorted(counts)
+    baseline = _count_by(generated["OFF"]["records"], "unroll")
+    assert set(counts) - set(baseline) == {"8", "16"}, (
+        "--all_unrolls should add only unroll 8 and 16: %s vs %s" % (sorted(counts), sorted(baseline))
+    )
+    assert set(baseline) <= set(counts), (
+        "--all_unrolls dropped a default unroll: %s vs %s" % (sorted(counts), sorted(baseline))
     )
     assert len(set(counts.values())) == 1, "--all_unrolls broke unroll lockstep: %s" % counts
-
-    baseline = _count_by(generated["OFF"]["records"], "unroll")
     assert set(counts.values()) == set(baseline.values()), (
         "--all_unrolls changed the per-unroll kernel count: %s vs %s" % (counts, baseline)
     )

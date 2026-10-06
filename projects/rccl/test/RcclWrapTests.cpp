@@ -2900,9 +2900,9 @@ TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
 // test_runner/configs), and Rcclwrap.* is the only listed pattern this file
 // matches. A suite of their own would never be run.
 // ---------------------------------------------------------------------------
-// Which unroll factors are arch-pinned is a build property, not a constant:
-// BUILD_ALL_UNROLLS compiles every one for the targeted archs and pins none. Ask
-// the table for a pinned factor rather than hardcoding 32.
+// Which unroll factors are arch-pinned is a build property, not a constant.
+// BUILD_ALL_UNROLLS adds unroll 8 and 16 and leaves an existing pin in place.
+// Ask the table for a pinned factor rather than hardcoding 32.
 constexpr char kOtherArch[] = "gfx1200";
 
 TEST(Rcclwrap, UnrollFactor_RejectsArchRestrictedUnrollOnOtherArch)
