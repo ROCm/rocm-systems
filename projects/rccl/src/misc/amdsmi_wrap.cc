@@ -907,7 +907,10 @@ ncclResult_t amdSmiDiagLoadResult = ncclSystemError;
 static ncclResult_t amd_smi_diagLoadImpl() {
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE) == -1)
     __atomic_store_n(&is_wsl2, (access("/dev/dxg", F_OK) == -1) ? 0 : 1, __ATOMIC_RELEASE);
-  if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) return ncclSystemError;
+  if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
+    INFO(NCCL_RAS, "RAS diagnostics: not using %s, WSL2 environment detected", RCCL_AMDSMI_LIBNAME);
+    return ncclSystemError;
+  }
 
   void* libhandle = dlopen(RCCL_AMDSMI_LIBNAME, RTLD_NOW);
   if (libhandle == nullptr) {

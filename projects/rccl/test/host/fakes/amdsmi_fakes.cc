@@ -8,6 +8,14 @@
 
 #include "amdsmi_fakes.h"
 
+#include "amdsmi_wrap.h"
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiDiagGpuCount, amd_smi_diagGpuCount);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiDiagGpuModel, amd_smi_diagGpuModel);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiDiagEccCounts, amd_smi_diagEccCounts);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiDiagXgmiLinks, amd_smi_diagXgmiLinks);
+
 ncclResult_t DefaultAmdSmiGetDeviceIndexByPciBusId(const char*, uint32_t* deviceIndex) {
   if (deviceIndex) *deviceIndex = static_cast<uint32_t>(-1);  // -1 -> skip fabric block
   return ncclSuccess;
