@@ -705,13 +705,15 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     if (scratch_pool == 0)
       scratch_pool = 0x1'0000'0000ULL;
     // Round the per-wave region to the target's COMPUTE_TMPRING_SIZE.WAVESIZE
-    // granule for PM4, or 1 KB for AQL, so that each wave's base equals
+    // granule, so that each wave's base equals
     // scratch_pool + scoreboard_id * wavesize,
     // which is exactly what rocm-dbgapi computes to locate a wave's private
     // memory (rocdbgapi architecture.cpp scratch_memory_region).
     uint64_t raw_per_wave = static_cast<uint64_t>(pkt.private_segment_fixed_size) * wf->wf_size();
-    uint64_t granule = pkt.pm4_abi ? properties.compute_tmpring_wavesize_granule : 1024;
-    uint64_t per_wave_size = ((raw_per_wave + granule - 1) / granule) * granule;
+    const uint64_t granule = properties.compute_tmpring_wavesize_granule;
+    const uint64_t per_wave_size = pkt.scratch_wave_size_bytes != 0
+                                       ? pkt.scratch_wave_size_bytes
+                                       : ((raw_per_wave + granule - 1) / granule) * granule;
     uint32_t wg_total_size = static_cast<uint32_t>(pkt.workgroup_size_x) *
                              std::max<uint16_t>(1, pkt.workgroup_size_y) *
                              std::max<uint16_t>(1, pkt.workgroup_size_z);
@@ -764,7 +766,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     };
     VmAccessOutcome scratch_outcome = scratch_range_outcome(false);
 
-    if (!pkt.pm4_abi && scratch_allocator_) {
+    if (!pkt.pm4_abi && scratch_allocator_ && pkt.scratch_wave_stride_per_se == 0) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
       // physical XCC/SE/scoreboard address space instead of logical grid slots.
@@ -3723,6 +3725,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   uint64_t scratch_backing_addr = 0;
   uint32_t scratch_wave_limit_per_se = std::numeric_limits<uint32_t>::max();
   uint32_t scratch_wave_stride_per_se = 0;
+  uint32_t scratch_wave_size_bytes = 0;
   bool scratch_use_once = false;
   bool scratch_uses_alternate = false;
   const uint32_t private_segment_fixed_size =
@@ -3768,7 +3771,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       const auto properties = isa_properties(arch);
       const uint32_t wavesize_mask = util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits);
       const uint64_t raw_per_wave = static_cast<uint64_t>(private_segment_fixed_size) * wave_size;
-      const uint64_t per_wave_stride = ((raw_per_wave + 1023) / 1024) * 1024;
+      const uint64_t granule = properties.compute_tmpring_wavesize_granule;
+      const uint64_t per_wave_stride = ((raw_per_wave + granule - 1) / granule) * granule;
       const uint64_t required_wavesize =
           per_wave_stride / properties.compute_tmpring_wavesize_granule;
       const auto scratch_wave_limit = [&](uint32_t tmpring_size) -> std::optional<uint32_t> {
@@ -3783,7 +3787,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       };
       bool main_scratch_usable = scratch_backing_addr != 0;
       bool requires_dynamic_scratch = !main_scratch_usable;
-      if (!requires_dynamic_scratch && !scratch_allocator_) {
+      if (!requires_dynamic_scratch) {
         uint32_t compute_tmpring_size = 0;
         outcome = read_gpu_block(transaction_access,
                                  queue_ptr + offsetof(amd_queue_t, compute_tmpring_size),
@@ -3796,11 +3800,13 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         if (main_scratch_usable) {
           scratch_wave_limit_per_se = *wave_limit;
           scratch_wave_stride_per_se = *wave_limit;
+          scratch_wave_size_bytes = ((compute_tmpring_size >> 12) & wavesize_mask) *
+                                    properties.compute_tmpring_wavesize_granule;
         }
         requires_dynamic_scratch = !main_scratch_usable;
       }
 
-      if (async_scratch && main_scratch_usable && !scratch_allocator_) {
+      if (async_scratch && main_scratch_usable) {
         const AtomicLoadResult max_use = read_gpu_u64(
             transaction_access, queue_ptr + offsetof(amd_queue_v2_t, scratch_max_use_index));
         if (max_use.outcome != VmAccessOutcome::Complete)
@@ -3809,7 +3815,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         requires_dynamic_scratch = !main_scratch_usable;
       }
 
-      if (async_scratch && requires_dynamic_scratch && !scratch_allocator_) {
+      if (async_scratch && requires_dynamic_scratch) {
         const AtomicLoadResult alt_backing =
             read_gpu_u64(transaction_access,
                          queue_ptr + offsetof(amd_queue_v2_t, alt_scratch_backing_memory_location));
@@ -3854,6 +3860,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
           scratch_uses_alternate = true;
           scratch_wave_limit_per_se = *alt_wave_limit;
           scratch_wave_stride_per_se = *alt_wave_limit;
+          scratch_wave_size_bytes = ((alt_compute_tmpring_size >> 12) & wavesize_mask) *
+                                    properties.compute_tmpring_wavesize_granule;
           requires_dynamic_scratch = false;
           if (AMDHSA_BITS_GET(kd.kernel_code_properties,
                               KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
@@ -3868,7 +3876,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         }
       }
 
-      if (async_scratch && !requires_dynamic_scratch && !scratch_allocator_) {
+      if (async_scratch && !requires_dynamic_scratch) {
         outcome = record_async_scratch_use(queue, transaction_access, aql_packet_id,
                                            scratch_uses_alternate);
         if (outcome != VmAccessOutcome::Complete)
@@ -3881,6 +3889,11 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         const uint64_t status =
             wave_size == 32 ? kInsufficientScratchWave32 : kInsufficientScratchWave64;
         return request_dynamic_scratch(queue, transaction_access, aql_packet_id, status);
+      }
+      if (requires_dynamic_scratch) {
+        scratch_wave_limit_per_se = std::numeric_limits<uint32_t>::max();
+        scratch_wave_stride_per_se = 0;
+        scratch_wave_size_bytes = 0;
       }
       queue.scratch_request.reset();
 
@@ -3947,6 +3960,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.private_segment_fixed_size = private_segment_fixed_size;
   dp.scratch_wave_limit_per_se = scratch_wave_limit_per_se;
   dp.scratch_wave_stride_per_se = scratch_wave_stride_per_se;
+  dp.scratch_wave_size_bytes = scratch_wave_size_bytes;
   dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);
   dp.scratch_use_once = scratch_use_once;
   dp.wgp_mode = isa_properties(arch).supports_wgp_mode &&
@@ -4022,16 +4036,16 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       // scratch-memory region. The WAVES field is common, while ISA properties
       // describe the generation-specific WAVESIZE unit and field width.
       if (scratch_allocator_ && dp.scratch_backing_addr != 0 && !cus_.empty() &&
-          !scratch_uses_alternate) {
-        uint64_t per_wave_bytes =
-            static_cast<uint64_t>(dp.private_segment_fixed_size) * cus_[0]->wf_size();
-        // setup_wavefront() allocates scratch slots at a 1 KiB boundary. Encode
-        // that actual stride, rather than merely rounding to the register's
-        // unit, so flat_scratch agrees with rocm-dbgapi for every scoreboard
-        // slot after slot zero.
-        const uint64_t per_wave_stride = ((per_wave_bytes + 1023) / 1024) * 1024;
+          dp.scratch_wave_stride_per_se == 0 && !scratch_uses_alternate) {
+        const uint64_t per_wave_bytes =
+            static_cast<uint64_t>(dp.private_segment_fixed_size) * wave_size;
+        // Encode the actual stride used by setup_wavefront(), using the target's
+        // allocation granule and this dispatch's wave width. This keeps flat_scratch
+        // consistent with rocm-dbgapi for every scoreboard slot after slot zero.
         const auto properties = isa_properties(arch);
         const uint32_t wavesize_unit = properties.compute_tmpring_wavesize_granule;
+        const uint64_t per_wave_stride =
+            ((per_wave_bytes + wavesize_unit - 1) / wavesize_unit) * wavesize_unit;
         assert(wavesize_unit != 0 && properties.compute_tmpring_wavesize_bits != 0);
         const uint32_t wavesize_field = static_cast<uint32_t>(per_wave_stride / wavesize_unit);
         uint32_t waves_field = 0;
