@@ -640,7 +640,11 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         return f'std::ldexp({val}, {exp})'
 
     if kind in _STD_MATH:
-        arg = _lower_expr(node.children[0], ctx)
+        arg = None
+        if kind == SemaNodeKind.FLOOR:
+            arg = _input_flushed_source(node.children[0], ctx)
+        if arg is None:
+            arg = _lower_expr(node.children[0], ctx)
         return f'{_STD_MATH[kind]}({arg})'
 
     if kind == SemaNodeKind.FRACT:
@@ -1867,6 +1871,9 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         return _lower_float_compare(node, ctx)
     if callee.startswith(FLOAT_MINMAX_CALL):
         return _lower_float_minmax(node, ctx)
+    if callee == 'ceil' and len(node.children) == 2:
+        if (source := _input_flushed_source(node.children[1], ctx)) is not None:
+            return f'util::ceil_scalar({source})'
 
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
@@ -2094,6 +2101,58 @@ def _raw_float_sources(
     if has_abs or has_neg:
         modifiers = ('inst_.abs' if has_abs else '0u', 'inst_.neg' if has_neg else '0u')
     return dtype, reads, modifiers
+
+
+# Per-instruction input-flush policy of a rounding operation's source.
+INPUT_POLICY = 'input_policy'
+
+
+def _input_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
+    """Return a floating source value after ABS/NEG and MODE input flushing.
+
+    The register bits are flushed in their own format, before an F16 source is
+    widened. Flushing keeps the sign, so it commutes with ABS/NEG. Return None
+    when ``node`` is not a direct floating register read. SALU forms keep their
+    existing behavior; they have no hardware captures.
+    """
+    if ctx.exec_model != ExecModel.VECTOR:
+        return None
+    modifiers = None
+    if node.kind == SemaNodeKind.CALL and node.call_name == 'apply_src_mod':
+        if len(node.children) < 5:
+            return None
+        has_neg = node.children[3].lit_value == '1'
+        has_abs = node.children[4].lit_value == '1'
+        if has_abs or has_neg:
+            modifiers = (
+                node.children[2].lit_value or '0',
+                'inst_.abs' if has_abs else '0u',
+                'inst_.neg' if has_neg else '0u',
+            )
+        node = node.children[1]
+    if not (node.ty and node.ty.base == 'F' and node.ty.size in (16, 32, 64)):
+        return None
+    dtype = f'f{node.ty.size}'
+    while node.kind == SemaNodeKind.CAST:
+        node = node.children[0]
+    if node.kind != SemaNodeKind.INSTOPERAND:
+        return None
+    declaration = f'  const auto {INPUT_POLICY} = {float_compare.policy_expr(dtype)};'
+    if declaration not in ctx.vector_preamble:
+        ctx.vector_preamble.append(declaration)
+    fmt = f'amdgpu::fp_format::{float_compare.FORMATS[dtype]}'
+    bits = f'amdgpu::input_denormal::flush_input<{fmt}>({_lower_expr(node, ctx)}, {INPUT_POLICY})'
+    if dtype == 'f16':
+        value = f'util::f16_to_f32(static_cast<uint16_t>({bits}))'
+    else:
+        value = f'std::bit_cast<{"double" if dtype == "f64" else "float"}>({bits})'
+    if modifiers is not None:
+        index, abs_field, neg_field = modifiers
+        value = (
+            f'amdgpu::source_modifier::apply_to_float({value}, {index}, '
+            f'{abs_field}, {neg_field})'
+        )
+    return value
 
 
 def _lower_float_compare(node: SemaNode, ctx: LoweringContext) -> str:

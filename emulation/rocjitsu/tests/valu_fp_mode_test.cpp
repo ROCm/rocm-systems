@@ -2406,11 +2406,9 @@ std::vector<ArithmeticCase> integral_rounding_modifier_cases() {
     add("ScaleNegativeZero", sign, 0u, {.omod = 1});
     add("QuietNanBeforeScale", infinity | 0x42u, infinity | quiet | 0x42u, {.omod = 2});
     add("ClampNan", infinity | quiet | 0x42u, 0u, {.clamp = 1, .omod = 1});
-    // A tiny input gives +0 for FLOOR, TRUNC and RNDNE whether or not MODE
-    // flushes it. CEIL is omitted: gfx1201 flushes the input first and gives +0,
-    // but CEIL input flushing is not implemented here yet.
-    if (!std::string_view(form.name).starts_with("Ceil"))
-      add("TinyInput", 1u, 0u, {.omod = 1}, 0u);
+    // MODE flushes the tiny input first, so every form gives +0: on gfx1201
+    // ceil(+0) * 2 is +0, not 2.
+    add("TinyInput", 1u, 0u, {.omod = 1}, 0u);
 
     for (uint32_t rounding = 0; rounding < 4; ++rounding) {
       // Give the other format a different rounding mode to catch field mixups.
@@ -2514,6 +2512,76 @@ std::vector<ArithmeticCase> rounded_result_modifier_cases() {
   f64("DivFmasF64ClampNan", rdna4::kVDivFmasF64Vop3,
       {.clamp = 1, .src0 = V0, .src1 = V2, .src2 = V4},
       {0x7ff0000000000000u, 0x8000000000000000u, 0u}, 0u, 0xf0u);
+  return cases;
+}
+
+// CEIL and FLOOR flush a subnormal source to a signed zero when MODE disables
+// input denormals, so ceil(+tiny) = +0 and floor(-tiny) = -0. Results are
+// gfx1201 captures. MODE 0x30 keeps F32 input denormals and flushes F16/F64;
+// 0xc0 does the reverse, so each case catches a read of the wrong field.
+std::vector<ArithmeticCase> integral_rounding_input_flush_cases() {
+  struct Form {
+    const char *name;
+    uint16_t vop1;
+    uint16_t vop3;
+    unsigned width;
+    bool ceil;
+  };
+  constexpr std::array<Form, 6> forms = {{
+      {"CeilF16", rdna4::kVCeilF16Vop1, rdna4::kVCeilF16Vop3, 16, true},
+      {"FloorF16", rdna4::kVFloorF16Vop1, rdna4::kVFloorF16Vop3, 16, false},
+      {"CeilF32", rdna4::kVCeilF32Vop1, rdna4::kVCeilF32Vop3, 32, true},
+      {"FloorF32", rdna4::kVFloorF32Vop1, rdna4::kVFloorF32Vop3, 32, false},
+      {"CeilF64", rdna4::kVCeilF64Vop1, rdna4::kVCeilF64Vop3, 64, true},
+      {"FloorF64", rdna4::kVFloorF64Vop1, rdna4::kVFloorF64Vop3, 64, false},
+  }};
+  constexpr uint32_t kHigh = 0xa5a50000u;
+  std::vector<ArithmeticCase> cases;
+  for (const Form &form : forms) {
+    const uint64_t sign = uint64_t{1} << (form.width - 1);
+    const uint64_t largest_subnormal = (uint64_t{1} << (form.width == 16   ? 10
+                                                        : form.width == 32 ? 23
+                                                                           : 52)) -
+                                       1;
+    const uint64_t one = form.width == 16   ? 0x3c00u
+                         : form.width == 32 ? 0x3f800000u
+                                            : 0x3ff0000000000000u;
+    const bool f32_field = form.width == 32;
+    const auto add = [&](const std::string &name, std::array<uint32_t, 2> words, uint64_t input,
+                         uint32_t mode, bool flushed, uint64_t unflushed) {
+      // ceil(+tiny) and floor(-tiny) round to +-1 unless the input is flushed.
+      const uint64_t result = flushed ? (form.ceil ? 0u : sign) : unflushed;
+      std::vector<std::pair<uint32_t, uint32_t>> sources{{0, uint32_t(input)}};
+      std::vector<std::pair<uint32_t, uint32_t>> expected{{6, uint32_t(result)}};
+      if (form.width == 16) {
+        sources = {{0, kHigh | uint32_t(input)}, {6, kHigh}};
+        expected = {{6, kHigh | uint32_t(result)}};
+      } else if (form.width == 64) {
+        sources.emplace_back(1, uint32_t(input >> 32));
+        expected.emplace_back(7, uint32_t(result >> 32));
+      }
+      cases.push_back({std::string(form.name) + name,
+                       ROCJITSU_CODE_ARCH_RDNA4,
+                       {words[0], words[1], 0u},
+                       std::move(sources),
+                       std::move(expected),
+                       mode,
+                       FE_TONEAREST});
+    };
+    const uint64_t tiny = form.ceil ? 1u : sign | largest_subnormal;
+    const uint64_t rounded = form.ceil ? one : sign | one;
+    const auto vop1 = rdna4::build_vop1(form.vop1, {.src0 = 256, .vdst = 6});
+    const auto vop3 = rdna4::build_vop3(form.vop3, {.vdst = 6, .src0 = 256});
+    // NEG turns the opposite-signed tiny input into the one that rounds away.
+    const auto vop3_neg = rdna4::build_vop3(form.vop3, {.vdst = 6, .src0 = 256, .neg = 1});
+    for (const uint32_t mode : {0x30u, 0xc0u}) {
+      const bool flushed = (mode == 0xc0u) == f32_field;
+      const std::string suffix = mode == 0x30u ? "Mode30" : "ModeC0";
+      add("Vop1" + suffix, {vop1[0], 0u}, tiny, mode, flushed, rounded);
+      add("Vop3" + suffix, vop3, tiny, mode, flushed, rounded);
+      add("Vop3Neg" + suffix, vop3_neg, tiny ^ sign, mode, flushed, rounded);
+    }
+  }
   return cases;
 }
 
@@ -2624,6 +2692,12 @@ TEST_P(ValuIntegralRoundingModeTest, ModifiersOnScalarAndSimdPaths) {
 
 INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuIntegralRoundingModeTest,
                          testing::ValuesIn(integral_rounding_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(InputFlush, ValuIntegralRoundingModeTest,
+                         testing::ValuesIn(integral_rounding_input_flush_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

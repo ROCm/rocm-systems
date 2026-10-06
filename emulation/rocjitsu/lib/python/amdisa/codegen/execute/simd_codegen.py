@@ -356,6 +356,21 @@ _VOP3_UNARY_SKIP = {
     'v_cvt_f32_bf8',
 }
 
+
+def _flush_input_then(fmt: str, functor: str) -> str:
+    """Flush MODE input denormals in the raw source before ``functor``.
+
+    CEIL and FLOOR see the flushed zero, as gfx1201 does: ceil(+tiny) is +0.
+    """
+    mode = 'f32' if fmt == 'F32' else 'f16_f64'
+    policy = f'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_{mode}())'
+    return f'amdgpu::flush_input_then<amdgpu::fp_format::{fmt}>({policy}, {functor})'
+
+
+# Integral rounding operations whose source honors MODE input flushing.
+_INPUT_FLUSHED_ROUNDING = frozenset({'ceil', 'floor'})
+
+
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # --- bitwise / move (uint32, bit-identical) ---
     'v_mov_b32_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return a; }'),
@@ -575,12 +590,12 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_floor_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::floor_simd(a); }',
+        _flush_input_then('F32', '[](auto a) { return util::floor_simd(a); }'),
     ),
     'v_ceil_f32_vop1': (
         'float32_t',
         'float32_t',
-        '[](auto a) { return util::ceil_simd(a); }',
+        _flush_input_then('F32', '[](auto a) { return util::ceil_simd(a); }'),
     ),
     'v_trunc_f32_vop1': (
         'float32_t',
@@ -675,12 +690,20 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_floor_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) { return util::f32_to_f16_simd(util::floor_simd(util::f16_to_f32_simd(a))); }',
+        _flush_input_then(
+            'F16',
+            '[](auto a) {'
+            ' return util::f32_to_f16_simd(util::floor_simd(util::f16_to_f32_simd(a))); }',
+        ),
     ),
     'v_ceil_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) { return util::f32_to_f16_simd(util::ceil_simd(util::f16_to_f32_simd(a))); }',
+        _flush_input_then(
+            'F16',
+            '[](auto a) {'
+            ' return util::f32_to_f16_simd(util::ceil_simd(util::f16_to_f32_simd(a))); }',
+        ),
     ),
     'v_trunc_f16_vop1': (
         'uint32_t',
@@ -987,8 +1010,14 @@ SIMD_VOP2_BINARY_FP64: dict[str, str] = {
 # the glue note + UtilSimd.*F64*_BitExact guards). v_mov_b64 is a pure 64-bit
 # copy (T = uint64_t).
 SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
-    'v_ceil_f64_vop1': ('double', '[](auto a) { return util::ceil_simd(a); }'),
-    'v_floor_f64_vop1': ('double', '[](auto a) { return util::floor_simd(a); }'),
+    'v_ceil_f64_vop1': (
+        'double',
+        _flush_input_then('F64', '[](auto a) { return util::ceil_simd(a); }'),
+    ),
+    'v_floor_f64_vop1': (
+        'double',
+        _flush_input_then('F64', '[](auto a) { return util::floor_simd(a); }'),
+    ),
     'v_trunc_f64_vop1': ('double', '[](auto a) { return util::trunc_simd(a); }'),
     'v_rndne_f64_vop1': ('double', '[](auto a) { return util::rndne_simd(a); }'),
     'v_fract_f64_vop1': ('double', '[](auto a) { return a - util::floor_simd(a); }'),
@@ -1940,8 +1969,12 @@ _ROUNDED_VOP3_BINARY_FP64 = frozenset({'v_add_f64_vop3', 'v_mul_f64_vop3'})
 # preservation), so they are bit-identical to the scalar libm calls for every
 # finite / Inf / NaN / signed-zero input.
 SIMD_VOP3_UNARY_FP64: dict[str, str] = {
-    'v_ceil_f64_vop3': '[](auto a) { return util::ceil_simd(a); }',
-    'v_floor_f64_vop3': '[](auto a) { return util::floor_simd(a); }',
+    'v_ceil_f64_vop3': _flush_input_then(
+        'F64', '[](auto a) { return util::ceil_simd(a); }'
+    ),
+    'v_floor_f64_vop3': _flush_input_then(
+        'F64', '[](auto a) { return util::floor_simd(a); }'
+    ),
     'v_trunc_f64_vop3': '[](auto a) { return util::trunc_simd(a); }',
     'v_rndne_f64_vop3': '[](auto a) { return util::rndne_simd(a); }',
     # sqrt_f64 is correctly-rounded IEEE (scalar uses transcendental::sqrt_f64
@@ -3001,6 +3034,10 @@ def _simd_probe_line(
             if template_name.rsplit('_', 1)[0].upper() in ROUNDED_F16_OPS
             else ''
         )
+        if template_name.split('_')[1] in _INPUT_FLUSHED_ROUNDING:
+            # The glue flushes the raw half before widening it for the functor.
+            policy = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
+            rounded = f', false, {policy}'
         return f'  {macro}({spec3unaf16}{rounded});'
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
     # the VOP3 form reads src0/src1 and carries abs/neg/omod/clamp modifiers.
