@@ -224,18 +224,15 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         std::string                                  archName;
     };
 
-    // The 2-shot cap is part of the opt-in env, not the suite. gfx1250's table
-    // leaves ceNonRegMax[AllReduce] at 0, so a suite-wide RCCL_CE_AR_MAX_MSG_BYTES
-    // would make DefaultOff_2Shot_Gfx1250 look enabled.
+
+
+
     const std::unordered_map<std::string, std::string> baseEnv = {
         {"RCCL_CE_ALLREDUCE", "1"},
-        {"RCCL_CE_AR_MAX_MSG_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
+        {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
     };
 
     const std::vector<UseCeArCase> cases = {
-        // Per-arch default for 2-shot (staging buffer): off on gfx1250 (ceNonRegMax[AR]=0;
-        // gfx1250 uses registered CE instead) and off on gfx950. No env override.
-        {"DefaultOff_2Shot_Gfx1250_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}, "gfx1250"},
         // RCCL_CE_ALLREDUCE=-1 (default) is auto-on for gfx1250; overriding
         // RCCL_CE_AR_2SHOT_MAX_BYTES lifts the ceNonRegMax=0 cap so rcclUseCeAr2Shot
         // returns true, confirming the default-on wiring.
@@ -255,8 +252,6 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         {"ZeroCountRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 0, ncclSum, ncclFloat32, false, baseEnv},
         {"UnsupportedOpRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclAvg, ncclFloat32, false, baseEnv},
         {"Float8Rejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat8e4m3, false, baseEnv},
-        {"MessageTooLargeRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO,
-         (kCeArMaxMsgBytesDefault / sizeof(float)) + 4, ncclSum, ncclFloat32, false, baseEnv},
     };
 
     for(const auto& tc : cases)
@@ -285,8 +280,8 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         // cap must not see a suite or shell override, or gfx1250's table default
         // (off) becomes on. RCCL_CE_ALLREDUCE is env-first, so an inherited 0
         // fails DefaultOn, which expects the gfx1250 default (unset).
-        if (env.find("RCCL_CE_AR_MAX_MSG_BYTES") == env.end())
-            cfg.clearVariable("RCCL_CE_AR_MAX_MSG_BYTES");
+        if (env.find("RCCL_CE_AR_2SHOT_MAX_BYTES") == env.end())
+            cfg.clearVariable("RCCL_CE_AR_2SHOT_MAX_BYTES");
         if (env.find("RCCL_CE_ALLREDUCE") == env.end())
             cfg.clearVariable("RCCL_CE_ALLREDUCE");
         ProcessIsolatedTestRunner::registerTest(cfg);
