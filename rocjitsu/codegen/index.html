@@ -1,0 +1,2124 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User and developer documentation for the ROCm Just-in-Time Suite.">
+      
+      
+      
+        <link rel="canonical" href="https://rocm.github.io/rocm-systems/rocjitsu/codegen/">
+      
+      
+        <link rel="prev" href="../plugins/">
+      
+      
+        <link rel="next" href="../isa-target-providers/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>ISA code generation - Rocjitsu</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../assets/handbook.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#isa-code-generation" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Rocjitsu" class="md-header__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Rocjitsu
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              ISA code generation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Rocjitsu" class="md-nav__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Rocjitsu
+  </label>
+  
+    <div class="md-nav__source">
+      
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 21.5c-1.35-.85-3.8-1.5-5.5-1.5-1.65 0-3.35.3-4.75 1.05-.1.05-.15.05-.25.05-.25 0-.5-.25-.5-.5V6c.6-.45 1.25-.75 2-1 1.11-.35 2.33-.5 3.5-.5 1.95 0 4.05.4 5.5 1.5 1.45-1.1 3.55-1.5 5.5-1.5 1.17 0 2.39.15 3.5.5.75.25 1.4.55 2 1v14.6c0 .25-.25.5-.5.5-.1 0-.15 0-.25-.05-1.4-.75-3.1-1.05-4.75-1.05-1.7 0-4.15.65-5.5 1.5M12 8v11.5c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5V7c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5m1 3.5c1.11-.68 2.6-1 4.5-1 .91 0 1.76.09 2.5.28V9.23c-.87-.15-1.71-.23-2.5-.23q-2.655 0-4.5.84zm4.5.17c-1.71 0-3.21.26-4.5.79v1.69c1.11-.65 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24v-1.5c-.87-.16-1.71-.23-2.5-.23m2.5 2.9c-.87-.16-1.71-.24-2.5-.24-1.83 0-3.33.27-4.5.8v1.69c1.11-.66 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command-line interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../race-detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Race detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocgdb-debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qemu-vfio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QEMU VFIO-user compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vulkan-compute/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vulkan compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-2-2 2 2 0 0 0 2-2V5h2V3m6 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5h-2V3z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../style/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code style
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simdojo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vm-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU hardware model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbt-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary translation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rj_dbt_translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translation tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu_dbt_guest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DBT guest mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary instrumentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instrumentation overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA code generation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA code generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#amdisa-modules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        amdisa modules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mr-isa-location" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MR ISA location
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isa-additions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ISA additions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generated-isa-variant-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generated ISA variant features
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generated-file-locations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generated file locations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cli-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerating-everything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerating everything
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerating-isa-files-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerating ISA files only
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerating-dbt-files-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerating DBT files only
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-target-providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA target providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-gap-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA gap audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../npi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-instructions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous MMA execution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mma-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MMA lookahead admission
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concurrent-dispatch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrent dispatch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-counter-coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait coverage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 18H4V8h16m0-2h-8l-2-2H4c-1.11 0-2 .89-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+    
+  
+  
+    <li class="md-nav__item">
+      <a href="../blog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#amdisa-modules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        amdisa modules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mr-isa-location" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MR ISA location
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isa-additions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ISA additions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generated-isa-variant-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generated ISA variant features
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generated-file-locations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generated file locations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cli-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerating-everything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerating everything
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerating-isa-files-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerating ISA files only
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerating-dbt-files-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerating DBT files only
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="isa-code-generation">ISA Code Generation<a class="headerlink" href="#isa-code-generation" title="Permanent link">&para;</a></h1>
+<p>Instruction decoders, execution bodies, legalization tables, and encoding
+translators are generated from the
+<a href="https://gpuopen.com/machine-readable-isa/">Machine-Readable ISA (MR ISA)</a>
+XML specification via the <code>amdisa</code> Python library in <code>lib/python/amdisa/</code>.</p>
+<h2 id="amdisa-modules">amdisa modules<a class="headerlink" href="#amdisa-modules" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>parser.py</code></td>
+<td>Parse MR ISA XML specs into <code>IsaSpec</code> objects</td>
+</tr>
+<tr>
+<td><code>gpuisa.py</code></td>
+<td>Core data structures (<code>IsaSpec</code>, <code>Instruction</code>, <code>InstEncoding</code>, <code>Operand</code>)</td>
+</tr>
+<tr>
+<td><code>isa_profile.py</code></td>
+<td>Per-ISA profile constants and encoding rules</td>
+</tr>
+<tr>
+<td><code>semantics.py</code></td>
+<td>Derive instruction semantics from mnemonics</td>
+</tr>
+<tr>
+<td><code>cross_isa.py</code></td>
+<td>Cross-ISA instruction overlap analysis</td>
+</tr>
+<tr>
+<td><code>codegen/</code></td>
+<td>Generate C++ decoders, encoders, and instruction execute bodies</td>
+</tr>
+<tr>
+<td><code>legalization.py</code></td>
+<td>Generate cross-ISA legalization tables (Action classification)</td>
+</tr>
+<tr>
+<td><code>legalization_codegen.py</code></td>
+<td>Emit C++20 <code>InstructionLegalization[]</code> legalization table headers</td>
+</tr>
+<tr>
+<td><code>encoding_translator_codegen.py</code></td>
+<td>Emit C++20 neutral field structs + decode/encode functions</td>
+</tr>
+</tbody>
+</table>
+<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
+<p>Create or activate a virtual environment, then install in editable mode from
+the rocjitsu project root together with pre-commit:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>lib/python/<span class="w"> </span>pre-commit
+</code></pre></div>
+<p>The helper deliberately takes both Python and pre-commit from the same active
+virtual environment. It prepends this checkout's <code>lib/python/</code> to <code>PYTHONPATH</code>,
+so the generator implementation comes from the same checkout as the helper
+while its installed dependencies come from the environment.</p>
+<h2 id="mr-isa-location">MR ISA location<a class="headerlink" href="#mr-isa-location" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>rocm-systems/shared/machine-readable-isa/isa/
+</code></pre></div>
+<h2 id="isa-additions">ISA additions<a class="headerlink" href="#isa-additions" title="Permanent link">&para;</a></h2>
+<p>Repository-owned ISA additions can be supplied without modifying the public MR
+ISA XML. Each ISA additions document has this shape:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">&lt;IsaAdditions</span><span class="w"> </span><span class="na">Id=</span><span class="s">"example-additions"</span>
+<span class="w">              </span><span class="na">BaseArchitecture=</span><span class="s">"AMD CDNA 5"</span>
+<span class="w">              </span><span class="na">BaseSchemaVersion=</span><span class="s">"1.2.0"</span><span class="nt">&gt;</span>
+<span class="w">  </span><span class="nt">&lt;EncodingIdentifierAdditions&gt;</span>
+<span class="w">    </span><span class="nt">&lt;EncodingIdentifierAddition&gt;</span>
+<span class="w">      </span><span class="nt">&lt;EncodingName&gt;</span>ENC_EXAMPLE<span class="nt">&lt;/EncodingName&gt;</span>
+<span class="w">      </span><span class="nt">&lt;Opcode&gt;</span>7<span class="nt">&lt;/Opcode&gt;</span>
+<span class="w">      </span><span class="nt">&lt;EncodingIdentifier</span><span class="w"> </span><span class="na">Radix=</span><span class="s">"2"</span><span class="nt">&gt;</span>...complete<span class="w"> </span>identifier...<span class="nt">&lt;/EncodingIdentifier&gt;</span>
+<span class="w">    </span><span class="nt">&lt;/EncodingIdentifierAddition&gt;</span>
+<span class="w">  </span><span class="nt">&lt;/EncodingIdentifierAdditions&gt;</span>
+<span class="w">  </span><span class="nt">&lt;InstructionAdditions&gt;</span>
+<span class="w">    </span><span class="nt">&lt;Instruction&gt;</span>
+<span class="w">      </span><span class="cm">&lt;!-- One complete MR ISA &lt;Instruction&gt; node. --&gt;</span>
+<span class="w">    </span><span class="nt">&lt;/Instruction&gt;</span>
+<span class="w">  </span><span class="nt">&lt;/InstructionAdditions&gt;</span>
+<span class="nt">&lt;/IsaAdditions&gt;</span>
+</code></pre></div>
+<p>Apply one or more additions documents with a logical ISA name. Repeated
+documents for one ISA are processed in command-line and document order:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>amdisa<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>cdna5:/path/to/amdgpu_isa_cdna5.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna5:/path/to/first-additions.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna5:/path/to/second-additions.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-output<span class="w"> </span>/path/to/isa-output<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dbt-output<span class="w"> </span>/path/to/dbt-output
+</code></pre></div>
+<p>The <code>EncodingIdentifierAdditions</code> element is optional. <code>InstructionAdditions</code>
+is required and may be empty. The additions contract is intentionally narrower
+than a general XML patch:</p>
+<ul>
+<li>Only complete <code>&lt;Instruction&gt;</code> nodes and complete identifiers for an existing
+  encoding's <code>&lt;EncodingIdentifiers&gt;</code> list are accepted. An additions document
+  cannot replace or delete base definitions, identifier masks, microcode
+  formats, encoding conditions, operand types, or data formats.</li>
+<li>Added instructions must reference encodings, encoding conditions, operand
+  types, and operand fields already defined by the applicable base encoding
+  layout. Implied-literal operands outside that layout are accepted only when
+  their normalized field, type, direction, and parser-role flags match an
+  implied-literal contract established by the base XML.</li>
+<li>An identifier addition names its encoding and expected opcode. Its radix and
+  width must match the base encoding; its fixed bits must match an existing
+  identifier layout; and its decoded opcode must equal the declared opcode.
+  Duplicate and colliding decode slots are rejected. Each identifier must be
+  owned by an added instruction. An implied-literal identifier must have the
+  same instruction owner and opcode in its parent encoding.</li>
+<li>Additions document IDs and instruction names must be valid and unique.
+  Encoding/opcode ownership collisions between different instructions,
+  repeated instruction forms, multiple active forms that generate the same C++
+  instruction symbol, out-of-range opcodes, missing references, unknown root
+  data, and base architecture/schema mismatches are errors. Repetition of one
+  instruction's slot under distinct base-established MR-ISA encoding conditions
+  is allowed only when profile filtering leaves at most one generated form
+  active. Every added instruction must retain at least one active form.</li>
+<li>Every input document and contained addition validates before the parser-owned
+  tree is changed. Validated identifiers are merged before normal
+  encoding/decode-table parsing, then instructions are appended in deterministic
+  file/document order. A bad later file cannot leave a partially merged
+  specification, and an active added instruction whose final opcode pointer
+  would remain unpopulated is an error.</li>
+<li>An empty additions document leaves generated output byte-identical to the base
+  XML.</li>
+</ul>
+<p>The parsed <code>IsaSpec.applied_additions</code> and each added
+<code>Instruction.source_addition</code> retain the source document's provenance for later
+generator stages.
+Provenance does not by itself define target availability: a separate variant
+model must also be able to restrict encoding forms already present in the base
+XML.</p>
+<p>Production additions must be independently auditable from public inputs. Keep a
+colocated provenance manifest or equivalent record that names a pinned public
+source revision, the exact definition and test-vector locations, the public
+base-XML template used for every field, and the derivation of each identifier.
+When a repository verifier accompanies the delta, the production generation
+script must run it before parsing the XML and fail closed if the delta contains
+unrecorded metadata or no longer reconstructs from those inputs. The CDNA5
+gfx1251 manifest and verifier next to its delta are the reference pattern.</p>
+<h2 id="generated-isa-variant-features">Generated ISA variant features<a class="headerlink" href="#generated-isa-variant-features" title="Permanent link">&para;</a></h2>
+<p>An optional JSON manifest assigns instruction-and-encoding legality bits to
+concrete targets within one generated ISA family. It is deliberately separate
+from additive XML deltas: the XML describes which instruction forms can be
+decoded, while the manifest describes which concrete targets may use them. For
+example:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"schema_version"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"features"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"example_instruction"</span><span class="p">,</span><span class="w"> </span><span class="s2">"example_encoding_form"</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"variants"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"gfx_base"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<span class="w">    </span><span class="nt">"gfx_plus"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"example_instruction"</span><span class="p">,</span><span class="w"> </span><span class="s2">"example_encoding_form"</span><span class="p">]</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"instructions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"feature"</span><span class="p">:</span><span class="w"> </span><span class="s2">"example_instruction"</span><span class="p">,</span><span class="w"> </span><span class="nt">"names"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"V_EXAMPLE"</span><span class="p">]}</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"model_only_instructions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"V_EXAMPLE"</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"encodings"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"feature"</span><span class="p">:</span><span class="w"> </span><span class="s2">"example_encoding_form"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"encoding"</span><span class="p">:</span><span class="w"> </span><span class="s2">"VOP1_VOP_DPP16"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"instructions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"V_OTHER"</span><span class="p">]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Feature names describe reusable ISA properties rather than GPU revisions. The
+array order assigns the generated feature bit positions; within one schema
+version, existing entries must not be reordered or removed. The
+loader validates the complete manifest before changing the parsed <code>IsaSpec</code>.
+Unknown features, instructions, or encodings; duplicate requirements; malformed
+names; more than 32 instruction features; and generated C++ name collisions
+fail closed. Instruction requirements
+apply to every form of a mnemonic. Encoding requirements apply only when that
+runtime encoding modifier is present, so an ordinary form can remain legal when
+its DPP16 form is target-specific. Schema version 1 deliberately accepts only
+DPP16 encoding requirements; other encoding kinds fail validation until their
+runtime construction paths implement the same fail-closed contract.</p>
+<p>The generator emits immutable feature masks in <code>isa_features.h</code>. A
+target-specific decoder compares the decoded instruction's combined
+instruction-plus-encoding requirement with its concrete target mask before
+returning it. Entries in <code>model_only_instructions</code> are emitted without execute
+declarations, definitions, execution IDs, or callbacks; they can be decoded and
+inspected but cannot accidentally acquire placeholder execution semantics.</p>
+<p>These generated feature masks do not describe runtime behavior differences
+between targets that share an instruction form. Model those differences as
+fail-closed, provider-authored fields in <code>IsaTargetCapabilities</code>, and have the
+execution or analysis consumer query the selected concrete binding. This keeps
+handwritten target semantics separate from the generated legality contract.</p>
+<p>Attach at most one manifest to each logical ISA name. It is applied after the
+base XML and all ISA additions are parsed, and before semantics derivation and
+code generation:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>amdisa<span class="w"> </span>cdna5:/path/to/amdgpu_isa_cdna5.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna5:/path/to/cdna5-additions.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-variants<span class="w"> </span>cdna5:/path/to/cdna5-variants.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-output<span class="w"> </span>/path/to/isa-output<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dbt-output<span class="w"> </span>/path/to/dbt-output
+</code></pre></div>
+<h2 id="generated-file-locations">Generated file locations<a class="headerlink" href="#generated-file-locations" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Generated files</th>
+<th>Location</th>
+<th>Generator</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ISA decoders, encoders, execute bodies, and <code>insts.h</code></td>
+<td><code>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/&lt;output-directory&gt;/</code></td>
+<td><code>codegen/</code></td>
+</tr>
+<tr>
+<td>Shared execute templates</td>
+<td><code>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/</code></td>
+<td><code>codegen/</code></td>
+</tr>
+<tr>
+<td>ISA files generated at a custom path</td>
+<td>A caller-selected tree such as <code>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated/</code></td>
+<td><code>codegen/</code></td>
+</tr>
+<tr>
+<td>Cross-ISA legalization tables</td>
+<td><code>lib/rocjitsu/src/rocjitsu/code/dbt/generated/</code></td>
+<td><code>legalization_codegen.py</code></td>
+</tr>
+<tr>
+<td>Encoding decode/encode functions</td>
+<td><code>lib/rocjitsu/src/rocjitsu/code/dbt/generated/</code></td>
+<td><code>encoding_translator_codegen.py</code></td>
+</tr>
+</tbody>
+</table>
+<p>GPUOpen's public CDNA5 MR ISA uses the architecture name <code>AMD CDNA 5</code> and the
+filename <code>amdgpu_isa_cdna5.xml</code>. rocjitsu's logical generator key and
+configuration architecture are <code>cdna5</code>. Concrete GPU/runtime, ELF, and public
+DBT identities remain <code>gfx1250</code> or <code>gfx1251</code>; an architecture-only lookup uses
+the provider's explicit <code>gfx1250</code> default. Filesystem directories, generated
+and hand-written C++ namespace (<code>rocjitsu::cdna5</code>), and CMake provider targets
+continue to use <code>cdna5</code>.</p>
+<p>Hand-written per-ISA files (<code>isa.h</code>, <code>mma_exec.h</code>, <code>addr_calc.h/.cpp</code>) remain
+under <code>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/&lt;output-directory&gt;/</code> and are
+not overwritten by the generator. CDNA5 hand-written files are under
+<code>arch/amdgpu/cdna5/</code>. Hand-written shared headers remain under
+<code>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/</code>.</p>
+<p>The encoding translator engine (<code>code/dbt/encoding_translator.h</code>) is
+hand-written and shared across all ISA pairs. Only the per-pair
+decode/encode functions and neutral field structs are auto-generated.</p>
+<h2 id="cli-reference">CLI reference<a class="headerlink" href="#cli-reference" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>python -m amdisa [--isa-additions NAME:XML] [--isa-variants NAME:JSON]
+                 [--gen-isas] [--gen-dbt]
+                 [--isa-output DIR] [--include-root DIR]
+                 [--dbt-output DIR] [NAME:]XML ...
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[NAME:]XML ...</code></td>
+<td>One or more ISA XMLs. A recognized name selects its semantic profile. An unrecognized explicit name is treated as a custom generated identity, with its semantic profile detected from the XML</td>
+</tr>
+<tr>
+<td><code>--isa-additions NAME:XML</code></td>
+<td>Apply a validated ISA additions file to the named ISA; may be repeated</td>
+</tr>
+<tr>
+<td><code>--isa-variants NAME:JSON</code></td>
+<td>Attach one validated target-capability manifest to the named ISA</td>
+</tr>
+<tr>
+<td><code>--gen-isas</code></td>
+<td>Generate ISA C++ files (decoders, encodings, execute bodies)</td>
+</tr>
+<tr>
+<td><code>--gen-dbt</code></td>
+<td>Generate DBT legalization tables and encoding translators</td>
+</tr>
+<tr>
+<td><code>--isa-output DIR</code></td>
+<td>Output path for generated ISA C++ files</td>
+</tr>
+<tr>
+<td><code>--include-root DIR</code></td>
+<td>Compiler include root used to spell relocatable generated includes</td>
+</tr>
+<tr>
+<td><code>--dbt-output DIR</code></td>
+<td>Output directory for DBT tables (defaults to <code>--isa-output</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>When neither <code>--gen-isas</code> nor <code>--gen-dbt</code> is specified, both are
+generated. DBT generation is skipped when only one ISA is provided.</p>
+<p><code>--isa-output</code> controls where files are written. Generated include prefixes
+are derived from that path. If <code>--include-root</code> is provided, <code>--isa-output</code>
+must be beneath it and includes are emitted relative to it. Otherwise, absolute
+include paths are emitted so that a relative output path does not depend on the
+generator's working directory.</p>
+<p>The recognized profile names include <code>cdna1</code> through <code>cdna5</code>, <code>rdna1</code> through
+<code>rdna4</code>, and both <code>rdna3.5</code> and <code>rdna3_5</code>. An unrecognized explicit name is
+treated as a custom generated identity; its semantic profile is detected from
+the XML.</p>
+<h2 id="regenerating-everything">Regenerating everything<a class="headerlink" href="#regenerating-everything" title="Permanent link">&para;</a></h2>
+<p>The repository helper derives the repository, shared MR ISA, and generated
+output directories from its own location. It uses the checked-in public CDNA5
+MR ISA alongside the other XML inputs.
+Activate a Python virtual environment containing the generator dependencies and
+<code>pre-commit</code>, then run this command from the <code>rocm-systems</code> repository root:</p>
+<div class="highlight"><pre><span></span><code>./emulation/rocjitsu/scripts/generate-amdisa.sh
+</code></pre></div>
+<p>The helper can be invoked from any working directory when given by an
+appropriate relative or absolute path. It discovers the active environment
+through <code>VIRTUAL_ENV</code> or the active Python interpreter, then formats changed
+generated files through the repository's pre-commit configuration.</p>
+<p>The manual commands below are useful for focused generator development and are
+run from the rocjitsu project root. Set <code>MRISA</code> to the shared MR ISA directory:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">MRISA</span><span class="o">=</span>../../shared/machine-readable-isa/isa
+
+python<span class="w"> </span>-m<span class="w"> </span>amdisa<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna1:<span class="nv">$MRISA</span>/amdgpu_isa_cdna1.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna2:<span class="nv">$MRISA</span>/amdgpu_isa_cdna2.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna3:<span class="nv">$MRISA</span>/amdgpu_isa_cdna3.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna4:<span class="nv">$MRISA</span>/amdgpu_isa_cdna4.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna1:<span class="nv">$MRISA</span>/amdgpu_isa_rdna1.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna2:<span class="nv">$MRISA</span>/amdgpu_isa_rdna2.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna3:<span class="nv">$MRISA</span>/amdgpu_isa_rdna3.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna3_5:<span class="nv">$MRISA</span>/amdgpu_isa_rdna3_5.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna4:<span class="nv">$MRISA</span>/amdgpu_isa_rdna4.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_gfx1251_delta.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-variants<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_variants.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-output<span class="w"> </span>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--include-root<span class="w"> </span>lib/rocjitsu/src<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dbt-output<span class="w"> </span>lib/rocjitsu/src/rocjitsu/code/dbt/generated
+
+find<span class="w"> </span>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated<span class="w"> </span>lib/rocjitsu/src/rocjitsu/code/dbt/generated<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="se">\(</span><span class="w"> </span>-name<span class="w"> </span><span class="s1">'*.h'</span><span class="w"> </span>-o<span class="w"> </span>-name<span class="w"> </span><span class="s1">'*.cpp'</span><span class="w"> </span><span class="se">\)</span><span class="w"> </span>-exec<span class="w"> </span>clang-format<span class="w"> </span>-i<span class="w"> </span><span class="o">{}</span><span class="w"> </span>+
+</code></pre></div>
+<h2 id="regenerating-isa-files-only">Regenerating ISA files only<a class="headerlink" href="#regenerating-isa-files-only" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>amdisa<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna1:<span class="nv">$MRISA</span>/amdgpu_isa_cdna1.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna2:<span class="nv">$MRISA</span>/amdgpu_isa_cdna2.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna3:<span class="nv">$MRISA</span>/amdgpu_isa_cdna3.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna4:<span class="nv">$MRISA</span>/amdgpu_isa_cdna4.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna1:<span class="nv">$MRISA</span>/amdgpu_isa_rdna1.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna2:<span class="nv">$MRISA</span>/amdgpu_isa_rdna2.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna3:<span class="nv">$MRISA</span>/amdgpu_isa_rdna3.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna3_5:<span class="nv">$MRISA</span>/amdgpu_isa_rdna3_5.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna4:<span class="nv">$MRISA</span>/amdgpu_isa_rdna4.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_gfx1251_delta.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-variants<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_variants.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--gen-isas<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-output<span class="w"> </span>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--include-root<span class="w"> </span>lib/rocjitsu/src
+
+find<span class="w"> </span>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="se">\(</span><span class="w"> </span>-name<span class="w"> </span><span class="s1">'*.cpp'</span><span class="w"> </span>-o<span class="w"> </span>-name<span class="w"> </span><span class="s1">'*.h'</span><span class="w"> </span><span class="se">\)</span><span class="w"> </span>-exec<span class="w"> </span>clang-format<span class="w"> </span>-i<span class="w"> </span><span class="o">{}</span><span class="w"> </span>+
+</code></pre></div>
+<h2 id="regenerating-dbt-files-only">Regenerating DBT files only<a class="headerlink" href="#regenerating-dbt-files-only" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>amdisa<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna1:<span class="nv">$MRISA</span>/amdgpu_isa_cdna1.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna2:<span class="nv">$MRISA</span>/amdgpu_isa_cdna2.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna3:<span class="nv">$MRISA</span>/amdgpu_isa_cdna3.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna4:<span class="nv">$MRISA</span>/amdgpu_isa_cdna4.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna1:<span class="nv">$MRISA</span>/amdgpu_isa_rdna1.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna2:<span class="nv">$MRISA</span>/amdgpu_isa_rdna2.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna3:<span class="nv">$MRISA</span>/amdgpu_isa_rdna3.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna3_5:<span class="nv">$MRISA</span>/amdgpu_isa_rdna3_5.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rdna4:<span class="nv">$MRISA</span>/amdgpu_isa_rdna4.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_gfx1251_delta.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-variants<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_variants.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--gen-dbt<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dbt-output<span class="w"> </span>lib/rocjitsu/src/rocjitsu/code/dbt/generated
+
+find<span class="w"> </span>lib/rocjitsu/src/rocjitsu/code/dbt/generated<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="se">\(</span><span class="w"> </span>-name<span class="w"> </span><span class="s1">'*.cpp'</span><span class="w"> </span>-o<span class="w"> </span>-name<span class="w"> </span><span class="s1">'*.h'</span><span class="w"> </span><span class="se">\)</span><span class="w"> </span>-exec<span class="w"> </span>clang-format<span class="w"> </span>-i<span class="w"> </span><span class="o">{}</span><span class="w"> </span>+
+</code></pre></div>
+<h2 id="workflow">Workflow<a class="headerlink" href="#workflow" title="Permanent link">&para;</a></h2>
+<p>When modifying ISA semantics or adding instruction support:</p>
+<ol>
+<li>Edit the authoritative Python input: the generator orchestration in
+   <code>lib/python/amdisa/codegen/_generator.py</code>, execution emitters under
+   <code>lib/python/amdisa/codegen/execute/</code>, instruction classification in
+   <code>lib/python/amdisa/semantics.py</code>, or compatibility inventory logic in
+   <code>lib/python/amdisa/parser.py</code> as appropriate. Never edit generated C++.</li>
+<li>Regenerate with <code>scripts/generate-amdisa.sh</code> or the CLI as shown above</li>
+<li>If you regenerated manually, format the generated files with <code>clang-format</code>
+   (the helper formats changed generated files for you)</li>
+<li>Stage ALL generated files before committing</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025–2026 Advanced Micro Devices, Inc.<br> <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/LICENSE.md">MIT License</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" target="_blank" rel="noopener" title="Rocjitsu on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/issues" target="_blank" rel="noopener" title="Report an issue" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 8h-2.81c-.45-.8-1.07-1.5-1.82-2L17 4.41 15.59 3l-2.17 2.17a6 6 0 0 0-2.83 0L8.41 3 7 4.41 8.62 6c-.75.5-1.36 1.21-1.81 2H4v2h2.09c-.06.33-.09.66-.09 1v1H4v2h2v1c0 .34.03.67.09 1H4v2h2.81A5.99 5.99 0 0 0 15 20.18c.91-.52 1.67-1.28 2.19-2.18H20v-2h-2.09c.06-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.03-.67-.09-1H20zm-4 7a4 4 0 0 1-4 4 4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4 4 4 0 0 1 4 4zm-2-5v2h-4v-2zm-4 4h4v2h-4z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.tracking", "toc.follow", "content.code.copy", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../assets/repository-stats.js"></script>
+      
+    
+  </body>
+</html>

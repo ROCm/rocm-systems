@@ -1,0 +1,3041 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User and developer documentation for the ROCm Just-in-Time Suite.">
+      
+      
+      
+        <link rel="canonical" href="https://rocm.github.io/rocm-systems/rocjitsu/simdojo/">
+      
+      
+        <link rel="prev" href="../style/">
+      
+      
+        <link rel="next" href="../vm-design/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Simulation engine - Rocjitsu</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../assets/handbook.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#simulation-framework-design" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Rocjitsu" class="md-header__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Rocjitsu
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Simulation engine
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Rocjitsu" class="md-nav__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Rocjitsu
+  </label>
+  
+    <div class="md-nav__source">
+      
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 21.5c-1.35-.85-3.8-1.5-5.5-1.5-1.65 0-3.35.3-4.75 1.05-.1.05-.15.05-.25.05-.25 0-.5-.25-.5-.5V6c.6-.45 1.25-.75 2-1 1.11-.35 2.33-.5 3.5-.5 1.95 0 4.05.4 5.5 1.5 1.45-1.1 3.55-1.5 5.5-1.5 1.17 0 2.39.15 3.5.5.75.25 1.4.55 2 1v14.6c0 .25-.25.5-.5.5-.1 0-.15 0-.25-.05-1.4-.75-3.1-1.05-4.75-1.05-1.7 0-4.15.65-5.5 1.5M12 8v11.5c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5V7c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5m1 3.5c1.11-.68 2.6-1 4.5-1 .91 0 1.76.09 2.5.28V9.23c-.87-.15-1.71-.23-2.5-.23q-2.655 0-4.5.84zm4.5.17c-1.71 0-3.21.26-4.5.79v1.69c1.11-.65 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24v-1.5c-.87-.16-1.71-.23-2.5-.23m2.5 2.9c-.87-.16-1.71-.24-2.5-.24-1.83 0-3.33.27-4.5.8v1.69c1.11-.66 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command-line interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../race-detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Race detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocgdb-debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qemu-vfio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QEMU VFIO-user compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vulkan-compute/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vulkan compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-2-2 2 2 0 0 0 2-2V5h2V3m6 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5h-2V3z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../style/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code style
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulation engine
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#file-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#simulation-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Simulation Time
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compound-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compound Graph
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Compound Graph">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Components
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ports-and-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ports and Links
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#clock-domains" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Clock Domains
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Clock Domains">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functional-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functional Components
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-mode-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution Mode Selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-library" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component Library
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Component Library">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#register-file-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Register-file storage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Register-file storage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#representative-workloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Representative workloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worst-case-saturation-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worst-case saturation validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#messages-and-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Messages and Events
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Messages and Events">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zero-allocation-event-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Zero-Allocation Event Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-queues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event Queues
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#topology-and-partitioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Topology and Partitioning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Topology and Partitioning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#building-a-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building a Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#graph-partitioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graph Partitioning
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#simulation-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Simulation Engine
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Simulation Engine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#single-threaded-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-Threaded Path
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multi-threaded-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-Threaded Path
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Multi-Threaded Path">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#barrier-based-lbts-epoch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Barrier-Based LBTS Epoch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wall-clock-pacing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wall-Clock Pacing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Wall-Clock Pacing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three-State Machine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#capabilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Capabilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#service-callbacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service Callbacks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit Events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#primary-component-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Primary Component Protocol
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#async-event-insertion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async Event Insertion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interactive-stepping-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interactive Stepping (step())
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#engine-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Engine Lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vm-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU hardware model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbt-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary translation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rj_dbt_translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translation tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu_dbt_guest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DBT guest mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary instrumentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instrumentation overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codegen/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA code generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-target-providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA target providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-gap-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA gap audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../npi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-instructions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous MMA execution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mma-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MMA lookahead admission
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concurrent-dispatch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrent dispatch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-counter-coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait coverage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 18H4V8h16m0-2h-8l-2-2H4c-1.11 0-2 .89-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+    
+  
+  
+    <li class="md-nav__item">
+      <a href="../blog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#file-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#simulation-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Simulation Time
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compound-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compound Graph
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Compound Graph">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Components
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ports-and-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ports and Links
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#clock-domains" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Clock Domains
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Clock Domains">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functional-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functional Components
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-mode-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution Mode Selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-library" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component Library
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Component Library">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#register-file-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Register-file storage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Register-file storage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#representative-workloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Representative workloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worst-case-saturation-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worst-case saturation validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#messages-and-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Messages and Events
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Messages and Events">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zero-allocation-event-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Zero-Allocation Event Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-queues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event Queues
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#topology-and-partitioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Topology and Partitioning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Topology and Partitioning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#building-a-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building a Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#graph-partitioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graph Partitioning
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#simulation-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Simulation Engine
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Simulation Engine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#single-threaded-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-Threaded Path
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multi-threaded-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-Threaded Path
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Multi-Threaded Path">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#barrier-based-lbts-epoch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Barrier-Based LBTS Epoch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wall-clock-pacing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wall-Clock Pacing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Wall-Clock Pacing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three-State Machine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#capabilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Capabilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#service-callbacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service Callbacks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit Events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#primary-component-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Primary Component Protocol
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#async-event-insertion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async Event Insertion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interactive-stepping-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interactive Stepping (step())
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#engine-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Engine Lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="simulation-framework-design"><span class="twemoji" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 1 4 4 4 4 0 0 1-4 4 4 4 0 0 1-4-4 4 4 0 0 1 4-4m0 2a2 2 0 0 0-2 2 2 2 0 0 0 2 2 2 2 0 0 0 2-2 2 2 0 0 0-2-2m-2 12c-.25 0-.46-.18-.5-.42l-.37-2.65c-.63-.25-1.17-.59-1.69-.99l-2.49 1.01c-.22.08-.49 0-.61-.22l-2-3.46a.493.493 0 0 1 .12-.64l2.11-1.66L4.5 12l.07-1-2.11-1.63a.493.493 0 0 1-.12-.64l2-3.46c.12-.22.39-.31.61-.22l2.49 1c.52-.39 1.06-.73 1.69-.98l.37-2.65c.04-.24.25-.42.5-.42h4c.25 0 .46.18.5.42l.37 2.65c.63.25 1.17.59 1.69.98l2.49-1c.22-.09.49 0 .61.22l2 3.46c.13.22.07.49-.12.64L19.43 11l.07 1-.07 1 2.11 1.63c.19.15.25.42.12.64l-2 3.46c-.12.22-.39.31-.61.22l-2.49-1c-.52.39-1.06.73-1.69.98l-.37 2.65c-.04.24-.25.42-.5.42zm1.25-18-.37 2.61c-1.2.25-2.26.89-3.03 1.78L5.44 7.35l-.75 1.3L6.8 10.2a5.55 5.55 0 0 0 0 3.6l-2.12 1.56.75 1.3 2.43-1.04c.77.88 1.82 1.52 3.01 1.76l.37 2.62h1.52l.37-2.61c1.19-.25 2.24-.89 3.01-1.77l2.43 1.04.75-1.3-2.12-1.55c.4-1.17.4-2.44 0-3.61l2.11-1.55-.75-1.3-2.41 1.04a5.42 5.42 0 0 0-3.03-1.77L12.75 4z"/></svg></span> Simulation Framework Design<a class="headerlink" href="#simulation-framework-design" title="Permanent link">&para;</a></h1>
+<p>A simulation framework for modeling hardware systems as hierarchical compound
+graphs [1]. Runs a conservative barrier-based Parallel Discrete Event
+Simulation (PDES) [2][3] with Lower Bound on Time Stamp (LBTS)
+synchronization. Untimed (functional) components participate in the same
+event loop via the <code>Functional&lt;Base&gt;</code> CRTP mixin.</p>
+<h2 id="file-overview">File Overview<a class="headerlink" href="#file-overview" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sim_types.h</code></td>
+<td>Tick, ComponentID, LinkID, PortID, PartitionID, ExitReason, ExitStatus</td>
+</tr>
+<tr>
+<td><code>event_queue.h</code></td>
+<td>Event, EventQueueEntry, EventQueue, CrossPartitionQueue</td>
+</tr>
+<tr>
+<td><code>message.h</code></td>
+<td>MessageHeader, Message (with uintptr_t payload), MessageQueue</td>
+</tr>
+<tr>
+<td><code>component.h</code></td>
+<td>Node, Component, CompositeComponent, Link, Port, QueuedLink</td>
+</tr>
+<tr>
+<td><code>component.cpp</code></td>
+<td>Implementation for Component, CompositeComponent, Link</td>
+</tr>
+<tr>
+<td><code>clock_domain.h</code></td>
+<td>ClockDomain (frequency, period, phase offset)</td>
+</tr>
+<tr>
+<td><code>clocked.h</code></td>
+<td><code>Clocked&lt;Base&gt;</code> Curiously Recurring Template Pattern (CRTP) mixin for clock-driven components</td>
+</tr>
+<tr>
+<td><code>topology.h</code></td>
+<td>Topology, Partition, AdjacencyGraph, Partitioner</td>
+</tr>
+<tr>
+<td><code>topology.cpp</code></td>
+<td>Topology wiring, graph construction, multilevel Fiduccia-Mattheyses (FM) partitioning</td>
+</tr>
+<tr>
+<td><code>functional.h</code></td>
+<td><code>Functional&lt;Base&gt;</code> CRTP mixin for untimed components</td>
+</tr>
+<tr>
+<td><code>exec_mode.h</code></td>
+<td>ExecMode enum (FUNCTIONAL, CLOCKED) and <code>ExecBase&lt;Mode, Base&gt;</code> alias</td>
+</tr>
+<tr>
+<td><code>pacing_controller.h</code></td>
+<td>PacingController - PI-controlled wall-clock pacing with token bucket burst absorption</td>
+</tr>
+<tr>
+<td><code>simulation.h</code></td>
+<td>PartitionContext, SimulationEngine</td>
+</tr>
+<tr>
+<td><code>simulation.cpp</code></td>
+<td>Engine run loop, event dispatch, LBTS computation (multi-threaded)</td>
+</tr>
+<tr>
+<td><code>components/memory_interface.h</code></td>
+<td>MemoryInterface - abstract byte-addressed memory controller</td>
+</tr>
+<tr>
+<td><code>components/cache.h</code></td>
+<td><code>Cache&lt;NumSets, Assoc, LineSizeBits&gt;</code> - set-associative cache template</td>
+</tr>
+<tr>
+<td><code>components/sparse_memory.h</code></td>
+<td>SparseMemory - page-allocated flat address space</td>
+</tr>
+<tr>
+<td><code>components/register_file.h</code></td>
+<td>RegisterFile - typed register storage with read/write interface</td>
+</tr>
+<tr>
+<td><code>components/vector_reg.h</code></td>
+<td><code>VectorReg&lt;N, T&gt;</code> - SIMD-width vector register type</td>
+</tr>
+<tr>
+<td><em>(uses <code>util/debug_print.h</code>)</em></td>
+<td>Conditional debug output (<code>util::debug</code> namespace)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="simulation-time">Simulation Time<a class="headerlink" href="#simulation-time" title="Permanent link">&para;</a></h2>
+<p>All timestamps, periods, latencies, and phase offsets are expressed in
+<code>Tick</code> (<code>uint64_t</code>). The tick resolution is fixed globally at 1 picosecond
+(<code>TICKS_PER_SECOND = 1'000'000'000'000</code>). A 1 GHz clock has a period of 1000
+ticks (1 ns); a 2 GHz clock has 500 ticks.</p>
+<p>Frequency is a separate dimension measured in Hz (<code>uint64_t</code>), not ticks.
+The two are mixed in expressions like <code>TICKS_PER_SECOND / frequency_hz</code> to
+produce a <code>Tick</code> period, which is dimensionally correct.</p>
+<hr />
+<h2 id="compound-graph">Compound Graph<a class="headerlink" href="#compound-graph" title="Permanent link">&para;</a></h2>
+<p>The simulation topology is a <strong>compound graph</strong> [4] - a graph that combines
+two kinds of relationships:</p>
+<ul>
+<li><strong>Inclusion edges</strong> (parent-child): form the component tree, modeling
+  physical containment (e.g., a board contains processors, which contain
+  functional units)</li>
+<li><strong>Adjacency edges</strong> (links): model communication channels between
+  components, each with a propagation latency</li>
+</ul>
+<p>This mirrors how hardware is structured: a hierarchy of blocks connected by
+buses, crossbars, and point-to-point links.</p>
+<h3 id="components">Components<a class="headerlink" href="#components" title="Permanent link">&para;</a></h3>
+<p><strong>Component</strong> is a leaf simulation entity that processes events. It owns
+ports and interacts with the simulation engine. Event handlers are
+registered directly on ports via <code>Port::set_handler()</code>. Key virtual
+methods:</p>
+<ul>
+<li><code>initialize()</code> / <code>startup()</code> / <code>shutdown()</code> - lifecycle hooks called by
+  the engine during <code>create()</code>, <code>run()</code>, and <code>shutdown()</code> respectively</li>
+<li><code>step()</code> - execute one unit of component-specific work (domain-level
+  API for concrete types, not called by the engine)</li>
+<li><code>is_composite()</code> - returns false for leaves, true for composites</li>
+</ul>
+<p><strong>CompositeComponent</strong> extends Component with a child list. Critically, a
+composite can also handle events itself - it is not just a passive
+container. This lets you model a block that both contains sub-blocks
+and directly handles some events (e.g., routing, arbitration) without
+introducing artificial wrapper components.</p>
+<p><code>CompositeComponent</code> can serve as the topology root directly. All
+execution is event-driven — components schedule events during <code>startup()</code>
+and respond to them via event handlers.</p>
+<p><code>collect_components()</code> flattens the entire subtree including composites,
+so the engine initializes and dispatches to all components uniformly.</p>
+<h3 id="ports-and-links">Ports and Links<a class="headerlink" href="#ports-and-links" title="Permanent link">&para;</a></h3>
+<p><strong>Ports</strong> are named connection points on a component. Each port owns a
+reusable <code>Event</code> for message arrivals. Sending is done via <code>Port::send()</code>;
+receiving is handled by calling <code>Port::set_handler()</code> to register a
+callback that the engine invokes when a message arrives. Each port has a
+direction (<code>PortDirection::IN</code> or <code>PortDirection::OUT</code>) and an optional
+protocol tag (<code>PortProtocol</code>). <code>send()</code> is only valid on <code>OUT</code> ports.</p>
+<p><strong>Links</strong> are <strong>unidirectional</strong> connections between two ports with a
+propagation latency. Links have an execution mode: <code>CLOCKED</code> (default)
+routes messages through the engine event queue with latency; <code>FUNCTIONAL</code>
+invokes the destination handler synchronously with zero overhead.
+Bidirectional communication requires two links, one per direction. This
+matches hardware reality (request and response paths are separate) and
+keeps timing, flow control, and routing simple.</p>
+<div class="highlight"><pre><span></span><code>Component0           Component1
+  P0 ----link A----&gt; P1       (request path, 10 tick latency)
+  P3 &lt;---link B----- P2       (response path, 5 tick latency)
+</code></pre></div>
+<p><code>Topology::add_bidirectional_link(a_out, b_in, b_out, a_in, fwd, rev)</code>
+is a convenience that creates two unidirectional links in one call. It
+takes four ports (two per component: one OUT, one IN) and two latencies.</p>
+<p><strong>QueuedLink</strong> is a variant that buffers messages in a bounded priority
+queue instead of routing them through the engine immediately. The
+receiving component explicitly drains messages when ready - useful for
+pull-based consumption patterns like a clocked component that processes
+its input queue each cycle.</p>
+<hr />
+<h2 id="clock-domains">Clock Domains<a class="headerlink" href="#clock-domains" title="Permanent link">&para;</a></h2>
+<p>A <code>ClockDomain</code> defines a shared clock source with a frequency, period, and
+phase offset. Derived domains can be created with a frequency divider,
+modeling clock hierarchies (e.g., a 1 GHz core clock deriving a 500 MHz
+memory clock).</p>
+<p>The <code>Clocked&lt;Base&gt;</code> CRTP mixin adds clock-driven behavior to any component
+type. Subclasses override <code>advance(Tick now)</code>, which is called on each
+rising edge. Return true to continue clocking, false to halt. The mixin
+handles self-scheduling automatically.</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Pipeline</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">Clocked</span><span class="o">&lt;</span><span class="n">Component</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">  </span><span class="n">Pipeline</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">ClockDomain</span><span class="w"> </span><span class="o">&amp;</span><span class="n">clk</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Clocked</span><span class="p">(</span><span class="s">"pipeline"</span><span class="p">,</span><span class="w"> </span><span class="n">clk</span><span class="p">)</span><span class="w"> </span><span class="p">{}</span>
+<span class="w">  </span><span class="kt">bool</span><span class="w"> </span><span class="n">advance</span><span class="p">(</span><span class="n">Tick</span><span class="w"> </span><span class="n">now</span><span class="p">)</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* process one cycle */</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p><code>Clocked</code> is templated on the base class, so it works with both <code>Component</code>
+and <code>CompositeComponent</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">CPU</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">Clocked</span><span class="o">&lt;</span><span class="n">CompositeComponent</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">};</span>
+</code></pre></div>
+<h3 id="functional-components">Functional Components<a class="headerlink" href="#functional-components" title="Permanent link">&para;</a></h3>
+<p>The <code>Functional&lt;Base&gt;</code> CRTP mixin is the untimed counterpart to <code>Clocked</code>.
+Subclasses override <code>advance(Tick now)</code>, which is called repeatedly with a
+monotonic tick counter (synthetic timestamp, not wall time). Return true to
+continue advancing, false to halt. Used for components that model behavior
+without cycle accuracy.</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Memory</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">Functional</span><span class="o">&lt;</span><span class="n">Component</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">  </span><span class="n">Memory</span><span class="p">()</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">Functional</span><span class="p">(</span><span class="s">"memory"</span><span class="p">)</span><span class="w"> </span><span class="p">{}</span>
+<span class="w">  </span><span class="kt">bool</span><span class="w"> </span><span class="n">advance</span><span class="p">(</span><span class="n">Tick</span><span class="w"> </span><span class="n">now</span><span class="p">)</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* process one request */</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p>Like <code>Clocked</code>, it is templated on the base class and self-schedules via the
+engine's event queue.</p>
+<h3 id="execution-mode-selection">Execution Mode Selection<a class="headerlink" href="#execution-mode-selection" title="Permanent link">&para;</a></h3>
+<p>The <code>ExecMode</code> enum and <code>ExecBase&lt;Mode, Base&gt;</code> alias (in <code>exec_mode.h</code>)
+allow generic components to be templated on their execution mode:</p>
+<div class="highlight"><pre><span></span><code><span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="n">ExecMode</span><span class="w"> </span><span class="n">Mode</span><span class="o">&gt;</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">MyComponent</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">ExecBase</span><span class="o">&lt;</span><span class="n">Mode</span><span class="p">,</span><span class="w"> </span><span class="n">Component</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">  </span><span class="kt">bool</span><span class="w"> </span><span class="n">advance</span><span class="p">(</span><span class="n">Tick</span><span class="w"> </span><span class="n">now</span><span class="p">)</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/* same logic for both modes */</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+<p><code>ExecBase&lt;FUNCTIONAL, Component&gt;</code> resolves to <code>Functional&lt;Component&gt;</code>;
+<code>ExecBase&lt;CLOCKED, Component&gt;</code> resolves to <code>Clocked&lt;Component&gt;</code>. This
+enables a single component implementation that works in either mode,
+selected at compile time.</p>
+<hr />
+<h2 id="component-library">Component Library<a class="headerlink" href="#component-library" title="Permanent link">&para;</a></h2>
+<p>The <code>components/</code> directory provides reusable building blocks for hardware
+models. These are architecture-agnostic data structures and interfaces.</p>
+<p><strong>MemoryInterface</strong> (<code>memory_interface.h</code>) is the abstract base for all
+byte-addressed memory controllers. Controllers (cache controllers, memory
+controllers, scratchpad memories) implement this interface. Backing stores
+(<code>SparseMemory</code>, <code>Cache&lt;&gt;</code>) are data structures that do not implement it.</p>
+<p><strong>Cache</strong> (<code>cache.h</code>) is a set-associative cache template parameterized on
+number of sets, associativity, and line size. Provides <code>lookup()</code>, <code>fill()</code>,
+and <code>flush()</code>. Used as a backing store inside cache controllers.</p>
+<p><strong>SparseMemory</strong> (<code>sparse_memory.h</code>) is a page-allocated flat address space
+that allocates pages on first access. Used as backing storage for memory
+controllers.</p>
+<p><strong>RegisterFile</strong> (<code>register_file.h</code>) provides typed register storage with
+indexed read/write access. <strong>VectorReg</strong> (<code>vector_reg.h</code>) models a
+SIMD-width vector register with per-element access.</p>
+<h3 id="register-file-storage">Register-file storage<a class="headerlink" href="#register-file-storage" title="Permanent link">&para;</a></h3>
+<p>The functional GPU model provisions vector-register storage for every fixed
+wavefront slot in each simulated compute unit. Slots are independent of
+hardware occupancy: a wave that uses many registers still occupies one
+simulator slot, and register pressure does not reduce the number of admitted
+waves. For the shipped gfx942 configuration, the vector backing has the
+following dimensions:</p>
+<table>
+<thead>
+<tr>
+<th>Quantity</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Simulated compute units</td>
+<td>320</td>
+</tr>
+<tr>
+<td>Wavefront slots per CU</td>
+<td>32</td>
+</tr>
+<tr>
+<td>Registers per slot</td>
+<td>512 combined VGPR and AGPR entries</td>
+</tr>
+<tr>
+<td>Register width</td>
+<td>64 lanes × 4 bytes</td>
+</tr>
+<tr>
+<td>Complete vector backing</td>
+<td>1,280 MiB</td>
+</tr>
+</tbody>
+</table>
+<p><code>RegisterFile</code> divides the physical VGPR index space into fixed 4 KiB chunks.
+An untouched chunk is represented by a null entry and reads as zero; its
+storage is allocated and zero-initialized on the first mutable access. Retiring
+a wave makes wholly covered chunks logically absent and clears any shared
+boundary chunk. Each lazy register file retains up to 64 KiB of retired chunks,
+which are zeroed when reused; excess chunks release their allocations.
+<code>materialized_chunk_count()</code> excludes these retained spares.
+The implementation uses only portable C++ allocation and does not require
+virtual-memory APIs. Mutable handles and handles into materialized registers
+remain stable until their allocation retires, but the complete register file is
+deliberately not contiguous. Const access to an unmaterialized register observes
+its logical zero value through shared immutable backing without allocating a
+chunk. That read-only handle is an ephemeral value observation, not a persistent
+storage identity, and need not observe a later write through another handle.</p>
+<p>This is a functional storage model, not a model of a physical register file.
+In particular, filling all 32 simulator slots with high-pressure waves can
+represent an occupancy that hardware could not admit. That distinction is
+important when interpreting memory measurements or using register pressure to
+approximate hardware throughput.</p>
+<h4 id="representative-workloads">Representative workloads<a class="headerlink" href="#representative-workloads" title="Permanent link">&para;</a></h4>
+<p>The fixed-topology and IREE measurements were collected on 2026-08-10 from
+rocjitsu revision <code>49e6ddafeb9fd8cadda1c78b891466fd498ec676</code>. Fixed topology
+reports the median of six processes; IREE reports the median of five processes,
+all of which matched the checked-in output exactly. The CTS rows report the
+median of three source-identical processes from rocjitsu revision
+<code>4d5779c15beb0d9495b319dce5d906e966275e23</code> and test-corpus revision
+<code>ce5da512188dd40de0bc7da298ec11b587d8fdd3</code>; all tests passed. Every build was
+Release, pinned to CPU 8, and used an AMD EPYC 9554 host running Linux 6.8.</p>
+<table>
+<thead>
+<tr>
+<th>Workload</th>
+<th style="text-align: right;">Eager runtime</th>
+<th style="text-align: right;">Software runtime</th>
+<th style="text-align: right;">Eager peak RSS</th>
+<th style="text-align: right;">Software peak RSS</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fixed topology, no kernel</td>
+<td style="text-align: right;">0.87 s</td>
+<td style="text-align: right;">0.125 s</td>
+<td style="text-align: right;">1,511,424 KiB</td>
+<td style="text-align: right;">201,728 KiB</td>
+<td>85.6% faster, 86.7% less RSS</td>
+</tr>
+<tr>
+<td>IREE softmax, exact output</td>
+<td style="text-align: right;">2.50 s</td>
+<td style="text-align: right;">0.99 s</td>
+<td style="text-align: right;">1,630,208 KiB</td>
+<td style="text-align: right;">326,656 KiB</td>
+<td>60.4% faster, 80.0% less RSS</td>
+</tr>
+<tr>
+<td>CTS math</td>
+<td style="text-align: right;">28.37 s</td>
+<td style="text-align: right;">27.94 s</td>
+<td style="text-align: right;">2,235,924 KiB</td>
+<td style="text-align: right;">926,788 KiB</td>
+<td>1.5% faster, 58.5% less RSS</td>
+</tr>
+<tr>
+<td>CTS MFMA</td>
+<td style="text-align: right;">151.40 s</td>
+<td style="text-align: right;">150.78 s</td>
+<td style="text-align: right;">2,235,392 KiB</td>
+<td style="text-align: right;">926,720 KiB</td>
+<td>0.4% faster, 58.5% less RSS</td>
+</tr>
+</tbody>
+</table>
+<p>Unlike fixed topology and the shorter IREE workload, the CTS suites are
+dominated by simulated instruction execution and therefore amortize the fixed
+initialization work that lazy storage eliminates. Across three runs, the
+startup proxy (whole-process wall time minus test-body time) fell from about
+1.29 seconds to 0.54 seconds. Test-body time increased by 1.2% for math and was
+unchanged to measurement precision for MFMA (+0.1%). The result is a smaller
+end-to-end runtime improvement even as peak RSS falls by 58.5%.</p>
+<h4 id="worst-case-saturation-validation">Worst-case saturation validation<a class="headerlink" href="#worst-case-saturation-validation" title="Permanent link">&para;</a></h4>
+<p>The qualified gfx942 saturation workload was measured on 2026-08-10 from
+rocjitsu revision <code>49e6ddafeb9fd8cadda1c78b891466fd498ec676</code>. The
+representative case places eight waves on each of one XCD's 40 CUs and reports
+three-launch medians. The all-slot case deliberately fills all 32 functional
+simulator slots on all 320 CUs with 253-VGPR waves—an occupancy that hardware
+could not admit—and reports one checksum-validated launch.</p>
+<table>
+<thead>
+<tr>
+<th>Saturation runtime</th>
+<th style="text-align: right;">Eager</th>
+<th style="text-align: right;">Software lazy</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>253-VGPR initialization-only median launch</td>
+<td style="text-align: right;">156.201 ms</td>
+<td style="text-align: right;">157.479 ms</td>
+<td>0.8% slower</td>
+</tr>
+<tr>
+<td>253-VGPR eight-update median launch</td>
+<td style="text-align: right;">1,332.955 ms</td>
+<td style="text-align: right;">1,335.671 ms</td>
+<td>0.2% slower</td>
+</tr>
+<tr>
+<td>All-slot 253-VGPR eight-update timed launch</td>
+<td style="text-align: right;">48.127 s</td>
+<td style="text-align: right;">48.780 s</td>
+<td>1.4% slower</td>
+</tr>
+</tbody>
+</table>
+<p>Peak RSS is a process-wide high-water measurement. The representative sweep
+therefore has one result covering all 9--253-VGPR pressure points rather than
+separate values for its individual launch timings.</p>
+<table>
+<thead>
+<tr>
+<th>Saturation peak RSS</th>
+<th style="text-align: right;">Eager</th>
+<th style="text-align: right;">Software lazy</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Complete 9--253-VGPR sweep</td>
+<td style="text-align: right;">1,609,728 KiB</td>
+<td style="text-align: right;">318,280 KiB</td>
+<td>80.2% less RSS</td>
+</tr>
+<tr>
+<td>All slots, 253 VGPR, eight updates</td>
+<td style="text-align: right;">1,622,016 KiB</td>
+<td style="text-align: right;">967,064 KiB</td>
+<td>40.4% less RSS</td>
+</tr>
+</tbody>
+</table>
+<p>The qualified workload, complete methodology, and reproduction commands are
+pinned at rocjitsu test corpus revision
+<a href="https://github.com/ROCm/rocjitsu-test-corpus/tree/b3f5fa8a263ee2cd83666a62bc18731b09b1166a/corpus/kernels/benchmarks/vgpr_saturation"><code>b3f5fa8a263ee2cd83666a62bc18731b09b1166a</code></a>.</p>
+<hr />
+<h2 id="messages-and-events">Messages and Events<a class="headerlink" href="#messages-and-events" title="Permanent link">&para;</a></h2>
+<h3 id="messages">Messages<a class="headerlink" href="#messages" title="Permanent link">&para;</a></h3>
+<p><code>Message</code> is the base class for data sent over links. Every message carries
+a <code>MessageHeader</code> with timestamps, port IDs, sequence number, a <code>MessageOp</code>
+(READ, WRITE, RESPONSE, or NONE), an <code>addr</code> field for memory addresses, and
+an <code>mtype</code> field for memory type routing. It also has an optional
+<code>uintptr_t</code> payload for small integer values or pointers to arbitrary
+data. This eliminates the need for derived message classes in most
+cases — components that need richer payloads can store data in a side
+structure and pass a pointer via the payload field.</p>
+<h3 id="events">Events<a class="headerlink" href="#events" title="Permanent link">&para;</a></h3>
+<p>Events are the scheduling primitive. There are three types, ordered by
+priority (highest priority first):</p>
+<ol>
+<li><code>TIMER_CALLBACK</code> - scheduled timer/tick callback (used by <code>Clocked</code>)</li>
+<li><code>MESSAGE_ARRIVAL</code> - a message arrived at a port</li>
+<li><code>SIM_EXIT</code> - simulation exit sentinel (lowest priority, ensures all real
+   events at <code>max_ticks</code> fire before the exit)</li>
+</ol>
+<p>Events with the same timestamp are ordered by type priority, then by
+sequence number for deterministic tie-breaking.</p>
+<h3 id="zero-allocation-event-model">Zero-Allocation Event Model<a class="headerlink" href="#zero-allocation-event-model" title="Permanent link">&para;</a></h3>
+<p><code>Event</code> is a long-lived, reusable descriptor holding a target component,
+event type, and handler callback. Per-firing state (timestamp, message
+payload) is stored in <code>EventQueueEntry</code>, not in the Event itself. The same
+Event object can appear in the event queue multiple times at different
+timestamps - no allocation is needed per scheduling.</p>
+<ul>
+<li><strong>Ports</strong> own a reusable <code>Event</code> of type <code>MESSAGE_ARRIVAL</code>. Register a
+  handler via <code>Port::set_handler()</code>.</li>
+<li><strong>Clocked</strong> owns a reusable <code>Event</code> of type <code>TIMER_CALLBACK</code> that
+  re-enqueues itself on each clock edge.</li>
+</ul>
+<h3 id="event-queues">Event Queues<a class="headerlink" href="#event-queues" title="Permanent link">&para;</a></h3>
+<p>Each partition has a thread-local <code>EventQueue</code> (a min-heap by timestamp).
+Cross-partition events are staged in a <code>CrossPartitionQueue</code> - one per
+(source, destination) partition pair. The queue is spinlock-protected (push
+from the sender partition, drain from the receiver partition) with a
+pre-allocated swap buffer for zero-allocation drain. Each worker drains
+its own incoming queues at the start of each barrier epoch (Phase 1).</p>
+<hr />
+<h2 id="topology-and-partitioning">Topology and Partitioning<a class="headerlink" href="#topology-and-partitioning" title="Permanent link">&para;</a></h2>
+<p>The <code>Topology</code> owns the component tree reachable from the root composite,
+all links, clock domains, and partition assignments. Link-endpoint owners
+outside the root tree are borrowed. Those external components and their ports
+must remain alive through every repartition and engine create, run, and
+shutdown operation that retains them. It serves as the single entry point for
+building and wiring a model.</p>
+<h3 id="building-a-model">Building a Model<a class="headerlink" href="#building-a-model" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="n">SimulationEngine</span><span class="w"> </span><span class="nf">engine</span><span class="p">({.</span><span class="n">max_ticks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10000</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">num_threads</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">});</span>
+
+<span class="c1">// Create clock domains.</span>
+<span class="k">auto</span><span class="w"> </span><span class="o">*</span><span class="n">core_clk</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">add_clock_domain</span><span class="p">(</span><span class="s">"core"</span><span class="p">,</span><span class="w"> </span><span class="mi">1'000'000'000</span><span class="p">);</span>
+
+<span class="c1">// Build the component tree.</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">root</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">CompositeComponent</span><span class="o">&gt;</span><span class="p">(</span><span class="s">"soc"</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="o">*</span><span class="n">proc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">root</span><span class="o">-&gt;</span><span class="n">add_child</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">CompositeComponent</span><span class="o">&gt;</span><span class="p">(</span><span class="s">"proc"</span><span class="p">));</span>
+<span class="k">auto</span><span class="w"> </span><span class="o">*</span><span class="n">pipe</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">proc</span><span class="o">-&gt;</span><span class="n">add_child</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">Pipeline</span><span class="o">&gt;</span><span class="p">(</span><span class="o">*</span><span class="n">core_clk</span><span class="p">));</span>
+<span class="k">auto</span><span class="w"> </span><span class="o">*</span><span class="n">mem</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">proc</span><span class="o">-&gt;</span><span class="n">add_child</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">MemController</span><span class="o">&gt;</span><span class="p">(</span><span class="o">*</span><span class="n">core_clk</span><span class="p">));</span>
+
+<span class="c1">// Set root and wire links.</span>
+<span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">set_root</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">root</span><span class="p">));</span>
+<span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">add_link</span><span class="p">(</span><span class="n">pipe_req_port</span><span class="p">,</span><span class="w"> </span><span class="n">mem_req_port</span><span class="p">,</span><span class="w"> </span><span class="cm">/*latency=*/</span><span class="mi">10</span><span class="p">);</span>
+<span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">add_link</span><span class="p">(</span><span class="n">mem_resp_port</span><span class="p">,</span><span class="w"> </span><span class="n">pipe_resp_port</span><span class="p">,</span><span class="w"> </span><span class="cm">/*latency=*/</span><span class="mi">5</span><span class="p">);</span>
+
+<span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">partition_balanced</span><span class="p">(</span><span class="mi">4</span><span class="p">);</span>
+<span class="n">engine</span><span class="p">.</span><span class="n">create</span><span class="p">();</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">exit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">engine</span><span class="p">.</span><span class="n">run</span><span class="p">();</span>
+</code></pre></div>
+<h3 id="graph-partitioning">Graph Partitioning<a class="headerlink" href="#graph-partitioning" title="Permanent link">&para;</a></h3>
+<p>For parallel execution, the topology is partitioned into sub-graphs, one per
+thread. The built-in partitioner uses a multilevel FM algorithm [6][7]:</p>
+<ol>
+<li><strong>Coarsening</strong> - heavy-edge matching contracts the graph level by level</li>
+<li><strong>Initial bisection</strong> - greedy assignment + FM refinement on the coarsest
+   graph</li>
+<li><strong>Uncoarsening</strong> - project back, FM refine at each level</li>
+<li><strong>k-way</strong> - recursive bisection to reach the target partition count</li>
+</ol>
+<p>The partitioner minimizes edge cut (cross-partition communication) while
+balancing partition weights (configurable imbalance tolerance). No external
+library dependencies.</p>
+<hr />
+<h2 id="simulation-engine">Simulation Engine<a class="headerlink" href="#simulation-engine" title="Permanent link">&para;</a></h2>
+<p>The <code>SimulationEngine</code> owns the simulation <code>Topology</code> and drives the full
+lifecycle: build, run/step, and shutdown. Components participate by
+scheduling events during <code>startup()</code>:</p>
+<ul>
+<li>A <code>Clocked</code> component schedules clock-edge events (timing simulation).</li>
+<li>A <code>Functional</code> component self-schedules a timer callback and re-enqueues
+  after each <code>advance()</code> (untimed simulation within the event loop).</li>
+<li>If no events are ever scheduled and no primaries are registered, the
+  simulation terminates via quiescence.</li>
+</ul>
+<h3 id="single-threaded-path">Single-Threaded Path<a class="headerlink" href="#single-threaded-path" title="Permanent link">&para;</a></h3>
+<p>When <code>num_threads == 1</code>, the engine drains events directly from the priority
+queue in timestamp order - no LBTS computation, no barriers, no epoch
+structure. When the queue empties:</p>
+<ol>
+<li>Update <code>current_time_</code> for external observers</li>
+<li>Throttle via <code>PacingController</code> (PI-controlled sleep if sim is ahead)</li>
+<li>Run service callbacks</li>
+<li>Drain async event buffers</li>
+<li>If new events appeared, continue processing</li>
+<li>Check termination (quiescence or all primaries done)</li>
+<li>If primaries are active, pause the pacing clock and block on <code>idle_cv_</code>
+   until an async event or shutdown arrives (with a timed wait when pacing
+   is enabled)</li>
+<li>After wake, resume the pacing clock and drain async events</li>
+</ol>
+<h3 id="multi-threaded-path">Multi-Threaded Path<a class="headerlink" href="#multi-threaded-path" title="Permanent link">&para;</a></h3>
+<p>When <code>num_threads &gt; 1</code>, N worker threads (one per partition) run a
+barrier-based Parallel Discrete Event Simulation (PDES) loop. Each epoch
+has four phases, synchronized by a <code>std::barrier</code>:</p>
+<h4 id="barrier-based-lbts-epoch">Barrier-Based LBTS Epoch<a class="headerlink" href="#barrier-based-lbts-epoch" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code>Phase 1: Drain incoming cross-partition events + async events
+Phase 2: Process all events with timestamp &lt;= global_lbts
+Phase 3: Publish local_next (earliest possible future activity)
+Phase 4: Arrive at barrier (completion function computes new global_lbts)
+</code></pre></div>
+<p>The <strong>barrier completion function</strong> runs exactly once after all threads
+arrive. It computes <code>global_lbts = min(local_next[i])</code> across all
+partitions, updates <code>current_time_</code>, runs service callbacks periodically,
+and checks termination conditions.</p>
+<p>The barrier provides a consistent global snapshot without per-channel null
+messages or vector clocks.</p>
+<p><strong>Quiescence detection</strong> is trivial: if <code>global_lbts = TICK_MAX</code> after
+a barrier, all partitions are idle and the simulation terminates.</p>
+<p><strong>Termination after primaries</strong>: when all registered primaries have
+signaled <code>primary_release()</code>, the barrier completion function checks
+<code>is_fully_quiescent()</code> (all incoming queues empty, all event queues
+drained) before terminating, ensuring in-flight cross-partition messages
+are fully delivered.</p>
+<p><strong>max_ticks</strong>: in multi-threaded mode, checked by the barrier completion
+function when <code>global_lbts &gt;= max_ticks</code>.</p>
+<h3 id="wall-clock-pacing">Wall-Clock Pacing<a class="headerlink" href="#wall-clock-pacing" title="Permanent link">&para;</a></h3>
+<p><code>PacingController</code> maintains a closed-loop mapping between wall-clock
+(real) time and simulation time, configured via <code>Config::wall_clock_ratio</code>:</p>
+<ul>
+<li><code>0.0</code> (default) - disabled, simulation runs as fast as possible</li>
+<li><code>1.0</code> - real-time (1 sim ns = 1 wall ns)</li>
+<li><code>2.0</code> - sim runs at 2x real speed</li>
+</ul>
+<p>The controller is a <strong>PI (Proportional-Integral) servo</strong> inspired by the
+LinuxPTP clock discipline (ptp4l/phc2sys), with a <strong>token bucket</strong> burst
+buffer for absorbing event clustering jitter.</p>
+<h4 id="three-state-machine">Three-State Machine<a class="headerlink" href="#three-state-machine" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>INIT</strong>: Collects initial samples to estimate drift. No PI correction.</li>
+<li><strong>TRACKING</strong>: PI loop active with base gains. Transitions to STABLE after
+  sustained low-offset operation.</li>
+<li><strong>STABLE</strong>: Tighter gains (proportional=0.05, integral=0.0005) for
+  reduced jitter in steady state.</li>
+</ul>
+<p>Large offsets (&gt; step_threshold, default 1ms) trigger a <strong>phase step</strong>:
+the anchor is reset and the integral accumulator is cleared, matching
+NTP/PTP step behavior for fast convergence from large initial offsets.</p>
+<h4 id="capabilities">Capabilities<a class="headerlink" href="#capabilities" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>PI-controlled throttling</strong> - after processing events, the controller
+   computes the offset between sim time and the wall-clock-projected target.
+   The PI loop produces a sleep duration that converges to zero steady-state
+   error (the I term eliminates systematic bias). The Nyquist-safe time
+   constant (1/proportional_gain ≈ 10 epochs, 5x margin over the 1-epoch
+   sampling interval)
+   ensures stability per NTP best practice.</li>
+<li><strong>Token bucket burst absorption</strong> - the sim can run up to <code>burst_ns</code>
+   (default 4ms) ahead of the target without throttling. This absorbs Linux
+   sleep granularity (~1-4ms) and bursty event processing.</li>
+<li><strong>Hybrid sleep+spin</strong> - coarse <code>sleep_for</code> for the bulk of the wait,
+   then a spin-wait for the final 500us for sub-millisecond precision.</li>
+<li><strong>Timestamp translation</strong> - <code>sim_tick_now()</code> converts wall time to a sim
+   tick for <code>schedule_event_now()</code>, giving externally injected events
+   realistic timestamps. Thread-safe via a seqlock (lock-free for readers).</li>
+<li><strong>Idle handling</strong> - <code>pause()</code> / <code>resume()</code> shift the wall anchor by the
+   exact idle duration using chrono integer arithmetic (no floating-point
+   rounding). The PI integral is preserved across idle periods to retain
+   the frequency estimate. No drift accumulation across idle/wake cycles.</li>
+<li><strong>Anti-windup</strong> - the integral term is clamped to zero when the sim is
+   behind, preventing runaway accumulation during sustained overload.</li>
+</ol>
+<h3 id="service-callbacks">Service Callbacks<a class="headerlink" href="#service-callbacks" title="Permanent link">&para;</a></h3>
+<p>The engine supports registering callbacks that run periodically. In
+single-threaded mode they run after each queue drain; in multi-threaded
+mode they run from partition 0 during GVT computation. Use these for
+periodic tasks like watchdog timers, statistics snapshots, or progress
+reporting.</p>
+<h3 id="exit-events">Exit Events<a class="headerlink" href="#exit-events" title="Permanent link">&para;</a></h3>
+<p>The simulation reports its termination reason through <code>ExitStatus</code>, a
+first-class value type.</p>
+<ul>
+<li><code>ExitReason::COMPLETED</code> - normal completion (all primaries done or
+  max_ticks reached)</li>
+<li><code>ExitReason::EXIT_REQUEST</code> - a component called <code>request_exit()</code></li>
+<li><code>ExitReason::INTERRUPTED</code> - external interrupt (ctrl-C, watchdog)</li>
+</ul>
+<p><code>SimulationEngine::run()</code> returns an <code>ExitStatus</code>. The exit event is
+also stored internally and accessible via <code>last_exit()</code> for callers that
+use <code>step()</code> mode.</p>
+<p><code>request_exit()</code> is thread-safe: it sets the exit event, flips the <code>done_</code>
+flag, and wakes all partition workers.</p>
+<h3 id="primary-component-protocol">Primary Component Protocol<a class="headerlink" href="#primary-component-protocol" title="Permanent link">&para;</a></h3>
+<p>The engine supports a consensus-based end-of-simulation protocol.
+Work-producing components register as "primaries" during <code>startup()</code>
+and signal when they are done:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// In startup():</span>
+<span class="n">engine</span><span class="p">()</span><span class="o">-&gt;</span><span class="n">register_as_primary</span><span class="p">();</span>
+
+<span class="c1">// When done producing work:</span>
+<span class="n">engine</span><span class="p">()</span><span class="o">-&gt;</span><span class="n">primary_release</span><span class="p">();</span>
+
+<span class="c1">// If new work arrives (re-arm):</span>
+<span class="n">engine</span><span class="p">()</span><span class="o">-&gt;</span><span class="n">primary_retain</span><span class="p">();</span>
+</code></pre></div>
+<p>The simulation ends gracefully when <strong>all</strong> registered primaries have
+called <code>primary_release()</code>. This is checked via a unified
+<code>check_termination()</code> helper alongside <code>max_ticks</code> and quiescence
+detection. The exit reason is <code>COMPLETED</code> with a descriptive message
+distinguishing the trigger.</p>
+<p>Primaries also suppress quiescence termination: if any primary is registered
+but has not yet signaled OK, the engine will not exit when the event queue
+is empty. In single-threaded mode, the worker blocks on a condition variable
+until an async event or shutdown arrives. In multi-threaded mode, the
+barrier continues cycling and <code>check_termination()</code> defers exit until all
+primaries signal done AND the system is fully quiescent.</p>
+<p>This complements <code>request_exit()</code>: primaries are the cooperative
+termination path (consensus); <code>request_exit()</code> is the unilateral force
+stop (emergency brake).</p>
+<h3 id="async-event-insertion">Async Event Insertion<a class="headerlink" href="#async-event-insertion" title="Permanent link">&para;</a></h3>
+<p><code>schedule_event_async()</code> allows any thread to inject events into a
+partition's queue safely. Events are buffered in a per-partition
+<code>AsyncQueue</code> (a mutex-protected vector) and drained into the partition's
+event queue at the next safe point:</p>
+<ul>
+<li>In <code>worker_loop</code> (single-threaded): after the queue empties</li>
+<li>In <code>worker_loop</code> (multi-threaded): at Phase 1 of each barrier epoch</li>
+<li>In <code>step()</code>: at the start of each call, before processing</li>
+</ul>
+<p>In multi-threaded mode, async event timestamps are floored at the global
+LBTS to ensure they are not placed before the already-committed safe time.</p>
+<p><code>schedule_event_now()</code> is the preferred API for external stimulus. It
+translates the current wall time to a simulation tick (via
+<code>PacingController::sim_tick_now()</code> when enabled, or uses <code>current_time_</code>
+when disabled), then calls <code>schedule_event_async()</code>. This gives externally
+injected events realistic timestamps instead of tick 0.</p>
+<h3 id="interactive-stepping-step">Interactive Stepping (<code>step()</code>)<a class="headerlink" href="#interactive-stepping-step" title="Permanent link">&para;</a></h3>
+<p>For GUI, debugger, or test harness use. Single-threaded only. On the first
+call, starts all components (initialization happens in <code>create()</code>). Each
+subsequent call drains async events and advances to the next event time,
+processing all events at that timestamp. Ticks without scheduled events
+are skipped. Returns true if the simulation can continue. If the queue is
+empty but primaries are registered, returns true so the caller can poll.</p>
+<hr />
+<h3 id="engine-lifecycle">Engine Lifecycle<a class="headerlink" href="#engine-lifecycle" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="n">SimulationEngine</span><span class="w"> </span><span class="nf">engine</span><span class="p">({.</span><span class="n">max_ticks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10000</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">num_threads</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">});</span>
+<span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">set_root</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">my_model</span><span class="p">));</span>
+<span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">add_link</span><span class="p">(</span><span class="n">src_port</span><span class="p">,</span><span class="w"> </span><span class="n">dst_port</span><span class="p">,</span><span class="w"> </span><span class="n">latency</span><span class="p">);</span>
+<span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">partition_balanced</span><span class="p">(</span><span class="mi">4</span><span class="p">);</span>
+<span class="n">engine</span><span class="p">.</span><span class="n">create</span><span class="p">();</span><span class="w">       </span><span class="c1">// validates partitions, initializes components</span>
+<span class="c1">// (user enqueues work via CP)</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">exit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">engine</span><span class="p">.</span><span class="n">run</span><span class="p">();</span><span class="w">   </span><span class="c1">// starts up components, runs to completion</span>
+<span class="n">engine</span><span class="p">.</span><span class="n">shutdown</span><span class="p">();</span><span class="w">    </span><span class="c1">// called automatically by destructor if needed</span>
+</code></pre></div>
+<p>For multi-threaded engines, callers select a partition policy before
+<code>create()</code>. <code>create()</code> validates the selected partitions and calls
+<code>initialize()</code> on all components. <code>run()</code> calls <code>startup()</code> on all components
+and enters the event loop. <code>shutdown()</code> is called automatically by the
+destructor if the engine is still built.</p>
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
+<p>[1] R. M. Fujimoto, <em>Parallel and Distributed Simulation Systems</em>,
+    Wiley-Interscience, 2000.</p>
+<p>[2] K. M. Chandy and J. Misra, "Distributed Simulation: A Case Study in
+    Design and Verification of Distributed Programs," <em>IEEE Transactions on
+    Software Engineering</em>, vol. SE-5, no. 5, pp. 440-452, 1979.</p>
+<p>[3] R. E. Bryant, "Simulation of Packet Communication Architecture Computer
+    Systems," MIT-LCS-TR-188, Massachusetts Institute of Technology, 1977.</p>
+<p>[4] G. Sugiyama and K. Misue, "Visualization of Structural Information:
+    Automatic Drawing of Compound Digraphs," <em>IEEE Transactions on Systems,
+    Man, and Cybernetics</em>, vol. 21, no. 4, pp. 876-892, 1991.</p>
+<p>[5] F. Mattern, "Efficient Algorithms for Distributed Snapshots and Global
+    Virtual Time Approximation," <em>Journal of Parallel and Distributed
+    Computing</em>, vol. 18, no. 4, pp. 423-434, 1993.</p>
+<p>[6] C. M. Fiduccia and R. M. Mattheyses, "A Linear-Time Heuristic for
+    Improving Network Partitions," in <em>Proceedings of the 19th Design
+    Automation Conference</em>, pp. 175-181, 1982.</p>
+<p>[7] G. Karypis and V. Kumar, "A Fast and High Quality Multilevel Scheme for
+    Partitioning Irregular Graphs," <em>SIAM Journal on Scientific Computing</em>,
+    vol. 20, no. 1, pp. 359-392, 1998.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025–2026 Advanced Micro Devices, Inc.<br> <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/LICENSE.md">MIT License</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" target="_blank" rel="noopener" title="Rocjitsu on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/issues" target="_blank" rel="noopener" title="Report an issue" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 8h-2.81c-.45-.8-1.07-1.5-1.82-2L17 4.41 15.59 3l-2.17 2.17a6 6 0 0 0-2.83 0L8.41 3 7 4.41 8.62 6c-.75.5-1.36 1.21-1.81 2H4v2h2.09c-.06.33-.09.66-.09 1v1H4v2h2v1c0 .34.03.67.09 1H4v2h2.81A5.99 5.99 0 0 0 15 20.18c.91-.52 1.67-1.28 2.19-2.18H20v-2h-2.09c.06-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.03-.67-.09-1H20zm-4 7a4 4 0 0 1-4 4 4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4 4 4 0 0 1 4 4zm-2-5v2h-4v-2zm-4 4h4v2h-4z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.tracking", "toc.follow", "content.code.copy", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../assets/repository-stats.js"></script>
+      
+    
+  </body>
+</html>

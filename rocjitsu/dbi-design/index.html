@@ -1,0 +1,2813 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User and developer documentation for the ROCm Just-in-Time Suite.">
+      
+      
+      
+        <link rel="canonical" href="https://rocm.github.io/rocm-systems/rocjitsu/dbi-design/">
+      
+      
+        <link rel="prev" href="../rocjitsu_dbt_guest/">
+      
+      
+        <link rel="next" href="../dbi-overview/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Binary instrumentation - Rocjitsu</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../assets/handbook.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#dbi-design-document" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Rocjitsu" class="md-header__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Rocjitsu
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Binary instrumentation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Rocjitsu" class="md-nav__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Rocjitsu
+  </label>
+  
+    <div class="md-nav__source">
+      
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 21.5c-1.35-.85-3.8-1.5-5.5-1.5-1.65 0-3.35.3-4.75 1.05-.1.05-.15.05-.25.05-.25 0-.5-.25-.5-.5V6c.6-.45 1.25-.75 2-1 1.11-.35 2.33-.5 3.5-.5 1.95 0 4.05.4 5.5 1.5 1.45-1.1 3.55-1.5 5.5-1.5 1.17 0 2.39.15 3.5.5.75.25 1.4.55 2 1v14.6c0 .25-.25.5-.5.5-.1 0-.15 0-.25-.05-1.4-.75-3.1-1.05-4.75-1.05-1.7 0-4.15.65-5.5 1.5M12 8v11.5c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5V7c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5m1 3.5c1.11-.68 2.6-1 4.5-1 .91 0 1.76.09 2.5.28V9.23c-.87-.15-1.71-.23-2.5-.23q-2.655 0-4.5.84zm4.5.17c-1.71 0-3.21.26-4.5.79v1.69c1.11-.65 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24v-1.5c-.87-.16-1.71-.23-2.5-.23m2.5 2.9c-.87-.16-1.71-.24-2.5-.24-1.83 0-3.33.27-4.5.8v1.69c1.11-.66 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command-line interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../race-detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Race detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocgdb-debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qemu-vfio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QEMU VFIO-user compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vulkan-compute/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vulkan compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-2-2 2 2 0 0 0 2-2V5h2V3m6 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5h-2V3z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../style/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code style
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simdojo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vm-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU hardware model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbt-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary translation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rj_dbt_translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translation tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu_dbt_guest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DBT guest mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary instrumentation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary instrumentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#instrumentor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instrumentor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Instrumentor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline stages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#responsibilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Responsibilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#key-design-constraint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key design constraint
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trampolinebuilder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TrampolineBuilder
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TrampolineBuilder">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#spill-bracket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Spill bracket
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-handles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it handles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-does-not-handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does NOT handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shared-sopp-branch-math" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared SOPP branch math
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validators" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validators
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Validators">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#is_relocatable_anchoranchor-anchor_offset-text_bytes-arch-error_out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_relocatable_anchor(anchor, anchor_offset, text_bytes, arch, error_out)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validate_anchoranchor-anchor_offset-text_bytes-pt-arch-error_out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_anchor(anchor, anchor_offset, text_bytes, pt, arch, error_out)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validate_inline_nop_planplan-error_out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_inline_nop_plan(plan, error_out)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Types
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#supporting-modules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supporting Modules
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Supporting Modules">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Code Object Patcher (code/patch/code_object_patcher.h) [shared with DBT]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#instruction-builder-codebuildersinstruction_builderh-shared-with-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instruction Builder (code/builders/instruction_builder.h) [shared with DBT]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#spill-builders-codebuildersspill_buildersh-dbi-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Spill Builders (code/builders/spill_builders.h) [DBI-only]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vector-builders-codebuildersvector_buildersh-dbi-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vector Builders (code/builders/vector_builders.h) [DBI-only]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scalar-memory-builders-codebuilderssmem_buildersh-dbi-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scalar Memory Builders (code/builders/smem_builders.h) [DBI-only]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kernel-descriptor-scan-codekernel_descriptor_scanh-shared-with-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernel Descriptor Scan (code/kernel_descriptor_scan.h) [shared with DBT]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#register-liveness-analysis-shared-with-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Register Liveness Analysis [shared with DBT]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Register Liveness Analysis [shared with DBT]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-tracks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it tracks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-does-not-track" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does NOT track
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#special-state-exec-vcc-scc-m0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Special state (EXEC / VCC / SCC / M0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#probe-live-ins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Probe Live-Ins
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#spillmanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SpillManager
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SpillManager">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#responsibilities_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Responsibilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it is not
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#public-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public API
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#registerref-registerset-shared-with-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RegisterRef / RegisterSet [shared with DBT]
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#instrumentation-flow-inline-nop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instrumentation Flow (inline-nop)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#instrumentation-flow-probe-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instrumentation Flow (probe-call)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Instrumentation Flow (probe-call)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mask-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mask policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#probe-arguments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Probe arguments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#register-requirement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Register requirement
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instrumentation overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codegen/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA code generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-target-providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA target providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-gap-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA gap audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../npi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-instructions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous MMA execution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mma-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MMA lookahead admission
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concurrent-dispatch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrent dispatch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-counter-coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait coverage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 18H4V8h16m0-2h-8l-2-2H4c-1.11 0-2 .89-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+    
+  
+  
+    <li class="md-nav__item">
+      <a href="../blog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#instrumentor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instrumentor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Instrumentor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline stages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#responsibilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Responsibilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#key-design-constraint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key design constraint
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trampolinebuilder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TrampolineBuilder
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TrampolineBuilder">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#spill-bracket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Spill bracket
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-handles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it handles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-does-not-handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does NOT handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shared-sopp-branch-math" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared SOPP branch math
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validators" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validators
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Validators">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#is_relocatable_anchoranchor-anchor_offset-text_bytes-arch-error_out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_relocatable_anchor(anchor, anchor_offset, text_bytes, arch, error_out)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validate_anchoranchor-anchor_offset-text_bytes-pt-arch-error_out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_anchor(anchor, anchor_offset, text_bytes, pt, arch, error_out)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validate_inline_nop_planplan-error_out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_inline_nop_plan(plan, error_out)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Types
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#supporting-modules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supporting Modules
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Supporting Modules">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Code Object Patcher (code/patch/code_object_patcher.h) [shared with DBT]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#instruction-builder-codebuildersinstruction_builderh-shared-with-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instruction Builder (code/builders/instruction_builder.h) [shared with DBT]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#spill-builders-codebuildersspill_buildersh-dbi-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Spill Builders (code/builders/spill_builders.h) [DBI-only]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vector-builders-codebuildersvector_buildersh-dbi-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vector Builders (code/builders/vector_builders.h) [DBI-only]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scalar-memory-builders-codebuilderssmem_buildersh-dbi-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scalar Memory Builders (code/builders/smem_builders.h) [DBI-only]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kernel-descriptor-scan-codekernel_descriptor_scanh-shared-with-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernel Descriptor Scan (code/kernel_descriptor_scan.h) [shared with DBT]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#register-liveness-analysis-shared-with-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Register Liveness Analysis [shared with DBT]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Register Liveness Analysis [shared with DBT]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-tracks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it tracks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-does-not-track" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does NOT track
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#special-state-exec-vcc-scc-m0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Special state (EXEC / VCC / SCC / M0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#probe-live-ins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Probe Live-Ins
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#spillmanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SpillManager
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SpillManager">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#responsibilities_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Responsibilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it is not
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#public-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public API
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#registerref-registerset-shared-with-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RegisterRef / RegisterSet [shared with DBT]
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#instrumentation-flow-inline-nop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instrumentation Flow (inline-nop)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#instrumentation-flow-probe-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instrumentation Flow (probe-call)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Instrumentation Flow (probe-call)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mask-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mask policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#probe-arguments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Probe arguments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#register-requirement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Register requirement
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="dbi-design-document"><span class="twemoji" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg></span> DBI Design Document<a class="headerlink" href="#dbi-design-document" title="Permanent link">&para;</a></h1>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>The Dynamic Binary Instrumentation (DBI) system patches AMDGPU HSA code objects in-place, before they are loaded into device memory, to inject code at chosen anchor instructions. Patched code objects can be loaded by either the simulated KMD (<code>SimulatedDriver</code>) or — eventually — by real ROCR via the HSA tools layer (<code>HSA_TOOLS_LIB=librocjitsu_hooks.so</code>). DBI itself is target-agnostic at the layer boundary; most per-ISA differences are confined to the instruction/spill builders and decoder, but a few arch predicates (<code>max_scratch_offset_bytes</code>, <code>descriptor_vgpr_granularity_for_wavefront</code>, <code>arch_has_accvgpr</code>, <code>arch_has_unified_vgpr_allocation</code>) live in the orchestrator.</p>
+<p>This document describes the DBI subsystem as currently implemented. Two end-to-end trampoline shapes are in tree: the original <em>inline-nop</em> trampoline, and a <em>probe call</em> that invokes a copied no-op probe body (<code>rj_nop_probe</code>) via <code>s_swappc_b64</code> before the relocated original. Multiple instrumentation points per code object are supported. <strong>Register spilling is implemented</strong>: registers that are both live at the anchor and clobbered by instrumentation are saved to a reserved per-lane scratch "DBI spill zone" before the probe call and restored after — VGPRs directly, SGPRs through a bridge VGPR (<code>v_writelane</code>/<code>v_readlane</code>), and AccVGPRs directly via the CDNA scratch <code>acc</code> bit. EXEC/VCC/M0 that a probe clobbers are preserved in dead SGPRs, and EXEC is forced to <code>-1</code> (full mask) around the spill store/load so all lanes round-trip. <strong>Probes can take arguments and can choose their mask</strong>: a point carries a list of argument dwords, each either a build-time constant or the guest's <code>EXEC</code> at the anchor, and <code>force_full_exec</code> runs the body with every lane enabled instead of under the guest's mask. End-to-end scope is <strong>CDNA3, CDNA4, and RDNA4</strong> (sim-validated); RDNA2/3/3.5 and CDNA1/2 are deferred. Still future work: per-site failure tolerance, predicate-based anchor selection, <code>AfterInst</code> / <code>BlockEntry</code> / <code>BlockExit</code> kinds, layout/negotiation between the builder and the orchestrator, <strong>automatic SGPR-count growth</strong> so the probe's link pair is always granted (see <a href="#instrumentation-flow-probe-call">Probe-call register requirement</a>), enabling scratch from zero, HWREG (MODE) preservation, and precise EXEC/VCC/M0 liveness (their clobbers are detected but their liveness is not tracked, so preservation is conservative — see <a href="#register-liveness-analysis-shared-with-dbt">Register Liveness</a>).</p>
+<hr />
+<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────────────────────────────────────────┐
+│  Instrumentor                                                    │
+│  Orchestration: collect points, validate, plan, build, splice    │
+│                                                                  │
+│  ┌────────────────────────┐  ┌─────────────────────────────────┐ │
+│  │  Validators            │  │  Trampoline planning            │ │
+│  │  - is_relocatable_     │  │  - make_trampoline_plan()       │ │
+│  │    anchor() (structural│  │  - validate_inline_nop_plan()   │ │
+│  │  - validate_anchor()   │  │    (milestone guardrail)        │ │
+│  │    (+ milestone rules) │  │                                 │ │
+│  └────────────────────────┘  └─────────────────────────────────┘ │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────────┐│
+│  │  TrampolineBuilder                                           ││
+│  │  Plan → bytes: patched anchor word + trampoline body words   ││
+│  └──────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────────┐│
+│  │  CodeObjectPatcher                                           ││
+│  │  ELF mutation: splice + grow .text with trampoline cave, emit││
+│  └──────────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+<p>The orchestrator owns the multi-stage pipeline. All per-site validation and builder output is <em>preflighted</em> before the patcher mutates anything — a late failure (e.g. branch-range overflow) cannot leak a half-built ELF.</p>
+<hr />
+<h2 id="instrumentor">Instrumentor<a class="headerlink" href="#instrumentor" title="Permanent link">&para;</a></h2>
+<p><strong>Files:</strong> <code>code/patch/instrumentor.h</code>, <code>code/patch/instrumentor.cpp</code></p>
+<p>The Instrumentor is the top-level orchestrator. Callers queue <code>InstrumentationPoint</code>s (requests) and then invoke <code>patch()</code>. The orchestrator runs the pipeline: validate each anchor, plan a trampoline per site, build it, then mutate the ELF.</p>
+<h3 id="pipeline-stages">Pipeline stages<a class="headerlink" href="#pipeline-stages" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>InstrumentationPoint        -- request: "instrument here, with this body"
+      |  validate_points()
+      v
+ResolvedInstrumentationSite -- one validated anchor + snapshot of the
+      |                        original bytes (captured before mutation)
+      |  make_trampoline_plan() + TrampolineBuilder::build()
+      v
+(preflight: per-site plan + built bytes, accumulated locally)
+      |  splice anchors + append trampoline caves into .text + emit()
+      v
+InstrumentedCodeObject      -- patched ELF + diagnostics
+</code></pre></div>
+<h3 id="responsibilities">Responsibilities<a class="headerlink" href="#responsibilities" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Lazy CFG construction: blocks are decoded on the first call that needs them via <code>Decoder::create(arch)</code> + <code>BasicBlock::build(obj, *decoder)</code>. Decoder creation failure (RV32I/RV64I/INVALID) surfaces as a structured <code>ValidationResult</code> / <code>InstrumentedCodeObject</code> error, not a crash.</li>
+<li><code>validate_points()</code> looks up the decoded <code>Instruction</code> at each requested <code>anchor_offset</code> and runs <code>validate_anchor()</code>. All-or-nothing today: any per-site failure empties <code>sites</code> and reports diagnostics in <code>errors</code>.</li>
+<li><code>patch()</code> runs validation, then per-site <code>make_trampoline_plan()</code> + <code>TrampolineBuilder::build()</code> as preflight. Only after every site succeeds does it splice patched anchor bytes into a local <code>.text</code> copy, <code>append_words()</code> each trampoline after the original bytes as a local code cave, and grow the section in one <code>replace_text()</code> call. Returns <code>InstrumentedCodeObject{elf_bytes, errors, warnings}</code>.</li>
+<li><code>patch_with_debug_summaries()</code> is a test/debug entry point returning <code>InstrumentedCodeObjectDebug</code> (extends <code>InstrumentedCodeObject</code> with per-site <code>InstrumentationPatch</code> summaries — schema unstable; production callers should prefer <code>patch()</code> and recover per-site info from a fresh disassembly).</li>
+<li>Single-attempt: both entry points share one budget. After <code>patched_ = true</code>, subsequent calls return a fatal error. Recoverable errors require constructing a new Instrumentor.</li>
+</ul>
+<h3 id="current-scope">Current scope<a class="headerlink" href="#current-scope" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Multiple queued <code>InstrumentationPoint</code>s per <code>patch()</code> call are supported; sites sharing the same <code>(probe_obj, probe_symbol)</code> reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.</li>
+<li>Single <code>.text</code> section (multi-text is fatal).</li>
+<li><code>BeforeInst</code> kind only (other kinds are fatal).</li>
+<li><code>probe_obj</code> + <code>probe_symbol</code> are <strong>consumed</strong>: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.</li>
+<li><code>filter_flags</code> is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. <code>force_full_exec</code> is consumed (see <a href="#mask-policy">Mask policy</a>); it is rejected only on an inline-nop site, which has no call envelope whose mask could be widened.</li>
+<li>Probe calls require the probe body to read no register its ABI does not supply (<code>analyze_probe_live_ins</code>, see <a href="#probe-live-ins">Probe live-ins</a>). Under <code>AmdGpuFuncReturnS30S31</code> that is the link pair plus the declared argument VGPRs; any other input is fatal.</li>
+<li>Probe calls may pass 32-bit arguments via <code>InstrumentationPoint::probe_args</code>, delivered in VGPRs from <code>v0</code>. Each names a <code>ProbeArgSource</code>: a build-time constant, or a dword of the anchor <code>EXEC</code> mask. The count and the sources are declared by the caller and verified against the body; see <a href="#probe-arguments">Probe arguments</a>.</li>
+<li>Probe calls require the probe's link pair (<code>s[30:31]</code> for <code>rj_nop_probe</code>) and any chosen scratch/special-state temps to be within the kernel's SGPR allocation (bounded by <code>kernel_sgpr_count</code>); auto-growing the SGPR count is not yet implemented (see <a href="#instrumentation-flow-probe-call">Probe-call register requirement</a>).</li>
+<li>Register spilling is enabled for <code>spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)</code>. The orchestrator scans the kernel descriptor (<code>scan_kernel_descriptors</code>), builds one <code>SpillManager</code> from its <code>private_segment_fixed_size</code>, splits the spill set by class, and calls <code>plan_vgpr_spills</code> / <code>plan_sgpr_spills</code> / <code>plan_acc_spills</code>. Spilling is gated per-arch by <code>max_scratch_offset_bytes()</code> (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no <code>SpillPolicy</code> enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.</li>
+</ul>
+<h3 id="key-design-constraint">Key design constraint<a class="headerlink" href="#key-design-constraint" title="Permanent link">&para;</a></h3>
+<p>The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPatcher do not. Milestone-scoped restrictions live at the orchestrator boundary: reserved-field rejections in <code>validate_anchor()</code>, the <code>validate_inline_nop_plan()</code> shape check on the inline-nop path, the arch/scratch spill gating on the probe-call path (<code>max_scratch_offset_bytes</code> + the fail-closed <code>plan_*_spills</code> helpers, plus the single-kernel and nonzero-scratch checks), the probe live-in gate in <code>resolve_points()</code>, and the multi-text rejection at the top of <code>patch()</code>. The builder accepts any well-formed plan and the patcher accepts any well-formed mutation request.</p>
+<hr />
+<h2 id="trampolinebuilder">TrampolineBuilder<a class="headerlink" href="#trampolinebuilder" title="Permanent link">&para;</a></h2>
+<p><strong>Files:</strong> <code>code/patch/trampoline_builder.h</code>, <code>code/patch/trampoline_builder.cpp</code></p>
+<p>Generic byte emitter. Takes a <code>TrampolinePlan</code> and returns <code>TrampolineBytes{patched_anchor_bytes, trampoline_words}</code>. Knows nothing about <code>InstrumentationPoint</code>s or milestones. It emits two body shapes: the inline-nop body, and the probe-call envelope wrapped around the relocated original. <code>plan_probe_call()</code> selects the link/target SGPR pairs, the SCC temp, and any special-state (EXEC/VCC/M0) and SGPR-bridge temps, and reports <code>builder_clobbers</code>; <code>emit_probe_call()</code> lowers the chosen plan to bytes.</p>
+<p>The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (<code>s_mov</code> EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR) and SCC save; the <strong>spill prologue</strong> (see below); the <code>s_getpc_b64</code> + 64-bit add chain that materializes the copied probe body's address; <code>s_swappc_b64</code> to it; then after the call a <code>build_wait_all_loads_complete()</code> drain (so the probe's own in-flight loads finish before the restores and host resume), the SCC restore, the <strong>spill epilogue</strong>, and the special-state restores, before the relocated original.</p>
+<h3 id="spill-bracket">Spill bracket<a class="headerlink" href="#spill-bracket" title="Permanent link">&para;</a></h3>
+<p><code>build_spill_bracket()</code> produces the prologue (saves) and epilogue (restores) that wrap the call:</p>
+<ul>
+<li><strong>VGPRs</strong> — a direct <code>build_scratch_store_dword</code> in the prologue, <code>build_scratch_load_dword</code> in the epilogue.</li>
+<li><strong>AccVGPRs</strong> — the same builders with <code>acc=true</code> (CDNA scratch <code>acc</code> bit), addressing the accumulator file directly; no bridge. CDNA-only.</li>
+<li><strong>SGPRs</strong> — bridged through one VGPR (<code>plan.spill_bridge_vgpr</code>): <code>v_writelane</code> then a scratch store in the prologue; a scratch load, load-wait, then <code>v_readlane</code> in the epilogue. The single bridge is reused, so each SGPR restore is its own load/wait/readlane.</li>
+<li><strong>Waits/drains</strong> — <code>build_wait_stores_complete</code> drains the stores before the call (a WAR guard on the source registers, and on RDNA4 orders each store ahead of its reload, since RDNA4 tracks stores on STORECNT which <code>s_wait_loadcnt</code> misses); <code>build_wait_loads_complete</code> guards the reloads. The in-flight-load drains that bracket the whole envelope are emitted by <code>emit_probe_call</code> (so they also cover no-spill sites), not by the bracket.</li>
+<li><strong>EXEC full-mask</strong> — when the site spills or passes arguments, <code>emit_probe_call</code> forces <code>EXEC = -1</code> around the spill store and load so lanes inactive at the anchor still round-trip, restoring the anchor mask before the <code>s_swappc</code> (so the probe runs under the real mask) and re-widening before the reloads. Under <code>force_full_exec</code> the pre-call restore is dropped and the window stays open across the call.</li>
+</ul>
+<p>Per-arch specifics (scratch encodings, waitcnt split) live in <code>code/builders/spill_builders.h</code>; the bracket logic itself is arch-generic.</p>
+<h3 id="what-it-handles">What it handles<a class="headerlink" href="#what-it-handles" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Encoding the forward <code>s_branch</code> that goes into the anchor slot, pointing at the trampoline's first word.</li>
+<li>Emitting the trampoline body in order: <code>before_items</code> (each an <code>InlineAsmItem</code> containing one or more pre-encoded words), then the relocated original instruction words (when <code>emit_original</code>), then <code>after_items</code>, then the return <code>s_branch</code> back to <code>anchor_offset + original_size</code>.</li>
+<li>Plan well-formedness: <code>original_size</code> ∈ {4, 8}, <code>original_words.size() * sizeof(uint32_t) == original_size</code>, branch reach fits in SOPP <code>simm16</code>.</li>
+<li>Architecture awareness — SOPP encoding format is uniform across AMDGPU but opcodes differ (e.g. <code>s_branch</code> is opcode 2 on GFX9/CDNA, opcode 32 on GFX12/RDNA4). All opcode selection goes through <code>instruction_builder.h</code> helpers.</li>
+</ul>
+<h3 id="what-it-does-not-handle">What it does NOT handle<a class="headerlink" href="#what-it-does-not-handle" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Validating the <em>intent</em> of the plan (e.g. that it's a canonical inline-nop body). That's the orchestrator's <code>validate_inline_nop_plan()</code> job.</li>
+<li>Choosing the trampoline offset — the caller picks <code>trampoline_offset</code> in the plan.</li>
+<li>Mutating any ELF state — output is just bytes.</li>
+</ul>
+<h3 id="shared-sopp-branch-math">Shared SOPP branch math<a class="headerlink" href="#shared-sopp-branch-math" title="Permanent link">&para;</a></h3>
+<p><code>compute_sopp_branch_simm16(branch_pc, target)</code> in <code>instruction_builder.h</code> is the single source of truth for the AMDGPU branch encoding <code>(target - (branch_pc + 4)) / 4</code>. Used by both the trampoline builder and the DBT code-cave path.</p>
+<hr />
+<h2 id="validators">Validators<a class="headerlink" href="#validators" title="Permanent link">&para;</a></h2>
+<p>Three validators sit at the orchestrator boundary, separated so each can evolve independently.</p>
+<h3 id="is_relocatable_anchoranchor-anchor_offset-text_bytes-arch-error_out"><code>is_relocatable_anchor(anchor, anchor_offset, text_bytes, arch, error_out)</code><a class="headerlink" href="#is_relocatable_anchoranchor-anchor_offset-text_bytes-arch-error_out" title="Permanent link">&para;</a></h3>
+<p>Pure predicate over the anchor instruction and its position. Permanent structural checks only — no <code>InstrumentationPoint</code> involvement. Reusable by future predicate-based anchor selection (Instrumentor walks blocks and filters candidates) without inheriting milestone noise.</p>
+<p>Rules enforced:</p>
+<ul>
+<li><code>anchor_offset</code> is dword aligned.</li>
+<li><code>anchor.size()</code> is 4 or 8 and fits inside <code>text_bytes</code> (subtraction-based bounds check; resists overflow when <code>anchor_offset</code> is huge).</li>
+<li><code>anchor.raw_encoding()</code> is non-null.</li>
+<li><code>anchor</code> is not a branch / cond branch / indirect branch / indirect call / program terminator, and <code>branch_offset_bytes()</code> is <code>nullopt</code>.</li>
+<li><code>anchor.mnemonic()</code> is not on the small PC-relative denylist (<code>s_getpc_b64</code>, <code>s_call_b64</code>, <code>s_setpc_b64</code>, <code>s_swappc_b64</code>, <code>s_rfe_*</code>) — these may not surface as flag bits on every ISA.</li>
+</ul>
+<p><code>arch</code> is accepted now so a future ISA-specific denylist can grow without an API change.</p>
+<h3 id="validate_anchoranchor-anchor_offset-text_bytes-pt-arch-error_out"><code>validate_anchor(anchor, anchor_offset, text_bytes, pt, arch, error_out)</code><a class="headerlink" href="#validate_anchoranchor-anchor_offset-text_bytes-pt-arch-error_out" title="Permanent link">&para;</a></h3>
+<p>Combines <code>is_relocatable_anchor()</code> with milestone-scoped policy checks against <code>pt</code>: <code>filter_flags</code> is zero, <code>kind</code> is <code>BeforeInst</code>, and neither <code>probe_args</code> nor <code>force_full_exec</code> is set without a probe. The <code>probe_obj</code>/<code>probe_symbol</code> pair is consumed (not rejected): consistency (both set or both empty) and symbol resolution happen during point resolution. On success returns a <code>ResolvedInstrumentationSite</code> with the captured anchor snapshot (offset, size, original bytes, mnemonic, kind, and the resolved probe index when this is a probe call).</p>
+<h3 id="validate_inline_nop_planplan-error_out"><code>validate_inline_nop_plan(plan, error_out)</code><a class="headerlink" href="#validate_inline_nop_planplan-error_out" title="Permanent link">&para;</a></h3>
+<p>Defense-in-depth check that the orchestrator-produced <code>TrampolinePlan</code> matches the canonical inline-nop shape: exactly one <code>before_items</code> entry containing <code>s_nop 0</code>, empty <code>after_items</code>, <code>emit_original == true</code>. Lives at the orchestrator boundary rather than inside the builder so the builder stays generic. Deleted once arbitrary inline-asm bodies are supported.</p>
+<hr />
+<h2 id="data-types">Data Types<a class="headerlink" href="#data-types" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Stage</th>
+<th>Carries</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>InstrumentationPoint</code></td>
+<td>request</td>
+<td><code>anchor_offset</code>, <code>kind</code>, <code>probe_obj</code>, <code>probe_symbol</code>, <code>probe_args</code>, <code>force_full_exec</code>, reserved <code>filter_flags</code></td>
+</tr>
+<tr>
+<td><code>ResolvedInstrumentationSite</code></td>
+<td>post-validation</td>
+<td><code>anchor_offset</code>, <code>original_size</code>, <code>original_bytes</code>, <code>mnemonic</code>, <code>kind</code>, <code>probe_index</code> (set for probe calls), <code>probe_args</code></td>
+</tr>
+<tr>
+<td><code>ProbeCallable</code></td>
+<td>probe registry</td>
+<td>resolved probe <code>symbol</code>, <code>arch</code>, verified <code>ProbeAbi</code>, <code>body_words</code>, declared <code>arg_sources</code> and <code>force_full_exec</code>, <code>output_text_offset</code></td>
+</tr>
+<tr>
+<td><code>TrampolinePlan</code></td>
+<td>builder input</td>
+<td><code>arch</code>, <code>anchor_offset</code>, <code>original_size</code>, <code>original_words</code>, <code>trampoline_offset</code>, <code>return_target</code>, <code>before_items</code>, <code>after_items</code>, <code>emit_original</code>, <code>kernel_sgpr_count</code>; probe-call: <code>is_probe_call</code>, <code>probe_target_offset</code>, <code>link_pair_base</code>, <code>arg_vgpr_base</code>, <code>probe_args</code>, <code>force_full_exec</code>, <code>target_pair_base</code>, <code>scc_temp</code>, <code>preserve_scc</code>, <code>preserve_exec</code>, <code>preserve_vcc</code>, <code>preserve_m0</code>, <code>special_state_saves</code>, <code>vgpr_spills</code>, <code>sgpr_spills</code>, <code>acc_spills</code>, <code>spill_bridge_vgpr</code>, <code>before_word_count</code>, <code>builder_clobbers</code></td>
+</tr>
+<tr>
+<td><code>TrampolineBytes</code></td>
+<td>builder output</td>
+<td><code>patched_anchor_bytes</code>, <code>trampoline_words</code></td>
+</tr>
+<tr>
+<td><code>InstrumentationPatch</code></td>
+<td>per-site summary (test/debug)</td>
+<td><code>anchor_offset</code>, <code>original_size</code>, <code>trampoline_offset</code>, <code>return_target</code>, <code>original_bytes</code>, <code>patched_anchor_bytes</code>; probe-call: <code>is_probe_call</code>, <code>probe_symbol</code>, <code>probe_target_offset</code>, <code>link_pair_base</code>, <code>target_pair_base</code></td>
+</tr>
+<tr>
+<td><code>InstrumentedCodeObject</code></td>
+<td><code>patch()</code> output</td>
+<td><code>elf_bytes</code>, <code>errors</code>, <code>warnings</code></td>
+</tr>
+<tr>
+<td><code>InstrumentedCodeObjectDebug</code></td>
+<td><code>patch_with_debug_summaries()</code> output</td>
+<td><code>InstrumentedCodeObject</code> + <code>patches</code></td>
+</tr>
+</tbody>
+</table>
+<p>The intermediate site/plan types are expected to thicken as the framework grows (e.g. <code>ResolvedInstrumentationSite</code> likely gains an ordered list of bodies once multi-point coalescing lands; a layout/negotiation stage will appear between planning and splicing).</p>
+<hr />
+<h2 id="supporting-modules">Supporting Modules<a class="headerlink" href="#supporting-modules" title="Permanent link">&para;</a></h2>
+<h3 id="code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt">Code Object Patcher (<code>code/patch/code_object_patcher.h</code>) [shared with DBT]<a class="headerlink" href="#code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt" title="Permanent link">&para;</a></h3>
+<p>Owns ELF-level mutations. The DBI orchestrator reads the original payload via <code>text_bytes()</code>, assembles the new <code>.text</code> locally (each anchor spliced in place, then every trampoline appended after the original bytes with <code>append_words()</code>), and applies it with a single <code>replace_text()</code> before <code>emit()</code> returns the patched ELF buffer. When a site spills, the orchestrator also calls <code>set_private_segment_fixed_size(descriptor_file_offset, SpillManager::total_private_bytes())</code> to grow the kernel's scratch reservation to cover the DBI spill zone before <code>replace_text</code>. The patcher accepts any well-formed mutation request; layout decisions stay in the orchestrator. Trampolines live inside <code>.text</code> as a local code cave (the same layout DBT uses) rather than a separate section, so cave offsets are plain <code>.text</code>-relative bytes in <code>[text_size, text_size + cave_bytes)</code>.</p>
+<h3 id="instruction-builder-codebuildersinstruction_builderh-shared-with-dbt">Instruction Builder (<code>code/builders/instruction_builder.h</code>) [shared with DBT]<a class="headerlink" href="#instruction-builder-codebuildersinstruction_builderh-shared-with-dbt" title="Permanent link">&para;</a></h3>
+<p>ISA-parameterized helpers for encoding common instructions (<code>s_branch</code>, <code>s_nop</code>, <code>s_mov_b32</code>/<code>s_mov_b64</code>, <code>s_cselect_b32</code>, <code>s_getpc_b64</code>, <code>s_swappc_b64</code>, etc.) and the SOPP branch math (<code>compute_sopp_branch_simm16</code>). Used by both the trampoline builder and the DBT code-cave path. SOPP format is identical across AMDGPU generations but opcodes differ; always go through these helpers, never hardcode opcodes. (Moved from <code>code/patch/</code> to <code>code/builders/</code> alongside <code>spill_builders.h</code>.)</p>
+<h3 id="spill-builders-codebuildersspill_buildersh-dbi-only">Spill Builders (<code>code/builders/spill_builders.h</code>) [DBI-only]<a class="headerlink" href="#spill-builders-codebuildersspill_buildersh-dbi-only" title="Permanent link">&para;</a></h3>
+<p>Multi-word, generation-specific encoders for the spill bracket, split out from the scalar helpers because their prefixes/opcodes move by ISA and they return variable-length word lists. Not shared with DBT (which emits scratch through its own target-specific path):</p>
+<ul>
+<li><code>build_scratch_store_dword</code> / <code>build_scratch_load_dword</code> — per-lane scratch store/load. CDNA3/CDNA4 use the gfx9 FLAT <code>seg=SCRATCH</code> encoding (2 words, 13-bit signed offset, <code>lds</code>=0); RDNA4 uses the dedicated VSCRATCH encoding (3 words, 24-bit offset, <code>sve</code>=0). Both take an <code>acc</code> flag that, on CDNA, sets the FLAT <code>acc</code> bit to address the AccVGPR file directly (RDNA throws — no acc file).</li>
+<li><code>build_v_writelane_b32</code> / <code>build_v_readlane_b32</code> — the SGPR↔VGPR lane bridge (VOP3; CDNA prefix <code>0x34</code>, RDNA <code>0x35</code>).</li>
+<li><code>build_wait_loads_complete</code> / <code>build_wait_stores_complete</code> — the async-access fences. CDNA uses a unified <code>s_waitcnt</code>; RDNA4 splits into <code>s_wait_loadcnt</code> (loads on LOADCNT) and <code>s_wait_storecnt</code> (stores on STORECNT). <code>build_wait_all_loads_complete</code> is the boundary drain used by <code>emit_probe_call</code>.</li>
+</ul>
+<p>An unmodeled arch throws <code>UnimplementedInst</code>. The hard arch gates on spilling are these five builders, <code>max_scratch_offset_bytes</code>, and — in the orchestrator — <code>arch_has_accvgpr</code> (AccVGPR spills require an AGPR file) and <code>arch_has_unified_vgpr_allocation</code> (which selects the descriptor's ACCUM_OFFSET split used to size the AccVGPR window).</p>
+<h3 id="vector-builders-codebuildersvector_buildersh-dbi-only">Vector Builders (<code>code/builders/vector_builders.h</code>) [DBI-only]<a class="headerlink" href="#vector-builders-codebuildersvector_buildersh-dbi-only" title="Permanent link">&para;</a></h3>
+<p>The plain VALU ops emitted outside the spill bracket, which <code>instruction_builder.h</code> (scalar by construction) and <code>spill_builders.h</code> (scoped to the bracket) are not the home for. Today the two argument-materialization forms of <code>v_mov_b32</code>: <code>build_v_mov_b32_imm</code>, the <code>v_mov_b32 vN, &lt;literal&gt;</code> pair — a VOP1 word whose <code>src0</code> names the literal constant, plus the literal word — and <code>build_v_mov_b32_src</code>, the single-word <code>v_mov_b32 vN, &lt;src&gt;</code> used for a register-sourced argument slot (the EXEC temp holding the anchor mask). <code>build_v_mov_b32_src</code> rejects the literal <code>src0</code> code, since that form needs the trailing literal word only <code>build_v_mov_b32_imm</code> emits. Both cover all ten AMDGPU targets, each through its own generation's builder and opcode table — the encodings agree at this opcode, but the generated VOP1 <code>op</code> field is 7 bits on cdna5 and rdna4 and 8 bits on the other eight generations, so a shared packer would be right only for opcodes that fit both.</p>
+<h3 id="scalar-memory-builders-codebuilderssmem_buildersh-dbi-only">Scalar Memory Builders (<code>code/builders/smem_builders.h</code>) [DBI-only]<a class="headerlink" href="#scalar-memory-builders-codebuilderssmem_buildersh-dbi-only" title="Permanent link">&para;</a></h3>
+<p>SMEM is scalar but not SOP, so <code>instruction_builder.h</code> (SOP-only by its own documentation) is not its home, and it is not part of the spill bracket <code>spill_builders.h</code> covers. Today <code>build_s_load_dwordx2</code> and <code>build_wait_scalar_loads_complete</code>, both covering <strong>all ten AMDGPU targets</strong>. These are pure encoders with no DBI-specific semantics, so they follow <code>instruction_builder.h</code> and <code>vector_builders.h</code> rather than <code>spill_builders.h</code>, whose narrower scope comes from the scratch addressing modes and the CDNA <code>acc</code> bit.</p>
+<p>The wrapper exists because three things vary and every one of them is silent when wrong.</p>
+<p><strong>SBASE is the register index halved</strong> on every generation, and the decoder multiplies it back, so an unhalved base loads through the wrong address.</p>
+<p><strong>"No SGPR offset" has two shapes.</strong> CDNA1–4 gate the register and the immediate with independent <code>SOFFSET_EN</code> and <code>IMM</code> bits, so an immediate-only load clears the former and sets the latter. RDNA has neither bit and instead carries an always-present <code>SOFFSET</code> field that must name NULL. <strong>The NULL code moved</strong>, from 125 on RDNA1/2 to 124 from RDNA3 on. Leaving it zero names <code>s0</code>, so the load silently adds whatever that register holds. Each case takes the code from its own generation's operand table for that reason.</p>
+<p><strong>The immediate field changes name and width</strong>: <code>offset</code> at 21 bits through RDNA3.5, <code>ioffset</code> at 24 bits on RDNA4 and CDNA5. Both are <strong>signed</strong>, so <code>max_smem_byte_offset</code> bounds a forward offset one bit below the field width (<code>0x0FFFFF</code> and <code>0x7FFFFF</code>) rather than at the unsigned maximum.</p>
+<p>The scalar-load wait is a separate counter from anything in <code>spill_builders.h</code>: the monolithic <code>s_waitcnt 0</code> covers it through RDNA3.5, but GFX12 splits the counters and it becomes <code>s_wait_kmcnt</code> (CDNA5 has no <code>s_waitcnt</code> opcode at all). <code>build_wait_loads_complete</code>'s LOADCNT orders VMEM, not SMEM.</p>
+<p><strong>Three things no simulator test can validate</strong>, all instances of the standing rule that the simulator does not model everything hardware does. The model builds RDNA's offset operand from the immediate alone and ignores <code>SOFFSET</code> entirely. It retires scalar loads synchronously, so removing the completion wait does not change a simulated result. And it <em>zero</em>-extends the immediate offset (<code>generated/cdna3/smem.cpp</code> uses <code>static_cast&lt;int&gt;(enc-&gt;offset)</code>, unlike the deliberate <code>&lt;&lt; 20 &gt;&gt; 20</code> the tree uses where it does model a signed displacement), so an out-of-range offset simulates as a large forward access and runs backwards on hardware. The builder's bound is the only thing rejecting it.</p>
+<p><code>tests/patch/smem_builder_test.cpp</code> asserts SOFFSET against the <em>encoded word</em>, since a decode discards it. The offset bound is covered differently: the builder rejects an out-of-range offset, so the test asserts the rejection rather than inspecting a word. The wait has no in-tree observable and is documented rather than tested.</p>
+<h3 id="kernel-descriptor-scan-codekernel_descriptor_scanh-shared-with-dbt">Kernel Descriptor Scan (<code>code/kernel_descriptor_scan.h</code>) [shared with DBT]<a class="headerlink" href="#kernel-descriptor-scan-codekernel_descriptor_scanh-shared-with-dbt" title="Permanent link">&para;</a></h3>
+<p>Enumerates a code object's kernel descriptors and derives per-kernel allocation facts. <code>scan_kernel_descriptors(image, text_offset, text_size)</code> returns each kernel's descriptor file offset, entry, and <code>private_segment_fixed_size</code>, with overflow-safe extent checks and a descriptor-bounded-by-owning-section guard (rejects malformed ELFs). <code>kernel_wavefront_size</code> and <code>descriptor_vgpr_granularity_for_wavefront</code> decode the wave-size-dependent VGPR encoding granule (shared with DBT so the two cannot diverge); the orchestrator multiplies <code>(GRANULATED_WORKITEM_VGPR_COUNT + 1)</code> by that granule to get the kernel's VGPR count. The orchestrator currently rejects anything but a single kernel.</p>
+<p>The same header decodes the descriptor's kernarg fields, also shared with DBT. <code>kernarg_segment_ptr_slot</code> returns the user-SGPR index the kernarg pointer occupies, which is the summed width of whichever of private_segment_buffer (4), dispatch_ptr (2) and queue_ptr (2) the descriptor enables ahead of it. It answers whether or not the pointer is enabled, so a caller <em>inserting</em> the pointer can ask for the slot before setting the bit. <code>kernarg_segment_ptr_sgpr</code> is the narrower question, empty unless <code>has_kernarg_segment_ptr</code>. <code>kernarg_preload_length</code> / <code>kernarg_preload_offset</code> decode the two halves of the one <code>kernarg_preload</code> field. <code>kernel_descriptor_initial_sgpr_count</code> adds the dense system SGPRs the hardware initializes after the user block — enabled workgroup IDs, then WORKGROUP_INFO — giving one past the last SGPR the launch ABI writes; DBT repairs that range when it inserts a kernarg pointer, DBI uses it as a floor for framework storage.</p>
+<p>The pointer those first two name is <strong>live only at the kernel entry</strong>. Nothing reserves the pair; the register allocator reclaims it after its last use, which in compiled kernels is typically within the first handful of instructions. A consumer that needs the value at an arbitrary later site has to capture it at entry rather than read the pair there.</p>
+<h3 id="register-liveness-analysis-shared-with-dbt">Register Liveness Analysis [shared with DBT]<a class="headerlink" href="#register-liveness-analysis-shared-with-dbt" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong> <code>code/analysis/liveness.h</code>, <code>code/analysis/liveness.cpp</code>, <code>code/analysis/def_use_chain.h</code>, <code>code/analysis/def_use_chain.cpp</code>
+<strong>Used by:</strong> DBT semantic translator; the DBI probe-call register planner (liveness at the anchor feeds dead-register selection for the link/target pairs and SCC temp, and the spill-set computation)</p>
+<p>Kernel-scoped backward register liveness over the CFG embedded in <code>BasicBlock</code>. Callers construct a <code>LivenessAnalysis</code> from one <code>KernelBlockScope</code> (the blocks reachable from one kernel descriptor entry). Successor/predecessor edges that leave the scope are ignored, so one decoded code object containing N kernels yields N independent analyses.</p>
+<h4 id="what-it-tracks">What it tracks<a class="headerlink" href="#what-it-tracks" title="Permanent link">&para;</a></h4>
+<p>Ordinary SGPRs, VGPRs, and AccVGPRs via <code>RegisterSet</code>. <code>InstDefUse</code> records explicit operand defs and uses plus instruction-level implicit hooks; the only implicit hook today is the FLAT <code>saddr</code> SGPR-pair use that does not appear as an explicit operand.</p>
+<h4 id="what-it-does-not-track">What it does NOT track<a class="headerlink" href="#what-it-does-not-track" title="Permanent link">&para;</a></h4>
+<ul>
+<li>EXEC, VCC, SCC, M0, FLAT_SCRATCH, TTMP — special architectural state. The <code>RegClass</code> enum names these, but they are not in the backward-liveness dataflow set (<code>RegisterSet</code> is SGPR/VGPR/AccVGPR only). See the special-state note below for how they are still preserved, and for what a probe that <em>reads</em> them gets.</li>
+<li>Cross-kernel CFG. Edges that leave the kernel scope are silently dropped.</li>
+<li>Memory dependencies. Liveness is purely register-based.</li>
+</ul>
+<h4 id="special-state-exec-vcc-scc-m0">Special state (EXEC / VCC / SCC / M0)<a class="headerlink" href="#special-state-exec-vcc-scc-m0" title="Permanent link">&para;</a></h4>
+<p>EXEC, VCC, and M0 <em>writes</em> are surfaced by the decoder as special-state operands (e.g. <code>v_cmp</code> → VCC, <code>v_cmpx</code> → EXEC), so a probe's <code>ProbeClobberSummary.touches_{exec,vcc,m0}</code> are set and drive preservation. They are <strong>not</strong> part of the backward-liveness <code>RegisterSet</code> dataflow, so preservation is <em>save-when-clobbered</em>, not save-when-live. Because implicit-def detection is not proven comprehensive (a truly operand-less implicit def could be missed), EXEC and VCC are preserved <strong>unconditionally</strong> as a safety net; M0 is preserved only when a write is detected. This is why the trampoline can reserve EXEC/VCC/M0 temps even though liveness never reports them.</p>
+<p>The same <code>RegisterSet</code> limit bounds the probe live-in gate in the other direction: a probe that <em>reads</em> special state before writing it is not detected, because there are no bits to report it with. Such a probe is accepted with an empty live-in set and runs against whatever the envelope leaves in that register. This is a deliberate boundary — special state is the trampoline's to preserve, and the live-in gate covers ordinary registers only (<code>code/patch/probe_live_in.h</code>) — but it is worth knowing per register what "whatever the envelope leaves" means:</p>
+<ul>
+<li><strong>SCC</strong> — the probe never sees the anchor's SCC. The envelope's SCC save/restore (<code>s_cselect_b32</code> / <code>s_cmp_lg_u32</code>, see <a href="#instrumentation-flow-probe-call">Instrumentation Flow (probe-call)</a>) brackets the whole sequence and so protects the <strong>host kernel's</strong> SCC across instrumentation; it does not deliver it to the probe. The <code>s_getpc_b64</code> + 64-bit add chain that materializes the call target runs <em>after</em> the save and writes SCC, so the probe is entered with that carry-out. A probe branching on SCC before writing it therefore branches on envelope arithmetic, deterministically wrong rather than merely stale.</li>
+<li><strong>M0</strong> — carries the anchor's value. On GFX9/CDNA a <code>ds_*</code> instruction implicitly reads M0, which a kernel prologue initializes, so an LDS-using probe works only while no instruction upstream of the anchor rewrote M0 (<code>s_movrel*</code>, GWS, <code>s_sendmsg</code>, a strided DS op). Nothing verifies that.</li>
+<li><strong>EXEC / VCC</strong> — carry the anchor's value; the envelope restores the anchor mask before the call precisely so the probe runs under it. EXEC is forced to <code>-1</code> only around the spill store/load, never across the call.</li>
+</ul>
+<p>Covering the read side needs a special-state analysis that does not exist; <code>RegisterSet</code> has no bits for these (<code>isa/register_set.h</code>).</p>
+<h3 id="probe-live-ins">Probe Live-Ins<a class="headerlink" href="#probe-live-ins" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong> <code>code/patch/probe_live_in.h</code>, <code>code/patch/probe_live_in.cpp</code></p>
+<p>The complement of <code>probe_clobber</code>: what does the probe body <em>read</em> before defining it? <code>analyze_probe_live_ins()</code> builds the probe object's CFG (probe entry passed as an <code>extra_split_point</code>), forms the block scope with <code>reachable_kernel_blocks()</code>, runs <code>LivenessAnalysis</code> over it, and returns the entry block's live-in set minus <code>supplied_registers(abi)</code>. That subtraction is the <code>s[30:31]</code> return link plus the argument VGPRs the ABI's declared count covers.</p>
+<p>A non-empty result is a probe expecting state that only exists at kernel entry — <code>workitem_id_x</code> in <code>v31</code>, written by the kernel's own prologue — which a trampoline at an arbitrary anchor cannot reproduce. <code>Instrumentor::resolve_points()</code> rejects the site. This is also how a declared argument count is verified against the body the compiler actually emitted; see <a href="#probe-arguments">Probe arguments</a>.</p>
+<p>CFG liveness rather than a linear scan of the body words: a def under a forward branch does not reach a use after the join, so a linear walk would report a smaller footprint than the body has.</p>
+<p>The analysis sets <code>LivenessAnalysisOptions::exec_masked_defs_kill</code>, so a masked vector write counts as writing the whole register. Without it no masked def is ever a kill and every VGPR the probe reads — including ones it defines itself — is reported as an input. The probe owns its own EXEC; the option's doc states what that obliges.</p>
+<p>Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5, whose vector operands resolve only from a block where <code>MODE.VGPR_MSB</code> is known zero, which an anchor does not guarantee; relative (<code>v_movrel*</code>) or GPR-indexed (<code>MODE.GPR_IDX_EN</code>) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; relative SGPR access (the <code>s_movrel*</code> family, which displaces its index through M0 the same way), rejected by a mnemonic scan rather than by liveness, which models no scalar equivalent; a probe object without exactly one <code>.text</code>, or a body outside it, since <code>BasicBlock::build()</code> decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable <code>.text</code>; and an entry offset that starts no decoded block.</p>
+<h3 id="spillmanager">SpillManager<a class="headerlink" href="#spillmanager" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong> <code>code/patch/spill_manager.h</code>, <code>code/patch/spill_manager.cpp</code></p>
+<p>Per-kernel scratch-layout planner for DBI spill/fill slots. Probe-call trampolines use it to reserve byte offsets within per-lane scratch where saved SGPRs / VGPRs / AccVGPRs go before a probe runs and from which they are restored after; the orchestrator writes the bumped <code>total_private_bytes()</code> back into the descriptor (see <a href="#code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt">Code Object Patcher</a>). Not consumed by the inline-nop pipeline. Slots are laid out above the kernel's existing scratch via the shared <code>PrivateSegmentCursor</code> (an aligned, overflow-safe byte-range allocator, defined inline in <code>spill_manager.h</code>), so DBI slots can start above DBT's high-water mark when both passes run.</p>
+<h4 id="responsibilities_1">Responsibilities<a class="headerlink" href="#responsibilities_1" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Reserve a "DBI spill zone" appended above the kernel's existing <code>private_segment_fixed_size</code>, aligned to 16 bytes.</li>
+<li>Hand out stable per-register byte offsets within that zone. Registers cannot get more than one offset.</li>
+<li>Enforce a hard per-lane scratch cap. Allocations that would push the bumped total past the cap fail; on failure the manager state is unchanged.</li>
+<li>Compute the bumped <code>private_segment_fixed_size</code> that the kernel descriptor patcher will write back.</li>
+</ul>
+<h4 id="what-it-is-not">What it is not<a class="headerlink" href="#what-it-is-not" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Not a memory allocator. SpillManager only computes layout.</li>
+<li>Not the code generator. SpillManager hands out offsets; emitting the actual <code>scratch_store</code> / <code>scratch_load</code> (or the writelane/readlane bridge and <code>acc</code>-bit variants) is the trampoline builder's job (see <a href="#spill-builders-codebuildersspill_buildersh-dbi-only">Spill Builders</a>).</li>
+</ul>
+<h4 id="public-api">Public API<a class="headerlink" href="#public-api" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">SpillManager</span><span class="w"> </span><span class="k">final</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">  </span><span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">kSlotBytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span><span class="w">         </span><span class="c1">// one 32-bit lane per slot</span>
+<span class="w">  </span><span class="k">static</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">kDbiZoneAlignment</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">16</span><span class="p">;</span><span class="w"> </span><span class="c1">// zone start alignment</span>
+
+<span class="w">  </span><span class="n">SpillManager</span><span class="p">(</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">original_private_bytes</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">per_lane_scratch_limit</span><span class="p">);</span>
+
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="kt">uint32_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">allocate_slot</span><span class="p">(</span><span class="n">RegisterRef</span><span class="w"> </span><span class="n">reg</span><span class="p">);</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="kt">uint32_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">allocate_slots</span><span class="p">(</span><span class="n">RegisterRef</span><span class="w"> </span><span class="n">reg</span><span class="p">,</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="n">width</span><span class="p">);</span>
+<span class="w">  </span><span class="kt">bool</span><span class="w">                    </span><span class="nf">reserve</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">RegisterSet</span><span class="w"> </span><span class="o">&amp;</span><span class="n">set</span><span class="p">);</span>
+<span class="w">  </span><span class="kt">uint32_t</span><span class="w">                </span><span class="nf">total_private_bytes</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="p">;</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="kt">uint32_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">offset_for</span><span class="p">(</span><span class="n">RegisterRef</span><span class="w"> </span><span class="n">reg</span><span class="p">)</span><span class="w"> </span><span class="k">const</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+<p><code>allocate_slots</code> is the common multi-lane case (SGPR pair, 64-bit VGPR pair). <code>reserve</code> performs an upfront capacity check across the whole set so a partial allocation can never become visible. <code>offset_for</code> is the lookup used by code generators when emitting the matching <code>scratch_load</code> after a probe.</p>
+<h3 id="registerref-registerset-shared-with-dbt">RegisterRef / RegisterSet [shared with DBT]<a class="headerlink" href="#registerref-registerset-shared-with-dbt" title="Permanent link">&para;</a></h3>
+<p><strong>File:</strong> <code>isa/register_set.h</code>
+<strong>Used by:</strong> DBT semantic translator, DBI SpillManager and liveness</p>
+<p>ISA-independent register-file model. <code>RegisterRef</code> is <code>(RegClass, uint16_t index, uint8_t width)</code> measured in 32-bit lanes. <code>RegisterSet</code> is three disjoint bitsets (SGPR / VGPR / ACC_VGPR) sized to the union of CDNA and RDNA hardware bounds (<code>REGISTER_SET_MAX_*</code>). For scratch selection across both families, <code>REGISTER_SET_ALLOCATABLE_SGPRS</code> gives the conservative <code>min(CDNA, RDNA)</code> bound.</p>
+<p><code>RegisterSet</code> aliases the header-only <code>RegisterSetT</code>, selecting <code>RegisterSetWordType::Avx2M256</code> on AVX2 targets and <code>RegisterSetWordType::StandardUint64</code> otherwise. The enum selects an internal storage type (<code>__m256i</code> or a scalar unsigned integer) without passing vector types as template arguments. The register-set unit tests instantiate both storage types in AVX2 builds so the scalar fallback remains compiled and tested.</p>
+<p><code>RegisterSet</code> exposes <code>expand</code> / <code>erase</code> / <code>contains</code> / <code>none</code> / <code>size</code> / <code>intersects</code>, the standard set operators (<code>|=</code>, <code>&amp;=</code>, <code>-=</code>), and a <code>for_each</code> visitor that yields tracked single-lane <code>RegisterRef</code>s in (SGPR, VGPR, AccVGPR) ascending-index order.</p>
+<hr />
+<h2 id="instrumentation-flow-inline-nop">Instrumentation Flow (inline-nop)<a class="headerlink" href="#instrumentation-flow-inline-nop" title="Permanent link">&para;</a></h2>
+<p>For a code object with one queued <code>InstrumentationPoint</code> at <code>anchor_offset</code>:</p>
+<ol>
+<li><strong>Lazy block decode:</strong> On the first stage that needs the CFG, <code>Decoder::create(arch)</code> + <code>BasicBlock::build(obj, *decoder)</code> populates <code>blocks_</code>. Unsupported arch surfaces as a fatal error here.</li>
+<li><strong>Validate:</strong> <code>validate_points()</code> walks <code>points_</code>; for each, <code>find_instruction_at_offset()</code> locates the decoded <code>Instruction</code>, then <code>validate_anchor()</code> runs milestone-scoped + structural checks and produces a <code>ResolvedInstrumentationSite</code> capturing the original bytes.</li>
+<li><strong>Plan + build (preflight):</strong> For each site, <code>make_trampoline_plan(site, arch, trampoline_offset)</code> produces a canonical inline-nop plan (<code>before_items = {{ s_nop 0 }}</code>, <code>emit_original = true</code>); <code>validate_inline_nop_plan()</code> rechecks shape; <code>TrampolineBuilder::build(plan)</code> lowers it to <code>TrampolineBytes</code>. The trampoline cursor begins at <code>patcher.text_size()</code> (the first byte of the local cave) and advances by each built trampoline's size. Nothing is written to the patcher yet.</li>
+<li><strong>Assemble + replace:</strong> Once every site preflighted, copy <code>.text</code> into a local buffer, <code>memcpy</code> each <code>patched_anchor_bytes</code> into its <code>anchor_offset</code>, then <code>append_words()</code> every trampoline after the original bytes as a local code cave. A single <code>patcher.replace_text()</code> grows <code>.text</code> in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries).</li>
+<li><strong>Emit:</strong> <code>patcher.emit()</code> returns the patched ELF.</li>
+</ol>
+<p>The trampolines live inside <code>.text</code>, immediately after the original kernel bytes (like what DBT currently does). Keeping a single executable <code>.text</code> section avoids loaders that only treat <code>.text</code> as executable, and keeps cave offsets expressible as <code>.text</code>-relative bytes. Because the original bytes do not move, no branch offsets in the original code are relocated — only the in-place <code>s_branch</code> at each anchor is rewritten. One site lays out as:</p>
+<div class="highlight"><pre><span></span><code>.text:
+  [original kernel bytes]
+  ...
+  @ anchor_offset:
+    s_branch &lt;trampoline&gt;       &lt;-- forward branch into the local cave
+  ...
+  [local cave, after the original bytes]
+  @ trampoline_offset:
+    s_nop 0                     &lt;-- inline-nop body (the probe-call variant is described below)
+    &lt;relocated original word(s)&gt; &lt;-- 4 or 8 bytes, same encoding as the anchor
+    s_branch &lt;return&gt;           &lt;-- back to anchor_offset + original_size
+</code></pre></div>
+<p>Branch offsets are computed in SOPP <code>simm16</code> units; the trampoline must lie within <code>±32768 * 4</code> bytes of the anchor. For unusually large kernels this would require trampoline islands, which remain future work (same constraint as DBT code caves).</p>
+<hr />
+<h2 id="instrumentation-flow-probe-call">Instrumentation Flow (probe-call)<a class="headerlink" href="#instrumentation-flow-probe-call" title="Permanent link">&para;</a></h2>
+<p>A probe-call point sets <code>probe_obj</code> + <code>probe_symbol</code>. Resolution copies the probe's self-contained body (<code>rj_nop_probe</code>: <code>s_waitcnt</code> then <code>s_setpc_b64 s[30:31]</code>) once into the cave; sites sharing a <code>(probe_obj, probe_symbol)</code> reuse that one copy. The cave is laid out as: original kernel bytes, then each distinct probe body, then the per-site trampolines. The forward <code>s_branch</code> at the anchor targets the trampoline (not the body); the trampoline <em>calls</em> the body via <code>s_swappc_b64</code>.</p>
+<p>The trampoline envelope wraps the relocated original:</p>
+<div class="highlight"><pre><span></span><code>.text:
+  [original kernel bytes]   @ anchor_offset: s_branch &lt;trampoline&gt;
+  ...
+  [copied probe body]       @ probe_target_offset:
+    s_waitcnt ...
+    s_setpc_b64 s[30:31]    &lt;-- returns through the link pair
+  [trampoline]              @ trampoline_offset:
+    &lt;in-flight-load drain&gt;              &lt;-- s_wait_loadcnt / s_waitcnt; also emitted on no-spill sites
+    s_mov_b64    &lt;exec_temp&gt;, exec      &lt;-- EXEC save (preserve_exec, or any spilling site)
+    s_mov_b64    &lt;vcc_temp&gt;,  vcc       &lt;-- VCC save  (preserve_vcc)
+    s_mov_b32    &lt;m0_temp&gt;,   m0        &lt;-- M0 save   (preserve_m0)
+    s_mov_b64    exec, -1               &lt;-- widen to full mask (spill / argument / full-exec site)
+    [spill prologue]                    &lt;-- VGPR/acc direct stores; SGPR writelane + store; store wait
+    v_mov_b32    v[arg_base + i], &lt;lit&gt; &lt;-- one per immediate probe_args entry, all lanes
+    v_mov_b32    v[arg_base + i], &lt;exec_temp{,+1}&gt; &lt;-- one per AnchorExecLo/Hi entry
+    s_mov_b64    exec, &lt;exec_temp&gt;      &lt;-- restore anchor mask (absent under force_full_exec)
+    s_cselect_b32 &lt;scc_temp&gt;, 1, 0      &lt;-- SCC save (preserve_scc)
+    s_getpc_b64  s[target_pair]
+    s_add_u32    s[target_lo], s[target_lo], (probe_target - pc)@lo
+    s_addc_u32   s[target_hi], s[target_hi], (probe_target - pc)@hi
+    s_swappc_b64 s[30:31], s[target_pair]   &lt;-- call: PC=body, return-&gt;s[30:31]
+    &lt;in-flight-load drain&gt;              &lt;-- guards restores/host against the probe's own loads
+    s_cmp_lg_u32 &lt;scc_temp&gt;, 0          &lt;-- SCC restore
+    s_mov_b64    exec, -1               &lt;-- re-widen to full mask for the loads
+    [spill epilogue]                    &lt;-- VGPR/acc direct loads; SGPR load + wait + readlane; load wait
+    s_mov_b64    exec, &lt;exec_temp&gt;      &lt;-- EXEC restore
+    s_mov_b64    vcc,  &lt;vcc_temp&gt;       &lt;-- VCC restore
+    s_mov_b32    m0,   &lt;m0_temp&gt;        &lt;-- M0 restore
+    &lt;relocated original word(s)&gt;
+    s_branch &lt;return&gt;                   &lt;-- back to anchor_offset + original_size
+</code></pre></div>
+<p>Lines above are conditional: the EXEC/VCC/M0 saves and restores appear only when that register is preserved (EXEC also rides in whenever the site spills); the <code>v_mov_b32</code> block is empty when the site passes no arguments; the <code>[spill prologue]</code> / <code>[spill epilogue]</code> are empty when <code>spill_set</code> is empty (leaving the plain SCC-bracketed call). The full-mask window's <code>exec</code> toggles appear whenever the site spills, passes arguments, <strong>or</strong> runs the probe under a full mask. A site with nothing to spill still opens the window, and still emits the re-widen over an empty epilogue so the planner and emitter count the same toggles unconditionally. Three toggles by default; two under <code>force_full_exec</code>, which drops the pre-call restore. See <a href="#spill-bracket">TrampolineBuilder → Spill bracket</a> for the bracket contents. The <code>s_getpc_b64</code> + 64-bit add chain is <code>.text</code>-relative, so the materialized target is load-base-independent; the <code>±simm16</code> branch range only constrains the forward/return <code>s_branch</code>es, not the call.</p>
+<h3 id="mask-policy">Mask policy<a class="headerlink" href="#mask-policy" title="Permanent link">&para;</a></h3>
+<p>By default the probe runs under the mask the guest had at the anchor: the envelope restores <code>&lt;exec_temp&gt;</code> before the <code>s_swappc</code>, so a lane inactive at the site is inactive inside the probe. <code>InstrumentationPoint::force_full_exec</code> selects the other policy. The full-mask window the envelope already opened for the spill stores and argument writes simply stays open across the call, so the body runs with every lane enabled. The anchor mask is restored afterwards by the EXEC special-state restore that every such site already reserves.</p>
+<p>This is for a <em>uniform</em> probe, whose work does not depend on which lanes were active. A probe that reads per-lane guest state wants the default.</p>
+<p><strong>Cost is one toggle, not a new mechanism.</strong> A masked site emits three <code>exec</code> writes (widen, restore, re-widen); a full-exec site emits two. The re-widen stays: the probe itself may narrow <code>EXEC</code> while it runs, and the spill epilogue has to reload under a full mask regardless.</p>
+<p><strong>The policy is a property of the probe, not of the site</strong>, so it is recorded on the <code>ProbeCallable</code> alongside the argument shape and is <em>not</em> part of <code>ProbeKey</code>: two points naming one probe with different mask policies are not two probes, and the second declaration is rejected rather than resolving a byte-identical second body. Nothing verifies the claim that a probe is uniform: the caller declares it, the same way it declares the argument count. What keeps that from being dangerous is gate 5: a probe with implicit live-ins is rejected outright, so a full-exec probe can only read the arguments the trampoline handed it, and those were written under <code>EXEC = -1</code> and are therefore defined in every lane.</p>
+<p><strong>The guest's mask can be passed as a value.</strong> <code>ProbeArgSource::AnchorExecLo</code> / <code>AnchorExecHi</code> name argument slots the framework fills from the saved anchor <code>EXEC</code> pair rather than from a build-time constant, so a uniform probe can still report which lanes were active. The value is read from <code>&lt;exec_temp&gt;</code>, not from <code>exec</code>: the argument writes run inside the full-mask window, where the live register no longer holds the guest's mask. Passing one therefore requires the site to have saved <code>EXEC</code>, which <code>plan_probe_call</code> reserves for. <code>AnchorExecHi</code> is rejected on a Wave32 kernel, whose <code>EXEC</code> is a single dword.</p>
+<h3 id="probe-arguments">Probe arguments<a class="headerlink" href="#probe-arguments" title="Permanent link">&para;</a></h3>
+<p>A point may carry <code>probe_args</code>, a list of 32-bit values handed to the probe, each naming where the framework sources it (<code>ProbeArgSource</code>: a build-time constant, or one of the two dwords of the anchor <code>EXEC</code> mask). They arrive in consecutive VGPRs from <code>ProbeAbi::arg_vgpr_base</code> (<code>v0</code> today), one dword per register, in order — the AMDGPU function calling convention's placement for explicit scalar arguments.</p>
+<p><strong>The count is declared, not inferred.</strong> Nothing in a compiled body distinguishes "reads <code>v0</code> as its first argument" from "reads <code>v0</code> uninitialized", so the caller states how many dwords it is passing and <code>derive_probe_abi(cc, num_arg_dwords)</code> builds the ABI from the pair. <code>is_valid_probe_abi()</code> re-derives from an ABI's own count and compares, so a hand-built ABI whose argument window its convention would not choose is rejected.</p>
+<p><strong>Verification is the live-in analysis, unchanged.</strong> <code>supplied_registers()</code> widens to cover the argument VGPRs, and the existing "residual live-in set must be empty" rule then does the work: a declared argument the body reads subtracts away; one it reads but the caller did not declare survives and fails the site by name. Acceptance is "nothing left over" rather than "reads exactly what was declared", so a probe that ignores an argument it was handed is not rejected — wasteful, not unsafe. There is no argument-specific code in the analysis.</p>
+<p><code>kMaxProbeArgVgprs</code> is 16, an arbitrary cap. The convention fills <code>v0</code> upward through <code>v30</code> (<code>v31</code> is the packed workitem id), so 31 dwords is the most that arrive in registers; the cap sits well inside that because the free-register search would refuse an argument block near 31 long before the convention did, and only single-dword integer arguments have been measured.</p>
+<p><strong>Emission.</strong> <code>emit_probe_call()</code> writes the values with <code>v_mov_b32 vN, &lt;literal&gt;</code> (or <code>v_mov_b32 vN, &lt;sgpr&gt;</code> for a mask-sourced slot, which costs one word rather than two) <strong>inside the full-mask window</strong>, after the spill prologue and last before the call is set up. Three things fix that position:</p>
+<ul>
+<li>It follows the spill prologue, so an argument VGPR that was live at the anchor is already stored. The prologue ends in a store-completion wait, so the store has finished reading the register before the <code>v_mov</code> overwrites it.</li>
+<li>It runs under <code>EXEC = -1</code>, so the argument is defined in <em>every</em> lane. Written under the anchor mask instead, the inactive lanes would keep whatever the guest left in that register, and a probe reading an argument through an EXEC-independent op — <code>v_readlane_b32</code> of a fixed lane, or anything it runs after widening EXEC itself — would see stale data.</li>
+<li><code>v_mov_b32</code> writes no SCC, so it cannot disturb the save/restore pair straddling it.</li>
+</ul>
+<p>Passing any argument therefore opens the full-mask window even on a site that spills nothing, which costs the EXEC save/restore pair and the window's EXEC toggles. It also makes an argument-passing plan arch-dependent: reserving the EXEC temp resolves a per-arch operand code, so unlike a bare no-argument plan it cannot be built without <code>plan.arch</code>. An immediate argument adds two words to <code>before_word_count</code> and a mask-sourced one adds a single word, so the existing plan/emit drift guard covers them.</p>
+<p><strong>The argument VGPRs are builder clobbers</strong>, which is what routes a live one into the spill set. They are the one builder clobber not <em>chosen</em> dead — the ABI fixes them — so unlike the envelope's SGPR temps they can collide with a live value, and the site's <code>will_spill</code> decision has to account for them or a spilling site would skip the EXEC save that bracketing the stores requires.</p>
+<p>The declared count, the source list, and the mask policy are recorded on the <code>ProbeCallable</code>, not on the key, which is <code>(probe object, symbol)</code>. They describe the one copied body, so two points naming one symbol and declaring it differently are one probe declared twice: the second declaration is rejected rather than resolving a second, byte-identical body ahead of every trampoline. Whichever point resolves first supplies the declaration — a body reveals none of these three, so the diagnostic names the conflict rather than blaming the later point. Only the immediate <em>values</em> stay per-site.</p>
+<h3 id="register-requirement">Register requirement<a class="headerlink" href="#register-requirement" title="Permanent link">&para;</a></h3>
+<p>The probe's calling convention fixes the <strong>link pair</strong> at <code>s[30:31]</code> (<code>AmdGpuFuncReturnS30S31</code>): <code>s_swappc_b64</code> writes the return address there and the body's <code>s_setpc_b64 s[30:31]</code> reads it back. It likewise fixes the <strong>argument VGPRs</strong> at <code>v0</code> upward. The planner additionally picks a dead, even-aligned <strong>target pair</strong> (holds the materialized address) and a dead <strong>SCC temp</strong> from the anchor's liveness. All of these must be <em>granted by the kernel's allocation</em> — the SGPRs by <code>.sgpr_count</code>, the argument VGPRs by the ordinary-VGPR bound, since an index at or past it is unallocated or aliases an AGPR.</p>
+<p>The planner also reserves, from the same dead-SGPR pool bounded by <code>plan.kernel_sgpr_count</code>, a temp per preserved special register (an even pair for EXEC/VCC, a single for M0) and — for SGPR spills — a bridge VGPR from the kernel's ordinary-VGPR range (<code>min(kernel_vgpr_count, accum_base)</code>, so it can never alias an AccVGPR). EXEC is reserved whenever the site spills, not just when the probe clobbers it, because the store/load run under a forced full mask.</p>
+<p>The instrumentor does <strong>not yet grow the kernel's SGPR count</strong>, so the kernel must already allocate through <code>s31</code> (and through any special-state/bridge temps). Until auto-growth lands, the hardware smoke test instruments a register-padded fixture kernel (<code>vector_add_probe.hip</code>, <code>.sgpr_count</code> ≥ 32). Resource policy fails closed when the probe body reads a register its convention does not supply, when the link pair is live at the anchor, when a site passes more argument dwords than <code>kMaxProbeArgVgprs</code>, when the argument VGPRs fall outside the kernel's ordinary-VGPR bound, when a site passes arguments but no single kernel descriptor was discovered to derive that bound from, when a non-empty <code>probe_args</code> accompanies an inline-nop point, when no dead target pair or required temp is available within the kernel's allocation, when the probe clobbers FLAT_SCRATCH (the spill store/load depend on it), when the kernel has zero scratch or is one of several kernels, when a spill offset exceeds the arch's scratch-offset field, (for SGPR spills) when no dead bridge VGPR exists in the ordinary-VGPR range, or (for AccVGPR spills) when the target has no AccVGPR file (<code>arch_has_accvgpr</code> is false) or an AccVGPR index falls outside the descriptor-derived accumulator window (<code>kernel_vgpr_count − accum_base</code>). The spill set itself is <code>instrument_clobbers ∩ live_at_anchor</code> and is spilled, not rejected.</p>
+<hr />
+<h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Unit (<code>tests/patch/instrumentor_test.cpp</code>):</strong> Validator coverage (each rejection path on synthetic anchors, including the bounds-overflow regression for <code>is_relocatable_anchor</code>), inline-nop plan guardrail, <code>make_trampoline_plan</code>, end-to-end <code>patch()</code> on a synthetic ELF (expected anchor splice + trampoline layout + reparse), a decoded round-trip of every word in the emitted trampoline, the probe-call path (probe body copied once and the trampoline call targets it), the spill formula, per-class spill planning (<code>plan_vgpr/sgpr/acc_spills</code> — ascending slots, class/arch/offset-cap rejections, the kernel-VGPR-count bridge bound), the drain ordering (<code>expect_drain_before_store</code> / <code>expect_drain_after_return</code>), EXEC/VCC/M0 preservation (incl. unconditional EXEC/VCC), the probe declaration contract (two points disagreeing on argument count, argument sources, or mask policy are each rejected; two points agreeing on all three share one copied body; two points differing only in their immediate <em>values</em> also share one body while each trampoline materializes its own constant), the Wave32/Wave64 <code>AnchorExecHi</code> pair (rejected on a Wave32 kernel, accepted on a Wave64 one), and the fail-closed cases (FLAT_SCRATCH clobber, zero-scratch, SGPR temp past the kernel allocation, arguments past the kernel's ordinary-VGPR bound).</li>
+<li><strong>Spill sim e2e (<code>tests/dbi/dbi_spill_sim_test.cpp</code>):</strong> Runs the full <code>s_swappc</code> envelope + spill bracket through <code>DbiSim</code> and reads back registers after execution, each with a negative control that nops the restore. Fixtures cover VGPR, SGPR (VGPR-bridged), two-SGPR, reused-spilled-bridge, AccVGPR (CDNA), combined VGPR+SGPR+ACC, EXEC preserve (wave32 partial mask), full-mask EXEC-widen spill, and probe-runs-under-anchor-mask — parameterized across <strong>CDNA3, CDNA4, and RDNA4</strong> (AGPR is CDNA-only).</li>
+<li><strong>Mask sim e2e (<code>tests/dbi/dbi_mask_sim_test.cpp</code>):</strong> The only suite whose kernel narrows <code>EXEC</code> before the anchor (<code>s_mov_b64 exec, 3</code>), which is what makes the policy observable at all. A probe writing a sentinel into a dead observation VGPR reaches lanes 0..1 under the default policy and every lane under <code>force_full_exec</code>, so the two cases are each other's control. That pair runs in two envelope shapes: with no arguments the full-mask window never opens, so the masked probe inherits an untouched <code>EXEC</code>; with an argument in a live <code>v0</code> the window opens, <code>v0</code> spills, and the masked case additionally exercises the anchor-mask restore that <code>force_full_exec</code> is defined by skipping. Mask-as-value cases pass <code>AnchorExecLo</code> (all targets) and both dwords (Wave64 only, asserting <code>{3, 0}</code> against a preset register so the zero high dword is not vacuous), and the Wave32 target asserts the <code>AnchorExecHi</code> rejection instead — which is what makes its Wave32 descriptor load-bearing rather than decorative. A further pair covers a probe that narrows <code>EXEC</code> and returns without putting it back, at a site with a live argument VGPR: the post-call re-widen is the only thing that lets the spill reload reach the lanes the probe switched off, and no other probe here exercises it (they all return with <code>EXEC</code> already <code>-1</code>, where the re-widen is a no-op). Two negative controls, each nopping one <code>exec, -1</code> write: without the opening widen the full-exec probe falls back to the anchor's lanes, and without the re-widen the reload strands every lane the probe switched off. Parameterized across <strong>CDNA3, CDNA4, and RDNA4</strong>.</li>
+<li><strong>Argument sim e2e (<code>tests/dbi/dbi_arg_sim_test.cpp</code>):</strong> Runs a probe call that passes an argument at an anchor where the argument register <code>v0</code> is <em>live</em>, so one execution covers the whole chain — argument VGPRs into <code>builder_clobbers</code>, into the spill set, argument write, probe read, restore. Asserts both halves out of one dispatch: the probe received the value the site passed, and the guest's <code>v0</code> survived carrying it. Negative control nops the two <code>v_mov_b32 v0, &lt;literal&gt;</code> words and requires the probe to read the guest's value instead. Parameterized across <strong>CDNA3, CDNA4, and RDNA4</strong>. Shares <code>test::DbiSim</code> (<code>tests/dbi/dbi_sim.h</code>) with the spill suite; note that harness dispatches its own descriptor with the full register file, so the register-ownership gates are exercised at patch time only.</li>
+<li><strong>Unit (<code>tests/code/kernel_descriptor_scan_test.cpp</code>):</strong> Single-kernel scan, and the malformed-ELF rejections (unterminated <code>.kd</code> name, section-header-table / symtab-range overflow, descriptor crossing its owning section).</li>
+<li><strong>Unit (<code>tests/patch/trampoline_builder_test.cpp</code>):</strong> Builder byte-layout contract, branch math, arch-honoring opcode selection, INT16 limit boundary cases.</li>
+<li><strong>Unit (<code>tests/patch/instruction_builder_test.cpp</code>):</strong> <code>compute_sopp_branch_simm16</code> boundary / alignment / overflow / negative-unaligned-delta.</li>
+<li><strong>Unit (<code>tests/patch/vector_builder_test.cpp</code>):</strong> <code>build_v_mov_b32_imm</code> and <code>build_v_mov_b32_src</code> encoding across all ten AMDGPU targets (including the <code>vdst</code> boundary cases), non-AMDGPU rejection for both, <code>build_v_mov_b32_src</code>'s rejection of the literal <code>src0</code> code (that form needs a trailing word this encoder cannot return), and the literal <code>src0</code> code pinned against every generation's operand table.</li>
+<li><strong>Unit (<code>tests/patch/probe_symbol_test.cpp</code>, <code>probe_callable_test.cpp</code>, <code>probe_clobber_test.cpp</code>):</strong> Probe symbol resolution (missing / duplicate / undefined / non-executable / zero-size rejection), <code>ProbeCallable</code> construction, and the <code>rj_nop_probe</code> clobber summary (empty ordinary clobbers, no special state).</li>
+<li><strong>Unit (<code>tests/patch/probe_live_in_test.cpp</code>):</strong> Probe input footprint — <code>v31</code> read cold is reported, the same body defining <code>v31</code> first is not, a def under a forward branch (which a linear scan would miss) is reported, scalars both ways, the link pair excluded — the declared-argument cases (the same body accepted at count 1 and rejected naming <code>v0</code> at count 0; an argument beyond the count named; a declared-but-unread argument accepted) — plus every fail-closed path: unknown convention, gfx1250, relative / GPR-indexed VGPR access, multi-<code>.text</code> probe object, symbol outside <code>.text</code>, body ahead of its section, missing decoder, undecodable <code>.text</code>, and an entry that starts no block.</li>
+<li><strong>Probe fixture (<code>tests/dbi/probe_fixture_test.cpp</code>, gated on <code>HAS_PROBE_FIXTURES</code>):</strong> Resolves <code>rj_nop_probe</code> in the real amdclang++-compiled gfx90a device ELF, confirms the body returns via <code>s_setpc_b64 s[30:31]</code>, builds the callable, and checks the clobber summary. Also pins the argument ABI against the compiler with <code>rj_arg_probe</code>: declared at count 1 the residual live-in set is empty, and at count 0 the same body reports <code>v0</code> — so a toolchain that placed argument 0 elsewhere would fail with the register it chose. No GPU required.</li>
+<li><strong>Static DBI smoke (<code>tests/dbi/hsa_dbi_nop_asm_test.cpp</code>, <code>HsaDbiNopAsmCdna2Static</code>):</strong> Loads a real compiled gfx90a <code>vector_add</code> ELF, runs <code>Instrumentor::patch()</code>, asserts the patched ELF differs from the original, decodes the anchor as <code>s_branch</code>, and confirms <code>.text</code> grew to hold the appended trampoline cave. No GPU required.</li>
+<li><strong>Hardware DBI smoke (<code>HsaDbiNopAsmCdna2Hardware</code>, gated on <code>HAS_CDNA2_GPU</code>):</strong> Three tests on a real gfx90a GPU — patched ELF loads + validates via HSA; dispatched kernel produces bit-identical output to the original (the inline-nop placeholder is a no-op); a <em>sabotage</em> test overwrites the trampoline's <code>s_nop 0</code> with <code>s_endpgm 0</code> and asserts the kernel actually fails, proving the GPU genuinely executes the trampoline path rather than silently bypassing the splice. <code>hsa_init</code> / <code>hsa_shut_down</code> and agent enumeration run once per suite via <code>SetUpTestSuite</code> / <code>TearDownTestSuite</code>; the agent is located by matching the target's <code>DbiTargetParams::isa_substring</code> against the HSA ISA name, so the same fixture binds to a real GPU or to whichever agent the CLI launcher supplies.</li>
+<li><strong>Static probe-call smoke (<code>tests/dbi/hsa_dbi_nop_probe_test.cpp</code>, <code>HsaDbiNopProbeCdna2Static</code>, gated on <code>HAS_PROBE_FIXTURES</code>):</strong> Instruments the register-padded <code>vector_add_probe</code> kernel with a probe call to <code>rj_nop_probe</code>, then asserts the patch shape — anchor decodes as <code>s_branch</code>, <code>.text</code> grew, the copied probe body matches the resolved body and ends in <code>s_setpc_b64</code>, and the trampoline contains the <code>s_swappc_b64</code> to it. No GPU required.</li>
+<li><strong>Hardware probe-call smoke (<code>HsaDbiNopProbeCdna2Hardware</code>, gated on <code>HAS_CDNA2_GPU</code>):</strong> Load + validate; dispatch the probe-call-patched kernel and confirm bit-identical output to the original (the no-op probe is transparent); a <em>sabotage</em> test overwrites the copied probe body's first word with <code>s_endpgm</code> and asserts the wave terminates, proving the <code>s_swappc_b64</code> genuinely transfers control into the body. <strong>Preconditions:</strong> these dispatching cases require the <a href="#instrumentation-flow-probe-call">register-padded fixture kernel</a> <em>and</em> the SMEM SBASE operand decode fix in the branch's base; without both the probe-call wave hangs the GPU.</li>
+<li>Run with <code>build/tests/rocjitsu_tests</code>, <code>build/tests/hsa_dbi_nop_asm_test</code>, and <code>build/tests/hsa_dbi_nop_probe_test</code>.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025–2026 Advanced Micro Devices, Inc.<br> <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/LICENSE.md">MIT License</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" target="_blank" rel="noopener" title="Rocjitsu on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/issues" target="_blank" rel="noopener" title="Report an issue" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 8h-2.81c-.45-.8-1.07-1.5-1.82-2L17 4.41 15.59 3l-2.17 2.17a6 6 0 0 0-2.83 0L8.41 3 7 4.41 8.62 6c-.75.5-1.36 1.21-1.81 2H4v2h2.09c-.06.33-.09.66-.09 1v1H4v2h2v1c0 .34.03.67.09 1H4v2h2.81A5.99 5.99 0 0 0 15 20.18c.91-.52 1.67-1.28 2.19-2.18H20v-2h-2.09c.06-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.03-.67-.09-1H20zm-4 7a4 4 0 0 1-4 4 4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4 4 4 0 0 1 4 4zm-2-5v2h-4v-2zm-4 4h4v2h-4z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.tracking", "toc.follow", "content.code.copy", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../assets/repository-stats.js"></script>
+      
+    
+  </body>
+</html>

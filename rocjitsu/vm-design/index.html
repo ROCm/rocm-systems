@@ -1,0 +1,2955 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User and developer documentation for the ROCm Just-in-Time Suite.">
+      
+      
+      
+        <link rel="canonical" href="https://rocm.github.io/rocm-systems/rocjitsu/vm-design/">
+      
+      
+        <link rel="prev" href="../simdojo/">
+      
+      
+        <link rel="next" href="../dbt-design/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>GPU hardware model - Rocjitsu</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../assets/handbook.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#amdgpu-virtual-machine-design" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Rocjitsu" class="md-header__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Rocjitsu
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              GPU hardware model
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Rocjitsu" class="md-nav__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Rocjitsu
+  </label>
+  
+    <div class="md-nav__source">
+      
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 21.5c-1.35-.85-3.8-1.5-5.5-1.5-1.65 0-3.35.3-4.75 1.05-.1.05-.15.05-.25.05-.25 0-.5-.25-.5-.5V6c.6-.45 1.25-.75 2-1 1.11-.35 2.33-.5 3.5-.5 1.95 0 4.05.4 5.5 1.5 1.45-1.1 3.55-1.5 5.5-1.5 1.17 0 2.39.15 3.5.5.75.25 1.4.55 2 1v14.6c0 .25-.25.5-.5.5-.1 0-.15 0-.25-.05-1.4-.75-3.1-1.05-4.75-1.05-1.7 0-4.15.65-5.5 1.5M12 8v11.5c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5V7c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5m1 3.5c1.11-.68 2.6-1 4.5-1 .91 0 1.76.09 2.5.28V9.23c-.87-.15-1.71-.23-2.5-.23q-2.655 0-4.5.84zm4.5.17c-1.71 0-3.21.26-4.5.79v1.69c1.11-.65 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24v-1.5c-.87-.16-1.71-.23-2.5-.23m2.5 2.9c-.87-.16-1.71-.24-2.5-.24-1.83 0-3.33.27-4.5.8v1.69c1.11-.66 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command-line interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../race-detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Race detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocgdb-debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qemu-vfio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QEMU VFIO-user compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vulkan-compute/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vulkan compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-2-2 2 2 0 0 0 2-2V5h2V3m6 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5h-2V3z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../style/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code style
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simdojo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU hardware model
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU hardware model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#file-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component Hierarchy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#address-spaces-translation-and-backing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Address spaces, translation, and backing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Address spaces, translation, and backing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#translated-pci-cache-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translated PCI cache boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sdma-queue-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SDMA queue execution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Driver
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#command-processor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command Processor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Command Processor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#queue-ownership-and-xcd-fan-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queue ownership and XCD fan-out
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cross-xcd-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-XCD completion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#queue-exceptions-and-debugger-notification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queue exceptions and debugger notification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-driven-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event-Driven Dispatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dispatch-packet-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dispatch Packet Flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#memory-hierarchy-and-coherence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Memory Hierarchy and Coherence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution Modes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution Modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#interactive-stepping-rj_vm_step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interactive Stepping (rj_vm_step)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#continuous-execution-rj_vm_run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuous Execution (rj_vm_run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#simulation-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Simulation Integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kmd-emulation-kmd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KMD Emulation (kmd/)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="KMD Emulation (kmd/)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Components
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kfd-ioctl-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KFD ioctl surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signal-event-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signal event page
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c-api-rj_vmh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C API (rj_vm.h)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="C API (rj_vm.h)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbt-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary translation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rj_dbt_translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translation tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu_dbt_guest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DBT guest mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary instrumentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instrumentation overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codegen/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA code generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-target-providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA target providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-gap-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA gap audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../npi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-instructions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous MMA execution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mma-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MMA lookahead admission
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concurrent-dispatch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrent dispatch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-counter-coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait coverage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 18H4V8h16m0-2h-8l-2-2H4c-1.11 0-2 .89-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+    
+  
+  
+    <li class="md-nav__item">
+      <a href="../blog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#file-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component Hierarchy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#address-spaces-translation-and-backing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Address spaces, translation, and backing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Address spaces, translation, and backing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#translated-pci-cache-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translated PCI cache boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sdma-queue-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SDMA queue execution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Driver
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#command-processor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command Processor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Command Processor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#queue-ownership-and-xcd-fan-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queue ownership and XCD fan-out
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cross-xcd-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-XCD completion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#queue-exceptions-and-debugger-notification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queue exceptions and debugger notification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-driven-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event-Driven Dispatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dispatch-packet-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dispatch Packet Flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#memory-hierarchy-and-coherence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Memory Hierarchy and Coherence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution Modes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution Modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#interactive-stepping-rj_vm_step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interactive Stepping (rj_vm_step)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#continuous-execution-rj_vm_run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuous Execution (rj_vm_run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#simulation-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Simulation Integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kmd-emulation-kmd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KMD Emulation (kmd/)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="KMD Emulation (kmd/)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Components
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kfd-ioctl-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KFD ioctl surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signal-event-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signal event page
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c-api-rj_vmh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C API (rj_vm.h)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="C API (rj_vm.h)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="amdgpu-virtual-machine-design"><span class="twemoji" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 17H7V7h10m4 4V9h-2V7a2 2 0 0 0-2-2h-2V3h-2v2h-2V3H9v2H7c-1.11 0-2 .89-2 2v2H3v2h2v2H3v2h2v2a2 2 0 0 0 2 2h2v2h2v-2h2v2h2v-2h2a2 2 0 0 0 2-2v-2h2v-2h-2v-2m-6 2h-2v-2h2m2-2H9v6h6z"/></svg></span> AMDGPU Virtual Machine Design<a class="headerlink" href="#amdgpu-virtual-machine-design" title="Permanent link">&para;</a></h1>
+<p>An AMDGPU virtual machine built on the simdojo simulation framework. Models
+a complete SoC hierarchy, from command processors and shader engines down to
+compute units, wavefronts, and register files. Runs within simdojo's unified
+PDES epoch loop, supporting both interactive stepping and continuous
+execution.</p>
+<h2 id="file-overview">File Overview<a class="headerlink" href="#file-overview" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>soc.h/cpp</code></td>
+<td>SoC: root of one GPU's hardware hierarchy, owning XCDs, IODs, and shared GPU memory. Installed as the topology root only by a caller driving the config loader directly, as the tests do</td>
+</tr>
+<tr>
+<td><code>virtual_machine.h/cpp</code></td>
+<td>VirtualMachine: the runtime topology root, owns the SoCs and the simulated KFD</td>
+</tr>
+<tr>
+<td><code>kmd/linux/simulated_kfd.h/cpp</code></td>
+<td>SimulatedKfd: the KMD interface, serving the KFD ioctl surface</td>
+</tr>
+<tr>
+<td><code>amdgpu/iod.h/cpp</code></td>
+<td>IOD: I/O die with memory-side cache and HBM controllers</td>
+</tr>
+<tr>
+<td><code>amdgpu/memory_side_cache.h/cpp</code></td>
+<td>Memory-side cache component between L2 and HBM</td>
+</tr>
+<tr>
+<td><code>amdgpu/hbm_controller.h</code></td>
+<td>HBM request adapter that routes VM-tagged traffic through GpuVm before accessing GpuMemory</td>
+</tr>
+<tr>
+<td><code>rj_vm.cpp</code></td>
+<td>C API: create, step, run, checkpoint</td>
+</tr>
+<tr>
+<td><code>amdgpu/command_processor.h/cpp</code></td>
+<td>CP: dispatch packets, doorbell loop</td>
+</tr>
+<tr>
+<td><code>amdgpu/compute_unit.h/cpp</code></td>
+<td>CU: wavefront slots, register files, execution</td>
+</tr>
+<tr>
+<td><code>amdgpu/shader_engine.h/cpp</code></td>
+<td>SE: container of compute units</td>
+</tr>
+<tr>
+<td><code>amdgpu/xcd.h/cpp</code></td>
+<td>XCD: CP + shader engines</td>
+</tr>
+<tr>
+<td><code>amdgpu/wavefront.h/cpp</code></td>
+<td>Wavefront: ISA-specific thread state</td>
+</tr>
+<tr>
+<td><code>amdgpu/gpu_vm.h/cpp</code></td>
+<td>GpuVm: address-space identity, translation, permissions, lifetime, and physical-access routing</td>
+</tr>
+<tr>
+<td><code>kmd/linux/legacy_gpu_vm.h/cpp</code></td>
+<td>LegacyGpuVmAdapter: KFD-owned compatibility bindings registered with GpuVm</td>
+</tr>
+<tr>
+<td><code>amdgpu/legacy_address_space.h</code></td>
+<td>LegacyAddressSpace: interposer compatibility translation, passthrough, faults, and client-process access</td>
+</tr>
+<tr>
+<td><code>amdgpu/gpu_memory.h</code></td>
+<td>GpuMemory: physical sparse backing bytes only</td>
+</tr>
+<tr>
+<td><code>amdgpu/sdma_queue_scheduler.h/cpp</code></td>
+<td>SdmaQueueScheduler: SoC-owned SDMA queue scheduler and worker lifetime</td>
+</tr>
+<tr>
+<td><code>amdgpu/sdma_queue_binding_factory.h/cpp</code></td>
+<td>Reusable <code>GpuQueueRegistry</code> binding factory shared by KFD and PCI/MES SDMA frontends</td>
+</tr>
+<tr>
+<td><code>amdgpu/sdma_ring_consumer.h/cpp</code></td>
+<td><code>SdmaRingConsumer</code>: per-queue ring cursor, fetch, retry, execution, and retirement publication</td>
+</tr>
+<tr>
+<td><code>amdgpu/sdma_packet_processor.h/cpp</code></td>
+<td>SdmaPacketProcessor: SDMA packet decoding and effects over caller-owned typed continuation state</td>
+</tr>
+<tr>
+<td><code>amdgpu/packet_processor.h</code></td>
+<td>Shared compile-time one-packet contract and validated protocol-independent result envelope</td>
+</tr>
+<tr>
+<td><code>amdgpu/aql/aql_packet_processor.h/cpp</code></td>
+<td>AqlPacketProcessor: fixed-size AQL decode and durable CP admission</td>
+</tr>
+<tr>
+<td><code>amdgpu/pm4/pm4_packet_processor.h/cpp</code></td>
+<td>Production PM4 fetch, opcode effects, register updates, IB traversal, and cursor publication</td>
+</tr>
+<tr>
+<td><code>amdgpu/pm4/pm4.h</code></td>
+<td>PM4 opcodes, registers, scratch leases, and persistent submission state</td>
+</tr>
+<tr>
+<td><code>amdgpu/dispatch_entry.h</code></td>
+<td>ComputeQueueRecord: CP-owned AQL/PM4 queues, nested command streams, shader dispatches and cursor publication</td>
+</tr>
+<tr>
+<td><code>amdgpu/gpu_queue_registry.h/cpp</code></td>
+<td>Frontend-neutral queue admission, lifetime, routing, and generation-safe handles</td>
+</tr>
+<tr>
+<td><code>amdgpu/compute_queue_binding_factory.h/cpp</code></td>
+<td>Reusable binding adapter from GpuQueueRegistry to the unified compute command processor</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="component-hierarchy">Component Hierarchy<a class="headerlink" href="#component-hierarchy" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>SimulationEngine                           (simdojo - owns topology)
+└── Topology
+    └── VirtualMachine                     (CompositeComponent - topology root)
+        ├── SimulatedKfd driver_            (owned member, not a child component)
+        └── gpu[0..G] ("gpu0"..)           (CompositeComponent, one per GPU)
+            ├── SoC ("soc")                 (owned, but its children were adopted
+            │                                by the gpuN wrapper above, so it is
+            │                                empty in the tree; every SoC is named
+            │                                "soc", and find_child returns the first
+            │                                match, so the wrapper is what keeps the
+            │                                paths unique)
+            ├── GpuVm                       (shared address-space service)
+            ├── GpuMemory ("memory")        (physical sparse backing only)
+            ├── SdmaQueueScheduler          (shared queue worker and scheduler)
+            ├── Iod[0..I] ("iod0"..)       (CompositeComponent - memory-side cache + HBM controllers)
+            └── Xcd[0..N] ("xcd0"..)       (CompositeComponent)
+                ├── CommandProcessor ("cp") (Component - event-driven dispatch)
+                └── ShaderEngine[0..M]      (CompositeComponent)
+                    └── ComputeUnit[0..K]   (CompositeComponent - register files + wavefront slots)
+</code></pre></div>
+<p>The <code>VirtualMachine</code> is a <code>simdojo::CompositeComponent</code> set as the topology root,
+and it owns the simulated KFD alongside its SoCs. The simulation infrastructure
+(engine, topology, partitioning) is managed by <code>SimulationEngine</code>; the SoC
+represents the hardware being modeled.</p>
+<h2 id="address-spaces-translation-and-backing">Address spaces, translation, and backing<a class="headerlink" href="#address-spaces-translation-and-backing" title="Permanent link">&para;</a></h2>
+<p><code>GpuVm</code> is the frontend-neutral address-space authority. It owns identity,
+generation, invalidation epochs, immutable access snapshots, translation,
+permissions, and fault policy, but it does not own KFD process state or a
+transport session. The KFD-owned <code>LegacyGpuVmAdapter</code> creates one isolated
+<code>LegacyAddressSpace</code> compatibility binding per process registration and supplies
+it to <code>GpuVm</code> as both translator and backing. The PCI path instead registers a
+GFX12 page-table translator and a <code>PhysicalMemoryAccess</code> backing supplied by the
+active PCI transport session. Both receive an <code>AddressSpaceHandle</code>, and queues,
+dispatches, and wavefronts carry that handle rather than treating a numeric
+VMID/PASID as lifetime identity.</p>
+<p>An address-space slot generation changes when a slot is destroyed and reused.
+Its translation epoch changes when a root is replaced or invalidated. A
+<code>GpuVmAccess</code> selects an immutable translator/backing generation under the
+registry lock. Ordinary snapshots share its retirement state; each pinned
+snapshot has independent retirement state and survives root replacement.
+Invalidation and unregistration revoke both kinds. Access methods hold a shared
+revocation lease, allowing an in-flight access to finish without combining an
+old root with a replacement backing. The captured handle and epoch provide
+<code>VmCacheNamespace</code> for virtually indexed clean caches. Functional instruction
+fetch reuses an ordinary snapshot within a quantum and checks <code>is_current()</code>
+before reuse; the access method still takes a lease and checks for retirement.
+Access results are
+typed as complete, temporarily unavailable, faulted, or malformed; transport
+availability is not encoded as a fake mapping in <code>GpuMemory</code>.</p>
+<p>Queue execution owners separately retain a move-only <code>GpuVmBindingLease</code> for as
+long as they may begin new access transactions. Unregister, reset, and GART-root
+removal reject a binding while such a lease exists. This execution-lifetime pin
+does not alter frontend-visible queue-reference counts: a frontend owns its
+registry binding, while the CP or SDMA scheduler independently owns the right to
+take future VM snapshots until queue detach completes.</p>
+<p><code>GpuMemory</code> owns only sparse physical bytes. It has no VMID-aware request port,
+translation state, process mapping, or frontend policy. HBM controllers are the
+simdojo memory-protocol adapters: they resolve VM-tagged requests through
+<code>GpuVm</code> and issue VMID-zero physical requests directly to <code>GpuMemory</code>. The
+generic simdojo message header carries an optional typed completion status, and
+the HBM controller maps complete, unavailable, faulted, and malformed VM
+outcomes into that response while preserving the existing response opcode.</p>
+<p>Standalone model queues use a SoC-owned, handle-only identity address space.
+<code>IdentityAddressSpaceTranslator</code> preserves their flat addresses, while
+<code>GpuMemoryPhysicalAccess</code> adapts translated physical operations to the sparse
+backing store. The binding is deliberately absent from numeric VMID routing, so
+it can coexist with a frontend-owned VMID-0 GART binding. Command processors
+substitute this handle only when an internal queue omits one; all packet fetch,
+dependency, dispatch, cursor, and completion accesses then follow the same
+<code>GpuVmAccess</code> path as frontend-created queues. <code>SoC::set_memory()</code> installs this
+backing during configuration; it may reinstall the same backing after an
+explicit VM reset, but it does not replace one live backing object with another.</p>
+<p>PCI and VFIO remain transport and MMIO layers. They publish address-space and
+queue operations to the shared <code>GpuVm</code>, queue registry, and queue-owner services and do not duplicate
+translation, TLB/MMU policy, CP, MES, SDMA, or memory-backing behavior.</p>
+<h3 id="translated-pci-cache-boundary">Translated PCI cache boundary<a class="headerlink" href="#translated-pci-cache-boundary" title="Permanent link">&para;</a></h3>
+<p>The existing scalar, vector, and L2 caches are keyed by numeric VMID and virtual
+address, and L2 writeback targets <code>GpuMemory</code>. They are therefore valid only for
+the legacy compatibility binding today. Translated PCI/VFIO scalar and vector
+loads, stores, and atomics intentionally bypass those caches and operate through
+one <code>GpuVmAccess</code> snapshot per instruction. Contiguous lanes are still grouped
+into block accesses, and atomics use the backing's indivisible load and
+compare/exchange operations rather than synthesized read/write pairs.</p>
+<p>The instruction cache is clean-only, so translated instruction fetch can use it
+safely: its tag includes the full address-space handle generation and
+translation epoch. Root replacement or slot reuse consequently misses without
+allowing stale code from the prior namespace to alias.</p>
+<p>This bypass is a safe intermediate state, not the final physical-cache model. A
+future translated data-cache implementation must key lines by physical
+backing/domain identity plus translated line address and retain the backing
+snapshot needed for eviction. Until that contract exists, routing translated
+data through the legacy caches would permit dirty lines from an old binding to
+write into a replacement backing and is prohibited.</p>
+<h3 id="sdma-queue-execution">SDMA queue execution<a class="headerlink" href="#sdma-queue-execution" title="Permanent link">&para;</a></h3>
+<p><code>SdmaQueueScheduler</code> is owned by the SoC and runs one dedicated worker for all SDMA
+queues. It owns scheduling, bounded root-packet turns, temporary-failure retries,
+terminal queue state, and detach quiescence. Producer submission only raises the
+monotonic service target; it does not transfer retry ownership back to a frontend.
+<code>GpuQueueRegistry</code> provides generation-checked frontend lifetime, while the shared
+SDMA binding factory translates frontend-neutral queue operations into scheduler operations.
+Long-running copy, fill, or indirect packets retain resumable continuation state,
+but the current functional model does not preempt them with an intra-packet work quantum.</p>
+<p>Each scheduler-owned <code>SdmaRingConsumer</code> is the sole owner of one root ring's
+transport-independent execution state. It captures one <code>GpuVmAccess</code> snapshot
+for the head-packet transaction, fetches the one-dword framing prefix and only
+the additional bytes requested by the processor, owns the typed SDMA
+continuation supplied to <code>SdmaPacketProcessor</code>, resumes at the first uncommitted
+packet effect without transferring the VM snapshot, and atomically publishes
+the retired byte cursor. A packet such as <code>COND_EXE</code> may determine a retirement
+extent larger than its decoded header; the consumer retains that completed
+decision without re-evaluating it, but does not advance beyond the producer-visible
+ring extent. An unavailable access retains the snapshot and exact progress for a
+later retry; faulted or malformed work becomes terminal after any required cursor
+publication.</p>
+<p>KFD and PCI/MES only adapt queue creation, producer notifications, interrupts,
+and reset into <code>GpuQueueRegistry</code>. MES may supply the initial device cursor captured
+from an MQD. KFD supplies the zero cursor it establishes during queue creation.
+A legacy or restored queue without an explicit device cursor initializes from
+its published read pointer. These front ends must not duplicate scheduling,
+ring fetch, packet decoding, retry, or cursor-publication state. The command
+processor serves compute queues only and has no SDMA implementation or state.</p>
+<p>The AQL command processor and SDMA scheduler use the same compile-time
+packet-processor interface and
+<code>PacketProcessResult</code> envelope, not a common execution engine. SDMA may suspend
+after a partial effect, so its ring consumer owns an opaque typed continuation
+that only <code>SdmaPacketProcessor</code>
+interprets; AQL blocks only before committing an effect and can restart
+the same request. The common <code>required_bytes</code> field requests more head-packet
+input; <code>retirement_bytes</code> reports the eventual cursor advance and can include a
+protocol-defined skipped extent, which the ring owner must bound against its ring
+and producer cursor. Ring ownership, VM snapshots, scheduling, consumer publication,
+and completion remain outside packet processors. Guest-controlled AQL validation failures are
+reported through the typed packet/admission result and fault only their queue;
+internal invariant violations remain exceptions.
+The firmware-free PM4 path supports the modeled compute-queue packet subset,
+rather than general PM4. MES maps its MQD and address space, but submits the
+queue through <code>GpuQueueRegistry</code> to a selected command processor. The binding
+retains only a CP registration token; the CP-owned queue controller retains the
+VM snapshot and retry-safe cursor publication state. The production packet
+processor in <code>pm4/</code> performs ring traversal, opcode effects, register updates,
+and nested IB traversal over that CP-owned state. CP supplies cache flushing,
+dispatch admission, retry scheduling, and synchronous fault cancellation
+callbacks. Temporary unavailability retains command and cursor-publication state
+for retry; cancellation stops resident waves before submission resources are
+released. A snapshot captured before GART publication is unready and must be
+released before retrying, so the next turn can capture the published binding.
+Once ready, the snapshot stays pinned through execution and retirement publication.
+For native rings, CP captures <code>command_access</code>, initializes the consumer cursor,
+builds root submissions from doorbells, and retries pending publication even when
+execution is suspended. The processor traverses packets and nested IBs, captures
+access for submitted streams as needed, and commits/publishes packet retirement
+through <code>read_pointer_journal</code>. The retry callback sets <code>command_retry_pending</code>,
+which CP clears before resuming. Dispatch admission appends to <code>dispatches.entries</code>;
+CP retires these entries before packet processing continues. On terminal publication
+failure, the processor sets <code>publication_faulted</code> before invoking cancellation.
+The cancellation callback marks the queue faulted, cancels pending work, and notifies
+failed submissions while preserving the publication failure.
+The PCI/MMIO layer supplies only the narrow register-write sink. PM4 service
+uses bounded queue turns for event-loop fairness and retains CP queue
+serialization.</p>
+<p>Graceful AQL removal is a publication barrier. The CP retains the registration
+while a consumed ring cursor, dispatch completion, or queue-idle signal still
+needs retry, and reports a terminal publication failure instead of silently
+dropping it. Reset and rollback use a distinct force-cancel operation.</p>
+<hr />
+<h2 id="driver">Driver<a class="headerlink" href="#driver" title="Permanent link">&para;</a></h2>
+<p>The Driver models the kernel-mode driver (KMD) interface presented to a
+user-mode driver (e.g., rocr). It is an abstract interface rather than a member
+of <code>SoC</code>; the concrete implementation is the simulated KFD, which the
+interception layer routes a guest process's driver syscalls to.</p>
+<p>It therefore exposes a syscall surface rather than a dispatch entry point:</p>
+<ul>
+<li><code>open()</code> / <code>close()</code> - open and close the driver device.</li>
+<li><code>ioctl(request, arg)</code> - the KFD ioctl surface, including the queue creation
+  path described under <em>Queue ownership and XCD fan-out</em> below.</li>
+<li><code>mmap()</code> / <code>munmap()</code> - map driver-owned memory, such as the doorbell page.</li>
+</ul>
+<p>Work does not reach the hardware through this interface. A process creates a HW
+queue through <code>ioctl</code>, and thereafter submits by writing that queue's ring and
+ringing its doorbell, which the owning XCD's command processor polls.</p>
+<hr />
+<h2 id="command-processor">Command Processor<a class="headerlink" href="#command-processor" title="Permanent link">&para;</a></h2>
+<p>The CP reads dispatch packets and distributes wavefronts across registered
+compute units in round-robin order. Each XCD has its own CP, and a CP is wired
+only to its own XCD's compute units.</p>
+<h3 id="queue-ownership-and-xcd-fan-out">Queue ownership and XCD fan-out<a class="headerlink" href="#queue-ownership-and-xcd-fan-out" title="Permanent link">&para;</a></h3>
+<p><code>SoC::assign_queue_owner_cp()</code> rotates HW queues across the XCDs. The XCD it
+returns <em>owns</em> the queue: it alone reads the ring, advances the read pointer, and
+holds each dispatch's completion signal. It is not the only XCD that runs the
+work.</p>
+<p><code>AqlQueueConfig::xcd_fanout</code> is the switch. A queue that sets it is replicated onto
+every XCD at registration; a queue that does not keeps the whole grid on the CP
+it was registered against. The KFD path sets it for supported AQL compute queues;
+SDMA queues instead belong to the SoC scheduler. A test queue opts in through
+<code>AqlQueue(..., xcd_fanout=true)</code> and leaves it clear otherwise. The creation path
+is not itself the switch — either path can produce either kind of queue.</p>
+<p>Each dispatch on a fanned-out queue is split so that <strong>XCD i runs the grid chunks
+congruent to i modulo the XCD count</strong> — round-robin, one workgroup at a time. The
+chunk is one workgroup, except for a clustered dispatch where it is a whole
+cluster, so cluster peers stay co-resident on the XCD whose LDS they share.</p>
+<p>For those dispatches, the rank is the XCD's own index rather than its position
+relative to the queue's owner, so the workgroup-to-XCD mapping does not depend on
+which XCD the queue landed on. That matters because kernels swizzle their
+workgroup index for cache locality assuming exactly this permutation. A dispatch
+that is not fanned out makes no such claim: it runs wholly on its owner.</p>
+<p>A grid with fewer chunks than XCDs is still split; the XCDs that get nothing take
+an empty share. Those empty shares are what keep every XCD's copy of the queue in
+step, because <code>barrier_satisfied()</code> reads ordering from the entries sitting ahead
+of a barrier'd packet, and an XCD that never heard about a packet would start the
+next one early. An empty share is still a <em>kernel</em> dispatch -- <code>is_non_kernel()</code>
+is false for it, since the packet kind is recorded rather than inferred from the
+workgroup count -- and it completes immediately because its <code>total_wgs</code> is zero.
+Like every other shard it is then held at the head until the grid retires.</p>
+<p>Every packet on a fanned-out queue reaches every XCD; what differs is how. A
+kernel dispatch is <strong>divided</strong> -- each XCD takes the chunks described above. A
+packet that runs no shader has no grid to divide, so it is <strong>copied</strong> whole. The
+full set as it stands:</p>
+<table>
+<thead>
+<tr>
+<th>Packet</th>
+<th>On a fanned-out queue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AQL kernel dispatch</td>
+<td>Divided: XCD i takes the chunks congruent to i</td>
+</tr>
+<tr>
+<td>AMD extended kernel dispatch (clustered)</td>
+<td>Divided, with a whole cluster as the chunk</td>
+</tr>
+<tr>
+<td>BarrierAND / BarrierOR</td>
+<td>Copied whole to every XCD</td>
+</tr>
+<tr>
+<td>AMD barrier-value</td>
+<td>Copied whole to every XCD</td>
+</tr>
+<tr>
+<td>AMD PM4 IB</td>
+<td>Copied whole to every XCD</td>
+</tr>
+</tbody>
+</table>
+<p><code>replicate_non_kernel_entry()</code> does the copying. A replica's entry list is
+therefore the owner's whole sequence rather than a subsequence of it, and that is
+what makes the ordering <code>barrier_satisfied()</code> reads from the entries sitting ahead
+of a barrier'd packet a device-wide ordering rather than a local one. Adding a
+packet type means deciding which column it belongs in; a type that is neither
+divided nor copied would silently let a replica run ahead of the owner.</p>
+<p>A copy carries no completion signal and no dispatch-level callbacks. A packet is
+owed exactly one of each however many XCDs end up running it, and the XCD that
+read the packet keeps that duty -- for a copied packet exactly as for a shard of a
+divided one.</p>
+<p>Replicas never read the ring and never poll a doorbell; shards arrive from the
+owning XCD through the engine's cross-thread event queue, so the handoff is safe
+when <code>partition_topology_by_xcds</code> has put each XCD on its own worker thread. A
+packet's acquire fence travels with the shard and each XCD applies it to its own
+caches on its own thread, since one XCD may not touch another's.</p>
+<h3 id="cross-xcd-completion">Cross-XCD completion<a class="headerlink" href="#cross-xcd-completion" title="Permanent link">&para;</a></h3>
+<p>A fanned-out dispatch retires once, after the last workgroup anywhere on the
+device. Each XCD counts its own share, flushes its own caches, then publishes the
+share to a <code>GridCompletion</code> counter shared by all shards. The owning XCD holds the
+head of its queue until that counter covers the grid, then fires the completion
+signal. Publishing releases and the owner's check acquires, so no XCD's results
+are still sitting in its caches when the signal is written.</p>
+<p>An XCD parked on a share it has already finished re-arms a re-check for as long as
+the grid is still outstanding. Which timer carries that re-check depends on whether
+the CP has a doorbell poll thread, and only one of the two paths uses the engine's
+event queue: a CP that polls its own host-accessible queues just sets a pending flag
+that the poll thread re-reads at its 100us cadence, while a CP with no poll thread --
+an internal test queue, or a fan-out replica, which holds host-accessible queues but
+never polls them -- schedules an event on its own queue instead. That event backs off
+exponentially, up to a cap, and resets as soon as work arrives; at one tick it is a
+spin, and with one replica per XCD waiting on every grid it was a 12x slowdown on
+real workloads. The XCD that retires
+the grid does wake every XCD, but that wake travels the engine's cross-thread
+async queue, which neither contributes to LBTS nor counts as outstanding work
+when the engine tests for termination: with one partition per XCD, every
+partition can go quiescent in the same epoch the wake is deposited, and the run
+ends before the next epoch delivers it. Unbounded one-tick polling also creates
+unnecessary scheduler traffic. The re-check therefore uses bounded backoff to
+keep the waiting partition's next-event time finite while leaving the wake an
+optimization rather than the only thing standing between grid retirement and
+signal publication.</p>
+<p>A peer shard carries no completion signal and does not report the queue idle. The
+packet-scoped plugin callbacks are emitted once for the packet rather than once per
+share, but by two different mechanisms. <code>onAmdgpuDispatchPacketProcessed</code> and
+<code>onAmdgpuDispatchExecutionEnd</code> belong to the owner: a peer skips them outright.
+<code>onAmdgpuDispatchExecutionBegin</code> is not owner-only -- it is emitted by whichever XCD
+first places a workgroup, and <code>GridCompletion::claim_execution_begin()</code> suppresses
+every later caller. The distinction is load-bearing when the owner's own share is
+empty: the callback is necessarily emitted by a peer there, and an owner-only rule
+would drop it. The workgroup and wavefront callbacks are not skipped either: every
+XCD still reports the work it actually ran.</p>
+<p>Destroying a fan-out queue discards any share that has not yet been published:
+the teardown runs on the caller's thread and so cannot flush a partition's compute
+units, and publishing without that write-back would let the owner signal with an
+XCD's results still cached. Dropping them is sound <strong>only because a fan-out queue
+is always destroyed on every XCD at once</strong> — the KFD paths sweep every command
+processor and an owner cascades to its replicas — so no XCD is ever left holding a
+grid that can no longer retire. A future change that tears one XCD's copy down
+alone would strand the owner.</p>
+<p>A shard still sitting in a peer's inbox when its replica is destroyed is dropped
+for the same reason and on the same argument. It has not run and its XCD's caches
+have not been written back, so crediting it would be worse than losing it: the
+owner would retire the grid and fire the completion signal for workgroups that
+never executed. KFD teardown is what reaches this window, since it removes
+replicas in XCD order while a later owner is still registered.</p>
+<h3 id="queue-exceptions-and-debugger-notification">Queue exceptions and debugger notification<a class="headerlink" href="#queue-exceptions-and-debugger-notification" title="Permanent link">&para;</a></h3>
+<p>A trap exception has one owner for its complete mask. The send site records
+whether the debugger or ROCr owns it; trap completion preserves that decision.
+Runtime delivery freezes all replicas of the logical queue before publishing
+one shared exception status and interrupt. Status publication and acknowledgment
+polling use checked atomic memory accesses. An inaccessible status or an unchanged
+status at the runtime acknowledgment deadline is a failed delivery, so the
+exception remains available to a later debugger. When a debugger was attached at
+the send site, its retained queue status also survives a successful ROCr
+acknowledgment and becomes queryable when a matching exception bit is enabled.
+A debugger can recover a retained fatal stop through a valid CWSR suspend/resume.
+While the runtime ownership result is pending, resume reports a queue error and
+preserves the stopped waves, saved CWSR image, and exception gate. Once the result
+is committed, the debugger can retry recovery. Successful recovery clears the
+exception gate on every replica, preserves independent runtime and debugger
+suspension reasons, and schedules deferred queue work when all gates open.</p>
+<p>Debugger publication separates the event from the notifier transport. Queue
+status stays hidden while a write is in flight so a failed publication can roll
+back a debugger-only stop. If QUERY arrives after reading the wake but before
+that write commits, or while an overlapping ROCr reservation hides the event,
+the session records a replacement-wake obligation. Once
+status is visible, the retry worker sends that wake under the session lock,
+without hiding the event again. The recovery write is bounded and holds no CU
+or allocation lock. Retained events, including queue creation, survive transport
+failures until acknowledged. Process events are already queryable during a
+write; their claims record which bits QUERY consumed so completion cannot mark
+a later event as already notified.</p>
+<p>The notifier uses a disposable child because another holder of the shared file
+description can change its blocking mode. Application signal handlers are
+blocked before cloning and remain blocked in the child; the parent restores
+its original mask. A deadline bounds the parent's wait, and a process-owned
+reaper handles a child that has not exited after cancellation.</p>
+<h3 id="event-driven-dispatch">Event-Driven Dispatch<a class="headerlink" href="#event-driven-dispatch" title="Permanent link">&para;</a></h3>
+<p>The CP is event-driven, and work reaches it only through a registered queue --
+there is no submit entry point on the CP itself:</p>
+<ul>
+<li><code>register_queue(AqlQueueConfig)</code> / <code>unregister_queue(...)</code> - attach and detach an AQL
+  queue. A host-accessible queue also starts the doorbell poll thread -- unless it
+  is a fan-out replica. Peer copies of a fanned-out queue are host-accessible too,
+  but their work arrives as dispatch shards from the owning XCD; a replica that read
+  the ring would dispatch the same packets once per XCD, so only the owner polls.</li>
+<li><code>handle_doorbell(...)</code> - the doorbell event handler. It fetches newly written
+  packets from each queue's ring, then runs the dispatch loop.</li>
+<li><code>step()</code> - one engine step of that same dispatch loop, for the internal test
+  queues that are driven by <code>run()</code>/<code>step()</code> rather than by a poll thread.</li>
+</ul>
+<p>A producer writes an AQL packet into the ring and rings the doorbell; the poll
+thread notices the change and fires the doorbell event. For each workgroup in
+this XCD's share -- the whole grid unless the queue fans out, in which case the
+owner hands each peer its shard through <code>accept_fanout_shard()</code> and every CP
+walks only its own -- the CP calls <code>dispatch_wf()</code> on the next CU in round-robin
+order. <code>dispatch_wf()</code>
+self-schedules the CU's tick via <code>schedule_work()</code>; there is no separate
+<code>activate()</code> call.</p>
+<p>Each CU runs its dispatched wavefronts independently. With serial CU dispatch,
+the CU is self-driving: <code>dispatch_wf()</code> calls <code>schedule_work()</code>, which schedules
+a tick event (only when the CU has runnable wavefronts) that calls
+<code>execute_quantum()</code>. With pooled functional dispatch, the CP owns the
+continuation event, gathers its runnable CUs, and submits one <code>run_quantum()</code>
+task per CU to the SoC's shared host pool. Pool workers mutate only their
+assigned CU state; the CP waits for the batch and then performs queue
+advancement, completion publication, cache maintenance, and cross-CU effects on
+its engine thread.</p>
+<p>The pool is host acceleration machinery, not part of the modeled GPU topology.
+Its thread budget includes the calling CP thread plus retained workers, and
+changing that budget must not change the observable result of a race-free
+workload. Hot-hook callback serialization is enforced inside
+<code>ExecutionPluginGroup</code>; replacing a plugin group neither changes the dispatch
+budget nor reconstructs the pool.</p>
+<p>One pool is shared by all CPs in an SoC, so retained worker counts do not
+multiply with the XCD count. Each submission owns its task index, results,
+exception state and worker join. A short pool mutex protects pending assignments
+and worker ownership; it is released before CU execution. Simdojo's <code>num_threads</code>
+can therefore drive concurrent submissions from separate XCD partitions. With
+E engine threads and dispatch width D, at most E + D - 1 CU threads can execute
+at once, subject to available work. Each CP keeps its own scratch storage alive
+and applies stateful completion actions only after its submission joins.
+Different SoCs own independent pools.</p>
+<p>A functional quantum is a number of CU <code>step()</code> iterations rather than a count
+of individual instructions. Each step visits the runnable wavefronts resident
+on that CU and can issue one instruction for each of them. A quantum executes up
+to <code>kFunctionalQuantum</code> such iterations, but may yield early when a wavefront
+requests it (for example, <code>s_sleep</code> or a vendor-dependency retry). The next CU
+or CP continuation is scheduled at <code>now + max(1, last_quantum_executed_)</code> -- by
+the work actually executed -- so an early yield resumes promptly instead of
+leaping a full quantum, while <code>max(1, ...)</code> keeps the event strictly in the
+future. The quantum allows CU events to interleave, guaranteeing forward
+progress for inter-CU synchronization patterns such as spin-locks or semaphore
+acquire/release on global memory.</p>
+<p>A wavefront that reaches <code>s_endpgm</code> halts: it frees its SGPR/VGPR
+resources immediately and notifies the CP of workgroup completion (there
+is no separate lazy retirement pass). When a CU has no resident
+wavefronts it stops scheduling and fires its <code>on_idle</code> callback. When all
+CUs are idle and no packets remain, the CP signals completion via
+<code>engine()-&gt;primary_release()</code>.</p>
+<p>Completion-signal and queue-inactive writes are durable per-queue journals.
+An unavailable translated backing pauses admission and advancement only for
+the queue whose journal is incomplete; the CP continues fetching, dispatching,
+and retiring independent queues. A later retry resumes at the first uncommitted
+publication stage, so callbacks, signal updates, mailbox writes, and interrupts
+are not replayed.</p>
+<hr />
+<h2 id="dispatch-packet-flow">Dispatch Packet Flow<a class="headerlink" href="#dispatch-packet-flow" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>producer writes an AQL packet into the ring, then rings the doorbell
+  └── doorbell poll thread observes the change -&gt; doorbell event
+        └── cp-&gt;handle_doorbell():
+              fetch_from_queue() reads the packet and builds a DispatchEntry
+                (a fanned-out packet also hands each peer XCD its shard here)
+              then, for each workgroup of this XCD's share:
+                cu = next CU (round-robin)
+                cu-&gt;dispatch_wf(wg_id, pc, sgprs, vgprs)
+                  └── find idle slot, allocate SGPR/VGPR blocks
+                      initialize wavefront state (pc, wg_id)
+                      serial: schedule_work() -&gt; CU tick event
+                      pooled: CP continuation -&gt; shared SoC pool -&gt; CU quantum
+</code></pre></div>
+<p>The in-flight record the CP builds from that packet is a <code>DispatchEntry</code>, which
+carries among other things:</p>
+<ul>
+<li><code>kernel_entry_pc</code> - byte address of kernel code in GPU memory</li>
+<li><code>total_wgs</code> - workgroups to launch, narrowed to this XCD's share once sharded</li>
+<li><code>wfs_per_workgroup</code> - wavefronts per workgroup</li>
+<li><code>sgprs_per_wf</code> / <code>vgprs_per_wf</code> - register requirements (from code object)</li>
+</ul>
+<p>Wavefronts are distributed round-robin across CUs within the XCD. Each CU
+allocates a contiguous range of indices in its physical SGPR and VGPR files
+for the wavefront. Backing storage is allocated lazily in 4 KiB chunks on first
+mutable access; const reads of absent chunks return zero without allocating.
+The backing storage need not be contiguous across chunks. For a fanned-out
+dispatch this walk covers only the XCD's own share of the grid; see <em>Queue
+ownership and XCD fan-out</em> above.</p>
+<hr />
+<h2 id="memory-hierarchy-and-coherence">Memory Hierarchy and Coherence<a class="headerlink" href="#memory-hierarchy-and-coherence" title="Permanent link">&para;</a></h2>
+<p>Each CU has private L1 scalar (K$) and L1 vector (V$) caches backed by a
+shared L2 per XCD. The memory type (Mtype), derived from instruction
+encoding bits (sc0/sc1/nt), controls caching behavior:</p>
+<table>
+<thead>
+<tr>
+<th>Mtype</th>
+<th>sc1</th>
+<th>sc0</th>
+<th>L1 Behavior</th>
+<th>L2 Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RW</td>
+<td>0</td>
+<td>0</td>
+<td>Cached, write-through</td>
+<td>Write-back</td>
+</tr>
+<tr>
+<td>CC</td>
+<td>0</td>
+<td>1</td>
+<td>Invalidate-on-read, write-through</td>
+<td>Write-through to HBM</td>
+</tr>
+<tr>
+<td>UC</td>
+<td>1</td>
+<td>0</td>
+<td>Bypass</td>
+<td>Bypass</td>
+</tr>
+<tr>
+<td>NT</td>
+<td>0</td>
+<td>0+nt</td>
+<td>Bypass L1</td>
+<td>Cached</td>
+</tr>
+</tbody>
+</table>
+<p><strong>CC (coherently cacheable)</strong> loads invalidate the L1 line before
+refetching from L2, matching real SC0/GLC hardware behavior. This
+ensures that stores from other CUs (which write through L1 to L2)
+are visible to polling loops.</p>
+<p><strong>Atomic operations</strong> (<code>flat_atomic_*</code>) bypass L1 entirely and perform
+read-modify-write at L2. The old value is returned to vdst when
+SC0/GLC is set. The L1 line is invalidated after the atomic to prevent
+stale reads. Supported integer atomics: swap, cmpswap, add, sub,
+smin/umin, smax/umax, and, or, xor, inc, dec.</p>
+<p><strong>Cache management instructions:</strong></p>
+<ul>
+<li><code>s_dcache_inv</code> / <code>s_dcache_inv_vol</code> — invalidate the L1 scalar cache</li>
+<li><code>s_gl1_inv</code> — invalidate the L1 vector cache</li>
+</ul>
+<hr />
+<h2 id="execution-modes">Execution Modes<a class="headerlink" href="#execution-modes" title="Permanent link">&para;</a></h2>
+<h3 id="interactive-stepping-rj_vm_step">Interactive Stepping (<code>rj_vm_step</code>)<a class="headerlink" href="#interactive-stepping-rj_vm_step" title="Permanent link">&para;</a></h3>
+<p>Synchronous, single-threaded. The caller drives execution one tick at a
+time:</p>
+<div class="highlight"><pre><span></span><code>rj_vm_step(vm, &amp;active)
+  └── engine.step()         process all events at next timestamp
+        └── CP doorbell event fires → cp-&gt;step() drains dispatch queue
+            CU tick events fire → execute one instruction per wavefront
+</code></pre></div>
+<p>Returns <code>active=1</code> while any wavefront is still executing. The engine is
+built during <code>rj_vm_create()</code>, not on first step.</p>
+<h3 id="continuous-execution-rj_vm_run">Continuous Execution (<code>rj_vm_run</code>)<a class="headerlink" href="#continuous-execution-rj_vm_run" title="Permanent link">&para;</a></h3>
+<p>The simulation thread runs <code>engine.run()</code>, which drains the event queue
+continuously. The main thread injects work via <code>schedule_event_async()</code>:</p>
+<div class="highlight"><pre><span></span><code>Main thread                          Simulation thread
+───────────                          ─────────────────
+                                     engine.run()
+                                       └── epoch loop processes events
+                                             │
+write ring + ring doorbell ────────►  doorbell event → CP fetches the packet
+  │                                          │
+  │                                     handle_doorbell() dispatches wavefronts
+  │                                     CU tick events execute instructions
+  │                                          │
+rj_vm_request_exit()     ──────────►  done_ set, workers stop
+  │                                        (ends the epoch loop; SimulatedKfd::
+  │                                         close() only tears down KFD process
+  │                                         state and does not stop the engine)
+  │
+sim_thread.join()  ◄─────────────────────    engine shuts down components
+  │
+engine.shutdown()
+</code></pre></div>
+<p>In single-threaded mode, the engine drains events in timestamp order
+without LBTS synchronization. The CP schedules doorbell events during
+<code>startup()</code> for pre-loaded packets and via <code>schedule_event_async()</code> for
+external submissions.</p>
+<hr />
+<h2 id="simulation-integration">Simulation Integration<a class="headerlink" href="#simulation-integration" title="Permanent link">&para;</a></h2>
+<p>The hardware hierarchy plugs into simdojo's <code>SimulationEngine</code> directly. The C
+API layer (<code>rj_vm.cpp</code>) owns the engine and wires that hierarchy into the
+topology, under a <code>VirtualMachine</code> root:</p>
+<ol>
+<li>
+<p><strong>Construction</strong> - The config loader parses a declarative JSON topology
+   config and creates a <code>SoC</code> with engine configuration. What becomes the
+   topology root depends on the entry point: <code>create_from_loaded()</code> wraps the
+   loaded SoC -- or SoCs, for a multi-GPU config -- in a <code>VirtualMachine</code> and
+   installs that via <code>set_root()</code>, which is what owns <code>SimulatedKfd</code>. A caller
+   driving the config loader itself, as the tests do, may instead install its
+   <code>SoC</code> as the root directly.</p>
+</li>
+<li>
+<p><strong><code>create()</code></strong> - Partitions topology, initializes all components, and
+   sets up the engine.</p>
+</li>
+<li>
+<p><strong><code>run()</code></strong> - Starts all components and drains events continuously.
+   In single-threaded mode, events are processed
+   in timestamp order until the queue empties and termination conditions are
+   met. In multi-threaded mode, workers run LBTS-synchronized epoch loops.</p>
+</li>
+<li>
+<p><strong><code>step()</code></strong> - Processes all events at the next timestamp (one tick step).
+   Returns whether the simulation can continue.</p>
+</li>
+<li>
+<p><strong><code>shutdown()</code></strong> - Calls <code>shutdown()</code> on all components, tears down engine.</p>
+</li>
+</ol>
+<p>After <code>run()</code> returns, <code>last_exit()</code> provides a <code>ExitStatus</code> with
+the termination reason (<code>COMPLETED</code>, <code>EXIT_REQUEST</code>, <code>INTERRUPTED</code>), the
+simulation tick, and a human-readable message. Components can call
+<code>engine()-&gt;request_exit(reason, code)</code> to stop the simulation.</p>
+<hr />
+<h2 id="kmd-emulation-kmd">KMD Emulation (<code>kmd/</code>)<a class="headerlink" href="#kmd-emulation-kmd" title="Permanent link">&para;</a></h2>
+<p>The <code>kmd/linux/</code> layer makes a real ROCm stack (ROCR + libhsakmt) run against the
+simulated GPU without any kernel driver. It is Linux-only and activated via
+<code>LD_PRELOAD</code>.</p>
+<h3 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>ROCm application
+  └── ROCR / HIP runtime
+        └── libhsakmt
+              ├── open("/dev/kfd")    ──►  interposer.cpp intercepts
+              ├── ioctl(kfd_fd, …)   ──►  SimulatedKfd::ioctl()
+              ├── mmap(kfd_fd, …)    ──►  SimulatedKfd::mmap()
+              ├── fopen("/sys/…")    ──►  interposer.cpp redirects → Sysfs temp dir
+              └── close(kfd_fd)      ──►  SimulatedKfd::close()
+</code></pre></div>
+<h3 id="components">Components<a class="headerlink" href="#components" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>interposer.cpp</code></td>
+<td>LD_PRELOAD shim: intercepts <code>open</code>, <code>ioctl</code>, <code>mmap</code>, <code>munmap</code>, <code>fopen</code>, <code>close</code> via syscall</td>
+</tr>
+<tr>
+<td><code>simulated_kfd.h/cpp</code></td>
+<td><code>SimulatedKfd</code>: handles all KFD ioctls, owns doorbell/event pages</td>
+</tr>
+<tr>
+<td><code>sysfs.h/cpp</code></td>
+<td><code>Sysfs</code>: generates a per-process <code>/tmp/rocjitsu_topology_*</code> directory that ROCR reads instead of the real <code>/sys/devices/virtual/kfd/kfd/topology</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="kfd-ioctl-surface">KFD ioctl surface<a class="headerlink" href="#kfd-ioctl-surface" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>ioctl</th>
+<th>Handler</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET_VERSION</code></td>
+<td><code>get_version_ioctl</code></td>
+<td>Returns KFD_IOCTL_MAJOR/MINOR_VERSION</td>
+</tr>
+<tr>
+<td><code>GET_PROCESS_APERTURES_NEW</code></td>
+<td><code>get_process_apertures_ioctl</code></td>
+<td>Returns <code>gpu_apertures(ordinal)</code> — LDS/scratch shifted by <code>kApertureStride</code> per GPU, with per-instance <code>gpu_id</code></td>
+</tr>
+<tr>
+<td><code>ACQUIRE_VM</code></td>
+<td><code>acquire_vm_ioctl</code></td>
+<td>No-op (VM is always acquired)</td>
+</tr>
+<tr>
+<td><code>ALLOC_MEMORY_OF_GPU</code></td>
+<td><code>alloc_memory_ioctl</code></td>
+<td>Allocates host memory, assigns GPU VA from a linear bump allocator</td>
+</tr>
+<tr>
+<td><code>FREE_MEMORY_OF_GPU</code></td>
+<td><code>free_memory_ioctl</code></td>
+<td>Frees host memory, removes VA mapping</td>
+</tr>
+<tr>
+<td><code>MAP_MEMORY_TO_GPU</code> / <code>UNMAP</code></td>
+<td>map/unmap ioctls</td>
+<td>No-op (host pointers serve as GPU VAs)</td>
+</tr>
+<tr>
+<td><code>CREATE_QUEUE</code></td>
+<td><code>create_queue_ioctl</code></td>
+<td>Registers an AQL ring with the CP; deferred until doorbell page is mapped</td>
+</tr>
+<tr>
+<td><code>DESTROY_QUEUE</code></td>
+<td><code>destroy_queue_ioctl</code></td>
+<td>Unregisters the ring from the CP</td>
+</tr>
+<tr>
+<td><code>CREATE_EVENT</code></td>
+<td><code>create_event_ioctl</code></td>
+<td>Allocates a slot in the memfd-backed signal page</td>
+</tr>
+<tr>
+<td><code>DESTROY_EVENT</code></td>
+<td><code>destroy_event_ioctl</code></td>
+<td>Removes event slot; wakes any WAIT_EVENTS callers</td>
+</tr>
+<tr>
+<td><code>SET_EVENT</code></td>
+<td><code>set_event_ioctl</code></td>
+<td>Marks slot non-zero with <code>memory_order_release</code>; notifies waiters</td>
+</tr>
+<tr>
+<td><code>WAIT_EVENTS</code></td>
+<td><code>wait_events_ioctl</code></td>
+<td>Waits up to 100ms then returns; simulates <code>wake_up_interruptible</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="signal-event-page">Signal event page<a class="headerlink" href="#signal-event-page" title="Permanent link">&para;</a></h3>
+<p>libhsakmt expects a memfd-backed page at the KFD mmap offset
+<code>KFD_MMAP_TYPE_EVENTS | gpu_id</code>. Each 64-bit slot corresponds to one
+<code>event_id</code>. libhsakmt polls <code>signal_page[event_id]</code> directly; non-zero means
+the event is pending. <code>close()</code> sets all slots to 1 to unblock any polling
+threads during shutdown.</p>
+<hr />
+<h2 id="c-api-rj_vmh">C API (<code>rj_vm.h</code>)<a class="headerlink" href="#c-api-rj_vmh" title="Permanent link">&para;</a></h2>
+<p>The C API wraps the VM behind an opaque <code>rj_vm_t</code> handle:</p>
+<p><code>rj_vm_t</code> is reference-counted (extends <code>RefCounted</code>). Use <code>rj_vm_retain</code>
+and <code>rj_vm_release</code> to manage shared ownership; <code>rj_vm_destroy</code> is a
+convenience wrapper that releases the last reference and tears down the VM.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rj_vm_create()</code></td>
+<td>Load config from JSON file, build VM and engine</td>
+</tr>
+<tr>
+<td><code>rj_vm_create_from_string()</code></td>
+<td>Load config from JSON string</td>
+</tr>
+<tr>
+<td><code>rj_vm_retain()</code></td>
+<td>Increment reference count</td>
+</tr>
+<tr>
+<td><code>rj_vm_release()</code></td>
+<td>Decrement reference count; destroys when it reaches zero</td>
+</tr>
+<tr>
+<td><code>rj_vm_destroy()</code></td>
+<td>Tear down VM</td>
+</tr>
+<tr>
+<td><code>rj_vm_step()</code></td>
+<td>One interactive step</td>
+</tr>
+<tr>
+<td><code>rj_vm_run()</code></td>
+<td>Run to completion via driver open/close</td>
+</tr>
+<tr>
+<td><code>rj_vm_save_checkpoint()</code></td>
+<td>Serialize VM state to FlatBuffer</td>
+</tr>
+<tr>
+<td><code>rj_vm_restore_checkpoint()</code></td>
+<td>Restore VM from checkpoint file</td>
+</tr>
+</tbody>
+</table>
+<h3 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;rocjitsu/rocjitsu.h&gt;</span>
+
+<span class="n">rj_vm_t</span><span class="w"> </span><span class="o">*</span><span class="n">vm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">NULL</span><span class="p">;</span>
+<span class="n">rj_vm_create</span><span class="p">(</span><span class="s">"configs/gfx950_mi355x.json"</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">vm</span><span class="p">);</span>
+
+<span class="kt">uint64_t</span><span class="w"> </span><span class="n">ticks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="n">rj_vm_run</span><span class="p">(</span><span class="n">vm</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">ticks</span><span class="p">);</span>
+
+<span class="n">rj_vm_destroy</span><span class="p">(</span><span class="n">vm</span><span class="p">);</span>
+</code></pre></div>
+<p>Internal C++ code (tests, GUI) accesses the <code>SoC</code> directly via the
+config loader (<code>config::load_config()</code> / <code>config::load_config_from_string()</code>).
+The <code>rj_vm.h</code> header is a pure C API with opaque handles.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025–2026 Advanced Micro Devices, Inc.<br> <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/LICENSE.md">MIT License</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" target="_blank" rel="noopener" title="Rocjitsu on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/issues" target="_blank" rel="noopener" title="Report an issue" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 8h-2.81c-.45-.8-1.07-1.5-1.82-2L17 4.41 15.59 3l-2.17 2.17a6 6 0 0 0-2.83 0L8.41 3 7 4.41 8.62 6c-.75.5-1.36 1.21-1.81 2H4v2h2.09c-.06.33-.09.66-.09 1v1H4v2h2v1c0 .34.03.67.09 1H4v2h2.81A5.99 5.99 0 0 0 15 20.18c.91-.52 1.67-1.28 2.19-2.18H20v-2h-2.09c.06-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.03-.67-.09-1H20zm-4 7a4 4 0 0 1-4 4 4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4 4 4 0 0 1 4 4zm-2-5v2h-4v-2zm-4 4h4v2h-4z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.tracking", "toc.follow", "content.code.copy", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../assets/repository-stats.js"></script>
+      
+    
+  </body>
+</html>

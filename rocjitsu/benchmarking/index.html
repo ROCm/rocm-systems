@@ -1,0 +1,2273 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User and developer documentation for the ROCm Just-in-Time Suite.">
+      
+      
+      
+        <link rel="canonical" href="https://rocm.github.io/rocm-systems/rocjitsu/benchmarking/">
+      
+      
+        <link rel="prev" href="../rocgdb-debugging/">
+      
+      
+        <link rel="next" href="../qemu-vfio/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Benchmarking - Rocjitsu</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../assets/handbook.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#benchmarking-rocjitsu" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Rocjitsu" class="md-header__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Rocjitsu
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Benchmarking
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Rocjitsu" class="md-nav__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Rocjitsu
+  </label>
+  
+    <div class="md-nav__source">
+      
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 21.5c-1.35-.85-3.8-1.5-5.5-1.5-1.65 0-3.35.3-4.75 1.05-.1.05-.15.05-.25.05-.25 0-.5-.25-.5-.5V6c.6-.45 1.25-.75 2-1 1.11-.35 2.33-.5 3.5-.5 1.95 0 4.05.4 5.5 1.5 1.45-1.1 3.55-1.5 5.5-1.5 1.17 0 2.39.15 3.5.5.75.25 1.4.55 2 1v14.6c0 .25-.25.5-.5.5-.1 0-.15 0-.25-.05-1.4-.75-3.1-1.05-4.75-1.05-1.7 0-4.15.65-5.5 1.5M12 8v11.5c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5V7c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5m1 3.5c1.11-.68 2.6-1 4.5-1 .91 0 1.76.09 2.5.28V9.23c-.87-.15-1.71-.23-2.5-.23q-2.655 0-4.5.84zm4.5.17c-1.71 0-3.21.26-4.5.79v1.69c1.11-.65 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24v-1.5c-.87-.16-1.71-.23-2.5-.23m2.5 2.9c-.87-.16-1.71-.24-2.5-.24-1.83 0-3.33.27-4.5.8v1.69c1.11-.66 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command-line interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../race-detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Race detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocgdb-debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Metrics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#instruction-execution-failures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instruction execution failures
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-and-record-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build and record provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prepare-the-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prepare the host
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Prepare the host">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reserve-cpus-with-systemd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reserve CPUs with systemd
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-one-sample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run one sample
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Run one sample">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#triton-specific-cache-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Triton-specific cache control
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#find-cpu-hotspots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Find CPU hotspots
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sampling-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sampling protocol
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#case-study-gfx1250-iree-and-gluon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Case study: gfx1250 IREE and Gluon
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qemu-vfio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QEMU VFIO-user compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vulkan-compute/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vulkan compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-2-2 2 2 0 0 0 2-2V5h2V3m6 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5h-2V3z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../style/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code style
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simdojo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vm-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU hardware model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbt-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary translation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rj_dbt_translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translation tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu_dbt_guest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DBT guest mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary instrumentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instrumentation overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codegen/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA code generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-target-providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA target providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-gap-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA gap audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../npi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-instructions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous MMA execution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mma-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MMA lookahead admission
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concurrent-dispatch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrent dispatch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-counter-coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait coverage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 18H4V8h16m0-2h-8l-2-2H4c-1.11 0-2 .89-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+    
+  
+  
+    <li class="md-nav__item">
+      <a href="../blog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Metrics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#instruction-execution-failures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instruction execution failures
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-and-record-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build and record provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prepare-the-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prepare the host
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Prepare the host">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reserve-cpus-with-systemd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reserve CPUs with systemd
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-one-sample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run one sample
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Run one sample">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#triton-specific-cache-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Triton-specific cache control
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#find-cpu-hotspots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Find CPU hotspots
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sampling-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sampling protocol
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#case-study-gfx1250-iree-and-gluon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Case study: gfx1250 IREE and Gluon
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="benchmarking-rocjitsu"><span class="twemoji" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m16 11.78 4.24-7.33 1.73 1-5.23 9.05-6.51-3.75L5.46 19H22v2H2V3h2v14.54L9.5 8z"/></svg></span> Benchmarking rocjitsu<a class="headerlink" href="#benchmarking-rocjitsu" title="Permanent link">&para;</a></h1>
+<p>This guide measures rocjitsu simulator and developer-tool performance on the
+host. It does not measure GPU hardware performance or kernel algorithm quality.</p>
+<p>Use a fixed workload, toolchain, simulator configuration, and launch environment.
+Measure each revision in separate Release build directories and alternate their
+run order. Small simulator changes are easily hidden by CPU frequency, process
+startup, JIT caches, and unrelated host activity.</p>
+<h2 id="metrics">Metrics<a class="headerlink" href="#metrics" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>End-to-end wall time</td>
+<td><code>Elapsed (wall clock) time</code> in <code>time.txt</code>. It includes startup, JIT/compiler work, runtime work, and simulation, and is the primary metric for short kernels and test suites.</td>
+</tr>
+<tr>
+<td>Active-dispatch throughput</td>
+<td>From the <a href="../plugins/#throughput-plugin">throughput plugin</a> completed-dispatch records: <code>sum(wave_instructions) / sum(wall_seconds) / 1e6</code>. This excludes gaps between dispatches. Aggregate counts and time before dividing; do not average the per-dispatch <code>mips</code> values.</td>
+</tr>
+<tr>
+<td><code>cycles:u</code> and <code>instructions:u</code></td>
+<td>Whole-process counters in <code>perf.csv</code>, used to cross-check noisy wall time. Keep the measured process boundary identical.</td>
+</tr>
+<tr>
+<td>Peak RSS and page faults</td>
+<td><code>Maximum resident set size</code> in <code>time.txt</code> and <code>minor-faults</code>/<code>major-faults</code> in <code>perf.csv</code>, used for allocation and simulator-concurrency changes. Measure a fresh process.</td>
+</tr>
+</tbody>
+</table>
+<p>Do not substitute one metric for another. For example, lazy allocation may
+improve process wall time and RSS without changing instruction-handler
+throughput.</p>
+<h3 id="instruction-execution-failures">Instruction execution failures<a class="headerlink" href="#instruction-execution-failures" title="Permanent link">&para;</a></h3>
+<p>With tests enabled, <code>ExecutionDispatchBenchmark</code> measures the CU execution API
+using predecoded RDNA4 instructions. Its three cases execute a supported scalar
+add, an unimplemented packed D16 buffer load, or a mix with 10% rejected
+instructions. Each case checks the observed failure count outside the timed
+loop and reports nanoseconds per instruction. Decoding and wavefront allocation
+are outside that timing; <code>DecodeExecuteBenchmark</code> covers the combined pipeline.
+Instruction callbacks record a compact failure status without constructing or
+emitting diagnostics. The VM supplies context when a failure stops simulation.</p>
+<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>--build<span class="w"> </span><span class="s2">"</span><span class="nv">$build</span><span class="s2">"</span><span class="w"> </span>--target<span class="w"> </span>rocjitsu_tests
+agent-reserved-run<span class="w"> </span>taskset<span class="w"> </span>-c<span class="w"> </span><span class="s2">"</span><span class="nv">$cpu</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>perf<span class="w"> </span>stat<span class="w"> </span>-e<span class="w"> </span>cycles:u,instructions:u,branches:u<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="nv">$build</span><span class="s2">/tests/rocjitsu_tests"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--gtest_filter<span class="o">=</span><span class="s1">'ExecutionDispatchBenchmark.*:DecodeExecuteBenchmark.*'</span>
+</code></pre></div>
+<p>This example uses the reserved-core wrapper described below; choose <code>$cpu</code>
+inside the reservation. On a host without that setup, omit <code>agent-reserved-run</code>
+and arrange a quiet CPU before comparing revisions.</p>
+<p>Alternate baseline and changed executables on the same CPU after warmup and
+compare medians across several runs. Include the success case: reducing rejection
+cost does not establish that successful execution is unchanged. These benchmarks
+measure host simulator throughput, and do not establish GPU hardware performance.
+Inspect retired instructions and cycles alongside wall time, especially when CPU
+frequency changes between samples; a timing difference alone cannot identify the
+cost of checking a result.</p>
+<h2 id="build-and-record-provenance">Build and record provenance<a class="headerlink" href="#build-and-record-provenance" title="Permanent link">&para;</a></h2>
+<p>Use the same compiler, SDK, CMake options, and workload artifacts for both
+revisions. Build before reserving the machine for measurements.</p>
+<div class="highlight"><pre><span></span><code><span class="nv">repo</span><span class="o">=</span>/path/to/rocm-systems
+<span class="nv">build</span><span class="o">=</span>/path/to/build-release
+<span class="nv">rocm_sdk</span><span class="o">=</span>/path/to/the-rock-venv/lib/python3.12/site-packages/_rocm_sdk_devel
+<span class="nv">config</span><span class="o">=</span>/path/to/rocjitsu-config.json
+
+cmake<span class="w"> </span>-S<span class="w"> </span><span class="s2">"</span><span class="nv">$repo</span><span class="s2">/emulation/rocjitsu"</span><span class="w"> </span>-B<span class="w"> </span><span class="s2">"</span><span class="nv">$build</span><span class="s2">"</span><span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DBUILD_TESTING<span class="o">=</span>OFF<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DLTO<span class="o">=</span>OFF<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DROCM_PATH<span class="o">=</span><span class="s2">"</span><span class="nv">$rocm_sdk</span><span class="s2">"</span>
+cmake<span class="w"> </span>--build<span class="w"> </span><span class="s2">"</span><span class="nv">$build</span><span class="s2">"</span><span class="w"> </span>--target<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>rocjitsu_bin<span class="w"> </span>rocjitsu_shared<span class="w"> </span>rocjitsu_plugin_throughput_so
+
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">"</span><span class="nv">$repo</span><span class="s2">"</span><span class="w"> </span>rev-parse<span class="w"> </span>HEAD
+git<span class="w"> </span>-C<span class="w"> </span><span class="s2">"</span><span class="nv">$repo</span><span class="s2">"</span><span class="w"> </span>status<span class="w"> </span>--short
+sha256sum<span class="w"> </span><span class="s2">"</span><span class="nv">$config</span><span class="s2">"</span>
+</code></pre></div>
+<p>Retain the revision, build type, compiler and SDK versions, config hash,
+workload revision, command line, environment, and raw output with every result.
+Run from each revision's build tree; do not install either build into a shared
+SDK during the comparison.</p>
+<h2 id="prepare-the-host">Prepare the host<a class="headerlink" href="#prepare-the-host" title="Permanent link">&para;</a></h2>
+<p>Prefer a quiet host. If background work cannot be stopped, reserve complete
+physical cores with disjoint systemd cgroup cpusets. <code>taskset</code> constrains only
+the benchmark and does not stop an unrestricted build from using the same CPUs.</p>
+<div class="highlight"><pre><span></span><code>uptime
+ps<span class="w"> </span>-eo<span class="w"> </span>pid,psr,pcpu,pmem,comm,args<span class="w"> </span>--sort<span class="o">=</span>-pcpu<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-n<span class="w"> </span><span class="m">20</span>
+lscpu<span class="w"> </span>-e<span class="o">=</span>CPU,CORE,SOCKET,ONLINE
+cpupower<span class="w"> </span>frequency-info
+</code></pre></div>
+<p>Use <code>lscpu</code> to identify SMT siblings. CPU <code>N+core_count</code> is not universally the
+sibling of CPU <code>N</code>. A CPU mask is not isolated if another job can use either
+thread of the same core.</p>
+<p>Keep the governor and energy-performance policy unchanged across the complete
+comparison. Choose one fixed physical core, with a consistent SMT-sibling
+policy, for a single-threaded simulator-only probe. Size a larger mask to the
+parallelism the runner and its compiler/JIT workers can actually use. Avoid
+broad masks when the process may migrate but cannot use the extra cores.</p>
+<h3 id="reserve-cpus-with-systemd">Reserve CPUs with systemd<a class="headerlink" href="#reserve-cpus-with-systemd" title="Permanent link">&para;</a></h3>
+<p>Use the system service manager on a cgroup-v2 host. Reserve every SMT sibling
+of each selected core, remove those logical CPUs from the top-level background
+units, and launch the complete benchmark process tree in a sibling slice. The
+copy-paste example below requires those units to be unrestricted and fails if
+one already has a nonempty <code>AllowedCPUs</code>. In that case, use a root coordinator
+that applies the intersection of the existing mask and the housekeeping mask;
+never broaden an existing policy.</p>
+<p>The masks below are examples from a 96-core, 192-thread host. Derive them from
+<code>lscpu</code> for the benchmark machine. Run the setup and cleanup from Bash:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
+grep<span class="w"> </span>-qw<span class="w"> </span>cpuset<span class="w"> </span>/sys/fs/cgroup/cgroup.controllers
+
+<span class="nv">reserved</span><span class="o">=</span><span class="m">80</span>-95,176-191
+<span class="nv">housekeeping</span><span class="o">=</span><span class="m">0</span>-79,96-175
+<span class="nv">background_units</span><span class="o">=()</span>
+<span class="nb">declare</span><span class="w"> </span>-A<span class="w"> </span><span class="nv">previous_allowed</span><span class="o">=()</span>
+<span class="nv">old_paranoid</span><span class="o">=</span>
+<span class="nv">paranoid_changed</span><span class="o">=</span><span class="m">0</span>
+
+<span class="k">for</span><span class="w"> </span>unit<span class="w"> </span><span class="k">in</span><span class="w"> </span>init.scope<span class="w"> </span>system.slice<span class="w"> </span>user.slice<span class="w"> </span>machine.slice<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span><span class="k">$(</span>systemctl<span class="w"> </span>show<span class="w"> </span><span class="s2">"</span><span class="nv">$unit</span><span class="s2">"</span><span class="w"> </span>-p<span class="w"> </span>LoadState<span class="w"> </span>--value<span class="k">)</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span>not-found<span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nv">background_units</span><span class="o">+=(</span><span class="s2">"</span><span class="nv">$unit</span><span class="s2">"</span><span class="o">)</span>
+<span class="w">    </span>previous_allowed<span class="o">[</span><span class="s2">"</span><span class="nv">$unit</span><span class="s2">"</span><span class="o">]=</span><span class="k">$(</span>systemctl<span class="w"> </span>show<span class="w"> </span><span class="s2">"</span><span class="nv">$unit</span><span class="s2">"</span><span class="w"> </span>-p<span class="w"> </span>AllowedCPUs<span class="w"> </span>--value<span class="k">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-n<span class="w"> </span><span class="si">${</span><span class="nv">previous_allowed</span><span class="p">[</span><span class="nv">$unit</span><span class="p">]</span><span class="si">}</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">      </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"</span><span class="nv">$unit</span><span class="s2"> already has AllowedCPUs=</span><span class="si">${</span><span class="nv">previous_allowed</span><span class="p">[</span><span class="nv">$unit</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
+<span class="w">      </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"compute its intersection with </span><span class="nv">$housekeeping</span><span class="s2"> before continuing"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
+<span class="w">      </span><span class="nb">exit</span><span class="w"> </span><span class="m">2</span>
+<span class="w">    </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="k">done</span>
+
+cleanup_host<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span>unit
+<span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">status</span><span class="o">=</span><span class="m">0</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span>unit<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">background_units</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span>sudo<span class="w"> </span>systemctl<span class="w"> </span>set-property<span class="w"> </span>--runtime<span class="w"> </span><span class="s2">"</span><span class="nv">$unit</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">"AllowedCPUs=</span><span class="si">${</span><span class="nv">previous_allowed</span><span class="p">[</span><span class="nv">$unit</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nv">status</span><span class="o">=</span><span class="m">1</span>
+<span class="w">  </span><span class="k">done</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">((</span><span class="w"> </span>paranoid_changed<span class="w"> </span><span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>sudo<span class="w"> </span>sysctl<span class="w"> </span>-w<span class="w"> </span>kernel.perf_event_paranoid<span class="o">=</span><span class="s2">"</span><span class="nv">$old_paranoid</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nv">status</span><span class="o">=</span><span class="m">1</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="s2">"</span><span class="nv">$status</span><span class="s2">"</span>
+<span class="o">}</span>
+<span class="nb">trap</span><span class="w"> </span>cleanup_host<span class="w"> </span>EXIT
+<span class="nb">trap</span><span class="w"> </span><span class="s1">'exit 130'</span><span class="w"> </span>INT
+<span class="nb">trap</span><span class="w"> </span><span class="s1">'exit 143'</span><span class="w"> </span>TERM
+
+<span class="k">for</span><span class="w"> </span>unit<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">background_units</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>sudo<span class="w"> </span>systemctl<span class="w"> </span>set-property<span class="w"> </span>--runtime<span class="w"> </span><span class="s2">"</span><span class="nv">$unit</span><span class="s2">"</span><span class="w"> </span><span class="s2">"AllowedCPUs=</span><span class="nv">$housekeeping</span><span class="s2">"</span>
+<span class="k">done</span>
+
+systemctl<span class="w"> </span>show<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">background_units</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-p<span class="w"> </span>Id<span class="w"> </span>-p<span class="w"> </span>AllowedCPUs<span class="w"> </span>-p<span class="w"> </span>EffectiveCPUs<span class="w"> </span>-p<span class="w"> </span>ControlGroup
+</code></pre></div>
+<p>The sample wrapper below places the complete <code>/usr/bin/time</code>, <code>taskset</code>, <code>perf</code>,
+RocJITsu, and workload chain in a transient sibling scope, then drops privileges
+before measurement. Its pinned CPU pair is a subset of the reservation. Pass
+every required runtime input explicitly to <code>systemd-run</code>; do not measure only
+the client process.</p>
+<p>Common alternatives have narrower guarantees:</p>
+<ul>
+<li><code>taskset</code> does not exclude competitors or protect the selected core's other
+  SMT sibling.</li>
+<li>A user-level or nested systemd scope can only narrow its parent's effective
+  cpuset. It cannot claim CPUs excluded by <code>user.slice</code>, and restricting only
+  the benchmark still leaves competitors unrestricted.</li>
+<li>Legacy <code>cset shield</code> packages may expect the cgroup-v1 <code>/cpusets</code> hierarchy.
+  Verify cgroup-v2 support rather than treating a successful command as proof;
+  always inspect <code>cpuset.cpus.effective</code>.</li>
+<li>Boot-time CPU isolation is static and still requires separate IRQ and kernel
+  work handling. Prefer reversible runtime cpusets unless residual kernel noise
+  is visible in the measurements.</li>
+</ul>
+<p>The cleanup trap must restore the exact prior policies even after a failed run.
+If the coordinator is killed forcefully, restore the recorded values manually
+before starting unrelated work.</p>
+<p>Check access to the userspace counters before collecting samples. If the
+preflight fails and the policy is greater than 2, use a dedicated shell on a
+controlled benchmark host. The trap restores the original policy if that shell
+is interrupted. Do not lower the policy below 2 or make the change persistent.
+The conditional keeps an expected preflight failure from terminating the
+strict reservation shell before recovery runs.</p>
+<div class="highlight"><pre><span></span><code><span class="nv">old_paranoid</span><span class="o">=</span><span class="k">$(</span>sysctl<span class="w"> </span>-n<span class="w"> </span>kernel.perf_event_paranoid<span class="k">)</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">'kernel.perf_event_paranoid = %s\n'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$old_paranoid</span><span class="s2">"</span>
+
+<span class="k">if</span><span class="w"> </span>perf<span class="w"> </span>stat<span class="w"> </span>-e<span class="w"> </span>cycles:u,instructions:u<span class="w"> </span>--<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span>:
+<span class="k">else</span>
+<span class="w">  </span><span class="nv">perf_status</span><span class="o">=</span><span class="nv">$?</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">((</span><span class="w"> </span>old_paranoid<span class="w"> </span>&lt;<span class="o">=</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"perf preflight failed with policy </span><span class="nv">$old_paranoid</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
+<span class="w">    </span><span class="nb">exit</span><span class="w"> </span><span class="s2">"</span><span class="nv">$perf_status</span><span class="s2">"</span>
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span>sudo<span class="w"> </span>sysctl<span class="w"> </span>-w<span class="w"> </span>kernel.perf_event_paranoid<span class="o">=</span><span class="m">2</span>
+<span class="w">  </span><span class="nv">paranoid_changed</span><span class="o">=</span><span class="m">1</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span><span class="nb">declare</span><span class="w"> </span>-F<span class="w"> </span>cleanup_host<span class="w"> </span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nb">trap</span><span class="w"> </span><span class="s1">'sudo sysctl -w kernel.perf_event_paranoid="$old_paranoid"'</span><span class="w"> </span>EXIT
+<span class="w">  </span><span class="k">fi</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>perf<span class="w"> </span>stat<span class="w"> </span>-e<span class="w"> </span>cycles:u,instructions:u<span class="w"> </span>--<span class="w"> </span>true<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span>:
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span><span class="nv">perf_status</span><span class="o">=</span><span class="nv">$?</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"perf preflight still fails after temporary policy change"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
+<span class="w">    </span><span class="nb">exit</span><span class="w"> </span><span class="s2">"</span><span class="nv">$perf_status</span><span class="s2">"</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="k">fi</span>
+
+<span class="c1"># Keep this shell open through all recorded samples.</span>
+</code></pre></div>
+<h2 id="run-one-sample">Run one sample<a class="headerlink" href="#run-one-sample" title="Permanent link">&para;</a></h2>
+<p>Add the throughput plugin and a file sink to a copy of the target config:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">results_root</span><span class="o">=</span>/path/to/results
+<span class="nv">out</span><span class="o">=</span><span class="s2">"</span><span class="nv">$results_root</span><span class="s2">/sample-01"</span>
+<span class="nv">base_config</span><span class="o">=</span><span class="nv">$config</span>
+mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="nv">$results_root</span><span class="s2">"</span>
+<span class="k">if</span><span class="w"> </span>!<span class="w"> </span>mkdir<span class="w"> </span><span class="s2">"</span><span class="nv">$out</span><span class="s2">"</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"sample output already exists: </span><span class="nv">$out</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
+<span class="w">  </span><span class="nb">exit</span><span class="w"> </span><span class="m">2</span>
+<span class="k">fi</span>
+
+jq<span class="w"> </span>--arg<span class="w"> </span>out<span class="w"> </span><span class="s2">"</span><span class="nv">$out</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s1">'.plugins = {"throughput": {}} |</span>
+<span class="s1">   .sinks = {"types": ["file"], "dir": $out}'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="nv">$base_config</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="s2">"</span><span class="nv">$out</span><span class="s2">/config.json"</span>
+
+<span class="nv">scope_env</span><span class="o">=(</span>
+<span class="w">  </span>--setenv<span class="o">=</span><span class="s2">"HOME=</span><span class="nv">$HOME</span><span class="s2">"</span>
+<span class="w">  </span>--setenv<span class="o">=</span><span class="s2">"PATH=</span><span class="nv">$PATH</span><span class="s2">"</span>
+<span class="o">)</span>
+<span class="nv">direct_env</span><span class="o">=(</span>
+<span class="w">  </span><span class="s2">"HOME=</span><span class="nv">$HOME</span><span class="s2">"</span>
+<span class="w">  </span><span class="s2">"PATH=</span><span class="nv">$PATH</span><span class="s2">"</span>
+<span class="o">)</span>
+<span class="c1"># Add matching scope_env and direct_env entries for every required input.</span>
+</code></pre></div>
+<h3 id="triton-specific-cache-control">Triton-specific cache control<a class="headerlink" href="#triton-specific-cache-control" title="Permanent link">&para;</a></h3>
+<p>Skip this subsection unless the workload compiles through Triton. This includes
+Gluon workloads that use Triton as their backend. Choose whether the Triton
+cache is fresh or warm before the comparison and keep that policy fixed. An
+unset <code>TRITON_CACHE_DIR</code> below requests a fresh per-sample cache; a preset value
+must name a managed, prepopulated directory.</p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-z<span class="w"> </span><span class="si">${</span><span class="nv">TRITON_CACHE_DIR</span><span class="p">+x</span><span class="si">}</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nv">sample_triton_cache</span><span class="o">=</span><span class="s2">"</span><span class="nv">$out</span><span class="s2">/triton-cache"</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>mkdir<span class="w"> </span><span class="s2">"</span><span class="nv">$sample_triton_cache</span><span class="s2">"</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"fresh Triton cache path already exists: </span><span class="nv">$sample_triton_cache</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
+<span class="w">    </span><span class="nb">exit</span><span class="w"> </span><span class="m">2</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="k">elif</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>!<span class="w"> </span>-d<span class="w"> </span><span class="nv">$TRITON_CACHE_DIR</span><span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"managed Triton cache path is not a directory: </span><span class="nv">$TRITON_CACHE_DIR</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
+<span class="w">  </span><span class="nb">exit</span><span class="w"> </span><span class="m">2</span>
+<span class="k">else</span>
+<span class="w">  </span><span class="nv">sample_triton_cache</span><span class="o">=</span><span class="nv">$TRITON_CACHE_DIR</span>
+<span class="k">fi</span>
+
+<span class="nv">scope_env</span><span class="o">+=(</span>--setenv<span class="o">=</span><span class="s2">"TRITON_CACHE_DIR=</span><span class="nv">$sample_triton_cache</span><span class="s2">"</span><span class="o">)</span>
+<span class="nv">direct_env</span><span class="o">+=(</span><span class="s2">"TRITON_CACHE_DIR=</span><span class="nv">$sample_triton_cache</span><span class="s2">"</span><span class="o">)</span>
+</code></pre></div>
+<p>Wrap the exact workload command with rocjitsu, affinity, counters, and resource
+measurement. This recipe measures local mode: the workload and simulator share
+one process tree. Do not add <code>--daemon</code> or <code>--attach</code>; those modes require a
+separate process-boundary protocol. The throughput report is written to
+<code>$out/throughput.log</code>. Completed-dispatch records are emitted as dispatches
+finish. A shutdown summary is not guaranteed in local mode because normal
+process teardown may not destroy the in-process VM, so this workflow does not
+depend on it.</p>
+<div class="highlight"><pre><span></span><code><span class="nv">workload</span><span class="o">=(</span>/path/to/workload<span class="w"> </span>--its<span class="w"> </span>--arguments<span class="o">)</span>
+<span class="nv">command</span><span class="o">=(</span>
+<span class="w">  </span><span class="s2">"</span><span class="nv">$build</span><span class="s2">/tools/rocjitsu/rocjitsu"</span>
+<span class="w">  </span>--config<span class="w"> </span><span class="s2">"</span><span class="nv">$out</span><span class="s2">/config.json"</span>
+<span class="w">  </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">workload</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span>
+<span class="o">)</span>
+
+<span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-v<span class="w"> </span>reserved<span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nv">cpus</span><span class="o">=</span><span class="si">${</span><span class="nv">BENCHMARK_CPUS</span><span class="k">:-</span><span class="nv">80</span><span class="p">,176</span><span class="si">}</span><span class="w"> </span><span class="c1"># This pair must be inside $reserved.</span>
+<span class="k">else</span>
+<span class="w">  </span><span class="nv">cpus</span><span class="o">=</span><span class="si">${</span><span class="nv">BENCHMARK_CPUS</span><span class="k">:-</span><span class="nv">8</span><span class="p">,104</span><span class="si">}</span><span class="w"> </span><span class="c1"># Example only: verify the topology.</span>
+<span class="k">fi</span>
+
+make_launcher<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[[</span><span class="w"> </span>-v<span class="w"> </span>reserved<span class="w"> </span><span class="o">]]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">    </span><span class="c1"># Collection is asynchronous, so every invocation needs a fresh unit.</span>
+<span class="w">    </span><span class="nv">unit</span><span class="o">=</span><span class="s2">"rocjitsu-benchmark-</span><span class="k">$(</span>systemd-id128<span class="w"> </span>new<span class="k">)</span><span class="s2">"</span>
+<span class="w">    </span><span class="nv">launcher</span><span class="o">=(</span>
+<span class="w">      </span>sudo<span class="w"> </span>systemd-run<span class="w"> </span>--scope<span class="w"> </span>--quiet<span class="w"> </span>--collect
+<span class="w">      </span>--unit<span class="o">=</span><span class="s2">"</span><span class="nv">$unit</span><span class="s2">"</span><span class="w"> </span>--slice<span class="o">=</span>benchmark.slice
+<span class="w">      </span>--property<span class="o">=</span><span class="s2">"AllowedCPUs=</span><span class="nv">$reserved</span><span class="s2">"</span>
+<span class="w">      </span>--property<span class="o">=</span><span class="nv">KillMode</span><span class="o">=</span>control-group
+<span class="w">      </span><span class="s2">"</span><span class="si">${</span><span class="nv">scope_env</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span>
+<span class="w">      </span>--
+<span class="w">      </span>/usr/bin/setpriv<span class="w"> </span>--reuid<span class="o">=</span><span class="s2">"</span><span class="k">$(</span>id<span class="w"> </span>-u<span class="k">)</span><span class="s2">"</span><span class="w"> </span>--regid<span class="o">=</span><span class="s2">"</span><span class="k">$(</span>id<span class="w"> </span>-g<span class="k">)</span><span class="s2">"</span><span class="w"> </span>--init-groups
+<span class="w">      </span>--no-new-privs
+<span class="w">    </span><span class="o">)</span>
+<span class="w">    </span><span class="nb">printf</span><span class="w"> </span><span class="s1">'systemd unit: %s.scope\n'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$unit</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
+<span class="w">  </span><span class="k">else</span>
+<span class="w">    </span><span class="nv">launcher</span><span class="o">=(</span>/usr/bin/env<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">direct_env</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span><span class="o">)</span>
+<span class="w">  </span><span class="k">fi</span>
+<span class="o">}</span>
+
+make_launcher
+<span class="nv">events</span><span class="o">=</span>cycles:u,instructions:u,task-clock,context-switches,cpu-migrations,minor-faults,major-faults
+<span class="nv">measurement</span><span class="o">=(</span>
+<span class="w">  </span>/usr/bin/time<span class="w"> </span>-v<span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$out</span><span class="s2">/time.txt"</span>
+<span class="w">  </span>taskset<span class="w"> </span>-c<span class="w"> </span><span class="s2">"</span><span class="nv">$cpus</span><span class="s2">"</span>
+<span class="w">  </span>perf<span class="w"> </span>stat<span class="w"> </span><span class="s2">"-x,"</span><span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$out</span><span class="s2">/perf.csv"</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="s2">"</span><span class="nv">$events</span><span class="s2">"</span>
+<span class="w">  </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">command</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span>
+<span class="o">)</span>
+
+<span class="k">if</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">launcher</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">measurement</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>&gt;<span class="s2">"</span><span class="nv">$out</span><span class="s2">/stdout.log"</span><span class="w"> </span><span class="m">2</span>&gt;<span class="s2">"</span><span class="nv">$out</span><span class="s2">/stderr.log"</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span>:
+<span class="k">else</span>
+<span class="w">  </span><span class="nv">measurement_status</span><span class="o">=</span><span class="nv">$?</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"measurement failed with status </span><span class="nv">$measurement_status</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span>
+<span class="w">  </span><span class="nb">exit</span><span class="w"> </span><span class="s2">"</span><span class="nv">$measurement_status</span><span class="s2">"</span>
+<span class="k">fi</span>
+
+<span class="nb">printf</span><span class="w"> </span><span class="s1">'dispatches\twave_instructions\tdispatch_seconds_sum\tactive_mips\n'</span>
+jq<span class="w"> </span>-s<span class="w"> </span>-e<span class="w"> </span>-r<span class="w"> </span><span class="s1">'</span>
+<span class="s1">  [.[] | select(.schema == "rocjitsu.throughput.v2" and</span>
+<span class="s1">                .record == "dispatch")] as $dispatches |</span>
+<span class="s1">  if ($dispatches | length) == 0 then</span>
+<span class="s1">    error("expected at least one completed throughput dispatch")</span>
+<span class="s1">  else</span>
+<span class="s1">    ($dispatches | map(.wave_instructions) | add) as $wave_instructions |</span>
+<span class="s1">    ($dispatches | map(.wall_seconds) | add) as $dispatch_seconds_sum |</span>
+<span class="s1">    if ($wave_instructions &lt;= 0 or $dispatch_seconds_sum &lt;= 0) then</span>
+<span class="s1">      error("throughput dispatches have no completed work")</span>
+<span class="s1">    else</span>
+<span class="s1">      [($dispatches | length), $wave_instructions, $dispatch_seconds_sum,</span>
+<span class="s1">       ($wave_instructions / $dispatch_seconds_sum / 1000000)] | @tsv</span>
+<span class="s1">    end</span>
+<span class="s1">  end</span>
+<span class="s1">'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$out</span><span class="s2">/throughput.log"</span>
+</code></pre></div>
+<p>While a long isolated sample is running, inspect its printed unit name from
+another shell. The scope and one of its processes must both be confined to the
+reserved CPUs, while the background units exclude them. The measured process
+must also have the invoking user's UID, zero effective capabilities, and
+<code>NoNewPrivs: 1</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="nv">unit</span><span class="o">=</span>rocjitsu-benchmark-12345<span class="w"> </span><span class="c1"># Replace with the printed unit name.</span>
+systemctl<span class="w"> </span>show<span class="w"> </span><span class="s2">"</span><span class="nv">$unit</span><span class="s2">.scope"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-p<span class="w"> </span>ControlGroup<span class="w"> </span>-p<span class="w"> </span>AllowedCPUs<span class="w"> </span>-p<span class="w"> </span>EffectiveCPUs
+<span class="nv">cgroup</span><span class="o">=</span><span class="k">$(</span>systemctl<span class="w"> </span>show<span class="w"> </span><span class="s2">"</span><span class="nv">$unit</span><span class="s2">.scope"</span><span class="w"> </span>-p<span class="w"> </span>ControlGroup<span class="w"> </span>--value<span class="k">)</span>
+<span class="nv">pid</span><span class="o">=</span><span class="k">$(</span>head<span class="w"> </span>-n<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="s2">"/sys/fs/cgroup</span><span class="nv">$cgroup</span><span class="s2">/cgroup.procs"</span><span class="k">)</span>
+grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'^(Uid|CapEff|NoNewPrivs|Cpus_allowed_list):'</span><span class="w"> </span><span class="s2">"/proc/</span><span class="nv">$pid</span><span class="s2">/status"</span>
+cat<span class="w"> </span><span class="s2">"/sys/fs/cgroup</span><span class="nv">$cgroup</span><span class="s2">/cpuset.cpus.effective"</span>
+</code></pre></div>
+<p>Use the same wrapper for every revision. <code>perf</code> overhead was below measurement
+noise in a warmed short-kernel control, but changing the process boundary or
+affinity changed the absolute counts materially.</p>
+<h2 id="find-cpu-hotspots">Find CPU hotspots<a class="headerlink" href="#find-cpu-hotspots" title="Permanent link">&para;</a></h2>
+<p>Profile a representative long-running workload with the same Release binary
+and affinity used for timing. Sampling adds overhead, so use this run only for
+diagnosis.</p>
+<div class="highlight"><pre><span></span><code>make_launcher
+<span class="s2">"</span><span class="si">${</span><span class="nv">launcher</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>taskset<span class="w"> </span>-c<span class="w"> </span><span class="s2">"</span><span class="nv">$cpus</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>perf<span class="w"> </span>record<span class="w"> </span>-F<span class="w"> </span><span class="m">199</span><span class="w"> </span>-e<span class="w"> </span>cycles:u<span class="w"> </span>-g<span class="w"> </span>--call-graph<span class="w"> </span>dwarf<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$out</span><span class="s2">/perf.data"</span><span class="w"> </span>--<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">command</span><span class="p">[@]</span><span class="si">}</span><span class="s2">"</span>
+
+perf<span class="w"> </span>report<span class="w"> </span>--stdio<span class="w"> </span>--no-children<span class="w"> </span>--sort<span class="o">=</span>dso,symbol<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-i<span class="w"> </span><span class="s2">"</span><span class="nv">$out</span><span class="s2">/perf.data"</span><span class="w"> </span>&gt;<span class="s2">"</span><span class="nv">$out</span><span class="s2">/perf-report.txt"</span>
+
+<span class="c1"># Inspect one hot function at the instruction level.</span>
+perf<span class="w"> </span>annotate<span class="w"> </span>--stdio<span class="w"> </span>-i<span class="w"> </span><span class="s2">"</span><span class="nv">$out</span><span class="s2">/perf.data"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--symbol<span class="o">=</span><span class="s1">'fully::qualified::symbol'</span>
+</code></pre></div>
+<p>After the final timing or profiling run, restore both host policies. Clear the
+trap only after successful cleanup; otherwise it remains available to retry on
+shell exit.</p>
+<div class="highlight"><pre><span></span><code><span class="k">if</span><span class="w"> </span><span class="nb">declare</span><span class="w"> </span>-F<span class="w"> </span>cleanup_host<span class="w"> </span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span>cleanup_host<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">trap</span><span class="w"> </span>-<span class="w"> </span>EXIT
+<span class="k">elif</span><span class="w"> </span><span class="o">((</span><span class="w"> </span><span class="si">${</span><span class="nv">paranoid_changed</span><span class="k">:-</span><span class="nv">0</span><span class="si">}</span><span class="w"> </span><span class="o">))</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span>sudo<span class="w"> </span>sysctl<span class="w"> </span>-w<span class="w"> </span>kernel.perf_event_paranoid<span class="o">=</span><span class="s2">"</span><span class="nv">$old_paranoid</span><span class="s2">"</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">trap</span><span class="w"> </span>-<span class="w"> </span>EXIT
+<span class="k">fi</span>
+</code></pre></div>
+<h2 id="sampling-protocol">Sampling protocol<a class="headerlink" href="#sampling-protocol" title="Permanent link">&para;</a></h2>
+<p>Set every persistent compiler, JIT, or translation cache used by the workload
+to an explicit path rather than relying on a default under the user's home
+directory. Record each setting. If the workload is already compiled and has no
+frontend cache, record that instead. The Triton-specific subsection above shows
+how to control that frontend's cache without imposing it on other workloads.</p>
+<ol>
+<li>Decide whether compiler/JIT and translation caches are warm or fresh before
+   running. Never mix policies within a comparison.</li>
+<li>For warm-cache simulator comparisons, run one unrecorded warm-up for each
+   workload and affinity, then reuse that cache. Do not warm a recorded
+   fresh-cache sample; create a new empty cache path for every sample.</li>
+<li>Use an even number of paired rounds so order is balanced:
+   <code>baseline, candidate</code>, then <code>candidate, baseline</code>. Six pairs are a reasonable
+   starting point for changes near 1%; use more when an identical-binary control
+   has a similar spread.</li>
+<li>Report per-revision medians, the observed range or median absolute deviation,
+   and paired percentage changes. Do not select the fastest run.</li>
+<li>Require identical pass/skip results and one or more completed dispatch
+   records with nonzero aggregate work and time per run. Require identical
+   dispatch counts and aggregate <code>wave_instructions</code> before interpreting
+   timing.</li>
+<li>Confirm small wall-time results with both cycles and instructions. Re-run a
+   representative long kernel and a short-kernel/test-suite aggregate when the
+   optimization may affect them differently.</li>
+</ol>
+<p>Run the throughput plugin alone when comparing its instruction-family timing;
+other execution plugins add observer cost and may change interval boundaries.</p>
+<h2 id="case-study-gfx1250-iree-and-gluon">Case study: gfx1250 IREE and Gluon<a class="headerlink" href="#case-study-gfx1250-iree-and-gluon" title="Permanent link">&para;</a></h2>
+<p>This case study records how the protocol behaved during recent functional
+gfx1250 simulation work on one quiet 96-core/192-thread host. The short workload
+was one Gluon kernel; the larger workload combined 26 precompiled IREE cases
+with 10 Gluon cases. The results explain the guidance above, but they are not
+universal acceptance thresholds.</p>
+<p>The historical runner measured <code>wall_seconds</code> with <code>time.monotonic()</code> around the
+selected suite, not GNU <code>time</code>. Its <code>active_dispatch_seconds</code> is the sum of the
+throughput plugin's dispatch <code>wall_seconds</code>, matching the active-dispatch
+denominator computed above. Active-throughput CV is the CV of each sample's
+<code>wave_instructions / active_dispatch_seconds</code>, not the CV of the seconds field.
+CV below is <code>100 * sample standard deviation / mean</code>, using <code>n - 1</code> in the
+standard deviation.</p>
+<table>
+<thead>
+<tr>
+<th>Setup</th>
+<th style="text-align: right;">Samples</th>
+<th style="text-align: right;">Runner wall CV</th>
+<th style="text-align: right;">Active-throughput CV</th>
+<th style="text-align: right;">Cycles CV</th>
+<th style="text-align: right;">Instructions CV</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>One Gluon kernel, unrestricted, fresh cache, <code>perf</code></td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">0.86%</td>
+<td style="text-align: right;">6.90%</td>
+<td style="text-align: right;">0.28%</td>
+<td style="text-align: right;">0.07%</td>
+</tr>
+<tr>
+<td>Same kernel, 40 allowed physical CPUs</td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">2.29%</td>
+<td style="text-align: right;">7.57%</td>
+<td style="text-align: right;">0.56%</td>
+<td style="text-align: right;">0.14%</td>
+</tr>
+<tr>
+<td>Same kernel, one core and its SMT sibling</td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">0.37%</td>
+<td style="text-align: right;">6.71%</td>
+<td style="text-align: right;">0.31%</td>
+<td style="text-align: right;">0.17%</td>
+</tr>
+<tr>
+<td>26 precompiled IREE plus 10 fresh-cache Gluon cases, 40 physical CPUs</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">0.75%</td>
+<td style="text-align: right;">0.97%</td>
+<td style="text-align: right;">0.28%</td>
+<td style="text-align: right;">0.06%</td>
+</tr>
+</tbody>
+</table>
+<p>A follow-up used ten balanced interleaved pairs while five AFL workers remained
+active. One worker saturated logical CPU 0. The affinity-only run used physical
+core 0 (<code>0,96</code>); the isolated run used physical core 80 (<code>80,176</code>) inside a
+16-core systemd reservation. An uncontended affinity-only control on core 8
+verified that isolation itself did not change wall-time variation.</p>
+<table>
+<thead>
+<tr>
+<th>Background setup</th>
+<th style="text-align: right;">Samples</th>
+<th style="text-align: right;">Runner wall CV</th>
+<th style="text-align: right;">Active-throughput CV</th>
+<th style="text-align: right;">Cycles CV</th>
+<th style="text-align: right;">Instructions CV</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>taskset</code>, uncontended core 8</td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">0.31%</td>
+<td style="text-align: right;">6.68%</td>
+<td style="text-align: right;">0.26%</td>
+<td style="text-align: right;">0.26%</td>
+</tr>
+<tr>
+<td>systemd-isolated core 80, uncontended control</td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">0.31%</td>
+<td style="text-align: right;">6.14%</td>
+<td style="text-align: right;">0.23%</td>
+<td style="text-align: right;">0.12%</td>
+</tr>
+<tr>
+<td><code>taskset</code>, contended core 0</td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">1.38%</td>
+<td style="text-align: right;">12.58%</td>
+<td style="text-align: right;">2.65%</td>
+<td style="text-align: right;">0.55%</td>
+</tr>
+<tr>
+<td>systemd-isolated core 80</td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">0.54%</td>
+<td style="text-align: right;">5.21%</td>
+<td style="text-align: right;">0.27%</td>
+<td style="text-align: right;">0.11%</td>
+</tr>
+</tbody>
+</table>
+<p>Against the contended affinity-only setup, systemd isolation reduced CV by 60%
+for runner wall time, 59% for active throughput, 90% for cycles, and 80% for
+instructions. The median wall-time difference includes removal of actual CPU
+contention and is not a simulator speedup. On the uncontended core, wall CV was
+unchanged as expected. This makes CPU reservation useful insurance on a shared
+host, not a substitute for the identical-work validity checks above.</p>
+<p>The quiet-host short workload reported 24 or 25 dispatches with the same
+wave-instruction count, the contended follow-up reported 24 through 27, and the
+larger suite reported 200 or 201. The tables include that variability to
+characterize the workloads, but none of these datasets would pass the strict
+A/B validity gate above.</p>
+<p>The sub-second active interval remained noisy even with fixed affinity; the
+larger suite reduced that noise substantially. For the Triton-backed Gluon
+case, prewarming the Triton cache changed median wall time by 4.82%, cycles by
+4.19%, and instructions by 5.89%. Establish the measurement floor with an
+identical-binary A/B control, and treat an optimization within that floor as
+unresolved until more pairs or a longer workload reproduce it.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025–2026 Advanced Micro Devices, Inc.<br> <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/LICENSE.md">MIT License</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" target="_blank" rel="noopener" title="Rocjitsu on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/issues" target="_blank" rel="noopener" title="Report an issue" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 8h-2.81c-.45-.8-1.07-1.5-1.82-2L17 4.41 15.59 3l-2.17 2.17a6 6 0 0 0-2.83 0L8.41 3 7 4.41 8.62 6c-.75.5-1.36 1.21-1.81 2H4v2h2.09c-.06.33-.09.66-.09 1v1H4v2h2v1c0 .34.03.67.09 1H4v2h2.81A5.99 5.99 0 0 0 15 20.18c.91-.52 1.67-1.28 2.19-2.18H20v-2h-2.09c.06-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.03-.67-.09-1H20zm-4 7a4 4 0 0 1-4 4 4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4 4 4 0 0 1 4 4zm-2-5v2h-4v-2zm-4 4h4v2h-4z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.tracking", "toc.follow", "content.code.copy", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../assets/repository-stats.js"></script>
+      
+    
+  </body>
+</html>

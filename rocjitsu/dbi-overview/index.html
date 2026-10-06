@@ -1,0 +1,3863 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User and developer documentation for the ROCm Just-in-Time Suite.">
+      
+      
+      
+        <link rel="canonical" href="https://rocm.github.io/rocm-systems/rocjitsu/dbi-overview/">
+      
+      
+        <link rel="prev" href="../dbi-design/">
+      
+      
+        <link rel="next" href="../plugins/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Instrumentation overview - Rocjitsu</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../assets/handbook.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#dbi-overview" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Rocjitsu" class="md-header__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Rocjitsu
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Instrumentation overview
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Rocjitsu" class="md-nav__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Rocjitsu
+  </label>
+  
+    <div class="md-nav__source">
+      
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 21.5c-1.35-.85-3.8-1.5-5.5-1.5-1.65 0-3.35.3-4.75 1.05-.1.05-.15.05-.25.05-.25 0-.5-.25-.5-.5V6c.6-.45 1.25-.75 2-1 1.11-.35 2.33-.5 3.5-.5 1.95 0 4.05.4 5.5 1.5 1.45-1.1 3.55-1.5 5.5-1.5 1.17 0 2.39.15 3.5.5.75.25 1.4.55 2 1v14.6c0 .25-.25.5-.5.5-.1 0-.15 0-.25-.05-1.4-.75-3.1-1.05-4.75-1.05-1.7 0-4.15.65-5.5 1.5M12 8v11.5c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5V7c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5m1 3.5c1.11-.68 2.6-1 4.5-1 .91 0 1.76.09 2.5.28V9.23c-.87-.15-1.71-.23-2.5-.23q-2.655 0-4.5.84zm4.5.17c-1.71 0-3.21.26-4.5.79v1.69c1.11-.65 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24v-1.5c-.87-.16-1.71-.23-2.5-.23m2.5 2.9c-.87-.16-1.71-.24-2.5-.24-1.83 0-3.33.27-4.5.8v1.69c1.11-.66 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command-line interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../race-detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Race detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocgdb-debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qemu-vfio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QEMU VFIO-user compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vulkan-compute/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vulkan compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-2-2 2 2 0 0 0 2-2V5h2V3m6 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5h-2V3z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../style/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code style
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simdojo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vm-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU hardware model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbt-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary translation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rj_dbt_translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translation tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu_dbt_guest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DBT guest mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary instrumentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instrumentation overview
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instrumentation overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-purpose-and-position" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Purpose and position
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Purpose and position">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The problem
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-first-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first client
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-range-of-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The range of tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-this-sits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where this sits
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#users" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Users
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-the-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. The model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. The model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-variants-and-dispatch-time-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Variants and dispatch-time selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-the-forward-looking-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 The forward-looking loop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-observational-versus-transformational" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Observational versus transformational
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-dbi-is-not-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 DBI is not DBT
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-the-memory-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. The memory model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-the-data-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. The data path
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. The data path">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-where-the-buffer-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Where the buffer lives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-the-record-write-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 The record-write contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-record-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Record format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-how-a-probe-finds-the-buffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 How a probe finds the buffer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-flow-control-and-loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Flow control and loss
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-ordering-and-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Ordering and time
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-instrumentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Instrumentation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Instrumentation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-site-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Site selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-relocation-and-instrumentability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Relocation and instrumentability
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6.2 Relocation and instrumentability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#relocation-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relocation strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-probe-placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Probe placement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-execution-mask-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Execution mask policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-register-pressure-and-spilling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Register pressure and spilling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-outstanding-memory-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Outstanding memory operations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-probes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 Probes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-composition-with-translation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Composition with translation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Performance
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Performance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-governing-arithmetic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The governing arithmetic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#overhead-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overhead budget
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-runtime-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Runtime integration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Runtime integration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-how-a-tool-gets-into-the-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 How a tool gets into the process
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8.1 How a tool gets into the process">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#publishing-the-mapping-open" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publishing the mapping (OPEN)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-user-experience" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 User experience
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-failure-at-instrumentation-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 Failure at instrumentation time
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84-failure-at-run-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 Failure at run time
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Non-goals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-simulator-and-hardware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Simulator and hardware
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-open-questions-and-known-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Open questions and known gaps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. Open questions and known gaps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known gaps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codegen/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA code generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-target-providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA target providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-gap-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA gap audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../npi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-instructions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous MMA execution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mma-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MMA lookahead admission
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concurrent-dispatch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrent dispatch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-counter-coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait coverage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 18H4V8h16m0-2h-8l-2-2H4c-1.11 0-2 .89-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+    
+  
+  
+    <li class="md-nav__item">
+      <a href="../blog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-purpose-and-position" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Purpose and position
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Purpose and position">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The problem
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-first-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first client
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-range-of-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The range of tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-this-sits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where this sits
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#users" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Users
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-the-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. The model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. The model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-variants-and-dispatch-time-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Variants and dispatch-time selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-the-forward-looking-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 The forward-looking loop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-observational-versus-transformational" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Observational versus transformational
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-dbi-is-not-dbt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 DBI is not DBT
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-the-memory-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. The memory model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-the-data-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. The data path
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. The data path">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-where-the-buffer-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Where the buffer lives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-the-record-write-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 The record-write contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-record-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Record format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-how-a-probe-finds-the-buffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 How a probe finds the buffer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-flow-control-and-loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Flow control and loss
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-ordering-and-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Ordering and time
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-instrumentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Instrumentation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Instrumentation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-site-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Site selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-relocation-and-instrumentability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Relocation and instrumentability
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6.2 Relocation and instrumentability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#relocation-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relocation strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-probe-placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Probe placement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-execution-mask-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Execution mask policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-register-pressure-and-spilling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Register pressure and spilling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-outstanding-memory-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Outstanding memory operations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-probes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 Probes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-composition-with-translation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.8 Composition with translation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Performance
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Performance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-governing-arithmetic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The governing arithmetic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#overhead-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overhead budget
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-runtime-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Runtime integration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Runtime integration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-how-a-tool-gets-into-the-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 How a tool gets into the process
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8.1 How a tool gets into the process">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#publishing-the-mapping-open" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publishing the mapping (OPEN)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-user-experience" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 User experience
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-failure-at-instrumentation-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 Failure at instrumentation time
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84-failure-at-run-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 Failure at run time
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Non-goals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-simulator-and-hardware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Simulator and hardware
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-open-questions-and-known-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Open questions and known gaps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. Open questions and known gaps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known gaps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="dbi-overview">DBI Overview<a class="headerlink" href="#dbi-overview" title="Permanent link">&para;</a></h1>
+<p><strong>What this document is.</strong> A high-level description of where rocjitsu's dynamic
+binary instrumentation (DBI) is going, why it is shaped the way it is, and which
+decisions are settled. It is written above the level of the source tree (i.e.,
+no file paths, no class names, no signatures) so that it stays accurate as
+<code>develop</code> moves.</p>
+<p><strong>What this document is not.</strong> Not an implementation plan, and not a description
+of what exists today. For the current state of the implementation read
+<code>dbi-design.md</code>; where the two disagree, that document describes reality and this
+one describes intent.</p>
+<p>It also does not design any client of the framework. The concurrency sanitizer
+motivates this work and appears throughout as a worked example, but its detection
+algorithm, shadow state, and report format are deliberately absent, and no
+separate document specifies them. The bar here is that someone building the
+<strong>framework</strong> should find the framework's contracts answered.</p>
+<p>Requirements are tiered throughout:</p>
+<ul>
+<li><strong>Committed</strong>: the design targets this.</li>
+<li><strong>Must remain possible</strong>: not being built, but the architecture must not
+  foreclose it. A much weaker and cheaper obligation, and the distinction is
+  load-bearing: do not implement one of these because it appears here.</li>
+<li><strong>Open</strong>: a real decision not yet made, listed so it gets made deliberately
+  rather than by accident.</li>
+</ul>
+<hr />
+<h2 id="1-purpose-and-position">1. Purpose and position<a class="headerlink" href="#1-purpose-and-position" title="Permanent link">&para;</a></h2>
+<h3 id="the-problem">The problem<a class="headerlink" href="#the-problem" title="Permanent link">&para;</a></h3>
+<p>Hardware performance counters tell you that something happened, not who did
+it. A counter reports a bank conflict; it does not name the instruction or the
+access pattern responsible. The attribution question is the one users actually
+have, and the one counters structurally cannot answer.</p>
+<p>Binary instrumentation answers it by inserting code that observes the program as
+it runs. On AMDGPU this has historically been hard enough that it did not exist.
+rocjitsu changes the economics: the machine-readable ISA foundation built for
+simulation also provides the decode, analysis, and encode machinery
+instrumentation needs. Instrumentation is not a capability bolted onto the
+simulator; it is a second consumer of the same substrate.</p>
+<h3 id="the-first-client">The first client<a class="headerlink" href="#the-first-client" title="Permanent link">&para;</a></h3>
+<p>A <strong>concurrency sanitizer</strong> to detect data races in GPU kernels. It is the
+milestone that justifies the work and it sets the priority: collect a memory
+address stream at runtime, move it to the host, analyse it there.</p>
+<p>The framework must be more general than its first client; the shapes it is
+expected to serve are set out below.</p>
+<p><strong>Two race detectors already exist in this project, and neither is what is
+described here.</strong> One is a simulator plugin: it does not use binary
+instrumentation, it relies on the simulator's total observability, and it was
+written for that environment. The other is a prototype, usable but not
+production code and not a design to reproduce. Neither is the intended
+architecture; neither is superseded by this document.</p>
+<h3 id="the-range-of-tools">The range of tools<a class="headerlink" href="#the-range-of-tools" title="Permanent link">&para;</a></h3>
+<p>The framework is not designed around a list of tools but around a few shapes,
+each defined by what it demands. A proposed tool is in scope if it falls into
+one of these, and the capabilities in §5 and §6 exist to serve them.</p>
+<ul>
+<li><strong>Site identity only.</strong> The probe reports that it fired, under which mask, in
+  which wave. Instruction-mix analysis, block and function counters, coverage,
+  divergence logging. Needs site selection, wave and mask context, and host-side
+  aggregation of per-execution records.</li>
+<li><strong>Operand observing.</strong> Reads the guest's inputs at the site: an address, a
+  branch target. Memory logging and everything downstream of it, including
+  coalescing analysis, bank-conflict detection, and cache modelling. Needs
+  before-placement, per-lane data, and dense record kinds.</li>
+<li><strong>Result observing.</strong> Reads what the instruction produced. Numerical
+  correctness checks, overflow detection, capturing an atomic's outcome. Needs
+  after-placement.</li>
+<li><strong>Both at one site.</strong> Operands and result for the same execution, as one event.
+  A race detector needs this at an atomic. Needs pre and post placement in a
+  single window (§6.3).</li>
+<li><strong>Region bracketing.</strong> Two firings whose meaning lies in their pairing: loop
+  and function coverage, before-and-after value comparison. Needs block exits as
+  first-class sites, stateless probes emitting at each end, and per-wave
+  ordering for the host to pair them.</li>
+<li><strong>Several instrumentations at one site.</strong> Coverage alongside an address
+  stream; a required initialisation probe sharing an anchor with a logging
+  probe. Needs composed trampolines with defined ordering (§6.3).</li>
+<li><strong>Behavior-changing transforms.</strong> Instruction substitution, emulating a
+  missing instruction, auto-correcting a detected fault. Must remain possible
+  rather than committed, and gated behind explicit opt-in (§2.3).</li>
+</ul>
+<p>Two shapes are deliberately not served, for different reasons:</p>
+<ul>
+<li><strong>Tools that aggregate on the device.</strong> Out of scope now because of the
+  complexity it adds (§4), not because it conflicts with anything. The door is
+  open and the mechanism is a generalisation of what already exists; it could be
+  built if a client needs it enough.</li>
+<li><strong>Tools whose conclusions depend on precise timing.</strong> A clock in a record is
+  supportable, and ordinary timing tools are in range. But instrumentation
+  perturbs timing by construction, so anything resting on cycle-level fidelity
+  is better served by the simulator this project already provides. That is a
+  recommendation about which instrument to reach for, not a limit on what the
+  framework can record.</li>
+</ul>
+<h3 id="where-this-sits">Where this sits<a class="headerlink" href="#where-this-sits" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Versus hardware counters.</strong> Complementary. Counters are cheap, aggregate,
+  unattributed. DBI is expensive, precise, attributed. A user reaches for DBI
+  once a counter has told them a problem exists.</li>
+<li><strong>Versus rocjitsu's DBT.</strong> Same substrate, opposite failure semantics (§2.4).</li>
+</ul>
+<h3 id="users">Users<a class="headerlink" href="#users" title="Permanent link">&para;</a></h3>
+<p><strong>Everyday users</strong>: Mainly AMD engineers and AMD customers. Run a provided tool and
+read a report. They write nothing. Instrumentation must be transparent: launch
+the application under the tool, or attach to a running one, and get output. No
+separate step to produce an instrumented binary, no rebuild, no relink.</p>
+<p><strong>Advanced users</strong>: Primarily AMD engineers that build tools on the framework.
+Their surface is:</p>
+<blockquote>
+<p><strong>Site selection, probe choice, and host-side analysis, not probe authoring.</strong></p>
+</blockquote>
+<p>That sentence is the boundary of the whole project. Advanced users say what to
+instrument, pick from a catalogue of provided probes, and write the interesting
+logic on the host, where there is a real language, real memory, and no register
+pressure. Authoring probes requires a compiler, a stable ABI, and unbounded
+device-side capability which is all out of scope (§9).</p>
+<p><strong>Open:</strong> whether AMD authors tools on customers' behalf or customers write their
+own. This decides whether the advanced-user API is a supported product surface or
+an internal API that happens to be usable. It need not be decided now, but it
+must not be decided by neglect. The cheap hedge is to design as if external users
+will touch it while committing to nothing.</p>
+<hr />
+<h2 id="2-the-model">2. The model<a class="headerlink" href="#2-the-model" title="Permanent link">&para;</a></h2>
+<h3 id="21-variants-and-dispatch-time-selection">2.1 Variants and dispatch-time selection<a class="headerlink" href="#21-variants-and-dispatch-time-selection" title="Permanent link">&para;</a></h3>
+<p>The center of the design is not "instrument a kernel." It is <strong>kernel variants
+with dispatch-time selection</strong>; instrumentation is one variant-producing
+transform among several.</p>
+<p>A variant is code plus a kernel descriptor, resident in device memory. Nothing
+binds a dispatch to a particular variant except a pointer in the dispatch packet.
+Therefore:</p>
+<ul>
+<li><strong>Producing a variant</strong> is a pure code-object-to-code-object transform,
+  normally performed when a code object is loaded, though nothing requires that
+  timing and §8.2 depends on being able to produce one later.</li>
+<li><strong>Selecting a variant</strong> happens per dispatch, by rewriting the dispatch packet
+  as it is submitted. The cost is a table lookup.</li>
+</ul>
+<p>That separation is what makes per-dispatch behavior possible without
+per-dispatch instrumentation: sampling, instrumented-versus-original comparison,
+routing dispatches to different buffers. It requires only that the framework
+observe and edit dispatch packets.</p>
+<p><strong>Committed:</strong> instrumentation at load time; variant selection at dispatch time;
+queue interception as a mandatory component, not an optimisation.</p>
+<h3 id="22-the-forward-looking-loop">2.2 The forward-looking loop<a class="headerlink" href="#22-the-forward-looking-loop" title="Permanent link">&para;</a></h3>
+<p><strong>Must remain possible:</strong> a tool that runs a kernel many times, observes it
+through instrumentation, synthesises a new variant (a rewritten algorithm, not
+merely an observed one), loads it at runtime, selects it for subsequent
+dispatches, and instruments that to verify the result.</p>
+<p>This is profile-guided runtime specialisation. It is not being built. It is
+recorded because it imposes exactly one architectural requirement, and that
+requirement is cheap to preserve:</p>
+<blockquote>
+<p><strong>Transforms are code-object-to-code-object functions, closed under
+composition.</strong></p>
+</blockquote>
+<p>If that holds, synthesising and instrumenting a derived variant is the same
+machinery applied twice. If instrumentation is instead written against "the
+application's code object" rather than "a code object", the capability is
+foreclosed. The same invariant is what lets instrumentation compose with binary
+translation (§6.8).</p>
+<h3 id="23-observational-versus-transformational">2.3 Observational versus transformational<a class="headerlink" href="#23-observational-versus-transformational" title="Permanent link">&para;</a></h3>
+<p>Two classes of transform, sharing all machinery, differing in their obligations:</p>
+<ul>
+<li><strong>Observational</strong> transforms must not change what the program computes.
+  Instrumentation is observational, and that is what makes it safe to enable
+  without auditing the result.</li>
+<li><strong>Transformational</strong> transforms deliberately change behavior. Correctness then
+  depends on the transform being right, not on the framework being transparent.</li>
+</ul>
+<p>Only observational transforms are committed. Transformational ones are must
+remain possible, and should require explicit opt-in when they arrive.</p>
+<h3 id="24-dbi-is-not-dbt">2.4 DBI is not DBT<a class="headerlink" href="#24-dbi-is-not-dbt" title="Permanent link">&para;</a></h3>
+<p>They share a substrate and have opposite failure semantics. Designers should not
+import DBT's instincts.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>DBT</th>
+<th>DBI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Nature</td>
+<td>Substitutive: replaces code so the app runs at all</td>
+<td>Additive: inserts code alongside the original</td>
+</tr>
+<tr>
+<td>Failure</td>
+<td>Binary. One untranslatable instruction and you have nothing</td>
+<td>Graded. A missed site costs coverage, not correctness</td>
+</tr>
+<tr>
+<td>Needs</td>
+<td>Completeness, caching</td>
+<td>Coverage accounting, sampling</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-invariants">3. Invariants<a class="headerlink" href="#3-invariants" title="Permanent link">&para;</a></h2>
+<p>These hold regardless of implementation. Breaking one is a change to the plan,
+not to the code.</p>
+<ol>
+<li>
+<p><strong>Transparency.</strong> Instrumented code computes what the original computed.
+   Architectural state the guest can observe, including the lane execution mask,
+   condition codes, and mode bits, is bit-identical wherever the guest can
+   observe it.</p>
+<p>This extends to state that is easy to overlook because it is not a register
+the guest names. <strong>Probe memory operations perturb the guest's
+outstanding-memory counters</strong>, and guest code performs arithmetic against its
+own count of outstanding operations; leaving those disturbed violates this
+invariant in a way that manifests as data corruption rather than a fault.
+Handling it is the framework's responsibility, not the probe's (§6.6).</p>
+</li>
+<li>
+<p><strong>No silent loss of coverage.</strong> Every instrumentation request resolves to
+   instrumented, or to rejected with a reason. Every dropped record is counted.
+   Every unsampled dispatch is accounted for. A tool must always be able to tell
+   the user what it did <strong>not</strong> observe. A sanitizer that silently loses data is
+   a sanitizer that silently lies.</p>
+</li>
+<li>
+<p><strong>Transforms compose.</strong> Code object in, code object out, no assumption about
+   provenance.</p>
+</li>
+<li>
+<p><strong>Instrumentation does not allocate device memory during execution</strong> (§4).
+   Buffers are obtained ahead of time by the host. One deliberate exception,
+   which should be understood rather than glossed: raising the scratch
+   reservation causes the runtime to allocate more scratch at dispatch. That is
+   an allocation on instrumentation's behalf, it scales with occupancy, and it
+   can fail. When it fails the application's queue is not degraded, it is
+   stopped. It is acceptable because it is bounded and requested at
+   instrumentation time rather than during execution. Note the mechanism: the
+   dispatch packet's segment sizes are what the hardware honors, so raising
+   the reservation means rewriting the packet, not the kernel descriptor
+   (§6.5).</p>
+</li>
+<li>
+<p><strong>The framework does not require serializing the application.</strong> No mechanism
+   in the design may depend on kernels running one at a time; that would change
+   the behavior being measured and is very hard to walk back.</p>
+<p>This is a constraint on the framework, not a promise about every run. A
+sufficiently heavyweight tool can induce serialization as a consequence of
+what it asked for; most concretely, a large enough scratch request causes
+the runtime to admit one scratch dispatch at a time. The heavier the tool,
+the more it perturbs the application; that is inherent, and acceptable. What
+is not acceptable is it happening invisibly, so induced serialization is
+detected and reported (§7).</p>
+</li>
+<li>
+<p><strong>The device never waits on the host for an individual record</strong> (§5.5, noting
+   the deliberate exception in lossless mode).</p>
+</li>
+<li>
+<p><strong>Extension points are source-compatible, not binary-compatible.</strong> Probes,
+   client tools, and the framework are built and shipped together. A project-wide
+   position, not a DBI-specific one.</p>
+</li>
+</ol>
+<hr />
+<h2 id="4-the-memory-model">4. The memory model<a class="headerlink" href="#4-the-memory-model" title="Permanent link">&para;</a></h2>
+<p><strong>The defining constraint: instrumentation gets a small, fixed scratch allocation
+for spilling and makes no other device memory allocations.</strong></p>
+<p>Accepted consequences:</p>
+<ul>
+<li>The framework does not track device memory or interfere with how the
+  application uses it. Instrumentation is not in the way.</li>
+<li><strong>No on-device aggregation.</strong> Everything is streamed to the host and reduced
+  there. Tools that would naturally accumulate on the device still work (a basic
+  block counter emits a record per execution instead) but they pay for it in
+  link bandwidth (§7).</li>
+<li>The implementation is dramatically simpler.</li>
+</ul>
+<p>That bill is the accepted trade and should not be re-litigated without new
+information.</p>
+<p>Buffers carrying data to the host are obtained from the system by the host,
+ahead of time. "No device allocation" is a rule about who allocates and when, not
+a claim that device-visible memory does not exist.</p>
+<p><strong>Supportable, but not planned:</strong> letting a tool supply device buffers of its
+own, which would restore on-device aggregation and with it an efficient counter.
+It is a generalisation of the same mechanism and needs no new delivery machinery
+(§5.4). Recorded so nothing forecloses it. There is no present reason to build
+it, and it carries a cost the current model avoids: tool buffers occupy cache and
+capacity, perturbing the memory behavior of the application under study.</p>
+<hr />
+<h2 id="5-the-data-path">5. The data path<a class="headerlink" href="#5-the-data-path" title="Permanent link">&para;</a></h2>
+<h3 id="51-where-the-buffer-lives">5.1 Where the buffer lives<a class="headerlink" href="#51-where-the-buffer-lives" title="Permanent link">&para;</a></h3>
+<p><strong>Committed: pinned, fine-grained host memory, for correctness and live
+visibility rather than throughput.</strong> This is not a claim that host memory is the
+fastest place for a GPU to write; it very often is not.</p>
+<p>The model requires the host to read records while the kernel producing them is
+still running. That is what makes streaming analysis, bounded buffer reuse, and
+draining possible at all. Host-resident fine-grained memory provides it directly:
+the device writes, the host reads, and the platform guarantees coherence between
+them with no third party involved.</p>
+<p>Device-local memory can be moved to the host at high rate, since a copy engine
+beats a host thread reading across the link. But that is a transfer of a region
+whose extent must be known first, not a live view of memory the device is
+concurrently writing. Getting live visibility that way means adding a scheduling
+mechanism, a shared engine the application may itself be using, and a third
+participant in the coherence argument. The choice is to keep the data path direct
+and its correctness easy to state, and to pay for that in write throughput.</p>
+<p>On parts where host and device share physical memory this distinction largely
+dissolves; the reasoning above is about discrete parts.</p>
+<h3 id="52-the-record-write-contract">5.2 The record-write contract<a class="headerlink" href="#52-the-record-write-contract" title="Permanent link">&para;</a></h3>
+<p>What a probe must do to write a record, and what that costs. Everything below
+follows from the placement decision above, and the rest of §5 depends on it.</p>
+<p><strong>A record must become visible to a host reader in bounded time.</strong> Ordinary
+global stores may sit in cache indefinitely, so the write path must use
+system-scope-coherent stores. This is a correctness requirement, not an
+optimisation: without it the drainer sees nothing and the flow control of §5.5 is
+meaningless. What that means in instructions varies considerably by generation,
+and on some the penalty is severe.</p>
+<p><strong>The write is expensive at the source, not only at the link.</strong> Fine-grained host
+memory is mapped uncached, so writes do not coalesce the way device-local writes
+do and a scattered per-lane pattern is costly where it is issued. This is the
+main reason §7's arithmetic describes a ceiling rather than a rate the device
+will sustain, and why the visible symptom of over-instrumenting is a slow kernel
+rather than a full buffer.</p>
+<p><strong>Claiming a slot requires an atomic the platform may not provide.</strong> The slot
+reservation that gives §5.6 its ordering is a device-side atomic into host
+memory, and that depends on the host interconnect supporting atomic operations
+from the device. Where it does not, fine-grained access may not be granted at
+all. Availability is queryable, must be queried rather than assumed, and needs a
+fallback where it is absent.</p>
+<p>Together these bound how much a probe can afford to write, which is why record
+density (§5.3) is treated as a performance property rather than a formatting one.</p>
+<h3 id="53-record-format">5.3 Record format<a class="headerlink" href="#53-record-format" title="Permanent link">&para;</a></h3>
+<p><strong>Committed: a heterogeneous, self-describing record stream.</strong> Every record
+carries a tag identifying its layout and the host demultiplexes. New probe types
+are added by adding record kinds, not by breaking the format.</p>
+<p><strong>The framework defines the envelope; the tool defines the payload.</strong> The
+framework guarantees the stream is self-describing and that certain context is
+obtainable by a probe: which dispatch, workgroup, and wave it is running in,
+which lanes were active, which site it was attached to. What a probe records is
+an agreement between it and its host consumer; a field no consumer reads need not
+be filled, and identity should be treated as available-if-wanted rather than
+mandatory. The distinction that matters is between what a probe <strong>can know</strong>,
+which is a framework contract since a probe cannot report its dispatch unless the
+framework makes that reachable, and what it <strong>writes down</strong>, which is a tool
+decision.</p>
+<p>Two granularities, both supported:</p>
+<ul>
+<li><strong>Wave-granular</strong>: one record per wavefront per event, carrying the lane mask.
+  Far cheaper in bandwidth and atomics. Lossy under divergence if it records only
+  a representative lane's data.</li>
+<li><strong>Lane-granular</strong>: one record per active lane. Complete, proportionally more
+  expensive.</li>
+</ul>
+<p>Wave-granular is the expected default, with lane-granular available where
+fidelity demands it. Because the stream is typed, both coexist.</p>
+<p><strong>Record density is a performance feature, not a formatting detail.</strong> Every byte
+is link bandwidth (§7), so density is a property of each record kind rather
+than of the format. A low-rate diagnostic kind can afford generous fixed
+metadata. A high-volume kind cannot, the obvious case being a per-lane address
+stream, and it needs either a much larger useful payload per record or a
+compressed encoding such as a base address plus per-lane deltas. The tagged-stream
+design exists precisely so metadata chosen for one kind is not imposed on another.</p>
+<h3 id="54-how-a-probe-finds-the-buffer">5.4 How a probe finds the buffer<a class="headerlink" href="#54-how-a-probe-finds-the-buffer" title="Permanent link">&para;</a></h3>
+<p>Three mechanisms can deliver the buffer address to a probe.</p>
+<p><strong>Baked as an immediate</strong> into the instrumented code. The framework knows the
+address at instrumentation time and materialises it. Nothing is loaded or
+negotiated, which makes it easiest to implement. Its limitation is structural:
+the address becomes part of the code image, and an image is shared by every
+dispatch of that kernel. Fine when a kernel runs once or its dispatches never
+overlap; it cannot express a per-dispatch buffer, so concurrent dispatches must
+share one.</p>
+<p><strong>Passed through the kernel argument segment.</strong> The dispatch packet points at a
+host-written argument buffer, which the framework can substitute with an extended
+copy carrying its own pointer alongside the application's arguments. The most
+robust of the three, and the only one per-dispatch by construction, since the
+argument buffer is itself per-dispatch. It costs a scalar load. This presumes the
+kernel receives an argument pointer at all; kernels taking no arguments may not,
+in which case one must be enabled, subject to the shifting and the ceiling
+described below.</p>
+<p>Nothing stops the framework from pointing the packet at a buffer of its own.
+Three conditions govern whether that buffer is a valid one, and each is a silent
+corruption if missed:</p>
+<ul>
+<li><strong>Where it comes from.</strong> Argument buffers must be allocated from the memory the
+  runtime designates for that purpose, and must satisfy the kernel's declared
+  alignment. An ordinary allocation that happens to be device-visible is not
+  sufficient.</li>
+<li><strong>What it contains.</strong> The application's arguments are followed by implicit
+  arguments the toolchain adds and the kernel expects to find. The extended copy
+  reproduces both and appends after them; writing over the implicit region
+  corrupts a kernel that never declared those arguments and cannot be blamed for
+  reading them.</li>
+<li>
+<p><strong>How long it must live.</strong> Until the dispatch has <strong>completed</strong>, and no
+  earlier. Arguments are ordinary memory that a kernel may read at any point
+  during its execution, not only at wave launch, so nothing short of completion
+  bounds the last read.</p>
+<p>The trap here is that several earlier events look like completion and are not.
+The packet being written, the command processor consuming it, and the queue's
+read index advancing past it all mean the dispatch was <em>launched</em>. A framework
+that reclaims on any of them corrupts a kernel still reading its arguments,
+and does so intermittently, under load, in a way that will be blamed on the
+application.</p>
+<p>Completion is observable only through a signal. A dispatch packet carries at
+most one, and applications frequently leave it unset, so the framework cannot
+assume there is one to watch and cannot add a second. The dependable
+construction is for the framework to introduce <strong>its own</strong> synchronisation
+after the dispatch, carrying a signal it owns, and to reclaim when that fires.
+Note that this is the same mechanism §7 needs in order to count dispatches in
+flight, so it is one facility serving two requirements rather than a cost
+incurred here alone.</p>
+</li>
+</ul>
+<p><strong>Read from the dispatch packet.</strong> A wave can be given a pointer to its own
+dispatch packet in a preloaded scalar pair. This does not carry the buffer
+address, since the packet is a fixed hardware-defined structure with nowhere to
+put one, so it reaches the buffer indirectly via the argument buffer the packet
+names, which is strictly more work than reading the argument pointer directly.
+Its value is as a fallback for kernels not compiled to receive an argument
+pointer, and as a source of per-dispatch identity records may want anyway.</p>
+<p>Enabling a preloaded register a kernel did not already have is possible but not
+free. These registers are assigned positionally, meaning those enabled are laid
+out in a fixed order, so turning one on shifts everything after it, and the
+dispatch pointer sits early, ahead of the argument pointer and the workgroup
+identifiers. The shift does <strong>not</strong> require rewriting guest instructions: a short
+prologue copying displaced values back down costs one move per value, and the
+translation path already does exactly this. The binding constraint is elsewhere.
+Hardware initialises only a small fixed number of these registers, so on a kernel
+that already consumes that budget, insertion is not expensive, it is unavailable.</p>
+<p>The kernel descriptor is not a candidate: it is hardware-consumed dispatch
+configuration, every field architecturally defined, and a wavefront cannot read it
+as data.</p>
+<p><strong>Committed: delivery through the kernel argument segment, with buffers bound
+per dispatch.</strong> Per-dispatch binding is what the rest of the design wants: a pool
+allocated up front and bound at submission satisfies the memory model while still
+allowing concurrent instrumented kernels, which a per-code-object buffer cannot,
+since concurrent dispatches of one kernel would have to share (invariant 5). A
+per-code-object buffer with a baked immediate remains a legitimate first
+implementation, and moving between them is cheap: it changes where the value
+comes from, not what probes receive.</p>
+<p>Two optimisations, neither required:</p>
+<ul>
+<li><strong>Hold the pointer in a reserved scalar pair for the kernel's lifetime.</strong> A
+  framework-inserted prologue at kernel entry, which §8.3's required
+  initialisation instrumentation means must exist regardless, loads it once and
+  passes it to probes as an argument, removing the per-site load while keeping
+  per-dispatch binding. It costs two scalar registers held for the whole kernel,
+  which the framework can create by growing the allocation (§6.5, tier 3) rather
+  than hoping to find dead ones. Whether that costs occupancy is
+  generation-dependent.</li>
+<li><strong>Fold the address into the code</strong> where the buffer genuinely is per code
+  object, collapsing back to the baked immediate.</li>
+</ul>
+<h3 id="55-flow-control-and-loss">5.5 Flow control and loss<a class="headerlink" href="#55-flow-control-and-loss" title="Permanent link">&para;</a></h3>
+<p>The device must know how much space remains, or it will overwrite records the
+host has not read, silently and undetectably. This aggregate flow control, a
+single shared consumed-index, is required, and it is <strong>not</strong> per-record
+acknowledgement.</p>
+<p>Per-record acknowledgement, meaning the device waiting for the host to confirm
+each record, is <strong>rejected</strong>. It puts host latency in the wave's critical path and
+makes the host a liveness dependency. Request/response transports designed for
+low-volume device-to-host calls are the wrong shape for a high-volume one-way
+stream and should not be proposed for this path. They are reasonable for
+development-time debugging output, which is not on the measurement path.</p>
+<p>Two properties hold in both modes below.</p>
+<p><strong>Loss respects the boundaries of an event.</strong> Where one occurrence of an
+instrumented event produces several records, most clearly one per active lane
+of a wavefront executing one instruction, those records all land or none do.
+Dropping part of a group is worse than dropping all of it: a consumer computing
+an aggregate over a wavefront's addresses gets a wrong answer rather than a
+missing one, and cannot tell the difference. Drop granularity is the event, not
+the record.</p>
+<p><strong>Drops are counted per record kind.</strong> Loss is not uniformly harmful. For a race
+detector, losing an access record costs a missed race, an incomplete answer.
+Losing a synchronization record costs a fabricated one, because the ordering
+edge that would have explained an apparent conflict is gone. Per-kind accounting
+is what lets a client distinguish "I saw less than everything" from "I may be
+about to report something untrue", and refuse to answer in the second case.</p>
+<p><strong>Lossy (default).</strong> Increment the dropped count and skip the store. Never
+blocks, bounded overhead, records are a sample.</p>
+<p><strong>Lossless.</strong> The wave waits for space. No data loss, at real cost:</p>
+<ul>
+<li>The host drainer becomes a <strong>liveness dependency of the GPU kernel</strong>, a
+  permanent property of the mode, and the reason lossy is the default.</li>
+<li>It requires a drainer on an <strong>independent thread</strong>. If the drainer is the
+  application thread and that thread is blocked in a synchronous kernel launch,
+  the result is deadlock: the kernel cannot finish until the host drains, and the
+  host cannot drain until the kernel finishes.</li>
+<li>It requires a <strong>bounded wait with a defined escalation</strong>. There is no
+  per-dispatch watchdog that simply kills a slow kernel; what a spinning wave
+  actually endangers is preemption. The driver must be able to remove the
+  queue from the hardware, to evict memory, to schedule another process, or at
+  teardown, and a wave that cannot be preempted turns that into a timeout,
+  which can escalate to a device reset affecting other processes on the same
+  device. The likelier everyday outcome is a wedged process rather than a
+  reset, but the multi-tenant hazard is real and on shared systems argues
+  against the mode by itself. Two obligations follow: the spin must use an
+  instruction that leaves the wave preemptible rather than a tight busy loop,
+  and on reaching the bound the framework either degrades to dropping (recording
+  the transition) or aborts with a diagnostic. The bound is a hard requirement,
+  not a quality-of-implementation matter.</li>
+<li>It is <strong>not viable for cooperative or persistent kernels</strong>, where all
+  workgroups are resident simultaneously and no wave can retire to make room. A
+  full buffer there is a deadlock the escalation bound can only convert to an
+  abort.</li>
+<li>It <strong>heavily perturbs timing</strong>, changing the interleaving of the program under
+  study. Harmless for happens-before analysis, fatal for anything inferring
+  behavior from timing. A per-client judgement.</li>
+</ul>
+<p><strong>Supportable, but not planned:</strong> reserving capacity for protected record kinds
+so low-priority records drop first while high-priority ones are always admitted.
+A middle ground costing one comparison on the low-priority path. Not part of the
+plan; a client that cannot tolerate loss should use lossless mode.</p>
+<p>A flat fill-once buffer that stops when full is a legitimate simpler starting
+point. It shares the record format; only space reclamation differs.</p>
+<h3 id="56-ordering-and-time">5.6 Ordering and time<a class="headerlink" href="#56-ordering-and-time" title="Permanent link">&para;</a></h3>
+<p><strong>Records are totally ordered by their position in the buffer.</strong> Producers claim
+a slot by atomic increment, so the slot index is itself a sequence number,
+costing nothing beyond the reservation that was happening anyway.</p>
+<p>Note carefully what that does and does not give a consumer. It is the order in
+which probes claimed slots, not the order in which instrumented instructions
+executed, and emphatically not a time base. It is enough to recover the relative
+order of records from a single wave, which is what reconstructing that wave's
+behavior requires. Anything stronger must be built by the client from data it
+records itself.</p>
+<p><strong>There is no timestamp requirement.</strong> A concurrency sanitizer establishes
+happens-before from the program's <strong>synchronization structure</strong>, meaning
+barriers, atomics, and fences, not from time. That has a direct consequence for
+probe design: some probes must observe an instruction's outcome, such as an
+atomic's return value or success mask, not merely that it executed (§6.3).</p>
+<p><strong>Must remain possible:</strong> timing tools, which do need a clock in the record.
+Nothing in the format should assume time is absent, but a clock is payload, and
+adding one is a tool's decision rather than a framework change.</p>
+<hr />
+<h2 id="6-instrumentation">6. Instrumentation<a class="headerlink" href="#6-instrumentation" title="Permanent link">&para;</a></h2>
+<h3 id="61-site-selection">6.1 Site selection<a class="headerlink" href="#61-site-selection" title="Permanent link">&para;</a></h3>
+<p><strong>The durable identity of a site is (code object identity, offset).</strong> A virtual
+address is the runtime projection of that identity, valid only for one load of
+one image. Anything persisted uses the durable form; a live API operating on a
+running process may use addresses. The framework maintains the mapping.</p>
+<p>The low-level selection API is offset-based and complete. Every convenience layer
+compiles down to it, so layers can be added, replaced, or supplied by users
+without touching the core:</p>
+<ul>
+<li><strong>by symbol or kernel name.</strong></li>
+<li><strong>by source location</strong>, where line information is present, and frequently it
+  is not: release builds ship without it, vendor libraries are stripped, and some
+  of the kernels users most want attributed are hand-written assembly with no
+  source to point at. Source attribution is best-effort, not a guarantee. Where
+  available, resolution belongs on the host: a record identifies its site and the
+  host resolves it afterwards. Baking file and line into records spends scarce
+  link bandwidth on data identical for every occurrence of a site and derivable
+  from what the host already holds.</li>
+<li><strong>by basic block</strong>, including block exits as first-class sites rather than
+  only entries. Any analysis bracketing a region needs a probe on every path out
+  of it, early exits included, or its pairing is incomplete.</li>
+<li><strong>by predicate over decoded instructions</strong>, such as "all global loads" or "all
+  atomics". The layer that matters most to the first client, and the decode and
+  instruction-property machinery to evaluate it already exists. The properties
+  such a predicate needs, being access size, read versus write, and address
+  space, are recoverable from the instruction encoding, so this layer does not
+  depend on debug information.</li>
+</ul>
+<p>Selection must compose with the runtime filtering of §7. A user asking for "these
+instructions, in this kernel, only for these workgroups, only for this range of
+dispatches" is expressing one intent through two mechanisms: sites are chosen at
+instrumentation time, dispatches at submission time, anything finer inside the
+probe.</p>
+<p>Selection can fail for a given site. Per invariant 2, failure is reported with a
+reason, never silently.</p>
+<h3 id="62-relocation-and-instrumentability">6.2 Relocation and instrumentability<a class="headerlink" href="#62-relocation-and-instrumentability" title="Permanent link">&para;</a></h3>
+<p><strong>Instrumentability is a relocation problem.</strong> Nearly any instruction can be
+instrumented. Instrumentation displaces code, and the instructions that resist it
+are exactly those whose meaning depends on their own address:</p>
+<ul>
+<li><strong>Instructions that read or write the program counter.</strong> A program-counter read
+  yields the address of the following instruction; if that feeds arithmetic that
+  later computes a branch target, moving the code changes the result. Either the
+  dependent instructions are adjusted for the move, or a different instruction in
+  the same block is chosen.</li>
+<li><strong>Branches.</strong> If the anchor is a branch, instrumentation must execute before
+  the original branch does, and a relative branch that moves must have its
+  displacement re-encoded to still reach its target.</li>
+</ul>
+<p>These are not exotic cases needing separate machinery. Whatever relocation
+strategy is chosen, instructions move and this bookkeeping is required. It is the
+discipline binary translation already enforces:</p>
+<blockquote>
+<p><strong>Anything naming a code or data address is a fixup, never a final value
+written at emission time.</strong></p>
+</blockquote>
+<p>DBI inherits that rule wholesale. One consequence: the relocation bookkeeping
+required for correctness is the mapping from instrumented addresses back to
+original ones. Other tools need that mapping (§8.1); maintaining it is not extra
+work undertaken on their behalf.</p>
+<p><strong>A rewritten image must remain a valid one.</strong> The loader is not a byte pipe. It
+checks that the image targets the agent exactly, both architecture and the
+feature flags that distinguish otherwise-identical targets, along with segment
+sizes and alignment, relocations, and the metadata note. A mismatch is a rejected
+load, not a degraded one.</p>
+<p>The metadata note deserves particular attention, because it is not merely
+descriptive. The kernel descriptor remains the hardware-consumed configuration,
+but the note is what the runtime reads when a host asks a kernel about its
+resource requirements, and those answers are what the application uses to
+populate dispatch packets. The two must therefore agree: an instrumented image
+whose note still describes the original does not merely misreport, it causes
+packets to be built for the wrong kernel. This is the same hazard as §6.5's,
+seen from the other end.</p>
+<h4 id="relocation-strategy">Relocation strategy<a class="headerlink" href="#relocation-strategy" title="Permanent link">&para;</a></h4>
+<p><strong>Committed: rewrite the existing code section in place</strong>, accepting that code
+moves and that everything referring to moved code must be fixed up. Appending
+instrumented copies of whole functions is the fallback, to be taken if the
+in-place rewrite proves intractable rather than merely difficult.</p>
+<p>The forcing constraint: relative control flow reaches roughly ±128 KB, and that
+bound applies symmetrically to the branch out to a trampoline and the branch
+back. Absolute-target control flow has unlimited reach but takes its target from
+a register pair, and the sequence to set one up is far too long to substitute for
+a single instruction.</p>
+<p><strong>This is not a tail case.</strong> The workloads this framework serves are large,
+heavily unrolled, heavily fused kernels, many per application. Anchors beyond
+reach are the normal condition.</p>
+<p>The three layouts:</p>
+<ol>
+<li><strong>A single cave appended after the existing code.</strong> One instruction is
+   substituted in place and everything else appended, so no instruction moves
+   and every original branch keeps its distance. The single-slot substitution is
+   a hard constraint, not an incidental one: overwriting a longer span risks
+   clobbering an instruction that is itself a branch target. Only site-to-cave
+   reach binds, and that is where it fails. Note that "nothing moves" is true of
+   code and not of the container: growing the section displaces what follows it,
+   including the kernel descriptors, unless the added space is given its own
+   loadable segment. <strong>Where the implementation is today, and adequate until
+   reach runs out.</strong></li>
+<li><strong>Rewrite the section in place</strong>, moving and growing code as needed and
+   inserting reach-restoring islands during layout. <strong>The direction.</strong></li>
+<li><strong>Relocated, instrumented copies of whole functions appended to the existing
+   section</strong>, leaving the original bytes in place and redirecting execution into
+   the copies. Two copies of a function in one section, not a second section:
+   appending is the same container operation the cave already performs, so it
+   needs no new segment plumbing. <strong>The fallback.</strong></li>
+</ol>
+<p>A two-hop scheme through a minimal nearby stub is <strong>rejected</strong>: prior binary
+translation work established it as insufficient.</p>
+<p><strong>Why the in-place direction is credible.</strong> Binary translation in this project
+already rewrites the code section in place and already solves the hard parts:
+relaxing an out-of-range relative branch into a longer sequence, island pools
+inserted during emission, inverting conditional branches to reach past their
+range, and fixup windows that grow to a fixed point. That machinery is not
+hypothetical and is partly shared already. The cost previously attributed to
+this direction was largely the cost of building it (completely and correctly)
+and most of that bill has been paid.</p>
+<p><strong>Where instrumentation cannot follow translation, and this is the real work.</strong>
+Translation re-emits only the code it can prove reachable and discards the rest;
+it refuses an entire image if any single program-counter materialisation within
+it cannot be proven safe. Both are affordable only because translation replaces
+the program wholesale. Instrumentation cannot do either. The application still
+expects all of its code to exist, including code the analysis could not reach or
+could not decode, so an in-place rewrite must <strong>preserve bytes it does not
+understand while relocating everything that moves</strong>. That is a different problem
+from re-emitting a control-flow graph, and it is where the design effort will
+actually land.</p>
+<p><strong>The fallback is not merely an escape hatch from complexity.</strong> Appended copies
+degrade gracefully per function: instrument the functions that can be analysed,
+leave the others untouched in the original section, and lose coverage rather
+than correctness. An in-place rewrite has no equivalent, since displacing a
+region obliges you to fix every reference into it, including from code that
+could not be decoded.</p>
+<p>The fallback's other advantage is that it leaves the original bytes identical to
+compiler output, so original offsets stay valid for anything else reading the
+image (§8.1). Against it: code size, and instruction-cache pressure from a
+second copy larger than the original, which is precisely the pressure large and
+numerous kernels already create. One residue to note: redirecting into a copy is
+free for kernels, since the descriptor can name the copy's entry, and free for
+functions reached by direct call, since the copy's call sites are re-encoded. A
+function reached by address needs a jump at its original entry, which may be out
+of range and cannot be written in one instruction slot.</p>
+<p>One argument is <strong>not</strong> available to either side: preserving an uninstrumented
+variant. The original code object's bytes exist on the host under any strategy
+and can be loaded as a separate variant, so no layout choice forecloses running
+uninstrumented (§2.1).</p>
+<h3 id="63-probe-placement">6.3 Probe placement<a class="headerlink" href="#63-probe-placement" title="Permanent link">&para;</a></h3>
+<p>Instrumentation at a site runs <strong>before</strong> the instruction, <strong>after</strong> it, or
+<strong>both</strong>:</p>
+<ul>
+<li><strong>Before</strong>: reads the instruction's source operands. Address capture works
+  this way.</li>
+<li><strong>After</strong>: reads the instruction's results. Capturing an atomic's return value
+  or success mask requires it.</li>
+<li><strong>Both</strong>: reads operands and results for the same execution. A race detector
+  needs this at an atomic, where the address is only available beforehand and
+  the outcome only afterwards, and both belong to one event.</li>
+</ul>
+<p>Several independent instrumentations may also share one anchor, which the
+framework composes into a single sequence with a defined order rather than
+treating as competing claims on the site. For example, §8.3's required
+initialisation instrumentation will land on anchors that also carry ordinary
+probes. A first implementation may support only one instrumentation per site,
+but that is a simplification to be removed, not a property of the design.</p>
+<p>The instrumented sequence is therefore a pre-probe, the original instruction,
+and a post-probe, in one save-and-restore window rather than two. That has three
+consequences worth stating, because "both" is not simply "before and after
+independently":</p>
+<ul>
+<li><strong>State is preserved once</strong>, not twice. The window spans the whole sequence.</li>
+<li><strong>The original instruction still executes under the guest's own mask</strong>, inside
+  that window. Invariant 1 and §6.4's third regime apply unchanged.</li>
+<li><strong>A value captured before can reach the probe that runs after.</strong> The framework
+  holds it across the intervening instruction. This is not a probe holding state
+  across its own invocations, which §6.7 forbids: the probes remain stateless
+  and the framework owns the value, which is what makes a single record
+  describing one execution possible rather than two records the host must pair.</li>
+</ul>
+<h3 id="64-execution-mask-policy">6.4 Execution mask policy<a class="headerlink" href="#64-execution-mask-policy" title="Permanent link">&para;</a></h3>
+<p>The instrumented sequence has three regimes with respect to the lane execution
+mask. Only one is a policy choice.</p>
+<ol>
+<li><strong>Save and restore window, all lanes enabled. Mandatory.</strong> The probe may run
+   under a wider mask than the guest, or alter the mask itself, and can therefore
+   clobber physical registers of lanes the guest had inactive. The save must have
+   captured those lanes for the restore to put them back; saving under the
+   guest's mask would leave them unsaved and silently corrupted. Note that with
+   all lanes enabled, a save spilling to memory issues addresses for lanes the
+   guest had masked off, which is correct for register preservation but is a real
+   interaction with the spill-destination choice.</li>
+<li><strong>Probe body, policy.</strong> See below.</li>
+<li><strong>The guest instruction, the guest's original mask. Mandatory.</strong> Invariant 1.</li>
+</ol>
+<p>The policy in (2) is best expressed not as "restore or not, for speed" but as a
+declaration about the probe:</p>
+<blockquote>
+<p><strong>Does this probe's body operate on guest lane state?</strong></p>
+</blockquote>
+<p>Probes reading guest vector state or emitting per-lane data must run under the
+guest's mask; with all lanes enabled they would read garbage from inactive lanes
+and emit junk records. Probes whose body is uniform, such as a counter or a
+timestamp, can run with all lanes enabled and save the restore.</p>
+<p>Note the difference between <strong>the mask as data</strong> (a probe recording which lanes
+were active) and <strong>the mask as control</strong> (a probe wanting its own work
+predicated). The former is available from the saved copy; whether it is free
+depends on where the save allocator put it (§6.5).</p>
+<p>Wave sizes differ across targets and modes. Probe declarations are wave-size
+agnostic; the framework materialises the correct widths.</p>
+<h3 id="65-register-pressure-and-spilling">6.5 Register pressure and spilling<a class="headerlink" href="#65-register-pressure-and-spilling" title="Permanent link">&para;</a></h3>
+<p>Two facts make this tractable, and both are static: the probe's register
+footprint is known because the framework has the probe, and the guest's live
+registers at the insertion point are known from liveness analysis. Their
+intersection is the minimal set that must be preserved; the complement of the
+guest's live set is the pool of available destinations.</p>
+<p>That yields a cost hierarchy, each tier cheaper at run time and more work at
+instrumentation time than the next:</p>
+<ol>
+<li><strong>Registers dead at the site.</strong> Cheapest, and it does not change the kernel's
+   register allocation at all.</li>
+<li><strong>Rewrite the probe to fit what is available.</strong> Register renaming on a compiled
+   probe is the same decode-analyse-emit machinery instrumentation already
+   requires, so this is not a new capability class. Tuple alignment must be
+   respected, and architecturally fixed registers cannot be renamed.</li>
+<li><strong>Grow the kernel's register allocation.</strong> Costs occupancy. Requires reading
+   and modifying the kernel descriptor's resource fields.</li>
+<li><strong>Spill to scratch.</strong> Costs memory latency and draws on the small fixed
+   budget. Many small kernels reserve no scratch at all, in which case this tier
+   does not exist until the framework creates it, establishing scratch state the
+   kernel never had rather than merely enlarging a reservation.</li>
+</ol>
+<p><strong>Growing an existing memory reservation is a dispatch-packet edit, not a
+descriptor edit.</strong> The segment sizes the hardware honors come from the dispatch
+packet; the sizes recorded in the code object are what the application's runtime
+reads in order to fill that packet. Note the qualifier: this covers enlarging a
+reservation the kernel already has. Creating one where the kernel had none, which
+is the common case rather than the exception, is the larger operation described
+in tier 4 above and is not a packet edit alone. Raising a reservation therefore means editing the packet at
+submission, and if the recorded sizes are left stale the two disagree. The
+failure is not a fault: accesses beyond the provisioned region are silently
+discarded or read as zero. This is the single easiest way to corrupt a guest
+while believing instrumentation is transparent.</p>
+<p>Two further consequences of growing scratch specifically. A large enough request
+causes the runtime to admit one such dispatch at a time, which is the induced
+serialization invariant 5 permits but requires be reported. A request that cannot
+be satisfied does not degrade the dispatch, it stops the application's queue.
+Both argue for treating tier 4 as genuinely last-resort rather than as a
+comfortable fallback.</p>
+<p>This hierarchy is why the memory model of §4 is survivable: most spilling should
+never touch memory.</p>
+<p>Two things about where the pressure lies, both generation-specific and to be
+resolved against the target's occupancy model rather than assumed:</p>
+<ul>
+<li><strong>Whether scalar-register pressure costs anything varies by generation.</strong> On
+  some, scalar registers are allocated per wave at fixed size and do not enter
+  the occupancy calculation; on others they are drawn from a shared pool and do.
+  Effort spent easing scalar pressure, probe rewriting in particular, pays off
+  very differently per target, and may not pay off at all.</li>
+<li><strong>Vector register growth costs occupancy broadly</strong>, and is the one
+  instrumentation decision that can visibly change application performance. Where
+  a separate accumulation register file exists physically, unused accumulation
+  registers can be a cheap spill destination; where the file is unified with the
+  vector file they are not free, because the split is part of the kernel's
+  declared allocation and changing it can itself change occupancy.</li>
+</ul>
+<p><strong>The quality of instrumentation is bounded by the quality of the liveness
+analysis.</strong> Conservative liveness means more spilling means more overhead, and
+anything defeating control-flow reconstruction degrades to worst-case spilling.
+The binary analysis layer is load-bearing, not incidental.</p>
+<h3 id="66-outstanding-memory-operations">6.6 Outstanding memory operations<a class="headerlink" href="#66-outstanding-memory-operations" title="Permanent link">&para;</a></h3>
+<p>Instrumentation must reckon with the guest's in-flight memory operations. Two
+independent hazards.</p>
+<p><strong>Spilling a register that is the destination of an in-flight load</strong> saves a
+stale value. The load then lands, and the restore overwrites it with the stale
+copy, corrupting the guest irrespective of any other bookkeeping.</p>
+<p><strong>Inflating the guest's outstanding-operation counters</strong> breaks relaxed waits.
+A wait for zero outstanding operations is harmless; instrumentation only makes
+the guest wait longer. But compilers routinely emit waits permitting some
+operations to remain outstanding, and if instrumentation has added to that count
+such a wait is satisfied too early, and the guest reads a register whose load has
+not landed. This is silent data corruption, and it is the more dangerous of the
+two because nothing about it looks like a fault.</p>
+<p>Two hardware properties constrain the response. The counters cannot be read or
+restored, so there is no save-and-restore. And a probe cannot wait for only its
+own operations: the counters are counts rather than tags, and the probe's
+operations are the newest, so waiting for the count to fall to any threshold
+retires the oldest entries first, which are the guest's.</p>
+<p><strong>The framework therefore drains outstanding operations on entry to the
+instrumented sequence.</strong> It is required anyway for spill correctness, and it
+disposes of the relaxed-wait hazard at the same time: once the guest has nothing
+outstanding, every subsequent guest wait is satisfiable and its data has
+definitively arrived. Operations the probe leaves outstanding when the guest
+resumes can then only make the guest wait longer, never less. A separate drain
+before the kernel terminates ensures record writes cannot race termination.</p>
+<p><strong>This is a framework obligation, not a probe one.</strong> The probe is context-free and
+shared across every site; only the framework knows the guest's state at a given
+site. A probe declares the memory operations it issues; the framework emits the
+waits. Counters are split and named differently across generations, so this is
+per-counter and target-aware.</p>
+<p>Two refinements are available later and are not required for correctness:
+narrowing or eliminating the drain where analysis proves no in-flight destination
+overlaps the spill set and no relaxed wait follows; and, rather than draining,
+adjusting the guest's subsequent wait thresholds by the probe's known operation
+count. The latter is exactly semantics-preserving and free at runtime, but must
+contend with control-flow merges where a wait is reachable from both instrumented
+and uninstrumented paths.</p>
+<p><strong>The cost is easy to underestimate.</strong> An entry drain destroys memory-latency
+hiding at every instrumented site. On a memory-bound kernel with a probe on every
+access it is plausibly a larger contribution to overhead than the record traffic
+§7 treats as the governing constraint.</p>
+<h3 id="67-probes">6.7 Probes<a class="headerlink" href="#67-probes" title="Permanent link">&para;</a></h3>
+<p>Probes are standalone compiled objects, built as part of rocjitsu, made resident
+in the instrumented image, and called.</p>
+<p><strong>What a probe may not do.</strong> Committed constraints. The framework should verify
+these rather than trust them, and where it cannot, the gap should be named
+rather than assumed away:</p>
+<ul>
+<li><strong>No scratch.</strong> A function that spills requires valid private-segment state,
+  and the guest's scratch belongs to the guest. Note this is only partly
+  checkable: instructions that name the private segment are recognisable, but
+  private memory reached through flat addressing is not distinguishable
+  statically. The rule therefore rests on how probes are built as much as on
+  what the framework can prove, which is defensible only while probes come from
+  the framework's own build.</li>
+<li><strong>No local data share.</strong> It is allocated per workgroup at dispatch and the
+  guest owns all of it.</li>
+<li><strong>No nesting or recursion.</strong></li>
+<li><strong>No state across invocations</strong>, which follows from the first two. An analysis
+  that would naturally open a region and close it, such as timing a block or
+  pairing an entry with an exit, cannot hold the opening value anywhere. It
+  emits a record at each end and the host pairs them. That costs a second record
+  and buys the guarantee that probes are stateless and re-entrant.</li>
+</ul>
+<p><strong>How probes are reached.</strong></p>
+<ul>
+<li><strong>Called, not inlined</strong>, via a call primitive taking an absolute target from a
+  register pair, so the call itself is unconstrained by range. The branch from
+  the site into its trampoline is constrained; see §6.2.</li>
+<li><strong>Therefore not specialized per call site.</strong> Record kind, granularity, and
+  per-site constants are passed rather than folded in. Code size stays flat;
+  argument setup is paid at every site. This is why the argument-passing
+  convention carries weight.</li>
+<li><strong>Placement is free.</strong> A probe need not live in the instrumented kernel's code
+  section, only be resident, executable, and reachable, which absolute
+  addressing guarantees. Co-location is a lifetime and loader-simplicity choice.</li>
+</ul>
+<p><strong>The probe ABI.</strong></p>
+<ul>
+<li><strong>Internal and versioned in lockstep</strong>, because probes ship with the
+  framework, so drift cannot happen in the field.</li>
+<li><strong>Register footprint is inferred, not declared.</strong> The framework decodes the
+  probe and computes which registers it reads, writes, and disturbs, the same
+  analysis it already performs on guest code. A declaration cannot be guaranteed
+  for a compiled probe: the compiler owns register allocation, so an annotation
+  is a claim about an artifact that a different compiler version or optimization
+  decision can invalidate unnoticed. The failure is silent and severe, since the
+  framework then preserves the wrong registers and corrupts the guest.
+  Declarations are trustworthy only where the author fixes the registers, which
+  means hand-written assembly.</li>
+<li><strong>Inference yields clobbers only.</strong> Where the probe's arguments and return
+  address live is fixed by the calling convention of the toolchain that built
+  it, not by one this framework invents, so calls must conform to that
+  convention.</li>
+<li><strong>LLVM's non-kernel calling convention is not adopted, but is the
+  obvious fallback if probes ever stop being analyzable.</strong> For probes the
+  framework builds and can decode, inference yields a tighter clobber set than
+  any fixed convention, and the convention's frame and stack setup exists to
+  support spilling that a leaf, non-spilling probe never does. A probe whose
+  body cannot be analyzed, or one permitted to spill or to manage memory of its
+  own, needs a contract rather than an analysis, and that convention is where to
+  start. It is not free: it assumes state the current probe rules forbid, its
+  specification is explicitly a work in progress, and parts of it do not apply
+  on newer targets.</li>
+<li><strong>Must remain possible: user-authored probes.</strong> The blocker is that the
+  call-site sequence must match the probe's calling convention, which is only a
+  blocker if that sequence is hand-written per probe. The requirement is
+  therefore narrow and cheap:</li>
+</ul>
+<blockquote>
+<p><strong>The calling convention must be data the framework consumes, a probe
+descriptor giving footprint, argument locations, placement, and mask policy,
+never assumptions baked into the emitter.</strong></p>
+</blockquote>
+<p><strong>How probes are built.</strong></p>
+<ul>
+<li><strong>Compiled from source, for the targets a build needs.</strong> A device compiler is
+  therefore a prerequisite of instrumentation, and that dependency should fall
+  on instrumentation rather than the project as a whole: someone building only
+  the simulator or the translator should not need one.</li>
+<li><strong>The target set is configuration, not a fixed matrix.</strong> Hardware executes one
+  target, so building for the local system is the sensible default; the
+  cross-target case arises under the simulator, and cross-compilation is a
+  matter of asking the toolchain for a different target rather than having that
+  hardware present. The buildable set is bounded by the toolchain's vintage, so
+  a target this framework supports may be unbuildable on an older compiler.</li>
+<li><strong>Wave size is a genuine variant axis in a way target count is not.</strong> Where a
+  target supports more than one wave size, the probe must match the guest
+  kernel's wave size, because mask widths and lane semantics differ. Those
+  targets need a probe per wave size, selected at instrumentation time.</li>
+<li><strong>Testing covers mechanisms, not the full matrix.</strong> What needs per-target
+  coverage is each distinct mechanism a probe embodies; probes sharing a
+  mechanism and differing only in payload do not each require every target.</li>
+</ul>
+<h3 id="68-composition-with-translation">6.8 Composition with translation<a class="headerlink" href="#68-composition-with-translation" title="Permanent link">&para;</a></h3>
+<p>Instrumentation must be able to run <strong>after</strong> binary translation, because the
+translated code is what executes. This follows from invariant 3 and costs nothing
+if transforms are a pipeline behind a single interception point; it is a fight if
+each transform is an independent hook competing for the same mechanism.</p>
+<p>One consequence for the analysis layer: instrumentation cannot assume it is
+looking at compiler output. It may be looking at machine-generated translation
+output, with different register-pressure characteristics.</p>
+<hr />
+<h2 id="7-performance">7. Performance<a class="headerlink" href="#7-performance" title="Permanent link">&para;</a></h2>
+<h3 id="the-governing-arithmetic">The governing arithmetic<a class="headerlink" href="#the-governing-arithmetic" title="Permanent link">&para;</a></h3>
+<p><strong>The device's capacity to generate records exceeds the host link's capacity to
+carry them by two to three orders of magnitude on discrete parts.</strong> No amount of
+drainer optimisation changes that. Where host and device share physical memory
+the gap narrows substantially; the design should not assume the discrete case is
+the only case.</p>
+<p>What that gap describes is a ceiling, not a rate the device will sustain. Because
+the buffer is uncached host memory (§5.2), the write path throttles the producer
+directly: the observable effect of over-instrumenting is waves stalling on their
+own record writes, not an orderly queue draining at link speed. The practical
+consequence is the same, produce fewer records, but the symptom a user reports
+will be a slow kernel rather than a full buffer.</p>
+<p>The ordering of bottlenecks is: device produces ≫ link carries ≥ host
+processes. Post-processing matters because it must not become a new bottleneck
+below the link, but making it faster buys nothing beyond the link ceiling.</p>
+<p>What buys throughput is <strong>producing fewer records</strong>:</p>
+<ul>
+<li>
+<p><strong>Sampling.</strong> Dispatch-granular selection supplies the most practically
+  important controls the framework offers: <strong>instrument only a named kernel,
+  only dispatches in a numbered range, or only within a time window.</strong> These are
+  not conveniences; they are what makes the framework applicable to workloads
+  that cannot be shrunk.</p>
+<p>The decision is a table lookup, but the mechanism is not free. Observing
+packets requires interposing on submission, which routes every dispatch in the
+process through the framework, including those sampling declines to
+instrument, and adds latency to each. Applications issuing very many small
+dispatches pay this whether or not they are being sampled. It is the price of
+admission for everything in §2.1, and it should be counted once, honestly,
+rather than assumed away.</p>
+<p>Finer granularity, such as per workgroup, per wave, or every Nth execution of
+a site, happens inside the probe and costs cycles there instead. The two
+mechanisms should not be conflated.</p>
+</li>
+<li>
+<p><strong>Filtering in the probe.</strong> The earliest point volume can be reduced. It costs
+  cycles rather than memory, so it survives the memory model. This is the
+  design's main lever and should be a first-class probe capability.</p>
+</li>
+<li><strong>Denser records</strong> (§5.3).</li>
+</ul>
+<p>One caution against reading link bandwidth as the only constraint: draining the
+guest's outstanding memory operations at each site (§6.6) removes latency hiding,
+and on memory-bound kernels can cost more than the records do. Record volume
+dominates what the host sees; the drain dominates what the device pays.</p>
+<h3 id="overhead-budget">Overhead budget<a class="headerlink" href="#overhead-budget" title="Permanent link">&para;</a></h3>
+<p><strong>There is no fixed overhead target.</strong> Overhead must instead be bounded,
+predictable, and reported. A number would be meaningless: cost is dominated by
+what the user chose to instrument, and occupancy effects make it nonlinear, since
+a probe costing a handful of cycles can more than halve throughput if register
+growth crosses an occupancy threshold.</p>
+<p>The framework reports, per run:</p>
+<ul>
+<li>wall-clock for instrumented and uninstrumented dispatches, per kernel. The
+  baseline comes from dispatches that ran the original variant, which sampling
+  supplies for free; a dispatch cannot be re-run to obtain one, since kernels
+  mutate memory. <strong>Under full instrumentation there is no in-run baseline</strong> and
+  the application must be run again without instrumentation.</li>
+<li>occupancy change. Occupancy is not determined by register counts alone: local
+  data share per workgroup, workgroup size, and wave-slot limits also bind, and
+  for kernels limited by those an occupancy figure inferred from register deltas
+  is simply wrong. It must be computed against the full occupancy model or
+  reported as the estimate it is.</li>
+<li>records produced, drained, and dropped</li>
+<li>sites requested, instrumented, and rejected</li>
+<li><strong>whether instrumentation induced serialization</strong>. Per invariant 5, a
+  heavyweight tool may cause the runtime to admit dispatches one at a time, and
+  a user comparing timings needs to know that happened (e.g., by tracking how
+  many dispatches are in flight at once, which the framework can count because
+  it already observes every submission, and comparing that against the
+  uninstrumented dispatches of the same run). This is only in question when the
+  framework grew a memory resource, so it costs nothing the rest of the time.</li>
+</ul>
+<p>A user who sees "3.2× slower, 41% of records dropped, occupancy 8→5" can make an
+informed decision. A user who sees a slow run and a clean report cannot.</p>
+<p><strong>Representative small inputs are the expected usage</strong> where users have that
+option, the standard bargain for heavyweight dynamic analysis, and better stated
+up front than treated as an apology.</p>
+<p>It must not be the only answer, because for a large class of users it is not
+available. High-performance-computing workloads often exhibit the behavior of
+interest only at full scale; machine-learning workloads are profiled on a real
+training step of a real model, with no smaller version that reproduces the bug.
+For those users the workable substitute is <strong>narrowing in dispatch space rather
+than input space</strong>: one kernel, a range of dispatches, or a window of execution,
+at full scale. That comes free from dispatch-granular selection, which is why
+that mechanism deserves prominence.</p>
+<hr />
+<h2 id="8-runtime-integration">8. Runtime integration<a class="headerlink" href="#8-runtime-integration" title="Permanent link">&para;</a></h2>
+<h3 id="81-how-a-tool-gets-into-the-process">8.1 How a tool gets into the process<a class="headerlink" href="#81-how-a-tool-gets-into-the-process" title="Permanent link">&para;</a></h3>
+<p>The dynamic linker can preload a library before the process begins, which is how
+rocjitsu's driver-level interposer gets in. Separately, the GPU runtime hands its
+dispatch table to registered tool libraries during its initialisation. The
+second is the natural home for instrumentation, since it operates in terms of
+code objects and queues rather than driver calls. Note that runtime
+initialisation is triggered by the application, so a tool library is loaded
+before the application does any GPU work, not before it starts running.</p>
+<p>Which of the runtime's registration mechanisms the framework uses is an
+implementation choice, not an architectural one: it changes how the hook installs
+itself and nothing about the transforms, the record format, or the buffers. What
+must not happen is for that choice to harden into an assumption of exclusivity,
+because the obligations below are what keep coexistence possible.</p>
+<p>Interception is installed by modifying entries in the runtime's dispatch table.
+Two interception points matter:</p>
+<ul>
+<li><strong>Code object load</strong>, before the loader places the image. Where instrumentation
+  happens.</li>
+<li><strong>Queue creation and packet submission</strong>, so the framework can observe and edit
+  dispatch packets. Where variant selection, sampling, and buffer binding happen.</li>
+</ul>
+<p><strong>What is and is not safe at tool-load time.</strong> Agents and their memory pools
+already exist by then, so enumerating them is not the hazard. The real ones are
+that re-entering runtime initialisation from inside the tool's entry point
+deadlocks, and that table entries take effect the moment they are written,
+including for the runtime's own internal calls, before the tool has finished
+setting itself up. Deferring agent-scoped work to a later interception is
+defensible, but as a sequencing choice rather than because agents are unavailable.</p>
+<p><strong>Coexisting with other tools.</strong> A user instrumenting a workload that also
+requires translation needs both at once, and an existing profiler in the same
+process wants the same table, the same queue interception, and the same
+code-object-load notification. Four obligations follow, and they are what keep
+that possible:</p>
+<ul>
+<li><strong>Chain, never capture.</strong> Retain the previous entries, call them, propagate
+  their results, and tolerate being handed the table more than once. Overwriting
+  without saving what was there silently disables whatever was installed first.</li>
+<li><strong>Do not disable facilities other tools depend on.</strong> Turning off a runtime
+  mechanism to simplify one's own path can remove another tool's entire
+  capability. Any such measure must be conditional on the user not wanting that
+  tool, and must be visible.</li>
+<li><strong>Expect single-registrant hooks.</strong> Some runtime facilities accept exactly one
+  registrant and reject the second. Composition is unavailable for those and
+  first writer wins, so the framework must decide whether to claim them at all
+  and fail visibly rather than silently when it cannot.</li>
+<li><strong>Do not rely on composition for transforms.</strong> Several tools can overlay the
+  same table, but the runtime builds no chain: the link to the previous function
+  is a value each tool happened to save, calling it is each tool's choice, and
+  the resulting call order is the <strong>reverse</strong> of installation order. That suffices
+  for observing and forwarding. It does not suffice for rewriting, where two
+  tools compose only if both forward their transformed result and nothing
+  enforces that. Where this project needs more than one transform, the answer is
+  a single hook running a pipeline (§6.8).</li>
+</ul>
+<p><strong>What is owed to tools that observe our output.</strong> Instrumentation rewrites the
+code object before it is loaded, so what other tools see is the instrumented
+image: every offset they report refers to instrumented code, and resource figures
+read from the loaded image are the instrumented footprints, so any occupancy
+figure derived from them is wrong. Without the first two of the following,
+enabling instrumentation silently corrupts another tool's output.</p>
+<ul>
+<li><strong>Publish the instrumented-to-original mapping</strong>, in a form usable by a tool
+  that observes the image but never consumes this framework's records. The
+  bookkeeping already exists (§6.2); the delivery mechanism is open.</li>
+<li><strong>Keep the original resource footprint available</strong> alongside the instrumented
+  one, so consumers can report what the application would have used.</li>
+<li><strong>Join through the other tool's correlation scheme.</strong> Identifiers it mints
+  cannot be reconstructed from outside it and must be received from it. The only
+  identifier an outside component can reliably contribute is one it supplies in
+  advance.</li>
+<li><strong>Expect live integration to be out of reach.</strong> Feeding records directly into
+  another tool's buffers requires it to expose an ingestion path and an
+  extensible record taxonomy. Where it does not, emit alongside and join
+  afterwards. Lifting that is a request to the other project.</li>
+</ul>
+<h4 id="publishing-the-mapping-open">Publishing the mapping (OPEN)<a class="headerlink" href="#publishing-the-mapping-open" title="Permanent link">&para;</a></h4>
+<p>The requirement is settled and forced from outside; the delivery mechanism is
+not. Candidates:</p>
+<ul>
+<li><strong>Carried in the records themselves.</strong> Each record already names its original
+  site, so anything consuming this framework's output is self-mapping. This
+  covers our consumers completely and other tools not at all, which is precisely
+  the shape of the problem.</li>
+<li><strong>A side-car artifact</strong> per instrumented code object. Straightforward and
+  universally consumable, at the cost of a file nobody asked for, a lifetime to
+  manage, and a convention every consumer must learn.</li>
+<li><strong>Debug information in the instrumented image.</strong> Consumers already know how to
+  read it and no new convention is needed; awkward because the images most in
+  need of mapping are frequently the ones with no debug information to extend.</li>
+<li><strong>Through the observing tool's own notification path</strong>, if it grows a field for
+  a rewritten image. Cleanest for the consumer, entirely outside this project's
+  control, so it cannot be the only plan.</li>
+</ul>
+<p>The choice is unusually consumer-driven and should be made with whoever must read
+it: a mechanism no consumer adopts satisfies the requirement on paper and not in
+fact.</p>
+<h3 id="82-user-experience">8.2 User experience<a class="headerlink" href="#82-user-experience" title="Permanent link">&para;</a></h3>
+<p>The everyday user's invocation is the existing launcher with a configuration
+file, running an unmodified application. DBI is a configuration section and a
+hook, not a new tool, and there is no separate instrument-then-run step.</p>
+<p><strong>Attaching to a running application.</strong> The committed meaning is <strong>activating a
+hook already present in the process</strong>, not injecting into a process that never
+had one. Injection is out of scope; the ecosystem already provides a registration
+path that makes the dormant-hook form workable.</p>
+<p>What attach reaches is asymmetric, and the asymmetry is accepted rather than
+solved:</p>
+<ul>
+<li><strong>Code objects are reachable retroactively</strong>, but not by mutation. Loaded
+  executables are frozen, so an already-loaded code object cannot be rewritten
+  in place and cannot have anything added to it. What is possible is to build an
+  instrumented code object and load it as a new executable, freeze that, and
+  name its kernel in subsequent dispatches. The original stays loaded and
+  untouched. This is §2.1 doing work it was not specifically designed for, and
+  the cost is a second resident copy of any kernel instrumented this way.</li>
+<li><strong>Queues are reachable only prospectively.</strong> Submission interception is
+  established when a queue is created. The obstacle is not merely that an
+  existing queue was missed: there is no way to enumerate the queues a process
+  already owns, so a late-arriving tool cannot find them even in principle. It
+  sees the doorbell traffic of queues it never observed being created and cannot
+  attribute it. Dispatches on those queues cannot be redirected.</li>
+</ul>
+<p><strong>This limits attach to applications that create queues during their run.</strong> An
+application creating its queues once at startup and running for hours is
+precisely the case that motivates attaching and precisely the case attach reaches
+nothing. That is a real gap, accepted knowingly; a submission interception point
+not requiring ownership of queue creation is not currently known to exist.</p>
+<p>Note that existing tooling in this project uses "attach" for something else
+entirely: launching a new process against an already-running service. The
+collision will mislead people, and the user-facing name for this capability
+should not repeat it.</p>
+<p><strong>Output format is a tool decision, not a framework constraint.</strong> The everyday
+user's default is a human-readable report in a file, because that is what an
+everyday user wants. A tool whose consumers are other tools may emit
+machine-readable output instead, and for anything sitting alongside existing
+profiling data, that output needs identifiers joining to the rest of the
+ecosystem's, since data that cannot be correlated to a kernel trace is stranded.
+Raw record spooling is a debugging mode: at scale it is terabytes.</p>
+<h3 id="83-failure-at-instrumentation-time">8.3 Failure at instrumentation time<a class="headerlink" href="#83-failure-at-instrumentation-time" title="Permanent link">&para;</a></h3>
+<p><strong>Best-effort, with required sites.</strong></p>
+<ul>
+<li>Attempt everything the user asked for; where a site cannot be instrumented,
+  warn and continue.</li>
+<li><strong>Collect, then decide.</strong> Accumulate all outcomes before evaluating success. A
+  user with ten problems should see ten, not one per run.</li>
+<li>A tool may mark instrumentation as <strong>required</strong>, initialisation and
+  finalisation being the obvious cases, where partial application is meaningless.
+  If required instrumentation fails, instrumentation fails.</li>
+<li>If instrumentation fails, the application exits with a clear diagnostic.</li>
+</ul>
+<p>The failure mode to avoid above all others is <strong>silently running uninstrumented
+and producing a clean report</strong>, which a user cannot distinguish from a clean run.</p>
+<p><strong>This policy does not vary with when the failure is discovered.</strong> Code objects
+load throughout a run, including device libraries, runtime-compiled modules, and
+lazily loaded ones, so failures are not a startup-only phenomenon, and there is
+no meaningful line between "before execution begins" and "during it". A required
+instrumentation point that cannot be satisfied means the tool cannot do the job
+it was asked to do, as true at the three-hour mark as at the first dispatch.
+Continuing would only produce output the user cannot rely on.</p>
+<p>The counterpart obligation is that <strong>the user is told how much was actually
+instrumented</strong>: sites requested, instrumented, and rejected, and which code
+objects were covered. Best-effort coverage is only defensible if its extent is
+visible.</p>
+<h3 id="84-failure-at-run-time">8.4 Failure at run time<a class="headerlink" href="#84-failure-at-run-time" title="Permanent link">&para;</a></h3>
+<p><strong>Host process death</strong>, meaning the application crashes or is killed. End-of-run
+reporting never happens and in-process analysis state is lost. An application
+under a sanitizer is disproportionately likely to crash, so this is the common
+case. Mitigations, in increasing order of cost:</p>
+<ul>
+<li><strong>Incremental output</strong>, which streaming analysis wants anyway.</li>
+<li><strong>Signal handling</strong> to flush, subject to async-signal-safety constraints.</li>
+<li><strong>An out-of-process drainer</strong>, with the buffer in shared memory, so the
+  application's death takes neither the data nor the analysis with it. The
+  durable answer, and rocjitsu already has comparable multi-process
+  memory-sharing machinery.</li>
+</ul>
+<p><strong>Device faults.</strong> The runtime surfaces queue errors, and a memory fault is
+reported with the faulting agent, the faulting virtual address, and flags
+describing the reason, including whether the report is imprecise. What is not
+reported is a program counter, so the fault alone does not identify the
+instruction. Absent a handler the default behavior is a diagnostic message and
+an abort from a runtime thread. The hardware trap mechanism used by the GPU
+debugger could in principle expose a faulting wave's state, and the runtime has a
+device core-dump path worth leaning on; both are must-remain-possible, not
+committed.</p>
+<p>Two capabilities are worth deliberate design:</p>
+<ul>
+<li><strong>The last records before a fault are diagnostic.</strong> An address stream plus a
+  fault is a far better crash report than the fault alone, exactly the
+  attribution that motivates the project, and the more valuable because the
+  fault carries no program counter of its own. It is genuinely best-effort
+  rather than nearly free: the faulting wave's in-flight stores and unflushed
+  caches are lost, so what survives is what had already reached host memory.</li>
+<li><strong>Distinguishing an application fault from a probe fault.</strong> Instrumentation bugs
+  manifest as device faults, and without a way to tell them apart the framework
+  will be blamed for application bugs and vice versa. Probe writes target known
+  address ranges, which makes this tractable.</li>
+</ul>
+<p>Both run into host-process death: a device fault usually wedges the queue and the
+process is terminated. Same answer, incremental output or out-of-process.</p>
+<hr />
+<h2 id="9-non-goals">9. Non-goals<a class="headerlink" href="#9-non-goals" title="Permanent link">&para;</a></h2>
+<p>Deliberate scope decisions, not missing features.</p>
+<ul>
+<li><strong>No on-device aggregation or reduction.</strong> The device streams; the host
+  reduces. A consequence of §4, and a statement about efficiency rather than
+  capability: a basic block counter is implementable, it simply emits a record
+  per execution instead of accumulating. Such tools work; they cost more here
+  than they would elsewhere.</li>
+<li><strong>No arbitrary user-authored probe logic.</strong> No compiler, no code generation from
+  source. Probes ship with rocjitsu. Hand-written assembly probes are a
+  possibility, not a commitment.</li>
+<li><strong>No general-purpose instrumentation framework.</strong> This is deliberately the
+  constrained option: a fixed catalogue of probes, streaming, host-side
+  analysis. Arbitrary device-side logic is not a gap to be closed here.</li>
+<li><strong>No dependencies outside ROCm</strong>, and no third-party instrumentation library.
+  The one prerequisite worth naming is the device compiler needed to build
+  probes (§6.7). It is part of ROCm rather than external, but it is packaged
+  separately from the runtime and it is needed only at build time, so a machine
+  that only runs instrumented applications does not need it.</li>
+<li><strong>AMDGPU targets only.</strong></li>
+<li><strong>No completeness guarantee.</strong> Sampling and dropping are architectural.</li>
+<li><strong>No binary-stable ABI</strong> for probes or client tools.</li>
+<li><strong>Not always-on.</strong> An analysis tool for representative inputs, not production
+  telemetry.</li>
+<li><strong>Not a debugger, and not a replacement for hardware counters.</strong></li>
+</ul>
+<hr />
+<h2 id="10-simulator-and-hardware">10. Simulator and hardware<a class="headerlink" href="#10-simulator-and-hardware" title="Permanent link">&para;</a></h2>
+<p><strong>Both are targets. Neither is a fallback for the other.</strong></p>
+<p>Hardware sets the rules. Every constraint in this document, including the memory
+model, the probe restrictions, occupancy cost, and cache coherence, exists
+because of silicon. The simulator is the low-friction validation path: everything
+is observable and instrumentation is comparatively easy.</p>
+<p>Because the instrumentation step is a pure code-object transform it is identical
+for both. The runtime integration around it is not: buffer placement,
+dispatch-packet rewriting, and drain scheduling differ between an environment the
+framework controls entirely and one where it must negotiate with a real runtime
+and real hardware. The shared part is nonetheless large enough to give a
+differential-testing story, in that the same instrumentation on both targets
+should produce consistent results, and divergence is a bug in one of them.</p>
+<hr />
+<h2 id="11-open-questions-and-known-gaps">11. Open questions and known gaps<a class="headerlink" href="#11-open-questions-and-known-gaps" title="Permanent link">&para;</a></h2>
+<h3 id="open-questions">Open questions<a class="headerlink" href="#open-questions" title="Permanent link">&para;</a></h3>
+<p>Each is discussed in context above. Everything else in this document is either
+committed or explicitly deferred; these two are the decisions still to make, and
+neither can be settled inside the project alone.</p>
+<ol>
+<li><strong>How the instrumented-to-original mapping is published</strong> (§8.1): the
+   requirement is settled, the delivery mechanism is not. Consumer-driven, so it
+   wants the tools that must read the mapping represented in the decision.</li>
+<li><strong>Advanced-user API status</strong> (§1): supported product surface, or internal API
+   that happens to be usable. This is a question about who the framework is for,
+   and answering it may need someone who owns that relationship.</li>
+</ol>
+<h3 id="known-gaps">Known gaps<a class="headerlink" href="#known-gaps" title="Permanent link">&para;</a></h3>
+<p>Subjects a reader may reasonably expect that this document does not address.
+Listed so their absence is visibly deliberate.</p>
+<ul>
+<li><strong>Scale-out.</strong> Multiple agents, multiple queues, multiple processes. Buffers
+  are agent-scoped; nothing here says who drains what when a node has eight
+  devices and eight ranks.</li>
+<li><strong>Code objects that are not a single static image</strong>, meaning runtime-compiled
+  and runtime-loaded modules, bundles, and images already instrumented.</li>
+<li><strong>Kernel entry and exit instrumentation</strong>, which §8.3's required initialisation
+  and finalisation sites presuppose and §5.4's prologue depends on.</li>
+<li><strong>Which memory regions are in scope</strong> for instrumentation.</li>
+<li><strong>Validation strategy</strong> beyond the differential testing of §10.</li>
+<li><strong>Determinism and reproducibility</strong> of a sampled run.</li>
+<li><strong>A security and threat model.</strong> A framework that rewrites code before it is
+  loaded and shares memory with a host process has one; nothing here states what
+  it assumes about the code it instruments or the process it runs in.</li>
+<li><strong>Buffer sizing guidance.</strong> How large a buffer should be for a given workload,
+  and how a user is meant to arrive at that number, which matters given that
+  overflow policy is a first-class design element.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025–2026 Advanced Micro Devices, Inc.<br> <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/LICENSE.md">MIT License</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" target="_blank" rel="noopener" title="Rocjitsu on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/issues" target="_blank" rel="noopener" title="Report an issue" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 8h-2.81c-.45-.8-1.07-1.5-1.82-2L17 4.41 15.59 3l-2.17 2.17a6 6 0 0 0-2.83 0L8.41 3 7 4.41 8.62 6c-.75.5-1.36 1.21-1.81 2H4v2h2.09c-.06.33-.09.66-.09 1v1H4v2h2v1c0 .34.03.67.09 1H4v2h2.81A5.99 5.99 0 0 0 15 20.18c.91-.52 1.67-1.28 2.19-2.18H20v-2h-2.09c.06-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.03-.67-.09-1H20zm-4 7a4 4 0 0 1-4 4 4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4 4 4 0 0 1 4 4zm-2-5v2h-4v-2zm-4 4h4v2h-4z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.tracking", "toc.follow", "content.code.copy", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../assets/repository-stats.js"></script>
+      
+    
+  </body>
+</html>

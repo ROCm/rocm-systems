@@ -1,0 +1,2543 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User and developer documentation for the ROCm Just-in-Time Suite.">
+      
+      
+      
+        <link rel="canonical" href="https://rocm.github.io/rocm-systems/rocjitsu/dbt-design/">
+      
+      
+        <link rel="prev" href="../vm-design/">
+      
+      
+        <link rel="next" href="../rj_dbt_translate/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Binary translation - Rocjitsu</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../assets/handbook.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#dbt-design" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Rocjitsu" class="md-header__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Rocjitsu
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Binary translation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Rocjitsu" class="md-nav__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Rocjitsu
+  </label>
+  
+    <div class="md-nav__source">
+      
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 523 · build snapshot" aria-label="Stars: 523">523</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 436 · build snapshot" aria-label="Forks: 436">436</li>
+      </ul>
+    </div>
+  </a>
+</div>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 21.5c-1.35-.85-3.8-1.5-5.5-1.5-1.65 0-3.35.3-4.75 1.05-.1.05-.15.05-.25.05-.25 0-.5-.25-.5-.5V6c.6-.45 1.25-.75 2-1 1.11-.35 2.33-.5 3.5-.5 1.95 0 4.05.4 5.5 1.5 1.45-1.1 3.55-1.5 5.5-1.5 1.17 0 2.39.15 3.5.5.75.25 1.4.55 2 1v14.6c0 .25-.25.5-.5.5-.1 0-.15 0-.25-.05-1.4-.75-3.1-1.05-4.75-1.05-1.7 0-4.15.65-5.5 1.5M12 8v11.5c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5V7c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5m1 3.5c1.11-.68 2.6-1 4.5-1 .91 0 1.76.09 2.5.28V9.23c-.87-.15-1.71-.23-2.5-.23q-2.655 0-4.5.84zm4.5.17c-1.71 0-3.21.26-4.5.79v1.69c1.11-.65 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24v-1.5c-.87-.16-1.71-.23-2.5-.23m2.5 2.9c-.87-.16-1.71-.24-2.5-.24-1.83 0-3.33.27-4.5.8v1.69c1.11-.66 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command-line interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../race-detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Race detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocgdb-debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qemu-vfio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QEMU VFIO-user compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vulkan-compute/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vulkan compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-2-2 2 2 0 0 0 2-2V5h2V3m6 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5h-2V3z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../style/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code style
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simdojo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vm-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU hardware model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary translation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary translation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-short-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Short Version
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The Short Version">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#runtime-host-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime host configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-small-relocation-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A Small Relocation Example
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#input-and-output-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Input and Output Shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#translation-phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translation Phases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Translation Phases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-build-descriptor-plans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Build Descriptor Plans
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-build-the-source-cfg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Build the Source CFG
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Build the Source CFG">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-calls-have-their-own-edge-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Calls Have Their Own Edge Type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#static-indirect-branch-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Static Indirect Branch Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-form-kernel-scopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Form Kernel Scopes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-translate-one-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Translate One Scope
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Translate One Scope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#semantic-equivalence-and-generated-translation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Semantic Equivalence and Generated Translation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-place-the-body-and-repair-control-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Place the Body and Repair Control Flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Place the Body and Repair Control Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#direct-branches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Direct Branches
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovered-indirect-transfers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovered Indirect Transfers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-feed-resources-back-into-the-descriptor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Feed Resources Back into the Descriptor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-commit-the-code-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Commit the Code Object
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#entry-stubs-and-kernarg-preload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entry Stubs and Kernarg Preload
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kernarg-extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernarg Extension
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sidecars-and-virtual-lds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sidecars and Virtual LDS
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sidecars and Virtual LDS">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-virtualize-lds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Virtualize LDS?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rj_dbt_translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translation tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu_dbt_guest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DBT guest mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary instrumentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instrumentation overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codegen/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA code generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-target-providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA target providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-gap-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA gap audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../npi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-instructions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous MMA execution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mma-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MMA lookahead admission
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concurrent-dispatch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrent dispatch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-counter-coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait coverage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 18H4V8h16m0-2h-8l-2-2H4c-1.11 0-2 .89-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+    
+  
+  
+    <li class="md-nav__item">
+      <a href="../blog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-short-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Short Version
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The Short Version">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#runtime-host-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime host configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-small-relocation-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A Small Relocation Example
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#input-and-output-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Input and Output Shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#translation-phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translation Phases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Translation Phases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-build-descriptor-plans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Build Descriptor Plans
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-build-the-source-cfg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Build the Source CFG
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Build the Source CFG">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-calls-have-their-own-edge-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Calls Have Their Own Edge Type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#static-indirect-branch-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Static Indirect Branch Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-form-kernel-scopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Form Kernel Scopes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-translate-one-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Translate One Scope
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Translate One Scope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#semantic-equivalence-and-generated-translation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Semantic Equivalence and Generated Translation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-place-the-body-and-repair-control-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Place the Body and Repair Control Flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Place the Body and Repair Control Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#direct-branches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Direct Branches
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovered-indirect-transfers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovered Indirect Transfers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-feed-resources-back-into-the-descriptor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Feed Resources Back into the Descriptor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-commit-the-code-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Commit the Code Object
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#entry-stubs-and-kernarg-preload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entry Stubs and Kernarg Preload
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kernarg-extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernarg Extension
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sidecars-and-virtual-lds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sidecars and Virtual LDS
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sidecars and Virtual LDS">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-virtualize-lds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Virtualize LDS?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="dbt-design"><span class="twemoji" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m21 9-4-4v3h-7v2h7v3M7 11l-4 4 4 4v-3h7v-2H7z"/></svg></span> DBT Design<a class="headerlink" href="#dbt-design" title="Permanent link">&para;</a></h1>
+<p>Rocjitsu's dynamic binary translator (DBT) turns an AMDGPU code object for a
+guest ISA into a loadable code object for a host ISA.</p>
+<p>The Dynamic Binary Translation (DBT) system translates AMDGPU code objects compiled for one ISA to execute on a different ISA. The initial target pairs are CDNA4 (GFX950) → RDNA4 (GFX1200/1201) and CDNA4 (GFX950) → CDNA3 (GFX942), but the architecture is designed to support any directional ISA pair.</p>
+<p>The central design choice is:</p>
+<blockquote>
+<p>Translate one kernel scope at a time, then relocate that scope as a unit.</p>
+</blockquote>
+<p>DBT does <strong>not</strong> edit <code>.text</code> as one flat stream. A code object can contain
+several kernels, shared helpers, PC-relative control flow, and more than one
+runtime variant of a kernel. Treating each kernel as a relocation unit makes
+those relationships explicit.</p>
+<h2 id="the-short-version">The Short Version<a class="headerlink" href="#the-short-version" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code> guest ELF
+    |
+    v
++---------------------+
+| Read kernel          |  kernel descriptors identify roots and ABI state
+| descriptors          |
++---------------------+
+    |
+    v
++---------------------+
+| Build source CFG     |  direct edges + recovered static indirect edges
++---------------------+
+    |
+    v
++---------------------+
+| Form kernel scopes   |  reachable blocks for each entry and variant
++---------------------+
+    |
+    v
++---------------------+
+| Translate each scope |  semantic expansion, LDS lowering, re-encoding
+| into a local buffer  |  and resource accounting
++---------------------+
+    |
+    v
++---------------------+
+| Place and relocate   |  entry stubs and control-flow PC builders
++---------------------+
+    |
+    v
++---------------------+
+| Commit the ELF       |  descriptors, .text, sidecars, metadata, e_flags
++---------------------+
+    |
+    v
+ host ELF
+</code></pre></div>
+<h3 id="runtime-host-configuration">Runtime host configuration<a class="headerlink" href="#runtime-host-configuration" title="Permanent link">&para;</a></h3>
+<p>DBT guest mode keeps the synthetic guest identity separate from the target that
+runs translated code. <code>DbtGuestConfig</code> describes the advertised guest ISA and
+device, while its <code>DbtHostConfig</code> describes the host ISA, topology GPU ID, and
+execution backend. The backend is an enum with two modes:</p>
+<ul>
+<li><code>hardware</code> forwards execution-facing operations to a real host GPU.</li>
+<li><code>simulator</code> delegates host KFD execution to <code>SimulatedKfd</code> and runs the
+  translated code on a RocJITsu VM.</li>
+</ul>
+<p>A simulator-backed DBT config supports two layouts. When <code>simulator_config</code> is
+set, it names an external host simulator config; relative paths are resolved
+beside the DBT guest config, and that external file overrides any simulator
+VM/topology in the DBT guest file. This is the normal composition form and lets
+<code>guest_gfx950_on_simulated_gfx942.json</code> reuse the golden
+<code>gfx942_cdna3_kmd.json</code> config. When <code>simulator_config</code> is omitted, the DBT
+guest block and simulator VM/topology are read from the same file. The
+self-contained form is useful for tests and generated temporary configs.</p>
+<p>Both layouts use the same translation and validation path. Before discovery,
+the runtime rejects guest execution limits that the selected simulator device
+cannot provide, including LDS size, scratch slots, waves per SIMD, and wavefront
+size.</p>
+<hr />
+<p>There are three different address spaces to keep straight:</p>
+<div class="highlight"><pre><span></span><code>source .text offsets  -&gt;  kernel-local buffer offsets  -&gt;  final .text offsets
+</code></pre></div>
+<p>DBT records mappings between these spaces instead of assuming that every
+instruction moves by one constant delta.</p>
+<h2 id="a-small-relocation-example">A Small Relocation Example<a class="headerlink" href="#a-small-relocation-example" title="Permanent link">&para;</a></h2>
+<p>Suppose a source kernel has three blocks:</p>
+<div class="highlight"><pre><span></span><code>source .text
+
+0x100  block A: conditional branch to block C
+0x104  block B: guest_op
+       ...
+0x120  block C: s_endpgm
+</code></pre></div>
+<p>On the host, <code>guest_op</code> needs a longer instruction sequence. The translated
+layout might look like this (offsets are illustrative):</p>
+<div class="highlight"><pre><span></span><code>kernel-local buffer
+
+0x00   block A: [branch patch window]
+0x08   block B: host_op_1
+                 host_op_2
+                 host_op_3
+                 ...
+0x34   block C: s_endpgm
+</code></pre></div>
+<p>The source branch targeted <code>0x120</code>; it must now target local offset <code>0x34</code> and,
+after final placement, the corresponding final <code>.text</code> address. DBT therefore
+records the branch while emitting block A and patches it only after every block
+has a known location.</p>
+<p>This example captures the reason for most of the design:</p>
+<ul>
+<li>instruction sizes can change;</li>
+<li>fallthrough should remain adjacent;</li>
+<li>explicit branches must be relocated; and</li>
+<li>descriptors must point at the final entry, not the temporary buffer.</li>
+</ul>
+<h2 id="input-and-output-shape">Input and Output Shape<a class="headerlink" href="#input-and-output-shape" title="Permanent link">&para;</a></h2>
+<p>A source code object is approximately:</p>
+<div class="highlight"><pre><span></span><code>AMDGPU ELF
+  ELF header
+    e_machine = EM_AMDGPU
+    e_flags   = guest machine id + AMDGPU feature bits
+
+  LOAD segment
+    .text
+      kernel bodies and helpers
+
+    descriptor storage
+      kernel_a.kd  ----+
+      kernel_b.kd  ----+----&gt; entries in .text
+</code></pre></div>
+<p>An AMDHSA dispatch packet's <code>kernel_object</code> is the loaded address of a kernel
+descriptor. The entry PC is computed from that descriptor and its signed
+<code>KERNEL_CODE_ENTRY_BYTE_OFFSET</code>:</p>
+<div class="highlight"><pre><span></span><code>entry_pc = descriptor_address + kernel_code_entry_byte_offset
+</code></pre></div>
+<p>This is why moving code and moving descriptors cannot be handled independently.</p>
+<p>The translated object is approximately:</p>
+<div class="highlight"><pre><span></span><code>Translated AMDGPU ELF
+  ELF header
+    e_flags = host machine id + preserved upper feature bits
+
+  LOAD segment
+    .text
+      [kernel_a entry stub, when needed]
+      [kernel_a translated body]
+      [kernel_a sidecar entry stub and body, when needed]
+      [kernel_b entry stub, when needed]
+      [kernel_b translated body]
+      ...
+
+    existing descriptor storage
+      kernel_a.kd  ----&gt; translated kernel_a entry
+      kernel_b.kd  ----&gt; translated kernel_b entry
+
+    loaded descriptor tail, when sidecars exist
+      kernel_a virtual-LDS descriptor  ----&gt; sidecar entry
+
+  non-ALLOC sections
+    .rocjitsu.lds   runtime sidecar metadata, when needed
+</code></pre></div>
+<p>Existing application-visible descriptors are reused and patched. Sidecar
+descriptors are loaded data appended after the translated text storage; they are
+not exported as ordinary application-visible kernel symbols.</p>
+<h2 id="translation-phases">Translation Phases<a class="headerlink" href="#translation-phases" title="Permanent link">&para;</a></h2>
+<h3 id="1-build-descriptor-plans">1. Build Descriptor Plans<a class="headerlink" href="#1-build-descriptor-plans" title="Permanent link">&para;</a></h3>
+<p>Kernel descriptor symbols identify the source kernel entries. For each
+descriptor, <code>KernelDescriptorTranslator</code> builds a <code>KdTranslation</code> plan that
+records:</p>
+<ul>
+<li>the source descriptor and entry locations;</li>
+<li>target wave and register resource fields;</li>
+<li>LDS, private-memory, and kernarg sizes;</li>
+<li>descriptor-controlled initial SGPR state;</li>
+<li>any target entry prologue; and</li>
+<li>whether this is a normal or sidecar variant.</li>
+</ul>
+<p>Descriptor translation happens early because CFG construction needs the kernel
+roots. Some final resource values are intentionally deferred until instruction
+lowering has chosen its scratch registers.</p>
+<p>Wave-size changes are not emulated by the instruction stream. If the guest wave
+size cannot be preserved on the host, descriptor translation reports the kernel
+as unsupported.</p>
+<h3 id="2-build-the-source-cfg">2. Build the Source CFG<a class="headerlink" href="#2-build-the-source-cfg" title="Permanent link">&para;</a></h3>
+<p><code>BasicBlock::build</code> decodes source text and creates block leaders at:</p>
+<ul>
+<li>the first decoded instruction;</li>
+<li>every descriptor entry;</li>
+<li>every firmware preload entry;</li>
+<li>every direct branch or call target;</li>
+<li>every recovered indirect target; and</li>
+<li>the instruction after a terminator, when more text follows.</li>
+</ul>
+<p>It then adds ordinary CFG edges for branches and fallthrough, and separate call
+edges for validated calls.</p>
+<h4 id="why-calls-have-their-own-edge-type">Why Calls Have Their Own Edge Type<a class="headerlink" href="#why-calls-have-their-own-edge-type" title="Permanent link">&para;</a></h4>
+<p>A call has two relevant destinations:</p>
+<div class="highlight"><pre><span></span><code>             +------------+
+call site --&gt;| callee body |
+     |       +------------+
+     |
+     +------&gt; continuation after the callee returns
+</code></pre></div>
+<p>The callee is included in the kernel scope, but a return through
+<code>s_setpc_b64</code> is valid only for the continuation and saved return-SGPR pair of
+that call. Modeling calls separately avoids connecting every callee return to
+every possible continuation.</p>
+<p>Direct <code>s_call_b64</code> and recovered <code>s_swappc_b64</code> transfers become call edges
+only when DBT can validate a matching return. Otherwise, a recovered concrete
+target is treated conservatively as ordinary control flow.</p>
+<h4 id="static-indirect-branch-recovery">Static Indirect Branch Recovery<a class="headerlink" href="#static-indirect-branch-recovery" title="Permanent link">&para;</a></h4>
+<p>Indirect recovery recognizes common sequences shaped like:</p>
+<div class="highlight"><pre><span></span><code>s_getpc_b64  s[target:target+1]
+... scalar arithmetic adjusts the PC ...
+s_setpc_b64  s[target:target+1]       ; jump
+</code></pre></div>
+<p>or:</p>
+<div class="highlight"><pre><span></span><code>s_getpc_b64  s[target:target+1]
+... scalar arithmetic adjusts the PC ...
+s_swappc_b64 s[return:return+1], s[target:target+1]  ; call
+</code></pre></div>
+<p>The analysis first builds a temporary direct CFG. It gathers local PC-builder
+facts, propagates them across simple block boundaries with bounded dataflow, and
+accepts only small concrete target sets.</p>
+<p>Unknown writes, conflicting builders, or saturated target sets are not guessed.
+If an unrecovered indirect transfer is reachable in a relocated kernel, normal
+translation fails closed.</p>
+<h3 id="3-form-kernel-scopes">3. Form Kernel Scopes<a class="headerlink" href="#3-form-kernel-scopes" title="Permanent link">&para;</a></h3>
+<p>A kernel scope contains the source blocks reachable from one descriptor entry.
+For a kernarg-preload kernel, the firmware entry at <code>entry + 256</code> is an
+additional root of the same scope.</p>
+<p>Scope traversal follows:</p>
+<ul>
+<li>branch and fallthrough successors; and</li>
+<li>validated call edges into callees.</li>
+</ul>
+<p>It stops at another kernel's hardware entry. Shared helpers are therefore
+duplicated when multiple kernels reach them:</p>
+<div class="highlight"><pre><span></span><code>source CFG                    translated .text
+
+kernel A --+                 [kernel A body]
+           +--&gt; helper         [copy of helper]
+kernel B --+                 [kernel B body]
+                               [copy of helper]
+</code></pre></div>
+<p>Duplication is deliberate. Every branch, call, and return in a translated body
+can resolve through that body's own source-to-target map.</p>
+<p>Normal and sidecar variants are separate scopes even when they start from the
+same source entry. They can have different descriptors, prologues, LDS lowering,
+scratch requirements, and final entries.</p>
+<h3 id="4-translate-one-scope">4. Translate One Scope<a class="headerlink" href="#4-translate-one-scope" title="Permanent link">&para;</a></h3>
+<p>Blocks are emitted into a kernel-local byte buffer in source-address order. That
+preserves ordinary fallthrough without adding branches between adjacent blocks.</p>
+<p>For an ordinary instruction, the decision order is:</p>
+<div class="highlight"><pre><span></span><code>source instruction
+       |
+       v
+handwritten semantic EXPAND rule matched?
+       | yes                         | no
+       v                             v
+emit replacement sequence     virtual-LDS lowering matched?
+                                     | yes                 | no
+                                     v                     v
+                              emit LDS replacement    registered operand rewrite?
+                                                           | yes        | no
+                                                           v            v
+                                                   emit replacement  legalization says EXPAND?
+                                                                        | yes        | no
+                                                                        v            v
+                                                                       fail     generated
+                                                                                re-encoding
+</code></pre></div>
+<p>Opcode expansions and registered operand rewrites are selected by one
+<code>RewriteRegistry</code>. For audited profiles, each registry entry also provides a
+read-only residual predicate. When requested, the post-materialization verifier
+runs those predicates over the final executable stream and fails if a
+registry-owned rewrite remains actionable. This check does not certify
+independent pipeline augmentations, such as WMMA completion-wait insertion,
+which retain their own ownership and tests.</p>
+<p>Control-flow instructions take a related but separate path: DBT emits or
+reserves a relocation window and records a fixup instead of trusting the source
+PC-relative value.</p>
+<h4 id="semantic-equivalence-and-generated-translation">Semantic Equivalence and Generated Translation<a class="headerlink" href="#semantic-equivalence-and-generated-translation" title="Permanent link">&para;</a></h4>
+<p>The ISA XML describes structure—encodings, operands, opcodes, and fields—not
+execution semantics. DBT's equivalence contract is:</p>
+<ul>
+<li>the same mnemonic on two ISAs has the same semantics; and</li>
+<li>a different mnemonic is equivalent only when it is explicitly registered as
+  an alias or reviewed rename. An XML <code>AliasedInstructionNames</code> entry is valid
+  evidence for adding such an alias to legalization.</li>
+</ul>
+<p>Structural similarity alone never proves semantic equivalence.</p>
+<p>The generator uses that equivalence information and the structural XML to
+choose a legalization action:</p>
+<ul>
+<li><strong>Identity</strong>: the target form is encoding-compatible;</li>
+<li><strong>Substitute</strong>: the encoding is compatible but the opcode changes;</li>
+<li><strong>Lower</strong>: the semantic equivalent has a different encoding layout and needs
+  generated decode/re-encode work; or</li>
+<li><strong>Expand</strong>: no single generated target encoding is sufficient.</li>
+</ul>
+<p>Identity, Substitute, and Lower flow through the generated encoding translator.
+An Expand entry must be handled by a handwritten semantic rule; otherwise DBT
+rejects the kernel.</p>
+<p>Semantic rules may emit several instructions and explicit waits. They request
+scratch registers, private spill storage, or descriptor growth through
+<code>TranslationContext</code>. Virtual-LDS mode is also visible to the rules so special
+operations such as load-to-LDS and transposed LDS reads can use pair-specific
+lowerings.</p>
+<p>There is no global instruction scheduler or optimization pass. Each source
+instruction is handled when the append-only cursor reaches it.</p>
+<h3 id="5-place-the-body-and-repair-control-flow">5. Place the Body and Repair Control Flow<a class="headerlink" href="#5-place-the-body-and-repair-control-flow" title="Permanent link">&para;</a></h3>
+<p>After local emission, <code>append_relocated_kernel_text</code> chooses the body's final
+position in output <code>.text</code>. It:</p>
+<ul>
+<li>places the descriptor-visible entry at the source entry's residue modulo 256;</li>
+<li>emits descriptor-visible entry stubs when required;</li>
+<li>rebases block placements and fixups into final <code>.text</code> coordinates; and</li>
+<li>records the final descriptor entry and relocated body entry separately.</li>
+</ul>
+<p>Only then does DBT repair control flow.</p>
+<h4 id="direct-branches">Direct Branches<a class="headerlink" href="#direct-branches" title="Permanent link">&para;</a></h4>
+<p>A direct branch gets a patch window chosen from its source distance and the
+resources available to the kernel. DBT does not reserve the largest possible
+window for every branch because that would significantly bloat large kernels.</p>
+<p>The final repair choices are:</p>
+<div class="highlight"><pre><span></span><code>target in SOPP range
+  -&gt; patch the target ISA branch immediate
+
+target out of range + long window + descriptor-backed SGPR pair
+  -&gt; build target PC in the scratch pair, then setpc/swappc
+
+eligible branch target out of range + no long-branch SGPR pair
+  -&gt; route through skipped branch-island pools inserted in the body
+
+supported out-of-range conditional branch
+  -&gt; invert the condition, skip over an unconditional long transfer
+</code></pre></div>
+<p>Far source branches reserve a long window when a legal scratch pair is
+available. Kernels that cannot reserve such a pair receive skipped island pools
+during emission. Direct calls cannot use branch islands; they need an encodable
+direct form or a reserved long form. A late range increase still fails if
+neither the reserved window nor an eligible island chain can represent it.</p>
+<p>Unused words in a branch window are filled with target NOPs.</p>
+<h4 id="recovered-indirect-transfers">Recovered Indirect Transfers<a class="headerlink" href="#recovered-indirect-transfers" title="Permanent link">&para;</a></h4>
+<p>For one effective recovered target, DBT reserves a fixed transfer window at the
+<code>setpc</code> or <code>swappc</code> consumer. Final repair emits either:</p>
+<ul>
+<li>a direct branch or call when the target is close; or</li>
+<li>a canonical get-PC, add-delta, set-PC/swap-PC sequence using the original
+  target SGPR pair.</li>
+</ul>
+<p>If one dynamic consumer has multiple recovered targets, one direct window cannot
+preserve it. DBT keeps the indirect consumer and rewrites each recovered
+source-side PC-builder range to compute the relocated target instead.</p>
+<h3 id="6-feed-resources-back-into-the-descriptor">6. Feed Resources Back into the Descriptor<a class="headerlink" href="#6-feed-resources-back-into-the-descriptor" title="Permanent link">&para;</a></h3>
+<p>Semantic expansion can discover requirements that were unknown during the
+initial descriptor pass:</p>
+<div class="highlight"><pre><span></span><code>initial descriptor resources
+          |
+          v
+  instruction lowering
+     |       |       |
+     v       v       v
+   VGPRs   SGPRs   private spill bytes
+     \       |       /
+      +------v------+
+      recompute this variant's descriptor
+</code></pre></div>
+<p>Scratch allocation prefers a liveness-dead VGPR window. Using a register beyond
+the original allocation requests descriptor growth. Selected semantic rules can
+instead borrow an allowed live VGPR window and save/restore it through per-lane
+private memory.</p>
+<p>Transient spill slots are reusable between independent instruction expansions.
+Persistent slots are separate and hold values that must survive across multiple
+translated sequences, such as a spilled virtual-LDS base pointer.</p>
+<p>SGPR allocation is stricter. DBT can use descriptor-backed growth or a
+liveness-proven dead pair for specific rules, but it has no general SGPR spill
+stack.</p>
+<p>After body emission and branch repair, DBT recomputes the affected descriptor if
+the required VGPR count, SGPR count, or private segment size grew. The recomputed
+entry prologue must be byte-for-byte identical to the one already emitted. A
+change would require a second layout pass, so the current implementation rejects
+it.</p>
+<h3 id="7-commit-the-code-object">7. Commit the Code Object<a class="headerlink" href="#7-commit-the-code-object" title="Permanent link">&para;</a></h3>
+<p>Translation is built on a private <code>CodeObjectPatcher</code> copy. The completed plan is
+committed only after all kernel scopes succeed (or are replaced by allowed skip
+stubs).</p>
+<p>The commit step:</p>
+<ol>
+<li>Pads translated <code>.text</code> to at least its original size.</li>
+<li>Applies normal descriptor resource and entry patches.</li>
+<li>Replaces <code>.text</code>.</li>
+<li>Appends loaded sidecar descriptors, when present.</li>
+<li>Appends <code>.rocjitsu.lds</code> as non-ALLOC metadata, when present.</li>
+<li>Replaces only the low AMDGPU machine-id bits in <code>e_flags</code>.</li>
+</ol>
+<p>If <code>.text</code> or the descriptor tail grows, the ELF patcher also updates affected:</p>
+<ul>
+<li>section file offsets and allocated virtual addresses;</li>
+<li>LOAD segment offsets, sizes, and virtual addresses;</li>
+<li>symbol values;</li>
+<li>relocation offsets; and</li>
+<li>descriptor entry offsets when descriptor storage itself moves.</li>
+</ul>
+<p>Inserted file padding preserves the required
+<code>p_offset % p_align == p_vaddr % p_align</code> congruence for LOAD segments. Upper
+AMDGPU feature bits in <code>e_flags</code>, such as XNACK and SRAMECC state, are preserved.</p>
+<p>Any commit failure discards the private patcher copy and returns the original
+code object with diagnostics.</p>
+<h2 id="entry-stubs-and-kernarg-preload">Entry Stubs and Kernarg Preload<a class="headerlink" href="#entry-stubs-and-kernarg-preload" title="Permanent link">&para;</a></h2>
+<p>Most kernels have one hardware-visible entry. If descriptor translation needs a
+prologue, DBT places a small stub before the relocated body:</p>
+<div class="highlight"><pre><span></span><code>descriptor entry
+  [target ABI prologue]
+  s_branch relocated body
+
+relocated body
+  [translated source entry block]
+  ...
+</code></pre></div>
+<p>A nonzero kernarg-preload specification creates two hardware-visible entries
+exactly 256 bytes apart:</p>
+<div class="highlight"><pre><span></span><code>target entry
+  [prologue]
+  s_branch translated source entry
+
+target entry + 256
+  [same prologue]
+  s_branch translated block for source entry + 256
+
+translated body
+  [blocks reachable from either source entry]
+</code></pre></div>
+<p>Both source addresses are CFG leaders and scope roots. The normal stub must fit
+without overlapping the <code>entry + 256</code> slot, and both stub branches must reach
+their body entries.</p>
+<p>The descriptor's preload range can extend beyond its declared <code>kernarg_size</code>.
+DBT preserves the larger of <code>kernarg_size</code> and the exact declared preload
+extent. Any alignment needed for DBT-owned wrapper fields is padding after that
+preserved prefix; DBT does not read undeclared source bytes merely to align it.</p>
+<h2 id="kernarg-extension">Kernarg Extension<a class="headerlink" href="#kernarg-extension" title="Permanent link">&para;</a></h2>
+<p>Some translated variants need DBT-owned dispatch data. DBT preserves guest
+kernarg offsets by placing a byte-for-byte guest prefix at the start of a wrapper:</p>
+<div class="highlight"><pre><span></span><code>kernarg wrapper
+
+  offset 0
+  +----------------------------------+
+  | preserved guest kernarg bytes    |  guest offsets remain unchanged
+  +----------------------------------+
+  | padding to 8-byte alignment      |
+  +----------------------------------+
+  | original kernarg pointer (u64)   |
+  +----------------------------------+
+  | aligned DBT payload 0            |
+  +----------------------------------+
+  | aligned DBT payload 1 ...        |
+  +----------------------------------+
+</code></pre></div>
+<p>The entry prologue reads DBT payloads from the wrapper, then restores the
+guest-visible kernarg pointer before entering translated guest code when the
+source ABI supplied that pointer.</p>
+<p>If the source descriptor did not request a kernarg pointer SGPR, a sidecar may
+add a target-only pair when the 16 initialized user-SGPR limit permits it. The
+prologue then repairs any source-visible initialized SGPRs whose target
+positions shifted.</p>
+<h2 id="sidecars-and-virtual-lds">Sidecars and Virtual LDS<a class="headerlink" href="#sidecars-and-virtual-lds" title="Permanent link">&para;</a></h2>
+<p>A sidecar is an additional implementation of a kernel, selected by the rocjitsu
+runtime rather than by normal application symbol lookup.</p>
+<div class="highlight"><pre><span></span><code>application-visible kernel object
+             |
+             v
+      normal descriptor ----&gt; normal translated body
+             |
+             | .rocjitsu.lds maps normal to sidecar
+             v
+      sidecar descriptor ---&gt; virtual-LDS translated body
+</code></pre></div>
+<p>The metadata stores ELF virtual addresses. After loading, the HSA hook derives
+the image load base from the normal kernel object and resolves the loaded
+sidecar descriptor address.</p>
+<h3 id="why-virtualize-lds">Why Virtualize LDS?<a class="headerlink" href="#why-virtualize-lds" title="Permanent link">&para;</a></h3>
+<p>CDNA4 can request more LDS for a workgroup than a CDNA3 host can provide. DBT
+therefore creates a virtual-LDS sidecar when the static requirement exceeds the
+host limit or the scope may use LDS and could exceed the limit because of the
+dispatch-time group-segment request.</p>
+<p>The normal body keeps hardware LDS. The sidecar:</p>
+<ul>
+<li>advertises zero fixed hardware LDS;</li>
+<li>uses a global-memory allocation as per-workgroup LDS storage; and</li>
+<li>receives the allocation description through a kernarg wrapper.</li>
+</ul>
+<p>At dispatch time, the hook uses:</p>
+<div class="highlight"><pre><span></span><code>requested_lds = max(descriptor_static_lds, packet.group_segment_size)
+</code></pre></div>
+<p>The AQL <code>group_segment_size</code> is the total group allocation request, not an extra
+amount to add to the descriptor's static value.</p>
+<div class="highlight"><pre><span></span><code>requested_lds &lt;= host limit
+  -&gt; keep normal kernel object and packet
+
+requested_lds &gt; host limit
+  -&gt; allocate GPU-visible backing storage
+  -&gt; build a kernarg wrapper and VirtualLdsDispatchState
+  -&gt; switch kernel_object to the sidecar descriptor
+  -&gt; set packet group_segment_size to zero
+  -&gt; use the sidecar private_segment_size
+</code></pre></div>
+<p>The 24-byte runtime payload is:</p>
+<div class="highlight"><pre><span></span><code>VirtualLdsDispatchState
+  uint64 backing_base
+  uint32 stride_x
+  uint32 stride_y
+  uint32 stride_z
+  uint32 reserved
+</code></pre></div>
+<p>The sidecar entry prologue computes a private slice for the current workgroup:</p>
+<div class="highlight"><pre><span></span><code>virtual_lds_base = backing_base
+                 + workgroup_id_x * stride_x
+                 + workgroup_id_y * stride_y
+                 + workgroup_id_z * stride_z
+</code></pre></div>
+<p>A singleton grid dimension gets a zero runtime stride. A dimension with more
+than one workgroup requires the corresponding descriptor-initialized workgroup
+ID SGPR.</p>
+<p>Every sidecar instruction that accesses LDS storage must be translated away
+from hardware LDS. Pair-specific semantic rules handle special cases such as
+MUBUF load-to-LDS and transposed reads; the virtual-LDS layer handles supported
+ordinary DS loads and stores. Cross-lane DS operations that do not access LDS
+storage may remain native. An unsupported storage operation rejects the sidecar
+instead of silently using hardware LDS with a zero-LDS descriptor.</p>
+<p>Lowered accesses preserve address/data aliasing with temporaries or private
+spills and emit conservative waits where the source LDS completion behavior
+requires them.</p>
+<p>DBT prefers a permanent descriptor-backed SGPR pair for <code>virtual_lds_base</code>. If
+that is impossible, spill-per-use mode saves the pointer in persistent private
+memory and borrows/restores an SGPR pair around each lowered access.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025–2026 Advanced Micro Devices, Inc.<br> <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/LICENSE.md">MIT License</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" target="_blank" rel="noopener" title="Rocjitsu on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/issues" target="_blank" rel="noopener" title="Report an issue" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 8h-2.81c-.45-.8-1.07-1.5-1.82-2L17 4.41 15.59 3l-2.17 2.17a6 6 0 0 0-2.83 0L8.41 3 7 4.41 8.62 6c-.75.5-1.36 1.21-1.81 2H4v2h2.09c-.06.33-.09.66-.09 1v1H4v2h2v1c0 .34.03.67.09 1H4v2h2.81A5.99 5.99 0 0 0 15 20.18c.91-.52 1.67-1.28 2.19-2.18H20v-2h-2.09c.06-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.03-.67-.09-1H20zm-4 7a4 4 0 0 1-4 4 4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4 4 4 0 0 1 4 4zm-2-5v2h-4v-2zm-4 4h4v2h-4z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.tracking", "toc.follow", "content.code.copy", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../assets/repository-stats.js"></script>
+      
+    
+  </body>
+</html>
