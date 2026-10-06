@@ -2,7 +2,7 @@
 """Run MADEngine AI workloads against CI-built RCCL and track performance.
 
 This script handles:
-  1. Installing madengine from source into the CI venv
+  1. Installing madengine from source into the CI Python environment
   2. Building a Docker overlay image with the CI-built RCCL
   3. Generating a manifest.json per A/B phase
   4. Running both phases back to back inside one SLURM allocation: the stock
@@ -79,8 +79,8 @@ BASELINE = "baseline"
 CANDIDATE = "candidate"
 
 # Kept in its own directory: it doubles as the build context the compute
-# nodes use, and WORK_DIR holds the venv, the clones and the live sbatch
-# logs -- tarring a file that is still growing fails the build.
+# nodes use, and WORK_DIR holds the Python environment, the clones and the
+# live sbatch logs -- tarring a file that is still growing fails the build.
 OVERLAY_CTX = "overlay_ctx"
 OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 
@@ -245,140 +245,9 @@ def install_madengine(work_dir: Path) -> Path:
     return madengine_dir
 
 
-def patch_madengine_for_cluster(
-    madengine_dir: Path,
-    no_gres: bool = False,
-) -> None:
+def patch_madengine_for_cluster(madengine_dir: Path) -> None:
     """Patch madengine source for cluster-specific compatibility."""
     src = madengine_dir / "src" / "madengine"
-
-    if no_gres:
-        template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
-        if not template.exists():
-            log.warning("SLURM template not found at %s", template)
-        else:
-            content = template.read_text()
-            patched = content.replace(
-                "#SBATCH --gpus-per-node={{ gpus_per_node }}\n", ""
-            )
-            if patched != content:
-                template.write_text(patched)
-                log.info("Patched SLURM template: removed --gpus-per-node directive")
-            else:
-                log.info("SLURM template already patched (no --gpus-per-node)")
-
-    template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
-    if template.exists():
-        content = template.read_text()
-        marker = "# Load required modules"
-        if marker in content and "$HOME/.local/bin" not in content:
-            patched = content.replace(
-                marker,
-                'export PATH="$HOME/.local/bin:$PATH"\n\n' + marker,
-            )
-            template.write_text(patched)
-            log.info(
-                "Patched SLURM template: added $HOME/.local/bin to PATH "
-                "(SLURM jobs do not inherit user shell PATH)"
-            )
-        else:
-            log.info("SLURM template PATH patch already present or marker not found")
-
-    template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
-    if template and template.exists():
-        content = template.read_text()
-        # The whole template is the sbatch script, so both verification blocks
-        # run on a compute node, and both inherit the submission environment
-        # whose PATH leads with the head node's venv. That interpreter belongs
-        # to another distro (3.10/3.12 there against 3.9 here), so madengine is
-        # not usable from it and both blocks need the node-local bootstrap.
-        verify_str = 'echo "Verifying madengine availability..."'
-        heredoc_idx = content.find("TASK_SCRIPT_EOF")
-        # The single-node block is bounded by the heredoc: the multi-node pass
-        # inserts text starting with verify_str, so an unbounded search could
-        # land inside what it just patched.
-        blocks = [
-            ("single-node", 0, heredoc_idx, "# Single-node: Create local execution manifest"),
-            ("multi-node", heredoc_idx, len(content), "# Create local execution manifest"),
-        ]
-        # Right to left, so patching one does not move the other's offsets.
-        for label, search_from, search_to, end_str in sorted(
-            blocks, key=lambda b: b[1], reverse=True
-        ):
-            if search_from < 0 or search_to < 0:
-                log.warning("Could not locate the %s verification block", label)
-                continue
-            verify_idx = content.find(verify_str, search_from, search_to)
-            end_idx = (
-                content.find(end_str, verify_idx, search_to) if verify_idx != -1 else -1
-            )
-            if verify_idx == -1 or end_idx == -1:
-                log.warning("Could not locate the %s verification block", label)
-                continue
-            replacement = (
-                'echo "Verifying madengine availability..."\n'
-                'MAD_CLI_COMMAND=""\n'
-                'if command -v madengine >/dev/null 2>&1 && '
-                'madengine --help >/dev/null 2>&1; then\n'
-                '    MAD_CLI_COMMAND="madengine"\n'
-                '    echo "  ✓ madengine available: '
-                '$(madengine --version 2>&1 | head -1)"\n'
-                'fi\n'
-                'if [ -z "$MAD_CLI_COMMAND" ]; then\n'
-                # PATH still leads with the head node's venv, whose
-                # interpreter belongs to another distro.
-                '    NODE_PYTHON=""\n'
-                # Building the venv is the probe: `import venv` succeeds on
-                # distro pythons whose ensurepip is missing, and the failure
-                # would land under `set -e` before the next candidate is tried.
-                '    for cand in /usr/bin/python3 /usr/local/bin/python3; do\n'
-                '        [ -x "$cand" ] || continue\n'
-                '        rm -rf "$WORKSPACE/node_venv"\n'
-                '        if "$cand" -m venv "$WORKSPACE/node_venv" >/dev/null 2>&1; then\n'
-                '            NODE_PYTHON="$cand"; break\n'
-                '        fi\n'
-                '    done\n'
-                '    if [ -z "$NODE_PYTHON" ]; then\n'
-                '        echo "  ✗ no usable python3 on $(hostname)"\n'
-                '        exit 1\n'
-                '    fi\n'
-                '    echo "  ⚠ madengine not functional — '
-                'installing for this node\'s Python '
-                '($("$NODE_PYTHON" --version 2>&1) at $NODE_PYTHON)"\n'
-                '    SUBMISSION_DIR={{ manifest_file | dirname }}\n'
-                '    MADENGINE_SRC="$SUBMISSION_DIR/madengine"\n'
-                '    if [ -d "$MADENGINE_SRC" ] && [ -f "$MADENGINE_SRC/pyproject.toml" ]; then\n'
-                '        source "$WORKSPACE/node_venv/bin/activate"\n'
-                '        pip install --upgrade pip setuptools wheel 2>&1 | tail -3\n'
-                '        pip install "$MADENGINE_SRC" 2>&1 | tail -20\n'
-                '        if madengine --version >/dev/null 2>&1; then\n'
-                '            MAD_CLI_COMMAND="madengine"\n'
-                '            echo "  ✓ madengine installed: '
-                '$(madengine --version 2>&1 | head -1)"\n'
-                '        else\n'
-                '            echo "  ✗ madengine install failed"\n'
-                '            exit 1\n'
-                '        fi\n'
-                '    else\n'
-                '        echo "  ✗ madengine source not found at $MADENGINE_SRC"\n'
-                '        exit 1\n'
-                '    fi\n'
-                'fi\n'
-                'echo ""\n\n'
-            )
-            content = content[:verify_idx] + replacement + content[end_idx:]
-            log.info("Patched SLURM template: per-node madengine install (%s)", label)
-        template.write_text(content)
-
-    template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
-    if template and template.exists():
-        content = template.read_text()
-        old_nfs_pattern = r"\bnfs\b"
-        new_nfs_pattern = r"\bnfs[0-9]*\b"
-        if old_nfs_pattern in content and new_nfs_pattern not in content:
-            content = content.replace(old_nfs_pattern, new_nfs_pattern)
-            template.write_text(content)
-            log.info("Patched SLURM template: NFS detection now matches nfs4")
 
     # /var/tmp is persistent and shared, so job-scope the workspace and delete
     # it after use. Anchor-guarded: a no-op once ROCm/madengine#190 is pinned.
@@ -387,13 +256,6 @@ def patch_madengine_for_cluster(
         content = template.read_text()
         original = content
         patches = [
-            (
-                # Matches the /tmp branch below, job-scoped all along.
-                "multi-node workspace scoping",
-                "    WORKSPACE=$SLURM_TMPDIR/madengine_node_${SLURM_PROCID}\n",
-                "    WORKSPACE=$SLURM_TMPDIR"
-                "/madengine_job_${SLURM_JOB_ID}_node_${SLURM_PROCID}\n",
-            ),
             (
                 # Bare SLURM_TMPDIR would rsync the project into /var/tmp.
                 "single-node workspace scoping",
@@ -445,23 +307,6 @@ def patch_madengine_for_cluster(
 
         if content != original:
             template.write_text(content)
-
-    run_orch = src / "orchestration" / "run_orchestrator.py"
-    if run_orch.exists():
-        content = run_orch.read_text()
-        patched = content.replace(
-            'print(self.console.sh("yum info rocm-libs", canFail=True))',
-            'print(self.console.sh("rpm -qi rocm-libs 2>/dev/null '
-            '|| echo rocm-libs not installed as RPM", canFail=True))',
-        )
-        if patched != content:
-            run_orch.write_text(patched)
-            log.info(
-                "Patched run_orchestrator.py: replaced 'yum info' with 'rpm -qi' "
-                "to avoid interactive GPG prompt hang"
-            )
-        else:
-            log.info("run_orchestrator.py already patched or yum string not found")
 
 
 def get_rccl_commit(rccl_lib: Path | None = None) -> str:
@@ -909,6 +754,7 @@ def generate_manifest(
         "exclusive": True,
         "enable_node_check": False,
         "network_interface": socket_ifname,
+        "skip_gpus_directive": cluster_config.get("slurm_no_gres", False),
     }
 
     overlay_dockerfile = work_dir / OVERLAY_CTX / OVERLAY_DOCKERFILE
@@ -1597,10 +1443,7 @@ def main() -> None:
     # Step 2: Install madengine
     madengine_dir = install_madengine(work_dir)
 
-    patch_madengine_for_cluster(
-        madengine_dir,
-        no_gres=cluster_config.get("slurm_no_gres", False),
-    )
+    patch_madengine_for_cluster(madengine_dir)
 
     # Step 3: Build overlay image (or use pre-built)
     if args.skip_overlay_build:

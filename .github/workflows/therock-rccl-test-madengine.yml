@@ -100,20 +100,27 @@ jobs:
           fi
 
       # The pool is not uniform -- 3.10, 3.12, and one machine with no pip at
-      # all -- so pin the interpreter as rccl-coco-run.yml does.
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.12'
-
-      # A venv on top of it: these runners are shared and long-lived, so anything
-      # installed straight into the interpreter would persist into the next job.
-      # This one lives under WORK_DIR and the cleanup step deletes it.
-      - name: Create Python virtual environment
+      # all -- and the compute nodes run another distro again, yet they run
+      # madengine from this environment through the inherited PATH.
+      # setup-python's build needs glibc 2.35 and the runner's own libssl, so
+      # it does not start there; a conda-forge interpreter needs glibc 2.17
+      # and carries its libraries. It lives under WORK_DIR, which the nodes
+      # see, and the cleanup step deletes it: these runners are shared and
+      # long-lived.
+      - name: Create Python environment
+        env:
+          MINIFORGE_VERSION: "26.7.2-0"
+          MINIFORGE_SHA256: "281b0ac7d550802efc81af633225a5e6116d29ae72f3ab4eae7168c3931a4c05"
         run: |
           mkdir -p "${WORK_DIR}"
-          python3 -m venv "${WORK_DIR}/venv"
-          echo "${WORK_DIR}/venv/bin" >> "$GITHUB_PATH"
+          installer="${WORK_DIR}/Miniforge3.sh"
+          curl -fsSL -o "${installer}" \
+            "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-x86_64.sh"
+          echo "${MINIFORGE_SHA256}  ${installer}" | sha256sum -c -
+          bash "${installer}" -b -p "${WORK_DIR}/conda"
+          rm -f "${installer}"
+          "${WORK_DIR}/conda/bin/conda" create -y -q -p "${WORK_DIR}/env" python=3.12
+          echo "${WORK_DIR}/env/bin" >> "$GITHUB_PATH"
 
           # The datastore is only appended to at the very end of the workload, so
           # an unwritable RESULTS_DIR would surface three hours in. A directory
@@ -171,7 +178,6 @@ jobs:
           NCCL_DEBUG: WARN
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
         run: |
-          source "${WORK_DIR}/venv/bin/activate"
           export PYTHONPATH="rocm-systems/projects/rccl/ci/scripts:${PYTHONPATH}"
 
           NOTIFY_ARGS=""
@@ -213,9 +219,6 @@ jobs:
       - name: Cleanup work directory
         if: always()
         run: |
-          # node_venv is the per-node bootstrap: on a single-node run the template
-          # puts WORKSPACE on the shared filesystem, so it lands here rather than
-          # in node-local storage and would otherwise outlive the run.
-          rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/venv" \
-                 "${WORK_DIR}/node_venv" "${WORK_DIR}/overlay_ctx" \
+          rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/conda" \
+                 "${WORK_DIR}/env" "${WORK_DIR}/overlay_ctx" \
                  "${WORK_DIR}/docker_builds"
