@@ -359,10 +359,17 @@ in the following table.
           is as available to a partition as it is to the whole GPU. This
           mirrors ``NCCL_NET_GDR_MLOPART``, which already lets a partition keep
           GDR. See :ref:`device-api-gin` and :ref:`nps4_cpx_mi300_rccl`.
-      - | ``1``: Allow GIN on partitions (default).
+        | The default is scoped to the shape this was validated on, a single
+          node. Past one node, admitting a partition also reaches the
+          hierarchical Copy Engine path, which has not been validated on
+          partitioned hardware; set ``1`` to opt in.
+      - | Unset: Allow GIN on partitions on a single-node communicator, and
+          disable GIN on a partitioned communicator spanning several nodes
+          (default). The latter is reported through ``NCCL_DEBUG=INFO``.
+        | ``1``: Allow GIN on partitions on any number of nodes.
         | ``0``: Disable GIN whenever any rank of the communicator runs on a
           partition, restoring the behavior from before this variable existed.
-        | A communicator with no partitioned rank is unaffected by either value.
+        | A communicator with no partitioned rank is unaffected by any value.
 
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
