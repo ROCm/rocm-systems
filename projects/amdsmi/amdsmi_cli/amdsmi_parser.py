@@ -2154,6 +2154,12 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "    Bare --port shows all ports; --port <idx> shows one port."
             )
             extended_help = "Show the extended vendor statistics set. Requires --port."
+            rdma_help = (
+                "Show RDMA hardware counters per RDMA port for the selected NIC.\n"
+                "    Bare --rdma shows all RDMA ports; --rdma <idx> shows one port.\n"
+                "    The index counts the NIC's RDMA ports from 0, across its RDMA devices.\n"
+                "    List the ports with 'static --nic'; it numbers them per device."
+            )
 
             nic_stats_group = metric_parser.add_argument_group("NIC Arguments")
             nic_stats_group.add_argument(
@@ -2164,6 +2170,15 @@ class AMDSMIParser(argparse.ArgumentParser):
                 default=None,
                 required=False,
                 help=port_help,
+            )
+            nic_stats_group.add_argument(
+                "--rdma",
+                type=int,
+                nargs="?",
+                const=-1,
+                default=None,
+                required=False,
+                help=rdma_help,
             )
             nic_stats_group.add_argument(
                 "--extended", action="store_true", required=False, help=extended_help

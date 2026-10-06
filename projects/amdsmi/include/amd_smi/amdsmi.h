@@ -9850,8 +9850,16 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
  *  1. First call with stats=NULL to get the count of available statistics
  *  2. Second call with allocated array to retrieve all statistics
  *
+ *  The counters are the driver's RDMA hardware counters, as listed by
+ *  `rdma statistic show link DEV/PORT`, and are read on every call.
+ *
+ *  @note Setting optional counters (`rdma statistic set link DEV/PORT optional-counters`)
+ *  is not supported.
+ *
  *  @param[in] processor_handle NIC for which to query
- *  @param[in] rdma_port_index index of the NIC RDMA port to query
+ *  @param[in] rdma_port_index index of the RDMA port to query, counted from 0 across the
+ *    NIC's RDMA devices in the order of ::amdsmi_nic_rdma_devices_info_t (each device's
+ *    ports in turn)
  *  @param[in,out] num_stats pointer to the number of statistics
  *    - Input: maximum number of statistics that stats array can hold
  *    - Output: actual number of statistics available/returned
@@ -9859,7 +9867,8 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
  *    - If NULL, only num_stats is filled with the count of available statistics
  *    - If not NULL, must be allocated by user with at least num_stats elements
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *    ::AMDSMI_STATUS_NOT_SUPPORTED if the NIC has no RDMA port at @p rdma_port_index
  */
 amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle,
                                                     uint32_t rdma_port_index, uint32_t* num_stats,

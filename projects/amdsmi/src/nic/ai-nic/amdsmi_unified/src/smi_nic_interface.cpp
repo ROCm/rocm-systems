@@ -746,6 +746,8 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_count(smi_nic_ctx_t ctx, uint6
   }
 
   const auto& ib_port = ib_ports[rdma_port_index];
+  // Counters change while running; the map from discovery time would be stale.
+  ib_port.collect_hw_counters();
   const auto& stats_map = ib_port.get_hw_counters_map();
   *count = static_cast<uint32_t>(stats_map.size());
 
@@ -795,6 +797,8 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
   }
 
   const auto& ib_port = ib_ports[rdma_port_index];
+  // Counters change while running; the map from discovery time would be stale.
+  ib_port.collect_hw_counters();
   const auto& stats_map = ib_port.get_hw_counters_map();
 
   if (stats_map.empty()) {

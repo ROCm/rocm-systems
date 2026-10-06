@@ -575,21 +575,27 @@ class AMDSMIHelpers:
         for nic_selection in nic_selections:
             valid_nic_choice = False
 
+            # ID and UUID are matched against every choice before the selection is read as a
+            # BDF: BDF() raises for anything that is not one, which hid every ID but the first.
             for nic_id, nic_info in nic_choices.items():
-                bdf = nic_info["bdf"]
-                uuid = nic_info["UUID"]
-                device_handle = nic_info["Device Handle"]
-
-                # Check if passed nic is a nic ID or UUID
-                if nic_selection == nic_id or nic_selection.lower() == uuid:
-                    selected_device_handles.append(device_handle)
+                if nic_selection == nic_id or nic_selection.lower() == nic_info["UUID"]:
+                    selected_device_handles.append(nic_info["Device Handle"])
                     valid_nic_choice = True
                     break
-                else:  # Check if nic passed is a BDF object
-                    if BDF(nic_selection) == BDF(bdf):
-                        selected_device_handles.append(device_handle)
-                        valid_nic_choice = True
-                        break
+
+            if not valid_nic_choice:
+                try:
+                    selected_bdf = BDF(nic_selection)
+                except BDF.BDFError:
+                    logging.debug(
+                        f"AMDSMIHelpers.get_device_handles_from_nic_selections - {nic_selection} is not a BDF"
+                    )
+                else:
+                    for nic_info in nic_choices.values():
+                        if selected_bdf == BDF(nic_info["bdf"]):
+                            selected_device_handles.append(nic_info["Device Handle"])
+                            valid_nic_choice = True
+                            break
 
             if not valid_nic_choice:
                 logging.debug(

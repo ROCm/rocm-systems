@@ -2841,6 +2841,32 @@ def amdsmi_get_nic_vendor_statistics(
     return {stats[i].name.decode("utf-8"): stats[i].value for i in range(num_stats.value)}
 
 
+def amdsmi_get_nic_rdma_port_statistics(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle, rdma_port_index: int
+) -> Dict[str, int]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    num_stats = ctypes.c_uint32(0)
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_nic_rdma_port_statistics(
+            processor_handle, rdma_port_index, ctypes.byref(num_stats), None
+        )
+    )
+
+    if num_stats.value == 0:
+        return {}
+
+    stats = (amdsmi_wrapper.amdsmi_nic_stat_t * num_stats.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_nic_rdma_port_statistics(
+            processor_handle, rdma_port_index, ctypes.byref(num_stats), stats
+        )
+    )
+
+    return {stats[i].name.decode("utf-8"): stats[i].value for i in range(num_stats.value)}
+
+
 def amdsmi_get_gpu_device_uuid(processor_handle: processor_handle_t) -> str:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)

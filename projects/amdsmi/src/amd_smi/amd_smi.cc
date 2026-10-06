@@ -39,6 +39,7 @@
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_processor.h"
+#include "amd_smi/impl/amd_smi_rdma_port.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
@@ -1057,81 +1058,59 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
 amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle,
                                                     uint32_t rdma_port_index, uint32_t* num_stats,
                                                     amdsmi_nic_stat_t* stats) {
-  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
-  std::ostringstream ss;
   AMDSMI_CHECK_INIT();
-
-  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
-  status = get_ainic_device_from_handle(processor_handle, &nic_device);
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << smi_amdgpu_get_status_string(status, false);
-    LOG_ERROR(ss);
-    return status;
-  }
-  amd::smi::AMDSmiAINICDevice::AINICInfo nic_info = {};
-  status = nic_device->amd_query_nic_info(nic_info);
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | Failed to query NIC info";
-    LOG_ERROR(ss);
-    return status;
-  }
-  if (nic_info.rdma_dev.num_rdma_dev < 1) {
-    ss << __PRETTY_FUNCTION__ << " | No RDMA devices found";
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  } else if (rdma_port_index >= nic_info.rdma_dev.num_rdma_dev) {
-    ss << __PRETTY_FUNCTION__ << " | NIC ports (" << rdma_port_index
-       << ") is out of range (max ports:" << nic_info.rdma_dev.num_rdma_dev << ")";
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  } else if (nic_info.rdma_dev.rdma_dev_info[0].num_rdma_ports < 1) {
-    ss << __PRETTY_FUNCTION__ << " | No RDMA ports found";
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  } else if (!num_stats) {
-    ss << __PRETTY_FUNCTION__ << " | Invalid num_stats pointer";
-    LOG_ERROR(ss);
+  if (num_stats == nullptr) {
     return AMDSMI_STATUS_INVAL;
-  } else if (!stats && *num_stats > 0) {
-    ss << __PRETTY_FUNCTION__ << " | Invalid stats and num_stats pointers";
-    LOG_ERROR(ss);
+  }
+  if ((stats == nullptr) && (*num_stats > 0)) {
     return AMDSMI_STATUS_INVAL;
   }
 
-  std::string netdev(
-      amd::smi::trim(nic_info.rdma_dev.rdma_dev_info[0].rdma_port_info[rdma_port_index].netdev));
-  std::string rdmadev(nic_info.rdma_dev.rdma_dev_info[0].rdma_dev);
-  int port_num = nic_info.rdma_dev.rdma_dev_info[0].rdma_port_info[rdma_port_index].rdma_port;
+  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
+  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
 
-  std::string directory_path = "/sys/class/net/" + netdev + "/device/infiniband/" + rdmadev +
-                               "/subsystem/" + rdmadev + "/subsystem/" + rdmadev + "/ports/" +
-                               std::to_string(port_num) + "/hw_counters/";
-  if (!std::filesystem::exists(directory_path)) {
-    ss << __PRETTY_FUNCTION__ << " | Directory does not exist: " << directory_path;
+  // No RDMA device and an index past the last RDMA port both keep the status this
+  // function has always returned.
+  amd::smi::RdmaPortRef_t ref = {};
+  if (!amd::smi::was_rdma_port_resolved(ainic_info.rdma_dev, ainic_info.port, rdma_port_index,
+                                        &ref)) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | No RDMA port at index " << rdma_port_index;
     LOG_ERROR(ss);
-    return AMDSMI_STATUS_FILE_ERROR;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  uint32_t idx = 0;
-  for (const auto& entry : std::filesystem::directory_iterator(directory_path)) {
-    if (std::filesystem::is_regular_file(entry.path())) {
-      if (stats && num_stats && idx < *num_stats) {
-        snprintf(stats[idx].name, sizeof(stats[idx].name), "%s",
-                 entry.path().filename().string().c_str());
-        std::ifstream in(entry.path());
-        if (!in.is_open()) {
-          ss << __PRETTY_FUNCTION__ << smi_amdgpu_get_status_string(status, false);
-          LOG_ERROR(ss);
-          return AMDSMI_STATUS_FILE_ERROR;
-        }
-        in >> stats[idx].value;
-      }
-      ++idx;
-    }
+  smi_nic_ctx_t ctx = amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx();
+  const uint64_t device = ainic_info.bus.bdf.as_uint;
+
+  uint32_t available = 0;
+  smi_nic_status_t nic_status = smi_get_nic_rdma_port_statistics_count(
+      ctx, device, ref.port_index, ref.ib_index, ref.rdma_port_index, &available);
+  if (nic_status != SMI_NIC_STATUS_SUCCESS) {
+    return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
-  if (num_stats) {
-    *num_stats = idx;
+
+  if (stats == nullptr) {
+    *num_stats = available;
+    return AMDSMI_STATUS_SUCCESS;
   }
+
+  auto info = std::make_unique<smi_nic_stat_info_t>();
+  nic_status = smi_get_nic_rdma_port_statistics_list(ctx, device, ref.port_index, ref.ib_index,
+                                                     ref.rdma_port_index, info.get());
+  if (nic_status != SMI_NIC_STATUS_SUCCESS) {
+    return amd::smi::ainic_to_amdsmi_status(nic_status);
+  }
+
+  const uint32_t n = std::min(info->count, *num_stats);
+  for (uint32_t i = 0; i < n; ++i) {
+    std::snprintf(stats[i].name, sizeof(stats[i].name), "%s", info->stats[i].name);
+    stats[i].value = info->stats[i].value;
+  }
+  *num_stats = n;
   return AMDSMI_STATUS_SUCCESS;
 }
 

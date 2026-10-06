@@ -156,6 +156,11 @@ target_include_directories(test_nic_stats_suite PRIVATE ${PROJECT_SOURCE_DIR}/sr
 target_link_libraries(test_nic_stats_suite amdsminic ${FILESYSTEM_LIB})
 add_test(NAME nic_stats_suite COMMAND test_nic_stats_suite)
 
+# Flat RDMA port index -> unified library triple. Header-only subject: no library link needed.
+add_executable(test_nic_rdma_resolver_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_rdma_resolver_suite.cpp)
+target_include_directories(test_nic_rdma_resolver_suite PRIVATE ${PROJECT_SOURCE_DIR}/include)
+add_test(NAME nic_rdma_resolver_suite COMMAND test_nic_rdma_resolver_suite)
+
 # Debug-log seam and read-chokepoint logging (real tmpdir files, capture sink).
 add_executable(test_nic_log_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_log_suite.cpp)
 target_compile_options(test_nic_log_suite PRIVATE -fno-rtti)

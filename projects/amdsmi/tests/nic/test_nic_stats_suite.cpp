@@ -7,7 +7,12 @@
  * fake returning canned VendorStatistics/FecStatistics_t.
  */
 
+#include <unistd.h>
+
 #include <cerrno>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -226,6 +231,44 @@ static void test_fec_query_is_logged_with_interface_and_outcome() {
   check("no FEC line when no log sink is installed", g_log_lines.empty());
 }
 
+static void write_counter(const std::filesystem::path& dir, const std::string& name,
+                          uint64_t value) {
+  std::ofstream(dir / name) << value << "\n";
+}
+
+// The kernel keeps its stats refresh interval in hw_counters/lifespan; it is a setting, not a
+// counter.
+static void test_rdma_hw_counters_skip_lifespan_and_refresh() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-rdma-hw-" + std::to_string(::getpid()));
+  const fs::path counters = root / "hw_counters";
+  fs::create_directories(counters);
+  write_counter(counters, "rx_rdma_ucast_pkts", 5);
+  write_counter(counters, "lifespan", 10);
+
+  std::string netdev = "enP1p3s0f3";
+  std::string name = "1";
+  SmiInfiniBandPort port(netdev, name, root.string());
+  port.collect_hw_counters();
+  check("lifespan is not reported as a counter", port.get_hw_counters_map().count("lifespan") == 0);
+  check("a real counter is read", port.get_hw_counters_map().count("rx_rdma_ucast_pkts") == 1);
+
+  write_counter(counters, "rx_rdma_ucast_pkts", 9);
+  write_counter(counters, "tx_rdma_ucast_pkts", 1);
+  port.collect_hw_counters();
+  check("a second collect sees the changed value",
+        port.get_hw_counters_map().at("rx_rdma_ucast_pkts") == 9);
+  check("a second collect adds a new counter",
+        port.get_hw_counters_map().count("tx_rdma_ucast_pkts") == 1);
+
+  fs::remove(counters / "tx_rdma_ucast_pkts");
+  port.collect_hw_counters();
+  check("a counter the driver stops reporting disappears",
+        port.get_hw_counters_map().count("tx_rdma_ucast_pkts") == 0);
+  fs::remove_all(root);
+}
+
 static void test_no_table_yields_empty_map() {
   auto transport = std::make_shared<FakeTransport>();
   transport->stats = {true, {{"tx_packets"}, {1}}, 0};
@@ -283,6 +326,7 @@ int main() {
   test_fec_counters_refresh_on_subsequent_collect();
   test_fec_failure_is_not_an_error();
   test_fec_query_is_logged_with_interface_and_outcome();
+  test_rdma_hw_counters_skip_lifespan_and_refresh();
   test_no_table_yields_empty_map();
   test_large_table_not_truncated_by_mechanism();
   test_real_tables_fit_within_cap();
