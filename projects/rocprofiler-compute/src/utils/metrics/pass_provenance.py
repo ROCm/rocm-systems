@@ -439,3 +439,29 @@ def bind_expression_dataframe(
             f"same-pass bind (DB): {unbound} metric(s) fell back to base columns",
         )
     return used_passes
+
+
+def resolve_weight_counter_column(
+    weight_counter: str,
+    sub_metric_name: str,
+    df: pd.DataFrame,
+    pass_layout: Optional[PassLayout],
+) -> str:
+    """Qualify a WEIGHTED_AVG weight counter to the sub-metric's bound pass."""
+    if pass_layout is None or not pass_layout.has_duplicates:
+        return weight_counter
+    if weight_counter not in pass_layout.duplicated:
+        return weight_counter
+    row_pass = df.attrs.get(METRIC_ROW_PASS_ATTR, {})
+    # Sub-metric rows are keyed by metric name in the Metric column.
+    if "Metric" not in df.columns:
+        return weight_counter
+    matches = df.index[df["Metric"] == sub_metric_name]
+    if len(matches) == 0:
+        return weight_counter
+    pass_key = row_pass.get(matches[0])
+    if not pass_key:
+        return weight_counter
+    if weight_counter not in pass_layout.counters_by_pass.get(pass_key, frozenset()):
+        return weight_counter
+    return pass_layout.qualified_column(weight_counter, pass_key)
