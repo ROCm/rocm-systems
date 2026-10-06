@@ -4,23 +4,14 @@
 #ifndef UTIL_DATA_TYPES_H_
 #define UTIL_DATA_TYPES_H_
 
+#include "util/detail/convert/select.h"
+
 #include <array>
 #include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-
-// Platform feature detection for the vectorized f16<->f32 block converters.
-// x86 gets an F16C specialization; every other target (incl. ARM until a NEON
-// path is added) uses the portable scalar fallback below.
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-#define UTIL_ARCH_X86 1
-#if defined(__AVX512F__) || defined(__F16C__)
-#include <immintrin.h>
-#define UTIL_HAS_X86_F16C 1
-#endif
-#endif
 
 namespace util {
 
@@ -51,39 +42,14 @@ inline float f16_to_f32(uint16_t h) {
   return std::bit_cast<float>(f);
 }
 
-namespace detail {
-
-#if defined(UTIL_HAS_X86_F16C)
-/// x86 F16C specialization: convert as many halves as the widest available
-/// vector covers, advancing `i`. AVX-512 does 16/instr, AVX2 F16C does 8.
-/// `_mm*_cvtph_ps` is IEEE-754 and bit-identical to f16_to_f32 for every
-/// non-NaN input (verified exhaustively over all 65536 halves; NaN -> NaN with
-/// a possibly different payload, which the SIMD execute paths tolerate).
-inline void f16_to_f32_block_arch(const uint16_t *src, float *dst, size_t n, size_t &i) {
-#if defined(__AVX512F__)
-  for (; i + 16 <= n; i += 16)
-    _mm512_storeu_ps(
-        &dst[i], _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(src + i))));
-#endif
-  for (; i + 8 <= n; i += 8)
-    _mm256_storeu_ps(&dst[i],
-                     _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i *>(src + i))));
-}
-#else
-/// Portable fallback (non-x86, or x86 without F16C). No vector advance; the
-/// scalar loop in f16_to_f32_block does all the work.
-/// TODO(arm): add an __aarch64__ NEON path here (vcvt_f32_f16 / fcvtl).
-inline void f16_to_f32_block_arch(const uint16_t *, float *, size_t, size_t &) {}
-#endif
-
-} // namespace detail
-
 /// @brief Convert `n` contiguous IEEE-754 half values to float.
 ///
 /// Dispatches to a per-architecture vector backend (x86 F16C today) and falls
 /// back to scalar f16_to_f32 for the remaining tail and on platforms without a
 /// vector path. ~70x faster than the scalar bit-twiddling loop on AVX-512.
 /// Hot path: MFMA f16 input gather, which converts 1024 halves per instruction.
+/// Non-NaN results match f16_to_f32 bit for bit. The x86 vector chunks quiet
+/// signaling NaNs; the scalar tail uses f16_to_f32's original bit construction.
 inline void f16_to_f32_block(const uint16_t *src, float *dst, size_t n) {
   size_t i = 0;
   detail::f16_to_f32_block_arch(src, dst, n, i);
@@ -190,34 +156,6 @@ inline uint16_t f32_to_bf16(float val) {
   return static_cast<uint16_t>(f >> 16);
 }
 
-namespace detail {
-
-#if defined(UTIL_HAS_X86_F16C)
-/// x86 specialization: bf16->f32 is a zero-extend + 16-bit left shift, so it
-/// needs no F16C, only the wide integer ops. AVX-512 does 16/instr, AVX2 8.
-inline void bf16_to_f32_block_arch(const uint16_t *src, float *dst, size_t n, size_t &i) {
-#if defined(__AVX512F__)
-  for (; i + 16 <= n; i += 16) {
-    __m512i w =
-        _mm512_cvtepu16_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(src + i)));
-    _mm512_storeu_ps(&dst[i], _mm512_castsi512_ps(_mm512_slli_epi32(w, 16)));
-  }
-#endif
-#if defined(__AVX2__)
-  for (; i + 8 <= n; i += 8) {
-    __m256i w = _mm256_cvtepu16_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(src + i)));
-    _mm256_storeu_ps(&dst[i], _mm256_castsi256_ps(_mm256_slli_epi32(w, 16)));
-  }
-#endif
-}
-#else
-/// Portable fallback: no vector advance; the scalar shift loop in
-/// bf16_to_f32_block does all the work (and trivially auto-vectorizes).
-inline void bf16_to_f32_block_arch(const uint16_t *, float *, size_t, size_t &) {}
-#endif
-
-} // namespace detail
-
 /// @brief Convert `n` contiguous BFloat16 values to float.
 ///
 /// The bf16->f32 widening is exact (zero-extend into the low mantissa bits),
@@ -229,48 +167,6 @@ inline void bf16_to_f32_block(const uint16_t *src, float *dst, size_t n) {
   for (; i < n; ++i)
     dst[i] = bf16_to_f32(src[i]);
 }
-
-namespace detail {
-
-#if defined(UTIL_HAS_X86_F16C)
-/// x86 specialization: i8->i32 / u8->i32 are plain sign-/zero-extends, no
-/// F16C needed. AVX-512 does 16/instr, AVX2 8.
-inline void i8_to_i32_block_arch(const int8_t *src, int32_t *dst, size_t n, size_t &i) {
-#if defined(__AVX512F__)
-  for (; i + 16 <= n; i += 16)
-    _mm512_storeu_si512(
-        reinterpret_cast<__m512i *>(&dst[i]),
-        _mm512_cvtepi8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(src + i))));
-#endif
-#if defined(__AVX2__)
-  for (; i + 8 <= n; i += 8)
-    _mm256_storeu_si256(
-        reinterpret_cast<__m256i *>(&dst[i]),
-        _mm256_cvtepi8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(src + i))));
-#endif
-}
-inline void u8_to_i32_block_arch(const uint8_t *src, int32_t *dst, size_t n, size_t &i) {
-#if defined(__AVX512F__)
-  for (; i + 16 <= n; i += 16)
-    _mm512_storeu_si512(
-        reinterpret_cast<__m512i *>(&dst[i]),
-        _mm512_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(src + i))));
-#endif
-#if defined(__AVX2__)
-  for (; i + 8 <= n; i += 8)
-    _mm256_storeu_si256(
-        reinterpret_cast<__m256i *>(&dst[i]),
-        _mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(src + i))));
-#endif
-}
-#else
-/// Portable fallback: no vector advance; the scalar extend loops below do all
-/// the work (and trivially auto-vectorize).
-inline void i8_to_i32_block_arch(const int8_t *, int32_t *, size_t, size_t &) {}
-inline void u8_to_i32_block_arch(const uint8_t *, int32_t *, size_t, size_t &) {}
-#endif
-
-} // namespace detail
 
 /// @brief Sign-extend `n` contiguous int8 values to int32.
 ///
