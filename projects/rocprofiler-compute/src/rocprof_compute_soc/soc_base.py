@@ -13,6 +13,16 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
+from rocprof_compute_soc.counter_file import (
+    CounterFile,
+    flat_counters_in_perfmon_file,
+)
+from rocprof_compute_soc.counter_file import (
+    LimitedSet as LimitedSet,
+)
+from rocprof_compute_soc.counter_grouping_single_pass import (
+    try_allocate_single_pass_packable,
+)
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface, rocprofv3_avail_interface
 from utils.logger import (
@@ -564,10 +574,6 @@ class OmniSoC_Base:
         file_count = 0
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
 
-        from rocprof_compute_soc.counter_grouping_single_pass import (
-            try_allocate_single_pass_packable,
-        )
-
         single_pass = try_allocate_single_pass_packable(
             self,
             work_set,
@@ -808,55 +814,6 @@ class OmniSoC_Base:
                 f"{self.get_args().output_directory}' "
                 "for charts",
             )
-
-
-# Set with limited size
-class LimitedSet:
-    def __init__(self, maxsize: int) -> None:
-        self.avail: int = maxsize
-        self.elements: list[str] = []
-
-    def add(self, element: str, cost: int = 1) -> bool:
-        if element in self.elements:
-            return True
-        # Store all channels for a TCC channel counter in the same file
-        if element.split("[")[0] in {elem.split("[")[0] for elem in self.elements}:
-            self.elements.append(element)
-            return True
-        if cost < 0:
-            cost = 0
-        if cost == 0:
-            self.elements.append(element)
-            return True
-        if self.avail >= cost:
-            self.avail -= cost
-            self.elements.append(element)
-            return True
-        return False
-
-    def reserve(self, n: int) -> bool:
-        if self.avail < n:
-            return False
-        self.avail -= n
-        return True
-
-
-# Represents a file that lists PMC counters. Number of counters for each
-# block limited according to perfmon config.
-class CounterFile:
-    def __init__(self, name: str, perfmon_config: dict[str, int]) -> None:
-        self.name: str = name
-        self.blocks: dict[str, LimitedSet] = {
-            block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
-        }
-
-    def add(self, counter: str) -> bool:
-        block = counter_to_block(counter)
-        cost = pmc_slot_cost(counter, present=self.blocks[block].elements)
-        return self.blocks[block].add(counter, cost=cost)
-
-    def reserve(self, counter: str, n: int) -> bool:
-        return self.blocks[counter_to_block(counter)].reserve(n)
 
 
 def _trial_counter_file_with_extra(
