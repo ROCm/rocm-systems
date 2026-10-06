@@ -186,7 +186,3 @@ class TestFabricSetterCallSite(unittest.TestCase):
         ):
             with self.assertRaises(amdsmi.AmdSmiLibraryException):
                 amdsmi.amdsmi_set_gpu_fabric_ppod_config(_GOOD_HANDLE, {"accelerator_id": 1})
-
-
-if __name__ == "__main__":
-    unittest.main()
