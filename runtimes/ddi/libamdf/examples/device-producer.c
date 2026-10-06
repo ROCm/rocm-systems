@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /* GFX1201 AMDF qualification for same-device GPU-produced SDMA and AQL queues.
  * A host-produced AQL kernel publishes packets into a device-mapped target
  * queue. Completion, consumption, ring reuse, and cleanup are checked. */

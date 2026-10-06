@@ -7790,6 +7790,34 @@ static hipError_t capture_hipModuleEnumerateFunctions(hipFunction_t* functions, 
 }
 
 // Generated shim
+static hipError_t capture_hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTarget target, enum hipFlushGPUDirectRDMAWritesScope scope) {
+  hipError_t r = g_real_table.hipDeviceFlushGPUDirectRDMAWrites_fn(target, scope);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceFlushGPUDirectRDMAWrites a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.target = static_cast<decltype(a.target)>(target);
+    a.scope = static_cast<decltype(a.scope)>(scope);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value, int device) {
+  hipError_t r = g_real_table.hipKernelSetAttributeForDevice_fn(kernel, attr, value, device);
+  if (r == hipSuccess) {
+    hrr_args_hipKernelSetAttributeForDevice a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.kernel = reinterpret_cast<uint64_t>(kernel);
+    a.attr = static_cast<decltype(a.attr)>(attr);
+    a.value = static_cast<decltype(a.value)>(value);
+    a.device = static_cast<decltype(a.device)>(device);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8527,6 +8555,8 @@ void hip_capture_build_table(const HipDispatchTable* live) {
   g_cap_table.hipDeviceGetLuid_fn = capture_hipDeviceGetLuid;
   g_cap_table.hipInitDevice_fn = capture_hipInitDevice;
   g_cap_table.hipModuleEnumerateFunctions_fn = capture_hipModuleEnumerateFunctions;
+  g_cap_table.hipDeviceFlushGPUDirectRDMAWrites_fn = capture_hipDeviceFlushGPUDirectRDMAWrites;
+  g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
 
   // Publish only now that every slot is populated. hip_capture_install()
   // refuses to copy the table until this is set, so a caller that returned

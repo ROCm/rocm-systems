@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+
 // ROCr HSA ELF symbol versions. The first 280 names match
 // projects/rocr-runtime/runtime/hsa-runtime/hsacore.so.def; the
 // loader extension names also appear in the public HSA header.
