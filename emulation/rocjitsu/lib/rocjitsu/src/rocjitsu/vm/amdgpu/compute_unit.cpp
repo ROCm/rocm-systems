@@ -427,14 +427,14 @@ void ComputeUnitCore::flush_cp_notifications() {
   for (;;) {
     bool capacity_changed = false;
     std::vector<PendingExecutionFailure> execution_failures;
-    std::vector<PendingVmFault> faults;
+    std::vector<PendingDispatchFailure> faults;
     std::vector<PendingQueueException> exceptions;
     std::vector<std::pair<uint32_t, uint32_t>> ready;
     {
       std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
       if (!has_pending_cp_notifications())
         return;
-      faults.swap(pending_vm_faults_);
+      faults.swap(pending_dispatch_failures_);
       execution_failures.swap(pending_execution_failures_);
       exceptions.swap(pending_queue_exceptions_);
       ready.swap(pending_wg_completions_);
@@ -446,9 +446,13 @@ void ComputeUnitCore::flush_cp_notifications() {
       return;
     for (const auto &failure : execution_failures)
       cp_->notify_execution_failure(failure.queue_id, failure.process_id, failure.reason);
-    for (const PendingVmFault &fault : faults)
-      cp_->notify_dispatch_vm_fault(fault.queue_id, fault.process_id, fault.dispatch_id,
-                                    fault.outcome);
+    for (const PendingDispatchFailure &fault : faults) {
+      if (fault.vm_outcome)
+        cp_->notify_dispatch_vm_fault(fault.queue_id, fault.process_id, fault.dispatch_id,
+                                      *fault.vm_outcome);
+      else
+        cp_->notify_dispatch_failure(fault.queue_id, fault.process_id, fault.dispatch_id);
+    }
     for (const auto &exception : exceptions) {
       const bool delivered =
           queue_exception_handler_
@@ -498,10 +502,10 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
     abort_dispatch(wf.dispatch_id());
     return;
   }
-  pending_vm_faults_.push_back({.queue_id = wf.queue_id(),
-                                .process_id = wf.process_id(),
-                                .dispatch_id = wf.dispatch_id(),
-                                .outcome = outcome});
+  pending_dispatch_failures_.push_back({.queue_id = wf.queue_id(),
+                                        .process_id = wf.process_id(),
+                                        .dispatch_id = wf.dispatch_id(),
+                                        .vm_outcome = outcome});
   if (outcome == VmAccessOutcome::Revoked) {
     // Fetch revocation is recovered before reaching this terminal path. An
     // in-flight data access cannot be replayed safely. Notify the live queue
@@ -1658,8 +1662,10 @@ void ComputeUnitCore::fail_wave_instruction(Wavefront &wf, std::string_view inst
   std::string reason(instruction_execution_error_name(error));
   if (!failure_detail.empty())
     reason += std::format(" ({})", failure_detail);
-  const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
-                                          this->name(), wf.wf_id(), instruction, pc, reason);
+  const std::string failure = std::format(
+      "CU {}: wf{} could not execute {} at pc={:#x} (pid={} qid={} dispatch={} wg={}): {}",
+      this->name(), wf.wf_id(), instruction, pc, wf.process_id(), wf.queue_id(), wf.dispatch_id(),
+      wf.wg_id(), reason);
   util::Logger::warn(failure);
   if (!wf.fail_pm4_submission()) {
     // Notify the queue owner without hiding the simulator's failure status.
@@ -1667,12 +1673,18 @@ void ComputeUnitCore::fail_wave_instruction(Wavefront &wf, std::string_view inst
     // even after request_exit records the terminal engine result.
     const bool claimed =
         execution_failure_handler_ && execution_failure_handler_(wf, /*retain_wave=*/true);
+    pending_dispatch_failures_.push_back({.queue_id = wf.queue_id(),
+                                          .process_id = wf.process_id(),
+                                          .dispatch_id = wf.dispatch_id(),
+                                          .vm_outcome = std::nullopt});
     if (auto *sim_engine = this->engine())
       sim_engine->request_exit(failure, /*code=*/1);
     if (claimed)
       return;
   }
-  wf.halt();
+  // halt() follows the successful workgroup-completion path. A rejected
+  // instruction instead cancels resident waves and their pending memory work.
+  abort_dispatch(wf.dispatch_id());
 }
 
 void AsyncInstructionWindow::materialize() {
