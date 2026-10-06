@@ -41,7 +41,6 @@
 #include "rocprofiler-sdk.hpp"
 #include "rocprofiler-sdk/roctx_client.hpp"
 
-#include <algorithm>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/processed_entry.hpp>
@@ -95,7 +94,6 @@
 #include <memory>
 #include <mutex>
 #include <regex>
-#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>

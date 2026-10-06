@@ -182,6 +182,7 @@ struct backend
     using callback_tracing_ompt_data_t = Wrapper::ompt_data_t;
     using ompt_thread_t                = Wrapper::ompt_thread_t;
 
+    // NOLINTBEGIN(readability-identifier-naming) -- names mirror OMPT / rocprofiler-sdk
     static constexpr ompt_thread_t OMPT_THREAD_INITIAL = Wrapper::OMPT_THREAD_INITIAL;
 
     static constexpr ompt_operation_t OMPT_ID_thread_begin =
@@ -220,6 +221,7 @@ struct backend
     static constexpr ompt_operation_t OMPT_ID_error     = Wrapper::OMPT_ID_error;
     static constexpr ompt_operation_t OMPT_ID_callback_functions =
         Wrapper::OMPT_ID_callback_functions;
+    // NOLINTEND(readability-identifier-naming)
 #endif
 
 #if ROCPROFILER_VERSION >= 600

@@ -8,8 +8,6 @@ endif()
 set(callback_domains_ompt_headers
     ${CMAKE_CURRENT_LIST_DIR}/decoder.hpp
     ${CMAKE_CURRENT_LIST_DIR}/ompt.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/rules.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/specification.hpp
 )
 
 set(callback_domains_ompt_headers ${callback_domains_ompt_headers} PARENT_SCOPE)
