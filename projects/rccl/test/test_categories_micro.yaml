@@ -91,6 +91,8 @@ test_categories:
       - "Nccl*"
       - "Sym*"
       - "Win*"
+      # test/common/ProcessIsolatedTestRunner.cpp
+      - "ProcessIsolatedRunnerMicrotest.*"
     exclude_windows:
       - "*"
     labels:

@@ -825,6 +825,11 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
 
             setenv(kReexecMarkerEnvVar, cfg.name.c_str(), 1);
 
+            // The one-test filter maps to shard 0 only; inherited shard vars make the child run 0 tests and exit 0.
+            unsetenv("GTEST_TOTAL_SHARDS");
+            unsetenv("GTEST_SHARD_INDEX");
+            unsetenv("GTEST_SHARD_STATUS_FILE");
+
             // gtestInfo was validated non-null in the parent before any
             // fork; no need to re-check here.
             std::string filterArg = std::string("--gtest_filter=")
