@@ -1333,17 +1333,17 @@
         },
         {
           "name": "DdaFabricEligibilityTest",
-          "description": "DDA fabric eligibility tests (gfx1250)",
+          "description": "DDA fabric eligibility tests for AllReduce, AllGather, ReduceScatter, AlltoAll across LL/LL128/VMM tiers on gfx1250",
           "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"
         },
         {
           "name": "DdaFabricMaxBlocksTest",
-          "description": "DDA fabric max blocks tests (gfx1250)",
+          "description": "DDA fabric max-blocks CU cap computation and env-override tests",
           "test_filter": "DdaFabricMaxBlocksTest.*"
         },
         {
           "name": "DdaFabricScratchSizingTest",
-          "description": "DDA fabric scratch sizing tests (gfx1250)",
+          "description": "DDA fabric scratch-buffer sizing tests covering LL floor, LL128 floor, and CE scratch interplay",
           "test_filter": "DdaFabricScratchSizingTest.*"
         },
         {
@@ -1358,21 +1358,6 @@
           "env_variables": {
             "RCCL_CE_AR_2SHOT_MAX_BYTES": "268435456"
           }
-        },
-        {
-          "name": "DdaFabricEligibilityTest",
-          "description": "DDA fabric eligibility tests for AllReduce, AllGather, ReduceScatter, AlltoAll across LL/LL128/VMM tiers on gfx1250",
-          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"
-        },
-        {
-          "name": "DdaFabricMaxBlocksTest",
-          "description": "DDA fabric max-blocks CU cap computation and env-override tests",
-          "test_filter": "DdaFabricMaxBlocksTest.*"
-        },
-        {
-          "name": "DdaFabricScratchSizingTest",
-          "description": "DDA fabric scratch-buffer sizing tests covering LL floor, LL128 floor, and CE scratch interplay",
-          "test_filter": "DdaFabricScratchSizingTest.*"
         },
         {
           "name": "DdaAlltoAllThresholdTest",
