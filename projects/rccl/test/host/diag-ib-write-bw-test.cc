@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Host-only microtests for src/diagnostics/ib_write_bw.cc, #include-d via DIAG_IB_WRITE_BW_CC_PATH to reach its
- * file-static helpers. Peers are simulated through the bootstrap seams; no test spawns ib_write_bw.
+ * file-static helpers: discovery, pairing, command build, output parse and stats. No test spawns ib_write_bw.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -533,8 +533,7 @@ TEST_F(DiagIbWriteBwMicrotest, FindPair_SameDevicePairsKthWithKthInBothPhases) {
   ASSERT_TRUE(FindPair(1, false, &server, &client));
   EXPECT_EQ(server, 6);
   EXPECT_EQ(client, 0);
-  comm_->rank = 6;
-  comm_->node = 1;
+  PlaceRank(6);
   ASSERT_TRUE(FindPair(0, false, &server, &client));
   EXPECT_EQ(server, 0);
   EXPECT_EQ(client, 6);
@@ -550,16 +549,15 @@ TEST_F(DiagIbWriteBwMicrotest, FindPair_CrossRotatesServerOntoNextClientDevice) 
   ASSERT_TRUE(FindPair(0, true, &server, &client));
   EXPECT_EQ(server, 0);
   EXPECT_EQ(client, 4);
-  comm_->rank = 3;
+  PlaceRank(3);
   ASSERT_TRUE(FindPair(0, true, &server, &client));
   EXPECT_EQ(server, 3);
   EXPECT_EQ(client, 5);
-  comm_->rank = 4;
-  comm_->node = 1;
+  PlaceRank(4);
   ASSERT_TRUE(FindPair(0, true, &server, &client));
   EXPECT_EQ(server, 0);
   EXPECT_EQ(client, 4);
-  comm_->rank = 5;
+  PlaceRank(5);
   ASSERT_TRUE(FindPair(0, true, &server, &client));
   EXPECT_EQ(server, 3);
   EXPECT_EQ(client, 5);
@@ -637,8 +635,7 @@ TEST_F(DiagIbWriteBwMicrotest, FindPair_OddRingSkipsOnlyTheWrappingPair) {
   ASSERT_TRUE(FindPair(1, false, &server, &client));
   EXPECT_EQ(server, 1);
   EXPECT_EQ(client, 2);
-  comm_->rank = 0;
-  comm_->node = 0;
+  PlaceRank(0);
   ASSERT_TRUE(FindPair(0, false, &server, &client));
   EXPECT_EQ(server, 0);
   EXPECT_EQ(client, 1);
@@ -651,21 +648,18 @@ TEST_F(DiagIbWriteBwMicrotest, FindPair_FalseWhenNoPeerExists) {
   SetDevices({"A", "A", "A", "A"});
   EXPECT_FALSE(FindPair(0, true, &server, &client));  // one client device leaves nothing to rotate onto
   SetDevices({"A", "A", "A", "B"});
-  comm_->rank = 1;
+  PlaceRank(1);
   EXPECT_FALSE(FindPair(0, false, &server, &client));  // second A on the server, one A on the client
-  comm_->rank = 3;
-  comm_->node = 1;
+  PlaceRank(3);
   EXPECT_FALSE(FindPair(0, false, &server, &client));  // B is not on the server node
   SetDevices({"C", "C", "A", "A"});
-  comm_->rank = 0;
-  comm_->node = 0;
+  PlaceRank(0);
   EXPECT_FALSE(FindPair(0, false, &server, &client));  // C is not on the client node
   SetDevices({"C", "A", "A", "A"});
-  comm_->rank = 3;
-  comm_->node = 1;
+  PlaceRank(3);
   EXPECT_FALSE(FindPair(0, false, &server, &client));  // the second A on the client outnumbers the server's
   EXPECT_FALSE(FindPair(1, false, &server, &client));
-  comm_->rank = 2;
+  PlaceRank(2);
   ASSERT_TRUE(FindPair(1, false, &server, &client));
   EXPECT_EQ(server, 2);
   EXPECT_EQ(client, 1);
