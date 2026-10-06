@@ -29,7 +29,7 @@ use crate::platform::memory::{
     KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation,
 };
 use rocddi::device::Device;
-use rocddi::gpu::CopyRect;
+use rocddi::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::{
     Allocation, DeviceAccess, MemoryKind, VirtualAddress, VirtualDeviceMapping, VirtualHostMapping,
     VirtualMemory,
@@ -4533,11 +4533,13 @@ enum AsyncCopyRoute {
     },
     GpuFromHost {
         device: Box<Device>,
+        index: usize,
         destination: u64,
         source: HostCopySource,
     },
     GpuToHost {
         device: Box<Device>,
+        index: usize,
         destination: HostCopyDestination,
         source: u64,
         size: usize,
@@ -4548,7 +4550,24 @@ enum AsyncCopyRoute {
     },
     GpuBatch {
         device: Box<Device>,
-        rects: Vec<CopyRect>,
+        entries: Vec<GpuBatchEntry>,
+    },
+}
+
+enum GpuBatchEntry {
+    Linear {
+        destination: u64,
+        source: u64,
+        size: u64,
+    },
+    FromHost {
+        destination: u64,
+        source: HostCopySource,
+    },
+    ToHost {
+        destination: HostCopyDestination,
+        source: u64,
+        size: usize,
     },
 }
 
@@ -4843,6 +4862,7 @@ fn resolve_async_copy(
                 Ok(ResolvedAsyncCopy {
                     route: AsyncCopyRoute::GpuFromHost {
                         device,
+                        index,
                         destination,
                         source,
                     },
@@ -4864,6 +4884,7 @@ fn resolve_async_copy(
                 Ok(ResolvedAsyncCopy {
                     route: AsyncCopyRoute::GpuToHost {
                         device,
+                        index,
                         destination,
                         source,
                         size,
@@ -5037,13 +5058,10 @@ fn loaded_source_snapshot(address: usize, size: usize) -> Result<Vec<u8>, Status
     Ok(bytes)
 }
 
-fn copy_from_host_route(
-    device: &Device,
-    destination: u64,
+fn with_host_copy_source<T>(
     source: &HostCopySource,
-    stop: &AtomicBool,
-) -> Result<(), CopyRouteFailure> {
-    let gpu = copy_gpu(device)?;
+    copy: impl FnOnce(&[u8]) -> Result<T, CopyRouteFailure>,
+) -> Result<T, CopyRouteFailure> {
     let snapshot = if let HostCopySource::LoadedAddress(address, size) = source {
         loaded_source_snapshot(*address, *size).map_err(CopyRouteFailure::retired)?
     } else {
@@ -5058,9 +5076,50 @@ fn copy_from_host_route(
         HostCopySource::LoadedAddress(_, _) => snapshot.as_slice(),
         HostCopySource::LoadedBytes(bytes) => bytes,
     };
-    // SAFETY: HSA checked the GPU destination and retains its backing. rocddi
-    // copies host bytes into owned staging before native submission.
-    unsafe { gpu.copy_from_host(destination, host, stop) }.map_err(Into::into)
+    copy(host)
+}
+
+fn copy_from_host_route(
+    device: &Device,
+    destination: u64,
+    source: &HostCopySource,
+    stop: &AtomicBool,
+) -> Result<(), CopyRouteFailure> {
+    let gpu = copy_gpu(device)?;
+    with_host_copy_source(source, |host| {
+        // SAFETY: HSA checked the GPU destination and retains its backing. rocddi
+        // copies host bytes into owned staging before native submission.
+        unsafe { gpu.copy_from_host(destination, host, stop) }.map_err(Into::into)
+    })
+}
+
+fn copy_to_host_destination(
+    destination: &HostCopyDestination,
+    size: usize,
+    copy: impl FnOnce(&mut [u8]) -> Result<(), CopyRouteFailure>,
+) -> Result<SyncGpuCopyOutcome, CopyRouteFailure> {
+    match destination {
+        HostCopyDestination::Address(address) => {
+            // SAFETY: The HSA caller keeps this valid host range live through
+            // its synchronous call or until asynchronous completion.
+            let host = unsafe { std::slice::from_raw_parts_mut(*address as *mut u8, size) };
+            copy(host)?;
+            fence(Ordering::SeqCst);
+            Ok(SyncGpuCopyOutcome::Done)
+        }
+        HostCopyDestination::LoadedAddress(address) => {
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(size)
+                .map_err(|_| CopyRouteFailure::retired(OUT_OF_RESOURCES))?;
+            bytes.resize(size, 0);
+            copy(&mut bytes)?;
+            Ok(SyncGpuCopyOutcome::LoadedDestination {
+                address: *address,
+                bytes,
+            })
+        }
+    }
 }
 
 fn copy_to_host_route(
@@ -5071,32 +5130,11 @@ fn copy_to_host_route(
     stop: &AtomicBool,
 ) -> Result<SyncGpuCopyOutcome, CopyRouteFailure> {
     let gpu = copy_gpu(device)?;
-    match destination {
-        HostCopyDestination::Address(address) => {
-            // SAFETY: The HSA caller keeps this valid host range live through
-            // its synchronous call or until asynchronous completion.
-            let host = unsafe { std::slice::from_raw_parts_mut(*address as *mut u8, size) };
-            // SAFETY: HSA checked the GPU source and retains its backing.
-            unsafe { gpu.copy_to_host(host, source, stop) }.map_err(CopyRouteFailure::from)?;
-            fence(Ordering::SeqCst);
-            Ok(SyncGpuCopyOutcome::Done)
-        }
-        HostCopyDestination::LoadedAddress(address) => {
-            let mut bytes = Vec::new();
-            bytes
-                .try_reserve_exact(size)
-                .map_err(|_| CopyRouteFailure::retired(OUT_OF_RESOURCES))?;
-            bytes.resize(size, 0);
-            // SAFETY: HSA checked the GPU source and rocddi writes the owned
-            // host buffer after native retirement.
-            unsafe { gpu.copy_to_host(&mut bytes, source, stop) }
-                .map_err(CopyRouteFailure::from)?;
-            Ok(SyncGpuCopyOutcome::LoadedDestination {
-                address: *address,
-                bytes,
-            })
-        }
-    }
+    copy_to_host_destination(destination, size, |host| {
+        // SAFETY: HSA checked the GPU source and retains its backing. rocddi
+        // writes the host buffer only after native retirement.
+        unsafe { gpu.copy_to_host(host, source, stop) }.map_err(Into::into)
+    })
 }
 
 fn execute_sync_gpu_copy(
@@ -5151,6 +5189,56 @@ fn write_loaded_copy_destination(address: usize, bytes: &[u8]) -> Status {
     unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), host as *mut u8, bytes.len()) };
     fence(Ordering::SeqCst);
     SUCCESS
+}
+
+fn execute_gpu_batch(
+    device: &Device,
+    entries: Vec<GpuBatchEntry>,
+    stop: &AtomicBool,
+) -> Result<(), CopyRouteFailure> {
+    let gpu = copy_gpu(device)?;
+    let mut sequence = GpuCopySequence::begin(gpu, stop).map_err(CopyRouteFailure::from)?;
+    for entry in entries {
+        let outcome = match entry {
+            GpuBatchEntry::Linear {
+                destination,
+                source,
+                size,
+            } => {
+                // SAFETY: Batch preparation checked both mapped GPU ranges and
+                // retains their owners until native retirement is proved.
+                unsafe { sequence.copy_linear(destination, source, size) }
+                    .map(|()| SyncGpuCopyOutcome::Done)
+                    .map_err(CopyRouteFailure::from)
+            }
+            GpuBatchEntry::FromHost {
+                destination,
+                source,
+            } => with_host_copy_source(&source, |host| {
+                // SAFETY: HSA checked the GPU destination and retains its
+                // backing. rocddi owns the staged copy of these host bytes.
+                unsafe { sequence.copy_from_host(destination, host) }
+                    .map_err(CopyRouteFailure::from)
+            })
+            .map(|()| SyncGpuCopyOutcome::Done),
+            GpuBatchEntry::ToHost {
+                destination,
+                source,
+                size,
+            } => copy_to_host_destination(&destination, size, |host| {
+                // SAFETY: HSA checked the GPU source and retains its backing.
+                // rocddi writes the host slice after native retirement.
+                unsafe { sequence.copy_to_host(host, source) }.map_err(CopyRouteFailure::from)
+            }),
+        }?;
+        if let SyncGpuCopyOutcome::LoadedDestination { address, bytes } = outcome {
+            let status = write_loaded_copy_destination(address, &bytes);
+            if status != SUCCESS {
+                return Err(CopyRouteFailure::retired(status));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn execute_copy_route(route: AsyncCopyRoute, stop: &AtomicBool) -> (bool, bool) {
@@ -5228,6 +5316,7 @@ fn execute_copy_route(route: AsyncCopyRoute, stop: &AtomicBool) -> (bool, bool) 
         }
         AsyncCopyRoute::GpuFromHost {
             device,
+            index: _,
             destination,
             source,
         } => match copy_from_host_route(&device, destination, &source, stop) {
@@ -5236,6 +5325,7 @@ fn execute_copy_route(route: AsyncCopyRoute, stop: &AtomicBool) -> (bool, bool) 
         },
         AsyncCopyRoute::GpuToHost {
             device,
+            index: _,
             destination,
             source,
             size,
@@ -5258,13 +5348,8 @@ fn execute_copy_route(route: AsyncCopyRoute, stop: &AtomicBool) -> (bool, bool) 
                 Err(failure) => (false, failure.operands_may_be_live),
             }
         }
-        AsyncCopyRoute::GpuBatch { device, rects } => {
-            let Ok(gpu) = device.gpu() else {
-                return (false, false);
-            };
-            // SAFETY: Batch validation established every mapped range and the
-            // worker retains every backing owner through native retirement.
-            match unsafe { gpu.copy_rects(&rects, stop) } {
+        AsyncCopyRoute::GpuBatch { device, entries } => {
+            match execute_gpu_batch(&device, entries, stop) {
                 Ok(()) => (true, false),
                 Err(failure) => (false, failure.operands_may_be_live),
             }
@@ -5602,8 +5687,8 @@ fn resolve_batch_copy_entries(
     runtime: &Runtime,
     entries: &[BatchCopyEntry],
 ) -> Result<(AsyncCopyRoute, Vec<Option<usize>>), Status> {
-    let mut rects = Vec::new();
-    rects
+    let mut prepared_entries = Vec::new();
+    prepared_entries
         .try_reserve_exact(entries.len())
         .map_err(|_| OUT_OF_RESOURCES)?;
     let mut borrowed_memory = Vec::new();
@@ -5620,32 +5705,73 @@ fn resolve_batch_copy_entries(
             entry.source_agent,
             entry.size,
         )?;
-        match resolved.route {
+        let (device, index, prepared) = match resolved.route {
             AsyncCopyRoute::GpuLinear {
                 device,
                 index,
                 destination,
                 source,
                 size,
-            } => {
-                if selected
-                    .as_ref()
-                    .is_some_and(|(selected, _)| *selected != index)
-                {
-                    return Err(NOT_SUPPORTED);
-                }
-                selected.get_or_insert((index, device));
-                rects.push(CopyRect::linear(destination, source, size));
-                borrowed_memory.extend(resolved.borrowed_memory);
-            }
+            } => (
+                device,
+                index,
+                GpuBatchEntry::Linear {
+                    destination,
+                    source,
+                    size,
+                },
+            ),
+            AsyncCopyRoute::GpuFromHost {
+                device,
+                index,
+                destination,
+                source,
+            } => (
+                device,
+                index,
+                GpuBatchEntry::FromHost {
+                    destination,
+                    source,
+                },
+            ),
+            AsyncCopyRoute::GpuToHost {
+                device,
+                index,
+                destination,
+                source,
+                size,
+            } => (
+                device,
+                index,
+                GpuBatchEntry::ToHost {
+                    destination,
+                    source,
+                    size,
+                },
+            ),
             AsyncCopyRoute::Noop if entries.len() == 1 => {
                 return Ok((AsyncCopyRoute::Noop, borrowed_memory));
             }
             _ => return Err(INVALID_AGENT),
+        };
+        if selected
+            .as_ref()
+            .is_some_and(|(selected, _)| *selected != index)
+        {
+            return Err(NOT_SUPPORTED);
         }
+        selected.get_or_insert((index, device));
+        prepared_entries.push(prepared);
+        borrowed_memory.extend(resolved.borrowed_memory);
     }
     let (_, device) = selected.ok_or(INVALID_ARGUMENT)?;
-    Ok((AsyncCopyRoute::GpuBatch { device, rects }, borrowed_memory))
+    Ok((
+        AsyncCopyRoute::GpuBatch {
+            device,
+            entries: prepared_entries,
+        },
+        borrowed_memory,
+    ))
 }
 
 struct PreparedBatchCopy {
@@ -5657,6 +5783,9 @@ unsafe fn prepare_batch_copy(
     runtime: &Runtime,
     operations: &[HsaAmdMemoryCopyOp],
 ) -> Result<PreparedBatchCopy, Status> {
+    if operations.is_empty() {
+        return Err(INVALID_ARGUMENT);
+    }
     let mut tasks = Vec::new();
     tasks
         .try_reserve_exact(operations.len())

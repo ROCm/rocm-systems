@@ -91,17 +91,17 @@ implemented.
 Linear asynchronous copy and explicit engine-0 copy use rocddi's bounded SDMA
 submission path on GFX1201. Pitched rectangular copy uses the same native
 path, submitting its rows through one queue. Linear and broadcast batch
-operations reuse one queue for all entries in an operation. The
-frontend waits for dependency signals, retains signal storage and runtime-owned
-memory until native retirement, and decrements the completion signal once
-after a successful copy. Each batch operation releases its memory borrow and
-decrements its own completion signal when that operation retires; operations
-may share a signal. It sets the affected completion signal negative after an
-asynchronous failure. An uncertain native
-retirement retains the command buffer and all runtime-owned operands for
-process teardown. Engine queries advertise only engine 0 when this path is
-available. Native swap is unavailable on GFX1201. Indirect copies, raw wait
-and signal operations, and asynchronous copy profiling are unsupported.
+operations reuse one queue for their device and staged host entries, in
+descriptor order. The frontend waits for dependency signals, retains signal
+storage and runtime-owned memory until native retirement, and decrements the
+completion signal once after a successful copy. Each batch operation may use
+its own completion signal or share one with other operations. Each operation
+releases its memory borrow and decrements its signal when it retires. The
+frontend sets the completion signal negative after an asynchronous failure.
+Uncertain native retirement retains the command buffer and all runtime-owned
+operands for process teardown. Engine queries advertise only engine 0 when
+this path is available. Native swap is unavailable on GFX1201. Indirect copies,
+raw wait and signal operations, and asynchronous copy profiling are unsupported.
 Zero-byte single copies and rectangles with a zero dimension return success
 without changing the completion signal.
 External semaphore imports and queue operations return unsupported on Linux,
