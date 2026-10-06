@@ -49,4 +49,3 @@ class TestPowerInfoUnavailable(unittest.TestCase):
     def test_each_key_reports_its_own_field(self):
         readings = {field: index + 1 for index, field in enumerate(_UNAVAILABLE)}
         self.assertEqual(_power_info_with(readings), readings)
-

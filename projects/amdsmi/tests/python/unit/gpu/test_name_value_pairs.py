@@ -51,4 +51,3 @@ class TestAmdSmiNameValuePairs(unittest.TestCase):
 
     def test_zero_count_returns_empty(self):
         self.assertEqual(_decode([]), [])
-

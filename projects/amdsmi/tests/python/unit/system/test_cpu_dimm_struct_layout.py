@@ -38,4 +38,3 @@ class TestDimmStructLayout(unittest.TestCase):
             (record.sensor, record.update_rate, record.dimm_addr, record.temp),
             (0x3FF, 0x155, 0xAB, 42.5),
         )
-

@@ -132,4 +132,3 @@ class TestOdVoltCurveRegions(unittest.TestCase):
                 for freq, volt in written
             ],
         )
-
