@@ -1,10 +1,15 @@
-# AIPROFCOMP-865 — Single-pass packable and unpackable
+# Single-pass packable and unpackable
 
 **JIRA:** AIPROFCOMP-865 (parent AIPROFCOMP-864)
 
 **Scope:** Fix multi-pass ratio errors on the existing analysis YAML structure.
 
-**Out of scope:** Full metric-library LLD (MetricLibrary, Stage 4 migration, SDK collectables registry).
+**Out of scope:** Full metric-library migration (MetricLibrary, Stage 4, SDK collectables registry).
+
+**Related design:**
+
+- [Analysis config YAML redesign](../design/analysis-config-redesign/hld-analysis-config-redesign.md#layer-details) — Layer 1.5 collectables. This plan uses that idea on today’s panel YAML.
+- [Three-layer analysis config LLD](../design/analysis-config-redesign/lld-index.md) and [metric library LLD](../design/analysis-config-redesign/lld-phase1-metric-library.md) — the migration this plan does not do.
 
 This is the overall plan. The packing algorithm and flowchart are in [Metric grouping (SPP / SPU)](aiprofcomp-865-metric-grouping.md).
 
@@ -19,7 +24,7 @@ Full historical plan drafts are preserved on branch
 |------|---------|
 | **Single-pass packable(SPP)** | Metric whose PMC set fits one hardware bucket. **Collection:** guarantee counter collection within a single pass (PMC duplication across passes allowed). **Analyze:** same-pass bind — each expression uses counters from one co-located pass (shadow columns `{counter}@pass:{key}`), so ratios are not evaluated on values merged across disjoint replays. |
 | **Single-pass unpackable(SPU)** | Cannot fit one bucket even with global repack → decompose into collectables and recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO`. (Slot-budget limited under `perfmon_config`.) |
-| **[Collectable](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-problem-decompose.html)** | A single-pass fragment (formula + PMC set) that must be collected together, then composed into a display metric (LLD Layer 1.5 concept on today’s panel YAML). Used to solve **SPU** parents. |
+| **[Collectable](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-problem-decompose.html)** | A single-pass fragment (formula + PMC set) that must be collected together, then composed into a display metric ([Layer 1.5](../design/analysis-config-redesign/hld-analysis-config-redesign.md#layer-details) on today’s panel YAML). Used to solve **SPU** parents. |
 | **POLICY_GAP** | Shipping-layout diagnosis: multi-bucket today but **is** SPP under the new packer (will be fixed by Phase 1 below). |
 | **WEIGHTED_AVG** | Analyze composite: recombine single-pass submetrics as \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). |
 | **COLLECT_SUM / COLLECT_RATIO** | Analyze composites for sum-of-subcollectables and ratio-of-collectables parents. |
