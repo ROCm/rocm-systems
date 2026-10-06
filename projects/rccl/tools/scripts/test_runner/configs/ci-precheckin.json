@@ -58,6 +58,8 @@
         {"name": "AllReduce.UserBufferRegistration", "description": "AllReduce user-buffer registration path", "test_filter": "AllReduce.UserBufferRegistration"},
         {"name": "AllReduce.ROCTX", "description": "AllReduce roctx logging path", "test_filter": "AllReduce.ROCTX"},
         {"name": "AllReduce.BiasFloat32_Sum", "description": "AllReduce reduce-with-bias path (representative)", "test_filter": "AllReduce.BiasFloat32_Sum"},
+        {"name": "AllReduce.Fp8Avg", "description": "FP8 E4M3 avg (PreMulSum scalar carried as float); discriminates where the device fp8 type is FNUZ", "test_filter": "AllReduce.Fp8Avg", "timeout": 300},
+        {"name": "AllReduce.OneRankAvgTailElements", "description": "Single-rank oneRankReduce avg tail, including both FP8 types", "test_filter": "AllReduce.OneRankAvgTailElements"},
         {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
         {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
         {"name": "GroupCall.MultiRootBroadcast", "description": "Multi-root broadcast fallback (AllGatherV disabled)", "test_filter": "GroupCall.MultiRootBroadcast"},
@@ -85,6 +87,8 @@
         {"name": "Recorder.ParseBinary", "description": "Recorder parse binary tests", "test_filter": "Recorder.ParseBinary", "timeout": 60},
         {"name": "Recorder.ParseJson", "description": "Recorder parse JSON tests", "test_filter": "Recorder.ParseJson", "timeout": 60},
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithread verification tests", "test_filter": "Recorder.VerifyMultithread", "timeout": 60},
+        {"name": "Recorder.RedOpRecordJson", "description": "Recorder RedOp record JSON output", "test_filter": "Recorder.RedOpRecordJson", "timeout": 60},
+        {"name": "Recorder.RedOpRecordBinary", "description": "Recorder RedOp record binary output", "test_filter": "Recorder.RedOpRecordBinary", "timeout": 60},
         {"name": "ProxyTraceTestFixture.nonEmptySingleton", "description": "ProxyTrace non-empty singleton test", "test_filter": "ProxyTraceTestFixture.nonEmptySingleton", "timeout": 60},
         {"name": "ProxyTraceTestFixture.addTraceOp", "description": "ProxyTrace add trace operation test", "test_filter": "ProxyTraceTestFixture.addTraceOp", "timeout": 60},
         {"name": "ProxyTraceTestFixture.getMapSizeMB", "description": "ProxyTrace get map size test", "test_filter": "ProxyTraceTestFixture.getMapSizeMB", "timeout": 60},
@@ -93,7 +97,26 @@
         {"name": "CollTraceUtilsTest.aggregateResultsTest", "description": "CollTrace aggregate results test", "test_filter": "CollTraceUtilsTest.aggregateResultsTest", "timeout": 60},
         {"name": "CollTraceUtilsTest.EventQueueOperationTest", "description": "CollTrace event queue operation test", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest", "timeout": 60},
         {"name": "CollTraceUtilsTest.EventQueueMultiThreadTest", "description": "CollTrace event queue multithread test", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest", "timeout": 60},
-        {"name": "CollTraceUtilsTest.getSizeMbTest", "description": "CollTrace get size MB test", "test_filter": "CollTraceUtilsTest.getSizeMbTest", "timeout": 60}
+        {"name": "CollTraceUtilsTest.getSizeMbTest", "description": "CollTrace get size MB test", "test_filter": "CollTraceUtilsTest.getSizeMbTest", "timeout": 60},
+        {"name": "DeviceResourceRequirementTests.LLA2ACalcSlots_DivUpRounding", "description": "ncclLLA2ACalcSlots divUp rounding table", "test_filter": "DeviceResourceRequirementTests.LLA2ACalcSlots_DivUpRounding"},
+        {"name": "DeviceResourceRequirementTests.LLA2ACalcSlots_LinearInMaxElts", "description": "ncclLLA2ACalcSlots scales linearly in maxElts", "test_filter": "DeviceResourceRequirementTests.LLA2ACalcSlots_LinearInMaxElts"},
+        {"name": "DeviceResourceRequirementTests.LLA2ACalcSlots_ZeroMaxEltsIsZero", "description": "ncclLLA2ACalcSlots(0, *) is 0", "test_filter": "DeviceResourceRequirementTests.LLA2ACalcSlots_ZeroMaxEltsIsZero"},
+        {"name": "DeviceResourceRequirementTests.LLA2ACreateRequirement_BufferSizeFormula", "description": "ncclLLA2ACreateRequirement bufferSize/bufferAlign/handle formula", "test_filter": "DeviceResourceRequirementTests.LLA2ACreateRequirement_BufferSizeFormula"},
+        {"name": "DeviceResourceRequirementTests.LLA2ACreateRequirement_RoundTripWithCalcSlots", "description": "ncclLLA2ACalcSlots feeding ncclLLA2ACreateRequirement, realistic usage", "test_filter": "DeviceResourceRequirementTests.LLA2ACreateRequirement_RoundTripWithCalcSlots"},
+        {"name": "DeviceResourceRequirementTests.GinOutboxCreateRequirement_FloorClampsSizeLog2Below7", "description": "ncclGinOutboxCreateRequirement 128-byte size_log2 floor", "test_filter": "DeviceResourceRequirementTests.GinOutboxCreateRequirement_FloorClampsSizeLog2Below7"},
+        {"name": "DeviceResourceRequirementTests.GinOutboxCreateRequirement_SizeLog2AboveFloorIsUnclamped", "description": "ncclGinOutboxCreateRequirement size_log2 above the floor is unclamped", "test_filter": "DeviceResourceRequirementTests.GinOutboxCreateRequirement_SizeLog2AboveFloorIsUnclamped"},
+        {"name": "DeviceResourceRequirementTests.GinOutboxCreateRequirement_BufferSizeFormula", "description": "ncclGinOutboxCreateRequirement bufferSize/bufferAlign/handle formula", "test_filter": "DeviceResourceRequirementTests.GinOutboxCreateRequirement_BufferSizeFormula"},
+        {"name": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_NoFloorOnSizeLog2", "description": "ncclGinInboxA2ACreateRequirement has no size_log2 floor, unlike the outbox", "test_filter": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_NoFloorOnSizeLog2"},
+        {"name": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_BufferSizeAndSignalCountFormula", "description": "ncclGinInboxA2ACreateRequirement bufferSize/ginSignalCount formula", "test_filter": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_BufferSizeAndSignalCountFormula"},
+        {"name": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero", "description": "Pin: ncclGinInboxA2ACreateRequirement(nRanks=1) divides by zero (SIGFPE), contained by ProcessIsolatedTestRunner", "test_filter": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero"},
+        {"name": "DeviceResourceRequirementTests.LsaBarrierCreateRequirement_BufferSizeFormula", "description": "ncclLsaBarrierCreateRequirement bufferSize/bufferAlign/handle formula", "test_filter": "DeviceResourceRequirementTests.LsaBarrierCreateRequirement_BufferSizeFormula"},
+        {"name": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula", "description": "ncclGinBarrierCreateRequirement null-comm contract and ginSignalCount formula", "test_filter": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula"},
+        {"name": "TeamTopologyTests.OuterFactor_DividesRanksAndRankAndMultipliesStride", "description": "ncclTeamOuterFactor divides nRanks and rank by innerSize and multiplies stride, including truncation to an empty team", "test_filter": "TeamTopologyTests.OuterFactor_DividesRanksAndRankAndMultipliesStride"},
+        {"name": "TeamTopologyTests.CftMultimem_ReturnsDegenerateSingletonTeam", "description": "ncclTeamCftMultimem is a singleton team because cftMcSize is stuck at 1", "test_filter": "TeamTopologyTests.CftMultimem_ReturnsDegenerateSingletonTeam"},
+        {"name": "TeamTopologyTests.Cft_HierMultimem_MatchesFlatWhenCftUnsupported", "description": "ncclTeamCft HIER_MULTIMEM factors by 1 and equals FLAT on ROCm", "test_filter": "TeamTopologyTests.Cft_HierMultimem_MatchesFlatWhenCftUnsupported"},
+        {"name": "TeamTopologyTests.RankToWorld_ZeroTeamAliasesSelf_OffsetTeamMapsLinearly", "description": "Pin: a zero-stride team makes ncclTeamRankToWorld alias every team rank to self, contrasted with the linear map on a strided team", "test_filter": "TeamTopologyTests.RankToWorld_ZeroTeamAliasesSelf_OffsetTeamMapsLinearly"},
+        {"name": "TeamTopologyTests.RankToLsa_NoBoundsCheck_ExtrapolatesOutOfRange", "description": "Pin: ncclTeamRankToLsa applies lsaSelf + (rank - team.rank) * team.stride unclamped, for in-range and out-of-range team ranks alike", "test_filter": "TeamTopologyTests.RankToLsa_NoBoundsCheck_ExtrapolatesOutOfRange"},
+        {"name": "TeamTopologyTests.Cft_HierLsa_MultiRank_ReturnsEmptyTeam_PinsKnownDefect", "description": "Pin: ncclTeamCft HIER_LSA truncates 1/lsaSize to 0, plus the lsaSelf term and the cftMcSize singleton at 2 ranks (needs 2 GPUs)", "test_filter": "TeamTopologyTests.Cft_HierLsa_MultiRank_ReturnsEmptyTeam_PinsKnownDefect", "env_variables": {"UT_TEAM_TOPOLOGY_REQUIRE_MULTI_GPU": "1"}}
       ]
     },
     "unit_tests_fixtures": {
@@ -110,11 +133,11 @@
         "NCCL_DEBUG": "INFO"
       },
       "tests": [
-        {"name": "BitOps", "description": "Bit operation utility tests (macros and typed fixtures)", "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"},
+        {"name": "BitOps", "description": "Bit operation utility tests (macros and typed fixtures)", "test_filter": "ALIGN_*:DIVUP.*:ROUNDUP.*:u32fp*:getHash.*:eatHash.*:BitOpsTemplate*:Add4G.*"},
         {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"},
         {"name": "MiscTests.Sorter", "description": "Task coll sorter unit test", "test_filter": "MiscTests.Sorter"},
         {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
-        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*"},
+        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*:GinProxyFlushWaitTest.*"},
         {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
       ]
     },
@@ -161,6 +184,39 @@
       "tests": [
         {"name": "InitMicrotestsUncached", "description": "Host-only init.cc microtests, HIP_*_UNCACHED_MEMORY arm; covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_init_faultinj": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroInit-faultinj",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "InitMicrotestsFaultInj", "description": "Host-only init.cc microtests, ENABLE_FAULT_INJECTION arm (the one that ships); covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_enqueue": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroEnqueue",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "EnqueueMicrotests", "description": "Host-only enqueue.cc microtests (no GPU, no HIP/RCCL runtime); contributes enqueue.cc coverage", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_symkernels": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroSymKernels",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "SymKernelsMicrotests", "description": "Host-only sym_kernels.cc/sym_kernels_host.cc microtests (no GPU, no HIP/RCCL runtime); contributes sym_kernels coverage", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -198,6 +254,24 @@
       "name": "RCCL Microtests - init.cc (uncached)",
       "description": "rccl-UnitTestsMicroInit-uncached (init.cc HIP_*_UNCACHED_MEMORY arm)",
       "config": "unit_tests_micro_init_uncached",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - init.cc (fault injection)",
+      "description": "rccl-UnitTestsMicroInit-faultinj (init.cc ENABLE_FAULT_INJECTION arm)",
+      "config": "unit_tests_micro_init_faultinj",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - enqueue.cc",
+      "description": "rccl-UnitTestsMicroEnqueue (host-only enqueue.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_enqueue",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - sym_kernels.cc",
+      "description": "rccl-UnitTestsMicroSymKernels (host-only sym_kernels.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_symkernels",
       "enabled": true
     }
   ]

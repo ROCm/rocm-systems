@@ -15,15 +15,15 @@
 #   2. projects/rccl  install.sh              build RCCL from PR sources
 #   3. lib/build-ompi-ucx.sh                  build a UCX-enabled OpenMPI (isolated)
 #   4. projects/rccl-tests                    build the *_perf binaries (with MPI)
-#   5. plugins/tuner/example                  build + install libnccl-tuner-example.so
-#   6. test/ext-plugins                       run pytest -m "ext_mixed or ext_tuner"
+#   5. plugins/tuner/example                  build + install librccl-tuner-example.so
+#   6. plugins/profiler/proxytrace            build + install librccl-profiler-proxytrace.so
+#   7. test/ext-plugins                       run pytest -m "ext_mixed or ext_tuner"
 #
 # Scope: the mixed-plugin tests (the pytest port of plugins/mixed/example/test.sh
 # plus the new runtime check) and the CSV tuner tests. The tuner tests launch
 # mpirun with `--mca pml ucx`, so this suite uses its OWN UCX-enabled OpenMPI via
-# build-ompi-ucx.sh, kept fully isolated from the gin/device-api OpenMPI. The
-# profiler/inspector suites additionally need cuda.h for their example .so and
-# are left as a follow-up.
+# build-ompi-ucx.sh, kept fully isolated from the gin/device-api OpenMPI.
+# Profiler/inspector coverage is a follow-up (marker set below).
 #
 # Required env (from the workflow via `sbatch --export=ALL,...`):
 #   RCCL_DEVICE_API_WORKDIR   GHA workspace (rocm-systems root)
@@ -172,18 +172,32 @@ fi
 # (RCCL_INSTALL_DIR/plugins/tuner/example); its presence is also what makes
 # conftest run (not skip) the ext_tuner tests.
 _pt "build:tuner-so:start"
-echo "==> [4/5] build + install libnccl-tuner-example.so"
+echo "==> [4/5] build + install librccl-tuner-example.so"
 tuner_src="${rccl_src}/plugins/tuner/example"
 tuner_dst="${rccl_install_dir}/plugins/tuner/example"
 make -C "${tuner_src}" -j"${build_jobs}" default
-tuner_so="$(find "${tuner_src}" -name libnccl-tuner-example.so -type f 2>/dev/null | head -n1)"
+tuner_so="$(find "${tuner_src}" -name librccl-tuner-example.so -type f 2>/dev/null | head -n1)"
 if [[ -z "${tuner_so}" ]]; then
-  echo "ERROR: libnccl-tuner-example.so not produced under ${tuner_src}" >&2
+  echo "ERROR: librccl-tuner-example.so not produced under ${tuner_src}" >&2
   exit 1
 fi
 mkdir -p "${tuner_dst}"
-cp -f "${tuner_so}" "${tuner_dst}/libnccl-tuner-example.so"
-echo "    installed -> ${tuner_dst}/libnccl-tuner-example.so"
+cp -f "${tuner_so}" "${tuner_dst}/librccl-tuner-example.so"
+echo "    installed -> ${tuner_dst}/librccl-tuner-example.so"
+
+_pt "build:proxytrace-so:start"
+echo "==> [4b/5] build + install librccl-profiler-proxytrace.so"
+proxytrace_src="${rccl_src}/plugins/profiler/proxytrace"
+proxytrace_dst="${rccl_install_dir}/plugins/profiler/proxytrace"
+make -C "${proxytrace_src}" -j"${build_jobs}" all || true
+proxytrace_so="$(find "${proxytrace_src}" "${rccl_install_dir}" -name librccl-profiler-proxytrace.so -type f 2>/dev/null | head -n1)"
+if [[ -n "${proxytrace_so}" ]]; then
+  mkdir -p "${proxytrace_dst}"
+  cp -f "${proxytrace_so}" "${proxytrace_dst}/librccl-profiler-proxytrace.so"
+  echo "    installed -> ${proxytrace_dst}/librccl-profiler-proxytrace.so"
+else
+  echo "WARN: librccl-profiler-proxytrace.so not produced; proxytrace pytest will skip"
+fi
 
 # 5) Hand the install/test locations to the run stage. RCCL_INSTALL_DIR is the
 # librccl.so dir and the plugin root; OMPI_INSTALL_DIR/UCX come from ompi-ucx.env
@@ -192,6 +206,7 @@ echo "    installed -> ${tuner_dst}/libnccl-tuner-example.so"
   printf 'export RCCL_INSTALL_DIR=%q\n' "${rccl_install_dir}"
   printf 'export RCCL_TESTS_DIR=%q\n'   "${rccl_tests_src}"
   printf 'export OMPI_INSTALL_DIR=%q\n' "${MPI_HOME}"
+  printf 'export RCCL_TEST_INTERFACES=%q\n' "${RCCL_TEST_INTERFACES:-eth0}"
 } > "${workdir}/.ci-out/ext-plugins.env"
 _pt "build:end"
 ) > "${build_out}" 2> "${build_err}" || build_rc=$?

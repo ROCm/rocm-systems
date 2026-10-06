@@ -74,9 +74,8 @@ struct FaultInjectResult {
 //   - isend returns an error OR fatalErrorCount > 0
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     CAST_ENV_CHECK_OR_SKIP();
 
@@ -211,9 +210,8 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
 // WRR token path (same rationale as CastStressMultiRoundTwoConns).
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjCastSlowQpRebalances) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -352,9 +350,8 @@ TEST_F(NetIbMPITest, FaultInjCastSlowQpRebalances) {
 // corrupt or drop data.
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjCastDelayDataIntegrity) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -422,9 +419,8 @@ TEST_F(NetIbMPITest, FaultInjCastDelayDataIntegrity) {
 //     and FaultInjCastQpErrorIsFatal already covers that case)
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjCastSingleQpErrorIsFatal) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     CAST_ENV_CHECK_OR_SKIP();
 
@@ -563,9 +559,8 @@ TEST_F(NetIbMPITest, FaultInjCastSingleQpErrorIsFatal) {
 //   - fatalErrorCount on the new connection remains 0
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     CAST_ENV_CHECK_OR_SKIP();
 
@@ -714,9 +709,8 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
 // Does NOT require ndevs >= 2 — only tests the classification function.
 // =============================================================================
 TEST_F(NetIbMPITest, FailoverErrorCodeWhitelist) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
@@ -804,9 +798,8 @@ TEST_F(NetIbMPITest, FailoverErrorCodeWhitelist) {
 //   - sentData fix (C2) — without it, probe result is ignored
 // =============================================================================
 TEST_F(NetIbMPITest, FailoverCqeErrorRecovered) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
@@ -960,9 +953,8 @@ TEST_F(NetIbMPITest, FailoverCqeErrorRecovered) {
 // Verifies graceful degradation (no crash, no hang).
 // =============================================================================
 TEST_F(NetIbMPITest, FailoverSingleDeviceTopology) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
@@ -1079,9 +1071,8 @@ TEST_F(NetIbMPITest, FailoverSingleDeviceTopology) {
 // should detect the total failure and return a fatal error, no hang.
 // =============================================================================
 TEST_F(NetIbMPITest, FailoverAllDevicesFailed) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
@@ -1207,9 +1198,8 @@ TEST_F(NetIbMPITest, FailoverAllDevicesFailed) {
 // mid-flight injection which is non-deterministic on fast HW.
 // =============================================================================
 TEST_F(NetIbMPITest, FailoverLargeMessageDataIntegrity) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
@@ -1347,9 +1337,8 @@ TEST_F(NetIbMPITest, FailoverLargeMessageDataIntegrity) {
 // regardless of which device fails.
 // =============================================================================
 TEST_F(NetIbMPITest, FailoverDeviceOneFailure) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
@@ -1478,9 +1467,8 @@ TEST_F(NetIbMPITest, FailoverDeviceOneFailure) {
 // state machine handles multiple concurrent failed requests.
 // =============================================================================
 TEST_F(NetIbMPITest, FailoverMultiRequestInFlight) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
@@ -1631,9 +1619,8 @@ TEST_F(NetIbMPITest, FailoverMultiRequestInFlight) {
 // Does not require NIC Fusion — we only check the resiliency state struct.
 // =============================================================================
 TEST_F(NetIbMPITest, RecoveryThreadStartedOnlyWithParam) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv  = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     const char* recoveryEnv  = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
@@ -1705,9 +1692,8 @@ TEST_F(NetIbMPITest, RecoveryThreadStartedOnlyWithParam) {
 //      carry sustained live traffic.
 // =============================================================================
 TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv  = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     const char* recoveryEnv  = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
@@ -1940,9 +1926,8 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
 // on the surviving device, no crash, no unexpected state transitions.
 // =============================================================================
 TEST_F(NetIbMPITest, RecoveryPendingWhileLinkDown) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv  = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     const char* recoveryEnv  = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
@@ -2103,9 +2088,8 @@ TEST_F(NetIbMPITest, RecoveryPendingWhileLinkDown) {
 // IbCastPortRecoveryContextInit that would only surface with device 1.
 // =============================================================================
 TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv  = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     const char* recoveryEnv  = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
@@ -2348,9 +2332,8 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
 // Default timing: 200ms start + 5 * (500ms batch + 5s ack timeout) ≈ 28s
 // =============================================================================
 TEST_F(NetIbMPITest, RecoveryUdTimeoutExhaustsAttempts) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv  = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     const char* recoveryEnv  = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
@@ -2492,9 +2475,8 @@ TEST_F(NetIbMPITest, RecoveryUdTimeoutExhaustsAttempts) {
 // Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); no other setup.
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjCastOpsPostSendErrno) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     CAST_ENV_CHECK_OR_SKIP();
 
@@ -2614,9 +2596,8 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPostSendErrno) {
 // Requires: NCCL_IB_RESILIENCY_PORT_FAILOVER=1 and NIC Fusion ndevs >= 2 (else SKIP).
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjCastOpsPollCqFlushNonFatal) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
     if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
@@ -2756,9 +2737,8 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPollCqFlushNonFatal) {
 // Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); single device.
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjCastOpsPollCqSynthFatal) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     CAST_ENV_CHECK_OR_SKIP();
 
@@ -2874,9 +2854,8 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPollCqSynthFatal) {
 // Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); arms all recv QPs.
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjCastOpsPostRecvErrno) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     CAST_ENV_CHECK_OR_SKIP();
 
@@ -3002,9 +2981,8 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPostRecvErrno) {
 // Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); arms all QPs.
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjCastOpsPollCqInjectCountFinite) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     CAST_ENV_CHECK_OR_SKIP();
 
@@ -3172,9 +3150,8 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPollCqInjectCountFinite) {
 // Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); no data transfer.
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjCastOpsApiInvalidArgs) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     CAST_ENV_CHECK_OR_SKIP();
 

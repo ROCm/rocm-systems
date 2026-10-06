@@ -17,8 +17,7 @@ This library is part of the [rocm-systems](https://github.com/ROCm/rocm-systems)
 ## Requirements
 
 - CMake 3.21+
-- C++17 compatible compiler
-- Git (sparse-clones RocPD schema SQL at configure time)
+- C++20 compatible compiler
 - SQLite3 (bundled via CMake module)
 - spdlog and fmt (system packages or FetchContent fallback)
 

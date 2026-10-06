@@ -604,7 +604,7 @@ int main() {
         }
 
         // Iterate through all available accelerator partition profiles
-        amdsmi_accelerator_partition_profile_config_t profile_config;
+        amdsmi_accelerator_partition_profile_config_t profile_config = {};
         ret = amdsmi_get_gpu_accelerator_partition_profile_config(processor_handles[device_index],
                                                                   &profile_config);
         for (uint32_t profile_idx = 0; profile_idx < profile_config.num_profiles; profile_idx++) {
@@ -620,7 +620,7 @@ int main() {
                     << acceleratorPartitionString(updatePartition) << "): " << err_str << "\n\n";
 
           // Get the current accelerator partition
-          amdsmi_accelerator_partition_profile_t profile;
+          amdsmi_accelerator_partition_profile_t profile = {};
           uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE];
           ret = amdsmi_get_gpu_accelerator_partition_profile(processor_handles[device_index],
                                                              &profile, partition_id);
@@ -1096,6 +1096,16 @@ int main() {
       printf("\tVendor Name: %s\n", asic_info.vendor_name);
       printf("\tSubVendorID: 0x%04x\n", asic_info.subvendor_id);
       printf("\tRevisionID: 0x%02x\n", asic_info.rev_id);
+      if (asic_info.chip_rev_id != UINT32_MAX) {
+        printf("\tChip RevisionID: 0x%02x\n", asic_info.chip_rev_id);
+      } else {
+        printf("\tChip RevisionID: N/A\n");
+      }
+      if (asic_info.external_rev_id != UINT32_MAX) {
+        printf("\tExternal RevisionID: 0x%02x\n", asic_info.external_rev_id);
+      } else {
+        printf("\tExternal RevisionID: N/A\n");
+      }
       printf("\tSubSystemID: 0x%04x\n", asic_info.subsystem_id);
       printf("\tAsic serial: 0x%s\n", asic_info.asic_serial);
       if (asic_info.oam_id != UINT32_MAX) {

@@ -57,6 +57,7 @@
 #ifdef ENABLE_WSL_BACKEND
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #endif
+#include "fwupd_carveout.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -646,6 +647,39 @@ amdsmi_status_t amdsmi_get_switch_processor_handles(amdsmi_socket_handle socket_
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// Registry of amdsmi_node_handle values that were actually handed out by
+// amdsmi_get_node_handle() (or, in unit tests only, injected via
+// amdsmi_test_register_node_handle() -- see amd_smi_test_internal.h). An
+// amdsmi_node_handle is internally a std::string* to a board sysfs path, but
+// callers only ever see it as an opaque void*; a caller can pass any
+// garbage-but-nonzero value through the public API. is_registered_node_handle()
+// lets consumers of a node_handle (amdsmi_get_npm_info(),
+// amdsmi_set_npm_limit()) confirm the pointer is one this library actually
+// vended *before* reinterpret_cast'ing and dereferencing it, so an
+// unregistered/garbage handle is rejected as AMDSMI_STATUS_INVAL instead of
+// being dereferenced as an arbitrary pointer.
+//
+// g_node_registered_pointers is checked by pointer identity only (no
+// dereference of the candidate handle), which is what makes the check safe
+// to run on a completely untrusted node_handle value. It is kept separate
+// from (but updated alongside) g_node_registry: the latter owns the
+// std::string storage for handles amdsmi_get_node_handle() itself allocated,
+// while the pointer set also accommodates test-injected handles that this
+// library does not own.
+namespace {
+std::mutex g_node_mu;
+std::map<std::string, std::unique_ptr<std::string>> g_node_registry;
+std::set<const void*> g_node_registered_pointers;
+
+bool is_registered_node_handle(amdsmi_node_handle node_handle) {
+  if (node_handle == nullptr) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lk(g_node_mu);
+  return g_node_registered_pointers.find(node_handle) != g_node_registered_pointers.end();
+}
+}  // namespace
+
 amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
                                        amdsmi_node_handle* node_handle) {
   AMDSMI_CHECK_INIT();
@@ -697,9 +731,10 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
   }
 
   // Store board path so node handle remains valid for library lifetime.
-  static std::mutex g_node_mu;
-  static std::map<std::string, std::unique_ptr<std::string>> g_node_registry;
-
+  // g_node_mu/g_node_registry/g_node_registered_pointers are file-scope (see
+  // the anonymous namespace above amdsmi_get_node_handle()) so that
+  // is_registered_node_handle() can validate a node_handle from any caller,
+  // not just from within this function.
   std::string board_path = found_board.string();
   {
     std::lock_guard<std::mutex> lk(g_node_mu);
@@ -708,6 +743,7 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
       auto ptr = std::make_unique<std::string>(board_path);
       amdsmi_node_handle h = reinterpret_cast<amdsmi_node_handle>(ptr.get());
       g_node_registry.emplace(board_path, std::move(ptr));
+      g_node_registered_pointers.insert(h);
       *node_handle = h;
     } else {
       *node_handle = reinterpret_cast<amdsmi_node_handle>(it->second.get());
@@ -716,6 +752,28 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
 
   return AMDSMI_STATUS_SUCCESS;
 }
+
+// Test-only wrapper: registers a raw, test-fabricated amdsmi_node_handle as
+// valid in the same registry amdsmi_get_node_handle() populates, so that
+// is_registered_node_handle() (consulted by amdsmi_get_npm_info() and
+// amdsmi_set_npm_limit()) accepts it. Not declared in amdsmi.h -- internal
+// use via amd_smi_test_internal.h only. See that header for why this exists:
+// unit tests fabricate node_handle values directly (bypassing
+// amdsmi_get_node_handle()'s oam_id == 0 gate, which the test environment
+// cannot satisfy) and need a way to make that fabricated pointer pass the
+// production registered-handle check without weakening the check itself.
+// Guarded by BUILD_TESTS so this handle-forging escape hatch never ships in
+// a production build (see amd_smi_test_internal.h and src/CMakeLists.txt).
+#ifdef BUILD_TESTS
+amdsmi_status_t amdsmi_test_register_node_handle(amdsmi_node_handle node_handle) {
+  if (node_handle == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  std::lock_guard<std::mutex> lk(g_node_mu);
+  g_node_registered_pointers.insert(node_handle);
+  return AMDSMI_STATUS_SUCCESS;
+}
+#endif  // BUILD_TESTS
 
 amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle* processor_handles,
                                                         uint32_t* processor_count,
@@ -1674,10 +1732,42 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
   return amdsmi_status;
 }
 
+// amdsmi_get_npm_info() memcpy's rsmi_npm_info_t directly into
+// amdsmi_npm_info_t; keep their shared fields byte-compatible so that copy
+// stays correct if either struct changes.
+static_assert(sizeof(amdsmi_npm_info_t) == sizeof(rsmi_npm_info_t),
+              "amdsmi_npm_info_t and rsmi_npm_info_t must stay the same size");
+static_assert(offsetof(amdsmi_npm_info_t, status) == offsetof(rsmi_npm_info_t, status),
+              "status offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
+static_assert(offsetof(amdsmi_npm_info_t, limit) == offsetof(rsmi_npm_info_t, limit),
+              "limit offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
+static_assert(offsetof(amdsmi_npm_info_t, ubb_power_threshold) ==
+                  offsetof(rsmi_npm_info_t, ubb_power_threshold),
+              "ubb_power_threshold offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
+static_assert(offsetof(amdsmi_npm_info_t, max_node_power_limit) ==
+                  offsetof(rsmi_npm_info_t, max_node_power_limit),
+              "max_node_power_limit offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
+static_assert(offsetof(amdsmi_npm_info_t, current_node_power) ==
+                  offsetof(rsmi_npm_info_t, current_node_power),
+              "current_node_power offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
+
 amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_info_t* npm_info) {
   AMDSMI_CHECK_INIT();
 
   if (node_handle == nullptr || npm_info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here, ahead of any privilege
+  // check further down the call chain.
+  // Behavior change: previously any non-null node_handle was dereferenced
+  // here; a caller-supplied garbage handle now fails with
+  // AMDSMI_STATUS_INVAL instead of crashing.
+  if (!is_registered_node_handle(node_handle)) {
     return AMDSMI_STATUS_INVAL;
   }
 
@@ -1707,6 +1797,41 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
   std::memcpy(npm_info, &rsmi_npm_info, sizeof(amdsmi_npm_info_t));
 
   return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_set_npm_limit(amdsmi_node_handle node_handle, uint64_t limit) {
+  AMDSMI_CHECK_INIT();
+
+  if (node_handle == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here, ahead of the
+  // REQUIRE_ROOT_ACCESS privilege check that only exists one layer down in
+  // rsmi_dev_npm_limit_set().
+  if (!is_registered_node_handle(node_handle)) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Verify board path from node_handle
+  auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  rsmi_status_t rstatus =
+      rsmi_dev_npm_limit_set(0, reinterpret_cast<uintptr_t>(node_handle), limit);
+  return amd::smi::rsmi_to_amdsmi_status(rstatus);
 }
 
 amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle,
@@ -2447,20 +2572,6 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   uint16_t device_id = 0;
   uint16_t subsystem_id = 0;
   char temp_market_name[AMDSMI_MAX_STRING_LENGTH] = {0};
-  smi_clear_char_and_reinitialize(info->market_name, AMDSMI_MAX_STRING_LENGTH, temp_market_name);
-  info->market_name[0] = '\0';
-  info->vendor_id = std::numeric_limits<uint32_t>::max();
-  info->vendor_name[0] = '\0';
-  info->subvendor_id = std::numeric_limits<uint32_t>::max();
-  info->device_id = std::numeric_limits<uint64_t>::max();
-  info->rev_id = std::numeric_limits<uint16_t>::max();
-  info->asic_serial[0] = '\0';
-  info->oam_id = std::numeric_limits<uint32_t>::max();
-  info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
-  info->target_graphics_version = std::numeric_limits<uint64_t>::max();
-  info->subsystem_id = std::numeric_limits<uint32_t>::max();
-  info->flags = 0;
-  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
 
   std::ostringstream ss;
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
@@ -2491,13 +2602,12 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
     }
   }
 
+  init_asic_info_defaults(info);
+
   /**
    * For other sysfs related information, get from rocm-smi
    */
 
-  // Ensure asic_serial defaults to an unsupported value
-  std::string max_uint64_str = "ffffffffffffffff";
-  smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, max_uint64_str);
   uint64_t asic_serial_id = 0;
   amdsmi_status_t status =
       rsmi_wrapper(rsmi_dev_asic_serial_get, processor_handle, 0, &asic_serial_id);
@@ -2560,7 +2670,6 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   if (status == AMDSMI_STATUS_SUCCESS) {
     info->device_id = static_cast<uint64_t>(device_id);
   }
-  info->rev_id = dev_info.pci_rev;
   status = rsmi_wrapper(rsmi_dev_vendor_id_get, processor_handle, 0, &vendor_id);
   if (status == AMDSMI_STATUS_SUCCESS) {
     info->vendor_id = vendor_id;
@@ -2652,6 +2761,8 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   // TODO(cpoag): check if this is correct, might be able to go through KGD/KFD
   info->rev_id = static_cast<uint32_t>(dev_info.pci_rev);
   info->flags = static_cast<uint64_t>(dev_info.ids_flags);
+  info->chip_rev_id = static_cast<uint32_t>(dev_info.chip_rev);
+  info->external_rev_id = static_cast<uint32_t>(dev_info.external_rev);
   libdrm.unload();
 
   ss << __PRETTY_FUNCTION__ << " | info->market_name: " << info->market_name << "\n"
@@ -2668,6 +2779,12 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
      << " | info->rev_id (dec): " << std::dec << info->rev_id << "\n"
      << " | info->rev_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0') << info->rev_id
      << "\n"
+     << " | info->chip_rev_id (dec): " << std::dec << info->chip_rev_id << "\n"
+     << " | info->chip_rev_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0')
+     << info->chip_rev_id << "\n"
+     << " | info->external_rev_id (dec): " << std::dec << info->external_rev_id << "\n"
+     << " | info->external_rev_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0')
+     << info->external_rev_id << "\n"
      << " | info->asic_serial: 0x" << info->asic_serial << "\n"
      << " | info->oam_id (dec): " << std::dec << info->oam_id << "\n"
      << " | info->oam_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0') << info->oam_id
@@ -5163,27 +5280,33 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
   info->min_clk = static_cast<uint32_t>(min_freq);
   info->clk_deep_sleep = static_cast<uint8_t>(sleep_state_freq);
 
+  // gpu_metrics marks an unavailable clock with UINT16_MAX. Widen it to the uint32
+  // marker the DF case returns, so every clk_type reports unavailable the same way.
+  auto widen_unavailable = [](uint16_t clk) -> uint32_t {
+    return clk == UINT16_MAX ? UINT32_MAX : static_cast<uint32_t>(clk);
+  };
+
   switch (clk_type) {
     case AMDSMI_CLK_TYPE_GFX:
-      info->clk = metrics.current_gfxclk;
+      info->clk = widen_unavailable(metrics.current_gfxclk);
       break;
     case AMDSMI_CLK_TYPE_MEM:
-      info->clk = metrics.current_uclk;
+      info->clk = widen_unavailable(metrics.current_uclk);
       break;
     case AMDSMI_CLK_TYPE_VCLK0:
-      info->clk = metrics.current_vclk0;
+      info->clk = widen_unavailable(metrics.current_vclk0);
       break;
     case AMDSMI_CLK_TYPE_VCLK1:
-      info->clk = metrics.current_vclk1;
+      info->clk = widen_unavailable(metrics.current_vclk1);
       break;
     case AMDSMI_CLK_TYPE_DCLK0:
-      info->clk = metrics.current_dclk0;
+      info->clk = widen_unavailable(metrics.current_dclk0);
       break;
     case AMDSMI_CLK_TYPE_DCLK1:
-      info->clk = metrics.current_dclk1;
+      info->clk = widen_unavailable(metrics.current_dclk1);
       break;
     case AMDSMI_CLK_TYPE_SOC:
-      info->clk = metrics.current_socclk;
+      info->clk = widen_unavailable(metrics.current_socclk);
       break;
     // fclk/df not supported by gpu metrics so providing default value which cannot be contrued to
     // be valid
@@ -5408,11 +5531,17 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_INVAL;
   }
 
+  // Validate the buffer holds a full header before dereferencing any header field
+  if (buf_size < sizeof(amdsmi_cper_hdr_t)) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size: " << std::dec
+       << buf_size << " is smaller than the cper header: (" << sizeof(amdsmi_cper_hdr_t) << ")\n";
+    LOG_ERROR(ss);
+    return AMDSMI_STATUS_UNEXPECTED_SIZE;
+  }
   const amdsmi_cper_hdr_t* cper = reinterpret_cast<const amdsmi_cper_hdr_t*>(cper_buffer);
-  if (cper->record_length > buf_size) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size " << std::dec
-       << buf_size << " is smaller than cper record length " << std::dec << cper->record_length
-       << "\n";
+  if ((cper->record_length < sizeof(amdsmi_cper_hdr_t)) || (cper->record_length > buf_size)) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper record length: " << std::dec
+       << cper->record_length << " does not fit the buffer size: " << buf_size << "\n";
     LOG_ERROR(ss);
     return AMDSMI_STATUS_UNEXPECTED_SIZE;
   } else if (strncmp(cper->signature, "CPER", 4) != 0) {
@@ -5422,7 +5551,7 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_UNEXPECTED_DATA;
   }
   uint32_t i = 0;
-  for (int afid : cper_decode(cper)) {
+  for (int afid : cper_decode(cper, buf_size)) {
     if (i < *num_afids) {
       afids[i] = static_cast<uint64_t>(afid);
     }
@@ -5827,7 +5956,6 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
 
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
-  char buff[AMDSMI_MAX_STRING_LENGTH];
   FILE* fp;
   double pcie_speed = 0;
   unsigned pcie_width = 0;
@@ -5857,7 +5985,7 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
       "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/max_link_speed";
   fp = fopen(path_max_link_speed.c_str(), "r");
   if (fp) {
-    if (fscanf(fp, "%lf %s", &pcie_speed, buff) != 2) {
+    if (fscanf(fp, "%lf %*s", &pcie_speed) != 1) {
       fclose(fp);
       std::ostringstream ss;
       ss << __PRETTY_FUNCTION__ << " | Failed to parse: " << path_max_link_speed;
@@ -8463,6 +8591,17 @@ static bool is_dry_run() {
   return (dry_run != nullptr && std::string(dry_run) == "1");
 }
 
+// The fwupd UMA carveout is a platform-wide APU BIOS setting, so it must only be
+// consulted for the integrated (FUSION) GPU -- never a discrete GPU that merely
+// lacks the amdgpu sysfs node. Uses the ASIC AMDGPU_IDS_FLAGS_FUSION flag.
+static bool gpu_handle_is_apu(amdsmi_processor_handle processor_handle) {
+  amdsmi_asic_info_t asic_info = {};
+  if (amdsmi_get_gpu_asic_info(processor_handle, &asic_info) != AMDSMI_STATUS_SUCCESS) {
+    return false;
+  }
+  return (asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0;
+}
+
 static amdsmi_status_t get_gpu_uma_carveout_info_internal(amd::smi::AMDSmiGPUDevice* gpu_device,
                                                           amdsmi_uma_carveout_info_t* info) {
   if (gpu_device == nullptr || info == nullptr) {
@@ -8576,8 +8715,26 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
-  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+  // Prefer the fwupd path; the amdgpu sysfs node is the fallback when fwupd is
+  // unavailable or when fwupd redacts it for an unprivileged caller (below).
+  if (gpu_handle_is_apu(processor_handle)) {
+    amdsmi_status_t fwupd_ret = amd::smi::fwupd_get_carveout_info(info);
+    if (fwupd_ret == AMDSMI_STATUS_SUCCESS) {
+      // fill current_index from it so an unprivileged `static`
+      // still shows the active carveout without a PolicyKit prompt.
+      if (info->current_index == info->num_options) {
+        SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+        amdsmi_uma_carveout_info_t sysfs_info{};
+        if (get_gpu_uma_carveout_info_internal(gpu_device, &sysfs_info) == AMDSMI_STATUS_SUCCESS &&
+            sysfs_info.current_index < info->num_options) {
+          info->current_index = sysfs_info.current_index;
+        }
+      }
+      return AMDSMI_STATUS_SUCCESS;
+    }
+  }
 
+  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
   return get_gpu_uma_carveout_info_internal(gpu_device, info);
 }
 
@@ -8593,6 +8750,16 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
 #ifdef ENABLE_WSL_BACKEND
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
+
+  // fwupd brokers PolicyKit auth (no root needed) instead of the root-only
+  // sysfs node; falls back to sysfs on NOT_SUPPORTED. Runs before the mutex
+  // since it never touches gpu_device.
+  if (gpu_handle_is_apu(processor_handle)) {
+    amdsmi_status_t fwupd_ret = amd::smi::fwupd_set_carveout(option_index);
+    if (fwupd_ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+      return fwupd_ret;
+    }
+  }
 
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
 

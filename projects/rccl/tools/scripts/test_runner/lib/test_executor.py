@@ -8,12 +8,14 @@ Handles test execution, build processes, and result tracking
 """
 
 import glob
+import hashlib
 import json
 import os
 import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -33,6 +35,31 @@ except ImportError:
 
 # Make stdout unbuffered to prevent output ordering issues with subprocesses
 sys.stdout.reconfigure(line_buffering=True)
+
+
+def wrap_mpi_program(program, gtest_json_path=None):
+    """bash -c wrapper for one MPI rank: ulimit, glob-safe exec, JSON on rank 0.
+
+    Every rank used to get ``--gtest_output=json:<same file>``. Google Test
+    truncates that path at start-up, so N ranks racing on it leave an empty or
+    corrupt report even when the test passed (Grow_ConfigInheritance).
+    Rank 0 alone sets GTEST_OUTPUT; other ranks exec the same binary without it.
+    Rank 0 is the first host in the SLURM list or hostfile, which is not
+    necessarily the process that reads the file. The path has to be one that
+    host can write and this process can read; a node-local /tmp file is not.
+    """
+    preamble = "ulimit -l unlimited 2>/dev/null; set -f; "
+    if gtest_json_path:
+        json_env = f"GTEST_OUTPUT=json:{shlex.quote(gtest_json_path)}"
+        inner = (
+            preamble
+            + 'rank="${OMPI_COMM_WORLD_RANK:-${PMIX_RANK:-${PMI_RANK:-0}}}"; '
+            + f'if [ "$rank" = "0" ]; then exec env {json_env} {program}; '
+            + f"else exec {program}; fi"
+        )
+    else:
+        inner = preamble + f"exec {program}"
+    return f"bash -c {shlex.quote(inner)}"
 
 
 def glob_filter_matches(name: str, pattern_str: str) -> bool:
@@ -65,6 +92,73 @@ def glob_filter_matches(name: str, pattern_str: str) -> bool:
     return (not pos) or any(p.match(name) for p in pos)
 
 
+def suite_disposition(suite, smoke_only, suite_name_filter=None):
+    """Classify a parsed suite for the banner and the run/record loop.
+
+    Order is scope, then --suite-name, then enabled. A disabled suite outside
+    smoke or off the name filter is skip, not disabled, so the banner and the
+    summary stay in agreement.
+    """
+    details = suite["suite_details"]
+    if smoke_only and not details.get("smoke", False):
+        return "skip_scope"
+    name = details["name"]
+    if suite_name_filter and not glob_filter_matches(name, suite_name_filter):
+        return "skip_name"
+    if not details.get("enabled", True):
+        return "disabled"
+    return "run"
+
+
+def configure_coverage_build(install_flags, cmake_options, coverage_report):
+    """Return build options for the requested coverage mode."""
+    install_flags = list(install_flags)
+
+    def remove_flag(flag):
+        while flag in install_flags:
+            install_flags.remove(flag)
+
+    # Drop any pre-existing (e.g. cached-config) coverage -D options so the
+    # authoritative values appended below are the only ones present, rather than
+    # leaning on CMake's last-wins to override a contradictory earlier token.
+    cmake_options = " ".join(
+        tok for tok in cmake_options.split()
+        if not tok.startswith("-DENABLE_CODE_COVERAGE=")
+        and not tok.startswith("-DENABLE_FULL_COVERAGE=")
+    )
+
+    def append_cmake_option(option):
+        nonlocal cmake_options
+        cmake_options = f"{cmake_options} {option}".strip()
+
+    if not coverage_report:
+        remove_flag("--enable-code-coverage")
+        remove_flag("--enable-full-coverage")
+        append_cmake_option("-DENABLE_CODE_COVERAGE=OFF")
+        append_cmake_option("-DENABLE_FULL_COVERAGE=OFF")
+    else:
+        remove_flag("--enable-full-coverage")
+        if "--debug" not in install_flags and "--debug-fast" not in install_flags:
+            install_flags.append("--debug")
+        if "--enable-code-coverage" not in install_flags:
+            install_flags.append("--enable-code-coverage")
+        append_cmake_option("-DENABLE_CODE_COVERAGE=ON")
+        append_cmake_option("-DENABLE_FULL_COVERAGE=AUTO")
+
+    return install_flags, cmake_options
+
+
+def rccl_build_type(build_config, args, using_custom_lib=False):
+    """Return the RCCL build type selected by the runner."""
+    if using_custom_lib:
+        return "custom"
+    install_flags = build_config.get("install_flags", [])
+    if (any(flag in install_flags for flag in ("--debug", "--debug-fast"))
+            or getattr(args, "coverage_report", False)):
+        return "debug"
+    return "release"
+
+
 class ExitCode(IntEnum):
     """Exit codes for processes"""
     EXIT_SUCCESS = 0
@@ -78,6 +172,15 @@ class TestResult(str, Enum):
     RESULT_FAILED = "FAILED"
     RESULT_TIMEOUT = "TIMEOUT"
     RESULT_SKIPPED = "SKIPPED"
+    RESULT_DISABLED = "DISABLED"
+
+
+# Google Test's own "nothing was selected" banner, e.g. a --gtest_filter that
+# matches no test. Exit status is 0 and no per-test line is printed, so this is
+# the only positive evidence that the run executed nothing.
+_GTEST_RAN_NOTHING_RE = re.compile(
+    r"Running 0 tests from 0 test (?:suites|cases)|0 tests from 0 test (?:suites|cases) ran"
+)
 
 
 def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str:
@@ -85,9 +188,14 @@ def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str
     Map gtest process exit + stdout/stderr to a TestResult string.
 
     Google Test returns exit 0 when failures are absent, including when all
-    selected tests are SKIPPED. Prefer ``infer_gtest_result_from_json_file`` when
-    ``--gtest_output=json:…`` is used; this function is the stdout fallback (e.g.
-    ``[  SKIPPED ]`` / ``[  OK ]`` patterns).
+    selected tests are SKIPPED and when the filter selected nothing at all.
+    A filter that matches no test must not report PASSED -- that turns a typo'd
+    or renamed test_filter into a silent green result. Report it SKIPPED, which
+    is what the pytest path already does for "no tests collected".
+
+    Prefer ``infer_gtest_result_from_json_file`` when ``--gtest_output=json:…``
+    is used; this function is the stdout fallback (e.g. ``[  SKIPPED ]`` /
+    ``[  OK ]`` patterns).
     """
     if returncode == ExitCode.EXIT_TIMEOUT:
         return TestResult.RESULT_TIMEOUT.value
@@ -103,34 +211,660 @@ def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str
         return TestResult.RESULT_PASSED.value
     if has_skipped:
         return TestResult.RESULT_SKIPPED.value
+    if _GTEST_RAN_NOTHING_RE.search(out):
+        return TestResult.RESULT_SKIPPED.value
     return TestResult.RESULT_PASSED.value
 
 
-def _gtest_json_accumulate(obj, stats):
-    """Walk gtest JSON (--gtest_output=json); set stats keys failed/passed/skipped."""
-    if isinstance(obj, dict):
-        if "result" in obj and isinstance(obj.get("name"), str):
-            fails = obj.get("failures")
-            if isinstance(fails, list) and len(fails) > 0:
-                stats["failed"] = True
+def _result_from_gtest_details(details):
+    """Map executed leaf statuses to an entry TestResult.
+
+    Same walk as collect_gtest_case_details: FAILED beats PASSED beats SKIPPED.
+    An empty leaf list is SKIPPED (filter matched nothing).
+    """
+    failed = passed = skipped = False
+    for item in details or []:
+        status = item.get("status")
+        if status == "FAILED":
+            failed = True
+        elif status == "PASSED":
+            passed = True
+        elif status == "SKIPPED":
+            skipped = True
+    if failed:
+        return TestResult.RESULT_FAILED.value
+    if passed:
+        return TestResult.RESULT_PASSED.value
+    return TestResult.RESULT_SKIPPED.value
+
+
+def _gtest_leaf_not_run(case):
+    """True for DISABLED tests listed in JSON but never executed (SUPPRESSED)."""
+    result = case.get("result")
+    if result in ("SUPPRESSED", "NOT_RUN"):
+        return True
+    disabled = case.get("disabled")
+    if disabled in (True, 1, "1", "true", "True") and result not in (
+        "COMPLETED",
+        "SKIPPED",
+    ):
+        return True
+    return False
+
+
+def _leaf_case_status(case):
+    """Map one executed gtest JSON leaf to PASSED / FAILED / SKIPPED / UNKNOWN.
+
+    Returns None for leaves that were not run (DISABLED / SUPPRESSED). Those
+    must not inflate "test cases executed" or the unique-case counts.
+
+    A missing or empty ``result`` is not PASSED. Google Test writes COMPLETED
+    or SKIPPED on a finished leaf. If the case was started (``status`` is RUN,
+    or status is omitted on a truncated abort report) the missing result is
+    FAILED. If it was never started (NOTRUN), it is SKIPPED. The entry verdict
+    uses this same walk, so infer and the issue tree cannot disagree.
+    """
+    if _gtest_leaf_not_run(case):
+        return None
+    fails = case.get("failures")
+    if isinstance(fails, list) and fails:
+        return "FAILED"
+    result = case.get("result")
+    if result == "SKIPPED":
+        return "SKIPPED"
+    if result == "COMPLETED":
+        return "PASSED"
+    run_status = case.get("status")
+    if result in (None, "") and run_status in ("NOTRUN", "NOT_RUN"):
+        return "SKIPPED"
+    if result in (None, ""):
+        return "FAILED"
+    return str(result)
+
+
+def collect_gtest_case_details(obj):
+    """Leaf cases from a gtest JSON object (suite, case, full_name, status).
+
+    DISABLED / SUPPRESSED entries are omitted; they were not executed.
+    """
+    details = []
+    if not isinstance(obj, dict):
+        return details
+    for suite in obj.get("testsuites") or []:
+        if not isinstance(suite, dict):
+            continue
+        suite_name = suite.get("name") or ""
+        for case in suite.get("testsuite") or []:
+            if not isinstance(case, dict) or not isinstance(case.get("name"), str):
+                continue
+            status = _leaf_case_status(case)
+            if status is None:
+                continue
+            name = case["name"]
+            details.append({
+                "suite": suite_name,
+                "case": name,
+                "full_name": f"{suite_name}.{name}" if suite_name else name,
+                "status": status,
+            })
+    return details
+
+
+def _counts_from_details(details):
+    counts = {
+        "cases": 0, "passed": 0, "failed": 0, "skipped": 0, "timeout": 0,
+        "disabled": 0,
+    }
+    for item in details or []:
+        counts["cases"] += 1
+        status = item.get("status")
+        if status == "PASSED":
+            counts["passed"] += 1
+        elif status == "FAILED":
+            counts["failed"] += 1
+        elif status == "SKIPPED":
+            counts["skipped"] += 1
+        elif status == "TIMEOUT":
+            counts["timeout"] += 1
+        elif status == "DISABLED":
+            counts["disabled"] += 1
+    return counts
+
+
+def _issues_only(details):
+    return [d for d in details or [] if d.get("status") in ("FAILED", "SKIPPED", "TIMEOUT")]
+
+
+def synthetic_case_detail(test_name, test_filter=None, status="FAILED"):
+    """One leaf when the gtest/pytest report was missing or unreadable.
+
+    MPI abort and multi-rank races on ``--gtest_output=json`` often leave no
+    parseable report even though the config entry ran. Count that as one case
+    using the gtest filter when it names a single test.
+    """
+    full_name = test_name or "(test)"
+    if (
+        test_filter
+        and test_filter not in ("*", "ALL")
+        and "*" not in test_filter
+        and "?" not in test_filter
+        and "-" not in test_filter
+        and ":" not in test_filter
+    ):
+        full_name = test_filter
+    suite, _, case = full_name.partition(".")
+    if not case:
+        suite = test_name or full_name
+        case = full_name
+    return {
+        "suite": suite,
+        "case": case,
+        "full_name": full_name,
+        "status": status,
+    }
+
+
+def merge_process_failure_details(details, test_name, test_filter=None,
+                                  reason="process exited non-zero"):
+    """Add a process-level failure missing from rank 0's gtest report.
+
+    MPI gtest JSON is intentionally written by rank 0 only. If another rank
+    fails, mpirun returns non-zero while that report can contain only passing
+    or skipped leaves. Keep those leaves, but add an explicit failure so case
+    totals and the issue tree agree with the entry verdict.
+    """
+    if any(item.get("status") == "FAILED" for item in details or []):
+        return details
+    merged = list(details or [])
+    label = f"{test_name or '(test)'} ({reason})"
+    merged.append({
+        "suite": test_name or "(test)",
+        "case": label,
+        "full_name": label,
+        "status": "FAILED",
+    })
+    return merged
+
+
+def timeout_placeholder_detail(test_name, test_filter=None, timeout_s=None):
+    """Synthetic leaf used when the process dies before gtest/pytest finishes."""
+    label = test_filter if test_filter and test_filter not in ("*", "ALL") else (test_name or "(test)")
+    if timeout_s is not None:
+        full_name = f"{label} (timed out after {timeout_s}s)"
+    else:
+        full_name = f"{label} (timed out)"
+    return {
+        "suite": test_name or label,
+        "case": label,
+        "full_name": full_name,
+        "status": "TIMEOUT",
+    }
+
+
+def merge_timeout_details(details, test_name, test_filter=None, timeout_s=None):
+    """Keep any parsed leaves and add a TIMEOUT leaf if the run itself timed out."""
+    merged = list(details or [])
+    if not any(item.get("status") == "TIMEOUT" for item in merged):
+        merged.append(timeout_placeholder_detail(test_name, test_filter, timeout_s))
+    return merged
+
+
+def collect_gtest_case_details_from_file(json_path):
+    """Return leaf-case details from a gtest JSON report, or None if unreadable."""
+    if not json_path or not os.path.isfile(json_path):
+        return None
+    try:
+        with open(json_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return collect_gtest_case_details(data)
+
+
+def collect_pytest_case_details_from_junit(junit_path):
+    """Return leaf-case details from a pytest JUnit XML report, or None."""
+    if not junit_path or not os.path.isfile(junit_path):
+        return None
+    try:
+        root = ET.parse(junit_path).getroot()
+    except (OSError, ET.ParseError):
+        return None
+    details = []
+    for tc in root.iter("testcase"):
+        classname = tc.get("classname") or ""
+        name = tc.get("name") or ""
+        kinds = {child.tag for child in tc}
+        if kinds & {"failure", "error"}:
+            status = "FAILED"
+        elif "skipped" in kinds:
+            status = "SKIPPED"
+        else:
+            status = "PASSED"
+        details.append({
+            "suite": classname,
+            "case": name,
+            "full_name": f"{classname}::{name}" if classname else name,
+            "status": status,
+        })
+    return details
+
+
+_ISSUE_STATUSES = ("FAILED", "SKIPPED", "TIMEOUT")
+_UNIQUE_STATUS_RANK = {
+    "FAILED": 0,
+    "TIMEOUT": 1,
+    "SKIPPED": 2,
+    "PASSED": 3,
+    "DISABLED": 4,
+}
+_IDENTITY_ENV_IGNORE = frozenset({
+    "LD_LIBRARY_PATH",
+    "LLVM_PROFILE_FILE",
+    "RCCL_BUILD",
+})
+
+
+def make_run_identity_key(
+    binary="",
+    num_ranks=0,
+    num_nodes=0,
+    num_gpus=0,
+    custom_args="",
+    env_vars=None,
+    extra="",
+):
+    """Stable identity for "same env, same test setup" duplicate detection.
+
+    JSON-merged test env is used (not the full process environment).
+    LD_LIBRARY_PATH / LLVM_PROFILE_FILE / RCCL_BUILD are omitted because the
+    runner always rewrites those. ``extra`` holds mpi_args or pytest test_dir.
+
+    The returned value is a hash of that payload. The same inputs still match,
+    and tests.jsonl does not store the env plaintext.
+    """
+    env_norm = {
+        str(k): str(v)
+        for k, v in sorted((env_vars or {}).items())
+        if k not in _IDENTITY_ENV_IGNORE
+    }
+    try:
+        gpus = int(num_gpus or 0)
+    except (TypeError, ValueError):
+        gpus = 0
+    payload = {
+        "args": " ".join(str(custom_args or "").split()),
+        "binary": os.path.basename(str(binary or "")),
+        "env": env_norm,
+        "extra": str(extra or ""),
+        "gpus": gpus,
+        "nodes": int(num_nodes or 0),
+        "ranks": int(num_ranks or 0),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def relocate_rma_reload_counter(env, workspace_dir):
+    """Replace RCCL_RMA_RELOAD_COUNTER_FILE with a file in a private directory.
+
+    A fixed path under /tmp can be pre-created as a symlink by another user on
+    the node. The directory is mode 0700 under the run workspace, and the file
+    is created with O_EXCL so the test does not follow a planted link. Call
+    this after make_run_identity_key so duplicate detection still sees the
+    configured env.
+    """
+    key = "RCCL_RMA_RELOAD_COUNTER_FILE"
+    if not env or key not in env:
+        return
+    base = workspace_dir or os.getcwd()
+    parent = os.path.join(base, "rma_reload_counters")
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    os.chmod(parent, 0o700)
+    counter_dir = tempfile.mkdtemp(prefix="counter-", dir=parent)
+    os.chmod(counter_dir, 0o700)
+    path = os.path.join(counter_dir, "counter.txt")
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    os.close(fd)
+    env[key] = path
+
+
+def finish_run_result(result, identity, executed=True):
+    """Attach the run identity and whether this entry actually executed."""
+    result["run_identity"] = identity
+    result["executed"] = executed
+    if result.get("case_details"):
+        result["case_details"] = stamp_run_identity(result["case_details"], identity)
+    return result
+
+
+def stamp_run_identity(details, identity):
+    """Copy leaf dicts and attach ``run_identity`` for unique/duplicate accounting."""
+    if not details:
+        return details
+    stamped = []
+    for item in details:
+        copied = dict(item)
+        copied["run_identity"] = identity
+        stamped.append(copied)
+    return stamped
+
+
+def format_issue_leaves(details, indent="    "):
+    """ASCII tree of FAILED/SKIPPED/TIMEOUT leaves for one config entry."""
+    issues = _issues_only(details)
+    if not issues:
+        return ""
+    lines = []
+    for i, item in enumerate(issues):
+        branch = "`- " if i == len(issues) - 1 else "+- "
+        lines.append(f"{indent}{branch}{item['status']:<7} {item['full_name']}")
+    return "\n".join(lines)
+
+
+def format_status_tree(entries, title, statuses=None, status_width=7):
+    """ASCII tree of selected leaves grouped by config suite and entry.
+
+    ``entries`` is a list of dicts with keys config_suite, config_entry, details.
+    When ``statuses`` is None every leaf is included.
+    """
+    grouped = {}
+    for entry in entries or []:
+        details = entry.get("details") or []
+        if statuses is None:
+            selected = list(details)
+        else:
+            selected = [d for d in details if d.get("status") in statuses]
+        if not selected:
+            continue
+        suite = entry.get("config_suite") or "(suite)"
+        name = entry.get("config_entry") or "(test)"
+        grouped.setdefault(suite, []).append((name, selected))
+    if not grouped:
+        return ""
+
+    lines = [title]
+    suite_items = list(grouped.items())
+    for si, (suite, named_issues) in enumerate(suite_items):
+        last_suite = si == len(suite_items) - 1
+        s_branch, s_pipe = ("`- ", "   ") if last_suite else ("+- ", "|  ")
+        lines.append(f"  {s_branch}{suite}")
+        for ei, (name, issues) in enumerate(named_issues):
+            last_entry = ei == len(named_issues) - 1
+            e_branch, e_pipe = ("`- ", "   ") if last_entry else ("+- ", "|  ")
+            lines.append(f"  {s_pipe}{e_branch}{name}")
+            by_gtest = {}
+            for item in issues:
+                by_gtest.setdefault(item.get("suite") or name, []).append(item)
+            show_inner = len(by_gtest) > 1
+            def _append_leaves(prefix, items):
+                for ci, item in enumerate(items):
+                    c_branch = "`- " if ci == len(items) - 1 else "+- "
+                    label = item.get("label") or item.get("case") or item.get("full_name")
+                    lines.append(
+                        f"{prefix}{c_branch}{item['status']:<{status_width}} {label}"
+                    )
+
+            if show_inner:
+                inner_items = list(by_gtest.items())
+                for gi, (gtest_suite, cases) in enumerate(inner_items):
+                    last_g = gi == len(inner_items) - 1
+                    g_branch, g_pipe = ("`- ", "   ") if last_g else ("+- ", "|  ")
+                    lines.append(f"  {s_pipe}{e_pipe}{g_branch}{gtest_suite}")
+                    _append_leaves(f"  {s_pipe}{e_pipe}{g_pipe}", cases)
             else:
-                res = obj.get("result")
-                if res == "SKIPPED":
-                    stats["skipped"] = True
-                elif res == "COMPLETED":
-                    stats["passed"] = True
-        for v in obj.values():
-            _gtest_json_accumulate(v, stats)
-    elif isinstance(obj, list):
-        for item in obj:
-            _gtest_json_accumulate(item, stats)
+                _append_leaves(f"  {s_pipe}{e_pipe}", issues)
+    return "\n".join(lines)
 
 
-def infer_gtest_result_from_json_file(json_path: str, returncode: int) -> str:
+def format_issue_tree(entries):
+    """ASCII tree of FAILED/SKIPPED/TIMEOUT cases grouped by config suite and entry.
+
+    Uses the same leaf walk as uniqueness accounting so a config entry that ran
+    (including MPI abort with no gtest JSON) still appears.
+    """
+    loc_map = {}
+    for record in iter_case_records(entries):
+        if record.get("status") not in _ISSUE_STATUSES:
+            continue
+        loc = (record["config_suite"], record["config_entry"])
+        loc_map.setdefault(loc, []).append({
+            "suite": record["suite"],
+            "case": record["case"],
+            "full_name": record["full_name"],
+            "label": record.get("label") or record.get("full_name"),
+            "status": record["status"],
+        })
+    rebuilt = _entries_from_location_map(loc_map, entries)
+    return format_status_tree(
+        rebuilt,
+        "Failed/skipped/timeout cases:",
+        statuses=_ISSUE_STATUSES,
+        status_width=7,
+    )
+
+
+def format_duplicate_tree(entries, title=None):
+    """ASCII tree of leaves that ran more than once with the same env/setup."""
+    return format_status_tree(
+        entries,
+        title or "Duplicate cases:",
+        statuses=("DUPLICATE",),
+        status_width=9,
+    )
+
+
+def _case_record_key(record):
+    return (record.get("full_name") or "", record.get("run_identity") or "")
+
+
+def _worst_case_status(statuses):
+    return min(
+        statuses,
+        key=lambda status: _UNIQUE_STATUS_RANK.get(status, 99),
+        default="UNKNOWN",
+    )
+
+
+def _duplicate_run_suffix(records):
+    """e.g. '(2 runs)' or '(2 runs: PASSED, SKIPPED)'."""
+    n = len(records)
+    seen = []
+    for record in records:
+        status = record.get("status") or "UNKNOWN"
+        if status not in seen:
+            seen.append(status)
+    if len(seen) == 1:
+        return f"({n} runs)"
+    return f"({n} runs: {', '.join(seen)})"
+
+
+def iter_case_records(entries):
+    """Yield one record per executed gtest/pytest leaf (and synthetic non-gtest runs)."""
+    for entry in entries or []:
+        suite = entry.get("config_suite") or "(suite)"
+        name = entry.get("config_entry") or "(test)"
+        identity = entry.get("run_identity") or ""
+        details = entry.get("details")
+        if details:
+            for item in details:
+                yield {
+                    "config_suite": suite,
+                    "config_entry": name,
+                    "run_identity": item.get("run_identity") or identity,
+                    "suite": item.get("suite") or name,
+                    "case": item.get("case") or item.get("full_name") or name,
+                    "full_name": item.get("full_name") or item.get("case") or name,
+                    "status": item.get("status") or "UNKNOWN",
+                }
+            continue
+        if not entry.get("executed"):
+            continue
+        result = entry.get("config_result") or "UNKNOWN"
+        if result == "SKIPPED":
+            # Pre-launch skip (missing binary, too few GPUs, etc.) did not run a case.
+            continue
+        yield {
+            "config_suite": suite,
+            "config_entry": name,
+            "run_identity": identity,
+            "suite": name,
+            "case": name,
+            "full_name": name,
+            "status": result,
+        }
+
+
+def _entries_from_location_map(loc_map, original_entries):
+    """Preserve first-seen config suite/entry order when rebuilding tree entries."""
+    rebuilt = []
+    seen = set()
+    for entry in original_entries or []:
+        loc = (
+            entry.get("config_suite") or "(suite)",
+            entry.get("config_entry") or "(test)",
+        )
+        if loc in loc_map and loc not in seen:
+            seen.add(loc)
+            rebuilt.append({
+                "config_suite": loc[0],
+                "config_entry": loc[1],
+                "details": loc_map[loc],
+            })
+    return rebuilt
+
+
+def _tally_status(counts, prefix, status):
+    key = {
+        "PASSED": f"{prefix}passed",
+        "FAILED": f"{prefix}failed",
+        "SKIPPED": f"{prefix}skipped",
+        "TIMEOUT": f"{prefix}timeout",
+        "DISABLED": f"{prefix}disabled",
+    }.get(status, f"{prefix}other")
+    counts[key] += 1
+
+
+def summarize_case_uniqueness(entries):
+    """Count unique leaves and build unique/duplicate trees.
+
+    A duplicate is the same leaf name with the same run identity (env, ranks,
+    binary, args). Duplicate runs are not removed; they are reported so a human
+    can decide whether the extra execution is intentional.
+
+    Invariants:
+      unique + duplicate_extra == total
+      total_{passed,failed,skipped,timeout,disabled,other} sum to total
+      unique_{passed,failed,skipped,timeout,disabled,other} sum to unique
+    When duplicate_cases == 0 the total and unique status buckets match.
+    Disabled config entries (enabled: false) are included in total and unique
+    so those two still add up after the Disabled metric is printed.
+    """
+    groups = {}
+    order = []
+    for record in iter_case_records(entries):
+        key = _case_record_key(record)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(record)
+
+    unique_counts = {
+        "total": 0,
+        "unique": 0,
+        "duplicate_extra": 0,
+        "duplicate_cases": 0,
+        "total_passed": 0,
+        "total_failed": 0,
+        "total_skipped": 0,
+        "total_timeout": 0,
+        "total_disabled": 0,
+        "total_other": 0,
+        "unique_passed": 0,
+        "unique_failed": 0,
+        "unique_skipped": 0,
+        "unique_timeout": 0,
+        "unique_disabled": 0,
+        "unique_other": 0,
+    }
+    duplicate_loc = {}
+
+    for key in order:
+        records = groups[key]
+        unique_counts["total"] += len(records)
+        unique_counts["unique"] += 1
+        for record in records:
+            _tally_status(unique_counts, "total_", record.get("status"))
+        extra = len(records) - 1
+        if extra:
+            unique_counts["duplicate_extra"] += extra
+            unique_counts["duplicate_cases"] += 1
+        worst = _worst_case_status([r.get("status") for r in records])
+        _tally_status(unique_counts, "unique_", worst)
+
+        if extra:
+            suffix = _duplicate_run_suffix(records)
+            seen_loc_leaf = set()
+            for record in records:
+                loc = (record["config_suite"], record["config_entry"])
+                loc_leaf = loc + (record["full_name"],)
+                if loc_leaf in seen_loc_leaf:
+                    continue
+                seen_loc_leaf.add(loc_leaf)
+                duplicate_loc.setdefault(loc, []).append({
+                    "suite": record["suite"],
+                    "case": record["case"],
+                    "full_name": record["full_name"],
+                    "label": f"{record['full_name']} {suffix}",
+                    "status": "DUPLICATE",
+                })
+
+    unique_counts["duplicate_entries"] = _entries_from_location_map(duplicate_loc, entries)
+    return unique_counts
+
+
+def format_case_counts(counts):
+    """One-line expansion of a config entry into counted gtest/pytest cases."""
+    if not counts:
+        return ""
+    cases = counts.get("cases", 0)
+    details = []
+    for key, label in (
+        ("passed", "passed"),
+        ("failed", "failed"),
+        ("skipped", "skipped"),
+        ("timeout", "timed out"),
+        ("disabled", "disabled"),
+    ):
+        n = counts.get(key, 0)
+        if n:
+            details.append(f"{n} {label}")
+    if details:
+        return f"{cases} cases ({', '.join(details)})"
+    return f"{cases} cases"
+
+
+def print_case_result(result, case_counts, case_details, trailer):
+    """Print the Result line and any FAILED/SKIPPED/TIMEOUT leaves.
+
+    ``trailer`` is the text after the optional case counts, for example
+    ``"(1.250 seconds)"`` or ``"after 30 seconds"``.
+    """
+    cases_suffix = format_case_counts(case_counts)
+    if cases_suffix:
+        print(f"\n  Result: {result} [{cases_suffix}] {trailer}")
+    else:
+        print(f"\n  Result: {result} {trailer}")
+    issue_tree = format_issue_leaves(case_details)
+    if issue_tree:
+        print(issue_tree)
+
+
+def infer_gtest_result_from_json_file(json_path: str, returncode: int, details=None) -> str:
     """
     Map gtest exit code + JSON report to TestResult.
 
-    When returncode is 0, inspects leaf tests for failures/SKIPPED/COMPLETED.
+    When returncode is 0, scores the same leaf list collect_gtest_case_details
+    uses. Pass *details* to avoid a second json.load of the same report.
     Falls back to infer_gtest_result_from_output(\"\", rc) if the file is missing
     or invalid JSON.
     """
@@ -138,51 +872,45 @@ def infer_gtest_result_from_json_file(json_path: str, returncode: int) -> str:
         return TestResult.RESULT_TIMEOUT.value
     if returncode != ExitCode.EXIT_SUCCESS:
         return TestResult.RESULT_FAILED.value
-    if not json_path or not os.path.isfile(json_path):
+    if details is None:
+        details = collect_gtest_case_details_from_file(json_path)
+    if details is None:
+        # The runner does not capture stdout, so the "0 tests" banner in
+        # infer_gtest_result_from_output cannot match on this path. A present
+        # report with no leaves is SKIPPED via _result_from_gtest_details.
+        # A missing report stays on the exit code.
         return infer_gtest_result_from_output("", returncode)
-    try:
-        with open(json_path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return infer_gtest_result_from_output("", returncode)
-    stats = {"failed": False, "passed": False, "skipped": False}
-    _gtest_json_accumulate(data, stats)
-    if stats["failed"]:
-        return TestResult.RESULT_FAILED.value
-    if stats["passed"]:
-        return TestResult.RESULT_PASSED.value
-    if stats["skipped"]:
-        return TestResult.RESULT_SKIPPED.value
-    return TestResult.RESULT_PASSED.value
+    return _result_from_gtest_details(details)
 
 
-def infer_pytest_result_from_junit(junit_path: str, returncode: int) -> str:
+def infer_pytest_result_from_junit(junit_path: str, returncode: int, details=None) -> str:
     """Map a pytest run (JUnit XML + exit code) to a TestResult, preferring the
-    report so a fully-skipped harness reports SKIPPED rather than PASSED."""
+    report so a fully-skipped harness reports SKIPPED rather than PASSED.
+
+    Pass *details* from collect_pytest_case_details_from_junit to avoid a
+    second parse of the same report.
+    """
     if returncode == ExitCode.EXIT_TIMEOUT:
         return TestResult.RESULT_TIMEOUT.value
     # pytest exit 5 = no tests collected.
     if returncode == 5:
         return TestResult.RESULT_SKIPPED.value
-    if not junit_path or not os.path.isfile(junit_path):
-        return (TestResult.RESULT_PASSED.value if returncode == ExitCode.EXIT_SUCCESS
-                else TestResult.RESULT_FAILED.value)
-    try:
-        root = ET.parse(junit_path).getroot()
-    except (OSError, ET.ParseError):
+    if details is None:
+        details = collect_pytest_case_details_from_junit(junit_path)
+    if details is None:
         return (TestResult.RESULT_PASSED.value if returncode == ExitCode.EXIT_SUCCESS
                 else TestResult.RESULT_FAILED.value)
 
-    total = passed = skipped = failed = 0
-    for tc in root.iter("testcase"):
-        total += 1
-        kinds = {child.tag for child in tc}
-        if kinds & {"failure", "error"}:
+    passed = skipped = failed = 0
+    for item in details:
+        status = item.get("status")
+        if status == "FAILED":
             failed += 1
-        elif "skipped" in kinds:
+        elif status == "SKIPPED":
             skipped += 1
         else:
             passed += 1
+    total = passed + skipped + failed
 
     if failed:
         return TestResult.RESULT_FAILED.value
@@ -194,14 +922,85 @@ def infer_pytest_result_from_junit(junit_path: str, returncode: int) -> str:
     return TestResult.RESULT_PASSED.value
 
 
+# Job ids for allocators whose host list this runner does not parse. An empty
+# mpi_hosts under one of these is "topology unknown", not "this one machine".
+_UNRESOLVED_ALLOCATION_ENV = (
+    "SLURM_JOB_ID",
+    "PBS_JOBID",
+    "LSB_JOBID",
+    "FLUX_JOB_ID",
+    "COBALT_JOBID",
+)
+
+
+def _first_scheduled_host(mpi_hosts):
+    """Host that receives MPI rank 0, or None when that host cannot be named.
+
+    Open MPI gives rank 0 to the first SLURM host or the first hostfile entry.
+    An empty dict means mpirun keeps every rank on this machine.
+    """
+    if not mpi_hosts:
+        return None
+    if "host_list" in mpi_hosts:
+        for part in str(mpi_hosts["host_list"]).split(","):
+            host = part.strip().split(":")[0].strip()
+            if host:
+                return host
+        return None
+    if "hostfile" in mpi_hosts:
+        try:
+            with open(mpi_hosts["hostfile"], encoding="utf-8", errors="replace") as hf:
+                for line in hf:
+                    line = line.split("#")[0].strip()
+                    if not line:
+                        continue
+                    host = line.split()[0].strip()
+                    if host:
+                        return host
+        except OSError:
+            return None
+    return None
+
+
+def _rank0_is_local(mpi_hosts):
+    """True when rank 0 runs on this machine.
+
+    No host list means every rank is local. A declared host source that cannot
+    be read is not treated as local: the report must not assume /tmp is shared.
+    """
+    if not mpi_hosts:
+        return True
+    host = _first_scheduled_host(mpi_hosts)
+    if not host:
+        return False
+    local = socket.gethostname().split(".")[0]
+    return host.split(".")[0] == local
+
+
+def _test_needs_mpi(test, suite_config):
+    """True for an entry --skip-mpi-check drops (auto ranks, or more than one)."""
+    test_ranks = test.get("num_ranks", (suite_config or {}).get("num_ranks", 1))
+    if isinstance(test_ranks, str):
+        return test_ranks.strip().lower() == "auto"
+    return test_ranks > 1
+
+
 def _distinct_host_count(mpi_hosts: dict) -> int:
     """
     Count distinct hosts from SLURM host_list or Open MPI hostfile.
-    Returns 0 if unknown (no host list / file), so callers skip the insufficient-nodes
-    check when topology cannot be determined.
+
+    An empty dict with no batch job means mpirun places every rank on the local
+    host, so the count is 1 and a multi-node entry is skipped. An active
+    allocation whose hosts were not detected stays 0: the caller then does not
+    skip, because 0 means the topology is unknown.
+
+    Returns 0 when an active allocation cannot be resolved or a declared host
+    source cannot be read.
     """
     if not mpi_hosts:
-        return 0
+        if any(os.environ.get(name) for name in _UNRESOLVED_ALLOCATION_ENV):
+            return 0
+        return 1
     if "host_list" in mpi_hosts:
         seen = set()
         for part in mpi_hosts["host_list"].split(","):
@@ -295,6 +1094,11 @@ class TestExecutor:
         self.test_names = []
         self.test_durations = []
         self.test_suites = []
+        # Per config-entry gtest/pytest leaf counts (wildcards expanded).
+        self.test_case_counts = []
+        self.test_case_details = []
+        self.test_run_identities = []
+        self.test_executed = []
 
         # Structured result emission (dashboard). Enabling either --emit-results or
         # --db-push turns on per-test log capture so perf output can be parsed.
@@ -314,13 +1118,22 @@ class TestExecutor:
         """Setup build and log directories"""
         workdir = self.paths.get("workdir", os.getcwd())
 
-        # Determine workspace name for logs/reports (always timestamped)
-        suffix_part = f"_{self.args.report_suffix}" if self.args.report_suffix else ""
-        timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
-        workspace_name = f"rccl_test_artifacts{suffix_part}_{timestamp}"
-
-        # Create workspace directory path
-        self.workspace_dir = os.path.join(workdir, workspace_name)
+        output_dir = getattr(self.args, "output", None)
+        if output_dir:
+            # --output takes the workspace path verbatim, so --report-suffix (only
+            # consumed by the timestamped-name branch below) would be silently
+            # dropped. Warn rather than ignore it without a trace.
+            if getattr(self.args, "report_suffix", ""):
+                print("NOTE: --report-suffix is ignored when --output is given "
+                      "(the workspace directory is taken verbatim from --output)")
+            self.workspace_dir = os.path.abspath(
+                os.path.expanduser(os.path.expandvars(output_dir))
+            )
+        else:
+            suffix_part = f"_{self.args.report_suffix}" if self.args.report_suffix else ""
+            timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
+            workspace_name = f"rccl_test_artifacts{suffix_part}_{timestamp}"
+            self.workspace_dir = os.path.join(workdir, workspace_name)
 
         # Determine build directory (priority: --build-dir > env var > default)
         custom_rccl_path = os.environ.get('RCCL_LIB_PATH') or os.environ.get('RCCL_BUILD_DIR')
@@ -338,24 +1151,29 @@ class TestExecutor:
             if self.args.verbose:
                 print(f"Using custom RCCL library path from environment: {self.build_dir}")
         else:
-            # Use default build directory matching install.sh convention
+            # Use default build directory matching install.sh convention.
+            # --coverage-report forces a Debug build (configure_coverage_build
+            # appends --debug), so mirror that here or the runner would look for
+            # librccl.so / device-*.elf under build/release while install.sh
+            # built them into build/debug.
             self.using_custom_lib = False
-            install_flags = self.build_config.get("install_flags", [])
-            if "--debug" in install_flags or "--debug-fast" in install_flags:
-                build_type = "debug"
-            else:
-                build_type = "release"
+            build_type = rccl_build_type(self.build_config, self.args)
             self.build_dir = os.path.join(workdir, "build", build_type)
 
         # Set log and report directories under workspace
         self.log_dir = os.path.join(self.workspace_dir, "logs")
         self.report_dir = os.path.join(self.workspace_dir, "report")
+        self.rawfiles_dir = os.path.join(self.log_dir, "rawfiles")
 
         # Create directories (skip build_dir if using custom lib)
         if not self.using_custom_lib:
             os.makedirs(self.build_dir, exist_ok=True)
         os.makedirs(self.log_dir, exist_ok=True)
         os.makedirs(self.report_dir, exist_ok=True)
+        os.makedirs(self.rawfiles_dir, exist_ok=True)
+        if self.args.coverage_report and not getattr(self.args, "skip_tests", False):
+            for profile in Path(self.rawfiles_dir).glob("*.profraw"):
+                profile.unlink()
 
         if self.args.verbose:
             print(f"Work directory:   {workdir}")
@@ -365,6 +1183,49 @@ class TestExecutor:
                 print(f"  (Custom path via {'--build-dir' if self.args.build_dir else 'RCCL_LIB_PATH/RCCL_BUILD_DIR'})")
             print(f"Log directory:    {self.log_dir}")
             print(f"Report directory: {self.report_dir}")
+
+    def _coverage_profile_pattern(self):
+        """Absolute per-host/process profile path for the current workspace."""
+        return os.path.join(
+            self.rawfiles_dir,
+            "rccl_tests_%h_%p_%m.profraw",
+        )
+
+    def _apply_coverage_profile_env(self, env):
+        """Export LLVM_PROFILE_FILE when this run is collecting coverage.
+
+        Returns the absolute pattern, or None when coverage is off, so the MPI
+        argv can forward the same value to remote ranks.
+        """
+        if not self.args.coverage_report:
+            return None
+        pattern = self._coverage_profile_pattern()
+        env["LLVM_PROFILE_FILE"] = pattern
+        return pattern
+
+    def _cmake_cache_value(self, name):
+        """Return the CMake cache VALUE for <name>, or None if absent."""
+        cache_path = os.path.join(self.build_dir, "CMakeCache.txt")
+        prefix = name + ":"
+        try:
+            with open(cache_path, encoding="utf-8") as cache:
+                for line in cache:
+                    if line.startswith(prefix):
+                        return line.rstrip("\n").split("=", 1)[-1]
+        except OSError:
+            return None
+        return None
+
+    def _full_coverage_resolved(self):
+        """True when this build's CMakeCache resolved ENABLE_FULL_COVERAGE to ON.
+
+        AUTO is FORCEd to ON or OFF in the cache, so the cache holds the answer.
+        device-*.elf is produced for every device-linker build, including the
+        host-only AUTO fallback, and llvm-cov fails on objects with no
+        __llvm_covmap.
+        """
+        value = self._cmake_cache_value("ENABLE_FULL_COVERAGE")
+        return value is not None and value.upper() == "ON"
 
     def _emit_log_path(self, test_name):
         """Unique per-test captured-log path under log_dir (used when result
@@ -635,10 +1496,18 @@ class TestExecutor:
         rocm_path = self._rocm_root()
         mpi_path = self.paths.get("mpi_path", "")
 
-        install_flags = list(self.build_config.get("install_flags", []))
+        # Expand env vars / ~ (e.g. ${WORKDIR}, ${ROCM_SYSTEMS:-...}) so build
+        # paths need not be hardcoded. Mirrors build_rccl_tests(); a no-op for
+        # flags/options that contain no ${VAR} references.
+        def _expand(p):
+            return os.path.expanduser(expand_env_vars(str(p)))
+
+        install_flags = [_expand(f) for f in self.build_config.get("install_flags", [])]
         cmake_options = self.build_config.get("cmake_options", "")
         if isinstance(cmake_options, dict):
-            cmake_options = " ".join(f"-D{k}={v}" for k, v in cmake_options.items())
+            cmake_options = " ".join(f"-D{k}={_expand(v)}" for k, v in cmake_options.items())
+        else:
+            cmake_options = _expand(cmake_options)
         build_env_vars = self.build_config.get("env_variables", {})
         parallel_jobs = self.build_config.get("parallel_jobs")
 
@@ -652,20 +1521,17 @@ class TestExecutor:
                 cmake_options = "-DENABLE_MPI_TESTS=OFF"
             print("NOTE: MPI tests disabled in build (--skip-mpi-check)")
 
-        # Drop code coverage instrumentation when no coverage report is requested.
-        # Coverage instrumentation slows down both runtime (counter updates) and
-        # process exit (profraw file write per PID), which is significant when
-        # many short-lived test processes are spawned.
+        install_flags, cmake_options = configure_coverage_build(
+            install_flags,
+            cmake_options,
+            self.args.coverage_report,
+        )
         if not self.args.coverage_report:
-            if "--enable-code-coverage" in install_flags:
-                install_flags.remove("--enable-code-coverage")
-            # Explicitly disable to override any cached CMake value from prior builds
-            if cmake_options:
-                cmake_options += " -DENABLE_CODE_COVERAGE=OFF"
-            else:
-                cmake_options = "-DENABLE_CODE_COVERAGE=OFF"
-            print("NOTE: Code coverage instrumentation disabled in build "
+            print("NOTE: Code coverage instrumentation disabled "
                   "(use --coverage-report to enable)")
+        else:
+            print("NOTE: Coverage instrumentation enabled; CMake will use device "
+                  "coverage when supported and otherwise fall back to host-only")
 
         # Build install.sh command
         install_script = os.path.join(workdir, "install.sh")
@@ -1079,12 +1945,36 @@ class TestExecutor:
         perf_nthreads = int(_t_match.group(1)) if _t_match else 1
         exec_mode = "mpi" if num_ranks > 1 else ("threaded" if perf_nthreads > 1 else "single")
 
-        # Merge environment variables
+        # Merge environment variables.  Expand ${VAR:-default} references so
+        # config values like "${RCCL_MULTIPLANE_MAP_FILE:-}" resolve from the
+        # caller's environment instead of being passed as literal strings.
         merged_env = {
-            **self.global_env,
-            **suite_config.get("env_variables", {}),
-            **env_vars
+            k: expand_env_vars(str(v))
+            for k, v in {
+                **self.global_env,
+                **suite_config.get("env_variables", {}),
+                **env_vars,
+            }.items()
         }
+
+        mpi_extra = " ".join(
+            p for p in (
+                self._normalize_mpi_args(suite_config.get("mpi_args")),
+                self._normalize_mpi_args(test_config.get("mpi_args")),
+            ) if p
+        )
+        run_identity = make_run_identity_key(
+            binary=binary,
+            num_ranks=num_ranks,
+            num_nodes=num_nodes,
+            num_gpus=num_gpus,
+            custom_args=custom_args,
+            env_vars=merged_env,
+            extra=mpi_extra,
+        )
+
+        def _done(result, executed=True):
+            return finish_run_result(result, run_identity, executed)
 
         print(f"\n{'='*80}")
         print(f"Test: {test_name}")
@@ -1094,6 +1984,10 @@ class TestExecutor:
         # is left untouched.
         if test_config.get("is_pytest", False):
             return self._run_pytest_test(test_config, merged_env)
+
+        # Identity was hashed from the configured env. The live counter file is
+        # a private path so a fixed /tmp name is not what the test opens.
+        relocate_rma_reload_counter(merged_env, getattr(self, "workspace_dir", None))
 
         if self.args.verbose:
             if description:
@@ -1128,13 +2022,30 @@ class TestExecutor:
                     "duration": 0,
                     "error": f"MPI binary not found: {test_binary_path}"
                 }
+            # CMake omits some single-rank targets unless an optional dependency
+            # is present (GIN-SDMA AllGather/Broadcast need sibling rccl-tests
+            # headers). Those configurations set skip_if_missing so a standalone
+            # RCCL build reports SKIPPED instead of failing before any test runs.
+            if suite_config.get("skip_if_missing"):
+                print(f"SKIP: optional test binary not found: {test_binary_path}")
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": f"Optional binary not found: {test_binary_path}"
+                }
             print(f"ERROR: Test binary not found: {test_binary_path}")
-            return {
+            missing_details = [synthetic_case_detail(
+                test_name, test_filter, TestResult.RESULT_FAILED.value
+            )]
+            return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": 0,
-                "error": f"Binary not found: {test_binary_path}"
-            }
+                "error": f"Binary not found: {test_binary_path}",
+                "case_details": missing_details,
+                "case_counts": _counts_from_details(missing_details),
+            })
 
         # For MPI tests, verify mpirun is available
         if num_ranks > 1:
@@ -1229,12 +2140,12 @@ class TestExecutor:
         # exit is a significant overhead when many short-lived test processes
         # are spawned.
         #
+        # %h  — unique per host when MPI ranks write to shared storage.
         # %p  — unique per child PID (ProcessIsolatedTestRunner re-execs each
         #        test as a separate process, so each gets its own file).
         # %m  — binary/module signature (keeps test-binary and librccl.so
         #        profiles in separate files since each has its own runtime).
-        if self.args.coverage_report:
-            env['LLVM_PROFILE_FILE'] = "rccl_tests_%p_%m.profraw"
+        profile_pattern = self._apply_coverage_profile_env(env)
 
         # Add test-specific env vars.  LD_LIBRARY_PATH is already merged above.
         for key, value in merged_env.items():
@@ -1254,8 +2165,14 @@ class TestExecutor:
         gtest_json_path = None
         gtest_out_arg = ""
         if is_gtest:
+            # Rank 0 writes this file. When that rank is another host, /tmp on
+            # this process stays empty and an exit 0 would be scored PASSED.
+            report_dir = tempfile.gettempdir()
+            if num_ranks > 1 and not _rank0_is_local(getattr(self, "mpi_hosts", None)):
+                report_dir = getattr(self, "workspace_dir", None) or report_dir
+                os.makedirs(report_dir, exist_ok=True)
             fd, gtest_json_path = tempfile.mkstemp(
-                prefix="rccl_gtest_", suffix=".json", dir=tempfile.gettempdir()
+                prefix="rccl_gtest_", suffix=".json", dir=report_dir
             )
             os.close(fd)
             gtest_out_arg = f" --gtest_output=json:{shlex.quote(gtest_json_path)}"
@@ -1376,9 +2293,9 @@ class TestExecutor:
                 mpi_args += " " + env_fmt.format(key=key, value=value)
 
             mpi_args += " " + env_fmt.format(key="LD_LIBRARY_PATH", value=env['LD_LIBRARY_PATH'])
-            if self.args.coverage_report:
+            if profile_pattern:
                 mpi_args += " " + env_fmt.format(
-                    key="LLVM_PROFILE_FILE", value="rccl_tests_%p_%m.profraw"
+                    key="LLVM_PROFILE_FILE", value=profile_pattern
                 )
 
             # Forward LD_PRELOAD so UCX core libraries are preloaded with
@@ -1390,21 +2307,16 @@ class TestExecutor:
             # Build the program (test binary + its arguments) that mpirun will
             # launch as a single string, so the locked-memory wrapper below can be
             # applied directly instead of re-parsing the assembled command.
+            # Do not pass --gtest_output to every rank: they would race on one file.
             if is_gtest and not (test_filter == "ALL" or test_filter == "*"):
                 program = f"{exe} --gtest_filter={test_filter}"
             else:
                 program = exe
             if custom_args:
                 program += f" {custom_args}"
-            program += gtest_out_arg
-
-            # RDMA QP/CQ creation pins memory and fails with "Cannot allocate
-            # memory" under SLURM's low inherited locked-memory soft limit, so
-            # raise it per rank before exec. `set -f` keeps gtest filter globs
-            # literal; wrapping the program (not the assembled command) means it
-            # always applies for MPI launches.
-            inner = f"ulimit -l unlimited 2>/dev/null; set -f; exec {program}"
-            wrapped_program = f"bash -c {shlex.quote(inner)}"
+            wrapped_program = wrap_mpi_program(
+                program, gtest_json_path if is_gtest else None
+            )
             cmd = f"{mpi_cmd} {mpi_args} {wrapped_program}"
 
         # Working directory: gtest binaries live in <build_dir>/test, but a
@@ -1462,10 +2374,21 @@ class TestExecutor:
                 returncode = proc.wait(timeout=timeout if timeout > 0 else None)
             except subprocess.TimeoutExpired:
                 duration = time.time() - start_time
-                print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
                 print("  Killing process group (mpirun and all ranks)...")
                 self._terminate_process_group(proc)
-                return {
+                # Read only after every possible gtest JSON writer has exited.
+                parsed = collect_gtest_case_details_from_file(gtest_json_path or "") if is_gtest else None
+                case_details = merge_timeout_details(
+                    parsed, test_name, test_filter, timeout
+                )
+                case_counts = _counts_from_details(case_details)
+                print_case_result(
+                    TestResult.RESULT_TIMEOUT.value,
+                    case_counts,
+                    case_details,
+                    f"after {timeout} seconds",
+                )
+                return _done({
                     "name": test_name,
                     "result": TestResult.RESULT_TIMEOUT.value,
                     "duration": duration,
@@ -1474,7 +2397,9 @@ class TestExecutor:
                     "num_nodes": num_nodes, "num_gpus": num_gpus,
                     "num_ranks": num_ranks, "log_file": emit_log_path,
                     "exec_mode": exec_mode, "nthreads": perf_nthreads,
-                }
+                    "case_counts": case_counts,
+                    "case_details": case_details,
+                })
             except KeyboardInterrupt:
                 # Make sure Ctrl-C tears down the whole MPI job, not just the shell.
                 print("\n  Interrupted -- killing process group (mpirun and all ranks)...")
@@ -1484,18 +2409,56 @@ class TestExecutor:
                 duration = time.time() - start_time
                 self._terminate_process_group(proc)
                 print(f"\n  ERROR: {e}")
-                return {
+                return _done({
                     "name": test_name,
                     "result": TestResult.RESULT_FAILED.value,
                     "duration": duration,
                     "error": str(e)
-                }
+                })
 
             duration = time.time() - start_time
 
+            case_counts = None
+            case_details = None
             if is_gtest:
                 rc = returncode if returncode is not None else -1
-                test_result = infer_gtest_result_from_json_file(gtest_json_path or "", rc)
+                report_missing = (
+                    num_ranks > 1
+                    and not _rank0_is_local(getattr(self, "mpi_hosts", None))
+                    and (
+                        not gtest_json_path
+                        or not os.path.isfile(gtest_json_path)
+                        or os.path.getsize(gtest_json_path) == 0
+                    )
+                )
+                if report_missing and rc == ExitCode.EXIT_SUCCESS:
+                    # The workspace path was not visible to rank 0. Do not
+                    # score the empty local file as a pass.
+                    test_result = TestResult.RESULT_FAILED.value
+                    case_details = merge_process_failure_details(
+                        None, test_name, test_filter,
+                        reason="rank 0 gtest report was not visible on this host",
+                    )
+                else:
+                    case_details = collect_gtest_case_details_from_file(gtest_json_path or "")
+                    test_result = infer_gtest_result_from_json_file(
+                        gtest_json_path or "", rc, details=case_details
+                    )
+                # MPI abort / JSON races leave no report; still count the entry.
+                if case_details is None and test_result == TestResult.RESULT_PASSED.value:
+                    case_details = [
+                        synthetic_case_detail(test_name, test_filter, test_result)
+                    ]
+                elif test_result == TestResult.RESULT_FAILED.value:
+                    case_details = merge_process_failure_details(
+                        case_details, test_name, test_filter
+                    )
+                elif test_result == TestResult.RESULT_TIMEOUT.value:
+                    case_details = merge_timeout_details(
+                        case_details, test_name, test_filter, timeout
+                    )
+                if case_details is not None:
+                    case_counts = _counts_from_details(case_details)
             else:
                 if returncode == ExitCode.EXIT_SUCCESS:
                     test_result = TestResult.RESULT_PASSED.value
@@ -1504,9 +2467,14 @@ class TestExecutor:
                 else:
                     test_result = TestResult.RESULT_FAILED.value
 
-            print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
+            print_case_result(
+                test_result,
+                case_counts,
+                case_details,
+                f"({duration:.3f} seconds)",
+            )
 
-            return {
+            result = {
                 "name": test_name,
                 "result": test_result,
                 "duration": duration,
@@ -1516,6 +2484,11 @@ class TestExecutor:
                 "num_ranks": num_ranks, "log_file": emit_log_path,
                 "exec_mode": exec_mode, "nthreads": perf_nthreads,
             }
+            if case_counts is not None:
+                result["case_counts"] = case_counts
+            if case_details is not None:
+                result["case_details"] = case_details
+            return _done(result)
         finally:
             if gtest_json_path:
                 try:
@@ -1566,17 +2539,39 @@ class TestExecutor:
         python_bin (default <test_dir>/venv else python3), timeout."""
         test_name = test_config.get("name")
         timeout = test_config.get("timeout", 0)
+        test_filter = test_config.get("test_filter", "*")
 
-        # Resolve harness dir (absolute, or relative to workdir).
+        # Identity and _done are created before the pre-launch failures so a
+        # missing harness still shows up in the issue tree.
         test_dir = test_config.get("test_dir", "")
-        if not test_dir:
-            print(f"ERROR: pytest test '{test_name}' is missing required 'test_dir'")
-            return {
+        run_identity = make_run_identity_key(
+            binary="pytest",
+            num_ranks=1,
+            num_nodes=1,
+            env_vars=merged_env,
+            extra=f"pytest:{os.path.normpath(test_dir) if test_dir else ''}",
+        )
+
+        def _done(result, executed=True):
+            return finish_run_result(result, run_identity, executed)
+
+        def _failed(error):
+            details = [synthetic_case_detail(
+                test_name, test_filter, TestResult.RESULT_FAILED.value
+            )]
+            return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": 0,
-                "error": "pytest test missing 'test_dir'",
-            }
+                "error": error,
+                "case_details": details,
+                "case_counts": _counts_from_details(details),
+            })
+
+        # Resolve harness dir (absolute, or relative to workdir).
+        if not test_dir:
+            print(f"ERROR: pytest test '{test_name}' is missing required 'test_dir'")
+            return _failed("pytest test missing 'test_dir'")
         test_dir = os.path.expanduser(os.path.expandvars(test_dir))
         if not os.path.isabs(test_dir):
             workdir = self.paths.get("workdir", os.getcwd())
@@ -1597,12 +2592,7 @@ class TestExecutor:
             python_bin, setup_err = self._setup_pytest_venv(test_dir, test_config)
             if setup_err:
                 print(f"\n  Result: {TestResult.RESULT_FAILED.value} ({setup_err})")
-                return {
-                    "name": test_name,
-                    "result": TestResult.RESULT_FAILED.value,
-                    "duration": 0,
-                    "error": setup_err,
-                }
+                return _failed(setup_err)
         else:
             python_bin = test_config.get("python_bin", "")
             if not python_bin:
@@ -1610,13 +2600,22 @@ class TestExecutor:
                 python_bin = venv_py if os.path.isfile(venv_py) else "python3"
 
         # test_filter -> pytest selection args (raw args if leading '-', else -k expr).
-        test_filter = test_config.get("test_filter", "*")
         select_args = []
         if test_filter and test_filter not in ("*", "ALL"):
             if test_filter.lstrip().startswith("-"):
                 select_args = shlex.split(test_filter)
             else:
                 select_args = ["-k", test_filter]
+
+        # Resolved directory replaces the pre-launch identity. _done looks the
+        # name up when it runs, so later returns see this value.
+        run_identity = make_run_identity_key(
+            binary="pytest",
+            num_ranks=1,
+            num_nodes=1,
+            env_vars=merged_env,
+            extra=f"pytest:{os.path.normpath(test_dir)}",
+        )
 
         # Env: build_dir first on LD_LIBRARY_PATH, then a per-test LD_LIBRARY_PATH
         # from the JSON env (mirrors the gtest/MPI path), then rocm/mpi libs.
@@ -1635,8 +2634,7 @@ class TestExecutor:
             ld_parts.append(os.path.join(mpi_path, "lib"))
         env["LD_LIBRARY_PATH"] = ":".join(ld_parts)
         env.setdefault("RCCL_BUILD", self.build_dir)
-        if self.args.coverage_report:
-            env["LLVM_PROFILE_FILE"] = "rccl_tests_%p_%m.profraw"
+        self._apply_coverage_profile_env(env)
         for key, value in merged_env.items():
             if key != "LD_LIBRARY_PATH":
                 env[key] = str(value)
@@ -1673,35 +2671,73 @@ class TestExecutor:
             result = subprocess.run(cmd, **run_kwargs)
         except subprocess.TimeoutExpired:
             duration = time.time() - start_time
-            print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
-            return {
+            parsed = collect_pytest_case_details_from_junit(junit_path)
+            case_details = merge_timeout_details(
+                parsed, test_name, test_filter, timeout
+            )
+            case_counts = _counts_from_details(case_details)
+            print_case_result(
+                TestResult.RESULT_TIMEOUT.value,
+                case_counts,
+                case_details,
+                f"after {timeout} seconds",
+            )
+            return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_TIMEOUT.value,
                 "duration": duration,
                 "error": f"Test timed out after {timeout} seconds",
-            }
+                "case_counts": case_counts,
+                "case_details": case_details,
+            })
         except Exception as e:
             duration = time.time() - start_time
             print(f"\n  ERROR: {e}")
-            return {
+            return _done({
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": duration,
                 "error": str(e),
-            }
+            })
 
         duration = time.time() - start_time
         rc = result.returncode if result.returncode is not None else -1
-        test_result = infer_pytest_result_from_junit(junit_path, rc)
-        print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
+        case_details = collect_pytest_case_details_from_junit(junit_path)
+        test_result = infer_pytest_result_from_junit(junit_path, rc, details=case_details)
+        if case_details is None and test_result in (
+            TestResult.RESULT_PASSED.value,
+            TestResult.RESULT_FAILED.value,
+            TestResult.RESULT_TIMEOUT.value,
+        ):
+            case_details = [synthetic_case_detail(test_name, test_filter, test_result)]
+        elif test_result == TestResult.RESULT_FAILED.value:
+            case_details = merge_process_failure_details(
+                case_details, test_name, test_filter
+            )
+        elif test_result == TestResult.RESULT_TIMEOUT.value:
+            case_details = merge_timeout_details(
+                case_details, test_name, test_filter, timeout
+            )
+        case_counts = _counts_from_details(case_details) if case_details is not None else None
+        print_case_result(
+            test_result,
+            case_counts,
+            case_details,
+            f"({duration:.3f} seconds)",
+        )
         if self.args.verbose:
             print(f"  JUnit report: {junit_path}")
-        return {
+        out = {
             "name": test_name,
             "result": test_result,
             "duration": duration,
             "exit_code": int(rc),
         }
+        if case_counts is not None:
+            out["case_counts"] = case_counts
+        if case_details is not None:
+            out["case_details"] = case_details
+        return _done(out)
 
     def run_test_suite(self, suite_config):
         """
@@ -1744,8 +2780,7 @@ class TestExecutor:
 
             # Skip MPI tests when --skip-mpi-check is set ("auto" implies multi-rank)
             test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
-            is_auto_ranks = isinstance(test_ranks, str) and test_ranks.strip().lower() == "auto"
-            is_mpi_test = is_auto_ranks or (not isinstance(test_ranks, str) and test_ranks > 1)
+            is_mpi_test = _test_needs_mpi(test, suite_config)
             if self.args.skip_mpi_check and is_mpi_test:
                 skipped_count += 1
                 if self.args.verbose:
@@ -1754,17 +2789,7 @@ class TestExecutor:
 
             result = self.run_test(test, suite_config)
             results.append(result)
-
-            self.test_names.append(test_name)
-            self.test_results.append(result["result"])
-            self.test_durations.append(result["duration"])
-            self.test_suites.append(suite_name)
-
-            if self.emit_enabled:
-                record = dict(result)
-                record["suite"] = suite_name
-                record["test_name"] = test_name
-                self.test_records.append(record)
+            self._record_result(suite_name, test_name, result)
 
             # If test failed and rerun flag is set, rerun immediately
             if self.args.rerun_failed and result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
@@ -1825,6 +2850,70 @@ class TestExecutor:
 
         return results
 
+    def _record_result(self, suite_name, test_name, result):
+        """Append one config-entry result to the summary lists and emit records.
+
+        Used by both launched runs and enabled:false DISABLED rows so a later
+        list or emit field cannot update one site and miss the other.
+        """
+        duration = float(result.get("duration") or 0)
+        self.test_names.append(test_name)
+        self.test_results.append(result["result"])
+        self.test_durations.append(duration)
+        self.test_suites.append(suite_name)
+        self.test_case_counts.append(result.get("case_counts"))
+        self.test_case_details.append(result.get("case_details"))
+        self.test_run_identities.append(result.get("run_identity", ""))
+        self.test_executed.append(bool(result.get("executed")))
+        if self.emit_enabled:
+            record = dict(result)
+            record["suite"] = suite_name
+            record["test_name"] = test_name
+            record["duration"] = duration
+            self.test_records.append(record)
+
+    def record_disabled_suite(self, suite_config):
+        """Record each config test as DISABLED without launching it.
+
+        ``enabled: false`` suites are omitted from the run, so they never
+        appear in the summary table or the Total/Unique case counts. Recording
+        them as DISABLED rows makes Config entries = Passed+Failed+Skipped+
+        Timeout+Disabled. The same leaves are included in Total and Unique so
+        those two still add up.
+        """
+        suite_name = suite_config["suite_details"]["name"]
+        tests = suite_config.get("tests") or []
+        for test in tests:
+            test_name = test.get("name") or "(test)"
+            if self.args.test_name and not glob_filter_matches(
+                test_name, self.args.test_name
+            ):
+                continue
+            # Same drop as run_test_suite: a disabled multi-rank entry must not
+            # emit DISABLED rows when --skip-mpi-check drops the enabled twin.
+            if getattr(self.args, "skip_mpi_check", False) and _test_needs_mpi(
+                test, suite_config
+            ):
+                continue
+            test_filter = test.get("test_filter", "*")
+            detail = synthetic_case_detail(
+                test_name, test_filter, status=TestResult.RESULT_DISABLED.value
+            )
+            identity = make_run_identity_key(
+                extra=f"disabled:{suite_name}:{test_name}",
+            )
+            details = stamp_run_identity([detail], identity)
+            counts = _counts_from_details(details)
+            self._record_result(suite_name, test_name, {
+                "name": test_name,
+                "result": TestResult.RESULT_DISABLED.value,
+                "duration": 0.0,
+                "executed": False,
+                "case_counts": counts,
+                "case_details": details,
+                "run_identity": identity,
+            })
+
     def _format_duration(self, seconds):
         """
         Format duration in a human-readable format
@@ -1847,6 +2936,26 @@ class TestExecutor:
             secs = seconds % 60
             return f"{hours} hr {minutes} min {secs:.2f} sec"
 
+    def _summary_case_entries(self):
+        """Config-entry records used for unique/duplicate case accounting."""
+        entries = []
+        for i in range(len(self.test_results)):
+            entries.append({
+                "config_suite": self.test_suites[i],
+                "config_entry": self.test_names[i],
+                "details": self.test_case_details[i] if i < len(self.test_case_details) else None,
+                "run_identity": (
+                    self.test_run_identities[i]
+                    if i < len(self.test_run_identities) else ""
+                ),
+                "executed": (
+                    self.test_executed[i]
+                    if i < len(self.test_executed) else False
+                ),
+                "config_result": self.test_results[i],
+            })
+        return entries
+
     def print_summary(self):
         """Print test execution summary"""
         total_tests = len(self.test_results)
@@ -1854,6 +2963,7 @@ class TestExecutor:
         failed = self.test_results.count(TestResult.RESULT_FAILED.value)
         timeout = self.test_results.count(TestResult.RESULT_TIMEOUT.value)
         skipped = self.test_results.count(TestResult.RESULT_SKIPPED.value)
+        disabled = self.test_results.count(TestResult.RESULT_DISABLED.value)
 
         # Calculate total test time
         total_time_seconds = sum(self.test_durations) if self.test_durations else 0
@@ -1864,24 +2974,62 @@ class TestExecutor:
         if total_tests > 0:
             print("\nDetailed Results:")
             print("-"*120)
-            print(f"{'Test Suite':<40} {'Test Name':<40} {'Result':<10} {'Duration'}")
+            print(f"{'Test Suite':<40} {'Test Name':<32} {'Result':<10} {'Cases':<8} {'Duration'}")
             print("-"*120)
             for i in range(total_tests):
+                counts = self.test_case_counts[i] if i < len(self.test_case_counts) else None
+                cases_cell = str(counts["cases"]) if counts else "-"
                 print(
                     f"{self.test_suites[i]:<40} "
-                    f"{self.test_names[i]:<40} "
+                    f"{self.test_names[i]:<32} "
                     f"{self.test_results[i]:<10} "
+                    f"{cases_cell:<8} "
                     f"{self.test_durations[i]:.3f} seconds"
                 )
             print("-"*120)
-            print(f"Total Tests:   {total_tests}")
-            print(f"Passed:        {passed}")
-            print(f"Failed:        {failed}")
-            print(f"Skipped:       {skipped}")
-            print(f"Timeout:       {timeout}")
-            if skipped > 0:
-                print(f"Skipped:       {skipped}")
-            print(f"Total Time:    {self._format_duration(total_time_seconds)}")
+            issue_entries = self._summary_case_entries()
+            uniqueness = summarize_case_uniqueness(issue_entries)
+            issue_tree = format_issue_tree(issue_entries)
+            if issue_tree:
+                print(issue_tree)
+            else:
+                print("Failed/skipped/timeout cases: (none)")
+            dup_tree = format_duplicate_tree(
+                uniqueness["duplicate_entries"],
+                title=(
+                    f"Duplicate cases ({uniqueness['duplicate_cases']} cases, "
+                    f"{uniqueness['duplicate_extra']} extra runs):"
+                ),
+            )
+            if dup_tree:
+                print(dup_tree)
+            else:
+                print("Duplicate cases: (none)")
+            # Counts last so they are visible at EOF after the issue and duplicate trees.
+            print(f"Config entries: {total_tests}")
+            print(f"Passed:         {passed}")
+            print(f"Failed:         {failed}")
+            print(f"Skipped:        {skipped}")
+            print(f"Timeout:        {timeout}")
+            print(f"Disabled:       {disabled}")
+            print("Test cases (gtest/pytest; wildcards expanded):")
+            print(f"  Total:        {uniqueness['total']}")
+            print(f"  Unique:       {uniqueness['unique']}")
+            if uniqueness["duplicate_cases"]:
+                print(
+                    f"  Duplicate:    {uniqueness['duplicate_extra']} extra "
+                    f"({uniqueness['duplicate_cases']} cases ran more than once)"
+                )
+            else:
+                print("  Duplicate:    none")
+            print(f"  Passed:       {uniqueness['total_passed']}")
+            print(f"  Failed:       {uniqueness['total_failed']}")
+            print(f"  Skipped:      {uniqueness['total_skipped']}")
+            print(f"  Timeout:      {uniqueness['total_timeout']}")
+            print(f"  Disabled:     {uniqueness['total_disabled']}")
+            if uniqueness["total_other"]:
+                print(f"  Other:        {uniqueness['total_other']}")
+            print(f"Total Time:     {self._format_duration(total_time_seconds)}")
             print("="*120)
 
         # Print rerun results if any
@@ -2031,53 +3179,26 @@ class TestExecutor:
     def generate_coverage_report(self):
         """Generate code coverage report.
 
-        Supports the report-only workflow: when invoked with
-        ``--no-build --skip-tests --coverage-report`` after a previous run that
-        executed an instrumented binary, this method picks up the existing
-        ``*.profraw`` files left in ``<build_dir>/test/`` and produces a fresh
-        HTML/text report under the current run's workspace ``report/``.
+        Profiles are isolated under the current workspace. For report-only use,
+        pass ``--output`` with the workspace from the original coverage run.
         """
         if not self.args.coverage_report:
-            return
+            return True
 
         print(f"\n{'='*80}")
         print("GENERATING COVERAGE REPORT")
         print(f"{'='*80}")
 
-        # Check for profraw files
-        import glob
-        import shutil
-
-        # Tests run with cwd=<build_dir>/test, so RCCL profraw files are written
-        # there. The rccl-tests perf binaries are instrumented separately and
-        # their profraw files live under the rccl-tests build tree, so search
-        # both roots. A recursive glob also picks up files written elsewhere
-        # under either tree (e.g. by ad-hoc runs).
-        profraw_search_roots = [self.build_dir]
         rccl_tests_build_dir = self._rccl_tests_build_dir()
-        if rccl_tests_build_dir:
-            profraw_search_roots.append(rccl_tests_build_dir)
-
-        profraw_files = []
-        for root in profraw_search_roots:
-            profraw_files.extend(
-                glob.glob(os.path.join(root, "**/*.profraw"), recursive=True)
-            )
-        # De-duplicate in case the roots overlap or are nested.
-        profraw_files = sorted({os.path.abspath(p) for p in profraw_files})
+        profraw_files = sorted(glob.glob(os.path.join(self.rawfiles_dir, "*.profraw")))
 
         if not profraw_files:
-            print("ERROR: No .profraw files found under the build directories:")
-            for root in profraw_search_roots:
-                print(f"           {root}")
+            print(f"ERROR: No .profraw files found in {self.rawfiles_dir}")
             if self.args.skip_tests:
                 print()
                 print("--coverage-report --skip-tests was requested, so this run did")
-                print("not execute any tests. Run the tests at least once with")
-                print("--coverage-report (without --skip-tests) so the instrumented")
-                print("binary writes .profraw files, then re-run with")
-                print("--no-build --skip-tests --coverage-report to regenerate the")
-                print("report from those files.")
+                print("not execute any tests. Re-run with --output pointing to the")
+                print("workspace from a previous coverage run, or execute tests first.")
             else:
                 print()
                 print("Tests ran but produced no coverage data. Confirm that the RCCL")
@@ -2085,42 +3206,31 @@ class TestExecutor:
                 print("(--enable-code-coverage / -DENABLE_CODE_COVERAGE=ON) and that the")
                 print("test processes terminated cleanly so the runtime could flush the")
                 print("profraw files.")
-            return
+            return False
 
         print(f"Found {len(profraw_files)} profraw files")
 
         os.makedirs(self.report_dir, exist_ok=True)
 
-        # Create rawfiles directory
-        rawfiles_dir = os.path.join(self.log_dir, "rawfiles")
-        os.makedirs(rawfiles_dir, exist_ok=True)
-
-        # Move all profraw files into a single location
-        print("Copying profraw files...")
-        for profraw in profraw_files:
-            shutil.copy(profraw, rawfiles_dir)
-
         # Create a list of raw files to merge
         rawprofiles_list = os.path.join(self.log_dir, "rawprofiles.list")
         with open(rawprofiles_list, 'w') as f:
-            for profraw in glob.glob(os.path.join(rawfiles_dir, "*.profraw")):
+            for profraw in profraw_files:
                 f.write(f"{profraw}\n")
 
-        # Resolve LLVM tools from the same ROCm root used to build/run so the
-        # profraw format matches the compiler that produced it.
         rocm_path = self._rocm_root()
         try:
             llvm_profdata = self._resolve_llvm_tool("llvm-profdata")
             llvm_cov = self._resolve_llvm_tool("llvm-cov")
-        except FileNotFoundError as e:
-            print(f"ERROR: {e}")
-            return
+        except FileNotFoundError as error:
+            print(f"ERROR: {error}")
+            return False
 
         if self.args.verbose:
             print(f"ROCm path:      {rocm_path}")
-            print(f"llvm-profdata:  {llvm_profdata} (exists: {os.path.isfile(llvm_profdata)})")
-            print(f"llvm-cov:       {llvm_cov} (exists: {os.path.isfile(llvm_cov)})")
-            print(f"Rawfiles dir:   {rawfiles_dir}")
+            print(f"llvm-profdata:  {llvm_profdata}")
+            print(f"llvm-cov:       {llvm_cov}")
+            print(f"Rawfiles dir:   {self.rawfiles_dir}")
 
         # Create the merged profdata
         print("Merging profraw files...")
@@ -2151,7 +3261,7 @@ class TestExecutor:
             print(f"ERROR: Failed to merge profraw files")
             print(f"Command: {' '.join(merge_cmd)}")
             print(f"Error: {e.stderr}")
-            return
+            return False
 
         # Build list of object files
         object_files = []
@@ -2178,7 +3288,10 @@ class TestExecutor:
         # llvm-cov to attribute that coverage.
         host_test_dir = os.path.join(test_dir, "host")
         for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
-                       "rccl-UnitTestsMicroInit-uncached"]:
+                       "rccl-UnitTestsMicroInit-uncached",
+                       "rccl-UnitTestsMicroInit-faultinj",
+                       "rccl-UnitTestsMicroEnqueue",
+                       "rccl-UnitTestsMicroSymKernels"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
                 object_files.extend(["--object", binary_path])
@@ -2194,9 +3307,26 @@ class TestExecutor:
                     if self.args.verbose:
                         print(f"Found perf binary: {perf_binary}")
 
+        # Add device code objects only when the build actually resolved full
+        # coverage. DeviceLinker.cmake creates device-*.elf for every
+        # device-linker build, including AUTO's host-only fallback, and those
+        # uninstrumented ELFs make llvm-cov show fail.
+        if self._full_coverage_resolved():
+            device_elfs = sorted(glob.glob(os.path.join(self.build_dir, "device-*.elf")))
+            for device_elf in device_elfs:
+                object_files.extend(["--object", device_elf])
+                if self.args.verbose:
+                    print(f"Found device object: {device_elf}")
+            if not device_elfs and self.args.verbose:
+                print("NOTE: no device-*.elf found next to librccl.so; device-side "
+                      "coverage will not appear")
+        elif self.args.verbose:
+            print("NOTE: skipping device-*.elf; CMakeCache ENABLE_FULL_COVERAGE "
+                  "did not resolve to ON (host-only coverage)")
+
         if not object_files:
             print("WARNING: No object files found for coverage report")
-            return
+            return False
 
         if self.args.verbose:
             print(f"Total object files for coverage: {len(object_files) // 2}")
@@ -2241,6 +3371,7 @@ class TestExecutor:
             print(f"Error: {e.stderr}")
             if self.args.verbose:
                 print(f"Command was: {' '.join(html_cmd)}")
+            return False
 
         # Generate function coverage summary (text report)
         print("Generating text coverage report...")
@@ -2282,6 +3413,7 @@ class TestExecutor:
             print(f"Error: {e.stderr}")
             if self.args.verbose:
                 print(f"Command was: {' '.join(text_cmd)}")
+            return False
 
         # Generate a plain (no --show-functions) llvm-cov report. Unlike the
         # per-file --show-functions report above, a plain report ends in a single
@@ -2317,6 +3449,7 @@ class TestExecutor:
             print(f"Error: {e.stderr}")
             if self.args.verbose:
                 print(f"Command was: {' '.join(summary_cmd)}")
+            return False
 
         print(f"\n{'='*80}")
         print("COVERAGE REPORT GENERATION COMPLETE")
@@ -2326,6 +3459,7 @@ class TestExecutor:
         print(f"Text report: {text_report}")
         if os.path.isfile(summary_report):
             print(f"Summary report: {summary_report}")
+        return True
 
     def _resolve_rccl_lib(self):
         """Best-effort: identify the librccl.so the tests actually loaded, and --
@@ -2501,13 +3635,12 @@ class TestExecutor:
             md = host_metadata.collect(rocm_version=re_mod._rocm_version(self._rocm_root()))
 
             # RCCL build type (perf configs should use a Release build).
-            install_flags = self.build_config.get("install_flags", []) if isinstance(self.build_config, dict) else []
-            if getattr(self, "using_custom_lib", False):
-                build_type = "custom"
-            elif any(f in install_flags for f in ("--debug", "--debug-fast")):
-                build_type = "debug"
-            else:
-                build_type = "release"
+            build_config = self.build_config if isinstance(self.build_config, dict) else {}
+            build_type = rccl_build_type(
+                build_config,
+                self.args,
+                getattr(self, "using_custom_lib", False),
+            )
             md["rccl_build_type"] = build_type
             md["mpi_impl"] = self.mpi_impl
             # Which librccl.so the tests actually loaded (and, if it came from a
@@ -2544,13 +3677,23 @@ class TestExecutor:
             )
         emitter.set_coverage(cov)
 
+        uniqueness = summarize_case_uniqueness(self._summary_case_entries())
         summary = {
             "total": len(self.test_results),
             "passed": self.test_results.count(TestResult.RESULT_PASSED.value),
             "failed": self.test_results.count(TestResult.RESULT_FAILED.value),
             "timeout": self.test_results.count(TestResult.RESULT_TIMEOUT.value),
             "skipped": self.test_results.count(TestResult.RESULT_SKIPPED.value),
+            "disabled": self.test_results.count(TestResult.RESULT_DISABLED.value),
             "duration_s": sum(self.test_durations) if self.test_durations else 0,
+            "cases_total": uniqueness["total"],
+            "cases_unique": uniqueness["unique"],
+            "cases_passed": uniqueness["total_passed"],
+            "cases_failed": uniqueness["total_failed"],
+            "cases_skipped": uniqueness["total_skipped"],
+            "cases_timeout": uniqueness["total_timeout"],
+            "cases_disabled": uniqueness["total_disabled"],
+            "cases_other": uniqueness["total_other"],
         }
         emitter.finalize_summary(summary)
 
@@ -2558,4 +3701,3 @@ class TestExecutor:
 
         if getattr(self.args, "db_push", False):
             emitter.push_postgres(timeout=getattr(self.args, "db_timeout", 10))
-

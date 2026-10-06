@@ -769,6 +769,7 @@ typedef enum {
   AMDSMI_VRAM_TYPE_HBM2E = 3,  //!< High Bandwidth Memory, Generation 2 Enhanced
   AMDSMI_VRAM_TYPE_HBM3 = 4,   //!< High Bandwidth Memory, Generation 3
   AMDSMI_VRAM_TYPE_HBM3E = 5,  //!< High Bandwidth Memory, Generation 3 Enhanced
+  AMDSMI_VRAM_TYPE_HBM4 = 6,   //!< High Bandwidth Memory, Generation 4
   // DDR
   AMDSMI_VRAM_TYPE_DDR2 = 10,  //!< Double Data Rate, Generation 2
   AMDSMI_VRAM_TYPE_DDR3 = 11,  //!< Double Data Rate, Generation 3
@@ -1130,7 +1131,8 @@ typedef struct {
   char vendor_name[AMDSMI_MAX_STRING_LENGTH];
   uint32_t subvendor_id;                      //!< The subsystem vendor ID
   uint64_t device_id;                         //!< The device ID of a GPU
-  uint32_t rev_id;                            //!< The revision ID of a GPU
+  uint32_t rev_id;                            //!< PCI config-space revision ID, 0xFFFFFFFF if
+                                              //!< not supported
   char asic_serial[AMDSMI_MAX_STRING_LENGTH]; /**< The socket's unique serial number, 0xFFFFFFFF if
                                                    not supported */
   uint32_t oam_id;                   //!< Corresponds to socket number, 0xFFFFFFFF if not supported
@@ -1139,7 +1141,13 @@ typedef struct {
   uint32_t subsystem_id;             //!> The subsystem ID
   uint64_t flags;                    //!< Chip flags
   uint32_t physical_acc_id;          //!< Physical accelerator ID, 0xFFFFFFFF if not supported
-  uint32_t reserved[17];
+  uint32_t chip_rev_id;              /**< amdgpu chip_rev: internal chip revision (stepping)
+                                          as the driver reports it, not decoded.
+                                          0xFFFFFFFF if not supported */
+  uint32_t external_rev_id;          /**< amdgpu external_rev. Family-scoped, so the same value
+                                          recurs across unrelated ASIC families; pair it with
+                                          device_id. 0xFFFFFFFF if not supported */
+  uint32_t reserved[15];
 } amdsmi_asic_info_t;
 
 /**
@@ -1361,7 +1369,7 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  */
 typedef struct {
-  uint32_t clk;            //!< In MHz
+  uint32_t clk;            //!< In MHz. UINT32_MAX when the clock is unavailable
   uint32_t min_clk;        //!< In MHz
   uint32_t max_clk;        //!< In MHz
   uint8_t clk_locked;      //!< True/False
@@ -2220,9 +2228,9 @@ typedef struct {
   uint16_t average_ipu_activity[AMDSMI_APU_MAX_IPU];        //!< v3_0
   uint16_t average_core_c0_activity[AMDSMI_APU_MAX_CORES];  //!< v3_0
   uint16_t average_dram_reads;                              //!< v3_0 [MB/s]
-  uint16_t average_dram_writes;                             //!< v3_0
-  uint16_t average_ipu_reads;                               //!< v3_0
-  uint16_t average_ipu_writes;                              //!< v3_0
+  uint16_t average_dram_writes;                             //!< v3_0 [MB/s]
+  uint16_t average_ipu_reads;                               //!< v3_0 [MB/s]
+  uint16_t average_ipu_writes;                              //!< v3_0 [MB/s]
 
   /**
    * @brief Power [mW]
@@ -2702,10 +2710,16 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-  amdsmi_npm_status_t status;    //!< NPM status (enabled/disabled).
-  uint64_t limit;                //!< Node-level power limit in Watts.
-  uint32_t ubb_power_threshold;  //!< The UBB node power threshold in Watts.
-  uint64_t reserved[5];
+  amdsmi_npm_status_t status;     //!< NPM status (enabled/disabled).
+  uint64_t limit;                 //!< Node-level power limit in Watts.
+  uint32_t ubb_power_threshold;   //!< The UBB node power threshold in Watts.
+  uint64_t max_node_power_limit;  //!< Platform max node-level power limit in Watts
+                                  //!< (board/max_node_power_limit), used to bound
+                                  //!< amdsmi_set_npm_limit() requests.
+  uint32_t current_node_power;    //!< The current (instantaneous) node power in W
+                                  //!< {@linux_bm}, MI450+.
+  uint64_t reserved[3];           //!< Reduced from reserved[5] to accommodate
+                                  //!< max_node_power_limit and current_node_power.
 } amdsmi_npm_info_t;
 
 /**
@@ -6131,7 +6145,16 @@ typedef struct {
  *  if enough memory had been provided. It is suggest to pass AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD
  * for all AF Ids.
  *
+ *  @note A section whose offset or register count falls outside the record is skipped and the
+ *  remaining sections still decode, so a partial AF ID list returns ::AMDSMI_STATUS_SUCCESS.
+ *  The caller cannot tell an empty list from a malformed record.
+ *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_INVAL @p cper_buffer, @p afids, or @p num_afids is NULL, or @p buf_size
+ *  or @p *num_afids is zero
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE @p buf_size is smaller than a CPER header, or the
+ *  record's own length field is smaller than a CPER header or larger than @p buf_size
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA @p cper_buffer does not start with a CPER signature
  */
 amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size, uint64_t* afids,
                                            uint32_t* num_afids);
@@ -6174,6 +6197,10 @@ amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processo
  *
  * An empty CPER ring (no records) also returns AMDSMI_STATUS_SUCCESS with
  * entry_count == 0 and buf_size == 0.
+ *
+ * A record the library cannot parse is dropped and the scan continues, so a short entry_count
+ * does not distinguish "the ring held fewer records" from "some records were malformed". The
+ * dropped records are named in the debug log.
  *
  * @ingroup tagRasInfo
  *
@@ -7671,7 +7698,14 @@ amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_han
  *
  * @details This function queries the NPM controller for the given node and returns whether NPM is
  * enabled, along with the current node-level power limit in Watts. The NPM status and limit are set
- * out-of-band and reported via this API.
+ * out-of-band and reported via this API. The returned amdsmi_npm_info_t::max_node_power_limit is
+ * the platform max bound (sourced from board/max_node_power_limit) that ::amdsmi_set_npm_limit
+ * itself validates requests against internally before issuing the write (mirroring
+ * ::amdsmi_set_power_cap and ::amdsmi_get_power_cap_info); callers may still query it here ahead
+ * of time to fail fast / present a clean error without invoking the setter. The returned
+ * amdsmi_npm_info_t::current_node_power is the current (instantaneous) node-level power reading in
+ * Watts (sourced from board/node_power); it is node-handle scoped (queried once per node), unlike
+ * amdsmi_power_info_t, which is scoped per GPU handle.
  *
  * @param[in]  node_handle Handle to the Node to query.
  * @param[out] info Pointer to amdsmi_npm_info_t structure to receive NPM status and limit.
@@ -7703,6 +7737,40 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
  *         non-zero on other failures.
  */
 amdsmi_status_t amdsmi_get_tray_info(amdsmi_node_handle node_handle, amdsmi_tray_info_t* info);
+
+/**
+ * @brief Sets the node power management (NPM) power limit for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details This function returns ::AMDSMI_STATUS_INVAL if NPM is disabled on the node
+ * (amdsmi_npm_info_t::status == ::AMDSMI_NPM_STATUS_DISABLED), since writing
+ * board/cur_node_power_limit while NPM is disabled has no defined effect. It also validates
+ * `limit` against the platform max bound (amdsmi_npm_info_t::max_node_power_limit, sourced from
+ * board/max_node_power_limit) before ever issuing a write, returning ::AMDSMI_STATUS_INVAL if
+ * `limit` is `0` or greater than that bound (this mirrors ::amdsmi_set_power_cap, whose analogous
+ * range check against ::amdsmi_get_power_cap_info's bounds is likewise enforced internally rather
+ * than left purely to the caller). If the platform max bound itself cannot be read (e.g. the
+ * sysfs interface is missing or returns unexpected data), this function fails closed and returns
+ * that underlying error rather than silently allowing an unbounded `limit` through. Once
+ * validated, this function issues a Set NPM Limit request to GPU PMFW via the amdgpu driver for
+ * the given node, requesting the value of `limit` verbatim. The write path is restricted to host
+ * / 1 permitted VM only; the enforcement of that restriction is done by the kernel driver, not by
+ * this function. When both SMI and BMC set limits, GPU PMFW arbitrates by taking the minimum of
+ * the two, bounded by the platform max.
+ *
+ * @param[in] node_handle Handle to the Node to set the limit on.
+ * @param[in] limit Node-level power limit in Watts to request.
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success. ::AMDSMI_STATUS_INVAL if NPM is disabled on this
+ * node, or if `limit` is `0` or exceeds the platform max bound. ::AMDSMI_STATUS_NOT_SUPPORTED if
+ * the sysfs interface (board/npm_status, board/cur_node_power_limit, or
+ * board/max_node_power_limit) is unavailable on this platform. Non-zero on other failure (e.g.
+ * ::AMDSMI_STATUS_NO_PERM if the driver rejects the write for this guest context).
+ */
+amdsmi_status_t amdsmi_set_npm_limit(amdsmi_node_handle node_handle, uint64_t limit);
 
 /** @} End tagNodeInfo */
 
@@ -9713,6 +9781,11 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
  *  depending on the driver package). No libdrm dependency is required for
  *  these APIs.
  *
+ *  @note UMA carveout is read and written through the fwupd daemon over
+ *  D-Bus. Therefore, the fwupd daemon and libdbus typically need to be present at
+ *  runtime; writes are authorized by PolicyKit (or root). When fwupd is unavailable,
+ *  these functions fall back to direct sysfs access.
+ *
  *  @par Supported ASICs (UMA carveout)
  *  UMA carveout is only available on APU parts whose VBIOS exposes the
  *  ATCS function code 0xA ("Set UMA Allocation Size") together with an
@@ -9765,7 +9838,8 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-  uint32_t current_index; /**< Currently active carveout index */
+  uint32_t current_index; /**< Currently active carveout index; equals num_options
+                                when unknown (e.g. redacted for an unprivileged caller) */
   uint32_t num_options;   /**< Number of available options */
   amdsmi_uma_carveout_option_t
       options[AMDSMI_MAX_CARVEOUT_OPTIONS]; /**< Available carveout options */
@@ -9787,7 +9861,10 @@ typedef struct {
  *  configuration for the specified GPU. UMA carveout controls dedicated GPU memory
  *  allocation on APU systems.
  *
- *  @note This uses a kernel UAPI sysfs interface, not libdrm.
+ *  @note reads and writes through the fwupd daemon over D-Bus, which is
+ *  brokered by PolicyKit. Falls back to sysfs when fwupd is unavailable
+ *  or redacts the information for an unprivileged caller. Reading
+ *  requires fwupd >= 1.8.4; writing requires fwupd >= 2.1.1 (Ubuntu 26.04+).
  *
  *  @ingroup tagMemConfig
  *
@@ -9810,7 +9887,10 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
  *  This function sets the UMA carveout configuration for the specified GPU.
  *  The system must be rebooted for changes to take effect.
  *
- *  @note This uses a kernel UAPI sysfs interface, not libdrm.
+ *  @note reads and writes through the fwupd daemon over D-Bus, which is
+ *  brokered by PolicyKit. Falls back to sysfs when fwupd is unavailable
+ *  or redacts the information for an unprivileged caller. Reading
+ *  requires fwupd >= 1.8.4; writing requires fwupd >= 2.1.1 (Ubuntu 26.04+).
  *
  *  @ingroup tagMemConfig
  *

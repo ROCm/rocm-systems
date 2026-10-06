@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: MIT
  */
 
-/* Shared helpers for the basics/ and async/ examples. Pulled out of the
- * per-example .cpp files to remove verbatim duplication; each example still
- * drives the hipFile API directly in its main() so the example flow stays
- * readable top-to-bottom. */
+/* Shared helpers for the basics/, batch/, and async/ examples. Pulled out of
+ * the per-example .cpp files to remove verbatim duplication; each example
+ * still drives the hipFile API directly in its main() so the example flow
+ * stays readable top-to-bottom. */
 
 #pragma once
 

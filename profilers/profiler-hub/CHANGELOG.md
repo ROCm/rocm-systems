@@ -34,6 +34,7 @@ downstream consumer of the library.
 
 ### Changed
 
+- profiler-hub now requires a C++20-compatible compiler for all build and consumer paths.
 - RocPD schema target version is 3.0.1 (includes NIC agent support above).
 - Schema SQL is obtained at configure time by cloning `rocprofiler-sdk-rocpd` from
   `rocm-systems` (`versions/3.0.1` by default) and embedding it as generated headers,

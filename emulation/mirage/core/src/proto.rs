@@ -140,6 +140,35 @@ pub enum Response {
 pub struct SessionDescription {
     /// The session this describes.
     pub session: SessionId,
+    /// The profile this session was brought up on, with every by-name
+    /// reference already followed.
+    ///
+    /// Sent rather than the individual facts a client wants from it, so
+    /// that a client asking what device the session emulates reads the
+    /// agent that defines it instead of a second copy travelling
+    /// alongside. `mirage exec` cannot resolve this for itself: it takes
+    /// no `--profile`, and re-reading the stored one would answer with
+    /// whatever has been edited into it since — for a session that is
+    /// supposed to keep emulating the device it came up on, the stored
+    /// document is the wrong source.
+    ///
+    /// Optional on the wire so a newer `mirage exec` can still attach to
+    /// an older run process: it simply arrives absent, and the one thing
+    /// derived from it — [`SessionDescription::emulated_gfx_target`] —
+    /// answers `None`, which is the silence a diagnostic falls back to
+    /// anyway.
+    ///
+    /// The other direction is the asymmetric one, and worth knowing
+    /// before a field is added to a profile: [`ProfileDef`] rejects
+    /// unknown fields, deliberately, because a mistyped key in a
+    /// hand-written profile that silently defaulted was its own class of
+    /// bug. An *older* `mirage exec` attaching to a newer run therefore
+    /// refuses a profile carrying a field it has never heard of, rather
+    /// than ignoring it. Both halves of a session are the same binary in
+    /// every ordinary setup, so this buys the on-disk strictness at a
+    /// cost paid only by a mixed-version pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<crate::profile::ProfileDef>,
     /// Number of nodes in the session's topology.
     pub node_count: u32,
     /// Processes per node in the job this session was created to run,
@@ -168,6 +197,21 @@ pub struct SessionDescription {
     pub head_addr: String,
     /// Rendezvous port on [`SessionDescription::head_addr`].
     pub head_port: u16,
+}
+
+impl SessionDescription {
+    /// The gfx target this session presents to the workload's ROCm
+    /// runtime, or `None` when there is nothing for that runtime to
+    /// recognise.
+    ///
+    /// Derived from [`SessionDescription::profile`] rather than carried
+    /// beside it, so there is one answer and it is the agent's. `None`
+    /// for a description from an older run process, which sent no
+    /// profile.
+    #[must_use]
+    pub fn emulated_gfx_target(&self) -> Option<crate::hardware::GfxTarget> {
+        self.profile.as_ref()?.emulated_gfx_target()
+    }
 }
 
 /// Where each rank's processes really run, for a containerised session.

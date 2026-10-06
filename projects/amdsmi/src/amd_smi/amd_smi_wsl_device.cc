@@ -19,6 +19,7 @@
 #include "amd_smi/impl/amd_smi_drm.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_socket.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
 #include "amd_smi/impl/amd_smi_wsl_syms.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -285,7 +286,7 @@ amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
   if (r == AMDSMI_STATUS_SUCCESS) {
     const auto& a = device_info_.asic;
-    std::memset(info, 0, sizeof(*info));
+    init_asic_info_defaults(info);
     copy_rocdxg_string(info->market_name, a.market_name);
     info->vendor_id = a.vendor_id;
     if (info->vendor_id == 0x1002)
@@ -294,10 +295,8 @@ amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
     info->device_id = a.device_id;
     info->rev_id = a.rev_id;
     std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "%016lx", a.asic_serial);
-    // rocdxg_smi_asic_info_t has no OAM/physical-accelerator-ID fields; gpu_id_ is
-    // just an enumeration index, not real hardware data, so report N/A rather than 0.
-    info->oam_id = std::numeric_limits<uint32_t>::max();
-    info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+    // oam_id and physical_acc_id stay N/A from the defaults; gpu_id_ is only an
+    // enumeration index, not real hardware data.
     info->num_of_compute_units = a.num_of_compute_units;
     // Convert IP version (major<<16|minor<<8|stepping) to the nibble-packed
     // hex format Python expects: hex(value)[2:] == "MMSS" (e.g. 0x1100 → "gfx1100").
@@ -311,23 +310,16 @@ amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
     return AMDSMI_STATUS_SUCCESS;
   }
   if (r != AMDSMI_STATUS_NOT_SUPPORTED) return r;
-  std::memset(info, 0, sizeof(*info));
+  init_asic_info_defaults(info);
   copy_string(info->market_name, marketing_name_);
   info->vendor_id = vendor_id_;
   if (vendor_id_ == 0x1002)
     copy_string(info->vendor_name, "Advanced Micro Devices, Inc. [AMD/ATI]");
-  info->subvendor_id = std::numeric_limits<uint32_t>::max();
   info->device_id = device_id_;
-  info->rev_id = std::numeric_limits<uint32_t>::max();
-  copy_string(info->asic_serial, "ffffffffffffffff");
-  // rocdxg_smi_asic_info_t has no OAM/physical-accelerator-ID fields; gpu_id_ is
-  // just an enumeration index, not real hardware data, so report N/A rather than 0.
-  info->oam_id = std::numeric_limits<uint32_t>::max();
-  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+  // oam_id and physical_acc_id stay N/A from the defaults; gpu_id_ is only an
+  // enumeration index, not real hardware data.
   info->num_of_compute_units =
       num_compute_units_ ? num_compute_units_ : std::numeric_limits<uint32_t>::max();
-  info->target_graphics_version = std::numeric_limits<uint64_t>::max();
-  info->subsystem_id = std::numeric_limits<uint32_t>::max();
   info->flags = family_id_;
   return AMDSMI_STATUS_SUCCESS;
 }

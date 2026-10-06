@@ -46,7 +46,7 @@ namespace gin_sdma {
 static constexpr size_t kGinPutMaxBytes = 1024ull * 1024 * 1024;  // 1 GiB (2^30, HW max)
 
 // Max bytes per single SDMA copy that the Anvil-SDMA backend copies *reliably*
-// on MI355X + ROCm 7.13 (NCCL_GIN_TYPE=5). This is SMALLER than kGinPutMaxBytes:
+// on MI355X + ROCm 7.13 (Anvil SDMA, NCCL_GIN_TYPE=7 as of 2.31). This is SMALLER than kGinPutMaxBytes:
 // the 30-bit count field bounds correctness at 1 GiB, but a single copy
 // descriptor at/above 256 MiB (2^28) on the fused COPY_LINEAR_WAIT_SIGNAL_MI4
 // path stalls the SDMA engine, so the fused copy never lands AND its SignalInc

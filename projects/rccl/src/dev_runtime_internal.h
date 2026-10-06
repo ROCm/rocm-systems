@@ -17,9 +17,41 @@ struct ncclComm;
 struct ncclSegmentWindow;
 struct ncclWindow_vidmem;
 
+// Complete type for dev_runtime.h's forward declaration.
+struct ncclDevrTeam {
+  struct ncclDevrTeam* next;
+  struct ncclTeam team;
+  CUmemGenericAllocationHandle mcHandle;
+  void* mcBasePtr;
+  ncclCftLeId ucLeId[2]; // 0: UC LE ID, 1: counted UC LE ID
+  ncclCftLeId mcLeId[2]; // 0: MC LE ID, 1: counted MC LE ID
+#if defined(NCCL_OS_WINDOWS)
+  int worldRankList[1]; // Variable length. [1] for MSVC.
+#else
+  int worldRankList[];
+#endif
+};
+
+// Non-static functions in dev_runtime.cc also called from cft_dev_runtime.cc:
+int computeLsaSize(struct ncclComm* comm);
+ncclResult_t symTeamObtain(struct ncclComm* comm, struct ncclTeam team, bool multimem, bool counted, bool wantsLeUc,
+                           bool wantsLeMc, struct ncclDevrTeam** outTeam, bool* needBarrier);
+ncclResult_t findCommAndHostWindowFromDeviceWindow(ncclWindow_t devWindow, ncclComm_t* foundComm,
+                                                   struct ncclDevrWindow** hostWindow);
+
+// Functions in cft_dev_runtime.cc called from dev_runtime.cc:
+int computeCftSize(struct ncclComm* comm);
+int computeCftMcSize(struct ncclComm* comm);
+ncclResult_t symBindTeamLe(struct ncclComm* comm, struct ncclDevrMemory* mem, ncclCftLeId le);
+ncclResult_t symUnbindTeamLe(struct ncclComm* comm, struct ncclDevrMemory* mem, ncclCftLeId le);
+ncclResult_t symTeamObtainUcLe(struct ncclComm* comm, struct ncclDevrTeam* t, struct ncclDevrState* devr,
+                               bool* needBarrier, bool counted);
+ncclResult_t symTeamObtainMcLe(struct ncclComm* comm, struct ncclDevrTeam* t, struct ncclDevrState* devr,
+                               bool* needBarrier, bool counted);
+
 struct ncclDevrGinSegmentInfo {
-  void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS];
-  ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS];
+  void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS];
+  ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS];
   CUmemLocationType memType;
   size_t segmentSize;
 };
@@ -27,13 +59,16 @@ struct ncclDevrGinSegmentInfo {
 // Complete type for src/include/dev_runtime.h's forward declaration.
 struct ncclDevrMemory {
   int refCount;
+  // Communicator-wide identity of this backing registration: backing registrations are created
+  // collectively in the same order on every rank, so equal ids denote the same registration.
+  uint64_t registryId;
   struct ncclDevrMemory* next;
   CUmemGenericAllocationHandle* memHandles;
   void* primaryAddr; // What we hope is the VA of this memory's first mapping.
   size_t size;
   size_t bigOffset; // offset in big VA space
-  void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS];
-  ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS];
+  void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS];
+  ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS];
   void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS];
   ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS];
   int winFlags;
@@ -56,7 +91,7 @@ struct ncclDevrMemory {
 ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory* mem, int numSegments);
 
 ncclResult_t ncclDevrCheckRegistrationSupport(void* userPtr, size_t userSize, struct ncclComm* comm,
-                                              bool hasSysmemSegment);
+                                              bool hasSysmemSegment, int winFlags);
 
 ncclResult_t ncclDevrValidateHandleLocationType(CUmemGenericAllocationHandle memHandle, int segment);
 
@@ -67,8 +102,5 @@ ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem);
 ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState* devr, struct ncclDevrMemory* mem,
                                                     cudaStream_t stream,
                                                     struct ncclSegmentWindow** outSegmentWindowsDev);
-
-ncclResult_t ncclDevrReplaceSegmentWindowsIfNeeded(struct ncclDevrState* devr, struct ncclDevrMemory* mem,
-                                                   struct ncclWindow_vidmem* winHost, cudaStream_t stream);
 
 #endif

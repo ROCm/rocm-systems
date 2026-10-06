@@ -51,19 +51,32 @@ struct cache_policy
             auto qname      = make_qualified_name(meta);
             auto track_name = format_track_name(gpu_id, qname);
 
-            registry.add_track({ track_name, std::nullopt, "{}" });
+            registry.add_track(
+                { .track_name = track_name, .thread_id = std::nullopt, .extdata = "{}" });
 
-            registry.add_pmc_info({ agent_type::GPU, gpu_id, target_arch, event_code,
-                                    instance_id, qname, qname,
-                                    meta.description.empty() ? "SDK PMC hardware counter"
-                                                             : meta.description,
-                                    long_description, component, "count",
-                                    rocprofsys::trace_cache::ABSOLUTE, meta.block,
-                                    meta.expression, meta.is_constant ? 1U : 0U,
-                                    meta.is_derived ? 1U : 0U, "{}" });
+            registry.add_pmc_info({ .type             = agent_type::gpu,
+                                    .agent_type_index = gpu_id,
+                                    .target_arch      = target_arch,
+                                    .event_code       = event_code,
+                                    .instance_id      = instance_id,
+                                    .name             = qname,
+                                    .symbol           = qname,
+                                    .description      = meta.description.empty()
+                                                            ? "SDK PMC hardware counter"
+                                                            : meta.description,
+                                    .long_description = long_description,
+                                    .component        = component,
+                                    .units            = "count",
+                                    .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+                                    .block            = meta.block,
+                                    .expression       = meta.expression,
+                                    .is_constant      = meta.is_constant ? 1U : 0U,
+                                    .is_derived       = meta.is_derived ? 1U : 0U,
+                                    .extdata          = "{}" });
 
-            name_entries.push_back(
-                { meta.counter_id, std::move(qname), std::move(track_name) });
+            name_entries.push_back({ .counter_id    = meta.counter_id,
+                                     .pmc_info_name = std::move(qname),
+                                     .track_name    = std::move(track_name) });
         }
 
         registry.set_gpu_perf_counter_counter_names(static_cast<std::uint32_t>(gpu_id),
@@ -78,7 +91,10 @@ struct cache_policy
                              const enabled_metrics& /*supported_metrics*/,
                              const metrics& metric_values, std::uint64_t timestamp)
     {
-        if(metric_values.empty()) return;
+        if(metric_values.empty())
+        {
+            return;
+        }
 
         trace_cache::get_buffer_storage().store(trace_cache::gpu_perf_counter_sample{
             static_cast<std::uint32_t>(device_id), timestamp, metric_values });

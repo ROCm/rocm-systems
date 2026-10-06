@@ -740,6 +740,8 @@ class AmdSmiVramType(IntEnum):
     HBM2 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM2
     HBM2E = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM2E
     HBM3 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM3
+    HBM3E = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM3E
+    HBM4 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM4
     DDR2 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR2
     DDR3 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR3
     DDR4 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR4
@@ -2874,6 +2876,11 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     asic_info_struct = amdsmi_wrapper.amdsmi_asic_info_t()
+    # A DRM libamd_smi predating these fields leaves the reserved slots as the
+    # caller passed them, so seed N/A rather than the ctypes zero. A WSL library
+    # that old clears the whole structure and still reports zero.
+    asic_info_struct.chip_rev_id = MaxUIntegerTypes.UINT32_T
+    asic_info_struct.external_rev_id = MaxUIntegerTypes.UINT32_T
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_asic_info(processor_handle, ctypes.byref(asic_info_struct))
     )
@@ -2882,17 +2889,30 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
     target_graphics_version = hex(asic_info_struct.target_graphics_version)[2:]
     subsystem_id = _validate_if_max_uint(asic_info_struct.subsystem_id, MaxUIntegerTypes.UINT32_T)
     subvendor_id = _validate_if_max_uint(asic_info_struct.subvendor_id, MaxUIntegerTypes.UINT32_T)
+    rev_id = _validate_if_max_uint(asic_info_struct.rev_id, MaxUIntegerTypes.UINT32_T)
+    chip_rev_id = _validate_if_max_uint(asic_info_struct.chip_rev_id, MaxUIntegerTypes.UINT32_T)
+    external_rev_id = _validate_if_max_uint(
+        asic_info_struct.external_rev_id, MaxUIntegerTypes.UINT32_T
+    )
     if isinstance(subsystem_id, int):
         subsystem_id = _pad_hex_value(hex(subsystem_id), 4)
     if isinstance(subvendor_id, int):
         subvendor_id = _pad_hex_value(hex(subvendor_id), 4)
+    if isinstance(rev_id, int):
+        rev_id = _pad_hex_value(hex(rev_id), 2)
+    if isinstance(chip_rev_id, int):
+        chip_rev_id = _pad_hex_value(hex(chip_rev_id), 2)
+    if isinstance(external_rev_id, int):
+        external_rev_id = _pad_hex_value(hex(external_rev_id), 2)
     asic_info = {
         "market_name": market_name,
         "vendor_id": asic_info_struct.vendor_id,
         "vendor_name": asic_info_struct.vendor_name.decode("utf-8"),
         "subvendor_id": subvendor_id,
         "device_id": asic_info_struct.device_id,
-        "rev_id": _pad_hex_value(hex(asic_info_struct.rev_id), 2),
+        "rev_id": rev_id,
+        "chip_rev_id": chip_rev_id,
+        "external_rev_id": external_rev_id,
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
         "oam_id": _validate_if_max_uint(asic_info_struct.oam_id, MaxUIntegerTypes.UINT32_T),
         "physical_acc_id": _validate_if_max_uint(
@@ -5356,6 +5376,32 @@ def amdsmi_get_node_handle(processor_handle):
 
 
 def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
+    """
+    Get NPM (Node Power Management) status and power limit info for the node
+    associated with node_handle.
+
+    Parameters:
+        node_handle(node_handle_t): Node handle obtained via
+            amdsmi_get_node_handle()
+
+    Returns:
+        `Dict[str, Any]`: Dictionary with keys:
+            - ``limit`` (`int`): Current NPM power limit in Watts.
+            - ``status`` (`int`): NPM status (enabled/disabled), see
+                ``amdsmi_npm_status_t``.
+            - ``ubb_power_threshold`` (`int`): UBB node power threshold in
+                Watts.
+            - ``max_node_power_limit`` (`int`): The platform max bound
+                consumed by amdsmi_set_npm_limit(): callers should ensure any
+                limit passed to that function does not exceed this value.
+            - ``current_node_power`` (`int`): The current (instantaneous) node
+                power in Watts (board/node_power), MI450+. Queried once per
+                node rather than once per GPU.
+
+    Raises:
+        AmdSmiParameterException: If the node handle is invalid.
+        AmdSmiLibraryException: If the underlying library call fails.
+    """
     if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
         raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
 
@@ -5367,6 +5413,12 @@ def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
         "status": npm_info.status,
         "ubb_power_threshold": _validate_if_max_uint(
             npm_info.ubb_power_threshold, MaxUIntegerTypes.UINT32_T
+        ),
+        "max_node_power_limit": _validate_if_max_uint(
+            npm_info.max_node_power_limit, MaxUIntegerTypes.UINT64_T
+        ),
+        "current_node_power": _validate_if_max_uint(
+            npm_info.current_node_power, MaxUIntegerTypes.UINT32_T
         ),
     }
 
@@ -5398,6 +5450,71 @@ def amdsmi_get_tray_info(
             tray_info.tray_type, "AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN"
         ).replace("AMDSMI_COMPUTE_TRAY_TYPE_", ""),
     }
+
+
+def amdsmi_set_npm_limit(node_handle: processor_handle_t, limit: int) -> None:
+    """
+    Set the NPM (Node Power Management) power limit for the node associated
+    with node_handle by writing to the board's cur_node_power_limit sysfs
+    interface.
+
+    This function rejects the request with AmdSmiLibraryException
+    (AMDSMI_STATUS_INVAL) if NPM is disabled on the node
+    (amdsmi_get_npm_info()'s "status" == AMDSMI_NPM_STATUS_DISABLED), since
+    writing board/cur_node_power_limit while NPM is disabled has no defined
+    effect. It also validates `limit` against the platform max bound
+    (amdsmi_get_npm_info()'s "max_node_power_limit", sourced from
+    board/max_node_power_limit) internally before ever issuing the write,
+    raising AmdSmiLibraryException with AMDSMI_STATUS_INVAL if `limit` is `0`
+    or greater than that bound. If the platform max bound itself cannot be
+    read (e.g. the sysfs interface is missing or returns unexpected data),
+    this function fails closed and raises that underlying error rather than
+    silently allowing an unbounded `limit` through. The amd-smi CLI's
+    `set --node-power-limit` additionally performs the same checks itself
+    ahead of calling this function, purely to fail fast and present a
+    friendlier, earlier user-facing error message; it is not the only
+    validation and is not required for correctness.
+
+    Parameters:
+        node_handle(node_handle_t): Node handle obtained via
+            amdsmi_get_node_handle()
+        limit(int): New NPM power limit value to request (units match the
+            board/cur_node_power_limit sysfs interface). Must satisfy
+            0 < limit <= UINT64_MAX; out-of-range values raise
+            AmdSmiParameterException rather than silently wrapping modulo
+            2**64 the way a raw ctypes.c_uint64() conversion would. Values
+            that pass this local bound check but are `0` or exceed the
+            platform max are rejected by the underlying library call instead
+            (see Raises below).
+
+    Returns:
+        None: This function raises an exception if the call did not succeed
+        (e.g. AmdSmiLibraryException with AMDSMI_STATUS_INVAL if `limit` is
+        `0` or exceeds the platform max bound, AMDSMI_STATUS_NOT_SUPPORTED if
+        the sysfs interface is unavailable, or AMDSMI_STATUS_NO_PERM if the
+        write was rejected)
+
+    Raises:
+        AmdSmiParameterException: If `node_handle` or `limit` is the wrong
+            type, or `limit` is outside `0 < limit <= UINT64_MAX`.
+        AmdSmiLibraryException: If the underlying library call fails,
+            including AMDSMI_STATUS_INVAL when `limit` is `0` or exceeds the
+            platform max bound (or when that bound itself cannot be read).
+    """
+    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+    if not isinstance(limit, int):
+        raise AmdSmiParameterException(limit, int)
+    if not 0 < limit <= 0xFFFFFFFFFFFFFFFF:
+        # ctypes.c_uint64() silently wraps out-of-range values modulo 2**64
+        # instead of raising (e.g. ctypes.c_uint64(2**64 + 12345).value ==
+        # 12345); reject explicitly here so a bad value is never wrapped into
+        # an unrelated one and written to hardware.
+        raise AmdSmiParameterException(
+            limit, int, msg=f"limit must satisfy 0 < limit <= {0xFFFFFFFFFFFFFFFF} (got {limit})"
+        )
+
+    _check_res(amdsmi_wrapper.amdsmi_set_npm_limit(node_handle, ctypes.c_uint64(limit)))
 
 
 def amdsmi_get_temp_metric(

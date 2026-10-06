@@ -11,9 +11,29 @@ Dynamic process attachment using rocprofv3
 
 For profiling long-running applications or services where restarting the application is not feasible, ``rocprofv3`` provides dynamic process attachment using the ``--attach`` option. This feature facilitates attaching the profiler to a running application without the need to restart it. The attachment is performed using the ``ptrace`` system call, which enables the profiler to monitor and collect performance data from the target process.
 
-.. note::
+Prerequisites
+--------------
 
-   The target process must have attach support enabled before you can attach to it: use a ``rocprofiler-register`` build configured with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. Without this, ``rocprofv3 --attach`` fails because the target process doesn't have the required attachment thread.
+Complete the following steps before using ``rocprofv3 --attach``.
+
+#. **Enable attachment support in the target process**
+
+   Start the target process with ``ROCP_TOOL_ATTACH=1`` set in its environment. For other ways to enable attachment, see :ref:`enabling attachment support <process_attachment_enable>`.
+
+#. **Obtain permission to trace the target process**
+
+   Run ``rocprofv3`` as the user owning the target process or as root. On distributions that enable the Yama security module, including recent Ubuntu releases, also set the ptrace scope to ``0``. For Docker requirements and other restrictions, see :ref:`trace permissions <process_attachment_permissions>`.
+
+   .. code-block:: shell
+
+      $ sudo sysctl kernel.yama.ptrace_scope=0
+
+   .. warning::
+
+      ``kernel.yama.ptrace_scope`` is a system-wide setting. Setting it to ``0`` allows any process to ``ptrace`` any other process running under the same user, not just ``rocprofv3``.
+
+Basic usage
+------------
 
 Here is an example syntax for dynamic process attachment:
 
@@ -199,10 +219,6 @@ Key considerations
 Here are some important points to be noted while using dynamic process attachment:
 
 - The target process must be running and actively using GPU resources for meaningful profiling data.
-
-- Attachment requires appropriate system permissions. It might even need elevated privileges depending on the target process.
-
-- To use attachment in a docker container, add the ``ptrace`` capability to the container (``SYS_PTRACE``).
 
 - The profiler collects data for the entire remaining lifetime of the process or until the configured collection period expires. To learn how to configure the collection period, see :ref:`duration-specific`.
 

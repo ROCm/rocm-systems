@@ -75,6 +75,8 @@ rocprofiler_add_interface_library(rocprofiler-sdk-elfio "ELFIO header-only C++ l
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-yaml-cpp "YAML CPP Parser" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-json "nlohmann json" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-sha256 "SHA-256 hashing library"
+                                  INTERNAL)
 
 #
 # interface for libraries (ROCm-specific)
@@ -88,6 +90,9 @@ rocprofiler_add_interface_library(rocprofiler-sdk-aqlprofile-external
 rocprofiler_add_interface_library(rocprofiler-sdk-hsakmt
                                   "HSAKMT library for AMD KFD support" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-drm "drm (amdgpu) library" INTERNAL)
+rocprofiler_add_interface_library(
+    rocprofiler-sdk-rocprof-trace-decoder
+    "Provides ATT trace decoder SONAME version compile definitions" INTERNAL)
 
 #
 # "nolink" interface targets emulate another interface target but do not link to the

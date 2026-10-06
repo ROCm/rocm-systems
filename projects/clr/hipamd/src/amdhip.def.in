@@ -543,6 +543,7 @@ hipMemGetMemPool
 hipMipmappedArrayGetMemoryRequirements
 hipKernelGetAttribute
 hipKernelSetAttribute
+hipKernelSetAttributeForDevice
 hipKernelGetFunction
 hipOccupancyMaxPotentialClusterSize
 hipOccupancyMaxActiveClusters
@@ -562,4 +563,7 @@ hipExecutionCtxRecordEvent
 hipExecutionCtxSynchronize
 hipExecutionCtxWaitEvent
 hipMemGetDefaultMemPool
+hipKernelNameRefByPtr
+hipModuleEnumerateFunctions
+hipDeviceFlushGPUDirectRDMAWrites
 @HSA_EXPORTS@

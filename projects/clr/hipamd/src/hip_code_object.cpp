@@ -24,21 +24,24 @@ hipError_t ihipFree(void* ptr);
 // forward declaration of methods required for managed variables
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
-hipError_t DynCO::loadCodeObject(const char* fname, const void* image) {
+hipError_t DynCO::loadCodeObject(const char* fname, const void* image, bool init_global_vars,
+                                 std::vector<char>* image_storage) {
   std::scoped_lock lock(dclock_);
 
   // Number of devices = 1 in dynamic code object
   fb_info_ = new FatBinaryInfo(fname, image);
-  std::vector<hip::Device*> devices = {g_devices[ihipGetDevice()]};
-  IHIP_RETURN_ONFAIL(fb_info_->ExtractFatBinaryUsingCOMGR(devices));
+  std::vector<hip::Device*> devices = {g_devices[device_id_]};
+  IHIP_RETURN_ONFAIL(fb_info_->ExtractFatBinaryUsingCOMGR(devices, image_storage));
 
   // No Lazy loading for DynCO
-  IHIP_RETURN_ONFAIL(fb_info_->BuildProgram(ihipGetDevice()));
+  IHIP_RETURN_ONFAIL(fb_info_->BuildProgram(device_id_));
 
   module_ = fb_info_->Module(device_id_);
 
-  // Define Global variables
-  IHIP_RETURN_ONFAIL(populateDynGlobalVars());
+  if (init_global_vars) {
+    // Primary library/module loads own global and managed-variable state.
+    IHIP_RETURN_ONFAIL(populateDynGlobalVars());
+  }
 
   // Define Global functions
   IHIP_RETURN_ONFAIL(populateDynGlobalFuncs());
@@ -144,7 +147,7 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name)
   }
 
   /* See if this could be solved */
-  return it->second->GetDynFunc(hfunc, module_);
+  return it->second->GetDynFunc(hfunc, module_, device_id_);
 }
 
 hipError_t DynCO::getFuncCount(unsigned int* count) {
@@ -156,10 +159,23 @@ hipError_t DynCO::getFuncCount(unsigned int* count) {
   return hipSuccess;
 }
 
-bool DynCO::isValidDynFunc(const void* hfunc) {
+hipError_t DynCO::enumerateFunctions(hipFunction_t* functions, unsigned int numFunctions) {
   std::scoped_lock lock(dclock_);
-  return std::any_of(functions_.begin(), functions_.end(),
-                     [&](auto& it) { return it.second->IsValidDynFunc(hfunc); });
+
+  assert(functions != nullptr);
+  unsigned int count = 0;
+  for (const auto& kv : functions_) {
+    if (count >= numFunctions) {
+      break;
+    }
+    hipFunction_t hfunc = nullptr;
+    auto ret = kv.second->GetDynFunc(&hfunc, module_, device_id_);
+    if (ret != hipSuccess) {
+      return ret;
+    }
+    functions[count++] = hfunc;
+  }
+  return hipSuccess;
 }
 
 hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
@@ -221,8 +237,8 @@ hipError_t DynCO::populateDynGlobalVars() {
   std::vector<std::string> var_names;
   std::string managedVarExt = ".managed";
   // For Dynamic Modules there is only one hipFatBinaryDevInfo_
-  device::Program* dev_program = fb_info_->GetProgram(ihipGetDevice())
-                                     ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
+  device::Program* dev_program =
+      fb_info_->GetProgram(device_id_)->getDeviceProgram(*g_devices[device_id_]->devices()[0]);
 
   if (!dev_program->getGlobalVarFromCodeObj(&var_names)) {
     LogPrintfError("Could not get Global vars from Code Obj for Module: 0x%x", module_);
@@ -248,8 +264,8 @@ hipError_t DynCO::populateDynGlobalFuncs() {
   std::scoped_lock lock(dclock_);
 
   std::vector<std::string> func_names;
-  device::Program* dev_program = fb_info_->GetProgram(ihipGetDevice())
-                                     ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
+  device::Program* dev_program =
+      fb_info_->GetProgram(device_id_)->getDeviceProgram(*g_devices[device_id_]->devices()[0]);
 
   // Get all the global func names from COMGR
   if (!dev_program->getGlobalFuncFromCodeObj(&func_names)) {
@@ -693,6 +709,33 @@ void StatCO::ForEachFatBinaryBlob(void (*cb)(const void*)) const {
   std::scoped_lock lock(sclock_);
   for (const auto& [data, _] : modules_) {
     cb(data);
+  }
+}
+
+// ================================================================================================
+void StatCO::ForEachGlobalVar(void (*cb)(const void*, const char*, size_t,
+                                         const void*)) {
+  std::scoped_lock lock(sclock_);
+  // Resolved here rather than by the caller: this sweep runs from HRR's
+  // capture init, which is inside hip::init(), and re-entering the runtime
+  // through hipGetSymbolAddress from there deadlocks on the init once-flag.
+  // No device is current that early, and GetGlobalVar asserts rather than
+  // erroring on a negative device id, so the address is reported as
+  // unresolved instead.
+  // No device is current this early in init, and GetGlobalVar asserts rather
+  // than erroring on a negative id, so fall back to device 0 — which is the
+  // device a recording resolves its globals on anyway.
+  int device_id = ihipGetDevice();
+  if (device_id < 0) device_id = 0;
+  const bool resolvable = static_cast<size_t>(device_id) < g_devices.size();
+  for (const auto& [host_var, var] : vars_) {
+    if (var == nullptr) continue;
+    hipDeviceptr_t dev_ptr = nullptr;
+    size_t sym_size = 0;
+    if (resolvable &&
+        GetGlobalVar(host_var, device_id, &dev_ptr, &sym_size) != hipSuccess)
+      dev_ptr = nullptr;
+    cb(host_var, var->GetName().c_str(), var->GetSize(), dev_ptr);
   }
 }
 }  // namespace hip

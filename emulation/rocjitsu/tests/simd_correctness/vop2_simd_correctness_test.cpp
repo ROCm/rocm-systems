@@ -104,7 +104,7 @@ struct Fixture {
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint64_t seed, bool is_float,
                                     uint64_t exec) {
     seed_inputs(seed, is_float, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     return snapshot_dst();
   }
 };

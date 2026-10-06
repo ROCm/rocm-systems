@@ -14,7 +14,8 @@
 // param/utils.h vs include/utils.h, param/param.h vs include/param.h). Source
 // keeps the plain names; includes must use the staged _tmp names.
 #include "param/common_tmp.h"
-#include "param/utils_tmp.h"
+// param/utils.h is listed before include/utils.h, so it keeps the plain name.
+#include "param/utils.h"
 #include "param/parsers.h"
 #include "param/param_registry.h"
 
@@ -112,8 +113,12 @@ struct ncclParam : public ncclParamInterface {
   }
 
   std::string dump() override {
-    std::string currentStr = this->toString();
+    auto lock = ensureLoaded();
+    bool sensitive = info.flags & NCCL_PARAM_FLAG_SENSITIVE;
+    std::string currentStr = parser.toString(value);
     std::string defaultStr = parser.toString(defaultValue);
+    if (sensitive && !currentStr.empty()) currentStr = "<redacted>";
+    if (sensitive && !defaultStr.empty()) defaultStr = "<redacted>";
     std::string flagStr = nccl::param::utils::flagsStr(info.flags);
 
     // Line 1: Key (type) [flags] desc

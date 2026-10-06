@@ -18,12 +18,12 @@
 namespace hip {
 class Device;
 extern std::vector<hip::Device*> g_devices;
+// ihip is internal/unstable API
 extern hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, hipDevice_t device);
 }  // namespace hip
 
 namespace hrr_cap {
 namespace metadata {
-namespace {
 
 std::string json_escape(const char* s) {
   std::string out;
@@ -53,7 +53,9 @@ std::string json_escape(const char* s) {
   return out;
 }
 
-std::string json_escape(const std::string& s) { return json_escape(s.c_str()); }
+namespace {
+
+std::string json_escape(const std::string& s) { return metadata::json_escape(s.c_str()); }
 
 std::string quote(const std::string& s) { return "\"" + json_escape(s) + "\""; }
 
