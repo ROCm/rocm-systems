@@ -224,15 +224,20 @@ def _largest_subset_fitting_bucket(
     remaining: set[str],
     perfmon_config: dict[str, int],
 ) -> set[str]:
-    """Greedy: add remaining counters in name order while the bucket still fits."""
+    """Greedy fit, treating all channels of one TCC series as one unit."""
     accepted: set[str] = set()
     current = _bucket_counter_set(bucket)
-    for ctr in sorted(remaining):
+    units: dict[str, set[str]] = {}
+    for counter in remaining:
+        key = _tcc_channel_base(counter) if is_tcc_channel_counter(counter) else counter
+        units.setdefault(key, set()).add(counter)
+    for key in sorted(units):
+        unit = units[key]
         trial = rebuild_counter_file(
-            bucket.name, perfmon_config, current | accepted | {ctr}
+            bucket.name, perfmon_config, current | accepted | unit
         )
         if trial is not None:
-            accepted.add(ctr)
+            accepted.update(unit)
     return accepted
 
 
@@ -278,6 +283,9 @@ def fill_slot_limit_into_existing_passes(
     passes_before = len(files)
     files = list(files)
     file_count = file_count_start if file_count_start is not None else passes_before
+    numeric_names = [int(bucket.name) for bucket in files if bucket.name.isdigit()]
+    if numeric_names:
+        file_count = max(file_count, max(numeric_names) + 1)
     pmc_already = 0
     pmc_into_existing = 0
     pmc_into_new = 0
@@ -461,6 +469,7 @@ def _count_packable_multi(
 def _strip_orphan_tcc_ea_req_duplicates(
     files: list[CounterFile],
     perfmon_config: dict[str, int],
+    required_unions: list[frozenset[str]] | None = None,
 ) -> list[CounterFile]:
     """Remove EA REQ series from non-home passes when a LEVEL+REQ home exists.
 
@@ -481,9 +490,9 @@ def _strip_orphan_tcc_ea_req_duplicates(
     if not home_bases:
         return files
 
-    updated: list[CounterFile] = []
+    updated = list(files)
     changed = False
-    for bucket in files:
+    for index, bucket in enumerate(files):
         bases = _bucket_tcc_channel_bases(bucket)
         drop_bases = {
             req_base
@@ -491,7 +500,6 @@ def _strip_orphan_tcc_ea_req_duplicates(
             if req_base in bases and _TCC_EA_REQ_TO_LEVEL[req_base] not in bases
         }
         if not drop_bases:
-            updated.append(bucket)
             continue
         kept = {
             ctr
@@ -507,10 +515,30 @@ def _strip_orphan_tcc_ea_req_duplicates(
                 "single-pass-packable: orphan TCC EA REQ strip rebuild failed "
                 f"for bucket {bucket.name!r}; leaving bucket unchanged.",
             )
-            updated.append(bucket)
             continue
+        trial = list(updated)
+        if kept:
+            trial[index] = rebuilt
+        else:
+            trial.pop(index)
+        if required_unions and _count_packable_multi(trial, required_unions) > 0:
+            console_debug(
+                "profiling",
+                "single-pass-packable: kept orphan TCC EA REQ series because "
+                "stripping it would break SPP coverage.",
+            )
+            continue
+        updated = trial
         changed = True
-        updated.append(rebuilt)
+        if not kept:
+            # Replacements keep ``updated`` aligned with ``files``. A pop is
+            # followed immediately by recursion so subsequent indices cannot
+            # refer to the shortened list.
+            return _strip_orphan_tcc_ea_req_duplicates(
+                updated,
+                perfmon_config,
+                required_unions,
+            )
 
     if changed:
         console_debug(
@@ -602,8 +630,7 @@ def try_allocate_single_pass_packable(
 
     files, file_count = _first_fit_unplaced(files, work_set, perfmon_config, file_count)
     files, merges = _reduce_passes(files, unions, perfmon_config)
-    files = _strip_orphan_tcc_ea_req_duplicates(files, perfmon_config)
-    file_count = file_count_start + len(files)
+    files = _strip_orphan_tcc_ea_req_duplicates(files, perfmon_config, unions)
 
     packable_multi = _count_packable_multi(files, unions)
     if packable_multi > 0:
@@ -625,8 +652,20 @@ def try_allocate_single_pass_packable(
         slot_limit_metric_count=slot_n,
         file_count_start=file_count,
     )
-    files = _strip_orphan_tcc_ea_req_duplicates(files, perfmon_config)
-    file_count = file_count_start + len(files)
+    files = _strip_orphan_tcc_ea_req_duplicates(files, perfmon_config, unions)
+    packable_multi = _count_packable_multi(files, unions)
+    if packable_multi > 0:
+        console_warning(
+            "profiling",
+            "single-pass-packable: "
+            f"{packable_multi} packable union(s) lost coverage after residual "
+            "fill; falling back to legacy heuristic.",
+        )
+        return None
+    file_count = max(
+        file_count_start,
+        *(int(bucket.name) + 1 for bucket in files if bucket.name.isdigit()),
+    )
 
     stats = SinglePassPackableStats(
         bucket_count=len(files),

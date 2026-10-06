@@ -759,7 +759,7 @@ def process_rocpd_csv(
 
     use_provenance = (
         pass_layout is not None
-        and hasattr(pass_layout, "has_duplicates")
+        and pass_layout.has_duplicates
         and "Pass_Key" in df.columns
     )
 

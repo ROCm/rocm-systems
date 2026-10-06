@@ -17,9 +17,13 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from utils.logger import console_debug
+from utils.logger import console_debug, console_warning
 from utils.metrics.expression import build_eval_string
-from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
+from utils.utils_counter_defs import (
+    SUPPORTED_DENOM,
+    extract_counters_and_variables,
+    get_build_in_vars,
+)
 
 PASS_COLUMN_SEP = "@pass:"
 PASS_VAR_SEP = "__pass"
@@ -194,6 +198,36 @@ def select_pass(
     return candidates[0]
 
 
+def select_pass_with_normalization_fallback(
+    required: frozenset[str],
+    layout: PassLayout,
+    gpu_series: str,
+) -> tuple[str | None, bool]:
+    """Select one pass, relaxing only runtime normalization counters if needed.
+
+    Returns ``(pass_key, relaxed)``. ``pass_key`` is ``None`` when no pass was
+    found even after relaxation. ``relaxed`` is true only when removing
+    normalization counters produced a qualifying pass.
+    """
+    chosen = select_pass(required, layout)
+    if chosen is not None:
+        return chosen, False
+
+    normalization_counters: set[str] = set()
+    for formula in SUPPORTED_DENOM.values():
+        counters, _ = extract_counters_and_variables(
+            formula,
+            gpu_series,
+            include_supported_denom=False,
+        )
+        normalization_counters.update(counters)
+    formula_counters = required - normalization_counters
+    if not formula_counters or formula_counters == required:
+        return None, False
+    fallback = select_pass(frozenset(formula_counters), layout)
+    return fallback, fallback is not None
+
+
 _ALREADY_BOUND_BUILTIN_RE = re.compile(rf"{re.escape(PASS_VAR_SEP)}\d+$")
 
 
@@ -292,7 +326,11 @@ def bind_metric_tables_to_passes(
             required = expand_required_counters(refs, gpu_series)
             # Prefer a pass that also has any normalization counters named
             # directly (already in required if present in the formula).
-            chosen = select_pass(required, pass_layout)
+            chosen, normalization_relaxed = select_pass_with_normalization_fallback(
+                required,
+                pass_layout,
+                gpu_series,
+            )
             if chosen is None:
                 unbound += 1
                 console_debug(
@@ -301,6 +339,14 @@ def bind_metric_tables_to_passes(
                     "using base columns",
                 )
                 continue
+            if normalization_relaxed:
+                missing = required - pass_layout.counters_by_pass[chosen]
+                console_warning(
+                    "pass_provenance",
+                    f"row {row_id}: runtime normalization counters "
+                    f"{sorted(missing)} are not in {chosen}; binding formula "
+                    "counters to that pass",
+                )
             used_passes.add(chosen)
             row_pass[row_id] = chosen
             for field in df.columns:
@@ -358,7 +404,11 @@ def bind_expression_dataframe(
             continue
         refs = extract_row_refs(exprs)
         required = expand_required_counters(refs, gpu_series)
-        chosen = select_pass(required, pass_layout)
+        chosen, normalization_relaxed = select_pass_with_normalization_fallback(
+            required,
+            pass_layout,
+            gpu_series,
+        )
         if chosen is None:
             unbound += 1
             console_debug(
@@ -367,6 +417,14 @@ def bind_expression_dataframe(
                 "using base columns",
             )
             continue
+        if normalization_relaxed:
+            missing = required - pass_layout.counters_by_pass[chosen]
+            console_warning(
+                "pass_provenance",
+                f"metric {metric_id}: runtime normalization counters "
+                f"{sorted(missing)} are not in {chosen}; binding formula "
+                "counters to that pass",
+            )
         used_passes.add(chosen)
         metric_pass[metric_id] = chosen
         for row_index in group.index:
