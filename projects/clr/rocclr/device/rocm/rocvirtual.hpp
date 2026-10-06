@@ -900,6 +900,10 @@ class VirtualGPU : public device::VirtualDevice {
     return (state_.load(std::memory_order_acquire) & flag) != 0;
   }
 
+  bool TestAndClearStateFlag(StateFlags flag) {
+    return (state_.fetch_and(static_cast<uint8_t>(~flag), std::memory_order_acq_rel) & flag) != 0;
+  }
+
   std::atomic<uint8_t> state_{0};
 
   Timestamp* timestamp_;
