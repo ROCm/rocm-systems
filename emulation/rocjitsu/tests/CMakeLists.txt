@@ -581,6 +581,7 @@ add_executable(
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
+    ds_memory_snapshot_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
     l2_cache_test.cpp
