@@ -33,6 +33,7 @@
 #endif
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_addc.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_cper.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
@@ -5531,27 +5532,13 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_INVAL;
   }
 
-  // Validate the buffer holds a full header before dereferencing any header field
-  if (buf_size < sizeof(amdsmi_cper_hdr_t)) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size: " << std::dec
-       << buf_size << " is smaller than the cper header: (" << sizeof(amdsmi_cper_hdr_t) << ")\n";
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_UNEXPECTED_SIZE;
-  }
-  const amdsmi_cper_hdr_t* cper = reinterpret_cast<const amdsmi_cper_hdr_t*>(cper_buffer);
-  if ((cper->record_length < sizeof(amdsmi_cper_hdr_t)) || (cper->record_length > buf_size)) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper record length: " << std::dec
-       << cper->record_length << " does not fit the buffer size: " << buf_size << "\n";
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_UNEXPECTED_SIZE;
-  } else if (strncmp(cper->signature, "CPER", 4) != 0) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
-       << "[AFIDS] cper buffer does not have the correct signature\n";
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_UNEXPECTED_DATA;
+  std::vector<int> afid_list;
+  amdsmi_status_t status = cper_get_afids(cper_buffer, buf_size, &afid_list);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
   }
   uint32_t i = 0;
-  for (int afid : cper_decode(cper, buf_size)) {
+  for (int afid : afid_list) {
     if (i < *num_afids) {
       afids[i] = static_cast<uint64_t>(afid);
     }
@@ -5560,6 +5547,13 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
   *num_afids = i;
 
   return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_cper_json(char* cper_buffer, uint32_t buf_size, char* json_buffer,
+                                     uint32_t* json_buffer_size) {
+  AMDSMI_CHECK_INIT();
+
+  return cper_get_report_json(cper_buffer, buf_size, json_buffer, json_buffer_size);
 }
 
 amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle,

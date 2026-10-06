@@ -4039,6 +4039,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_cper_json = _libraries['libamd_smi.so'].amdsmi_get_cper_json
+    amdsmi_get_cper_json.restype = amdsmi_status_t
+    amdsmi_get_cper_json.argtypes = [ctypes.POINTER(ctypes.c_char), uint32_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_ras_feature_info = _libraries['libamd_smi.so'].amdsmi_get_gpu_ras_feature_info
     amdsmi_get_gpu_ras_feature_info.restype = amdsmi_status_t
     amdsmi_get_gpu_ras_feature_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_ras_feature_t)]
@@ -5376,9 +5382,9 @@ __all__ = \
     'amdsmi_frequency_range_t', 'amdsmi_fw_block_t',
     'amdsmi_fw_info_t', 'amdsmi_get_afids_from_cper',
     'amdsmi_get_clk_freq', 'amdsmi_get_clock_info',
-    'amdsmi_get_cpu_affinity_with_scope', 'amdsmi_get_cpu_cc6_enable',
-    'amdsmi_get_cpu_cclk_limit', 'amdsmi_get_cpu_core_boostlimit',
-    'amdsmi_get_cpu_core_ccd_power',
+    'amdsmi_get_cper_json', 'amdsmi_get_cpu_affinity_with_scope',
+    'amdsmi_get_cpu_cc6_enable', 'amdsmi_get_cpu_cclk_limit',
+    'amdsmi_get_cpu_core_boostlimit', 'amdsmi_get_cpu_core_ccd_power',
     'amdsmi_get_cpu_core_current_freq_limit',
     'amdsmi_get_cpu_core_eff_floor_freq_limit',
     'amdsmi_get_cpu_core_energy',

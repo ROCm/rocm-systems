@@ -161,6 +161,7 @@ from .amdsmi_interface import amdsmi_get_gpu_ras_feature_info
 from .amdsmi_interface import amdsmi_get_gpu_ras_block_features_enabled
 from .amdsmi_interface import amdsmi_get_gpu_cper_entries
 from .amdsmi_interface import amdsmi_get_afids_from_cper
+from .amdsmi_interface import amdsmi_get_cper_json
 from .amdsmi_interface import amdsmi_gpu_validate_ras_eeprom
 
 # # Unsupported Functions In Virtual Environment
