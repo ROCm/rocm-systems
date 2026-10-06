@@ -51,7 +51,7 @@ CounterController::check_power_performance_level()
     // including) gfx1250 requires profile_standard for stable counter
     // collection; other GFX IPs do not.
     constexpr auto min_gfx_target_version = 110000;
-    constexpr auto max_gfx_target_version = 125000;
+    constexpr auto max_gfx_target_version = 120500;
 
     for(const auto* agent : agent::get_agents())
     {
@@ -87,7 +87,7 @@ CounterController::check_power_performance_level()
                            agent->node_id,
                            agent->drm_render_minor);
 
-        ROCP_WARNING_IF(perf_level == "auto")
+        ROCP_WARNING_IF(!perf_level.empty() && perf_level != "profile_standard")
             << fmt::format("Agent {} (renderD{}) has power_dpm_force_performance_level='{}'. Set "
                            "it to 'profile_standard' (e.g. via rocm-smi) for stable GPU counter "
                            "collection. Please refer to the rocprofv3 documentation, 'Setting "
