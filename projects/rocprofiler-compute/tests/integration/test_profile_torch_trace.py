@@ -642,3 +642,24 @@ def test_torch_operator_addmm_selects_kernels(
     assert "aten::addmm" in out
     assert "nn.Module.Linear.forward" in out
     assert "operator filter selected" in out
+
+
+@pytest.mark.torch_trace
+def test_list_torch_operators_wins_over_filter(
+    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-torch-operators",
+        "--torch-operator",
+        "*addmm*",
+        "--path",
+        torch_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Defaulting to listing" in out
+    assert "PyTorch Operator Call Tree:" in out
+    assert "Matched PyTorch Operators:" not in out
