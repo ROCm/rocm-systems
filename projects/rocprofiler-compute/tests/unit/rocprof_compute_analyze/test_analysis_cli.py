@@ -230,3 +230,15 @@ def test_list_operators_joint_backend_heading(capsys):
     cli.list_operators("/workload", kernel_top, ["torch", "triton"])
     captured = capsys.readouterr()
     assert "PyTorch, Triton Operator Call Tree" in captured.out
+
+
+def test_handle_operator_prints_matched_subtree(capsys):
+    args = Namespace(torch_operator=["*addmm*"])
+    cli = cli_analysis(args, {})
+    workload = workload_with_operator_forest()
+    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
+    cli.handle_operator(args, workload, ["torch"])
+    captured = capsys.readouterr()
+    assert "Matched PyTorch Operators: *addmm*" in captured.out
+    assert "aten::addmm" in captured.out
+    assert workload.filter_kernel_ids == [0]
