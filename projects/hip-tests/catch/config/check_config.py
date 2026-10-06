@@ -63,8 +63,8 @@ def main():
                 if targets and not (isinstance(reason, str) and reason.strip()):
                     missing_reasons.append(f"  {group}/{case_name}: '{field}'")
                 # A populated skip section with a real reason must cite a Jira
-                # reference (AIRUNTIME-<number>); the placeholder AIRUNTIME-XXXX
-                # has no digits and therefore does not count as a real ref.
+                # reference (AIRUNTIME-<number>); a reason with no such ref (or a
+                # digitless placeholder) does not count as a real ref.
                 elif targets and not JIRA_RE.search(reason):
                     missing_jira.append(f"  {group}/{case_name}: '{field}'")
 
