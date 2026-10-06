@@ -1545,14 +1545,14 @@ template <bool EnableAsync>
   }
 
   if constexpr (EnableAsync) {
-    bool may_submit = true;
+    bool may_submit = !async_mma_policy::prefer_inline_mma(*inst, active->wf_size());
     std::optional<uint64_t> issuer;
     auto *admission = storage ? storage->admission : nullptr;
     if (window && window->take_issuer(active->pc)) {
       may_submit = false;
       if (admission)
         ++admission->stats.issuer;
-    } else if (admission && matrix_coexecution::async_candidate(inst->mnemonic())) {
+    } else if (may_submit && admission && matrix_coexecution::async_candidate(inst->mnemonic())) {
       // Capacity can become available between this check and submit_mma().
       // Skipping lookahead must keep this instruction inline in that case.
       may_submit = false;

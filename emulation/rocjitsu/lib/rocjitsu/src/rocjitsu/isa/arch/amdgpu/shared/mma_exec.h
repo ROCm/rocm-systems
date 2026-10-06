@@ -27,6 +27,10 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mfma_fp4_avx512.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mfma_fp4_vnni.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mfma_scale_matmul.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mfma_scale_simd.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/data_types.h"
@@ -4019,6 +4023,56 @@ void exec_swmmac_bf16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_
       read_acc, [](float val) { return util::f32_to_bf16(val); }, const_acc, wave_size);
 }
 
+// Stage one CDNA4 block-scale operand into the matrix multiply's dense layout.
+// FP4 has exactly 32 consecutive K elements in each lane and four packed
+// registers per operand. Traverse those words directly, decoding each once,
+// instead of recomputing a generic register/lane mapping for every element.
+template <bool Transpose, typename Extract>
+void stage_mfma_scale_operand(RegisterAccess::VgprReadRegion &source, uint32_t dim, uint32_t K,
+                              uint32_t data_bits, uint32_t stride, float *destination,
+                              Extract extract) {
+  if constexpr (std::is_same_v<std::remove_cvref_t<Extract>, ExtractFp4>) {
+    if (source.wf_size() == 64 && data_bits == 4 &&
+        ((dim == 16 && K == 128) || (dim == 32 && K == 64))) {
+      constexpr std::array<float, 16> values = {0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,
+                                                4.0f,  6.0f,  -0.0f, -0.5f, -1.0f, -1.5f,
+                                                -2.0f, -3.0f, -4.0f, -6.0f};
+      for (uint32_t reg = 0; reg < 4; ++reg) {
+        const auto lanes = source.lanes(reg);
+        for (uint32_t group = 0; group < 64 / dim; ++group) {
+          const uint32_t k_base = group * 32 + reg * 8;
+          for (uint32_t index = 0; index < dim; ++index) {
+            const uint32_t word = lanes[group * dim + index];
+            for (uint32_t element = 0; element < 8; ++element) {
+              const float value = values[(word >> (element * 4)) & 0xfu];
+              if constexpr (Transpose)
+                destination[(k_base + element) * stride + index] = value;
+              else
+                destination[index * stride + k_base + element] = value;
+            }
+          }
+        }
+      }
+      return;
+    }
+  }
+  if constexpr (Transpose) {
+    for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t index = 0; index < dim; ++index) {
+        auto loc = mfma_scale_f8f6f4_input_loc(dim, K, index, k, data_bits);
+        destination[k * stride + index] =
+            extract(source, source.base(), physicalize_loc(loc, source.wf_size()));
+      }
+  } else {
+    for (uint32_t index = 0; index < dim; ++index)
+      for (uint32_t k = 0; k < K; ++k) {
+        auto loc = mfma_scale_f8f6f4_input_loc(dim, K, index, k, data_bits);
+        destination[index * stride + k] =
+            extract(source, source.base(), physicalize_loc(loc, source.wf_size()));
+      }
+  }
+}
+
 template <typename ExtractA, typename ExtractB, typename ScaleBlock>
 void exec_f32_scaled_impl(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t a_bits,
                           uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
@@ -4066,12 +4120,14 @@ void exec_f32_scaled_impl(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
 
   // SIMD fast path: hoist A/B into dense f32 buffers (lane permutation folded
   // in), then for each row accumulate each K-block's partial product as
-  // native-width FMA rows over the N (column) dimension. The per-output E8M0
-  // scale + ldexp accumulation stays scalar (cheap: O(num_blocks) per output
-  // vs O(K) MACs). A scalar tail covers trailing N columns.
+  // native-width FMA rows over the N (column) dimension. E8M0 scaling and
+  // accumulation use the same SIMD width, retaining scalar handling for
+  // exceptional scale results. A scalar tail covers trailing N columns.
+  // Like the scalar C++ fold, generic addition leaves dual-NaN payload
+  // selection to the host compiler; exact tests qualify supported builds.
   if constexpr (util::has_stdx_simd) {
     // Column-padded, stack-allocated, aligned B loads. See exec_f32_mixed.
-    // Cacc is touched scalar (per-output ldexp) so it keeps an N pitch.
+    // Cacc keeps an N pitch; its SIMD accesses need only element alignment.
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
     constexpr size_t MAX_AB = 2048;
     constexpr size_t MAX_BSTRIDE = 4096;
@@ -4093,16 +4149,8 @@ void exec_f32_scaled_impl(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
       alignas(64) float Bbuf[MAX_BSTRIDE] = {};
       alignas(64) float Cacc[MAX_C] = {};
       for (uint32_t b = 0; b < B; ++b) {
-        for (uint32_t row = 0; row < M; ++row)
-          for (uint32_t k = 0; k < K; ++k) {
-            auto al = mfma_scale_f8f6f4_input_loc(M, K, row, k, a_bits);
-            Abuf[row * K + k] = ea(reads.a, s0, physicalize_loc(al, wf));
-          }
-        for (uint32_t k = 0; k < K; ++k)
-          for (uint32_t col = 0; col < N; ++col) {
-            auto bl = mfma_scale_f8f6f4_input_loc(N, K, col, k, b_bits);
-            Bbuf[k * stride + col] = eb(reads.b, s1, physicalize_loc(bl, wf));
-          }
+        stage_mfma_scale_operand<false>(reads.a, M, K, a_bits, K, Abuf, ea);
+        stage_mfma_scale_operand<true>(reads.b, N, K, b_bits, stride, Bbuf, eb);
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {
             auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
@@ -4112,12 +4160,47 @@ void exec_f32_scaled_impl(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
                     : std::bit_cast<float>(reads.acc->lane(out.reg, out.lane)),
                 c_modifier);
           }
-        for (uint32_t row = 0; row < M; ++row) {
+        uint32_t row = 0;
+#if __has_include(<experimental/simd>)
+        // Four independent row accumulators hide FMA latency and share B
+        // loads. FP4 inputs cannot produce competing NaNs inside the FMA loop.
+        // Keep every output's K and block-add order unchanged.
+        constexpr uint32_t ROWS = 4;
+        constexpr bool FP4_INPUTS =
+            std::is_same_v<ExtractA, ExtractFp4> && std::is_same_v<ExtractB, ExtractFp4>;
+        for (; FP4_INPUTS && a_bits == 4 && b_bits == 4 && row + ROWS <= M && N >= W; row += ROWS) {
+          for (uint32_t blk = 0; blk < num_blocks; ++blk) {
+            const uint32_t k_start = blk * BLOCK_K;
+            const uint32_t k_end = std::min(k_start + BLOCK_K, K);
+            uint32_t col = 0;
+            for (; col + W <= N; col += W) {
+              const auto sums = mfma_fp4_block_product<ROWS>(Abuf + row * K + k_start, K,
+                                                             Bbuf + k_start * stride + col, stride,
+                                                             k_end - k_start);
+              for (uint32_t r = 0; r < ROWS; ++r) {
+                util::native<float> previous;
+                previous.copy_from(&Cacc[(row + r) * N + col], util::stdx::element_aligned);
+                const auto next = previous + scale_block_sum(sums[r], row + r, col, b, blk);
+                next.copy_to(&Cacc[(row + r) * N + col], util::stdx::element_aligned);
+              }
+            }
+            for (uint32_t r = 0; r < ROWS; ++r)
+              for (uint32_t tail_col = col; tail_col < N; ++tail_col) {
+                float block_sum = 0.0f;
+                for (uint32_t k = k_start; k < k_end; ++k)
+                  block_sum =
+                      std::fma(Abuf[(row + r) * K + k], Bbuf[k * stride + tail_col], block_sum);
+                Cacc[(row + r) * N + tail_col] +=
+                    scale_block_sum(block_sum, row + r, tail_col, b, blk);
+              }
+          }
+        }
+#endif
+        for (; row < M; ++row) {
           for (uint32_t blk = 0; blk < num_blocks; ++blk) {
             uint32_t k_start = blk * BLOCK_K;
             uint32_t k_end = std::min(k_start + BLOCK_K, K);
             uint32_t col = 0;
-            alignas(64) float bs[64];
             for (; col + W <= N; col += W) {
               util::native<float> acc(0.0f);
               for (uint32_t k = k_start; k < k_end; ++k) {
@@ -4126,9 +4209,10 @@ void exec_f32_scaled_impl(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
                 bv.copy_from(&Bbuf[k * stride + col], util::stdx::vector_aligned);
                 acc = util::stdx::fma(a, bv, acc);
               }
-              acc.copy_to(bs, util::stdx::vector_aligned);
-              for (uint32_t j = 0; j < W; ++j)
-                Cacc[row * N + col + j] += scale_block_sum(bs[j], row, col + j, b, blk);
+              util::native<float> previous;
+              previous.copy_from(&Cacc[row * N + col], util::stdx::element_aligned);
+              const auto next = previous + scale_block_sum(acc, row, col, b, blk);
+              next.copy_to(&Cacc[row * N + col], util::stdx::element_aligned);
             }
             for (; col < N; ++col) {
               float block_sum = 0.0f;
@@ -4184,6 +4268,19 @@ inline uint8_t read_mfma_scale_e8m0(auto &cu, uint32_t vgpr_base, uint32_t selec
   return static_cast<uint8_t>((raw >> (byte_index * 8)) & 0xffu);
 }
 
+inline void read_mfma_scale_e8m0_lanes(auto &cu, uint32_t vgpr_base, uint32_t selector,
+                                       uint32_t byte_index, std::span<uint8_t, 64> scales) {
+  if (selector >= 240 && selector <= 248) {
+    std::fill(scales.begin(), scales.end(), mfma_inline_scale_e8m0(selector));
+    return;
+  }
+  const auto reads =
+      RegisterAccess(cu).read_vgpr_region(src_base(vgpr_base, selector), 1, mfma_full_lane_mask(64),
+                                          static_cast<uint8_t>(1u << byte_index));
+  for (uint32_t lane = 0; lane < scales.size(); ++lane)
+    scales[lane] = static_cast<uint8_t>(reads.lane(0, lane) >> (byte_index * 8));
+}
+
 /// Scaled MFMA for mixed-format f8f6f4: A and B may have different bit widths.
 /// cbsz/blgp are used as format selectors (not lane permutations).
 template <typename ExtractA, typename ExtractB>
@@ -4192,14 +4289,90 @@ void exec_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
                            uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
                            uint32_t vgpr_base, uint32_t scale_a, uint32_t scale_b,
                            uint32_t scale_a_byte, uint32_t scale_b_byte, uint32_t c_modifier = 0) {
-  auto scale_block_sum = [&](float block_sum, uint32_t row, uint32_t col, uint32_t,
-                             uint32_t blk) -> float {
-    uint8_t sa_e8m0 = read_mfma_scale_e8m0(cu, vgpr_base, scale_a, M * blk + row, scale_a_byte);
-    uint8_t sb_e8m0 = read_mfma_scale_e8m0(cu, vgpr_base, scale_b, N * blk + col, scale_b_byte);
-    if (sa_e8m0 == 0xffu || sb_e8m0 == 0xffu)
-      return std::numeric_limits<float>::quiet_NaN();
-    int scale_exp = static_cast<int>(sa_e8m0) + static_cast<int>(sb_e8m0) - 254;
-    return std::ldexp(block_sum, scale_exp);
+  // Each scale byte is shared across an entire output row or column. Read it
+  // once before any destination writes, retaining selected-byte observations
+  // even when a scale register aliases the destination or an input register.
+  // Leave the forced-scalar path uncached as an independent reference.
+  // Both decoded CDNA4 shapes consume one scale byte from each of 64 lanes.
+  assert(B == 1 && cu.wf_size() == 64 &&
+         ((M == 16 && N == 16 && K == 128) || (M == 32 && N == 32 && K == 64)));
+  const bool cache_scales = !util::force_scalar();
+  std::array<uint8_t, 64> a_scales;
+  std::array<uint8_t, 64> b_scales;
+  if (cache_scales) {
+    read_mfma_scale_e8m0_lanes(cu, vgpr_base, scale_a, scale_a_byte, std::span(a_scales));
+    read_mfma_scale_e8m0_lanes(cu, vgpr_base, scale_b, scale_b_byte, std::span(b_scales));
+  }
+#if defined(__AVX512F__) && defined(__AVX512VL__) && defined(__FMA__)
+  if constexpr (std::is_same_v<ExtractA, ExtractFp4> && std::is_same_v<ExtractB, ExtractFp4>) {
+    if (cache_scales && mfma_fp4_avx512_shape(M, N, K, B, a_bits, b_bits, cu.wf_size())) {
+      const bool normal_scales = mfma_fp4_avx512_normal_scales(a_scales.data(), b_scales.data());
+      auto reads = read_mixed_matrix_fast_path_regions(cu, s0, s1, s2, 2048, 4, 2048, 4, 256, 32,
+                                                       const_acc, 64);
+      alignas(64) float c[256];
+      for (uint32_t row = 0; row < 16; ++row)
+        for (uint32_t col = 0; col < 16; ++col) {
+          const auto out = output_loc_32(16, 16, row, col, 0);
+          c[row * 16 + col] = apply_wmma_c_modifier(
+              std::bit_cast<float>(const_acc == ACC_FROM_VGPR ? reads.acc->lane(out.reg, out.lane)
+                                                              : const_acc),
+              c_modifier);
+        }
+#if defined(__AVX512BW__)
+      if (mfma_fp4_vnni_selected(M, N, K, B, a_bits, b_bits, cu.wf_size(), util::force_scalar())) {
+        alignas(64) uint32_t a[512], b[512];
+        for (uint32_t reg = 0; reg < 4; ++reg)
+          mfma_fp4_stage_vnni(reads.a.lanes(reg).data(), reads.b.lanes(reg).data(), reg, a, b);
+        if (normal_scales)
+          mfma_fp4_16x16x128_vnni(a, b, c, a_scales.data(), b_scales.data());
+        else
+          mfma_fp4_16x16x128_vnni<false>(a, b, c, a_scales.data(), b_scales.data());
+      } else
+#endif
+      {
+        alignas(64) float a[2048], b[2048];
+        for (uint32_t reg = 0; reg < 4; ++reg) {
+          mfma_fp4_stage_a_avx512(reads.a.lanes(reg).data(), reg, a);
+          mfma_fp4_stage_b_avx512(reads.b.lanes(reg).data(), reg, b);
+        }
+        if (normal_scales)
+          mfma_fp4_16x16x128_avx512(a, b, c, a_scales.data(), b_scales.data());
+        else
+          mfma_fp4_16x16x128_avx512<false>(a, b, c, a_scales.data(), b_scales.data());
+      }
+      // All source values, including aliased scales and accumulators, have been
+      // consumed before obtaining the destination region and writing any lane.
+      auto writes = write_mfma_acc32_region(cu, dst, 16, 16, 1, 64);
+      for (uint32_t row = 0; row < 16; ++row)
+        for (uint32_t col = 0; col < 16; ++col) {
+          const auto out = output_loc_32(16, 16, row, col, 0);
+          writes.set_lane(out.reg, out.lane, std::bit_cast<uint32_t>(c[row * 16 + col]));
+        }
+      return;
+    }
+  }
+#endif
+  auto scale_block_sum = [&](auto block_sum, uint32_t row, uint32_t col, uint32_t, uint32_t blk) {
+    const uint8_t sa_e8m0 =
+        cache_scales ? a_scales[M * blk + row]
+                     : read_mfma_scale_e8m0(cu, vgpr_base, scale_a, M * blk + row, scale_a_byte);
+    auto scale_one = [&](float sum, uint32_t column) {
+      const uint8_t sb_e8m0 = cache_scales ? b_scales[N * blk + column]
+                                           : read_mfma_scale_e8m0(cu, vgpr_base, scale_b,
+                                                                  N * blk + column, scale_b_byte);
+      if (sa_e8m0 == 0xffu || sb_e8m0 == 0xffu)
+        return std::numeric_limits<float>::quiet_NaN();
+      const int scale_exp = static_cast<int>(sa_e8m0) + static_cast<int>(sb_e8m0) - 254;
+      return std::ldexp(sum, scale_exp);
+    };
+    if constexpr (std::is_same_v<decltype(block_sum), float>) {
+      return scale_one(block_sum, col);
+    } else {
+#if __has_include(<experimental/simd>)
+      assert(cache_scales && "SIMD execution always uses cached scale bytes");
+      return mfma_scale_e8m0_simd(block_sum, sa_e8m0, &b_scales[N * blk + col]);
+#endif
+    }
   };
   exec_f32_scaled_impl(cu, M, N, K, B, a_bits, b_bits, dst, s0, s1, s2, ea, eb, scale_block_sum,
                        const_acc, c_modifier);

@@ -13055,6 +13055,7 @@ class CodeGenerator:
                     ('rocjitsu/isa/arch/amdgpu/shared/fp_mode.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/mxfp4_simd.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/division.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/cube.h', False),
                     ('util/except.h', False),
@@ -13615,6 +13616,9 @@ class CodeGenerator:
                 'rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h': 'gfx11_dot2_f32',
                 'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': 'gfx12_dot2_f32',
                 'rocjitsu/isa/arch/amdgpu/shared/cube.h': 'cube::',
+                'rocjitsu/isa/arch/amdgpu/shared/mxfp4_simd.h': (
+                    'try_execute_cvt_scalef32_pk_fp4_bf16_simd'
+                ),
                 'rocjitsu/isa/arch/amdgpu/shared/division.h': (
                     'div_scale(',
                     'div_fmas(',
