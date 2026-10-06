@@ -3188,7 +3188,39 @@ int SimulatedKfd::export_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   auto it = proc.allocations_.find(args->handle);
   if (it == proc.allocations_.end())
     return -EINVAL;
-  const auto &alloc = it->second;
+  auto &alloc = it->second;
+  // hipMalloc in local mode records the caller's VA and no memfd. IPC exports
+  // that allocation. When the driver already has a host pointer, copy those
+  // bytes into the memfd and point the GPU pages at it. When it does not, the
+  // memfd only has to exist: the live mapping stays where the runtime put it.
+  if (alloc.memfd < 0) {
+    int promoted_fd = memfd_create("rocjitsu_dmabuf_promote", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (promoted_fd < 0)
+      return -errno;
+    if (ftruncate(promoted_fd, static_cast<off_t>(alloc.size)) != 0) {
+      libc_passthrough().close(promoted_fd);
+      return -errno;
+    }
+    if (alloc.host_ptr) {
+      auto *new_host_ptr =
+          safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, promoted_fd, 0);
+      if (new_host_ptr == MAP_FAILED) {
+        libc_passthrough().close(promoted_fd);
+        return -ENOMEM;
+      }
+      std::memcpy(new_host_ptr, alloc.host_ptr, alloc.size);
+      proc.remap_page_host_ptrs(alloc.gpu_va, alloc.host_ptr, new_host_ptr, alloc.size);
+      if (alloc.host_ptr_owned)
+        safe_munmap(alloc.host_ptr, alloc.size);
+      alloc.host_ptr = new_host_ptr;
+      alloc.host_ptr_owned = true;
+    }
+    alloc.memfd = promoted_fd;
+    {
+      std::lock_guard<std::mutex> flk(owned_fds_mutex_);
+      owned_fds_.insert(promoted_fd);
+    }
+  }
   if (alloc.memfd < 0)
     return -EINVAL;
   int dupfd = safe_fcntl(alloc.memfd, F_DUPFD_CLOEXEC, 0);

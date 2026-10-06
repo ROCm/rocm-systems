@@ -2410,6 +2410,12 @@ public:
     uint32_t alloc_flags = 0;
     void *cpu_ptr = nullptr;
     bool sealed_ram = false;
+    // Userspace (libdrm amdgpu_bo_query_info / amdgpu_bo_set_metadata) reads and
+    // writes this on every VMM import. An empty record is a valid buffer.
+    uint64_t metadata_flags = 0;
+    uint64_t tiling_info = 0;
+    uint32_t metadata_size = 0;
+    uint32_t metadata[64] = {};
     SimulatedKfd *owner = nullptr;
     std::vector<GemMapping> installed_vas;
   };
@@ -2796,6 +2802,74 @@ public:
     return 0;
   }
 
+  /// @brief Get or set the UMD metadata libdrm stores on a GEM buffer.
+  /// @details hsa_amd_vmem_handle_create imports the KFD dmabuf and then queries
+  /// this. Rejecting the ioctl makes ROCr report the whole allocation as out of
+  /// memory. The record is per handle; a fresh buffer has an empty one.
+  int gem_metadata(const DrmFileToken &file, drm_amdgpu_gem_metadata *args) {
+    if (!args)
+      return -EINVAL;
+    std::lock_guard lock(fd_mutex_);
+    auto it = gem_entries_.find(args->handle);
+    if (it == gem_entries_.end() || !file || it->second.handle_closed ||
+        it->second.drm_file_id != file->id)
+      return -ENOENT;
+    auto &gem = it->second;
+    if (args->op == AMDGPU_GEM_METADATA_OP_GET_METADATA) {
+      args->data.flags = gem.metadata_flags;
+      args->data.tiling_info = gem.tiling_info;
+      args->data.data_size_bytes = gem.metadata_size;
+      if (gem.metadata_size != 0)
+        std::memcpy(args->data.data, gem.metadata, gem.metadata_size);
+      return 0;
+    }
+    if (args->op != AMDGPU_GEM_METADATA_OP_SET_METADATA)
+      return -EINVAL;
+    if (args->data.data_size_bytes > sizeof(args->data.data))
+      return -EINVAL;
+    gem.metadata_flags = args->data.flags;
+    gem.tiling_info = args->data.tiling_info;
+    gem.metadata_size = args->data.data_size_bytes;
+    std::memset(gem.metadata, 0, sizeof(gem.metadata));
+    if (gem.metadata_size != 0)
+      std::memcpy(gem.metadata, args->data.data, gem.metadata_size);
+    return 0;
+  }
+
+  /// @brief Answer libdrm's buffer-info query (DRM_AMDGPU_GEM_OP).
+  /// @details amdgpu_bo_import reads the create info through a user pointer in
+  /// value. hipIpcGetMemHandle imports the exported dmabuf and fails the whole
+  /// call when this ioctl is rejected.
+  int gem_op(const DrmFileToken &file, drm_amdgpu_gem_op *args) {
+    if (!args)
+      return -EINVAL;
+    std::lock_guard lock(fd_mutex_);
+    auto it = gem_entries_.find(args->handle);
+    if (it == gem_entries_.end() || !file || it->second.handle_closed ||
+        it->second.drm_file_id != file->id)
+      return -ENOENT;
+    if (args->op == AMDGPU_GEM_OP_GET_GEM_CREATE_INFO) {
+      if (args->value == 0)
+        return -EINVAL;
+      drm_amdgpu_gem_create_in info{};
+      info.bo_size = it->second.size;
+      info.alignment = 4096;
+      info.domains = (it->second.alloc_flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+                         ? AMDGPU_GEM_DOMAIN_VRAM
+                         : AMDGPU_GEM_DOMAIN_GTT;
+      std::memcpy(reinterpret_cast<void *>(args->value), &info, sizeof(info));
+      return 0;
+    }
+    if (args->op == AMDGPU_GEM_OP_SET_PLACEMENT) {
+      constexpr uint64_t domains =
+          AMDGPU_GEM_DOMAIN_CPU | AMDGPU_GEM_DOMAIN_GTT | AMDGPU_GEM_DOMAIN_VRAM;
+      if (args->value & ~domains)
+        return -EINVAL;
+      return 0;
+    }
+    return -EINVAL;
+  }
+
   /// @brief Map a live GEM handle's backing through its synthetic mmap offset.
   void *mmap_gem(const DrmFileToken &file, void *address, size_t size, int prot, int flags,
                  uint64_t offset) {
@@ -2880,7 +2954,45 @@ public:
     gem.drm_file_id = drm_file->id;
     gem.size = size;
     gem.alloc_flags = alloc_flags;
+    // hsaKmtMemoryGetCpuAddr follows a prime import with GEM_MMAP. A zero offset
+    // is "no mapping" and that call fails the VMM handle create.
+    const uint64_t map_bytes = (size + 4095) & ~uint64_t{4095};
+    if (map_bytes != 0 && next_gem_mmap_offset_ <= uint64_t{INT64_MAX} - map_bytes) {
+      gem.mmap_offset = next_gem_mmap_offset_;
+      next_gem_mmap_offset_ += map_bytes;
+    }
     return handle;
+  }
+
+  /// @brief Turn a GEM handle back into a dma-buf fd (DRM_IOCTL_PRIME_HANDLE_TO_FD).
+  /// @details hsa_amd_vmem_set_access exports the imported BO this way before it maps
+  /// the VA. The fd is a dup of the handle's backing memfd; the caller closes it.
+  int prime_export(const DrmFileToken &file, uint32_t handle, uint32_t flags) {
+    if (flags & ~(DRM_CLOEXEC | DRM_RDWR))
+      return -EINVAL;
+    std::shared_ptr<PrivateDrmFd> backing;
+    uint32_t alloc_flags = 0;
+    {
+      std::lock_guard lock(fd_mutex_);
+      auto it = gem_entries_.find(handle);
+      if (it == gem_entries_.end() || !file || it->second.handle_closed ||
+          it->second.drm_file_id != file->id || !it->second.dmabuf_fd)
+        return -ENOENT;
+      backing = it->second.dmabuf_fd;
+      alloc_flags = it->second.alloc_flags;
+    }
+    int exported = -1;
+    int error = 0;
+    const int cmd = (flags & DRM_CLOEXEC) ? F_DUPFD_CLOEXEC : F_DUPFD;
+    backing->use([&](int fd) {
+      exported = real().fcntl(fd, cmd, 0);
+      error = errno;
+      return exported;
+    });
+    if (exported < 0)
+      return error ? -error : -EBADF;
+    track_gem_flags(exported, alloc_flags);
+    return exported;
   }
 
   /// @brief Install or replace a resident mapping or sparse VA reservation.
@@ -4261,6 +4373,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
   constexpr unsigned kDrmIoctlNrAmdgpuInfo = DRM_COMMAND_BASE + DRM_AMDGPU_INFO;
   constexpr unsigned kDrmIoctlNrGemVa = DRM_COMMAND_BASE + DRM_AMDGPU_GEM_VA;
   constexpr unsigned kDrmIoctlNrPrimeFdToHandle = _IOC_NR(DRM_IOCTL_PRIME_FD_TO_HANDLE);
+  constexpr unsigned kDrmIoctlNrPrimeHandleToFd = _IOC_NR(DRM_IOCTL_PRIME_HANDLE_TO_FD);
   constexpr unsigned kDrmIoctlNrSyncobjCreate = _IOC_NR(DRM_IOCTL_SYNCOBJ_CREATE);
   constexpr unsigned kDrmIoctlNrSyncobjDestroy = _IOC_NR(DRM_IOCTL_SYNCOBJ_DESTROY);
   constexpr unsigned kDrmIoctlNrSyncobjTimelineWait = _IOC_NR(DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT);
@@ -4373,6 +4486,15 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
       ver->desc_len = 1;
       return 0;
     }
+    if (type == kDrmIoctlType && nr == kDrmIoctlNrPrimeHandleToFd && arg) {
+      auto *prime = static_cast<drm_prime_handle *>(arg);
+      int exported =
+          InterposerContext::ctx.prime_export(drm_file, prime->handle, prime->flags);
+      if (exported < 0)
+        return kfd_ioctl_ret(exported);
+      prime->fd = exported;
+      return 0;
+    }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrPrimeFdToHandle && arg) {
       auto *prime = static_cast<drm_prime_handle *>(arg);
       if (prime->fd < 0) {
@@ -4420,6 +4542,22 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
         return kfd_ioctl_ret(result);
       map->out.addr_ptr = offset;
       return 0;
+    }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_GEM_METADATA && arg) {
+      if (_IOC_SIZE(request) < sizeof(drm_amdgpu_gem_metadata)) {
+        errno = EINVAL;
+        return -1;
+      }
+      return kfd_ioctl_ret(InterposerContext::ctx.gem_metadata(
+          drm_file, static_cast<drm_amdgpu_gem_metadata *>(arg)));
+    }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_GEM_OP && arg) {
+      if (_IOC_SIZE(request) < sizeof(drm_amdgpu_gem_op)) {
+        errno = EINVAL;
+        return -1;
+      }
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.gem_op(drm_file, static_cast<drm_amdgpu_gem_op *>(arg)));
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrSyncobjCreate && arg) {
       auto *create = static_cast<drm_syncobj_create *>(arg);
