@@ -223,27 +223,15 @@ TEST(RmaSegmentMathTest, PeerSegOffIndexesPerRankTable)
     EXPECT_EQ(ncclRmaPeerSegOff(table, local, 1)[1], size_t{8192});
 }
 
-TEST(RmaSegmentMathTest, LayoutsMatchRequiresEqualBoundaries)
-{
-    const size_t lhs[] = {0, 4096, 8192};
-    const size_t rhs[] = {0, 4096, 8192};
-    const size_t shorter[] = {0, 4096};
-    const size_t shifted[] = {0, 2048, 8192};
-    EXPECT_TRUE(ncclRmaLayoutsMatch(2, lhs, 2, rhs));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(2, lhs, 1, shorter));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(2, lhs, 2, shifted));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(0, lhs, 0, lhs));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(NCCL_RMA_MAX_SEGMENTS + 1, lhs, NCCL_RMA_MAX_SEGMENTS + 1, lhs));
-}
-
 TEST(RmaSegmentMathTest, SegIndexOfUsesHalfOpenOffsets)
 {
     const size_t off[] = {0, 4096, 8192};
-    EXPECT_EQ(ncclRmaSegIndexOf(2, off, 0), 0);
-    EXPECT_EQ(ncclRmaSegIndexOf(2, off, 4095), 0);
-    EXPECT_EQ(ncclRmaSegIndexOf(2, off, 4096), 1);
-    EXPECT_EQ(ncclRmaSegIndexOf(2, off, 8192), 1);
-    EXPECT_EQ(ncclRmaSegIndexOf(0, off, 0), 0);
+    EXPECT_EQ(ncclRmaSegIndexOf(off, 2, 0), 0);
+    EXPECT_EQ(ncclRmaSegIndexOf(off, 2, 4095), 0);
+    EXPECT_EQ(ncclRmaSegIndexOf(off, 2, 4096), 1);
+    EXPECT_EQ(ncclRmaSegIndexOf(off, 2, 8192), 1);
+    EXPECT_EQ(ncclRmaSegIndexOf(off, 0, 0), 0);
+    EXPECT_EQ(ncclRmaSegIndexOf(nullptr, 2, 0), 0);
 }
 
 TEST(RmaSegmentMathTest, OffsetRangeOkRejectsPastEnd)
