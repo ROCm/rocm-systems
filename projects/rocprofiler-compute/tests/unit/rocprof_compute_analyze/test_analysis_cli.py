@@ -28,6 +28,19 @@ def simple_model_forest_with_relu_and_addmm():
     return {"1": [simple]}
 
 
+def torch_parent_triton_child_forest():
+    child = CallTreeNode(name="triton.JITFunction.matmul_kernel", backend="triton")
+    child.kernels["triton_matmul_kernel"] = KernelStats(
+        launches=1, total_duration_ns=40.0
+    )
+    parent = CallTreeNode(name="nn.Module.Linear.forward", backend="torch")
+    parent.kernels["torch_gemm_kernel"] = KernelStats(
+        launches=1, total_duration_ns=10.0
+    )
+    parent.children = [child]
+    return {"1": [parent]}
+
+
 def workload_with_operator_forest():
     workload = schema.Workload()
     workload.ml_api_call_trees = simple_model_forest_with_relu_and_addmm()
@@ -204,3 +217,16 @@ def test_operator_glob_addmm_path_selects_addmm_kernel_ids():
 def test_operator_glob_linear_includes_descendant_addmm_ids():
     workload = apply_torch_operator_glob("*Linear.forward")
     assert workload.filter_kernel_ids == [0]
+
+
+def test_list_operators_joint_backend_heading(capsys):
+    cli = cli_analysis.__new__(cli_analysis)
+    workload = schema.Workload()
+    workload.ml_api_call_trees = torch_parent_triton_child_forest()
+    cli._runs = {"/workload": workload}
+    kernel_top = pd.DataFrame({
+        "Kernel_Name": ["torch_gemm_kernel", "triton_matmul_kernel"]
+    })
+    cli.list_operators("/workload", kernel_top, ["torch", "triton"])
+    captured = capsys.readouterr()
+    assert "PyTorch, Triton Operator Call Tree" in captured.out
