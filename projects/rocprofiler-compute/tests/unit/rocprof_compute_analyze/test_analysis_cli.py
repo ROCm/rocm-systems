@@ -269,3 +269,26 @@ def test_apply_operator_filter_keeps_intersection():
     workload.filter_kernel_ids = [0]
     cli.apply_operator_filter(args, workload, "/workload", ["torch"])
     assert workload.filter_kernel_ids == [0]
+
+
+def test_apply_operator_filter_kernel_ids_only_from_requested_backend():
+    args = Namespace(torch_operator=["*"])
+    cli = cli_analysis(args, {})
+    workload = schema.Workload()
+    workload.ml_api_call_trees = torch_parent_triton_child_forest()
+    workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = pd.DataFrame({
+        "Kernel_Name": ["torch_gemm_kernel", "triton_matmul_kernel"]
+    })
+    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
+    assert workload.filter_kernel_ids == [0]
+    stored_names = []
+
+    def collect_names(node):
+        stored_names.append(node.name)
+        for child in node.children:
+            collect_names(child)
+
+    for roots in workload.ml_api_call_trees.values():
+        for root in roots:
+            collect_names(root)
+    assert "triton.JITFunction.matmul_kernel" not in stored_names
