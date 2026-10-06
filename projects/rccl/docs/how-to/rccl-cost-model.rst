@@ -294,7 +294,9 @@ The consequences for a plugin author:
 *  A plugin is **not** bound by a per-call ``algSelection``. The narrowing described in
    :ref:`cost-model-per-call-selection` runs before ``getCollInfo``, so writing a cost into a
    blanked cell revives a row the selection excluded. The same ``>= 0.0f`` guard leaves the
-   caller's selection intact.
+   caller's selection intact. A selection whose named rows are all ineligible is the one
+   exception: with ``forceAlgSelection`` at its default of ``1`` the call fails before
+   ``getCollInfo`` runs, so the plugin never sees that table and cannot rescue the selection.
 
 .. code-block:: cpp
 
@@ -337,6 +339,12 @@ The names come from an algorithm registry that covers both the general rows (``T
    If the selection names general rows but none of them is eligible on this communicator, for
    example ``NVLS_SIMPLE`` without NVLS, the call fails with ``ncclInvalidArgument``. Set
    ``forceAlgSelection`` to ``0`` to fall back to automatic selection instead.
+
+   Every rank must pass a selection that resolves to the same algorithm and protocol for a
+   given call. Selection is local and nothing compares the winner across ranks, so a
+   disagreement is undefined behavior, as it is for ``cgaClusterSize``. Eligibility is per
+   rank too, so ``forceAlgSelection = 0`` can diverge even when every rank passes the same
+   string.
 
 .. note::
 
