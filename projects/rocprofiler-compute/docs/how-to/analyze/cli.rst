@@ -812,6 +812,10 @@ Operator analyze reports after the call tree:
 
 Those recorded errors are warnings printed after the tree and do not exit.
 
+A Function whose first token is the legacy stacked shape (``:#`` or
+``#n@file:line``) makes analyze exit during parse, before the tree.
+Re-profile with current ``--torch-trace``.
+
 ``Thread_Id`` is the rocprofiler thread. ``T_Tid`` is PyTorch
 ``currentThreadId()`` and ``F_Tid`` is ``forwardThreadId()``; both are parsed
 from Function in analyze. ``/`` in the Operator column and in globs is the
