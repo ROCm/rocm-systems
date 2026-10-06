@@ -121,6 +121,12 @@ static_assert(offsetof(struct ncclIbConnectionMetadata, ndevs) ==
                 offsetof(struct ncclIbConnectionMetadata, addr) +
                   sizeof(((struct ncclIbConnectionMetadata*)0)->addr),
               "CAST connection metadata must preserve legacy field offsets");
+// The connect-caps trailer lives at the end of devName, so its offset is wire format too.
+static_assert(offsetof(struct ncclIbConnectionMetadata, devName) ==
+                sizeof(((struct ncclIbConnectionMetadata*)0)->qpInfo) +
+                  sizeof(((struct ncclIbConnectionMetadata*)0)->resiliencyInfo) +
+                  sizeof(((struct ncclIbConnectionMetadata*)0)->devs),
+              "CAST connection metadata must keep devName at its legacy offset");
 
 // Initialize QP sharing fields to defaults (sharing disabled)
 static inline void IbCastQpCreateAttrInitSharing(struct ncclIbQpCreateAttr* attr) {
