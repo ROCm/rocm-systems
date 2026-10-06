@@ -4,12 +4,19 @@
 
 ### Added
 
+* `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one.
+* Added a batch API example, `batch-roundtrip`.
+* Added reference documentation for the Stats API.
+
 ### Changed
+
+* LVM logical volumes are now eligible for the fastpath when every layer of the device-mapper stack is an LVM target and all underlying physical volumes are local NVMe. Any other interposing layer still forces compatibility mode.
 
 ### Fixed
 
+* Asynchronous fastpath operations now fail over to the fallback backend on `ENODEV` or `EREMOTEIO`, matching the synchronous and batch paths.
 * hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
-
+* `ais-check` now reports LVM volumes compatibility correctly.
 
 ### Removed
 
