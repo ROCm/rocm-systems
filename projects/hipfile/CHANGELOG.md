@@ -4,7 +4,7 @@
 
 ### Added
 
-* `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one. It is raw bytes, not a NUL-terminated string. Use it to correlate stats across processes, where ordering by device ID is not stable.
+* `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one. It is raw bytes, not a NUL-terminated string.
 * Added a batch API example, `batch-roundtrip`, installed with the other examples when `AIS_INSTALL_EXAMPLES` is `ON`, and a matching batch I/O tutorial.
 * Added reference documentation for the Stats API.
 
@@ -16,7 +16,7 @@
 ### Fixed
 
 * Asynchronous fastpath operations now fail over to the fallback backend on `ENODEV` or `EREMOTEIO`, matching the synchronous and batch paths. This resolves the 0.5.0 known issue where such operations failed outright.
-* hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors; `hipFileHandleRegister()` and `hipFileDriverOpen()` can return it. Budget about two descriptors per registered file and raise the soft limit with `ulimit -n` if you register many files. See the limitations page.
+* hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
 
 ### Removed
 
