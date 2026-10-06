@@ -1112,9 +1112,9 @@ exact_workgroup_release_wait_boundary(const SyncSequence &sequence,
         (*instruction)->src_loc() + sizeof(uint32_t) != boundary ||
         (*instruction)->raw_encoding() == nullptr)
       break;
-    // A NOP neither issues memory traffic nor changes control flow. In
-    // particular, a removed global wait must not hide an intact LDS wait.
-    if ((*instruction)->mnemonic() == "s_nop") {
+    // Scheduling waits and NOPs do not issue memory traffic or change control
+    // flow. Preserve their constraints without hiding preceding completion.
+    if ((*instruction)->mnemonic() == "s_nop" || (*instruction)->mnemonic() == "s_wait_alu") {
       boundary = (*instruction)->src_loc();
       continue;
     }

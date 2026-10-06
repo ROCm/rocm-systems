@@ -51,6 +51,12 @@ validate_encoded_mutation(rj_code_arch_t arch, EncodedMutationKind kind,
                           std::span<const uint8_t> before, std::span<const uint8_t> after,
                           bool allow_atomic_observation = false);
 
+/// Require NOPs for removed cache/store/LDS boundaries, preserving load
+/// completion when the original instruction combines load and LDS waits.
+[[nodiscard]] bool validate_atomic_order_boundary_rewrite(rj_code_arch_t arch,
+                                                          std::span<const uint8_t> before,
+                                                          std::span<const uint8_t> after);
+
 /// Prove any target-specific register-allocation boundary movement and return
 /// the RSRC3 value that common whole-descriptor comparison should use.
 [[nodiscard]] DescriptorResourceDeltaValidation

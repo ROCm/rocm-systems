@@ -917,18 +917,13 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
             "ConSan mutation proof found an unexpected atomic cache-operation size");
         continue;
       }
-      bool all_nops = true;
       const auto staged = composed_atomic_bytes(patch);
       const std::span<const uint8_t> after_bytes =
           staged.value_or(replacement_text.subspan(patch.anchor_offset, patch.original_size));
-      for (uint32_t offset = 0; offset < patch.original_size; offset += sizeof(uint32_t)) {
-        uint32_t after_word = 0;
-        std::memcpy(&after_word, after_bytes.data() + offset, sizeof(after_word));
-        all_nops &= after_word == nop;
-      }
-      if (!all_nops) {
-        errors.emplace_back(
-            "ConSan mutation proof did not remove the selected atomic cache operation");
+      if (!validate_atomic_order_boundary_rewrite(
+              arch, original_text.subspan(patch.anchor_offset, patch.original_size), after_bytes)) {
+        errors.emplace_back("ConSan mutation proof did not preserve load completion while removing "
+                            "the atomic boundary");
       }
       continue;
     }
