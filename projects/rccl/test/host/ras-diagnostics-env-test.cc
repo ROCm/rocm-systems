@@ -373,8 +373,7 @@ TEST_F(RasDiagnosticsEnvMicrotest, Summarize_IncompleteGroupReportsIncomplete) {
 
   ASSERT_EQ(ncclSuccess, CollectThenSummarize(&reporter));
   ASSERT_EQ(1u, g_emittedLines.size());
-  EXPECT_EQ("[INFO] NCCL environment: diagnostics incomplete, gathered 1/2 ranks in comm 0x3000/0x3001/0x3002 "
-            "(RAS overlay may not be ready)",
+  EXPECT_EQ("[INFO] NCCL environment: diagnostics incomplete, gathered 1/2 ranks in comm 0x3000/0x3001/0x3002",
             g_emittedLines[0]);
   EXPECT_FALSE(AnyLineContains(g_emittedLines, "consistent"));
 }

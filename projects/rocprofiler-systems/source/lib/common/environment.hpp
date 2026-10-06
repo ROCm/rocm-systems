@@ -377,11 +377,13 @@ remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
 {
     auto key = fmt::format("{}=", env_variable);
 
-    env_list.erase(std::remove_if(env_list.begin(), env_list.end(),
-                                  [&key](const std::string& entry) {
-                                      return std::string_view{ entry }.starts_with(key);
-                                  }),
-                   env_list.end());
+    env_list.erase(
+        std::ranges::remove_if(env_list,
+                               [&key](const std::string& entry) {
+                                   return std::string_view{ entry }.starts_with(key);
+                               })
+            .begin(),
+        env_list.end());
 
     // Restore from original_envs if previously existed
     for(const auto& orig : original_envs)
@@ -437,7 +439,7 @@ discover_llvm_libdir_for_ompt()
         {
             return;
         }
-        if(std::find(candidates.begin(), candidates.end(), candidate) == candidates.end())
+        if(std::ranges::find(candidates, candidate) == candidates.end())
         {
             candidates.emplace_back(candidate);
         }
@@ -467,8 +469,7 @@ discover_llvm_libdir_for_ompt()
     };
 
     // Pick the first candidate that contains libomptarget.so
-    auto const result =
-        std::find_if(candidates.begin(), candidates.end(), has_libomptarget);
+    auto const result = std::ranges::find_if(candidates, has_libomptarget);
     if(result != candidates.end())
     {
         LOG_DEBUG("Using LLVM libdir: {}", *result);
@@ -508,8 +509,8 @@ is_python_interpreter(std::string_view executable)
 
     const auto version_digits = basename.substr(python3_prefix.size());
 
-    return std::all_of(version_digits.begin(), version_digits.end(),
-                       [](unsigned char c) { return std::isdigit(c); });
+    return std::ranges::all_of(version_digits,
+                               [](unsigned char c) { return std::isdigit(c); });
 }
 
 /// @brief Discover the PyTorch library directory for a given Python interpreter.

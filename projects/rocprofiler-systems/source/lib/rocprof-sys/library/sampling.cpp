@@ -25,6 +25,7 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
+#include <algorithm>
 #include <cstdint>
 
 #include <timemory/backends/papi.hpp>
@@ -157,7 +158,7 @@ generate_line_info_json(const tim::unwind::processed_entry& line_info_entry)
     if(line_info_entry.lineinfo && !line_info_entry.lineinfo.lines.empty())
     {
         auto _lines = line_info_entry.lineinfo.lines;
-        std::reverse(_lines.begin(), _lines.end());
+        std::ranges::reverse(_lines);
         for(const auto& line : _lines)
         {
             nlohmann::json inlined;
@@ -1035,10 +1036,7 @@ spans_pause_interval(std::uint64_t _beg, std::uint64_t _end)
     }
 
     const auto _it =
-        std::lower_bound(pause_intervals.cbegin(), pause_intervals.cend(), _beg,
-                         [](const auto& _interval, std::uint64_t _val) {
-                             return _interval.resume_ts < _val;
-                         });
+        std::ranges::lower_bound(pause_intervals, _beg, {}, &pause_interval_t::resume_ts);
 
     return _it != pause_intervals.cend() && _it->pause_ts <= _end;
 }
@@ -1433,8 +1431,9 @@ parse_timer_data(std::int64_t _tid, const bundle_t* _init,
         _last = itr;
     }
 
-    std::sort(_results.begin(), _results.end(),
-              [](const auto& _lhs, const auto& _rhs) { return _lhs.m_beg < _rhs.m_beg; });
+    std::ranges::sort(_results, [](const auto& _lhs, const auto& _rhs) {
+        return _lhs.m_beg < _rhs.m_beg;
+    });
 
     return _results;
 }
@@ -1480,8 +1479,9 @@ parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
         }
     }
 
-    std::sort(_results.begin(), _results.end(),
-              [](const auto& _lhs, const auto& _rhs) { return _lhs.m_beg < _rhs.m_beg; });
+    std::ranges::sort(_results, [](const auto& _lhs, const auto& _rhs) {
+        return _lhs.m_beg < _rhs.m_beg;
+    });
 
     return _results;
 }
@@ -1595,7 +1595,7 @@ post_process_perfetto(std::int64_t                               _tid,
                             if(iitr.lineinfo)
                             {
                                 auto _lines = iitr.lineinfo.lines;
-                                std::reverse(_lines.begin(), _lines.end());
+                                std::ranges::reverse(_lines);
                                 size_t _n = 0;
                                 for(const auto& line : _lines)
                                 {
@@ -1695,7 +1695,7 @@ post_process_perfetto(std::int64_t                               _tid,
                 if(get_sampling_include_inlines() && iitr.lineinfo)
                 {
                     auto _lines = iitr.lineinfo.lines;
-                    std::reverse(_lines.begin(), _lines.end());
+                    std::ranges::reverse(_lines);
                     size_t _n = 0;
                     for(const auto& line : _lines)
                     {
@@ -1742,7 +1742,7 @@ post_process_perfetto(std::int64_t                               _tid,
                                 if(iitr.lineinfo)
                                 {
                                     auto _lines = iitr.lineinfo.lines;
-                                    std::reverse(_lines.begin(), _lines.end());
+                                    std::ranges::reverse(_lines);
                                     size_t _n = 0;
                                     for(const auto& line : _lines)
                                     {

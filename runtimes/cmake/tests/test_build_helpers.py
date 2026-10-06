@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 """Host-only regressions for the Cargo/CMake boundary (no Rust build required)."""
 
 import json

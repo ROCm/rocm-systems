@@ -246,7 +246,8 @@ TEST_F(TaskClassifyMicrotest, EnqueueP2pTask_Called_BuildsTheRawTaskAndItsTuning
 
   ASSERT_EQ(ncclSuccess,
             classifyEnqueueP2pTask(scene.comm(), &queue, ncclFuncRecv, ncclFuncAlltoAll, buff.data(),
-                                   kCount, kP2pDatatype, kPeer, kStream));
+                                   kCount, kP2pDatatype, kPeer, kStream,
+                                   /*launchCompletionEvent=*/nullptr));
 
   std::vector<struct ncclTaskTuningInfo*> tasks = QueueTasks(&queue);
   ASSERT_EQ(1u, tasks.size());
@@ -275,10 +276,12 @@ TEST_F(TaskClassifyMicrotest, EnqueueP2pTask_TwoCalls_AppendInCallOrderWithDisti
 
   ASSERT_EQ(ncclSuccess,
             classifyEnqueueP2pTask(scene.comm(), &queue, ncclFuncSend, ncclFuncGather, sendBuff.data(),
-                                   kCount, kP2pDatatype, kRoot, kStream));
+                                   kCount, kP2pDatatype, kRoot, kStream,
+                                   /*launchCompletionEvent=*/nullptr));
   ASSERT_EQ(ncclSuccess,
             classifyEnqueueP2pTask(scene.comm(), &queue, ncclFuncRecv, ncclFuncGather, recvBuff.data(),
-                                   kCount, kP2pDatatype, kPeer, kStream));
+                                   kCount, kP2pDatatype, kPeer, kStream,
+                                   /*launchCompletionEvent=*/nullptr));
 
   const std::vector<TaskClassify_P2p> expected = {{ncclFuncSend, sendBuff.data(), kRoot},
                                                   {ncclFuncRecv, recvBuff.data(), kPeer}};
@@ -296,7 +299,8 @@ TEST_F(TaskClassifyMicrotest, EnqueueP2pTask_TuningInputFails_PropagatesAndLeave
 
   EXPECT_EQ(ncclInternalError,
             classifyEnqueueP2pTask(scene.comm(), &queue, ncclFuncSend, ncclFuncAlltoAll, buff.data(),
-                                   kCount, kP2pDatatype, kPeer, kStream));
+                                   kCount, kP2pDatatype, kPeer, kStream,
+                                   /*launchCompletionEvent=*/nullptr));
 
   EXPECT_TRUE(ncclIntruQueueEmpty(&queue));
 }

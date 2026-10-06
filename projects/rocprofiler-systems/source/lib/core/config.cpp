@@ -21,6 +21,7 @@
 #include "sdk/tracing-config.hpp"
 #include "utility.hpp"
 
+#include <algorithm>
 #include <timemory/backends/capability.hpp>
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/mpi.hpp>
@@ -66,6 +67,7 @@
 #include <fstream>
 #include <limits>
 #include <linux/capability.h>
+#include <memory>
 #include <numeric>
 #include <ostream>
 #include <set>
@@ -84,8 +86,20 @@ using settings = tim::settings;
 
 namespace
 {
-int  verbose_value  = rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
-bool debug_value    = rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
+int&
+verbose_value()
+{
+    static int value = rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
+    return value;
+}
+
+bool&
+debug_value()
+{
+    static bool value = rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
+    return value;
+}
+
 auto configure_once = std::once_flag{};
 
 bool&
@@ -201,8 +215,9 @@ is_recognized_boolean_text_value(std::string_view value)
     constexpr auto accepted_values =
         std::array<std::string_view, 10>{ "on", "off", "true", "false", "yes",
                                           "no", "y",   "n",    "t",     "f" };
-    return std::any_of(accepted_values.begin(), accepted_values.end(),
-                       [value](auto accepted_value) { return value == accepted_value; });
+    return std::ranges::any_of(accepted_values, [value](auto accepted_value) {
+        return value == accepted_value;
+    });
 }
 
 [[nodiscard]] bool
@@ -315,9 +330,8 @@ validate_config_setting_value(std::string_view name, std::string_view raw_value,
             auto value = utility::string::trim(raw_value);
             if(choices)
             {
-                valid =
-                    std::any_of(choices->begin(), choices->end(),
-                                [&value](const auto& choice) { return value == choice; });
+                valid = std::ranges::any_of(
+                    *choices, [&value](const auto& choice) { return value == choice; });
                 expectation = format_config_choices(*choices);
             }
             break;
@@ -820,6 +834,24 @@ configure_settings(bool _init)
                               "Enable sampling GPU power, temp, utilization, "
                               "vcn_activity, jpeg_activity and memory usage",
                               true, "backend", "amd_smi", "rocm", "process_sampling");
+
+#if defined(ROCPROFSYS_BUILD_HIPFILE) && ROCPROFSYS_BUILD_HIPFILE == 1
+    ROCPROFSYS_CONFIG_SETTING(
+        bool, env_vars::USE_HIPFILE,
+        "Enable periodic sampling of hipFile's AMD Infinity Storage I/O statistics "
+        "(bytes, bandwidth, op counts, errors). Requires the target application to "
+        "use hipFile. Collection needs hipFile's statistics server "
+        "(HIPFILE_STATS_LEVEL, default 1); 0 disables it and yields no telemetry.",
+        false, "backend", "hipfile", "rocm", "process_sampling");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::HIPFILE_METRICS,
+        "hipFile metrics to collect: bytes, ops, fastpath, fallback, unaligned, errors, "
+        "bandwidth. Each name selects both the read and the write track. An empty value "
+        "implies 'all' and 'none' suppresses all.",
+        env_vars::HIPFILE_METRICS_DEFAULT, "backend", "hipfile", "rocm",
+        "process_sampling");
+#endif
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_SAMPLING,
                               "Enable statistical sampling of call-stack", false,
@@ -1717,11 +1749,11 @@ configure_settings(bool _init)
 
     if(auto opt = get_setting_value<int>(std::string{ env_vars::VERBOSE }); opt)
     {
-        verbose_value = *opt;
+        verbose_value() = *opt;
     }
     if(auto opt = get_setting_value<bool>(std::string{ env_vars::DEBUG_MODE }); opt)
     {
-        debug_value = *opt;
+        debug_value() = *opt;
     }
 
     if(get_env(env_vars::MONOCHROME,
@@ -1819,11 +1851,11 @@ configure_settings(bool _init)
 
     if(auto opt = get_setting_value<int>(std::string{ env_vars::VERBOSE }); opt)
     {
-        verbose_value = *opt;
+        verbose_value() = *opt;
     }
     if(auto opt = get_setting_value<bool>(std::string{ env_vars::DEBUG_MODE }); opt)
     {
-        debug_value = *opt;
+        debug_value() = *opt;
     }
 
     _settings_are_configured() = true;
@@ -1890,6 +1922,30 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         LOG_WARNING("No ROCm devices were found: disabling amd_smi...");
         _set(env_vars::USE_AMD_SMI, false);
     }
+
+#if defined(ROCPROFSYS_BUILD_HIPFILE) && ROCPROFSYS_BUILD_HIPFILE == 1
+    if(_config->get<bool>(std::string{ env_vars::USE_HIPFILE }))
+    {
+        // hipFile already defaults HIPFILE_STATS_LEVEL to 1, so injecting "1" here is a
+        // no-op. Do not override an explicit 0 either: that is the user's choice to turn
+        // hipFile's stats server off. Warn, because the combination produces empty
+        // telemetry despite ROCPROFSYS_USE_HIPFILE=ON.
+        if(rocprofsys::get_env<int>(env_vars::HIPFILE_STATS_LEVEL, 1) == 0)
+        {
+            LOG_WARNING("ROCPROFSYS_USE_HIPFILE=ON but HIPFILE_STATS_LEVEL=0; hipFile's "
+                        "statistics server is disabled, so no hipFile telemetry will be "
+                        "recorded. Unset HIPFILE_STATS_LEVEL or set it to 1 or higher");
+        }
+        if(!_config->get<bool>(std::string{ env_vars::USE_PROCESS_SAMPLING }))
+        {
+            LOG_WARNING(
+                "ROCPROFSYS_USE_HIPFILE=ON but ROCPROFSYS_USE_PROCESS_SAMPLING=OFF; "
+                "the hipFile collector runs on the process-sampling thread, so no "
+                "hipFile telemetry will be recorded. Set "
+                "ROCPROFSYS_USE_PROCESS_SAMPLING=ON");
+        }
+    }
+#endif
 
     if(_config->get<bool>(std::string{ env_vars::USE_KOKKOSP }))
     {
@@ -2352,7 +2408,7 @@ print_settings(
         }
     }
 
-    std::sort(_data.begin(), _data.end(), [](const auto& lhs, const auto& rhs) {
+    std::ranges::sort(_data, [](const auto& lhs, const auto& rhs) {
         auto const _npos = std::string::npos;
         // ROCPROFSYS_CONFIG_FILE always first
         if(lhs.at(0) == env_vars::MODE)
@@ -2387,7 +2443,7 @@ print_settings(
         return lhs.at(0) < rhs.at(0);
     });
 
-    auto tot_width = std::accumulate(_widths.begin(), _widths.end(), 0);
+    auto tot_width = std::accumulate(_widths.begin(), _widths.end(), std::size_t{ 0 });
     if(!_print_desc)
     {
         tot_width -= _widths.back() + 4;
@@ -2413,9 +2469,10 @@ print_settings(
         {
             switch(i)
             {
-                case 0: _os << std::left; break;
-                case 1: _os << std::left; break;
+                case 0:
+                case 1:
                 case 2: _os << std::left; break;
+                default: break;
             }
             if(_md)
             {
@@ -2441,6 +2498,7 @@ print_settings(
                     case 0: _os << "= "; break;
                     case 1: _os << "[ "; break;
                     case 2: _os << "]"; break;
+                    default: break;
                 }
             }
         }
@@ -2617,7 +2675,7 @@ bool
 get_debug()
 {
     std::call_once(configure_once, []() { (void) get_config(); });
-    return debug_value;
+    return debug_value();
 }
 
 bool
@@ -2640,7 +2698,7 @@ int
 get_verbose()
 {
     std::call_once(configure_once, []() { (void) get_config(); });
-    return verbose_value;
+    return verbose_value();
 }
 
 bool&
@@ -2673,6 +2731,17 @@ get_use_amd_smi()
 {
     static auto const _v = get_config()->find(std::string{ env_vars::USE_AMD_SMI });
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_use_hipfile()
+{
+#if defined(ROCPROFSYS_BUILD_HIPFILE) && ROCPROFSYS_BUILD_HIPFILE == 1
+    static auto _v = get_config()->find(std::string{ env_vars::USE_HIPFILE });
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+#else
+    return false;
+#endif
 }
 
 bool&
@@ -2781,9 +2850,8 @@ get_use_vaapi_tracing()
     const std::string domains =
         static_cast<tim::tsettings<std::string>&>(*_v->second).get();
     auto domain_list = rocprofsys::delimit(domains, " ,;:\t\n");
-    return std::find(domain_list.begin(), domain_list.end(), "rocdecode_api") !=
-               domain_list.end() ||
-           std::find(domain_list.begin(), domain_list.end(), "rocjpeg_api") !=
+    return std::ranges::find(domain_list, "rocdecode_api") != domain_list.end() ||
+           std::ranges::find(domain_list, "rocjpeg_api") !=
                domain_list.end();  // Check rocdecode_api or rocjpeg_api is present
 }
 
@@ -3527,15 +3595,14 @@ get_ump_absolute_path()
             return std::string{ pwd };
         }
 
-        char* current_dir = getcwd(nullptr, 0);
+        const std::unique_ptr<char, decltype(&std::free)> current_dir(getcwd(nullptr, 0),
+                                                                      std::free);
         if(current_dir == nullptr)
         {
             return std::string{ "." };
         }
 
-        auto result = std::string{ current_dir };
-        free(current_dir);
-        return result;
+        return std::string{ current_dir.get() };
     };
 
     auto const make_absolute = [&](std::string path) {

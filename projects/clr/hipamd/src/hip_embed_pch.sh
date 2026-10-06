@@ -106,8 +106,7 @@ EOF
   fi
 
 cat << EOF >> $tmp/hip_pch.mcin
-  .section .hip_pch_wave32,"aMS",@progbits,1
-  .data
+  .section .hip_pch_wave32,"a",@progbits
   .globl __hip_pch_wave32
   .globl __hip_pch_wave32_size
   .p2align 3
@@ -116,8 +115,7 @@ __hip_pch_wave32:
 __hip_pch_wave32_size:
   .long __hip_pch_wave32_size - __hip_pch_wave32
   .type __hip_pch_wave64,@object
-  .section .hip_pch_wave64,"aMS",@progbits,1
-  .data
+  .section .hip_pch_wave64,"a",@progbits
   .globl __hip_pch_wave64
   .globl __hip_pch_wave64_size
   .p2align 3
