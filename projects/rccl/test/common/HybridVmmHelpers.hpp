@@ -140,18 +140,11 @@ inline bool CheckHybridVmmRuntimeSupport(int dev, std::string* reason = nullptr)
 {
     HybridVmmRuntimeSupport local = ProbeHybridVmmRuntimeSupport(dev);
     bool cpuAccessSupported = MPIHelpers::allRanksTrue(local.importedHostCpuAccess);
-    bool reexportSupported  = MPIHelpers::allRanksTrue(local.importedHostReexport);
 
     // TODO(ROCM-29812): Remove this skip gate when imported host VMM CPU access is fixed.
     if (!cpuAccessSupported)
     {
         if (reason) *reason = "ROCM-29812: imported host VMM CPU access is unsupported";
-        return false;
-    }
-    // TODO(ROCM-29815): Remove this skip gate when imported POSIX VMM re-export is fixed.
-    if (!reexportSupported)
-    {
-        if (reason) *reason = "ROCM-29815: imported POSIX VMM re-export is unsupported";
         return false;
     }
     return true;
@@ -558,11 +551,18 @@ inline bool AllocDeepEpElasticRange(int dev, size_t gpuBytes, size_t cpuBytes,
     // Device RW on both segments (GPU kernels / GIN). Host RW on the CPU
     // segment matches DeepEP CPU-storage access.
     if (hipMemSetAccess(vaBase, gpuBytes, &accessDesc, 1) != hipSuccess ||
-        hipMemSetAccess(cpuVa, cpuBytes, &accessDesc, 1) != hipSuccess ||
-        hipMemSetAccess(cpuVa, cpuBytes, &hostAccess, 1) != hipSuccess)
+        hipMemSetAccess(cpuVa, cpuBytes, &accessDesc, 1) != hipSuccess)
     {
         cleanup();
         return false;
+    }
+    // Best-effort: callers touch the CPU segment only through hipMemcpy/hipMemset.
+    const hipError_t hostAccessErr = hipMemSetAccess(cpuVa, cpuBytes, &hostAccess, 1);
+    if (hostAccessErr != hipSuccess)
+    {
+        (void)hipGetLastError();
+        fprintf(stderr, "[ WARNING  ] DeepEP elastic CPU segment host access grant failed (%s); continuing\n",
+                hipGetErrorString(hostAccessErr));
     }
 
     out->base      = vaBase;
