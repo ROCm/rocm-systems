@@ -1,11 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-set(output_sources
-    ${CMAKE_CURRENT_LIST_DIR}/registry.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/process_tree.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/summary_writer.cpp
-)
+set(output_sources ${CMAKE_CURRENT_LIST_DIR}/output_summary.cpp)
 
 set(output_headers ${CMAKE_CURRENT_LIST_DIR}/output_summary.hpp)
 
