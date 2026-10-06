@@ -8,9 +8,10 @@
 #
 # Pins the build image, the build tools (pypi_release_constraints.txt), the
 # netlink packages that auditwheel copies into the wheel, the archive
-# timestamps (commit time) and the length of the embedded commit id, so two
-# builds of the same commit produce the same file. Fails if the third-party
-# notice does not list every library copied into amdsmi.libs/.
+# timestamps (commit time), the length of the embedded commit id and the
+# source path (the library embeds source file names), so two builds of the
+# same commit produce the same file. Fails if the third-party notice does not
+# list every library copied into amdsmi.libs/.
 set -euo pipefail
 
 REPO=$(cd "$1" && pwd -P)
@@ -26,9 +27,9 @@ SOURCE_DATE_EPOCH=$(git -C "$REPO" log -1 --format=%ct)
 chmod -R go-w "$REPO/projects/amdsmi"
 
 docker run --rm \
-    -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" -e REPO="$REPO" -e IMAGE="$IMAGE" -e RPMS="$RPMS" \
-    -e OWNER="$(id -u):$(id -g)" \
-    -v "$REPO:$REPO" -v "$GIT_DIR:$GIT_DIR:ro" -v "$OUT:/out" \
+    -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" -e REPO=/src/rocm-systems -e IMAGE="$IMAGE" \
+    -e RPMS="$RPMS" -e OWNER="$(id -u):$(id -g)" \
+    -v "$REPO:/src/rocm-systems" -v "$GIT_DIR:$GIT_DIR:ro" -v "$OUT:/out" \
     -v "$HERE/pypi_release_constraints.txt:/constraints.txt:ro" \
     "$IMAGE" bash -c '
 set -euo pipefail
