@@ -1439,26 +1439,62 @@ TEST_F(HostApiTest, AllToAllPut)
 namespace
 {
 constexpr int     kA2aPutsPerPeer  = 2;
-// Put k reads its source k * kA2aSrcShift bytes in, so each put carries its own pattern.
-constexpr size_t  kA2aSrcShift     = 64;
 constexpr size_t  kA2aGuard        = 4096;
 constexpr uint8_t kA2aSentinel     = 0xA5;
 constexpr size_t  kA2aUniformBytes = 4u << 20;
 // Around the default NCCL_CE_CHUNK_SIZE (8 MiB), none a multiple of it.
 constexpr size_t  kA2aUnevenBytes[] = {(3u << 20) + 4096, (9u << 20) + 12288, (12u << 20) + 262144};
 constexpr size_t  kA2aSlot          = 13u << 20;
-static_assert(kA2aUnevenBytes[2] + kA2aSrcShift * kA2aPutsPerPeer + kA2aGuard <= kA2aSlot,
-              "a slot must hold the largest put plus its guard");
+static_assert(kA2aUnevenBytes[2] + kA2aGuard <= kA2aSlot, "a slot must hold the largest put plus its guard");
 
 size_t a2aPutBytes(bool uneven, int src, int dst, int k)
 {
     return uneven ? kA2aUnevenBytes[(src + dst + k) % 3] : kA2aUniformBytes;
 }
 
-// Slot 0 is the send region; put k from rank src lands in its own slot.
-size_t a2aRecvOffset(int src, int k)
+// The first nRanks * kA2aPutsPerPeer slots hold what this rank sends, the rest what it receives.
+size_t a2aSendOffset(int dst, int k)
 {
-    return kA2aSlot * (1 + src * kA2aPutsPerPeer + k);
+    return kA2aSlot * (dst * kA2aPutsPerPeer + k);
+}
+
+size_t a2aRecvOffset(int nRanks, int src, int k)
+{
+    return kA2aSlot * ((nRanks + src) * kA2aPutsPerPeer + k);
+}
+
+// Word i of put k from src to dst; no two words of the test are equal, so a
+// chunk that lands at the wrong offset or at the wrong peer changes the data.
+uint64_t a2aWord(int nRanks, int src, int dst, int k, size_t i)
+{
+    const uint64_t op = (static_cast<uint64_t>(src) * nRanks + dst) * kA2aPutsPerPeer + k;
+    return op << 32 | i;
+}
+
+void a2aFill(void* buf, size_t bytes, int nRanks, int src, int dst, int k)
+{
+    std::vector<uint64_t> words(bytes / sizeof(uint64_t));
+    for(size_t i = 0; i < words.size(); ++i)
+        words[i] = a2aWord(nRanks, src, dst, k, i);
+    ASSERT_EQ(hipMemcpy(buf, words.data(), bytes, hipMemcpyHostToDevice), hipSuccess);
+}
+
+bool a2aVerify(const void* buf, size_t bytes, int nRanks, int src, int dst, int k)
+{
+    std::vector<uint64_t> words(bytes / sizeof(uint64_t));
+    if(hipMemcpy(words.data(), buf, bytes, hipMemcpyDeviceToHost) != hipSuccess)
+        return false;
+    for(size_t i = 0; i < words.size(); ++i)
+    {
+        if(words[i] != a2aWord(nRanks, src, dst, k, i))
+        {
+            fprintf(stderr, "a2aVerify: put %d from rank %d to rank %d, word %zu: expected %#llx got %#llx\n",
+                    k, src, dst, i, static_cast<unsigned long long>(a2aWord(nRanks, src, dst, k, i)),
+                    static_cast<unsigned long long>(words[i]));
+            return false;
+        }
+    }
+    return true;
 }
 } // namespace
 
@@ -1468,7 +1504,7 @@ size_t a2aRecvOffset(int src, int k)
  *        all of them (AICOMRCCL-1964).
  *
  * Runs once with uniform sizes and once with uneven sizes around the copy-engine
- * chunk size; with 4+ ranks on one node the uneven profile is what makes the
+ * chunk size; with 3+ ranks on one node the uneven profile is what makes the
  * copy engine split its batches into chunks. Each put lands in its own slot with
  * its own pattern, and the guard after it must stay untouched.
  *
@@ -1488,7 +1524,7 @@ TEST_F(HostApiTest, DenseAllToAllPutSignal)
     const int    nRanks_ = nRanks();
     ncclComm_t   comm    = getActiveCommunicator();
     hipStream_t  stream  = getActiveStream();
-    const size_t winSize = kA2aSlot * (1 + nRanks_ * kA2aPutsPerPeer);
+    const size_t winSize = kA2aSlot * 2 * nRanks_ * kA2aPutsPerPeer;
 
     void* winBuf = nullptr;
     ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, winSize));
@@ -1511,7 +1547,13 @@ TEST_F(HostApiTest, DenseAllToAllPutSignal)
     for(bool uneven : {false, true})
     {
         FillSentinel(base, winSize, kA2aSentinel);
-        FillBuf(base, kA2aSlot, myRank);
+        for(int peer = 0; peer < nRanks_; ++peer)
+        {
+            if(peer == myRank) continue;
+            for(int k = 0; k < kA2aPutsPerPeer; ++k)
+                a2aFill(base + a2aSendOffset(peer, k), a2aPutBytes(uneven, myRank, peer, k), nRanks_, myRank, peer, k);
+        }
+        ASSERT_MPI_EQ(hipSuccess, hipDeviceSynchronize());
         ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
 
         ncclResult_t putRes = ncclGroupStart();
@@ -1520,8 +1562,8 @@ TEST_F(HostApiTest, DenseAllToAllPutSignal)
             if(peer == myRank) continue;
             for(int k = 0; k < kA2aPutsPerPeer && putRes == ncclSuccess; ++k)
             {
-                putRes = ncclPutSignal(base + k * kA2aSrcShift, a2aPutBytes(uneven, myRank, peer, k), ncclUint8,
-                                       peer, win, a2aRecvOffset(myRank, k),
+                putRes = ncclPutSignal(base + a2aSendOffset(peer, k), a2aPutBytes(uneven, myRank, peer, k), ncclUint8,
+                                       peer, win, a2aRecvOffset(nRanks_, myRank, k),
                                        kSigIdx, kCtx, kFlags, comm, stream);
             }
         }
@@ -1540,8 +1582,8 @@ TEST_F(HostApiTest, DenseAllToAllPutSignal)
             for(int k = 0; k < kA2aPutsPerPeer && ok; ++k)
             {
                 const size_t   bytes = a2aPutBytes(uneven, src, myRank, k);
-                const uint8_t* slot  = base + a2aRecvOffset(src, k);
-                ok = VerifyBuf(slot, bytes, static_cast<int>(src + k * kA2aSrcShift)) &&
+                const uint8_t* slot  = base + a2aRecvOffset(nRanks_, src, k);
+                ok = a2aVerify(slot, bytes, nRanks_, src, myRank, k) &&
                      AllSentinel(slot + bytes, kA2aGuard, kA2aSentinel);
             }
         }
