@@ -8,6 +8,8 @@
 
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd, RawFd};
+use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
 
 use crate::device::Device;
 use crate::driver::ProviderDriver;
@@ -47,6 +49,31 @@ pub fn duplicate_descriptor(descriptor: RawFd) -> Result<OwnedFd, Error> {
 /// Reports an invalid descriptor or native metadata failure.
 pub fn descriptor_length(descriptor: RawFd) -> io::Result<u64> {
     crate::driver::PlatformDriver::descriptor_length(descriptor)
+}
+
+/// Resolves a reopenable filesystem path for a borrowed Linux descriptor.
+///
+/// The returned path owns its bytes and does not depend on the descriptor
+/// remaining open. An anonymous or unlinked file has no such path. The caller
+/// must keep the descriptor valid during this call.
+///
+/// # Errors
+/// Reports an invalid descriptor or a missing or changed filesystem path.
+pub fn descriptor_path(descriptor: RawFd) -> io::Result<PathBuf> {
+    if descriptor < 0 {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    let link = format!("/proc/self/fd/{descriptor}");
+    let path = std::fs::read_link(&link)?;
+    if !path.is_absolute() {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+    let source = std::fs::metadata(link)?;
+    let target = std::fs::metadata(&path)?;
+    if (source.dev(), source.ino()) != (target.dev(), target.ino()) {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+    Ok(path)
 }
 
 /// Reads an entire fixed range from a borrowed descriptor without changing its
@@ -470,5 +497,30 @@ mod descriptor_tests {
             ErrorKind::InvalidArgument
         );
         assert!(std::fs::File::from(duplicate).metadata().is_ok());
+    }
+
+    #[test]
+    fn descriptor_path_remains_owned_after_the_caller_closes_its_file() {
+        let mut path = std::env::temp_dir();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!("rocddi path #{}-{nonce}", std::process::id()));
+        let file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        assert!(descriptor_path(-1).is_err());
+        let resolved = descriptor_path(file.as_raw_fd()).unwrap();
+        assert_eq!(resolved, path);
+        drop(file);
+        let _other = std::fs::File::open("/dev/null").unwrap();
+        assert_eq!(resolved, path);
+        assert!(std::fs::File::open(&resolved).is_ok());
+        let unlinked = std::fs::File::open(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(descriptor_path(unlinked.as_raw_fd()).is_err());
     }
 }

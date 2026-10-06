@@ -111,6 +111,28 @@ Linux descriptor calls for memory and loader operations go through the
 rocddi provider.
 
 Loaded executable segments retain a CPU mapping alongside their GPU address.
+For executable loading, the supported GPU target is GFX1201. The loader also
+accepts version 6 `gfx12-generic` objects with a generic target version when
+loading for GFX1201. It rejects target feature settings that GFX1201 does not
+support before allocating the load image. Program code objects use system
+backing associated with a GFX1201 device.
+
+File readers snapshot the code-object bytes and resolve the descriptor's path
+while it is open. Loaded objects retain an encoded file URI independent of the
+descriptor's later lifetime. Readers without a reopenable path use a memory
+URI for their snapshot.
+
+The loader applies dynamic AMDGPU `ABS32_LO`, `ABS32_HI`, `ABS32`, `ABS64`, and
+`RELATIVE64` relocations within the checked load image before publishing its
+symbols. Section-targeted static relocations are already applied in the code
+object and are skipped. Undefined and common relocation symbols resolve against
+executable definitions, preferring program definitions over those for the load
+agent. Missing definitions return `HSA_STATUS_ERROR_VARIABLE_UNDEFINED`.
+Malformed section or symbol references return
+`HSA_STATUS_ERROR_INVALID_CODE_OBJECT`. Program linkage declarations must
+have a definition before the code object is loaded, including when the object
+has no relocation for that declaration.
+
 `hsa_memory_copy` resolves an executable variable address through that owned
 mapping and checks the complete requested range before copying. The runtime
 registry lock keeps the loaded object live for the synchronous operation.
