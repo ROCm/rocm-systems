@@ -90,8 +90,9 @@ inline uint32_t pack(int64_t units, int grid) {
   return sign | (uint32_t(exponent + 127) << 23) | (uint32_t(significand) & 0x7fffff);
 }
 
-// Alignment discards low bits by arithmetic floor. An accumulator too small
-// to retain any magnitude bits contributes zero, including when negative.
+// Alignment discards low bits by arithmetic floor. With `accumulator` set, a
+// term too small to retain any magnitude bits contributes zero, even when
+// negative.
 inline int64_t align(Term term, int grid, bool accumulator = false) {
   const int shift = term.exponent - grid;
   const uint64_t magnitude = !term.significand || shift <= -64 ? 0
@@ -109,13 +110,13 @@ inline int64_t align(Term term, int grid, bool accumulator = false) {
 /// align and add products independently, then align those sums with C. F32 outputs
 /// round once to FP32 using RNE. Packed F16 rounds the integer sum directly to F16
 /// using RNE, with a C-alignment exponent floor of -14 and finite overflow controlled
-/// by fp16_ovfl. For packed F16, a negative C with discarded bits contributes a
-/// floor unit even when its aligned magnitude is zero, provided the grid is at or
-/// below -14. Packed BF16 instead truncates the rounded FP32 result. Packed WMMA
-/// applies this narrowing after every step. Subnormal inputs and outputs are
-/// preserved. Integer arithmetic preserves observed NaN payloads and makes results
-/// independent of the host FP state.
-/// See tests/fixtures/float_dot/README.md for hardware qualification of
+/// by fp16_ovfl. A negative C with discarded bits contributes a floor unit even
+/// when its aligned magnitude is zero, provided the grid is at or below the C
+/// alignment floor (-14 for packed F16, -126 otherwise). Packed BF16 instead
+/// truncates the rounded FP32 result. Packed WMMA applies this narrowing after
+/// every step. Subnormal inputs and outputs are preserved. Integer arithmetic
+/// preserves observed NaN payloads and makes results independent of the host FP
+/// state. See tests/fixtures/float_dot/README.md for hardware qualification of
 /// https://github.com/ROCm/rocm-systems/issues/12056 on RDNA4.
 template <bool Bf16, bool Packed, std::size_t N>
 inline uint32_t gfx12_dot_bits(const std::array<uint16_t, N> &a, const std::array<uint16_t, N> &b,
@@ -165,12 +166,14 @@ inline uint32_t gfx12_dot_bits(const std::array<uint16_t, N> &a, const std::arra
   const unsigned acc_exp = (acc >> 23) & 255;
   const Term c{acc_exp ? (acc & 0x7fffff) | 0x800000u : acc & 0x7fffff,
                int(std::max(acc_exp, 1u)) - 127 - 23, bool(acc >> 31)};
-  // Packed F16 floors C's alignment exponent at -14. A negative subnormal C
-  // contributes an arithmetic-floor unit if the grid is at or below -14,
-  // even when no magnitude bits survive. Coarser grids drop that tiny C.
-  const int grid =
-      std::max(product_grid, std::max(Packed && !Bf16 ? -14 : -126, c.leading_exponent()) - 26);
-  int64_t total = align(c, grid, !(Packed && !Bf16 && grid <= -14));
+  // C aligns no lower than -14 for packed F16 and -126 otherwise. When the
+  // grid is at or below that floor, a negative C contributes an
+  // arithmetic-floor unit even when no magnitude bits survive (seen on
+  // gfx1201 for subnormal C in F32 DOT2 and packed F16). Coarser grids drop
+  // that tiny C.
+  const int c_floor = Packed && !Bf16 ? -14 : -126;
+  const int grid = std::max(product_grid, std::max(c_floor, c.leading_exponent()) - 26);
+  int64_t total = align(c, grid, grid > c_floor);
   for (std::size_t i = 0; i < N; i += 2) {
     const int pair_grid = std::max(product_grids[i], product_grids[i + 1]);
     const int64_t pair = align(products[i], pair_grid) + align(products[i + 1], pair_grid);

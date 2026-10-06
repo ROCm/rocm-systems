@@ -2883,6 +2883,15 @@ std::vector<DotLane> dot_family_lanes() {
       0x3f57ff80u, 0x3f57ff00u, {0x30u, 0xc0u, 0xffu});
   add("F32Bf16AbsNegativeZero", bf16, {.neg_hi = kSrc2}, 0xbf803f00u, 0xbf808000u, 0x80000000u,
       0x3f800000u, 0x3f7fffffu, {0x30u, 0xc0u});
+  // gfx1201: a negative subnormal C whose bits all fall below a grid at or
+  // under 2^-126 still subtracts one unit. gfx1100 reads BF16 subnormal
+  // factors as zero. CLAMP changes neither card's result.
+  add("F32Bf16TinyNegativeAccumulatorClamp", bf16, {.clamp = 1}, 0x023a003au, 0x4509cb3fu,
+      0x8014e243u, 0x8bac50edu, 0x07c71400u, {0x30u, 0xc0u, 0xffu});
+  add("F32Bf16TinyNegatedAccumulator", bf16, {.neg = kSrc2}, 0xcaefc286u, 0x000b807bu, 0x000ca6c0u,
+      0x8a244c00u, 0u, {0x30u, 0xc0u});
+  add("F32Bf16TinyNegativeAccumulatorLowHalves", bf16, {.opsel_hi = 0}, 0xc1200003u, 0xc4f54b59u,
+      0x800a3302u, 0x0a22bff8u, 0u, {0x30u, 0xc0u});
   return lanes;
 }
 
