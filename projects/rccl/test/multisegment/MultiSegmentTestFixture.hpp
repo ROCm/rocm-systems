@@ -47,7 +47,7 @@ protected:
         ncclResult_t res = rcclGetCollImplInfo(
             getActiveCommunicator(), ncclFuncAllReduce, count, getNcclDataType<T>(),
             ncclSum, sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &proto, &nCh);
-        return res == ncclSuccess && (algo == RCCL_CE_REGISTERED || algo == RCCL_CE_2SHOT);
+        return res == ncclSuccess && algo == RCCL_CE_REGISTERED;
     }
 
     struct MultiSegmentBuffer
