@@ -108,6 +108,19 @@ def test_select_pass_and_bind_expression() -> None:
     assert "raw_pmc_df['TA_BUSY']" in bound  # unique counter unchanged
 
 
+def test_bind_expression_builtin_is_idempotent_and_prefix_safe() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0",),
+        counters_by_pass={"pmc_perf_0": frozenset({"SQ_WAVES"})},
+        duplicated=frozenset(),
+    )
+    expr = "ammolite__SQ_WAVES + ammolite__SQ_WAVES_SUM"
+    bound = bind_expression(expr, "pmc_perf_0", layout, frozenset({"SQ_WAVES"}))
+    assert bound == "ammolite__SQ_WAVES__pass0 + ammolite__SQ_WAVES_SUM"
+    rebound = bind_expression(bound, "pmc_perf_0", layout, frozenset({"SQ_WAVES"}))
+    assert rebound == bound
+
+
 def test_extract_row_refs_ignores_system_vars() -> None:
     refs = extract_row_refs([
         "to_avg(raw_pmc_df['SQ_WAVES'] / ammolite__cu_per_gpu)",
