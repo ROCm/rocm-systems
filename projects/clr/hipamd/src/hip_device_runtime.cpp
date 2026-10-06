@@ -547,6 +547,41 @@ hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget t
   HIP_RETURN(hipSuccess);
 }
 
+hipError_t hipDeviceGetHostAtomicCapabilities(unsigned int* capabilities,
+                                              const hipAtomicOperation* operations,
+                                              unsigned int count, int device) {
+  HIP_INIT_API(hipDeviceGetHostAtomicCapabilities, capabilities, operations, count, device);
+
+  if (capabilities == nullptr || operations == nullptr || count == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  int deviceCount = 0;
+  HIP_RETURN_ONFAIL(ihipDeviceGetCount(&deviceCount));
+
+  if (device < 0 || device >= deviceCount) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  // Validate all operations first, so a rejected request leaves the output untouched.
+  for (unsigned int i = 0; i < count; ++i) {
+    const int op = static_cast<int>(operations[i]);
+    if (op < 0 || op >= static_cast<int>(hipAtomicOperationMax)) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+  }
+
+  const amd::Device* amdDevice = g_devices[device]->devices()[0];
+  const bool linkAtomics = amdDevice->info().pcie_atomics_;
+  const bool coherentLink = amdDevice->isXgmi();
+
+  for (unsigned int i = 0; i < count; ++i) {
+    capabilities[i] = hip::ihipAtomicCapability(operations[i], linkAtomics, coherentLink);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
 hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
   HIP_INIT_API(hipDeviceGetCacheConfig, cacheConfig);
 

@@ -23,6 +23,7 @@ set(TEST_SRC
     hipDeviceGetLuid.cc
     hipDeviceAPUCheck.cc
     hipDeviceFlushGPUDirectRDMAWrites.cc
+    hipDeviceGetHostAtomicCapabilities.cc
     hipDeviceGetDefaultMemPool.cc
     hipDeviceCanAccessPeer.cc
     hipDeviceEnableDisablePeerAccess.cc

@@ -709,3 +709,10 @@ global:
 local:
     *;
 } hip_7.17;
+
+hip_7.19 {
+global:
+    hipDeviceGetHostAtomicCapabilities;
+local:
+    *;
+} hip_7.18;

@@ -40,6 +40,8 @@ The HIP/HSA runtime now correctly releases allocated signal objects during strea
 
 ### Added
 * New HIP APIs
+    - Host atomic capabilities: support for API parity with the corresponding CUDA API.
+      * `hipDeviceGetHostAtomicCapabilities` returns, for each requested `hipAtomicOperation`, a bitmask of `hipAtomicOperationCapability` describing how the link between a device and the host performs that atomic operation natively. It refines the single `hipDeviceAttributeHostNativeAtomicSupported` flag into a per-operation answer.
     - GPUDirect RDMA: support for API parity with the corresponding CUDA API.
       * `hipDeviceFlushGPUDirectRDMAWrites` blocks until GPUDirect RDMA writes issued by a third-party device, such as an RDMA-capable NIC, are visible to the requested scope. Capability is reported by the new device attributes `hipDeviceAttributeGPUDirectRDMASupported`, `hipDeviceAttributeGPUDirectRDMAFlushWritesOptions` and `hipDeviceAttributeGPUDirectRDMAWritesOrdering`, which are also mirrored in `hipDeviceProp_t`.
     - Stream Ordered Memory Allocator: support for API parity with corresponding CUDA API.

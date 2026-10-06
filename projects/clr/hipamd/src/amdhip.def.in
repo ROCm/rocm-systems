@@ -566,4 +566,5 @@ hipMemGetDefaultMemPool
 hipKernelNameRefByPtr
 hipModuleEnumerateFunctions
 hipDeviceFlushGPUDirectRDMAWrites
+hipDeviceGetHostAtomicCapabilities
 @HSA_EXPORTS@
