@@ -18,13 +18,12 @@ namespace AMD {
 namespace {
 /// @brief Returns the AIE section for @p arch if present, else @c nullptr.
 ///
-/// The section is identified structurally by its @ref aie_section_header magic, not by a
-/// hardcoded name allowlist: the section's name IS the arch name, and which arch names are
-/// acceptable is the AIE agent's decision (the caller passes AieAgent::arch_name), not the
-/// parser's. This keeps a single source of truth for the accepted arch.
+/// An AIE section is recognized by its @ref aie_section_header magic, not by a name allowlist:
+/// the section name is the arch name, and which arch is acceptable is the agent's decision (the
+/// caller passes AieAgent::arch_name()), not the parser's.
 ///
 /// One hsaco can carry a section per arch, so the search continues past an AIE section for a
-/// different arch rather than stopping at the first one.
+/// different arch.
 ///
 /// @param elf ELF image to search (buffer-backed via initAsBuffer).
 /// @param arch Arch name to match; empty matches any AIE section.

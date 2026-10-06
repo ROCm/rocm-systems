@@ -6,13 +6,12 @@
 
 // Reader for the full-ELF kernel binaries aiecc emits (`aiecc --get-full-elf`).
 //
-// A full ELF carries the PDIs and the control code in one file, along with the relocations that
-// say where addresses have to be written into the control code. This reader is used at load time,
-// nested inside a unified hsaco's AIE section: the loader parses it, keeps the control code
-// pristine in host memory and places the PDIs in the agent's device memory. No address is patched
-// here -- at dispatch time, the driver copies the pristine control code into a per-dispatch device
-// buffer and patches the PDI and argument addresses into that copy, so concurrent dispatches of
-// the same kernel never share a patch site.
+// A full ELF carries the PDIs, the control code, and the relocations that say where addresses go
+// in the control code. The loader parses the full ELF found in a unified hsaco's AIE section, keeps
+// the control code pristine in host memory and places the PDIs in the agent's device memory. No
+// address is patched here. At dispatch time the driver copies the pristine control code into a
+// per-dispatch device buffer and patches the PDI and argument addresses into that copy, so
+// concurrent dispatches of the same kernel never share a patch site.
 
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_ELF_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_ELF_H_
@@ -71,7 +70,8 @@ struct Kernel {
 /// @param [in] size Size of `image` in bytes.
 /// @param [in] arch Arch name of the hsaco section the ELF was found in, e.g. "aie2p". The ELF's
 /// OS/ABI must be the one for this arch.
-/// @param [out] out Kernels found in the image, keyed by name. Cleared before use.
+/// @param [out] out Kernels found in the image, keyed by name. Replaced on success; left untouched
+/// on failure.
 /// @param [out] error Human-readable message describing the failure; only touched on error.
 /// @retval HSA_STATUS_SUCCESS `image` is a well-formed full ELF for `arch` and at least one
 /// dispatchable kernel was found.

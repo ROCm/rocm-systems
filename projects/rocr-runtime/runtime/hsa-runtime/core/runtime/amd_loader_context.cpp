@@ -294,17 +294,15 @@ const core::MemoryRegion* RegionMemory::AgentLocal(hsa_agent_t agent, bool is_co
       return region_it == gpu_agent->regions().end() ? nullptr : region_it->get();
     }
     case core::Agent::kAmdAieDevice: {
-      // AIE agent: find SHMEM region (first system region for non-code, device SVM for code)
+      // AIE agent: code goes in the device SVM region (dev heap), data in ordinary system memory.
       auto aie_agent = static_cast<AMD::AieAgent*>(base_agent);
       auto region_it = std::find_if(aie_agent->regions().begin(), aie_agent->regions().end(),
                                     [&](const std::shared_ptr<const core::MemoryRegion>& region) {
                                       auto amd_region =
                                           static_cast<const AMD::MemoryRegion*>(region.get());
                                       if (is_code) {
-                                        // For code segments, use the device SVM region (dev heap)
                                         return amd_region->IsDeviceSVM();
                                       } else {
-                                        // For data segments, use regular system memory
                                         return amd_region->IsSystem() && !amd_region->IsDeviceSVM();
                                       }
                                     });

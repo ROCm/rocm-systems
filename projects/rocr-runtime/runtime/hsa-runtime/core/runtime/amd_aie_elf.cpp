@@ -99,9 +99,8 @@ bool ParseArgIndex(const char* name, uint32_t* index) {
   for (const char* p = name; *p != '\0'; ++p) {
     if (*p < '0' || *p > '9') return false;
     const auto digit = static_cast<uint32_t>(*p - '0');
-    // Refuse rather than wrap. The caller bounds the result against kMaxArgIndex, and a value
-    // that wrapped can land back under that bound and name a different argument than the ELF
-    // asked for -- so the overflow has to be caught here, not there.
+    // Refuse rather than wrap: a wrapped value can land back under the caller's kMaxArgIndex
+    // bound and name a different argument than the ELF asked for.
     if (value > (std::numeric_limits<uint32_t>::max() - digit) / 10) return false;
     value = value * 10 + digit;
   }
@@ -219,8 +218,8 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
     const uint32_t word_count = shdrs[i].sh_size / sizeof(Elf32_Word);
     const auto* words = image.As<Elf32_Word>(shdrs[i].sh_offset, word_count);
     if (words == nullptr || word_count == 0) return fail("malformed group section");
-    // Producers emit only COMDAT groups, and a plain group has no known meaning in a full ELF.
-    // Refused rather than read as a kernel, the same as mlir-aie's hsaco packer does.
+    // Producers emit only COMDAT groups, and a plain group has no known meaning in a full ELF, so
+    // refuse it, as mlir-aie's hsaco packer does.
     if ((words[0] & GRP_COMDAT) == 0) return fail("group is not a COMDAT group");
     for (uint32_t w = 1; w < word_count; ++w) {
       const uint32_t member = words[w];
@@ -345,14 +344,12 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
     auto pdi_sites_it = group_pdi_sites.find(grp_index);
     if (pdi_sites_it != group_pdi_sites.end()) {
       for (const auto& [pdi_section, offset] : pdi_sites_it->second) {
-        // The runtime writes a 64-bit address here, so it has to lie wholly inside the control
-        // code.
+        // A 64-bit address is written here, so it must lie wholly inside the control code.
         if (offset + sizeof(uint64_t) > k.ctrl_code.size() || offset % sizeof(uint32_t) != 0) {
           return fail("PDI patch site does not fit the control code");
         }
-        // A real full-ELF control code opens with a 16-byte transaction header, so a legitimate
-        // PDI patch site is never at offset 0. Retained as a well-formedness check on the ELF,
-        // catching a relocation the parser mis-attributed rather than a legal kernel.
+        // A full-ELF control code opens with a 16-byte transaction header, so a PDI patch site at
+        // offset 0 means a malformed ELF, not a legal kernel.
         if (offset == 0) {
           return fail("PDI patch site at offset 0 is indistinguishable from no patch");
         }
@@ -374,12 +371,10 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
         auto& dst = k.arg_sites[arg_index];
         dst.reserve(sites.size());
         for (const RelocSite& site : sites) {
-          // PatchShimDma48 reads and writes the two dwords following the site, so three dwords
-          // starting at the offset have to lie wholly inside the control code, and the offset has
-          // to be dword aligned. Checked here rather than where the relocation was read, because
-          // this is the first point at which the control code's size is known. Without it a
-          // malformed ELF makes the driver patch past the end of the buffer it sized from
-          // ctrl_code_size -- the same bound the PDI patch site is checked against above.
+          // PatchShimDma48 updates the two dwords after the site, so three dwords from the offset
+          // must lie inside the control code and the offset must be dword aligned; otherwise the
+          // driver patches past the end of its per-dispatch buffer. Checked here because this is
+          // the first point at which the control code's size is known.
           if ((site.offset % sizeof(uint32_t)) != 0 ||
               site.offset + 3 * sizeof(uint32_t) > k.ctrl_code.size()) {
             return fail("argument patch site does not fit the control code");

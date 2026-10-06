@@ -445,7 +445,7 @@ public:
 
 /// @brief LoadedCodeObject for an AIE hsaco. Unlike the GPU path (one contiguous
 /// load segment), an AIE object is placed as independent XDNA BOs per kernel (insts
-/// and PDI for a PdiInsts kernel, only the nested ELF's PDI for a FullElf one), so
+/// and PDI for a PdiInsts kernel, the nested ELF's PDIs for a FullElf one), so
 /// this has no single ELF segment layout to track.
 class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject {
   friend class AmdHsaCodeLoader;
@@ -458,8 +458,8 @@ class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject
   size_t elf_size;
 
  public:
-  /// @brief Construct from the original hsaco bytes; ownership of elf_data_ stays
-  /// with the caller for the lifetime of this object.
+  /// @brief Construct from the original hsaco bytes; the caller keeps ownership of
+  /// elf_data_, which must outlive this object.
   AieLoadedCodeObjectImpl(ExecutableImpl* owner_, hsa_agent_t agent_, const void* elf_data_,
                           size_t elf_size_)
       : ExecutableObject(owner_, agent_), elf_data(elf_data_), elf_size(elf_size_) {}

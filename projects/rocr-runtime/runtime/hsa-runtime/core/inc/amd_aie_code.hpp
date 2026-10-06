@@ -30,9 +30,10 @@ namespace AMD {
 struct AieKernelInfo {
   /// @brief Kernel name.
   std::string name;
-  /// @brief Instruction blob in the ELF buffer; non-nullptr after parse.
+  /// @brief Instruction blob (PdiInsts) or nested full ELF (FullElf) in the ELF buffer;
+  /// non-nullptr after parse.
   const uint8_t* insts_data = nullptr;
-  /// @brief Instruction blob size in bytes; > 0.
+  /// @brief Size in bytes of the blob at @ref insts_data; > 0.
   uint64_t insts_size = 0;
   /// @brief PDI blob in the ELF buffer; nullptr if no PDI (full-ELF).
   const uint8_t* pdi_data = nullptr;
@@ -40,11 +41,8 @@ struct AieKernelInfo {
   uint64_t pdi_size = 0;
   /// @brief Kernel argument buffer size in bytes.
   uint32_t kernarg_size = 0;
-  /// @brief Number of NPU columns the kernel uses.
-  ///
-  /// Carried from the on-disk entry even though nothing consumes it yet: it is the partition
-  /// geometry a payload declares, which is what decides whether two payloads may share a hardware
-  /// context. Dropping it here would mean re-parsing the section to get it back.
+  /// @brief Number of columns of the NPU partition the kernel was compiled for (the partition
+  /// width, not the columns the design occupies).
   uint32_t num_cols = 0;
   /// @brief Payload kind; see @ref AieKernelKind.
   AieKernelKind kind = AieKernelKind::PdiInsts;
@@ -63,9 +61,10 @@ class AieCode {
   /// @param [in] arch Arch name of the agent, which is also the name of the section to parse.
   /// @param [out] out The parsed object; only set on success.
   /// @retval HSA_STATUS_SUCCESS The section for @p arch was found and is well formed.
+  /// @retval HSA_STATUS_ERROR_INVALID_ARGUMENT @p out is nullptr.
   /// @retval HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS @p data has no AIE section for @p arch.
-  /// @retval HSA_STATUS_ERROR_INVALID_CODE_OBJECT @p data is not an ELF64, or the AIE section for
-  /// @p arch is malformed.
+  /// @retval HSA_STATUS_ERROR_INVALID_CODE_OBJECT @p data is empty or not an ELF64, @p arch is
+  /// empty, or the AIE section for @p arch is malformed.
   static hsa_status_t Create(const void* data, size_t size, std::string_view arch,
                              std::unique_ptr<AieCode>* out);
 
@@ -86,9 +85,9 @@ class AieCode {
   /// @brief Parses the AIE section @p sec, whose header has already been bounds-checked.
   bool Parse(amd::elf::Section* sec);
 
-  /// @brief Parsed ELF view over the caller's buffer; owns the base/size (data()/size()).
+  /// @brief ELF view over the caller's buffer; does not copy or own the bytes.
   std::unique_ptr<amd::elf::Image> elf_;
-  /// @brief Architecture.
+  /// @brief Arch name, which is also the name of the parsed section.
   std::string arch_section_name_;
   /// @brief Parsed kernels keyed by name.
   std::unordered_map<std::string, AieKernelInfo> kernels_;
