@@ -113,13 +113,13 @@ jobs:
                 -DCMAKE_CXX_COMPILER=amdclang++ \
                 -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
                 -DCMAKE_HIP_PLATFORM=amd \
-                -DAIS_USE_CLANG_TIDY=ON \
-                -DAIS_CLANG_TIDY_EXECUTABLE=clang-tidy-${AIS_CLANG_TIDY_VERSION} \
+                -DHIPFILE_USE_CLANG_TIDY=ON \
+                -DHIPFILE_CLANG_TIDY_EXECUTABLE=clang-tidy-${AIS_CLANG_TIDY_VERSION} \
                 ../../rocm-systems/projects/hipfile
             '
       - name: Compile hipFile with clang-tidy
         # clang-tidy runs as part of compilation via CMAKE_CXX_CLANG_TIDY.
-        # AISClangTidy.cmake passes -warnings-as-errors=*, so any finding fails
+        # HipFileClangTidy.cmake passes -warnings-as-errors=*, so any finding fails
         # the build. No tests are run; we only care about clang-tidy diagnostics.
         run: |
           docker exec \

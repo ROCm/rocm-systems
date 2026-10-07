@@ -203,6 +203,120 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
 /**
  * Test Description
  * ----------------
+ *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
+ *     AMD_LOG_LEVEL=0, capturing stdout and stderr. The capture layer must print
+ *     its start notice exactly once, naming the per-process archive directory
+ *     and the base directory that child processes record to.
+ *   - Repeats the capture with only stdout captured: the notice is on stderr,
+ *     so stdout holds none.
+ *   - Spawns the same workload without HIP_HRR_CAPTURE_OUTPUT: no notice.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_notice"};
+  const std::string kNotice =
+      "[HRR capture] Recording this process's HIP calls, with their host buffers, kernel "
+      "arguments and code objects, to ";
+  auto count_notices = [&](const std::string& out) {
+    size_t n = 0;
+    for (size_t at = out.find(kNotice); at != std::string::npos;
+         at = out.find(kNotice, at + kNotice.size()))
+      ++n;
+    return n;
+  };
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess output:\n" << out);
+    REQUIRE(ret == 0);
+    REQUIRE(count_notices(out) == 1);
+
+    const size_t begin = out.find(kNotice);
+    std::string line = out.substr(begin, out.find('\n', begin) - begin);
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    const std::string base = cap.path.string();
+    const std::string pid_dir = hrr_single_process_archive(cap.path).filename().string();
+    // The writer joins the pid-<pid> component with '/' on every platform.
+    const std::string expected = kNotice + base + "/" + pid_dir +
+                                 " (child processes record to their own pid-* directories in " +
+                                 base + ")";
+    CHECK(line == expected);
+  }
+
+  {
+    // Same capture with only stdout captured: the notice goes to stderr, so the
+    // program's own stdout stays exactly what it was without capture.
+    ScopedDir cap_stdout{fs::temp_directory_path() / "hrr_capture_notice_stdout"};
+    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/false);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_stdout.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess stdout:\n" << out);
+    REQUIRE(ret == 0);
+    CHECK(count_notices(out) == 0);
+  }
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    // CLR's flag parser turns HIP_HRR_CAPTURE_OUTPUT= into a single space, which
+    // still enables capture. Unset the variable so an inherited value cannot arm it.
+    proc.unsetEnv("HIP_HRR_CAPTURE_OUTPUT");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Subprocess output without capture:\n" << out);
+    REQUIRE(ret == 0);
+    CHECK(count_notices(out) == 0);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
+ *     AMD_LOG_LEVEL=3, capturing stdout and stderr. The summary that
+ *     hip_capture_shutdown() logs at exit must name the per-process pid-<pid>
+ *     directory the archive was written to, the same one the start notice names,
+ *     not the base directory.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureExitSummary) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_exit_summary"};
+  hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+  proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+  // The summary goes through the CLR log at LOG_INFO with LOG_ALWAYS, which no
+  // mask filters out; AMD_LOG_MASK=0 keeps the per-API traces out of the output.
+  proc.setEnv("AMD_LOG_LEVEL", "3");
+  proc.setEnv("AMD_LOG_MASK", "0");
+  set_proc_search_path(proc);
+  int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+  const std::string out = proc.getOutput();
+  INFO("Capture subprocess output:\n" << out);
+  REQUIRE(ret == 0);
+
+  const std::string kSummary = "[HRR capture] Wrote ";
+  const size_t begin = out.find(kSummary);
+  REQUIRE(begin != std::string::npos);
+  CHECK(out.find(kSummary, begin + kSummary.size()) == std::string::npos);
+  std::string line = out.substr(begin, out.find('\n', begin) - begin);
+  if (!line.empty() && line.back() == '\r') line.pop_back();
+  INFO("Summary line: " << line);
+  const std::string pid_dir = hrr_single_process_archive(cap.path).filename().string();
+  // The writer joins the pid-<pid> component with '/' on every platform.
+  const std::string tail = " blobs to: " + cap.path.string() + "/" + pid_dir;
+  REQUIRE(line.size() >= tail.size());
+  CHECK(line.compare(line.size() - tail.size(), tail.size(), tail) == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - Spawns HrrTest Unit_HRR_AllApis_Direct as a subprocess with
  *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.  Exercises ~55 distinct
  *     HIP APIs covering device queries, streams, events, malloc variants
