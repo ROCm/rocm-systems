@@ -187,30 +187,38 @@ __CG_STATIC_QUALIFIER__ unsigned int barrier_signal() { return __ockl_grid_bar_a
 __CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
 }  // namespace grid
 
+// The LDS DMA path in memcpy_async is restricted to gfx9. gfx10 also exposes
+// __builtin_amdgcn_load_to_lds, but that path depends on the hardware adding lane_id * 4
+// to a wave uniform LDS base, and no gfx10 part was available to verify it against.
+// gfx10, gfx11 and gfx12 therefore use traditional_memcpy_bytes, which is correct on every
+// target. Turning gfx10 on later means widening this condition to __GFX10__ and running
+// Unit_device_memcpy_async_* on one. A target excluded here only loses the accelerated
+// path, it never becomes incorrect.
+#if defined(__GFX9__)
+#define __CG_LDS_DMA_TARGET 1
+#else
+#define __CG_LDS_DMA_TARGET 0
+#endif
+
 // Drain copies issued by memcpy_async before a barrier releases.
 //
-// gfx12.5 async global<->LDS copies retire through the async counter. A fence,
-// s_waitcnt, and s_barrier do not wait for that counter, so it has to be waited
-// explicitly or another wave can leave the barrier and read LDS that has not
-// landed yet.
+// gfx12.5 async global<->LDS copies retire through the async counter. A fence, s_waitcnt
+// and s_barrier do not wait for that counter, so it has to be waited explicitly or another
+// wave can leave the barrier and read LDS that has not landed yet. This is the only copy
+// form that needs an explicit drain.
 //
-// gfx9 and gfx10 direct-to-LDS loads (global_load_lds / the lds bit on
-// global_load) retire through vmcnt. That includes gfx90a (MI210), gfx942
-// (MI300A and MI300X), and gfx950. Those CDNA targets have back-off barriers,
-// so s_barrier itself does not drain vmcnt. Immediate 0 is a full s_waitcnt
-// (vmcnt, lgkmcnt, and expcnt). gfx11 and gfx12 do not implement
-// __builtin_amdgcn_load_to_lds, and gfx12 has a different waitcnt encoding, so
-// this wait is not emitted there.
+// gfx9 direct-to-LDS loads (global_load_lds_dword, or global_load_dword with the lds bit on
+// gfx90a) retire through vmcnt, and vmcnt IS covered by the workgroup release fence that
+// __syncthreads() and barrier_arrive() already perform: the memory legalizer emits
+// s_waitcnt vmcnt(0) ahead of the barrier exactly when such a load is in flight, and omits
+// it when none is. An unconditional s_waitcnt here would instead drain vmcnt in every
+// kernel that calls sync(), including the ones that never issue a memcpy_async, which
+// measured 1.24x-1.36x slower than __syncthreads() on gfx950 for a kernel that keeps a
+// global load in flight across a barrier. So no gfx9 drain is emitted here by design.
 __CG_STATIC_QUALIFIER__ void wait_async_copy_counter() {
 #if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
     __builtin_amdgcn_s_wait_asynccnt(0);
-#endif
-}
-
-__CG_STATIC_QUALIFIER__ void wait_lds_dma() {
-#if __has_builtin(__builtin_amdgcn_load_to_lds) && __has_builtin(__builtin_amdgcn_s_waitcnt)
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_load_to_lds)) __builtin_amdgcn_s_waitcnt(0);
 #endif
 }
 
@@ -248,10 +256,10 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
 __CG_STATIC_QUALIFIER__ bool is_valid() { return true; }
 
 __CG_STATIC_QUALIFIER__ void sync() {
-  // Each wave drains its own copies before the barrier, so every other wave
-  // observes the LDS results once the barrier releases.
+  // Each wave drains its own copies before the barrier, so every other wave observes the
+  // LDS results once the barrier releases. gfx9 LDS DMA needs nothing here; the workgroup
+  // release fence inside __syncthreads() already waits vmcnt when such a copy is in flight.
   wait_async_copy_counter();
-  wait_lds_dma();
   __syncthreads();
 }
 
@@ -261,10 +269,10 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
-  // Signal only after this wave's copies have landed. Waiting later, in
-  // barrier_wait, is too late: the last wave's arrive can release everyone else.
+  // Signal only after this wave's copies have landed. Waiting later, in barrier_wait, is
+  // too late: the last wave's arrive can release everyone else. gfx9 LDS DMA is drained by
+  // the workgroup release fence below, same as in sync().
   wait_async_copy_counter();
-  wait_lds_dma();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal))

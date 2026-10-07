@@ -193,19 +193,22 @@ __CG_STATIC_QUALIFIER__ bool dispatch_async_memcpy(const TyGroup& group, TyElem*
 }
 #endif
 
-#if __has_builtin(__builtin_amdgcn_load_to_lds)
+#if __has_builtin(__builtin_amdgcn_load_to_lds) && __CG_LDS_DMA_TARGET
 // LDS DMA does not write to the per-lane address it is handed. The destination is a wave-uniform
 // base and the hardware adds lane_id * 4 for a 4-byte transfer. The copy is therefore partitioned
 // by rank stride, which puts consecutive lanes on consecutive dwords, rather than by the contiguous
 // per-thread chunks dispatch_async_memcpy uses. The group's ranks must be contiguous within a wave,
 // which holds for a thread_block but not for a tile or a coalesced group.
 //
-// The size argument stays 4 on every target that has this builtin, including gfx950. gfx950 also
-// accepts 12 and 16, but those sizes add lane_id * 16 to the LDS base and would scatter the bytes.
-// gfx90a (MI210) encodes this as global_load_dword with the lds bit; gfx942 (MI300A/MI300X) and
-// gfx950 encode global_load_lds_dword. Both forms use the same M0 + lane_id * 4 addressing and both
-// retire through vmcnt. The builtin is not invocable on gfx11 or gfx12, which do not have
-// vmem-to-lds-load-insts; gfx12.5 is handled by the async path above.
+// The size argument stays 4 on every gfx9 target, including gfx950. gfx950 also accepts 12 and
+// 16, but those sizes add lane_id * 16 to the LDS base and would scatter the bytes. gfx906,
+// gfx908 and gfx90a (MI210) encode this as global_load_dword with the lds bit; gfx942
+// (MI300A/MI300X) and gfx950 encode global_load_lds_dword. Both forms use the same
+// M0 + lane_id * 4 addressing and both retire through vmcnt. gfx9 is always wave64, so lane is
+// always 0..63 here. gfx10 is excluded by __CG_LDS_DMA_TARGET even though the builtin is
+// invocable there; gfx11 and gfx12 lack vmem-to-lds-load-insts entirely, and gfx12.5 is handled
+// by the async path above. Compilers without __builtin_amdgcn_load_to_lds at all, which includes
+// the ROCm 7 clang, skip this block and use traditional_memcpy_bytes.
 //
 // global_load_lds is not replayed on an XNACK fault. The source must already be a resident global
 // address. Scratch fails that requirement and is rejected below; on MI300A a private or system
@@ -252,8 +255,8 @@ __CG_STATIC_QUALIFIER__ bool dispatch_lds_dma_memcpy(const TyGroup& group, TyEle
   const size_t ndwords = count / 4;
   const unsigned int num_threads = group.num_threads();
   const unsigned int rank = group.thread_rank();
-  // mbcnt_hi of a zero EXEC high half is 0 on wave32, so this is the hardware lane on both
-  // wave64 (MI210, MI300, gfx950) and wave32 (gfx10).
+  // The hardware lane this thread occupies. This is what the LDS DMA unit adds to the base, so
+  // it has to be the physical lane and not rank % wave_size. gfx9 is wave64 throughout.
   const unsigned int lane = __builtin_amdgcn_mbcnt_hi(~0u, __builtin_amdgcn_mbcnt_lo(~0u, 0u));
   // rank - lane is uniform in a thread_block. readfirstlane forces the SGPR that is copied to
   // M0; a divergent value would make every lane use the first active lane's LDS base.
@@ -293,19 +296,42 @@ __CG_STATIC_QUALIFIER__ void traditional_memcpy_bytes(const TyGroup& group,
                                                       TyElem* __restrict__ dst,
                                                       const TyElem* __restrict__ src,
                                                       const TySize& count) {
-  size_t group_size = group.size();
-  size_t bytes_per_thread = count / group_size; /* each thread will copy this much */
-  unsigned char *c_src = ((unsigned char*)src) + (group.thread_rank() * bytes_per_thread),
-                *c_dst = ((unsigned char*)dst) + (group.thread_rank() * bytes_per_thread);
-  for (size_t i = 0; i < bytes_per_thread; i++) {
-    c_dst[i] = c_src[i];
-  }
+  const size_t group_size = group.size();
+  const size_t rank = group.thread_rank();
+  const size_t bytes = static_cast<size_t>(count);
+  unsigned char* c_dst = (unsigned char*)dst;
+  const unsigned char* c_src = (const unsigned char*)src;
 
-  // copy remaining with 1 thread
-  size_t bytes_copied = bytes_per_thread * group_size;
-  if (group.thread_rank() == 0 && count > bytes_copied) {
-    for (size_t i = bytes_copied; i < count; i++) {
-      ((unsigned char*)dst)[i] = ((unsigned char*)src)[i];
+  // Rank strided, not rank contiguous. Neighbouring ranks have to touch neighbouring
+  // addresses for a wave's accesses to coalesce into whole cache lines; giving each rank
+  // its own contiguous chunk made one wave issue group_size separate lines per step.
+  // The widest element size both pointers can sustain is chosen at run time, because the
+  // only alignment known at compile time is alignof(TyElem) and the caller's pointers do
+  // not have to be more aligned than that.
+  const unsigned long addrs =
+      reinterpret_cast<unsigned long>(c_dst) | reinterpret_cast<unsigned long>(c_src);
+
+  if ((addrs & 15ul) == 0ul) {
+    typedef unsigned int __attribute__((ext_vector_type(4))) cg_uint4;
+    const size_t nvec = bytes / 16;
+    for (size_t i = rank; i < nvec; i += group_size) {
+      ((cg_uint4*)c_dst)[i] = ((const cg_uint4*)c_src)[i];
+    }
+    // At most 15 bytes are left over, so ranks 0..14 finish them one byte each.
+    for (size_t i = nvec * 16 + rank; i < bytes; i += group_size) {
+      c_dst[i] = c_src[i];
+    }
+  } else if ((addrs & 3ul) == 0ul) {
+    const size_t ndwords = bytes / 4;
+    for (size_t i = rank; i < ndwords; i += group_size) {
+      ((unsigned int*)c_dst)[i] = ((const unsigned int*)c_src)[i];
+    }
+    for (size_t i = ndwords * 4 + rank; i < bytes; i += group_size) {
+      c_dst[i] = c_src[i];
+    }
+  } else {
+    for (size_t i = rank; i < bytes; i += group_size) {
+      c_dst[i] = c_src[i];
     }
   }
 }
@@ -328,10 +354,11 @@ __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __
     }
   }
 #endif
-#if __has_builtin(__builtin_amdgcn_load_to_lds)
-  // __builtin_amdgcn_is_invocable is the vmem-to-lds-load-insts feature: gfx9 and gfx10,
-  // including gfx90a (MI210), gfx942 (MI300A/MI300X), and gfx950. It is false on gfx11 and
-  // gfx12, so those targets stay on the traditional copy. gfx12.5 never reaches here when its
+#if __has_builtin(__builtin_amdgcn_load_to_lds) && __CG_LDS_DMA_TARGET
+  // __CG_LDS_DMA_TARGET restricts this to gfx9, which is where the wave uniform LDS base
+  // plus lane_id * 4 addressing has been verified. __builtin_amdgcn_is_invocable is kept as
+  // well so a generic gfx9 target that lacks vmem-to-lds-load-insts still falls through.
+  // gfx10, gfx11 and gfx12 stay on the traditional copy; gfx12.5 never reaches here when its
   // async builtins are invocable. Hint is a constant, so a sub-dword element type does not
   // emit this path.
   if ((Hint % 4) == 0 && __builtin_amdgcn_is_invocable(__builtin_amdgcn_load_to_lds) &&
@@ -347,9 +374,11 @@ __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __
  * Enqueue a copy of `count` bytes.
  *
  * The copy is not complete when this function returns on targets that use an accelerated path
- * (gfx12.5 async copies, and gfx9/gfx10 LDS DMA, including MI210, MI300A/MI300X, and gfx950).
- * The destination must not be read until `group.sync()`. That sync drains the issuing wave's
- * copies before the barrier. `__syncthreads()` does not drain gfx12.5 async copies.
+ * (gfx12.5 async copies, and gfx9 LDS DMA, including MI210, MI300A/MI300X, and gfx950).
+ * Read the destination only after `group.sync()`. That is the portable rule, and on gfx12.5 it
+ * is the only thing that works: those copies retire through the async counter, which no fence
+ * or barrier drains. gfx9 LDS DMA instead retires through vmcnt, which the workgroup release
+ * fence in any barrier already waits for, so `__syncthreads()` is also sufficient there.
  */
 template <class TyGroup, typename TyElem, typename TySizeT>
 __CG_STATIC_QUALIFIER__ void memcpy_async(const TyGroup& group, TyElem* __restrict__ dst,

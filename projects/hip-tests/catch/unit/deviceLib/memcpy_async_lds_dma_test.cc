@@ -214,7 +214,8 @@ __global__ void privateSourceToLds(unsigned char* out, int* probe) {
   cg::thread_block block = cg::this_thread_block();
   // volatile plus the asm use keep this in scratch. A plain array is legal to promote
   // into LDS, which would make this case pass without ever rejecting a private pointer.
-  // Rank 0's bytes are the ones the fallback stores.
+  // Every rank writes the same first three bytes and tags the fourth with its own rank,
+  // so the fourth byte identifies which rank's scratch the fallback actually read.
   volatile unsigned char mine[4];
   mine[0] = 0x11;
   mine[1] = 0x22;
@@ -244,6 +245,117 @@ __global__ void privateSourceToLds(unsigned char* out, int* probe) {
   if (block.thread_rank() == 0) {
     for (int i = 0; i < 16; i++) out[i] = raw[i];
   }
+}
+
+
+// True when this target completes memcpy_async through the gfx12.5 async counter. That
+// counter is not drained by any fence or barrier, so those targets require group.sync().
+// Everywhere else the copy retires through vmcnt, which a workgroup barrier does wait for.
+__global__ void probeAsyncCounter(int* out) {
+#if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
+  *out = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt) ? 1 : 0;
+#else
+  *out = 0;
+#endif
+}
+
+// Same copy as globalToLds, synchronised with __syncthreads() rather than block.sync().
+// A large amount of existing code is written this way, so on every target whose copy
+// retires through vmcnt it has to keep working.
+template <typename T>
+__global__ void globalToLdsSyncthreads(const T* in, T* out, int bytes, int readBack) {
+  __shared__ __align__(16) unsigned char raw[kSharedCap];
+  cg::thread_block block = cg::this_thread_block();
+
+  for (int i = block.thread_rank(); i < kSharedCap; i += block.num_threads()) raw[i] = 0;
+  __syncthreads();
+
+  cg::memcpy_async(block, reinterpret_cast<T*>(raw), in, static_cast<size_t>(bytes));
+  __syncthreads();
+
+  unsigned char* o = reinterpret_cast<unsigned char*>(out);
+  for (int i = block.thread_rank(); i < readBack; i += block.num_threads()) o[i] = raw[i];
+}
+
+// The LDS destination does not have to start at the beginning of the shared allocation, and
+// the source does not have to be 16-byte aligned. Where LDS DMA runs, the destination base
+// is wave uniform and the hardware supplies the per-lane offset, so a base that is not the
+// start of the block is what exercises that. Offsets that are not a multiple of 4 must be
+// rejected by the alignment gate and fall back.
+template <typename T>
+__global__ void globalToLdsOffsetBase(const T* in, T* out, int bytes, int readBack, int off) {
+  __shared__ __align__(16) unsigned char raw[kSharedCap + 64];
+  cg::thread_block block = cg::this_thread_block();
+
+  for (int i = block.thread_rank(); i < kSharedCap + 64; i += block.num_threads()) raw[i] = 0;
+  block.sync();
+
+  const unsigned char* s8 = reinterpret_cast<const unsigned char*>(in);
+  cg::memcpy_async(block, reinterpret_cast<T*>(raw + off), reinterpret_cast<const T*>(s8 + off),
+                   static_cast<size_t>(bytes));
+  block.sync();
+
+  unsigned char* o = reinterpret_cast<unsigned char*>(out);
+  for (int i = block.thread_rank(); i < readBack; i += block.num_threads()) o[i] = raw[off + i];
+}
+
+// Two copies into disjoint LDS regions with one sync after both, which is the double
+// buffering shape memcpy_async exists for. Both have to have landed when the barrier
+// releases, not just the most recent one.
+__global__ void twoCopiesOneSync(const int* in, int* out, int bytes) {
+  __shared__ __align__(16) unsigned char a[kSharedCap / 2];
+  __shared__ __align__(16) unsigned char b[kSharedCap / 2];
+  cg::thread_block block = cg::this_thread_block();
+
+  for (int i = block.thread_rank(); i < kSharedCap / 2; i += block.num_threads()) {
+    a[i] = 0;
+    b[i] = 0;
+  }
+  block.sync();
+
+  const unsigned char* s8 = reinterpret_cast<const unsigned char*>(in);
+  cg::memcpy_async(block, reinterpret_cast<int*>(a), in, static_cast<size_t>(bytes));
+  cg::memcpy_async(block, reinterpret_cast<int*>(b), reinterpret_cast<const int*>(s8 + bytes),
+                   static_cast<size_t>(bytes));
+  block.sync();
+
+  unsigned char* o = reinterpret_cast<unsigned char*>(out);
+  for (int i = block.thread_rank(); i < bytes; i += block.num_threads()) o[i] = a[i];
+  for (int i = block.thread_rank(); i < bytes; i += block.num_threads()) o[bytes + i] = b[i];
+}
+
+// The split barrier has to complete the copy too. barrier_arrive is where the wait has to
+// happen: the last wave's arrive can release everyone else, so waiting in barrier_wait
+// would be too late.
+__global__ void arriveWaitPath(const int* in, int* out, int bytes, int readBack) {
+  __shared__ __align__(16) unsigned char raw[kSharedCap];
+  cg::thread_block block = cg::this_thread_block();
+
+  for (int i = block.thread_rank(); i < kSharedCap; i += block.num_threads()) raw[i] = 0;
+  block.sync();
+
+  cg::memcpy_async(block, reinterpret_cast<int*>(raw), in, static_cast<size_t>(bytes));
+  block.barrier_wait(block.barrier_arrive());
+
+  unsigned char* o = reinterpret_cast<unsigned char*>(out);
+  for (int i = block.thread_rank(); i < readBack; i += block.num_threads()) o[i] = raw[i];
+}
+
+// Many resident blocks at once. A single block cannot surface a completion bug that only
+// appears when the memory system is loaded enough for the copy to still be outstanding at
+// the barrier.
+__global__ void globalToLdsManyBlocks(const int* in, unsigned char* out, int bytes) {
+  __shared__ __align__(16) unsigned char raw[kSharedCap];
+  cg::thread_block block = cg::this_thread_block();
+
+  for (int i = block.thread_rank(); i < kSharedCap; i += block.num_threads()) raw[i] = 0;
+  block.sync();
+
+  cg::memcpy_async(block, reinterpret_cast<int*>(raw), in, static_cast<size_t>(bytes));
+  block.sync();
+
+  unsigned char* o = out + static_cast<size_t>(blockIdx.x) * kSharedCap;
+  for (int i = block.thread_rank(); i < bytes; i += block.num_threads()) o[i] = raw[i];
 }
 
 }  // namespace
@@ -309,7 +421,7 @@ TEST_CASE("Unit_device_memcpy_async_paths") {
 
   // A per-thread stack address is scratch. LDS DMA must not consume it: the global
   // aperture cast is the wrong memory on MI210, and on MI300A the load is not replayed
-  // if it faults. Rank 0 of the fallback copies these four bytes.
+  // if it faults. The ordinary copy reads it instead, one rank per byte.
   SECTION("private source falls back") {
     unsigned char* d_flag = nullptr;
     int* d_probe = nullptr;
@@ -326,17 +438,193 @@ TEST_CASE("Unit_device_memcpy_async_paths") {
     HIP_CHECK(hipMemcpy(probe, d_probe, sizeof(probe), hipMemcpyDeviceToHost));
     REQUIRE(probe[0] == 1);
     REQUIRE(probe[1] == 0);
-    const unsigned char expect[4] = {0x11, 0x22, 0x33, 0x40};
-    for (int i = 0; i < 4; i++) {
+    // The first three bytes are identical in every thread, so they pin down that the
+    // fallback read scratch rather than some other aperture. The fourth says which rank's
+    // scratch supplied it. Which rank that is depends on how the ordinary copy partitions
+    // the bytes, which is not part of the contract -- memcpy_async is collective and a
+    // per-thread source pointer is outside it -- so any rank in range is a pass. A value
+    // outside the range means the bytes did not come from a scratch read at all.
+    const unsigned char expect[3] = {0x11, 0x22, 0x33};
+    for (int i = 0; i < 3; i++) {
       INFO("private source byte " << i);
       REQUIRE(got[i] == expect[i]);
     }
+    INFO("private source rank byte: " << static_cast<unsigned>(got[3]));
+    REQUIRE(got[3] >= 0x40);
+    REQUIRE(got[3] < 0x40 + 128);  // 128 is the block size launched above
     for (int i = 4; i < 16; i++) {
       INFO("private source wrote past 4 bytes at " << i);
       REQUIRE(got[i] == 0);
     }
     HIP_CHECK(hipFree(d_flag));
     HIP_CHECK(hipFree(d_probe));
+  }
+
+
+  // The LDS base the accelerated copy is handed is wave uniform, so a destination that does
+  // not start at the beginning of the shared allocation is a distinct case. Offsets of 1, 2
+  // and 3 additionally have to be turned away by the alignment gate.
+  SECTION("global to lds, offset and misaligned destination base") {
+    for (int t : {64, 128, 129, 256, 1024}) {
+      for (int b : {64, 255, 1024, 4095}) {
+        for (int off : {1, 2, 3, 4, 8, 12, 36}) {
+          HIP_CHECK(hipMemset(d_out, 0xAB, kSharedCap));
+          const int readBack = std::min(b + kGuard, kSharedCap);
+          globalToLdsOffsetBase<int><<<1, t>>>(reinterpret_cast<const int*>(d_in),
+                                               reinterpret_cast<int*>(d_out), b, readBack, off);
+          HIP_CHECK(hipGetLastError());
+          HIP_CHECK(hipDeviceSynchronize());
+          std::vector<unsigned char> got(readBack, 0);
+          HIP_CHECK(hipMemcpy(got.data(), d_out, readBack, hipMemcpyDeviceToHost));
+          int mismatch = -1;
+          for (int i = 0; i < readBack; i++) {
+            const unsigned expected = (i < b) ? ref[off + i] : 0x00u;
+            if (got[i] != expected) {
+              mismatch = i;
+              break;
+            }
+          }
+          if (mismatch >= 0) {
+            UNSCOPED_INFO("offset base off: " << off << " threads: " << t << " bytes: " << b
+                                              << " first mismatch at index: " << mismatch);
+          }
+          REQUIRE(mismatch == -1);
+        }
+      }
+    }
+  }
+
+  SECTION("two copies, one sync") {
+    for (int t : {64, 128, 200, 256, 1024}) {
+      for (int b : {256, 1024, 4096}) {
+        HIP_CHECK(hipMemset(d_out, 0xAB, kSharedCap));
+        twoCopiesOneSync<<<1, t>>>(reinterpret_cast<const int*>(d_in),
+                                   reinterpret_cast<int*>(d_out), b);
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<unsigned char> got(2 * b, 0);
+        HIP_CHECK(hipMemcpy(got.data(), d_out, 2 * b, hipMemcpyDeviceToHost));
+        int mismatch = -1;
+        for (int i = 0; i < 2 * b; i++) {
+          if (got[i] != ref[i]) {
+            mismatch = i;
+            break;
+          }
+        }
+        if (mismatch >= 0) {
+          UNSCOPED_INFO("two copies threads: " << t << " bytes: " << b
+                                               << " first mismatch at index: " << mismatch);
+        }
+        REQUIRE(mismatch == -1);
+      }
+    }
+  }
+
+  SECTION("barrier_arrive and barrier_wait complete the copy") {
+    for (int t : {64, 128, 200, 256, 1024}) {
+      for (int b : {256, 1025, 4096}) {
+        HIP_CHECK(hipMemset(d_out, 0xAB, kSharedCap));
+        const int readBack = std::min(b + kGuard, kSharedCap);
+        arriveWaitPath<<<1, t>>>(reinterpret_cast<const int*>(d_in),
+                                 reinterpret_cast<int*>(d_out), b, readBack);
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<unsigned char> got(readBack, 0);
+        HIP_CHECK(hipMemcpy(got.data(), d_out, readBack, hipMemcpyDeviceToHost));
+        int mismatch = -1;
+        for (int i = 0; i < readBack; i++) {
+          const unsigned expected = (i < b) ? ref[i] : 0x00u;
+          if (got[i] != expected) {
+            mismatch = i;
+            break;
+          }
+        }
+        if (mismatch >= 0) {
+          UNSCOPED_INFO("barrier_arrive threads: " << t << " bytes: " << b
+                                                   << " first mismatch at index: " << mismatch);
+        }
+        REQUIRE(mismatch == -1);
+      }
+    }
+  }
+
+  // One block cannot surface a completion bug that needs a loaded memory system.
+  SECTION("global to lds, many concurrent blocks") {
+    constexpr int kBlocks = 1024;
+    unsigned char* d_many = nullptr;
+    HIP_CHECK(hipMalloc(&d_many, static_cast<size_t>(kBlocks) * kSharedCap));
+    for (int t : {64, 256, 1024}) {
+      for (int b : {1024, 4096, 8188}) {
+        HIP_CHECK(hipMemset(d_many, 0xAB, static_cast<size_t>(kBlocks) * kSharedCap));
+        globalToLdsManyBlocks<<<kBlocks, t>>>(reinterpret_cast<const int*>(d_in), d_many, b);
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<unsigned char> got(static_cast<size_t>(kBlocks) * kSharedCap);
+        HIP_CHECK(hipMemcpy(got.data(), d_many, got.size(), hipMemcpyDeviceToHost));
+        int badBlock = -1, mismatch = -1;
+        for (int blk = 0; blk < kBlocks && badBlock < 0; blk++) {
+          for (int i = 0; i < b; i++) {
+            if (got[static_cast<size_t>(blk) * kSharedCap + i] != ref[i]) {
+              badBlock = blk;
+              mismatch = i;
+              break;
+            }
+          }
+        }
+        if (badBlock >= 0) {
+          UNSCOPED_INFO("many blocks threads: " << t << " bytes: " << b << " block: " << badBlock
+                                                << " first mismatch at index: " << mismatch);
+        }
+        REQUIRE(badBlock == -1);
+      }
+    }
+    HIP_CHECK(hipFree(d_many));
+  }
+
+  // Targets whose copy retires through vmcnt are drained by any workgroup barrier, because
+  // the barrier performs a workgroup release fence. Only the gfx12.5 async counter needs
+  // group.sync() specifically, so that target is skipped here rather than asserted against.
+  SECTION("global to lds, synchronised with __syncthreads()") {
+    int* d_async = nullptr;
+    HIP_CHECK(hipMalloc(&d_async, sizeof(int)));
+    HIP_CHECK(hipMemset(d_async, 0, sizeof(int)));
+    probeAsyncCounter<<<1, 1>>>(d_async);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+    int usesAsyncCounter = 0;
+    HIP_CHECK(hipMemcpy(&usesAsyncCounter, d_async, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_async));
+
+    if (usesAsyncCounter) {
+      WARN("target completes memcpy_async through the async counter; __syncthreads() is not "
+           "sufficient there by design, skipping");
+    } else {
+      for (int t : kThreads) {
+        for (int b : kBytes) {
+          HIP_CHECK(hipMemset(d_out, 0xAB, kSharedCap));
+          const int readBack = std::min(b + kGuard, kSharedCap);
+          globalToLdsSyncthreads<int><<<1, t>>>(reinterpret_cast<const int*>(d_in),
+                                                reinterpret_cast<int*>(d_out), b, readBack);
+          HIP_CHECK(hipGetLastError());
+          HIP_CHECK(hipDeviceSynchronize());
+          std::vector<unsigned char> got(readBack, 0);
+          HIP_CHECK(hipMemcpy(got.data(), d_out, readBack, hipMemcpyDeviceToHost));
+          int mismatch = -1;
+          for (int i = 0; i < readBack; i++) {
+            const unsigned expected = (i < b) ? ref[i] : 0x00u;
+            if (got[i] != expected) {
+              mismatch = i;
+              break;
+            }
+          }
+          if (mismatch >= 0) {
+            UNSCOPED_INFO("__syncthreads threads: " << t << " bytes: " << b
+                                                    << " first mismatch at index: " << mismatch);
+          }
+          REQUIRE(mismatch == -1);
+        }
+      }
+    }
   }
 
   HIP_CHECK(hipFree(d_in));
