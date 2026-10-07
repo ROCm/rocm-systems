@@ -94,8 +94,6 @@ class RocProfCompute:
         if self.__mode == "profile":
             if not getattr(self.__args, "bench_only", False):
                 self.detect_profiler()
-        elif self.__mode == "analyze":
-            self.detect_analyze()
 
         console_debug(f"Execution mode = {self.__mode}")
 
@@ -159,6 +157,14 @@ class RocProfCompute:
         if self.__mode == "profile":
             self._validate_profile_mode_arguments()
             self._resolve_pc_sampling_interval()
+        elif self.__mode == "analyze":
+            self.detect_analyze()
+            if self.__args.list_stats and self.__analyze_mode == "db":
+                console_error(
+                    "--list-stats cannot be used with --output-format csv or db. "
+                    "Use --output-format stdout or txt, or omit --list-stats "
+                    "to export analysis results."
+                )
 
         # Validate name and output directory arguments in profiling mode
         # Skip validation if only listing metrics or sets

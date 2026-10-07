@@ -22,7 +22,6 @@ from sqlalchemy import text
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
-from rocprof_compute_analyze.analysis_base import TOP_STATS_BUILD_IN_CONFIG
 from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
     db_analysis,
@@ -774,7 +773,7 @@ def test_calc_dataframe_expressions_empty_returns_assignable_series():
 
 def test_calc_metrics_data_builds_rows_and_preserves_schema():
     """Metric tables expand into rows with table-level fields resolved once;
-    titleless raw tables are skipped and the output frames keep their columns."""
+    non-metric tables are skipped and the output frames keep their columns."""
     workload_path = "/fake/workload"
     metric_df = pd.DataFrame(
         {
@@ -795,20 +794,19 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
         701: metric_df,
     }
     arch_config.panel_configs = {
-        **copy.deepcopy(TOP_STATS_BUILD_IN_CONFIG),
         700: {
             "id": 700,
             "title": "Wavefront",
             "data source": [
                 {"metric_table": {"id": 701, "title": "Wavefront Launch Stats"}}
             ],
-        },
+        }
     }
 
-    analyzer = db_analysis(SimpleNamespace(verbose=0), {})
+    analyzer = db_analysis(MagicMock(verbose=0), {})
     analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
     analyzer._runs = {
-        workload_path: schema.Workload(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
     }
     analyzer._arch_configs = {"gfx942": arch_config}
 

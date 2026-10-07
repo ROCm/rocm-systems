@@ -4,9 +4,7 @@
 import csv
 import os
 import shutil
-import sqlite3
 import tempfile
-from contextlib import closing
 from pathlib import Path
 
 import common
@@ -75,9 +73,10 @@ def test_list_kernels(binary_handler_analyze_rocprof_compute):
 
 @pytest.mark.misc
 @pytest.mark.parametrize("output_format", ["csv", "db"])
-def test_list_stats_export(
-    binary_handler_analyze_rocprof_compute, tmp_path, monkeypatch, output_format
+def test_list_stats_rejects_db_output(
+    binary_handler_analyze_rocprof_compute, tmp_path, monkeypatch, capsys, output_format
 ):
+    """Reject CSV/DB statistics with an actionable error before exporting."""
     workload_path = tmp_path / "vcopy" / "MI100"
     shutil.copytree(Path(common.ROOT) / "tests/workloads/vcopy/MI100", workload_path)
     output_path = tmp_path / "kernel_stats"
@@ -94,29 +93,46 @@ def test_list_stats_export(
         output_path.name,
     ])
 
-    assert code == 0
-    if output_format == "csv":
-        kernel_stats = pd.read_csv(output_path / "kernel.csv")
-    else:
-        database_path = output_path.with_suffix(".db")
-        assert database_path.is_file()
-        with closing(sqlite3.connect(database_path)) as connection:
-            kernel_stats = pd.read_sql_query(
-                "SELECT * FROM compute_kernel_view", connection
-            )
-            assert connection.execute(
-                "SELECT dispatch_id FROM compute_dispatch ORDER BY dispatch_id"
-            ).fetchall() == [(1,), (2,), (3,)]
+    assert code == 1
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert "--list-stats cannot be used with --output-format csv or db" in output
+    assert "Use --output-format stdout or txt" in output
+    assert "deriving rocprofiler-compute metrics" not in output
+    assert not output_path.exists()
+    assert not output_path.with_suffix(".db").exists()
 
-    assert kernel_stats["kernel_name"].tolist() == [
-        "vecCopy(double*, double*, double*, int, int)"
-    ]
-    assert kernel_stats["dispatch_count"].tolist() == [3]
-    assert kernel_stats["duration_ns_sum"].tolist() == [61440]
-    assert kernel_stats["duration_ns_min"].tolist() == [19040]
-    assert kernel_stats["duration_ns_max"].tolist() == [23200]
-    assert kernel_stats["duration_ns_median"].tolist() == [19200]
-    assert kernel_stats["duration_ns_mean"].tolist() == [20480]
+
+@pytest.mark.misc
+@pytest.mark.parametrize("output_format", ["stdout", "txt"])
+def test_list_stats_cli_output(
+    binary_handler_analyze_rocprof_compute, tmp_path, monkeypatch, capsys, output_format
+):
+    """CLI formats keep the kernel and dispatch listings."""
+    workload_path = tmp_path / "vcopy" / "MI100"
+    shutil.copytree(Path(common.ROOT) / "tests/workloads/vcopy/MI100", workload_path)
+    monkeypatch.chdir(tmp_path)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(workload_path),
+        "--list-stats",
+        "--output-format",
+        output_format,
+        "--output-name",
+        "kernel_stats",
+    ])
+
+    assert code == 0
+    output = (
+        (tmp_path / "kernel_stats.txt").read_text(encoding="utf-8")
+        if output_format == "txt"
+        else capsys.readouterr().out
+    )
+    assert "Detected Kernels" in output
+    assert "Dispatch list" in output
+    assert "vecCopy(" in output
 
 
 @pytest.mark.list_metrics

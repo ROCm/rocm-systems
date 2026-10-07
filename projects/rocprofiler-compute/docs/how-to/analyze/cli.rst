@@ -365,6 +365,9 @@ More analysis options
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-stats
 
+``--list-stats`` supports the default ``stdout`` output and ``--output-format txt``.
+Combining it with ``--output-format csv`` or ``--output-format db`` returns an error.
+
 
 **List metrics**
 
@@ -632,6 +635,8 @@ Analysis output format
 Use the ``--output-format <format>`` analyze mode option to specify the output format of the
 analysis report. Supported formats are ``stdout``, ``txt``, ``csv``, and ``db``. The default output
 format is ``stdout``.
+
+``--list-stats`` is available only with ``stdout`` and ``txt`` output.
 
 * ``stdout`` format:
    * Print analysis report to the terminal.

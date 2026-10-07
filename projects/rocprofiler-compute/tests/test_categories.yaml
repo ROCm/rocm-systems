@@ -10,6 +10,7 @@ test_categories:
       - test_utils_counter_defs
       - test_parser
       - test_argparser
+      - test_rocprof_compute_base
       - test_profile_section
       - test_pc_sampling
       - test_analyze_workloads
@@ -104,6 +105,7 @@ test_categories:
       - test_utils_counter_defs
       - test_parser
       - test_argparser
+      - test_rocprof_compute_base
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
@@ -201,6 +203,7 @@ test_categories:
       - test_utils_counter_defs
       - test_parser
       - test_argparser
+      - test_rocprof_compute_base
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
@@ -298,6 +301,7 @@ test_categories:
       - test_utils_counter_defs
       - test_parser
       - test_argparser
+      - test_rocprof_compute_base
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
