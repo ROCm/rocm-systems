@@ -13,6 +13,8 @@ from amdisa.isa_profile import Cdna4Profile
     ('name', 'size', 'elements'),
     [
         ('DS_WRITE_B32', 4, 1),
+        ('DS_WRITE_ADDTID_B32', 4, 1),
+        ('DS_STORE_ADDTID_B32', 4, 1),
         ('DS_WRITE_B64', 8, 1),
         ('DS_WRITE_B96', 4, 3),
         ('DS_WRITE_B128', 4, 4),

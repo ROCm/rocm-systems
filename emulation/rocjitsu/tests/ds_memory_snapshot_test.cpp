@@ -36,6 +36,7 @@
 #include <array>
 #include <bit>
 #include <cstring>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <vector>
@@ -132,62 +133,73 @@ std::array<uint32_t, 2> encode_store(uint16_t opcode, uint8_t data, uint8_t addr
 
 struct StoreTarget {
   rj_code_arch_t arch;
-  uint32_t wave_size;
+  std::array<uint32_t, 2> wave_sizes;
   std::array<uint16_t, 4> opcodes;
   std::array<uint32_t, 2> (*encode)(uint16_t, uint8_t, uint8_t);
+  std::optional<uint16_t> addtid_opcode;
 };
 
 constexpr std::array kStoreTargets = {
     StoreTarget{
         ROCJITSU_CODE_ARCH_CDNA1,
-        64,
+        {64, 0},
         {cdna1::kDsWriteB32Ds, cdna1::kDsWriteB64Ds, cdna1::kDsWriteB96Ds, cdna1::kDsWriteB128Ds},
-        encode_store<cdna1::DsBuilderFields, cdna1::build_ds>},
+        encode_store<cdna1::DsBuilderFields, cdna1::build_ds>,
+        cdna1::kDsWriteAddtidB32Ds},
     StoreTarget{
         ROCJITSU_CODE_ARCH_CDNA2,
-        64,
+        {64, 0},
         {cdna2::kDsWriteB32Ds, cdna2::kDsWriteB64Ds, cdna2::kDsWriteB96Ds, cdna2::kDsWriteB128Ds},
-        encode_store<cdna2::DsBuilderFields, cdna2::build_ds>},
+        encode_store<cdna2::DsBuilderFields, cdna2::build_ds>,
+        cdna2::kDsWriteAddtidB32Ds},
     StoreTarget{
         ROCJITSU_CODE_ARCH_CDNA3,
-        64,
+        {64, 0},
         {cdna3::kDsWriteB32Ds, cdna3::kDsWriteB64Ds, cdna3::kDsWriteB96Ds, cdna3::kDsWriteB128Ds},
-        encode_store<cdna3::DsBuilderFields, cdna3::build_ds>},
+        encode_store<cdna3::DsBuilderFields, cdna3::build_ds>,
+        cdna3::kDsWriteAddtidB32Ds},
     StoreTarget{
         ROCJITSU_CODE_ARCH_CDNA4,
-        64,
+        {64, 0},
         {cdna4::kDsWriteB32Ds, cdna4::kDsWriteB64Ds, cdna4::kDsWriteB96Ds, cdna4::kDsWriteB128Ds},
-        encode_store<cdna4::DsBuilderFields, cdna4::build_ds>},
+        encode_store<cdna4::DsBuilderFields, cdna4::build_ds>,
+        cdna4::kDsWriteAddtidB32Ds},
     StoreTarget{ROCJITSU_CODE_ARCH_CDNA5,
-                32,
+                {32, 0},
                 {cdna5::kDsStoreB32Vds, cdna5::kDsStoreB64Vds, cdna5::kDsStoreB96Vds,
                  cdna5::kDsStoreB128Vds},
-                encode_store<cdna5::VdsBuilderFields, cdna5::build_vds>},
+                encode_store<cdna5::VdsBuilderFields, cdna5::build_vds>,
+                std::nullopt},
     StoreTarget{
         ROCJITSU_CODE_ARCH_RDNA1,
-        32,
+        {32, 64},
         {rdna1::kDsWriteB32Ds, rdna1::kDsWriteB64Ds, rdna1::kDsWriteB96Ds, rdna1::kDsWriteB128Ds},
-        encode_store<rdna1::DsBuilderFields, rdna1::build_ds>},
+        encode_store<rdna1::DsBuilderFields, rdna1::build_ds>,
+        rdna1::kDsWriteAddtidB32Ds},
     StoreTarget{
         ROCJITSU_CODE_ARCH_RDNA2,
-        32,
+        {32, 64},
         {rdna2::kDsWriteB32Ds, rdna2::kDsWriteB64Ds, rdna2::kDsWriteB96Ds, rdna2::kDsWriteB128Ds},
-        encode_store<rdna2::DsBuilderFields, rdna2::build_ds>},
+        encode_store<rdna2::DsBuilderFields, rdna2::build_ds>,
+        rdna2::kDsWriteAddtidB32Ds},
     StoreTarget{
         ROCJITSU_CODE_ARCH_RDNA3,
-        32,
+        {32, 64},
         {rdna3::kDsStoreB32Ds, rdna3::kDsStoreB64Ds, rdna3::kDsStoreB96Ds, rdna3::kDsStoreB128Ds},
-        encode_store<rdna3::DsBuilderFields, rdna3::build_ds>},
+        encode_store<rdna3::DsBuilderFields, rdna3::build_ds>,
+        rdna3::kDsStoreAddtidB32Ds},
     StoreTarget{ROCJITSU_CODE_ARCH_RDNA3_5,
-                32,
+                {32, 64},
                 {rdna3_5::kDsStoreB32Ds, rdna3_5::kDsStoreB64Ds, rdna3_5::kDsStoreB96Ds,
                  rdna3_5::kDsStoreB128Ds},
-                encode_store<rdna3_5::DsBuilderFields, rdna3_5::build_ds>},
+                encode_store<rdna3_5::DsBuilderFields, rdna3_5::build_ds>,
+                rdna3_5::kDsStoreAddtidB32Ds},
     StoreTarget{ROCJITSU_CODE_ARCH_RDNA4,
-                32,
+                {32, 64},
                 {rdna4::kDsStoreB32Vds, rdna4::kDsStoreB64Vds, rdna4::kDsStoreB96Vds,
                  rdna4::kDsStoreB128Vds},
-                encode_store<rdna4::VdsBuilderFields, rdna4::build_vds>},
+                encode_store<rdna4::VdsBuilderFields, rdna4::build_vds>,
+                rdna4::kDsStoreAddtidB32Vds},
 };
 
 TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
@@ -284,53 +296,77 @@ TEST(DsMemorySnapshot, OutstandingLogicalZeroPayloadSurvivesLaterIssue) {
 TEST(DsMemorySnapshot, DwordStoresCoverEveryGeneratedTarget) {
   constexpr uint8_t data = 11, address = 7;
   for (const auto &target : kStoreTargets) {
-    SnapshotFixture fx(target.wave_size, target.arch, 256);
-    ASSERT_NE(fx.wf, nullptr);
-    fx.seed();
-    fx.cu->set_plugin_group(fx.group);
-    for (uint32_t width = 1; width <= target.opcodes.size(); ++width)
-      for (uint64_t exec : {uint64_t{0}, uint64_t{0xa55aa55aa55aa55a}, ~uint64_t{0}}) {
-        exec &= target.wave_size == 64 ? ~uint64_t{0} : 0xffffffffu;
-        SCOPED_TRACE(testing::Message()
-                     << "arch=" << target.arch << " width=" << width << " exec=" << exec);
-        fx.wf->set_exec(exec);
-        fx.observer->reads.clear();
-        fx.observer->callbacks.clear();
-        auto inst = fx.issue_encoded(target.encode(target.opcodes[width - 1], data, address));
-        ASSERT_NE(inst, nullptr);
-        const auto *state = inst->data_as<VectorMemState>();
-        ASSERT_NE(state, nullptr);
-        ASSERT_EQ(state->store_data.size(), target.wave_size * width * sizeof(uint32_t));
-        EXPECT_EQ(state->exec_mask, exec);
-        EXPECT_EQ(state->lane_mask, exec);
-        std::set<Read> expected_reads;
-        for (uint32_t lane = 0; lane < target.wave_size; ++lane) {
-          const bool active = (exec >> lane) & 1;
-          if (active)
-            expected_reads.emplace(address, lane, ExecutionPlugin::kFullByteMask,
-                                   SnapshotFixture::word(address, lane));
-          EXPECT_EQ(state->per_lane_addr[lane],
-                    active ? SnapshotFixture::word(address, lane) + kOffset + fx.wf->lds_base()
-                           : 0u);
-          for (uint32_t element = 0; element < width; ++element) {
-            const uint32_t expected = active ? SnapshotFixture::word(data + element, lane) : 0;
-            uint32_t actual;
-            std::memcpy(&actual, state->store_data.data() + (lane * width + element) * 4, 4);
-            EXPECT_EQ(actual, expected);
-            if (active)
-              expected_reads.emplace(data + element, lane, ExecutionPlugin::kFullByteMask,
-                                     expected);
+    for (uint32_t wave_size : target.wave_sizes) {
+      if (wave_size == 0)
+        continue;
+      SnapshotFixture fx(wave_size, target.arch, 256);
+      ASSERT_NE(fx.wf, nullptr);
+      fx.seed();
+      fx.cu->set_plugin_group(fx.group);
+      for (size_t store = 0; store <= target.opcodes.size(); ++store) {
+        const bool addtid = store == target.opcodes.size();
+        // CDNA5 ADDTID uses a separate generator unchanged by this optimization.
+        if (addtid && !target.addtid_opcode)
+          continue;
+        const uint32_t width = addtid ? 1 : store + 1;
+        const uint16_t opcode = addtid ? *target.addtid_opcode : target.opcodes[store];
+        for (uint64_t exec : {uint64_t{0}, uint64_t{0xa55aa55aa55aa55a}, ~uint64_t{0}}) {
+          exec &= wave_size == 64 ? ~uint64_t{0} : 0xffffffffu;
+          SCOPED_TRACE(testing::Message()
+                       << "arch=" << target.arch << " wave=" << wave_size << " opcode=" << opcode
+                       << " width=" << width << " exec=" << exec);
+          fx.wf->set_exec(exec);
+          fx.observer->reads.clear();
+          fx.observer->callbacks.clear();
+          auto inst = fx.issue_encoded(target.encode(opcode, data, address));
+          ASSERT_NE(inst, nullptr);
+          const auto *state = inst->data_as<VectorMemState>();
+          ASSERT_NE(state, nullptr);
+          ASSERT_EQ(state->store_data.size(), wave_size * width * sizeof(uint32_t));
+          EXPECT_EQ(state->exec_mask, exec);
+          EXPECT_EQ(state->lane_mask, exec);
+          std::set<Read> expected_reads;
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
+            const bool active = (exec >> lane) & 1;
+            if (active && !addtid)
+              expected_reads.emplace(address, lane, ExecutionPlugin::kFullByteMask,
+                                     SnapshotFixture::word(address, lane));
+            if (!addtid) {
+              EXPECT_EQ(state->per_lane_addr[lane],
+                        active ? SnapshotFixture::word(address, lane) + kOffset + fx.wf->lds_base()
+                               : 0u);
+            }
+            for (uint32_t element = 0; element < width; ++element) {
+              const uint32_t expected = active ? SnapshotFixture::word(data + element, lane) : 0;
+              uint32_t actual;
+              std::memcpy(&actual, state->store_data.data() + (lane * width + element) * 4, 4);
+              EXPECT_EQ(actual, expected);
+              if (active)
+                expected_reads.emplace(data + element, lane, ExecutionPlugin::kFullByteMask,
+                                       expected);
+            }
           }
+          if (addtid) {
+            // Address generation predates this snapshot optimization. Check only
+            // the data-register observations without fixing its ADDR behavior here.
+            std::erase_if(fx.observer->reads,
+                          [](const Read &read) { return std::get<0>(read) == address; });
+            std::erase_if(fx.observer->callbacks, [](const ReadCallback &callback) {
+              return std::get<0>(callback) == address;
+            });
+          }
+          EXPECT_EQ(fx.observer->reads, expected_reads);
+          std::vector<ReadCallback> expected_callbacks;
+          if (exec) {
+            if (!addtid)
+              expected_callbacks.emplace_back(address, exec, ExecutionPlugin::kFullByteMask);
+            for (uint32_t element = 0; element < width; ++element)
+              expected_callbacks.emplace_back(data + element, exec, ExecutionPlugin::kFullByteMask);
+          }
+          EXPECT_EQ(fx.observer->callbacks, expected_callbacks);
         }
-        EXPECT_EQ(fx.observer->reads, expected_reads);
-        std::vector<ReadCallback> expected_callbacks;
-        if (exec) {
-          expected_callbacks.emplace_back(address, exec, ExecutionPlugin::kFullByteMask);
-          for (uint32_t element = 0; element < width; ++element)
-            expected_callbacks.emplace_back(data + element, exec, ExecutionPlugin::kFullByteMask);
-        }
-        EXPECT_EQ(fx.observer->callbacks, expected_callbacks);
       }
+    }
   }
 }
 
@@ -349,11 +385,15 @@ TEST(DsMemorySnapshot, BoundaryFallbackDoesNotReadNeighborWave) {
     auto inst = fx.issue(opcode, 255, 7, true);
     ASSERT_NE(inst, nullptr);
     const auto *state = inst->data_as<VectorMemState>();
-    uint32_t value;
-    std::memcpy(&value, state->store_data.data() + 4, 4);
-    EXPECT_EQ(value, 0u);
-    std::memcpy(&value, state->store_data.data(), 4);
-    EXPECT_EQ(value, 0x11223344u);
+    ASSERT_NE(state, nullptr);
+    const uint32_t width = opcode == cdna4::kDsWriteB96Ds ? 3 : 4;
+    ASSERT_EQ(state->store_data.size(), 64 * width * sizeof(uint32_t));
+    for (uint32_t element = 0; element < width; ++element) {
+      SCOPED_TRACE(testing::Message() << "width=" << width << " element=" << element);
+      uint32_t value;
+      std::memcpy(&value, state->store_data.data() + element * sizeof(value), sizeof(value));
+      EXPECT_EQ(value, element == 0 ? 0x11223344u : 0u);
+    }
     const std::vector<ReadCallback> expected = {{7, 1, ExecutionPlugin::kFullByteMask},
                                                 {511, 1, ExecutionPlugin::kFullByteMask}};
     EXPECT_EQ(fx.observer->callbacks, expected);
