@@ -37,6 +37,17 @@ _MIOPEN_CK_SO_PATTERN = re.compile(
     r"^(?:lib)?MIOpenCK\w+_(" + _GFX_ARCH_PATTERN.pattern + r")\.(?:so|dll)"
 )
 
+# Composable Kernel per-arch static libraries.
+# Matches libdevice_conv_operations_<token>.a (Linux) and
+# device_conv_operations_<token>.lib (Windows), where <token> is the target id
+# sanitized by ck_sanitize_arch, which mirrors MIOpen's miopen_sanitize_arch
+# (":"->"_", "+"->"p", "-"->"_").
+# Group 1 is the bare arch; a trailing "_strict" is the sanitized "-strict".
+_CK_STATIC_LIB_PATTERN = re.compile(
+    r"^(?:lib)?device_conv_operations_"
+    r"(gfx\d+[a-z]*(?:_strict)?)(?:_(?:xnack|sramecc)[p_])*\.(?:a|lib)$"
+)
+
 
 class DatabaseHandler(ABC):
     """Base class for kernel database handlers."""
@@ -280,6 +291,29 @@ class MIOpenHandler(DatabaseHandler):
         return None
 
 
+class ComposableKernelHandler(DatabaseHandler):
+    """Handler for Composable Kernel per-arch static libraries.
+
+    CK emits one copy of its unified archive per target:
+        libdevice_conv_operations_gfx942.a
+        libdevice_conv_operations_gfx950_xnackp.a
+        libdevice_conv_operations_gfx1250_strict.a
+    The unsuffixed libdevice_conv_operations.a is not matched and stays generic.
+    Contents are opaque; classification is by filename only.
+    """
+
+    def name(self) -> str:
+        return "composablekernel"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """Return the bare arch (e.g. gfx1250-strict) for a CK per-arch archive."""
+        filename = Path(self._relative_path(path, prefix_root)).name
+        match = _CK_STATIC_LIB_PATTERN.match(filename)
+        if not match:
+            return None
+        return match.group(1).replace("_strict", "-strict")
+
+
 class HipKernelProviderArchContentHandler(DatabaseHandler):
     """Handler for hipKernelProvider per-architecture kernel content.
 
@@ -374,6 +408,7 @@ AVAILABLE_HANDLERS = {
     "hipsparselt": HipSparseLtHandler,
     "aotriton": AotritonHandler,
     "miopen": MIOpenHandler,
+    "composablekernel": ComposableKernelHandler,
     "hipkernelprovider": HipKernelProviderArchContentHandler,
     "hotswap_cache": HotswapCacheHandler,
 }

@@ -13,7 +13,12 @@ from rocm_kpack.artifact_utils import (
     write_artifact_manifest,
 )
 from rocm_kpack.binutils import Toolchain
-from rocm_kpack.database_handlers import HipBLASLtHandler, MIOpenHandler, RocBLASHandler
+from rocm_kpack.database_handlers import (
+    ComposableKernelHandler,
+    HipBLASLtHandler,
+    MIOpenHandler,
+    RocBLASHandler,
+)
 from rocm_kpack.kpack import PackedKernelArchive
 from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
 
@@ -27,10 +32,11 @@ from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
         (MIOpenHandler(), "share/miopen/db/{target}_256.db.txt"),
         (MIOpenHandler(), "share/miopen/db/{target}256.HIP.fdb.txt"),
         (MIOpenHandler(), "lib/libMIOpenCKGroupedConv_{target}.so"),
+        (ComposableKernelHandler(), "lib/libdevice_conv_operations_{token}.a"),
     ],
 )
 def test_database_identity(tmp_path, target, handler, relative):
-    path = tmp_path / relative.format(target=target)
+    path = tmp_path / relative.format(target=target, token=target.replace("-", "_"))
     path.parent.mkdir(parents=True)
     path.write_text("payload")
     assert handler.detect(path, tmp_path) == target
@@ -177,3 +183,61 @@ def test_verifier_normalizes_ck_features_without_losing_strict_identity(
     verifier = ArtifactVerifier(tmp_path, Toolchain())
     verifier._check_architecture_separation([artifact])
     assert verifier.results[-1].passed == expected_pass
+
+
+@pytest.mark.parametrize(
+    "artifact_target,payload,expected_pass",
+    [
+        ("gfx1250-strict", "libdevice_conv_operations_gfx1250_strict.a", True),
+        ("gfx1250", "libdevice_conv_operations_gfx1250_strict.a", False),
+        ("gfx1250", "libdevice_conv_operations_gfx1250.a", True),
+        ("gfx1250-strict", "libdevice_conv_operations_gfx1250.a", False),
+        ("gfx942", "libdevice_conv_operations_gfx942_xnackp.a", True),
+        ("gfx90a", "libdevice_conv_operations_gfx942_xnackp.a", False),
+    ],
+)
+def test_verifier_checks_ck_static_library_identity(
+    tmp_path, artifact_target, payload, expected_pass
+):
+    artifact = tmp_path / f"composablekernel_lib_{artifact_target}"
+    library = artifact / "stage/lib" / payload
+    library.parent.mkdir(parents=True)
+    library.write_text("CK payload")
+    verifier = ArtifactVerifier(tmp_path, Toolchain())
+    verifier._check_architecture_separation([artifact])
+    assert verifier.results[-1].passed == expected_pass
+
+
+@pytest.mark.parametrize("selected", [["gfx1250"], ["gfx1250-strict"], None])
+def test_split_ck_static_libraries_keeps_strict_identity(tmp_path, selected):
+    source = tmp_path / "composablekernel_lib_gfx125X-all"
+    prefix = "ml-libs/composable_kernel/stage"
+    lib = source / prefix / "lib"
+    lib.mkdir(parents=True)
+    targets = ["gfx1250", "gfx1250-strict"]
+    for target in targets:
+        (lib / f"libdevice_conv_operations_{target.replace('-', '_')}.a").write_text(
+            target
+        )
+    (lib / "libdevice_conv_operations.a").write_text("unified")
+    write_artifact_manifest(source, [prefix])
+    dest = tmp_path / "split"
+    splitter = ArtifactSplitter(
+        artifact_prefix="composablekernel_lib",
+        toolchain=Toolchain(),
+        database_handlers=[ComposableKernelHandler()],
+        gpu_targets=selected,
+    )
+    splitter.split(source, dest)
+    expected = targets if selected is None else selected
+    assert {p.name for p in dest.iterdir() if p.is_dir()} == {
+        "composablekernel_lib_generic"
+    } | {f"composablekernel_lib_{t}" for t in expected}
+    for target in expected:
+        output = dest / f"composablekernel_lib_{target}" / prefix / "lib"
+        archive = f"libdevice_conv_operations_{target.replace('-', '_')}.a"
+        assert [p.name for p in output.iterdir()] == [archive]
+        assert (output / archive).read_text() == target
+    generic = {p.name for p in (dest / "composablekernel_lib_generic").rglob("*.a")}
+    # Per-arch archives never remain in generic, selected or not.
+    assert generic == {"libdevice_conv_operations.a"}

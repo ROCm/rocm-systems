@@ -218,6 +218,121 @@ class TestRecombineIntegration:
             )
             assert db_file.exists(), f"Missing database file for {arch}"
 
+    def test_recombine_keeps_sanitized_ck_static_library(
+        self, tmp_path, create_split_artifacts
+    ):
+        """CK names gfx1250-strict archives with the underscore-sanitized token;
+        the recombined arch artifact must keep them."""
+        shards_dir = create_split_artifacts("test_lib", {"shard1": ["gfx1250-strict"]})
+        ck_lib = (
+            shards_dir
+            / "shard1/test_lib_gfx1250-strict/test/lib/stage/lib"
+            / "libdevice_conv_operations_gfx1250_strict.a"
+        )
+        ck_lib.write_text("CK archive")
+
+        config_file = tmp_path / "strict_config.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "primary_shard": "shard1",
+                    "architecture_groups": {
+                        "gfx1250": {
+                            "display_name": "ROCm gfx1250",
+                            "architectures": ["gfx1250-strict"],
+                        }
+                    },
+                    "validation": {
+                        "error_on_duplicate_device_code": True,
+                        "verify_generic_artifacts_match": False,
+                        "error_on_missing_architecture": False,
+                    },
+                }
+            )
+        )
+        config = PackagingConfig.from_json(config_file)
+
+        collector = ArtifactCollector(shards_dir, config.primary_shard, verbose=False)
+        collector.collect()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        ArtifactCombiner(collector, verbose=False).combine_component(
+            "test_lib", "gfx1250", config.architecture_groups["gfx1250"], output_dir
+        )
+
+        recombined = (
+            output_dir
+            / "test_lib_gfx1250/test/lib/stage/lib"
+            / "libdevice_conv_operations_gfx1250_strict.a"
+        )
+        assert recombined.read_text() == "CK archive"
+
+    def test_recombine_keeps_strict_and_plain_ck_static_libraries_apart(
+        self, tmp_path, create_split_artifacts
+    ):
+        """gfx1250_strict contains the substring gfx1250; each CK archive must
+        still land only in its own recombined arch artifact."""
+        shards_dir = create_split_artifacts(
+            "test_lib", {"shard1": ["gfx1250", "gfx1250-strict"]}
+        )
+        for arch, token in (
+            ("gfx1250", "gfx1250"),
+            ("gfx1250-strict", "gfx1250_strict"),
+        ):
+            lib = (
+                shards_dir
+                / f"shard1/test_lib_{arch}/test/lib/stage/lib"
+                / f"libdevice_conv_operations_{token}.a"
+            )
+            lib.write_text(f"CK {arch}")
+
+        config_file = tmp_path / "both_config.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "primary_shard": "shard1",
+                    "architecture_groups": {
+                        "gfx1250": {
+                            "display_name": "ROCm gfx1250",
+                            "architectures": ["gfx1250"],
+                        },
+                        "gfx1250-strict": {
+                            "display_name": "ROCm gfx1250 strict",
+                            "architectures": ["gfx1250-strict"],
+                        },
+                    },
+                    "validation": {
+                        "error_on_duplicate_device_code": True,
+                        "verify_generic_artifacts_match": False,
+                        "error_on_missing_architecture": False,
+                    },
+                }
+            )
+        )
+        config = PackagingConfig.from_json(config_file)
+
+        collector = ArtifactCollector(shards_dir, config.primary_shard, verbose=False)
+        collector.collect()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        combiner = ArtifactCombiner(collector, verbose=False)
+        for group in ("gfx1250", "gfx1250-strict"):
+            combiner.combine_component(
+                "test_lib", group, config.architecture_groups[group], output_dir
+            )
+
+        for group, token in (
+            ("gfx1250", "gfx1250"),
+            ("gfx1250-strict", "gfx1250_strict"),
+        ):
+            lib_dir = output_dir / f"test_lib_{group}/test/lib/stage/lib"
+            assert sorted(p.name for p in lib_dir.glob("libdevice_conv_*")) == [
+                f"libdevice_conv_operations_{token}.a"
+            ]
+            assert (
+                lib_dir / f"libdevice_conv_operations_{token}.a"
+            ).read_text() == f"CK {group}"
+
     def test_recombine_missing_architecture(
         self, tmp_path, create_split_artifacts, sample_config
     ):
