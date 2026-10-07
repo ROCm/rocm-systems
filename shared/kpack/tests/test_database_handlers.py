@@ -819,41 +819,61 @@ class TestComposableKernelHandler:
     def test_name(self, handler):
         assert handler.name() == "composablekernel"
 
-    @pytest.mark.parametrize(
-        "filename,expected",
-        [
-            ("libdevice_conv_operations_gfx942.a", "gfx942"),
-            ("libdevice_conv_operations_gfx950_xnackp.a", "gfx950"),
-            ("libdevice_conv_operations_gfx90a_xnack_.a", "gfx90a"),
-            ("libdevice_conv_operations_gfx942_srameccp_xnack_.a", "gfx942"),
-            ("libdevice_conv_operations_gfx1250_strict.a", "gfx1250-strict"),
-            ("libdevice_conv_operations_gfx1250_strict_xnackp.a", "gfx1250-strict"),
-            ("libdevice_conv_operations_gfx1100.a", "gfx1100"),
-            # Windows: no lib prefix, .lib extension.
-            ("device_conv_operations_gfx942.lib", "gfx942"),
-            ("device_conv_operations_gfx1250_strict.lib", "gfx1250-strict"),
-        ],
-    )
-    def test_detect(self, handler, prefix_root, filename, expected):
-        assert self._detect(handler, prefix_root, f"lib/{filename}") == expected
+    _EXPORTS = "lib/cmake/composable_kernel/composable_kerneldevice_conv_operations_"
 
     @pytest.mark.parametrize(
-        "filename",
+        "relative,expected",
         [
-            "libdevice_conv_operations.a",
-            "libdevice_conv_operations_foo.a",
-            "libdevice_conv_operations_xnack.a",
-            "libdevice_conv_operations_gfx11_generic.a",
-            "libdevice_gemm_operations_gfx942.a",
-            "libdevice_conv_operations_gfx942.so",
-            "libdevice_conv_operations_gfx942.a.bak",
-            "libdevice_conv_operations_gfx942.lib.a",
-            "xlibdevice_conv_operations_gfx942.a",
-            "libMIOpen.a",
+            ("lib/libdevice_conv_operations_gfx942.a", "gfx942"),
+            ("lib/libdevice_conv_operations_gfx950_xnackp.a", "gfx950"),
+            ("lib/libdevice_conv_operations_gfx90a_xnack_.a", "gfx90a"),
+            ("lib/libdevice_conv_operations_gfx942_srameccp_xnack_.a", "gfx942"),
+            ("lib/libdevice_conv_operations_gfx942_xnack__srameccp.a", "gfx942"),
+            ("lib/libdevice_conv_operations_gfx1250_strict.a", "gfx1250-strict"),
+            ("lib/libdevice_conv_operations_gfx1250_strict_xnackp.a", "gfx1250-strict"),
+            ("lib/libdevice_conv_operations_gfx1100.a", "gfx1100"),
+            # Windows: no lib prefix, .lib extension.
+            ("lib/device_conv_operations_gfx942.lib", "gfx942"),
+            ("lib/device_conv_operations_gfx1250_strict.lib", "gfx1250-strict"),
+            # CMake exports travel with their archive.
+            (_EXPORTS + "gfx942Targets.cmake", "gfx942"),
+            (_EXPORTS + "gfx942Targets-release.cmake", "gfx942"),
+            (_EXPORTS + "gfx90aTargets-relwithdebinfo.cmake", "gfx90a"),
+            (_EXPORTS + "gfx950_xnack_Targets.cmake", "gfx950"),
+            (_EXPORTS + "gfx1250_strictTargets.cmake", "gfx1250-strict"),
+            (_EXPORTS + "gfx1250_strict_xnackpTargets-release.cmake", "gfx1250-strict"),
         ],
     )
-    def test_reject(self, handler, prefix_root, filename):
-        assert self._detect(handler, prefix_root, f"lib/{filename}") is None
+    def test_detect(self, handler, prefix_root, relative, expected):
+        assert self._detect(handler, prefix_root, relative) == expected
+
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            "lib/libdevice_conv_operations.a",
+            "lib/libdevice_conv_operations_foo.a",
+            "lib/libdevice_conv_operations_xnack.a",
+            "lib/libdevice_conv_operations_gfx11_generic.a",
+            "lib/libdevice_conv_operations_amdgcnspirv.a",
+            # A target id has at most one letter after its digits.
+            "lib/libdevice_conv_operations_gfx942xnackp.a",
+            "lib/libdevice_gemm_operations_gfx942.a",
+            "lib/libdevice_conv_operations_gfx942.so",
+            "lib/libdevice_conv_operations_gfx942.a.bak",
+            "lib/libdevice_conv_operations_gfx942.lib.a",
+            "lib/xlibdevice_conv_operations_gfx942.a",
+            "lib/libMIOpen.a",
+            # The config and the unified export stay generic.
+            "lib/cmake/composable_kernel/composable_kernelConfig.cmake",
+            "lib/cmake/composable_kernel/composable_kerneldevice_conv_operationsTargets.cmake",
+            _EXPORTS + "gfx11_genericTargets.cmake",
+            _EXPORTS + "gfx942Targets.cmake.bak",
+            _EXPORTS + "gfx942Targets-.cmake",
+            "lib/cmake/composable_kernel/composable_kernelutilityTargets.cmake",
+        ],
+    )
+    def test_reject(self, handler, prefix_root, relative):
+        assert self._detect(handler, prefix_root, relative) is None
 
     def test_reject_file_outside_prefix(self, handler, prefix_root):
         with pytest.raises(ValueError, match="is not under prefix_root"):

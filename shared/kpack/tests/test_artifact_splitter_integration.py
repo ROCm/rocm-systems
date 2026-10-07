@@ -1216,29 +1216,43 @@ class TestArtifactSplitterIntegration:
 
     @pytest.mark.parametrize("gpu_targets", [None, ["gfx942"]])
     def test_ck_static_libs_split_per_arch(self, toolchain, tmp_path, gpu_targets):
-        """CK per-arch archives shard into <prefix>_<arch>; the unsuffixed
-        archive stays generic; gpu_targets drops unselected arches entirely."""
+        """CK per-target archives and their CMake exports shard together into
+        <prefix>_<arch>, xnack spellings side by side; the unsuffixed archive,
+        its export and the package config stay generic; gpu_targets drops
+        unselected arches entirely."""
         input_dir = tmp_path / "test_artifact"
         input_dir.mkdir()
-        prefix = "ml-libs/composable_kernel/stage"
+        prefix = "math-libs/composable_kernel/stage"
         write_artifact_manifest(input_dir, [prefix])
-        lib_dir = input_dir / prefix / "lib"
-        lib_dir.mkdir(parents=True)
-        archives = {
-            "gfx942": [
-                "libdevice_conv_operations_gfx942.a",
-                "libdevice_conv_operations_gfx942_xnackp.a",
-            ],
-            "gfx1100": ["libdevice_conv_operations_gfx1100.a"],
+        stage = input_dir / prefix
+        exports = "lib/cmake/composable_kernel"
+        (stage / exports).mkdir(parents=True)
+
+        def per_target(token):
+            stem = f"{exports}/composable_kerneldevice_conv_operations_{token}Targets"
+            return [
+                f"lib/libdevice_conv_operations_{token}.a",
+                f"{stem}.cmake",
+                f"{stem}-release.cmake",
+            ]
+
+        files = {
+            "gfx942": per_target("gfx942")
+            + per_target("gfx942_xnackp")
+            + per_target("gfx942_xnack_"),
+            "gfx1100": per_target("gfx1100"),
         }
-        for names in archives.values():
-            for name in names:
-                (lib_dir / name).write_text(name)
-        (lib_dir / "libdevice_conv_operations.a").write_text("unified")
+        generic = [
+            "lib/libdevice_conv_operations.a",
+            f"{exports}/composable_kernelConfig.cmake",
+            f"{exports}/composable_kerneldevice_conv_operationsTargets.cmake",
+        ]
+        for relative in [*generic, *(r for rs in files.values() for r in rs)]:
+            (stage / relative).write_text(relative)
 
         output_dir = tmp_path / "output"
         splitter = ArtifactSplitter(
-            artifact_prefix="composablekernel_lib",
+            artifact_prefix="composable-kernel_dev",
             toolchain=toolchain,
             database_handlers=[ComposableKernelHandler()],
             verbose=True,
@@ -1246,16 +1260,18 @@ class TestArtifactSplitterIntegration:
         )
         splitter.split(input_dir, output_dir)
 
-        generic_lib = output_dir / "composablekernel_lib_generic" / prefix / "lib"
-        assert sorted(p.name for p in generic_lib.iterdir()) == [
-            "libdevice_conv_operations.a"
-        ]
-        for arch, names in archives.items():
-            arch_lib = output_dir / f"composablekernel_lib_{arch}" / prefix / "lib"
+        def contents(artifact):
+            root = output_dir / artifact / prefix
+            return sorted(
+                p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
+            )
+
+        assert contents("composable-kernel_dev_generic") == sorted(generic)
+        for arch, relatives in files.items():
             if gpu_targets is not None and arch not in gpu_targets:
-                assert not (output_dir / f"composablekernel_lib_{arch}").exists()
+                assert not (output_dir / f"composable-kernel_dev_{arch}").exists()
             else:
-                assert sorted(p.name for p in arch_lib.iterdir()) == sorted(names)
+                assert contents(f"composable-kernel_dev_{arch}") == sorted(relatives)
 
     def test_gpu_targets_filters_database_files(self, toolchain, tmp_path):
         """

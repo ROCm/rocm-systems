@@ -221,15 +221,20 @@ class TestRecombineIntegration:
     def test_recombine_keeps_sanitized_ck_static_library(
         self, tmp_path, create_split_artifacts
     ):
-        """CK names gfx1250-strict archives with the underscore-sanitized token;
-        the recombined arch artifact must keep them."""
+        """CK names gfx1250-strict archives and exports with the
+        underscore-sanitized token; the recombined arch artifact must keep them
+        alongside files that spell the arch with its hyphen."""
         shards_dir = create_split_artifacts("test_lib", {"shard1": ["gfx1250-strict"]})
-        ck_lib = (
-            shards_dir
-            / "shard1/test_lib_gfx1250-strict/test/lib/stage/lib"
-            / "libdevice_conv_operations_gfx1250_strict.a"
-        )
-        ck_lib.write_text("CK archive")
+        stage = shards_dir / "shard1/test_lib_gfx1250-strict/test/lib/stage"
+        payloads = [
+            "lib/libdevice_conv_operations_gfx1250_strict.a",
+            "lib/cmake/composable_kernel/"
+            "composable_kerneldevice_conv_operations_gfx1250_strictTargets.cmake",
+            "share/miopen/db/gfx1250-strict256.db.txt",
+        ]
+        for relative in payloads:
+            (stage / relative).parent.mkdir(parents=True, exist_ok=True)
+            (stage / relative).write_text(relative)
 
         config_file = tmp_path / "strict_config.json"
         config_file.write_text(
@@ -260,12 +265,9 @@ class TestRecombineIntegration:
             "test_lib", "gfx1250", config.architecture_groups["gfx1250"], output_dir
         )
 
-        recombined = (
-            output_dir
-            / "test_lib_gfx1250/test/lib/stage/lib"
-            / "libdevice_conv_operations_gfx1250_strict.a"
-        )
-        assert recombined.read_text() == "CK archive"
+        recombined = output_dir / "test_lib_gfx1250/test/lib/stage"
+        for relative in payloads:
+            assert (recombined / relative).read_text() == relative
 
     def test_recombine_keeps_strict_and_plain_ck_static_libraries_apart(
         self, tmp_path, create_split_artifacts
