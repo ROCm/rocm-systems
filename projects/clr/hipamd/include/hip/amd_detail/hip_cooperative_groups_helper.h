@@ -338,10 +338,16 @@ namespace cluster {
 __CG_STATIC_QUALIFIER__ void sync() {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
+  // is_invocable still names the builtin, so a compiler that does not have it
+  // (ROCm 7.0 and 7.1 clang) cannot parse the call. Those compilers fall back
+  // to s_barrier. memcpy_async includes this header, so it has to parse there.
+#if __has_builtin(__builtin_amdgcn_s_cluster_barrier)
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_cluster_barrier))
     // Generates a signal + wait combination for cluster barrier
     __builtin_amdgcn_s_cluster_barrier();
-  else if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
+  else
+#endif
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
     __builtin_amdgcn_s_barrier();  // fallback to s_barrier if device does not support clusters
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
@@ -375,6 +381,9 @@ __CG_STATIC_QUALIFIER__ void barrier_wait() {
 }
 
 __CG_STATIC_QUALIFIER__ dim3 block_index() {
+#if __has_builtin(__builtin_amdgcn_cluster_workgroup_id_x) &&                                      \
+    __has_builtin(__builtin_amdgcn_cluster_workgroup_id_y) &&                                      \
+    __has_builtin(__builtin_amdgcn_cluster_workgroup_id_z)
   return dim3(__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_x)
                   ? __builtin_amdgcn_cluster_workgroup_id_x()
                   : 0,
@@ -384,9 +393,15 @@ __CG_STATIC_QUALIFIER__ dim3 block_index() {
               __builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_z)
                   ? __builtin_amdgcn_cluster_workgroup_id_z()
                   : 0);
+#else
+  return dim3(0, 0, 0);
+#endif
 }
 
 __CG_STATIC_QUALIFIER__ dim3 dim_blocks() {
+#if __has_builtin(__builtin_amdgcn_cluster_workgroup_max_id_x) &&                                  \
+    __has_builtin(__builtin_amdgcn_cluster_workgroup_max_id_y) &&                                  \
+    __has_builtin(__builtin_amdgcn_cluster_workgroup_max_id_z)
   return dim3((__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_id_x)
                    ? __builtin_amdgcn_cluster_workgroup_max_id_x()
                    : 0) +
@@ -399,6 +414,9 @@ __CG_STATIC_QUALIFIER__ dim3 dim_blocks() {
                    ? __builtin_amdgcn_cluster_workgroup_max_id_z()
                    : 0) +
                   1);
+#else
+  return dim3(1, 1, 1);
+#endif
 }
 
 __CG_STATIC_QUALIFIER__ unsigned int block_rank() {
@@ -414,10 +432,14 @@ __CG_STATIC_QUALIFIER__ dim3 thread_index() {
 }
 
 __CG_STATIC_QUALIFIER__ unsigned int num_blocks() {
+#if __has_builtin(__builtin_amdgcn_cluster_workgroup_max_flat_id)
   return (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_flat_id)
               ? __builtin_amdgcn_cluster_workgroup_max_flat_id()
               : 0) +
          1;
+#else
+  return 1;
+#endif
 }
 
 __CG_STATIC_QUALIFIER__ dim3 dim_threads() {
