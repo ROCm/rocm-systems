@@ -69,7 +69,8 @@ TEST_F(sample_type_test, kernel_dispatch_sample_type_identifier)
 
 TEST_F(sample_type_test, memory_copy_sample_serialize_deserialize)
 {
-    const memory_copy_sample original(5000, 6000, 123, 200, 201, 1, 2, 4096, 700, 800,
+    const memory_copy_sample original(5000, 6000, 123, 200, 201,
+                                      "MEMORY_COPY_DEVICE_TO_HOST", 4096, 700, 800,
                                       0x1000, 0x2000, 0xDEAD);
 
     serialize(buffer.data(), original);
@@ -82,8 +83,7 @@ TEST_F(sample_type_test, memory_copy_sample_serialize_deserialize)
     EXPECT_EQ(deserialized.thread_id, original.thread_id);
     EXPECT_EQ(deserialized.dst_agent_id_handle, original.dst_agent_id_handle);
     EXPECT_EQ(deserialized.src_agent_id_handle, original.src_agent_id_handle);
-    EXPECT_EQ(deserialized.kind, original.kind);
-    EXPECT_EQ(deserialized.operation, original.operation);
+    EXPECT_EQ(deserialized.name, original.name);
     EXPECT_EQ(deserialized.bytes, original.bytes);
     EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
     EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
@@ -94,10 +94,11 @@ TEST_F(sample_type_test, memory_copy_sample_serialize_deserialize)
 
 TEST_F(sample_type_test, memory_copy_sample_get_size)
 {
-    const memory_copy_sample sample(5000, 6000, 123, 200, 201, 1, 2, 4096, 700, 800,
-                                    0x1000, 0x2000, 0xDEAD);
+    const memory_copy_sample sample(5000, 6000, 123, 200, 201,
+                                    "MEMORY_COPY_DEVICE_TO_HOST", 4096, 700, 800, 0x1000,
+                                    0x2000, 0xDEAD);
 
-    const size_t expected_size = sizeof(std::uint64_t) * 11 + sizeof(std::int32_t) * 2;
+    const size_t expected_size = sizeof(std::uint64_t) * 11 + sizeof(size_t) + 26 + 1;
 
     EXPECT_EQ(get_size(sample), expected_size);
 }
@@ -109,8 +110,9 @@ TEST_F(sample_type_test, memory_copy_sample_type_identifier)
 
 TEST_F(sample_type_test, memory_allocate_sample_serialize_deserialize)
 {
-    const memory_allocate_sample original(7000, 8000, 456, 300, 3, 4, 8192, 900, 1000,
-                                          0x3000, 0xBEEF);
+    const memory_allocate_sample original(7000, 8000, 456, 300,
+                                          "MEMORY_ALLOCATION_ALLOCATE", 4, 8192, 900,
+                                          1000, 0x3000, 0xBEEF);
 
     serialize(buffer.data(), original);
 
@@ -121,7 +123,7 @@ TEST_F(sample_type_test, memory_allocate_sample_serialize_deserialize)
     EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
     EXPECT_EQ(deserialized.thread_id, original.thread_id);
     EXPECT_EQ(deserialized.agent_id_handle, original.agent_id_handle);
-    EXPECT_EQ(deserialized.kind, original.kind);
+    EXPECT_EQ(deserialized.name, original.name);
     EXPECT_EQ(deserialized.operation, original.operation);
     EXPECT_EQ(deserialized.allocation_size, original.allocation_size);
     EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
@@ -132,10 +134,12 @@ TEST_F(sample_type_test, memory_allocate_sample_serialize_deserialize)
 
 TEST_F(sample_type_test, memory_allocate_sample_get_size)
 {
-    const memory_allocate_sample sample(7000, 8000, 456, 300, 3, 4, 8192, 900, 1000,
+    const memory_allocate_sample sample(7000, 8000, 456, 300,
+                                        "MEMORY_ALLOCATION_ALLOCATE", 4, 8192, 900, 1000,
                                         0x3000, 0xBEEF);
 
-    const size_t expected_size = sizeof(std::uint64_t) * 9 + sizeof(std::int32_t) * 2;
+    const size_t expected_size =
+        sizeof(std::uint64_t) * 9 + sizeof(std::int32_t) + sizeof(size_t) + 26 + 1;
 
     EXPECT_EQ(get_size(sample), expected_size);
 }

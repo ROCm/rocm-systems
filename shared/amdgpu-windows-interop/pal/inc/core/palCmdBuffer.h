@@ -72,9 +72,16 @@ class IMsaaState;
 class IPerfExperiment;
 class IQueue;
 class IQueryPool;
+#if PAL_WORK_LISTS_SUPPORT
+class IWorkList;
+#endif
+
 enum class PerfTraceMarkerType : uint32;
 enum class PointOrigin : uint32;
 
+#if PAL_WORK_LISTS_SUPPORT
+struct DispatchListInputParams;
+#endif
 struct VideoCodecInfo;
 struct VideoCodecAuxInfo;
 
@@ -517,9 +524,13 @@ union CmdBufferBuildFlags
         /// placeholder
         uint32 placeholder1                    :  2;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1011
         /// Enable TMZ mode to allow reading TMZ protected allocations. If this command buffer attempts to write
         /// non-TMZ memory, the results are undefined. Only valid for graphics and compute.
         uint32  enableTmz                      :  1;
+#else
+        uint32  placeholder2                   :  1;
+#endif
 
         /// @internal
         /// Build this command buffer in system memory
@@ -610,6 +621,13 @@ struct CmdBufferBuildInfo
 
     /// Client/app data handle. This can have an arbitrary value and is used to uniquely identify this command buffer.
     uint64 execMarkerClientHandle;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 1011
+    /// Specify a supported TmzMode to allow access to TMZ protected allocations which use the given TmzMode. Note
+    /// that some modes will restrict access by specific queue types (e.g. HwdrmPlus has no shader access). If this
+    /// command buffer attempts to write non-TMZ memory, the results are undefined. Only valid for graphics and compute.
+    TmzMode tmzMode;
+#endif
 };
 
 /// Specifies info on how a compute shader should use resources.
@@ -736,6 +754,15 @@ struct DynamicGraphicsShaderInfos
     } enable;
 };
 
+/// Specifies parameters for binding a graphics pipeline.
+/// @see ICmdBuffer::CmdBindGraphicsPipeline
+struct GraphicsPipelineBindParams
+{
+    DynamicGraphicsShaderInfos gfxShaderInfo;
+    DynamicGraphicsState       gfxDynState;
+};
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1004
 /// Specifies parameters for binding a pipeline.
 /// @see ICmdBuffer::CmdBindPipeline
 struct PipelineBindParams
@@ -757,6 +784,7 @@ struct PipelineBindParams
         };
     };
 };
+#endif
 
 /// Specifies per-MRT color target view and current image state.  Used as input to ICmdBuffer::CmdBindTargets().
 struct ColorTargetBindInfo
@@ -1518,6 +1546,16 @@ typedef void (PAL_STDCALL *CmdDispatchOffsetFunc)(
     DispatchDims launchSize,
     DispatchDims logicalSize);
 
+#if PAL_WORK_LISTS_SUPPORT
+/// @internal Function pointer type definition for issuing work-list dispatch operations.
+///
+/// @see ICmdBuffer::CmdDispatchList().
+typedef void (PAL_STDCALL* CmdDispatchListFunc)(
+    ICmdBuffer*                    pCmdBuffer,
+    const IWorkList&               workList,
+    const DispatchListInputParams& input);
+#endif
+
 /// @internal Function pointer type definition for issuing direct mesh dispatches.
 ///
 /// @see ICmdBuffer::CmdDispatchMesh().
@@ -1991,7 +2029,6 @@ struct CmdBufInfo
                                             ///  captureBegin or captureEnd is set. Otherwise set this to nullptr.
     const IGpuMemory*  pPrivFlipMemory;     ///< The gpu memory object of the private flip primary surface for the
                                             ///  DirectCapture feature.
-    const Util::Event* pEarlyPresentEvent;  ///< The 'early present' event object. This variable can be nullptr.
     uint64             frameIndex;          ///< The frame index of this command buffer. It is only required for the
                                             ///  DirectCapture feature
     uint32             vidPnSourceId;       ///< The display source id for the DirectCapture feature. Clients must set
@@ -2393,6 +2430,7 @@ public:
     /// @returns Number of DWORDs that can be allocated in one call to CmdAllocateLargeEmbeddedData
     virtual uint32 GetLargeEmbeddedDataLimit() const = 0;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1004
     /// Binds a graphics or compute pipeline to the current command buffer state.
     ///
     /// Graphics pipelines must be compiled for the PAL ABI. Compute pipelines must either be compiled for the PAL ABI
@@ -2404,8 +2442,58 @@ public:
     /// argument state, please read the @ref CmdSetUserData and @ref CmdSetKernelArguments documentation for details.
     ///
     /// @param [in] params Parameters necessary to manage dynamic pipeline shader information.
-    virtual void CmdBindPipeline(
-        const PipelineBindParams& params) = 0;
+    void CmdBindPipeline(
+        const PipelineBindParams& params)
+    {
+        if (params.pipelineBindPoint == PipelineBindPoint::Graphics)
+        {
+            GraphicsPipelineBindParams gfxParams = { };
+            gfxParams.gfxDynState                = params.gfxDynState;
+            gfxParams.gfxShaderInfo              = params.gfxShaderInfo;
+
+            CmdBindGraphicsPipeline(params.pPipeline, params.apiPsoHash, &gfxParams);
+        }
+        else
+        {
+            PAL_ASSERT(params.pipelineBindPoint == PipelineBindPoint::Compute);
+            CmdBindComputePipeline(params.pPipeline, params.apiPsoHash, &params.cs);
+        }
+    }
+#endif
+
+    /// Binds a graphics pipeline to the current command buffer state.
+    ///
+    /// Graphics pipelines must be compiled for the PAL ABI.
+    ///
+    /// PAL ABI pipelines use user data entries set by @ref CmdSetUserData.
+    ///
+    /// @param [in] pPipeline Pipeline object to bind. Can be nullptr.
+    /// @param [in] apiPsoHash API PSO hash value.
+    /// @param [in] params Parameters necessary to manage dynamic pipeline shader information, nullptr
+    ///                    is valid and means the same as a zero'd out params struct.
+    virtual void CmdBindGraphicsPipeline(
+        const IPipeline*                  pPipeline,
+        uint64                            apiPsoHash,
+        const GraphicsPipelineBindParams* pParams = nullptr) = 0;
+
+    /// Binds a compute pipeline to the current command buffer state.
+    ///
+    /// Compute pipelines must either be compiled for the PAL ABI or the HSA ABI, if it's supported.
+    /// HSA ABI support is indicated by supportHsaAbi in @ref DeviceProperties.
+    ///
+    /// PAL ABI pipelines and HSA ABI pipelines use different mechanisms to bind inputs and outputs. PAL ABI pipelines
+    /// use user data entries set by @ref CmdSetUserData. HSA ABI pipelines use kernel arguments set by @ref
+    /// CmdSetKernelArguments. Binding or unbinding a compute pipeline can implicitly modify the user data and kernel
+    /// argument state, please read the @ref CmdSetUserData and @ref CmdSetKernelArguments documentation for details.
+    ///
+    /// @param [in] pPipeline Pipeline object to bind. Can be nullptr.
+    /// @param [in] apiPsoHash API PSO hash value.
+    /// @param [in] csInfo Parameters necessary to manage dynamic pipeline shader information, nullptr is valid
+    ///                    and means the same as a zer'd out csInfo structure.
+    virtual void CmdBindComputePipeline(
+        const IPipeline*                pPipeline,
+        uint64                          apiPsoHash,
+        const DynamicComputeShaderInfo* pCsInfo = nullptr) = 0;
 
     /// Binds the specified MSAA state object to the current command buffer state.
     ///
@@ -3095,6 +3183,24 @@ public:
     {
         m_funcTable.pfnCmdDispatchMeshIndirectMulti(this, gpuVirtAddrAndStride, maximumCount, countGpuAddr);
     }
+
+#if PAL_WORK_LISTS_SUPPORT
+    /// Dispatches a set of input data which send either Dispatches or Draws to one or more @ref IStateBlock objects.
+    ///
+    /// @see DispatchListInputParams
+    ///
+    /// @param [in] workList  The Work List to use for this dispatch.
+    /// @param [in] input     Defines the Work List and input data to consume.
+    ///
+    /// @note Any state _not_ overridden by the state blocks invoked by the dispatch is inherited from the current
+    /// state which is active at the time of this operation.
+    void CmdDispatchList(
+        const IWorkList&               workList,
+        const DispatchListInputParams& input)
+    {
+        m_funcTable.pfnCmdDispatchList(this, workList, input);
+    }
+#endif
 
     /// Copies multiple regions from one GPU memory allocation to another.
     ///
@@ -4448,7 +4554,9 @@ public:
     /// The caller is responsible for avoiding deadlocks.
     ///
     /// An Engine must support @ref supportsGpuFence (@ref DeviceProperties::engineProperties::flags)
-    /// to support this call. Calling when missing engine support will cause undefined behavior.
+    /// to fully support gpuFences. Otherwise waits and signals from the CPU to this engine are not supported.
+    /// The engines can synchronize between themselves, just not the CPU.
+    /// Ignoring this restriction will cause undefined behavior
     ///
     /// Creation (@ref QueueSemaphoreCreateInfo)
     /// IQueueSemaphores must be created as fences on the GPU to be safely waited on. See flags.gpuFence
@@ -4468,7 +4576,9 @@ public:
     /// Sets a synchronization object's counter to a value on the GPU, then triggers interrupts to check on waiters.
     ///
     /// An Engine must support @ref supportsGpuFence (@ref DeviceProperties::engineProperties::flags)
-    /// to support this call. Calling when missing engine support will cause undefined behavior.
+    /// to fully support gpuFences. Otherwise waits and signals from the CPU to this engine are not supported.
+    /// The engines can synchronize between themselves, just not the CPU.
+    /// Ignoring this restriction will cause undefined behavior.
     ///
     /// Creation (@ref QueueSemaphoreCreateInfo)
     /// IQueueSemaphores must be created as fences on the GPU to be safely signaled. See flags.gpuFence.
@@ -5188,6 +5298,9 @@ protected:
         CmdDispatchMeshFunc              pfnCmdDispatchMesh;              ///< CmdDispatchmesh function pointer.
         CmdDispatchMeshIndirectMultiFunc pfnCmdDispatchMeshIndirectMulti; ///< CmdDispatchMeshIndirect function pointer.
         CmdDispatchAqlFunc               pfnCmdDispatchAql;                ///< CmdDispatchAql function pointer.
+#if PAL_WORK_LISTS_SUPPORT
+        CmdDispatchListFunc              pfnCmdDispatchList;               ///< CmdDispatchList function pointer
+#endif
     } m_funcTable;     ///< Function pointer table for Cmd* functions.
 
 private:
