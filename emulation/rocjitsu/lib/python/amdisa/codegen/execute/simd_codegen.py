@@ -27,12 +27,12 @@ min/max functors remain separate, with their documented NaN/signed-zero limits.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute import float_compare, float_minmax
+from amdisa.codegen.execute import float_compare, float_minmax, input_policy
 from amdisa.codegen.execute.floating_policy import (
     F16_FLUSHED_SOURCE_OPS,
     FLUSH_NEAREST_F32_OPS,
     INPUT_FLUSHED_ROUNDING,
-    ROUNDED_F16_OPS,
+    F16_TRANSCENDENTAL_OPS,
 )
 
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
@@ -363,8 +363,7 @@ def _flush_input_then(fmt: str, functor: str) -> str:
 
     CEIL and FLOOR see the flushed zero, as gfx1201 does: ceil(+tiny) is +0.
     """
-    mode = 'f32' if fmt == 'F32' else 'f16_f64'
-    policy = f'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_{mode}())'
+    policy = input_policy.policy_expr(fmt.lower())
     return f'amdgpu::flush_input_then<amdgpu::fp_format::{fmt}>({policy}, {functor})'
 
 
@@ -3048,14 +3047,14 @@ def _simd_probe_line(
             else 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16'
         )
         instruction = template_name.rsplit('_', 1)[0].upper()
-        transcendental = instruction in ROUNDED_F16_OPS
+        transcendental = instruction in F16_TRANSCENDENTAL_OPS
         fp16_args = ', true' if transcendental else ''
         if (
             instruction in F16_FLUSHED_SOURCE_OPS
             or template_name.split('_')[1] in INPUT_FLUSHED_ROUNDING
         ):
             # The glue flushes the raw half before widening it for the functor.
-            policy = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
+            policy = input_policy.policy_expr('f16')
             fp16_args = f', {"true" if transcendental else "false"}, {policy}'
         return f'  {macro}({spec3unaf16}{fp16_args});'
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;

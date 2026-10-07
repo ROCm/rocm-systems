@@ -2467,8 +2467,7 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}); }}()'
         )
     if node.ty == SemaType.F16 and any(
-        _contains_call(node.children[1], op)
-        for op in ('log', 'log2', 'exp', 'exp2', 'rcp', 'rsq', 'sqrt', 'sin', 'cos')
+        _contains_call(node.children[1], op) for op in sorted(F16_TRANSCENDENTAL_CALLS)
     ):
         return f'amdgpu::fp_mode::apply_omod_f16({rhs}, {omod_expr}, wf.fp16_ovfl())'
     return (

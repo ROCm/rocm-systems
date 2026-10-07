@@ -12,6 +12,7 @@ vop3_modifiers helpers.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.floating_policy import (
     F16_FLUSHED_SOURCE_CALLS,
@@ -30,7 +31,7 @@ def _flush_f16(read: str) -> str:
     """Flush a raw F16 register read under MODE before it is widened."""
     return (
         f'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>({read}, '
-        'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()))'
+        f'{input_policy.policy_expr("f16")})'
     )
 
 

@@ -23,9 +23,10 @@ Execution semantics are provided by ``SemanticsSpec`` from
 
 import cgen
 
+from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.floating_policy import (
+    F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
-    ROUNDED_F16_OPS,
 )
 import textwrap
 import re
@@ -1045,10 +1046,13 @@ class CodeGenerator:
 
     @staticmethod
     def _apply_sdwa_f16_omod(
-        body: str, instruction: str, *, rounded_result: bool = False
+        body: str, instruction: str, *, transcendental: bool = False
     ) -> str:
-        """Apply SDWA OMOD at the F16 producer, before result narrowing."""
-        helper = 'finish_rounded_f16' if rounded_result else 'round_f16_result'
+        """Apply SDWA OMOD at the F16 producer, before result narrowing.
+
+        ``transcendental`` selects the TRANS-unit output helper.
+        """
+        helper = 'finish_rounded_f16' if transcendental else 'round_f16_result'
         body = body.replace(
             'util::f32_to_f16_mode(',
             f'amdgpu::sdwa::{helper}({instruction}, wf, ',
@@ -2222,7 +2226,9 @@ class CodeGenerator:
                     '''
                     {
                       return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
-                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                          '''
+                    + input_policy.policy_expr('f32')
+                    + ''', src0, src1);
                     }
                     ''',
                 ),
@@ -2241,7 +2247,9 @@ class CodeGenerator:
                     '''
                     {
                       return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
-                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                          '''
+                    + input_policy.policy_expr('f32')
+                    + ''', src0, src1);
                     }
                     ''',
                 ),
@@ -12964,7 +12972,7 @@ class CodeGenerator:
                             _local_body = self._apply_sdwa_f16_omod(
                                 _local_body,
                                 '*this',
-                                rounded_result=sem.name in ROUNDED_F16_OPS,
+                                transcendental=sem.name in F16_TRANSCENDENTAL_OPS,
                             )
                         _local_body = re.sub(
                             r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
@@ -14398,7 +14406,7 @@ class CodeGenerator:
                 prefixed_body = self._apply_sdwa_f16_omod(
                     prefixed_body,
                     'inst',
-                    rounded_result=sem.name in ROUNDED_F16_OPS,
+                    transcendental=sem.name in F16_TRANSCENDENTAL_OPS,
                 )
             if sem.data_type == 'f16':
                 for result_format in ('F16', 'PK_F16'):

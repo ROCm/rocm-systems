@@ -46,7 +46,7 @@ F16_OPERATIONS = (
 )
 
 # Instructions rounded to half before output modifiers, with the TRANS policy.
-ROUNDED_F16_OPS = frozenset(
+F16_TRANSCENDENTAL_OPS = frozenset(
     op.instruction for op in F16_OPERATIONS if op.transcendental
 )
 
