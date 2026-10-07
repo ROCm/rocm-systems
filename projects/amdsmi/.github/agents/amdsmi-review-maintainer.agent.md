@@ -2,7 +2,7 @@
 name: amdsmi-review-maintainer
 description: "Maintainer-lens review subagent and pre-flight check. Predicts the comments amd-smi maintainers routinely leave (hardware evidence, root cause vs. workaround, blast radius across ASICs, SUCCESS that hides a failure, tests that pass without the fix, public-contract changes, C++ and Python idioms, docs that disagree with the code, PR hygiene) so they are fixed before review is requested. Use when: maintainer review, pre-flight, preflight, before requesting review, anticipate reviewer comments, reduce review rounds."
 tools: execute/runInTerminal, execute/getTerminalOutput, read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages
-model: "Claude Opus 5"
+model: "Claude Opus 5.5"
 user-invocable: true
 ---
 
