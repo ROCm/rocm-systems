@@ -14,11 +14,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Fixed decode errors of some AVC interlaced container streams by adding support for the picture data packet from the demuxer which contains multiple pictures.
 * Corrected fake CTest passes.
 * Resolved vendored libva link issue in samples without extra env vars.
-* Fixed out-of-bounds memory access in the HEVC parser. A stream declaring more sub-layers, layer sets, long-term reference pictures, or tiles than the parser allocates for them wrote past the end of its internal arrays. These counts are now validated against the array capacity before use.
-* Fixed out-of-bounds memory access in the AVC parser. A stream carrying more reference picture list modification entries or memory management control operations than the parser allocates for them wrote past the end of its internal arrays. Both counts are now bounded.
-* Fixed out-of-bounds memory access in the AV1 parser. A stream declaring more tiles than the tile arrays hold, or an OBU size reaching past the end of the packet, read and wrote outside the parser's buffers. Both are now validated before use.
-* Fixed out-of-bounds memory access in the VP9 parser. A superframe declaring frame sizes larger than the packet, an inter frame arriving before any key frame, or an uncompressed header shorter than the syntax it codes each read past the end of the frame data. Reads are now bounded to the frame being parsed.
-* Fixed out-of-bounds memory access in the NAL unit and SEI parsing shared by the AVC and HEVC parsers. A truncated packet, or an SEI payload size reaching past the end of its NAL unit, read past the end of the picture data. Reads are now bounded to the NAL unit, and a malformed NAL unit is reported rather than parsed.
+* Fixed out-of-bounds memory access issues in the HVEC, AVC, AV1, VP9 and base parsers.
 
 ## rocDecode 1.8.0 for ROCm 7.13
 
