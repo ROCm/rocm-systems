@@ -23,6 +23,9 @@
 #include "hrr_test_common.hh"
 #include "hrr_test_process.hh"
 
+#include <hip/hip_ext.h>  // hipExtModuleLaunchKernel
+#include <hip/hiprtc.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -94,6 +97,13 @@ __global__ void hrr_pinned_read_view(PinnedView v, int* out, int n) {
 __global__ void hrr_pinned_write(int* buf, int n, int seed) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) buf[i] = seed ^ i;
+}
+
+// hrr_pinned_read over a grid of any size, for the cooperative launches,
+// whose whole grid has to be resident at once.
+__global__ void hrr_pinned_read_strided(const int* in, int* out, int n) {
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x)
+    out[i] = in[i] * 3 + 1;
 }
 
 namespace {
@@ -329,6 +339,8 @@ TEST_CASE("Unit_HRR_PinnedHost_Lifetime_Direct", "[.][hrr-direct]") {
 //   -  hipModuleLaunchKernel on a handle that is not a kernel, with a zero grid:
 //      the runtime refuses the grid before it looks at the handle, and capture
 //      must not read the handle first. Nothing is recorded for it.
+//   -  the same with a handle hipKernelGetFunction returned for a pointer that
+//      is not a kernel
 // ===========================================================================
 TEST_CASE("Unit_HRR_PinnedHost_LaunchApis_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -368,6 +380,19 @@ TEST_CASE("Unit_HRR_PinnedHost_LaunchApis_Direct", "[.][hrr-direct]") {
                                                  args, nullptr);
   INFO("bogus handle launch: " << hipGetErrorName(bogus));
   CHECK((bogus == hipErrorInvalidValue || bogus == hipErrorInvalidConfiguration));
+  (void)hipGetLastError();
+
+  // The same through hipKernelGetFunction, which hands back any pointer it is
+  // given as a function handle and reports success.
+  hipFunction_t from_kernel = nullptr;
+  const hipError_t got = hipKernelGetFunction(&from_kernel, reinterpret_cast<hipKernel_t>(0x20));
+  INFO("hipKernelGetFunction: " << hipGetErrorName(got));
+  if (got == hipSuccess) {
+    const hipError_t r = hipModuleLaunchKernel(from_kernel, 0, 1, 1, kThreads, 1, 1, 0,
+                                               nullptr, args, nullptr);
+    INFO("launch of its handle: " << hipGetErrorName(r));
+    CHECK((r == hipErrorInvalidValue || r == hipErrorInvalidConfiguration));
+  }
   (void)hipGetLastError();
 
   HRR_HIP_CHECK(hipFree(out));
@@ -442,6 +467,268 @@ TEST_CASE("Unit_HRR_PinnedHost_Graph_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(h));
 }
 
+// ===========================================================================
+// A launch that fails after its snapshot, then a launch on a busy stream.
+//
+//   0  read      host filled pattern 1, stream idle
+//   -  read      host filled pattern 2; the block is too large, so the launch
+//                fails and nothing is recorded for it
+//   1  read      queued behind hipStreamWaitValue32, as in NoWait; the host
+//                has not touched the buffer since the failed launch
+// The failed launch's snapshot already saw pattern 2. If capture kept it,
+// launch 1 would find nothing changed and record both chunks as unchanged,
+// and replay would run launch 1 on pattern 1.
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_FailedLaunch_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int can_wait = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&can_wait, hipDeviceAttributeCanUseStreamWaitValue, 0));
+  REQUIRE(can_wait != 0);
+
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                              hipHostMallocDefault));
+  uint32_t* flag = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&flag), sizeof(uint32_t),
+                              hipHostMallocMapped));
+  *flag = 0;
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+  hipStream_t s = nullptr;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  // 0
+  fill(h, 1);
+  read_pinned(h, out, 1, kPinnedInts, s);
+
+  // The failed launch.
+  fill(h, 2);
+  int n = kPinnedInts;
+  void* args[] = {&h, &out, &n};
+  const hipError_t bad = hipLaunchKernel(reinterpret_cast<const void*>(hrr_pinned_read),
+                                         dim3(1), dim3(4096), args, 0, s);
+  INFO("oversized block: " << hipGetErrorName(bad));
+  REQUIRE(bad != hipSuccess);
+  (void)hipGetLastError();
+
+  // 1
+  HRR_HIP_CHECK(hipStreamWaitValue32(s, flag, 1, hipStreamWaitValueEq, 0xFFFFFFFF));
+  hipLaunchKernelGGL(hrr_pinned_read, dim3(kBlocks), dim3(kThreads), 0, s, h, out,
+                     kPinnedInts);
+  HRR_HIP_CHECK(hipGetLastError());
+  CHECK(hipStreamQuery(s) == hipErrorNotReady);
+  __atomic_store_n(flag, 1u, __ATOMIC_SEQ_CST);
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  check_out(out, [](int i) { return pattern(2, i) * 3 + 1; });
+
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(flag));
+  HRR_HIP_CHECK(hipHostFree(h));
+}
+
+namespace {
+#define HRR_PINNED_RTC_CHECK(expr)    \
+  do {                                \
+    const hiprtcResult r_ = (expr);   \
+    REQUIRE(r_ == HIPRTC_SUCCESS);    \
+  } while (0)
+
+// The module launches need a kernel loaded through the module path.
+const char* kPinnedRtcSource = R"(
+extern "C" __global__ void hrr_rtc_pinned_read(const int* in, int* out, int n) {
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x)
+    out[i] = in[i] * 3 + 1;
+}
+)";
+
+std::vector<char> compile_pinned_rtc() {
+  hiprtcProgram prog = nullptr;
+  HRR_PINNED_RTC_CHECK(hiprtcCreateProgram(&prog, kPinnedRtcSource, "hrr_pinned_rtc.hip", 0,
+                                           nullptr, nullptr));
+  HRR_PINNED_RTC_CHECK(hiprtcCompileProgram(prog, 0, nullptr));
+  size_t size = 0;
+  HRR_PINNED_RTC_CHECK(hiprtcGetCodeSize(prog, &size));
+  std::vector<char> code(size);
+  HRR_PINNED_RTC_CHECK(hiprtcGetCode(prog, code.data()));
+  HRR_PINNED_RTC_CHECK(hiprtcDestroyProgram(&prog));
+  return code;
+}
+
+// Grid of the entry-point launches: small enough for a cooperative launch to
+// fit on the device at once.
+constexpr int kEntryBlocks = 64;
+}  // namespace
+
+// ===========================================================================
+// The launch entry points LaunchApis does not reach, each on a fresh pattern,
+// then a free that fails.
+//
+//   0  hipModuleLaunchKernel            on a hipModuleGetFunction handle,
+//                                       its first launch
+//   1  hipModuleLaunchCooperativeKernel
+//   2  hipExtModuleLaunchKernel         (grid in work items)
+//   3  hipDrvLaunchKernelEx
+//   4  hipLaunchCooperativeKernel       by host stub
+//   5  hipLaunchCooperativeKernel_spt
+//   6  hipLaunchKernelExC
+//   7  hipLaunchKernelGGL on a registered range after hipHostFree refused it;
+//      capture must still know the range
+// Every launch reads the whole buffer, which holds new bytes each time.
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_EntryPoints_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int coop = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&coop, hipDeviceAttributeCooperativeLaunch, 0));
+  REQUIRE(coop != 0);
+
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                              hipHostMallocDefault));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+  int n = kPinnedInts;
+  void* args[] = {&h, &out, &n};
+  auto expect = [](int which) {
+    return [which](int i) { return pattern(which, i) * 3 + 1; };
+  };
+
+  const std::vector<char> code = compile_pinned_rtc();
+  hipModule_t mod = nullptr;
+  HRR_HIP_CHECK(hipModuleLoadData(&mod, code.data()));
+  hipFunction_t fn = nullptr;
+  HRR_HIP_CHECK(hipModuleGetFunction(&fn, mod, "hrr_rtc_pinned_read"));
+  const void* stub = reinterpret_cast<const void*>(hrr_pinned_read_strided);
+
+  // 0
+  fill(h, 20);
+  HRR_HIP_CHECK(hipModuleLaunchKernel(fn, kEntryBlocks, 1, 1, kThreads, 1, 1, 0, nullptr,
+                                      args, nullptr));
+  check_out(out, expect(20));
+
+  // 1
+  fill(h, 21);
+  HRR_HIP_CHECK(hipModuleLaunchCooperativeKernel(fn, kEntryBlocks, 1, 1, kThreads, 1, 1, 0,
+                                                 nullptr, args));
+  check_out(out, expect(21));
+
+  // 2
+  fill(h, 22);
+  HRR_HIP_CHECK(hipExtModuleLaunchKernel(fn, kEntryBlocks * kThreads, 1, 1, kThreads, 1, 1,
+                                         0, nullptr, args, nullptr, nullptr, nullptr, 0));
+  check_out(out, expect(22));
+
+  // 3
+  fill(h, 23);
+  {
+    HIP_LAUNCH_CONFIG cfg{};
+    cfg.gridDimX = kEntryBlocks;
+    cfg.gridDimY = 1;
+    cfg.gridDimZ = 1;
+    cfg.blockDimX = kThreads;
+    cfg.blockDimY = 1;
+    cfg.blockDimZ = 1;
+    cfg.hStream = nullptr;
+    HRR_HIP_CHECK(hipDrvLaunchKernelEx(&cfg, fn, args, nullptr));
+  }
+  check_out(out, expect(23));
+
+  // 4
+  fill(h, 24);
+  HRR_HIP_CHECK(hipLaunchCooperativeKernel(stub, dim3(kEntryBlocks), dim3(kThreads), args, 0,
+                                           nullptr));
+  check_out(out, expect(24));
+
+  // 5
+  fill(h, 25);
+  HRR_HIP_CHECK(hipLaunchCooperativeKernel_spt(stub, dim3(kEntryBlocks), dim3(kThreads), args,
+                                               0, nullptr));
+  check_out(out, expect(25));
+
+  // 6
+  fill(h, 26);
+  {
+    hipLaunchConfig_t cfg{};
+    cfg.gridDim = dim3(kEntryBlocks);
+    cfg.blockDim = dim3(kThreads);
+    cfg.stream = nullptr;
+    HRR_HIP_CHECK(hipLaunchKernelExC(&cfg, stub, args));
+  }
+  check_out(out, expect(26));
+
+  // 7
+  void* reg = std::aligned_alloc(4096, kPinnedBytes);
+  REQUIRE(reg != nullptr);
+  HRR_HIP_CHECK(hipHostRegister(reg, kPinnedBytes, hipHostRegisterDefault));
+  const hipError_t refused = hipHostFree(reg);
+  INFO("hipHostFree of a registered range: " << hipGetErrorName(refused));
+  REQUIRE(refused != hipSuccess);
+  (void)hipGetLastError();
+  fill(static_cast<int*>(reg), 27);
+  read_pinned(static_cast<const int*>(reg), out, 27);
+  HRR_HIP_CHECK(hipHostUnregister(reg));
+  std::free(reg);
+
+  HRR_HIP_CHECK(hipModuleUnload(mod));
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(h));
+}
+
+// ===========================================================================
+// hipDeviceReset in the middle of a capture.
+//
+//   0  read      pinned buffer A, pattern 30
+//   -  hipDeviceReset
+//   1  read      a new pinned buffer B, pattern 31
+//   2  only when the runtime no longer knows A: a launch whose pointer
+//      argument still holds A's old address, with nothing to read. Capture
+//      must have forgotten A rather than read its unmapped bytes.
+// Captured only: events after a reset replay against a reset device (see
+// Unit_HRR_ApiMatrix_Reset_Direct).
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_Reset_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* a = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&a), kPinnedBytes,
+                              hipHostMallocDefault));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+
+  // 0
+  fill(a, 30);
+  read_pinned(a, out, 30);
+
+  HRR_HIP_CHECK(hipDeviceReset());
+  HRR_HIP_CHECK(hipSetDevice(0));
+
+  // 1
+  int* b = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&b), kPinnedBytes,
+                              hipHostMallocDefault));
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+  fill(b, 31);
+  read_pinned(b, out, 31);
+
+  // 2
+  hipPointerAttribute_t attr{};
+  const bool a_known = hipPointerGetAttributes(&attr, a) == hipSuccess &&
+                       attr.type != hipMemoryTypeUnregistered;
+  (void)hipGetLastError();
+  const auto lo = reinterpret_cast<uintptr_t>(b);
+  const auto at = reinterpret_cast<uintptr_t>(a);
+  const bool reused = at >= lo && at < lo + kPinnedBytes;
+  INFO("A known after reset: " << a_known << ", inside B: " << reused);
+  if (!a_known && !reused) {
+    hipLaunchKernelGGL(hrr_pinned_read, dim3(1), dim3(kThreads), 0, nullptr, a, out, 0);
+    HRR_HIP_CHECK(hipGetLastError());
+    HRR_HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(b));
+  if (a_known) HRR_HIP_CHECK(hipHostFree(a));
+}
+
 namespace {
 constexpr const char* kDirect = "Unit_HRR_PinnedHost_Direct";
 // A capture or replay that takes longer than this has hung.
@@ -506,17 +793,45 @@ size_t snapshot_records(const std::vector<const hrr::KernelLaunchEvent*>& v) {
   return n;
 }
 
+// The first "[HRR]   Host snapshots : ..." line that matches fmt to its end,
+// which must hold n %llu conversions. False when no line does.
+bool host_snapshot_line(const std::string& out, const char* fmt, int n,
+                        unsigned long long* a, unsigned long long* b = nullptr) {
+  const std::string f = std::string(fmt) + "%n";
+  for (size_t at = out.find("Host snapshots :"); at != std::string::npos;
+       at = out.find("Host snapshots :", at + 1)) {
+    std::string line = out.substr(at, out.find('\n', at) - at);
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    int end = -1;
+    const int got = n == 2 ? std::sscanf(line.c_str(), f.c_str(), a, b, &end)
+                           : std::sscanf(line.c_str(), f.c_str(), a, &end);
+    if (got == n && end == static_cast<int>(line.size())) return true;
+  }
+  return false;
+}
+
 // "[HRR]   Host snapshots : N chunk(s) ... restored, M record(s) rejected".
 // Absent when replay restored and rejected nothing.
 void host_snapshot_summary(const std::string& out, unsigned long long& restored,
                            unsigned long long& rejected) {
   restored = rejected = 0;
-  const size_t at = out.find("Host snapshots :");
-  if (at == std::string::npos) return;
-  REQUIRE(std::sscanf(out.c_str() + at,
-                      "Host snapshots : %llu chunk(s) of pinned host memory "
-                      "restored, %llu record(s) rejected",
-                      &restored, &rejected) == 2);
+  const bool found = host_snapshot_line(out,
+                                        "Host snapshots : %llu chunk(s) of pinned host memory "
+                                        "restored, %llu record(s) rejected",
+                                        2, &restored, &rejected);
+  if (!found) restored = rejected = 0;
+}
+
+// "[HRR]   Host snapshots : N record(s) not applied, ... graph capture".
+// Absent when there were none.
+unsigned long long host_snapshots_in_graph(const std::string& out) {
+  unsigned long long n = 0;
+  return host_snapshot_line(out,
+                            "Host snapshots : %llu record(s) not applied, their launches "
+                            "replayed into a graph capture",
+                            1, &n)
+             ? n
+             : 0;
 }
 
 // A numeric manifest field, or -1 when it is absent.
@@ -631,6 +946,31 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_Restored) {
   CHECK(manifest.find("\"host_snapshots\": true") != std::string::npos);
   CHECK(manifest_count(manifest, "host_snapshots_unordered") == 0);
 
+  // The replay first: the record checks below stop at the first launch without
+  // records, and the reads are what this test is about.
+  {
+    auto [rc, out] = replay(archive);
+    INFO("Replay:\n" << out);
+    CHECK(rc == 0);
+
+    int d2h_pass = 0, d2h_fail = 0;
+    REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+#ifndef _WIN32
+    // Windows replay does not promise bit-exact device output; see hrr_run_playback.
+    CHECK(d2h_pass >= kBaseReads);
+    CHECK(d2h_fail == 0);
+#endif
+
+    // Replay copies a chunk only when its buffer holds something else, two
+    // chunks per launch here. Launches 0 and 1 find the previous content and
+    // launch 4 finds what kernel 3 wrote. Launches 2 and 3 find what the host
+    // left.
+    unsigned long long restored = 0, rejected = 0;
+    host_snapshot_summary(out, restored, rejected);
+    CHECK(restored == 6);
+    CHECK(rejected == 0);
+  }
+
   hrr::Archive arc;
   REQUIRE(hrr::load_archive(archive.string(), arc));
   const auto kls = launches_of(arc);
@@ -660,27 +1000,6 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_Restored) {
   REQUIRE(!kls[1]->args.empty());
   CHECK(kls[1]->args[0].value_kind == 3);
   CHECK(kls[1]->args[0].ptr_offsets == std::vector<uint16_t>{8});
-
-  auto [rc, out] = replay(archive);
-  INFO("Replay:\n" << out);
-  CHECK(rc == 0);
-
-  int d2h_pass = 0, d2h_fail = 0;
-  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
-#ifndef _WIN32
-  // Windows replay does not promise bit-exact device output; see hrr_run_playback.
-  CHECK(d2h_pass >= kBaseReads);
-  CHECK(d2h_fail == 0);
-#endif
-
-  // Replay copies a chunk only when its buffer holds something else, two
-  // chunks per launch here. Launches 0 and 1 find the previous content and
-  // launch 4 finds what kernel 3 wrote. Launches 2 and 3 find what the host
-  // left.
-  unsigned long long restored = 0, rejected = 0;
-  host_snapshot_summary(out, restored, rejected);
-  CHECK(restored == 6);
-  CHECK(rejected == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -866,9 +1185,12 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_MalformedRecordRejected) {
   CHECK(count_of(out, "run past the end of the event") == 1);
   CHECK(count_of(out, "launch attribute tail is malformed") == 1);
 
+  // Seven records fail a check of their own. Launch 5's claimed thousand and
+  // launch 6's two cannot be located, and count too.
   unsigned long long restored = 0, rejected = 0;
   host_snapshot_summary(out, restored, rejected);
-  CHECK(rejected == 7);
+  CHECK(rejected == 7 + 1000 + kls[6]->snapshots.size());
+  CHECK(host_snapshots_in_graph(out) == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1146,6 +1468,107 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_GraphCapture) {
   CHECK(rc < 128);
   CHECK(out.find("pinned host snapshots are not applied to kernels replayed into a "
                  "graph capture") != std::string::npos);
+  // Counted on a line of its own, not as rejected.
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(rejected == 0);
+  CHECK(host_snapshots_in_graph(out) == 1);
+}
+
+// ---------------------------------------------------------------------------
+// A launch that fails after capture snapshotted it leaves nothing behind. The
+// next launch, on a busy stream, finds the bytes changed since launch 0 and
+// records both chunks to restore. Replay runs it on pattern 2.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_FailedLaunch) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_failed.hrr");
+  capture_case("Unit_HRR_PinnedHost_FailedLaunch_Direct", cap.path);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  auto [rc, out] = replay(archive);
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(restored == 4);
+  CHECK(rejected == 0);
+#ifndef _WIN32
+  int d2h_pass = 0, d2h_fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+  CHECK(d2h_pass >= 2);
+  CHECK(d2h_fail == 0);
+#endif
+
+  const std::string manifest = read_text_file(archive / "manifest.json");
+  INFO("manifest:\n" << manifest);
+  CHECK(manifest_count(manifest, "host_snapshots_unordered") == 1);
+  CHECK(manifest_count(manifest, "host_snapshot_chunks") == 4);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() == 2);
+  REQUIRE(kls[1]->snapshots.size() == 2);
+  CHECK(kls[1]->snapshots[0].direction == 0);
+  CHECK(kls[1]->snapshots[1].direction == 0);
+}
+
+// ---------------------------------------------------------------------------
+// The cooperative, Ext, DrvLaunchKernelEx and LaunchKernelExC launches, a
+// hipModuleGetFunction handle on its first launch, and a registered range
+// after a failed hipHostFree. Each launch reads bytes the previous one did
+// not see, so replay restores both chunks of every launch.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_EntryPoints) {
+  constexpr int kLaunches = 8;
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_entry.hrr");
+  capture_case("Unit_HRR_PinnedHost_EntryPoints_Direct", cap.path);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  const std::string manifest = read_text_file(archive / "manifest.json");
+  INFO("manifest:\n" << manifest);
+  CHECK(manifest_count(manifest, "host_snapshot_chunks") == 2 * kLaunches);
+
+  // The reader decodes the module, Ext and hipLaunchKernel events only.
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  for (const auto* kl : launches_of(arc)) {
+    INFO("launch of " << kl->kernel_name);
+    CHECK(kl->snapshots.size() == 2);
+  }
+
+  auto [rc, out] = replay(archive);
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(restored == 2 * kLaunches);
+  CHECK(rejected == 0);
+#ifndef _WIN32
+  int d2h_pass = 0, d2h_fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+  CHECK(d2h_pass >= kLaunches);
+  CHECK(d2h_fail == 0);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// After hipDeviceReset capture records the new buffer and forgets the old
+// one, so a stale pointer to it is not read.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_DeviceReset) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_reset.hrr");
+  capture_case("Unit_HRR_PinnedHost_Reset_Direct", cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(hrr_single_process_archive(cap.path).string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() >= 2);
+  REQUIRE(kls[0]->snapshots.size() == 2);
+  REQUIRE(kls[1]->snapshots.size() == 2);
+  CHECK(kls[1]->snapshots[0].direction == 0);
+  CHECK(kls[1]->snapshots[1].direction == 0);
+  // Launch 2 ran only when A was gone; capture would have crashed reading it.
+  if (kls.size() == 3) CHECK(kls[2]->snapshots.empty());
 }
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
