@@ -6,41 +6,6 @@
 import pytest
 
 from utils import mem_chart_common
-from utils.utils_analysis import format_bw_human_readable
-
-# =============================================================================
-# format_bw_human_readable
-# =============================================================================
-
-
-class TestFormatBwHumanReadable:
-    @pytest.mark.parametrize(
-        "value, unit, prec, expected",
-        [
-            (1e12, "Bytes/s", 1, "1.0 TB/s"),
-            (2.5e12, "Bytes/s", 1, "2.5 TB/s"),
-            (1e9, "Bytes/s", 1, "1.0 GB/s"),
-            (100e9, "Bytes/s", 1, "100.0 GB/s"),
-            (1e6, "Bytes/s", 1, "1.0 MB/s"),
-            (1e3, "Bytes/s", 1, "1.0 KB/s"),
-            (500, "Bytes/s", 1, "500.0 B/s"),
-            (0, "Bytes/s", 1, "0.0 B/s"),
-            (100, "GB/s", 1, "100.0 GB/s"),
-            (1500, "GB/s", 1, "1.5 TB/s"),
-            (None, "Bytes/s", 1, "N/A"),
-            ("invalid", "Bytes/s", 1, "N/A"),
-        ],
-    )
-    def test_format(self, value, unit, prec, expected):
-        assert format_bw_human_readable(value, unit, prec) == expected
-
-    @pytest.mark.parametrize(
-        "prec, expected",
-        [(0, "123 GB/s"), (1, "123.5 GB/s"), (2, "123.46 GB/s")],
-    )
-    def test_precision(self, prec, expected):
-        assert format_bw_human_readable(123.456789e9, "Bytes/s", prec) == expected
-
 
 # =============================================================================
 # mem_chart_common helpers
@@ -60,8 +25,12 @@ class TestFormatValue:
     def test_format(self, value, unit, prec, expected):
         assert mem_chart_common.format_value(value, unit, prec) == expected
 
-    def test_bytes_per_second_routes_to_human_readable(self):
-        assert "GB/s" in mem_chart_common.format_value(100e9, "Bytes/s", 1)
+    @pytest.mark.parametrize(
+        "value, unit, expected",
+        [(123.4567e9, "Bytes/s", "123.457 GB/s"), (1.5, "GB/s", "1.500 GB/s")],
+    )
+    def test_bandwidth_is_fixed_gbps(self, value, unit, expected):
+        assert mem_chart_common.format_value(value, unit, 0) == expected
 
 
 class TestFormatScientific:
@@ -130,6 +99,47 @@ class TestMetricLine:
         result = mem_chart_common.metric_line("BW", None, "GB/s", "cyan")
         assert "BW" in result
         assert "N/A" in result
+
+    def test_precision(self):
+        result = mem_chart_common.metric_line("Scratch", 32 / 1024, " KB", precision=3)
+        assert "0.031 KB" in result
+
+
+class TestBuildCuPanel:
+    def test_stat_precision_defaults_to_one(self):
+        panel = mem_chart_common.build_cu_panel(20, stats=[("LDS Alloc", 2.0, " KB")])
+        assert "2.0 KB" in panel.renderable
+
+    def test_stat_precision_override_keeps_sub_kb_values(self):
+        panel = mem_chart_common.build_cu_panel(
+            20, stats=[("Scratch", 32 / 1024, " KB", 3)]
+        )
+        assert "0.031 KB" in panel.renderable
+
+
+class TestBuildCuStats:
+    def test_rows_and_units(self):
+        stats = mem_chart_common.build_cu_stats(
+            {
+                "Wavefront Occupancy": 45.5,
+                "VGPR": 64,
+                "SGPR": 32,
+                "Scratch Allocation": 0.125,
+                "LDS Allocation": 2048,
+                "Workgroups": 2.5,
+            },
+            "WGP",
+        )
+        rows = {row[0]: row for row in stats}
+        assert rows["Wave Occ"][1:] == (45.5, "%")
+        assert rows["Scratch/Wave"][1:] == (0.125, " KB", 3)
+        assert rows["LDS Alloc"][1:] == (2.0, " KB")
+        assert rows["Workgroups/WGP"][1:] == (2.5, "")
+
+    def test_missing_metrics_render_as_none(self):
+        stats = mem_chart_common.build_cu_stats({})
+        assert [row[1] for row in stats] == [None] * 6
+        assert stats[-1][0] == "Workgroups/CU"
 
 
 class TestFormatMemChartHeading:
