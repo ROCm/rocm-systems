@@ -1205,7 +1205,6 @@ TEST_F(EnqueueMicrotest, PackedChannels_CapsToCommNChannels) {
     EXPECT_EQ(8, plain);
     EXPECT_EQ(plain, limited);
   }
-  }
   // nChannels == 1 is the first value where the cap bites; a > 1 guard would return 5.
   {
     RankComm rc(8);
