@@ -788,6 +788,8 @@ DEEP_TENSOR_METHOD_WRAPS = (
     "contiguous",
 )
 
+_TENSOR_METHODS_ALLOWING_UNINITIALIZED = frozenset(("to", "cpu", "cuda"))
+
 DEEP_TENSOR_METHOD_WRAPS_ENV = "ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"
 
 
@@ -800,6 +802,45 @@ def _selected_tensor_method_wraps() -> tuple[str, ...]:
     if _deep_tensor_method_wraps_enabled():
         return TENSOR_METHOD_WRAPS + DEEP_TENSOR_METHOD_WRAPS
     return TENSOR_METHOD_WRAPS
+
+
+def _uninitialized_tensor_mixin_cls() -> Optional[type]:
+    """Return UninitializedTensorMixin, or None if torch.nn is unavailable."""
+    nn = _STATE.nn
+    if nn is None:
+        return None
+    parameter = getattr(nn, "parameter", None)
+    return getattr(parameter, "UninitializedTensorMixin", None)
+
+
+def _call_tensor_method_allowing_uninitialized(
+    original: Callable[..., Any], *args: Any, **kwargs: Any
+) -> object:
+    """Call original; disable subclass __torch_function__ for uninitialized tensors."""
+    uninitialized_tensor_cls = _uninitialized_tensor_mixin_cls()
+    disable_torch_function_subclass = getattr(
+        getattr(_STATE.torch, "_C", None), "DisableTorchFunctionSubclass", None
+    )
+    if (
+        uninitialized_tensor_cls is None
+        or disable_torch_function_subclass is None
+        or not args
+        or not isinstance(args[0], uninitialized_tensor_cls)
+    ):
+        return original(*args, **kwargs)
+    with disable_torch_function_subclass():
+        return original(*args, **kwargs)
+
+
+def _wrap_tensor_method_allowing_uninitialized(
+    original: Callable[..., Any],
+) -> Callable[..., Any]:
+    """Wrap original so uninitialized parameters can still call to/cpu/cuda."""
+
+    def wrapper(*args: Any, **kwargs: Any) -> object:
+        return _call_tensor_method_allowing_uninitialized(original, *args, **kwargs)
+
+    return wrapper
 
 
 def install_function_apply_wrappers() -> bool:
@@ -907,8 +948,13 @@ def install_tensor_method_wrappers() -> None:
         if getattr(fn, "_roctx_wrapped", False):
             continue
         try:
+            tensor_method = (
+                _wrap_tensor_method_allowing_uninitialized(fn)
+                if method_name in _TENSOR_METHODS_ALLOWING_UNINITIALIZED
+                else fn
+            )
             wrapped_fn = roctx_wrapper(
-                fn,
+                tensor_method,
                 f"torch.Tensor.{method_name}",
                 backend=_BACKEND_NAME,
             )
