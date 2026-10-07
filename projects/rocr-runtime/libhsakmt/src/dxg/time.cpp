@@ -61,8 +61,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCountersPrecise(HSAuint32 NodeId,
     uint64_t before = rocr::os::TimeNanos();
     HSAKMT_STATUS result = read_clock_counters(NodeId, &sample);
     uint64_t after = rocr::os::TimeNanos();
-    if (result != HSAKMT_STATUS_SUCCESS)
+    if (result != HSAKMT_STATUS_SUCCESS) {
+      if (best_elapsed != UINT64_MAX) {
+        *Counters = best;
+        return HSAKMT_STATUS_SUCCESS;
+      }
       return result;
+    }
 
     uint64_t elapsed = after - before;
     if (elapsed < best_elapsed) {
