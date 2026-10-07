@@ -2408,6 +2408,9 @@ public:
     bool handle_closed = false; ///< Close invalidates the handle; jobs retain its backing.
     uint64_t mmap_offset = 0;
     uint32_t alloc_flags = 0;
+    // GEM_CREATE arguments. GET_GEM_CREATE_INFO returns this record. A PRIME
+    // import synthesizes size, page alignment, and domain from the dmabuf.
+    drm_amdgpu_gem_create_in create_info{};
     void *cpu_ptr = nullptr;
     bool sealed_ram = false;
     // Userspace (libdrm amdgpu_bo_query_info / amdgpu_bo_set_metadata) reads and
@@ -2484,6 +2487,7 @@ public:
     entry.mmap_offset = next_gem_mmap_offset_;
     entry.alloc_flags = (request.domains & AMDGPU_GEM_DOMAIN_VRAM) ? KFD_IOC_ALLOC_MEM_FLAGS_VRAM
                                                                    : KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    entry.create_info = request;
     gem_entries_.emplace(candidate, std::move(entry));
     next_gem_mmap_offset_ += size;
     *handle = candidate;
@@ -2843,31 +2847,36 @@ public:
   int gem_op(const DrmFileToken &file, drm_amdgpu_gem_op *args) {
     if (!args)
       return -EINVAL;
-    std::lock_guard lock(fd_mutex_);
-    auto it = gem_entries_.find(args->handle);
-    if (it == gem_entries_.end() || !file || it->second.handle_closed ||
-        it->second.drm_file_id != file->id)
-      return -ENOENT;
-    if (args->op == AMDGPU_GEM_OP_GET_GEM_CREATE_INFO) {
-      if (args->value == 0)
+    drm_amdgpu_gem_create_in info{};
+    uint64_t user_pointer = 0;
+    {
+      std::lock_guard lock(fd_mutex_);
+      auto it = gem_entries_.find(args->handle);
+      if (it == gem_entries_.end() || !file || it->second.handle_closed ||
+          it->second.drm_file_id != file->id)
+        return -ENOENT;
+      if (args->op == AMDGPU_GEM_OP_GET_GEM_CREATE_INFO) {
+        if (args->value == 0)
+          return -EINVAL;
+        info = it->second.create_info;
+        user_pointer = args->value;
+      } else if (args->op == AMDGPU_GEM_OP_SET_PLACEMENT) {
+        constexpr uint64_t domains =
+            AMDGPU_GEM_DOMAIN_CPU | AMDGPU_GEM_DOMAIN_GTT | AMDGPU_GEM_DOMAIN_VRAM;
+        if (args->value & ~domains)
+          return -EINVAL;
+        return 0;
+      } else {
         return -EINVAL;
-      drm_amdgpu_gem_create_in info{};
-      info.bo_size = it->second.size;
-      info.alignment = 4096;
-      info.domains = (it->second.alloc_flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
-                         ? AMDGPU_GEM_DOMAIN_VRAM
-                         : AMDGPU_GEM_DOMAIN_GTT;
-      std::memcpy(reinterpret_cast<void *>(args->value), &info, sizeof(info));
-      return 0;
+      }
     }
-    if (args->op == AMDGPU_GEM_OP_SET_PLACEMENT) {
-      constexpr uint64_t domains =
-          AMDGPU_GEM_DOMAIN_CPU | AMDGPU_GEM_DOMAIN_GTT | AMDGPU_GEM_DOMAIN_VRAM;
-      if (args->value & ~domains)
-        return -EINVAL;
-      return 0;
-    }
-    return -EINVAL;
+    // value is a caller pointer. A raw copy faults the process; an ioctl returns EFAULT.
+    iovec local{&info, sizeof(info)};
+    iovec remote{reinterpret_cast<void *>(user_pointer), sizeof(info)};
+    return process_vm_writev(getpid(), &local, 1, &remote, 1, 0) ==
+                   static_cast<ssize_t>(sizeof(info))
+               ? 0
+               : -EFAULT;
   }
 
   /// @brief Map a live GEM handle's backing through its synthetic mmap offset.
@@ -2954,6 +2963,10 @@ public:
     gem.drm_file_id = drm_file->id;
     gem.size = size;
     gem.alloc_flags = alloc_flags;
+    gem.create_info.bo_size = size;
+    gem.create_info.alignment = 4096;
+    gem.create_info.domains = (alloc_flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) ? AMDGPU_GEM_DOMAIN_VRAM
+                                                                           : AMDGPU_GEM_DOMAIN_GTT;
     // hsaKmtMemoryGetCpuAddr follows a prime import with GEM_MMAP. A zero offset
     // is "no mapping" and that call fails the VMM handle create.
     const uint64_t map_bytes = (size + 4095) & ~uint64_t{4095};

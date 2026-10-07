@@ -854,8 +854,9 @@ TEST(InterposerDrmTest, GemOpReportsTheCreateSize) {
   ASSERT_GE(drm, 0);
   drm_amdgpu_gem_create create{};
   create.in.bo_size = 8192;
-  create.in.alignment = 4096;
-  create.in.domains = AMDGPU_GEM_DOMAIN_VRAM;
+  create.in.alignment = 65536;
+  create.in.domains = AMDGPU_GEM_DOMAIN_CPU;
+  create.in.domain_flags = AMDGPU_GEM_CREATE_EXT_COHERENT;
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
 
   drm_amdgpu_gem_create_in info{};
@@ -865,7 +866,13 @@ TEST(InterposerDrmTest, GemOpReportsTheCreateSize) {
   op.value = reinterpret_cast<uint64_t>(&info);
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &op), 0);
   EXPECT_EQ(info.bo_size, 8192u);
-  EXPECT_EQ(info.domains, static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_VRAM));
+  EXPECT_EQ(info.alignment, 65536u);
+  EXPECT_EQ(info.domains, static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_CPU));
+  EXPECT_EQ(info.domain_flags, static_cast<uint64_t>(AMDGPU_GEM_CREATE_EXT_COHERENT));
+
+  op.value = 1;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &op), -1);
+  EXPECT_EQ(errno, EFAULT);
 
   EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
