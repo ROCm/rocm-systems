@@ -405,14 +405,23 @@ static int open_events_file(const std::string& path, std::int64_t* existing_size
 // through a symbolic link or a hard link. Truncation happens only after the
 // opened inode has been checked, so a planted hard link cannot empty a file
 // outside the archive, and O_NONBLOCK keeps a planted FIFO from blocking the
-// open. Async-signal-safe: emergency_finalize reaches it through HRR_OPEN.
+// open. A refused inode fails with EPERM, so the caller's message names the
+// reason. Async-signal-safe: emergency_finalize reaches it through HRR_OPEN.
 static int open_private_fd(const char* path) {
   const int fd = ::open(path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
   if (fd < 0) return -1;
   struct stat st{};
-  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 || !owned_by_euid(st) ||
-      ((st.st_mode & 07777) != 0600 && ::fchmod(fd, 0600) != 0) || ::ftruncate(fd, 0) != 0) {
+  int err = 0;
+  if (::fstat(fd, &st) != 0) {
+    err = errno;
+  } else if (!S_ISREG(st.st_mode) || st.st_nlink != 1 || !owned_by_euid(st)) {
+    err = EPERM;
+  } else if (((st.st_mode & 07777) != 0600 && ::fchmod(fd, 0600) != 0) || ::ftruncate(fd, 0) != 0) {
+    err = errno;
+  }
+  if (err != 0) {
     ::close(fd);
+    errno = err;
     return -1;
   }
   return fd;

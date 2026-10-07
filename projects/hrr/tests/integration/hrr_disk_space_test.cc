@@ -57,6 +57,12 @@
 // 32-bit targets.
 static_assert(sizeof(void*) == 8, "the statvfs fake assumes an LP64 target");
 
+// Set by a workload in another file of this binary. Each statvfs and statvfs64
+// call runs it first, faked or not. The capture writer reads free space on its
+// pid-<pid> directory while it opens the archive, after it has removed a stale
+// active marker and before it creates its own.
+std::atomic<void (*)(const char*)> g_hrr_statvfs_hook{nullptr};
+
 namespace {
 
 constexpr uint64_t kBlock = 4096;
@@ -147,6 +153,7 @@ bool wait_for(const std::atomic<bool>& flag, int timeout_ms) {
 }
 
 int fake_statvfs(const char* name, const char* path, struct statvfs* buf) {
+  if (auto hook = g_hrr_statvfs_hook.load(std::memory_order_acquire)) hook(path);
   if (!is_faked(path)) {
     using Fn = int (*)(const char*, struct statvfs*);
     static Fn real[2] = {reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "statvfs")),

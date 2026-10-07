@@ -67,9 +67,12 @@
 #include "hrr_clock_hook.hh"
 
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -84,7 +87,6 @@
 #include <unistd.h>
 #endif
 #if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
-#include <cerrno>
 #include <cstddef>
 #include <linux/audit.h>
 #include <linux/filter.h>
@@ -343,6 +345,35 @@ TEST_CASE("Unit_HRR_CaptureActiveMarker_Direct", "[.][hrr-direct]") {
   CHECK(read_text_file(marker) == boot + " " + start + "\n");
 #endif
   HRR_HIP_CHECK(hipFree(d));
+}
+
+// ---------------------------------------------------------------------------
+// Hidden ([.]) workload for Unit_HRR_CaptureActiveMarker. The capture writer
+// removes a stale pid-<pid>/active before it reads free space on pid-<pid>,
+// and creates its own marker after. The statvfs hook from
+// hrr_disk_space_test.cc plants a hard link to HRR_TEST_VICTIM there in
+// between, so the writer opens that file and refuses it. The workload's one
+// HIP call opens the capture.
+// ---------------------------------------------------------------------------
+extern std::atomic<void (*)(const char*)> g_hrr_statvfs_hook;
+
+namespace {
+void plant_marker_link(const char* path) {
+  const std::string dir(path);
+  const std::string pid_dir = "/pid-" + std::to_string(::getpid());
+  if (dir.size() < pid_dir.size() ||
+      dir.compare(dir.size() - pid_dir.size(), pid_dir.size(), pid_dir) != 0)
+    return;
+  g_hrr_statvfs_hook = nullptr;
+  if (const char* victim = std::getenv("HRR_TEST_VICTIM"))
+    (void)::link(victim, (dir + "/active").c_str());
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_CaptureMarkerRefused_Direct", "[.][hrr-direct]") {
+  g_hrr_statvfs_hook = plant_marker_link;
+  HRR_HIP_CHECK(hipSetDevice(0));
+  g_hrr_statvfs_hook = nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -886,6 +917,10 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
  *     message and nothing is appended to events.bin, which stays without a
  *     marker next to it: the state a resume that fails after opening
  *     events.bin leaves behind.
+ *   - Runs Unit_HRR_CaptureMarkerRefused_Direct, which plants a hard link to
+ *     a file outside the archive at pid-<pid>/active while the archive opens:
+ *     capture is disabled, the message gives EPERM as the reason, and the
+ *     linked file keeps its contents.
  *   - Copies a finished archive into the next run's pid-<pid> and runs
  *     Unit_HRR_CaptureTrimFails_Direct, whose seccomp filter fails the
  *     ftruncate that would cut the trailer off. Capture is disabled with a
@@ -948,6 +983,20 @@ HRR_TEST_CASE(Unit_HRR_CaptureActiveMarker) {
     // appended.
     CHECK(fs::file_size(archives.front() / "events.bin") <= first_bytes);
     CHECK_FALSE(fs::is_regular_file(fs::symlink_status(archives.front() / "active")));
+  }
+
+  SECTION("marker refused, with the reason") {
+    const PlantedRun run = capture_after_planting(
+        base, work.path / "plant.sh",
+        "export HRR_TEST_VICTIM='" + victim_file.string() + "'\n",
+        "Unit_HRR_CaptureMarkerRefused_Direct");
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    // The inode is refused after open() succeeded, so errno is whatever an
+    // earlier call left unless the writer sets it.
+    CHECK(disabled_because(run.output, "cannot create ",
+                           "/active (" + std::string(std::strerror(EPERM)) + ")"));
+    CHECK(file_holds(victim_file, "must survive a capture\n"));
   }
 
   SECTION("resume that cannot trim the trailer") {
