@@ -45,6 +45,11 @@
 # It reaches the live dispatch table through rocprofiler-register, with
 # hrr_dispatch_tool.cc as the tool library. Linux only.
 #
+# hrr_fatbin_header_test.cc covers which registered fat binaries capture stores:
+# its hidden [.][hrr-direct] workload registers valid and altered bundle
+# headers itself, before and after HIP initialises. It compiles its kernel with
+# hipRTC, so it is a plain C++ translation unit.
+#
 # hrr_disk_space_test.cc covers how capture stops before the file system
 # holding the archive fills. The binary defines statvfs, statvfs64 and fsync to
 # fake a small file system under HIP_HRR_CAPTURE_OUTPUT when the test sets
@@ -82,6 +87,7 @@ add_executable(hrr-integration-tests
   hrr_roundtrip_test.cc
   hrr_api_matrix_test.cc
   hrr_dispatch_swap_test.cc
+  hrr_fatbin_header_test.cc
   hrr_secure_exec_test.cc
 )
 set_target_properties(hrr-integration-tests PROPERTIES
