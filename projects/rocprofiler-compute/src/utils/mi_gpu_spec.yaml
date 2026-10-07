@@ -512,6 +512,36 @@ mi_gpu_spec:
               physical: 6402
 
   #########################################################
+  # RDNA 4 family (gfx120x)
+  - gpu_series: rdna4
+    gpu_archs:
+      - gpu_arch: gfx1201
+        # Slot counts inherited from gfx1151 (RDNA3.5): RDNA4 keeps the same
+        # perfmon block layout. Only SQ, GRBM and GL2C have been confirmed on
+        # hardware; the rest are unverified and may need narrowing.
+        perfmon_config:
+          SQ: 8
+          SQC: 4
+          TA: 2
+          TCP: 4
+          GRBM: 2
+          CPC: 2
+          CPF: 2
+          GCEA: 2
+          SPI: 6
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
+        models:
+          - gpu_model: rdna4_navi48
+            design:
+              memory_levels: ["LDS", "L0", "L1", "L2"]
+            chip_ids:
+              physical: 30033
+
+
+  #########################################################
   # gfx1250 family
   - gpu_series: gfx1250_series
     gpu_archs:

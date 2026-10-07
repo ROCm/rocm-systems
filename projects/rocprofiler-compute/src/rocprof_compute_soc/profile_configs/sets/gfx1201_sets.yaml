@@ -1,0 +1,108 @@
+# Profile shortcut sets for gfx1201 (RDNA4 - Navi48 XTW, e.g. Radeon AI PRO R9700)
+#
+# Each set provides a named subset of the full profile for quick-look analysis.
+# Use with: rocprof-compute profile --set <set_option> ...
+#
+# Panel IDs for gfx1201:
+#   200 = System Speed-of-Light
+#   400 = Roofline
+#   500 = CPC
+#   600 = SPI
+#   700 = WGP
+#   900 = L0 Cache (TCP)
+#  1100 = L1 Cache (GL1C)
+#  1300 = L2 Cache (GL2C)
+#  1400 = GCEA
+#  1700 = GRBM
+
+sets:
+- title: Compute Throughput FLOPS
+  set_option: compute_thruput_flops
+  description: >-
+    Key compute throughput metrics: VALU FP32 and FP64 FLOPS, WMMA throughput,
+    IPC, and wavefront occupancy. Use for identifying compute-bound kernels.
+  metric:
+  - 2.1.0: VALU FLOPs (FP32)
+  - 2.1.1: WMMA FLOPs (F16->F32 16x16x16)
+  - 2.1.2: VALU FLOPs (F64)
+  - 2.1.3: IPC
+  - 2.1.4: Wavefront Occupancy
+
+- title: Memory Throughput
+  set_option: mem_thruput
+  description: >-
+    Key memory bandwidth metrics: GL0/GL1/GL2 cache hit rates and bandwidth,
+    fabric read/write bandwidth, and LDS bank conflicts.
+    Use for identifying memory-bound kernels and bandwidth bottlenecks.
+  metric:
+  - 2.1.5: GL2 Cache Hit Rate
+  - 2.1.6: GL2-Fabric Read BW
+  - 2.1.7: GL2-Fabric Write BW
+  - 2.1.10: GL0 Cache Hit Rate (TCP Cache)
+  - 2.1.11: GL0 Cache BW (TCP Cache)
+  - 2.1.12: GL1 Cache Hit Rate
+  - 2.1.13: GL1 Cache Read BW
+  - 2.1.14: GL2 Cache BW
+
+- title: LDS Performance
+  set_option: lds_perf
+  description: >-
+    LDS (Local Data Share) performance: bank conflicts, bandwidth, and
+    instruction mix. Use for optimizing shared memory usage.
+  metric:
+  - 2.1.8: LDS Bank Conflicts
+  - 7.4.1: LDS Instructions
+  - 7.4.2: LDS Bandwidth
+
+- title: Launch Stats
+  set_option: launch_stats
+  description: >-
+    Kernel launch and resource utilization statistics: grid size, workgroup
+    size, VGPR/SGPR register usage, LDS allocation.
+  metric:
+  - 7.2.0: Grid Size
+  - 7.2.1: Workgroup Size
+  - 7.3.0: Dispatched Waves
+  - 7.2.2: VGPRs
+  - 7.2.3: SGPRs
+  - 7.2.4: LDS Allocation
+  - 7.2.5: Scratch Allocation
+
+- title: Instruction Mix
+  set_option: inst_mix
+  description: >-
+    Instruction mix breakdown: VALU, SALU, SMEM, VMEM (Tex), LDS, flat
+    instructions and their issued counts per wave. Use to understand
+    instruction distribution and shader workload balance.
+  metric:
+  - 7.5.0: VALU Instructions
+  - 7.5.1: SALU Instructions
+  - 7.5.2: SMEM Instructions
+  - 7.5.3: Texture Load Instructions
+  - 7.5.4: Texture Store Instructions
+  - 7.5.5: LDS Instructions
+  - 7.5.6: Flat Instructions
+
+- title: Wave Wait Analysis
+  set_option: wave_wait
+  description: >-
+    Wavefront stall and wait analysis: dependency wait cycles and
+    instruction-issue stalls. Use to identify execution bottlenecks
+    caused by memory latency or RAW dependencies.
+  metric:
+  - 2.1.9: Wave Dependency Wait
+  - 2.1.10: Wave Issue Wait
+
+- title: Cache Efficiency
+  set_option: cache_efficiency
+  description: >-
+    Full cache hierarchy efficiency: instruction and scalar data cache
+    hit rates, and all cache bandwidth metrics from L0 to DRAM.
+  metric:
+  - 2.1.15: Scalar Data Cache Hit Rate
+  - 2.1.16: Scalar Data Cache BW
+  - 2.1.17: Instruction Cache Hit Rate
+  - 2.1.18: Instruction Cache BW
+  - 2.1.10: GL0 Cache Hit Rate (TCP Cache)
+  - 2.1.12: GL1 Cache Hit Rate
+  - 2.1.5: GL2 Cache Hit Rate
