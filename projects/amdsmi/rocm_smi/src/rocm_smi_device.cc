@@ -1180,12 +1180,16 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_bin
   size_t num = fread(p_binary_data, b_size, 1, ptr);
   fclose(ptr);
   if ((num * b_size) != b_size) {
+    // The node opened, so it is neither missing nor unreadable: it simply held
+    // fewer bytes than it said it would. Report that as a size error, because
+    // ENOENT would reach the caller as NOT_SUPPORTED and read as a verdict on
+    // the device rather than on the data.
     ss << "Could not read DevInfoBinary for DevInfoType (" << get_type_string(type) << ") - SYSFS ("
        << sysfs_path << "), binary size error; "
        << "[buff: " << p_binary_data << " size: " << b_size << " read: " << num << "]"
-       << ", returning ENOENT (" << std::strerror(ENOENT) << ")";
+       << ", returning EIO (" << std::strerror(EIO) << ")";
     LOG_ERROR(ss);
-    return ENOENT;
+    return EIO;
   }
 
   if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
