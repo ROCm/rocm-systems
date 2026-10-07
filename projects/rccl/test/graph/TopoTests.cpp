@@ -1061,6 +1061,80 @@ TEST_F(TopoTest, RingSearch_TwoRailNode_StaysOnTheLocalNicPathType) {
       {{"NCCL_CROSS_NIC", "2"}});
 }
 
+// DPX: a partition reaching another GPU's NIC keeps its PXN relay path and gets GDR via the relay, like a whole GPU.
+TEST_F(TopoTest, CheckGdr_DpxPartitionKeepsPxnRelayGdr) {
+  // PXN is off by default and NCCL_PARAM caches it per process, so the body runs in a child with PXN on.
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "CheckGdr_DpxPartitionKeepsPxnRelayGdr",
+      [this]() {
+        constexpr int kRails = 2;
+        constexpr int kParts = 2;
+        const uint64_t host = 0xe5;
+        struct ncclXmlNode* cpu = addSystemCpu(host);
+        struct ncclXmlNode* gpus[kRails][kParts] = {};
+        for (int r = 0; r < kRails; r++) {
+          const int busBase = 0x0b + r * 0x10;
+          char switchBus[32], gpuLegBus[32], nicLegBus[32], gpuBus[32], nicBus[32];
+          snprintf(switchBus, sizeof(switchBus), "0000:%02x:00.0", busBase);
+          snprintf(gpuLegBus, sizeof(gpuLegBus), "0000:%02x:01.0", busBase);
+          snprintf(nicLegBus, sizeof(nicLegBus), "0000:%02x:02.0", busBase);
+          railGpuBusId(r, gpuBus, sizeof(gpuBus));
+          snprintf(nicBus, sizeof(nicBus), "0000:%02x:00.0", busBase + 2);
+          struct ncclXmlNode* pciSwitch = addPciBridge(cpu, switchBus);
+          struct ncclXmlNode* gpuPci = addGpuPci(addPciBridge(pciSwitch, gpuLegBus), gpuBus, "gfx942",
+                                                 /*rank=*/r * kParts, /*dev=*/r * kParts, /*mloPart=*/0);
+          ASSERT_EQ(xmlGetSub(gpuPci, "gpu", &gpus[r][0]), ncclSuccess);
+          for (int p = 1; p < kParts; p++) {
+            gpus[r][p] = addGpuUnderPci(gpuPci, "gfx942", r * kParts + p, r * kParts + p, p);
+          }
+          addNic(addPciBridge(pciSwitch, nicLegBus), nicBus, /*dev=*/r);
+        }
+        // XGMI from every partition to every partition of the other GPU, addressed by the partition's PCI function.
+        for (int r = 0; r < kRails; r++) {
+          char peerBus[32];
+          railGpuBusId(1 - r, peerBus, sizeof(peerBus));
+          for (int p = 0; p < kParts; p++) {
+            for (int q = 0; q < kParts; q++) {
+              char target[32];
+              snprintf(target, sizeof(target), "%.*s%d", (int)strlen(peerBus) - 1, peerBus, q);
+              addGpuLink(gpus[r][p], target, /*count=*/8, PCI_ACCELERATOR_CLASS);
+            }
+          }
+        }
+
+        struct ncclTopoSystem* built = buildSystemWithPaths(host);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, kRails * kParts);
+        ASSERT_EQ(built->nodes[NET].count, kRails);
+
+        for (int g = 0; g < built->nodes[GPU].count; g++) {
+          struct ncclTopoNode* gpu = built->nodes[GPU].nodes + g;
+          ASSERT_NE(gpu->gpu.mloPart, NCCL_TOPO_UNDEF);
+          ASSERT_NE(gpu->gpu.parent, nullptr);
+          for (int n = 0; n < built->nodes[NET].count; n++) {
+            struct ncclTopoNode* net = built->nodes[NET].nodes + n;
+            SCOPED_TRACE(testing::Message() << "rank " << gpu->gpu.rank << " mlopart " << gpu->gpu.mloPart
+                                            << " net " << net->net.dev);
+            enum ncclTopoGdrMode mode = ncclTopoGdrModeDisable;
+            ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, net->id, /*read=*/1, &mode), ncclSuccess);
+            EXPECT_NE(mode, ncclTopoGdrModeDisable);
+            if (gpu->gpu.parent->paths[NET][n].type == PATH_PXB) {
+              EXPECT_EQ(gpu->paths[NET][n].type, PATH_PXB);
+              continue;
+            }
+            // The other rail's NIC: reached through a partition of the GPU that owns it.
+            EXPECT_EQ(gpu->paths[NET][n].type, PATH_PXN);
+            int proxyRank = -1;
+            ASSERT_EQ(ncclTopoGetIntermediateRank(built, gpu->gpu.rank, net->id, &proxyRank), ncclSuccess);
+            EXPECT_NE(proxyRank, gpu->gpu.rank);
+          }
+        }
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_PXN_DISABLE", "0"}});
+}
+
 #else // !(__HIP_PLATFORM_AMD__ || __HIPCC__)
 
 // ncclTopoAddXGMI() is not built on non-HIP platforms, so register one skipped

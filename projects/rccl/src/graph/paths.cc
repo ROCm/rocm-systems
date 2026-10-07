@@ -623,6 +623,10 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
   }
 
   int distance = ncclTopoGdrDistance(gpu, n);
+  // PXN relays live only on the GPU's own entry; a partition's parent DEV entry never carries PATH_PXN.
+  if (gpu->paths[NET] != NULL && gpu->paths[NET][n].type == PATH_PXN) {
+    distance = PATH_PXN;
+  }
   if (distance == PATH_PXN) {
     // In case of PXN, use the intermediate GPU distance instead
     int proxyRank;
