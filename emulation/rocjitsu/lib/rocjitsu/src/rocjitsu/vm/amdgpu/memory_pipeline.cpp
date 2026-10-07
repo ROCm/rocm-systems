@@ -47,7 +47,14 @@ MemoryPipeline::~MemoryPipeline() {
 
 MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instruction &inst) const {
   WaitCounterTokens counters;
-  if (const auto *issue = inst.amdgpu_memory_issue_info()) {
+  const DynamicInstState *state = inst.data();
+  const auto *issue = inst.amdgpu_memory_issue_info();
+  if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM)) {
+    const auto &routed = inst.data_as<VectorMemState>()->routed_issue_info;
+    if (routed)
+      issue = &*routed;
+  }
+  if (issue) {
     for (const auto obligation : issue->counter_obligations()) {
       for (uint8_t token = 0; token < obligation.counter_increment(); ++token)
         counters.types[counters.size++] = obligation.wait_counter_type();
@@ -56,7 +63,6 @@ MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instructi
   }
 
   WaitCounterType counter = counter_type_;
-  const DynamicInstState *state = inst.data();
   if (state != nullptr) {
     switch (state->tag()) {
     case SCALAR_MEM:
