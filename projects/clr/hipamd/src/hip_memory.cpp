@@ -3102,9 +3102,18 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
   }
 
+  size_t sizeAttrIdx = 0;
   for (size_t i = 0; i < count; ++i) {
     if (sizes[i] == 0) {
       return fail(i, hipErrorInvalidValue);
+    }
+    // sizesDst applies to swap entries only (0 < sizesDst[i] <= sizes[i]); it must be 0 otherwise.
+    if (sizesDst != nullptr) {
+      const bool isSwap = getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, sizeAttrIdx) &
+                          hipMemcpyFlagExtOpSwap;
+      if (isSwap ? (sizesDst[i] == 0 || sizesDst[i] > sizes[i]) : sizesDst[i] != 0) {
+        return fail(i, hipErrorInvalidValue);
+      }
     }
   }
 
@@ -3254,20 +3263,8 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
 
     amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, i, isAsync);
 
-    // sizesDst applies to swap entries only (0 < sizesDst[i] <= sizes[i]); it must be 0 otherwise.
-    size_t sizeB = 0;
-    if (sizesDst != nullptr) {
-      if (metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
-        sizeB = sizesDst[i];
-        if (sizeB == 0 || sizeB > sizes[i]) {
-          if (failIdx != nullptr) *failIdx = i;
-          return hipErrorInvalidValue;
-        }
-      } else if (sizesDst[i] != 0) {
-        if (failIdx != nullptr) *failIdx = i;
-        return hipErrorInvalidValue;
-      }
-    }
+    // Validated up front; non-zero only for swap entries.
+    const size_t sizeB = (sizesDst != nullptr) ? sizesDst[i] : 0;
 
     switch (type) {
       case hipCopyBuffer:
@@ -3381,6 +3378,7 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
                                size_t* failIdx, hipStream_t stream) {
   HIP_INIT_API(hipMemcpyBatchAsync, dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx,
                stream);
+  if (failIdx != nullptr) *failIdx = SIZE_MAX;
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
@@ -3427,7 +3425,7 @@ hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
   // Not supported while the stream is capturing.
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
-    hip_stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    hip_stream->InvalidateCapture();
     HIP_RETURN(hipErrorStreamCaptureUnsupported);
   }
   if (hip_stream->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {

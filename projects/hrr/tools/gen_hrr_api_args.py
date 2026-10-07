@@ -1300,6 +1300,21 @@ DEREF_FIELDS: Dict[str, List[Deref]] = {
         Deref("attrsIdxs", "size_t", 8, count="numAttrs", max_count=16),
         Deref("failIdx", "size_t", 8, direction="out"),
     ],
+    # Same arrays as hipMemcpyBatchAsync, plus the swap partner sizes and the
+    # per-entry waits/signals, whose addr is a recorded device address.
+    "hipExtMemcpyBatchAsync": [
+        Deref("dsts", "void*", 8, count="count", max_count=16, elem_ptr=True),
+        Deref("srcs", "void*", 8, count="count", max_count=16, elem_ptr=True),
+        Deref("sizes", "size_t", 8, count="count", max_count=16),
+        Deref("sizesDst", "size_t", 8, count="count", max_count=16),
+        Deref("waits", "hipExtMemcpyWait", 64, count="count", max_count=16,
+              ptr_members=("addr",)),
+        Deref("signals", "hipExtMemcpySignal", 64, count="count", max_count=16,
+              ptr_members=("addr",)),
+        Deref("attrs", "hipExtMemcpyAttributes", 56, count="numAttrs",
+              max_count=16),
+        Deref("attrsIdxs", "size_t", 8, count="numAttrs", max_count=16),
+    ],
     # Each operand is a tagged union of a pointer and an array handle, so
     # which member holds the recorded address depends on the tag beside it —
     # a rewrite no table entry can express.
@@ -2070,8 +2085,10 @@ _HEADER_PREAMBLE = """\
  * v8: hipDeviceFlushGPUDirectRDMAWrites and hipLibraryGetModule were
  * appended to HipDispatchTable. Each took a compiler ID, so the compiler
  * API IDs moved up by two. develop still records both under v7. A v7
- * reader decodes those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)8u)
+ * reader decodes those events as the wrong API.
+ * v9: hipKernelSetAttributeForDevice and hipExtMemcpyBatchAsync were
+ * appended to HipDispatchTable, shifting the compiler API IDs up by two. */
+#define HRR_VERSION ((uint16_t)9u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)

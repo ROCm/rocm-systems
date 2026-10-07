@@ -1370,6 +1370,62 @@ HRR_TEST_CASE(Unit_HRR_ChevronLaunchRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_ChevronLaunch_Direct", cap.path, 5);
 }
 
+// Capture records only successful calls, so the swap event exists only where swap runs.
+static bool hrr_device_supports_batch_swap() {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void *a = nullptr, *b = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&a, 256));
+  HRR_HIP_CHECK(hipMalloc(&b, 256));
+  void* dsts[] = {a};
+  void* srcs[] = {b};
+  size_t sizes[] = {256};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  size_t attr_idx[] = {0};
+  const hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr, 1,
+                                                &attr, attr_idx, 1, nullptr);
+  if (err == hipErrorNotSupported) {
+    (void)hipGetLastError();
+  } else {
+    HRR_HIP_CHECK(err);
+    HRR_HIP_CHECK(hipDeviceSynchronize());
+  }
+  HRR_HIP_CHECK(hipFree(a));
+  HRR_HIP_CHECK(hipFree(b));
+  return err != hipErrorNotSupported;
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ExtMemcpyBatch_Direct and REQUIRE the archive holds a
+ *     hipExtMemcpyBatchAsync event; where swap is supported, REQUIRE the
+ *     asymmetric-swap event with its sizesDst recorded.
+ *   - Replay and validate the D2H readbacks, which only the batches write.
+ */
+HRR_TEST_CASE(Unit_HRR_ExtMemcpyBatchRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmemcpybatch"};
+  hrr_run_roundtrip("Unit_HRR_ExtMemcpyBatch_Direct", cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  const auto is_batch = [](const hrr::Event& ev) {
+    return ev.header().event_type == HRR_API_HIPEXTMEMCPYBATCHASYNC;
+  };
+  REQUIRE(std::any_of(arc.events.begin(), arc.events.end(), is_batch));
+  if (!hrr_device_supports_batch_swap()) return;
+  REQUIRE(std::any_of(arc.events.begin(), arc.events.end(), [&](const hrr::Event& ev) {
+    if (!is_batch(ev)) return false;
+    hrr_args_hipExtMemcpyBatchAsync a{};
+    if (ev.raw_payload.size() < sizeof(a)) return false;
+    std::memcpy(&a, ev.raw_payload.data(), sizeof(a));
+    size_t sizes_dst = 0;
+    std::memcpy(&sizes_dst, a.sizesDst_bytes, sizeof(sizes_dst));
+    return a.sizesDst_present && a.sizesDst_n == 1 && sizes_dst == 1024;
+  }));
+}
+
 /**
  * Test Description
  * ----------------

@@ -1691,7 +1691,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     }
   }
 
-  // Reject asymmetric swaps up front; the caller decomposes them.
+  // Reject asymmetric swaps before this op submits; the caller decomposes them.
   if (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP && dst_size_list != nullptr) {
     for (uint32_t d = 0; d < num_entries; ++d) {
       if (dst_size_list[d] != size_list[d] && !engines[d].blit->NativeAsymmetricSwapSupported())
