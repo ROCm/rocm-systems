@@ -4017,7 +4017,7 @@ void VMinNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4028,7 +4028,7 @@ void VMinNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
               amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MinNum>{
-                  compare_policy},
+                  input_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -4061,7 +4061,7 @@ RJ_NOINLINE void VMinNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
           amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4072,7 +4072,7 @@ RJ_NOINLINE void VMinNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
           static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
               amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MinNum>{
-                  compare_policy},
+                  input_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -4093,7 +4093,7 @@ void VMaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4104,7 +4104,7 @@ void VMaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
               amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MaxNum>{
-                  compare_policy},
+                  input_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -4137,7 +4137,7 @@ RJ_NOINLINE void VMaxNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
           amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4148,7 +4148,7 @@ RJ_NOINLINE void VMaxNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
           static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
               amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::MaxNum>{
-                  compare_policy},
+                  input_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -6935,7 +6935,7 @@ void VMinimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6946,7 +6946,7 @@ void VMinimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
               amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Minimum>{
-                  compare_policy},
+                  input_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -6979,7 +6979,7 @@ RJ_NOINLINE void VMinimumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
           amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6990,7 +6990,7 @@ RJ_NOINLINE void VMinimumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
           static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
               amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Minimum>{
-                  compare_policy},
+                  input_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -7011,7 +7011,7 @@ void VMaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7022,7 +7022,7 @@ void VMaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
               amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Maximum>{
-                  compare_policy},
+                  input_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -7055,7 +7055,7 @@ RJ_NOINLINE void VMaximumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
           amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())});
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto compare_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7066,7 +7066,7 @@ RJ_NOINLINE void VMaximumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
           static_cast<uint16_t>(amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
               amdgpu::floating_operation::SourceModifiers{inst_.abs, inst_.neg}, output_policy,
               amdgpu::minmax::Operation<amdgpu::fp_format::F16, amdgpu::minmax::Maximum>{
-                  compare_policy},
+                  input_policy},
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
