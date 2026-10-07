@@ -38,7 +38,6 @@
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_system.h"
-#include "amd_smi/impl/amd_smi_temp_testing.h"
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
 #include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
 #include "amd_smi/impl/scoped_fd.h"

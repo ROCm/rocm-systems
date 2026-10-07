@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-#include "amd_smi/impl/amd_smi_temp_testing.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
 #include "rocm_smi/rocm_smi_main.h"
