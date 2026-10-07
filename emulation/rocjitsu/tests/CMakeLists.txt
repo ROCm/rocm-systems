@@ -842,16 +842,50 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
     endif()
 endif()
+set(_rj_l2_mutex_cases
+    ReaderRechecksAdmissionAfterWriterEnters
+    WriterWaitsAgainAfterNonzeroCounterWake
+    CoherenceDomainWritersUnderOuterLocks
+    FailedWriterTryReopensReaderAdmission
+    WriterExcludesReadersAndOtherWriters
+    ConcurrentReadersObserveCompleteWriterUpdates
+    PendingWriterClosesAdmissionAndWakesAfterLastReader
+    CollidingReadersOverlapAndWriterWaitsForTheLastOwner
+    ExclusiveUnlockWakesBlockingReaders
+)
+# Exclude exactly the cases registered below, so future cases still participate
+# in normal discovery until they receive an explicit timeout registration.
+set(_rj_gtest_exclusions
+    "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+)
+foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
+    string(
+        APPEND _rj_gtest_exclusions
+        ":L2MaintenanceMutexTest.${_l2_mutex_case}"
+    )
+endforeach()
+
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
-# and the concurrent-close wait test are registered separately so CTest can
-# bound a deadlocked child process.
-rj_add_gtest_tests(
-    rocjitsu_tests
-    TEST_FILTER
-        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
-)
+# and the concurrent-close wait test, plus the L2 mutex suite, are registered
+# separately so CTest can bound a deadlocked child process.
+rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
+
+# A failed assertion cannot bound a blocked join or jthread destructor. Give
+# each L2 mutex case its own process timeout in build-tree and installed tests.
+foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
+    rj_add_test(
+        NAME "L2MaintenanceMutexTest.${_l2_mutex_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
+    )
+endforeach()
 
 # GoogleTest registers every parameter before applying its filter. Keep the FP
 # matrices in their own executable so unrelated tests do not pay that cost.

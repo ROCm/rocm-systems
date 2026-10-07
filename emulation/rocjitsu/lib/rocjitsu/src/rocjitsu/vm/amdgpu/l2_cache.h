@@ -3,18 +3,6 @@
 
 /// @file l2_cache.h
 /// @brief L2 cache component shared per XCD.
-///
-/// @par Synchronization
-/// Normal line accesses take a shared maintenance guard followed by a per-set
-/// mutex; whole-cache maintenance takes the guard exclusively. Device atomics
-/// and domain-wide maintenance exclude every L2 in the coherence domain.
-/// Operations on a set are atomic, but multi-line requests are not snapshots.
-///
-/// Stale readers drop shared admission before taking the per-L2 reconciliation
-/// mutex, then reacquire admission and recheck the epoch so peers reuse the first
-/// refresh. The reconciliation mutex is always acquired before the maintenance
-/// guard; direct maintenance never acquires it. See L2MaintenanceMutex for the
-/// admission and publication protocol.
 
 #pragma once
 
@@ -74,6 +62,22 @@ namespace amdgpu {
 ///
 /// Provides structural ports for the topology graph (IN for CU L1 miss
 /// requests, OUT for HBM/fabric traffic).
+///
+/// @par Thread safety
+/// Public cache operations are thread-safe.
+/// Normal line accesses take shared maintenance admission before a per-set
+/// mutex; whole-cache maintenance takes admission exclusively. Independent sets
+/// proceed concurrently while admission is open. A writer that closes the gate
+/// blocks new accesses to every set while existing accesses finish. Device
+/// atomics and domain-wide maintenance exclude every L2 in the coherence domain.
+/// Operations on a set are atomic, but multi-line requests are not snapshots.
+///
+/// Current-epoch accesses skip reconciliation. Stale accesses release shared
+/// admission before taking the per-L2 reconciliation mutex, then reacquire
+/// admission and recheck the epoch so peers reuse the first refresh. When both
+/// locks are held, reconciliation precedes maintenance admission; admission
+/// always precedes the per-set mutex. Direct maintenance never acquires the
+/// reconciliation mutex. See L2MaintenanceMutex for admission and publication.
 class L2Cache : public simdojo::Component {
 public:
   static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes

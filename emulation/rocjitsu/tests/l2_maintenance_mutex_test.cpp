@@ -10,7 +10,6 @@
 #include <barrier>
 #include <chrono>
 #include <condition_variable>
-#include <functional>
 #include <future>
 #include <latch>
 #include <mutex>
@@ -18,7 +17,115 @@
 #include <thread>
 #include <vector>
 
+namespace rocjitsu::amdgpu {
+
+class L2MaintenanceMutexTestAccess {
+public:
+  static constexpr size_t reader_shards() { return L2MaintenanceMutex::kReaderShards; }
+  static size_t reader_shard() { return L2MaintenanceMutex::reader_shard(); }
+  template <typename Hooks> static void lock_shared(L2MaintenanceMutex &mutex, Hooks hooks) {
+    mutex.lock_shared_impl(hooks);
+  }
+  template <typename Hooks> static bool try_lock_shared(L2MaintenanceMutex &mutex, Hooks hooks) {
+    return mutex.try_lock_shared_impl(hooks);
+  }
+  template <typename Hooks> static void lock(L2MaintenanceMutex &mutex, Hooks hooks) {
+    mutex.lock_impl(hooks);
+  }
+  static std::atomic<unsigned> &reader_count(L2MaintenanceMutex &mutex, size_t shard) {
+    return mutex.readers_[shard].count;
+  }
+};
+
+} // namespace rocjitsu::amdgpu
+
 namespace {
+using MutexTestAccess = rocjitsu::amdgpu::L2MaintenanceMutexTestAccess;
+
+TEST(L2MaintenanceMutexTest, ReaderRechecksAdmissionAfterWriterEnters) {
+  for (bool blocking : {false, true}) {
+    SCOPED_TRACE(blocking);
+    rocjitsu::amdgpu::L2MaintenanceMutex mutex;
+    std::latch checked_open(1), resume_reader(1);
+    std::promise<bool> reader_outcome;
+    auto outcome = reader_outcome.get_future().share();
+    struct Hooks {
+      std::latch &checked_open, &resume_reader;
+      std::promise<bool> &outcome;
+      bool first = true;
+      void before_reader_increment() {
+        if (first) {
+          first = false;
+          checked_open.count_down();
+          resume_reader.wait();
+        }
+      }
+      void reader_retry() { outcome.set_value(false); }
+    };
+    std::jthread reader([&] {
+      Hooks hooks{checked_open, resume_reader, reader_outcome};
+      if (blocking) {
+        MutexTestAccess::lock_shared(mutex, hooks);
+        // If the recheck was removed, entry precedes the retry notification.
+        if (outcome.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+          reader_outcome.set_value(true);
+        mutex.unlock_shared();
+      } else {
+        const bool acquired = MutexTestAccess::try_lock_shared(mutex, hooks);
+        reader_outcome.set_value(acquired);
+        if (acquired)
+          mutex.unlock_shared();
+      }
+    });
+    checked_open.wait();
+    std::unique_lock writer(mutex);
+    resume_reader.count_down();
+    // A handshake reports either retry/rejection or premature entry. No sleep
+    // is used to infer that the reader reached its admission recheck.
+    EXPECT_FALSE(outcome.get());
+    writer.unlock();
+    reader.join();
+  }
+}
+
+TEST(L2MaintenanceMutexTest, WriterWaitsAgainAfterNonzeroCounterWake) {
+  rocjitsu::amdgpu::L2MaintenanceMutex mutex;
+  // Pin one real counter at two owners without relying on thread-ID collisions.
+  auto &counter = MutexTestAccess::reader_count(mutex, MutexTestAccess::reader_shard());
+  counter.store(2);
+  std::latch waiting_for_two(1), resume_writer(1);
+  std::promise<bool> writer_outcome;
+  auto outcome = writer_outcome.get_future().share();
+  struct Hooks {
+    std::latch &waiting_for_two, &resume_writer;
+    std::promise<bool> &outcome;
+    void before_writer_wait(unsigned active) {
+      if (active == 2) {
+        waiting_for_two.count_down();
+        resume_writer.wait();
+      } else {
+        EXPECT_EQ(active, 1u);
+        outcome.set_value(false);
+      }
+    }
+  };
+  std::jthread writer([&] {
+    MutexTestAccess::lock(mutex, Hooks{waiting_for_two, resume_writer, writer_outcome});
+    if (outcome.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+      writer_outcome.set_value(true);
+    mutex.unlock();
+  });
+  waiting_for_two.wait();
+  counter.store(1);
+  counter.notify_one();
+  resume_writer.count_down();
+  // wait(2) returns on the changed value, but one reader still owns the shard.
+  // The next handshake must be another wait, not entry into the writer section.
+  EXPECT_FALSE(outcome.get());
+  counter.store(0);
+  counter.notify_one();
+  writer.join();
+}
 
 TEST(L2MaintenanceMutexTest, CoherenceDomainWritersUnderOuterLocks) {
   // Model eight XCD caches beneath two coordinator locks. Exercise both
@@ -157,7 +264,7 @@ TEST(L2MaintenanceMutexTest, PendingWriterClosesAdmissionAndWakesAfterLastReader
 
 TEST(L2MaintenanceMutexTest, CollidingReadersOverlapAndWriterWaitsForTheLastOwner) {
   rocjitsu::amdgpu::L2MaintenanceMutex mutex;
-  constexpr size_t kReaders = 129;
+  constexpr size_t kReaders = MutexTestAccess::reader_shards() + 1;
   std::array<size_t, kReaders> slots{};
   std::mutex state_mutex;
   std::condition_variable held_changed;
@@ -169,7 +276,7 @@ TEST(L2MaintenanceMutexTest, CollidingReadersOverlapAndWriterWaitsForTheLastOwne
   std::vector<std::jthread> readers;
   for (size_t i = 0; i < kReaders; ++i) {
     readers.emplace_back([&, i] {
-      slots[i] = std::hash<std::thread::id>{}(std::this_thread::get_id()) % 128;
+      slots[i] = MutexTestAccess::reader_shard();
       std::shared_lock lock(mutex);
       {
         std::lock_guard state_lock(state_mutex);
@@ -194,7 +301,7 @@ TEST(L2MaintenanceMutexTest, CollidingReadersOverlapAndWriterWaitsForTheLastOwne
     readers.clear();
     return;
   }
-  // The fixed 128-slot policy guarantees a collision among 129 live threads.
+  // One more live reader than shards guarantees a collision with the actual policy.
   // Keep one colliding owner last, after every other owner of its slot drains.
   bool found_collision = false;
   for (size_t i = 0; i < kReaders && !found_collision; ++i) {

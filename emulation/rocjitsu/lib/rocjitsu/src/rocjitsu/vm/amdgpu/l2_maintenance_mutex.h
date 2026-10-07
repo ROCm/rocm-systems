@@ -16,7 +16,9 @@
 ///
 /// Ownership is nonrecursive and must be released by the acquiring thread.
 /// TSan annotations expose one shared/exclusive lock without changing the atomic
-/// protocol. Wakeup ordering is documented at release_reader().
+/// protocol. Device maintenance nests multiple L2 locks beneath coordinator
+/// locks; annotating every counter would exhaust TSan's held-lock tracker.
+/// Wakeup ordering is documented at release_reader().
 
 #pragma once
 
@@ -49,46 +51,8 @@ public:
   ~L2MaintenanceMutex() { __tsan_mutex_destroy(this, 0); }
 #endif
 
-  void lock_shared() {
-#ifdef ROCJITSU_L2_MUTEX_TSAN
-    __tsan_mutex_pre_lock(this, __tsan_mutex_read_lock);
-#endif
-    auto &counter = readers_[reader_shard()].count;
-    for (;;) {
-      while (writer_pending_.load(std::memory_order_acquire))
-        writer_pending_.wait(1, std::memory_order_acquire);
-      // The counter increment, gate recheck, writer gate store, and writer
-      // counter loads form one total order. Either the writer observes an
-      // admitted reader, or that reader observes the closed gate and retries.
-      counter.fetch_add(1, std::memory_order_seq_cst);
-      if (!writer_pending_.load(std::memory_order_seq_cst)) {
-#ifdef ROCJITSU_L2_MUTEX_TSAN
-        __tsan_mutex_post_lock(this, __tsan_mutex_read_lock, 0);
-#endif
-        return;
-      }
-      release_reader(counter);
-    }
-  }
-
-  bool try_lock_shared() {
-#ifdef ROCJITSU_L2_MUTEX_TSAN
-    constexpr unsigned flags = __tsan_mutex_read_lock | __tsan_mutex_try_lock;
-    __tsan_mutex_pre_lock(this, flags);
-#endif
-    bool acquired = false;
-    if (!writer_pending_.load(std::memory_order_acquire)) {
-      auto &counter = readers_[reader_shard()].count;
-      counter.fetch_add(1, std::memory_order_seq_cst);
-      acquired = !writer_pending_.load(std::memory_order_seq_cst);
-      if (!acquired)
-        release_reader(counter);
-    }
-#ifdef ROCJITSU_L2_MUTEX_TSAN
-    __tsan_mutex_post_lock(this, flags | (acquired ? 0 : __tsan_mutex_try_lock_failed), 0);
-#endif
-    return acquired;
-  }
+  void lock_shared() { lock_shared_impl(NoopHooks{}); }
+  bool try_lock_shared() { return try_lock_shared_impl(NoopHooks{}); }
 
   void unlock_shared() {
 #ifdef ROCJITSU_L2_MUTEX_TSAN
@@ -100,23 +64,7 @@ public:
 #endif
   }
 
-  void lock() {
-#ifdef ROCJITSU_L2_MUTEX_TSAN
-    __tsan_mutex_pre_lock(this, 0);
-#endif
-    writers_.lock();
-    writer_pending_.store(1, std::memory_order_seq_cst);
-    for (auto &reader : readers_) {
-      unsigned active = reader.count.load(std::memory_order_seq_cst);
-      while (active != 0) {
-        reader.count.wait(active, std::memory_order_acquire);
-        active = reader.count.load(std::memory_order_seq_cst);
-      }
-    }
-#ifdef ROCJITSU_L2_MUTEX_TSAN
-    __tsan_mutex_post_lock(this, 0, 0);
-#endif
-  }
+  void lock() { lock_impl(NoopHooks{}); }
 
   bool try_lock() {
 #ifdef ROCJITSU_L2_MUTEX_TSAN
@@ -151,6 +99,79 @@ public:
   }
 
 private:
+  friend class L2MaintenanceMutexTestAccess;
+
+  // Compile-time hooks let tests control interleavings in the actual protocol.
+  // Normal acquisitions inline empty hooks without storing any test state.
+  struct NoopHooks {
+    void before_reader_increment() const {}
+    void reader_retry() const {}
+    void before_writer_wait(unsigned) const {}
+  };
+
+  template <typename Hooks> void lock_shared_impl(Hooks hooks) {
+#ifdef ROCJITSU_L2_MUTEX_TSAN
+    __tsan_mutex_pre_lock(this, __tsan_mutex_read_lock);
+#endif
+    auto &counter = readers_[reader_shard()].count;
+    for (;;) {
+      while (writer_pending_.load(std::memory_order_acquire))
+        writer_pending_.wait(1, std::memory_order_acquire);
+      // The counter increment, gate recheck, writer gate store, and writer
+      // counter loads form one total order. Either the writer observes an
+      // admitted reader, or that reader observes the closed gate and retries.
+      hooks.before_reader_increment();
+      counter.fetch_add(1, std::memory_order_seq_cst);
+      if (!writer_pending_.load(std::memory_order_seq_cst)) {
+#ifdef ROCJITSU_L2_MUTEX_TSAN
+        __tsan_mutex_post_lock(this, __tsan_mutex_read_lock, 0);
+#endif
+        return;
+      }
+      release_reader(counter);
+      hooks.reader_retry();
+    }
+  }
+
+  template <typename Hooks> bool try_lock_shared_impl(Hooks hooks) {
+#ifdef ROCJITSU_L2_MUTEX_TSAN
+    constexpr unsigned flags = __tsan_mutex_read_lock | __tsan_mutex_try_lock;
+    __tsan_mutex_pre_lock(this, flags);
+#endif
+    bool acquired = false;
+    if (!writer_pending_.load(std::memory_order_acquire)) {
+      auto &counter = readers_[reader_shard()].count;
+      hooks.before_reader_increment();
+      counter.fetch_add(1, std::memory_order_seq_cst);
+      acquired = !writer_pending_.load(std::memory_order_seq_cst);
+      if (!acquired)
+        release_reader(counter);
+    }
+#ifdef ROCJITSU_L2_MUTEX_TSAN
+    __tsan_mutex_post_lock(this, flags | (acquired ? 0 : __tsan_mutex_try_lock_failed), 0);
+#endif
+    return acquired;
+  }
+
+  template <typename Hooks> void lock_impl(Hooks hooks) {
+#ifdef ROCJITSU_L2_MUTEX_TSAN
+    __tsan_mutex_pre_lock(this, 0);
+#endif
+    writers_.lock();
+    writer_pending_.store(1, std::memory_order_seq_cst);
+    for (auto &reader : readers_) {
+      unsigned active = reader.count.load(std::memory_order_seq_cst);
+      while (active != 0) {
+        hooks.before_writer_wait(active);
+        reader.count.wait(active, std::memory_order_acquire);
+        active = reader.count.load(std::memory_order_seq_cst);
+      }
+    }
+#ifdef ROCJITSU_L2_MUTEX_TSAN
+    __tsan_mutex_post_lock(this, 0, 0);
+#endif
+  }
+
   struct alignas(64) Reader {
     std::atomic<unsigned> count{0};
   };
