@@ -2886,9 +2886,11 @@ TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
 // then dispatched into a device function table whose entries are all nullptr,
 // which faults on the device.
 //
-// These assert the return code rather than which rejection branch ran, so they
-// hold for a multi-arch build (where the factor is generated but arch-locked)
-// and for a local-arch build (where it is not generated at all).
+// These assert the return code rather than which rejection branch ran.
+// commSetUnrollFactor reads ncclDevFuncUnrollGenerated, not
+// ncclDevFuncUnrollArch, so a factor this build generated is accepted even
+// when that table pins it to another arch. The rejection holds for a build
+// that did not generate the pinned factor.
 //
 // commSetUnrollFactor reads only archName, nNodes and cuCount, so no GPU is
 // needed. RCCL_PARAM caches RCCL_UNROLL_FACTOR in a function-local static,

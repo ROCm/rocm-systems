@@ -262,9 +262,17 @@ class DeviceTableGenerationTest(unittest.TestCase):
             generated,
         )
         pinned = self._unroll_table("ncclDevFuncUnrollArch", r'nullptr|"gfx\w+"')
-        self.assertEqual('"gfx1250"', pinned["32"])
-        self.assertEqual("nullptr", pinned["8"])
-        self.assertEqual("nullptr", pinned["16"])
+        self.assertEqual(
+            {
+                "1": "nullptr",
+                "2": "nullptr",
+                "4": "nullptr",
+                "8": "nullptr",
+                "16": "nullptr",
+                "32": '"gfx1250"',
+            },
+            pinned,
+        )
 
     def test_all_unrolls_adds_8_and_16_without_unpinning(self):
         # BUILD_ALL_UNROLLS appends 8 and 16 to the per-arch default. Unroll 32
@@ -296,13 +304,11 @@ class DeviceTableGenerationTest(unittest.TestCase):
             "#if (defined(__gfx1250__) || defined(__gfx1250_strict__))\n", header
         )
 
-    # ---- unroll arch restriction (host/device agreement) ---------------------
-    # commSetUnrollFactor rejects an RCCL_UNROLL_FACTOR whose device functions were
-    # not compiled for the running GPU, using ncclDevFuncUnrollArch[] emitted into
-    # host_table.cpp. That table is a claim about device_table.h, and nothing else
-    # checks the two agree: if it silently went all-nullptr the runtime check would
-    # degrade to the arch-blind behaviour that dispatched into an empty table and
-    # trapped. These tests hold host and device sides in lockstep.
+    # ---- unroll arch restriction (host table / device guard agreement) -------
+    # ncclDevFuncUnrollArch[] claims which arch each unroll's device functions
+    # were compiled for. commSetUnrollFactor does not read it; it only checks
+    # ncclDevFuncUnrollGenerated[]. These tests keep the emitted table locked to
+    # the guards in device_table.h, so a pin cannot silently disappear.
 
     # __gfx1250_strict__ is the same arch built in strict mode, so it folds to gfx1250; a literal \w+ would read it as a second, distinct arch.
     _ARCH_MACRO = re.compile(r"__(gfx\w+?)(?:_strict)?__")

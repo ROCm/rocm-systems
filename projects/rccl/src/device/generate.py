@@ -18,7 +18,8 @@ all_unrolls   = ["1", "2", "4", "8", "16", "32"]
 # Unroll factors whose device functions are compiled for one arch only, and the single
 # source of truth for that restriction: get_arch_guard(), the specialized_files.txt guard
 # the device linker filters on, the local-arch unroll set, and the ncclDevFuncUnrollArch[]
-# table the host checks before selecting an unroll. --all_unrolls does not clear it.
+# table emitted into host_table.cpp. commSetUnrollFactor does not read that table.
+# --all_unrolls does not clear it.
 unroll_arch_requirement = {
   "32": "gfx1250",
 }
@@ -307,13 +308,14 @@ def calc_unroll_and_pipeline_for_local_arch():
 # except for gfx950. For gfx950, we also disable pipelining.
 local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
 
-# --all_unrolls appends unroll 8 and 16 to the per-arch default. The default set and
-# any arch pin stay as calc_unroll_and_pipeline_for_local_arch decided them, and the
-# arch's pipeline decision stands. A build without the flag does not compile 8 or 16.
-# Must follow the call above, the only reader of unrolls_requiring_arch.
+# --all_unrolls appends the unrolls the multi-arch default skips (8 and 16). The
+# per-arch set and any arch pin stay as calc_unroll_and_pipeline_for_local_arch
+# decided them, and the arch's pipeline decision stands. A build without the flag
+# does not compile the skipped factors. Must follow the call above, the only
+# reader of unrolls_requiring_arch.
 if build_all_unrolls:
   local_unroll = list(local_unroll)
-  for unroll in ("8", "16"):
+  for unroll in [u for u in all_unrolls if u not in default_unrolls]:
     if unroll not in local_unroll:
       local_unroll.append(unroll)
 
@@ -663,13 +665,13 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
     out("  %s, // unroll %s\n" % ("true" if u in local_unroll else "false", u))
   out("};\n")
 
-  # Being generated is not sufficient: a multi-arch build generates every unroll
-  # while get_arch_guard() still compiles some of them for one arch only. The
-  # host must additionally match the running GPU against this table, otherwise
-  # it dispatches into an all-nullptr table and traps on the device.
+  # Records the compile-time pin from unroll_arch_requirement. get_arch_guard()
+  # is what keeps those device functions off other archs. commSetUnrollFactor
+  # does not read this table; it only checks ncclDevFuncUnrollGenerated.
   out("\n")
   out("// Arch required by each unroll factor's device functions, or nullptr when\n")
   out("// the unroll is built for every arch. Mirrors unroll_arch_requirement.\n")
+  out("// Not consulted by commSetUnrollFactor.\n")
   out("char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS] = {\n")
   for u in all_unrolls:
     arch = unroll_arch_requirement.get(u)
