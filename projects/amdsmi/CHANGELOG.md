@@ -6,6 +6,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.2.0
 
+### Added
+
+- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
+  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
+  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
+  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
+  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
+
+### Changed
+
+- **`amd-smi`, `amd-smi version`, and `amd-smi static --driver` include the DKMS build in the amdgpu version**.  
+  - For example `6.19.14.31400000-2370381`. Labels and JSON/CSV keys are unchanged.
+
 ### Resolved Issues
 
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
