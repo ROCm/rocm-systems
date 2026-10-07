@@ -2399,6 +2399,24 @@ public:
     }
   };
 
+  /// @brief BO state every handle to one backing file shares.
+  /// @details The kernel returns the same BO for every import of its dmabuf, so
+  /// create info, placement, and UMD metadata set through one handle are what
+  /// every other handle reads.
+  struct GemObject {
+    dev_t device = 0; ///< Backing file identity; zero when fstat failed.
+    ino_t inode = 0;
+    // GET_GEM_CREATE_INFO returns this record: the allocated size and the
+    // GEM_CREATE alignment, domains, and flags. SET_PLACEMENT updates domains.
+    drm_amdgpu_gem_create_in create_info{};
+    // Userspace (libdrm amdgpu_bo_query_info / amdgpu_bo_set_metadata) reads and
+    // writes this on every VMM import. An empty record is a valid buffer.
+    uint64_t metadata_flags = 0;
+    uint64_t tiling_info = 0;
+    uint32_t metadata_size = 0;
+    uint32_t metadata[64] = {};
+  };
+
   struct GemEntry {
     std::shared_ptr<PrivateDrmFd>
         dmabuf_fd;            ///< Backing retained through lazy mmap and submissions.
@@ -2408,17 +2426,9 @@ public:
     bool handle_closed = false; ///< Close invalidates the handle; jobs retain its backing.
     uint64_t mmap_offset = 0;
     uint32_t alloc_flags = 0;
-    // GEM_CREATE arguments. GET_GEM_CREATE_INFO returns this record. A PRIME
-    // import synthesizes size, page alignment, and domain from the dmabuf.
-    drm_amdgpu_gem_create_in create_info{};
+    std::shared_ptr<GemObject> object; ///< Shared with every handle to this backing.
     void *cpu_ptr = nullptr;
     bool sealed_ram = false;
-    // Userspace (libdrm amdgpu_bo_query_info / amdgpu_bo_set_metadata) reads and
-    // writes this on every VMM import. An empty record is a valid buffer.
-    uint64_t metadata_flags = 0;
-    uint64_t tiling_info = 0;
-    uint32_t metadata_size = 0;
-    uint32_t metadata[64] = {};
     SimulatedKfd *owner = nullptr;
     std::vector<GemMapping> installed_vas;
   };
@@ -2468,6 +2478,13 @@ public:
       return -error;
     }
     const bool sealed_ram = real().fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK) == 0;
+    auto object = std::make_shared<GemObject>();
+    if (struct stat st{}; real().fstat_fn(fd, &st) == 0) {
+      object->device = st.st_dev;
+      object->inode = st.st_ino;
+    }
+    object->create_info = request;
+    object->create_info.bo_size = size;
     auto backing = PrivateDrmFd::duplicate(fd);
     const int error = errno;
     real().close(fd);
@@ -2487,7 +2504,7 @@ public:
     entry.mmap_offset = next_gem_mmap_offset_;
     entry.alloc_flags = (request.domains & AMDGPU_GEM_DOMAIN_VRAM) ? KFD_IOC_ALLOC_MEM_FLAGS_VRAM
                                                                    : KFD_IOC_ALLOC_MEM_FLAGS_GTT;
-    entry.create_info = request;
+    entry.object = std::move(object);
     gem_entries_.emplace(candidate, std::move(entry));
     next_gem_mmap_offset_ += size;
     *handle = candidate;
@@ -2809,7 +2826,8 @@ public:
   /// @brief Get or set the UMD metadata libdrm stores on a GEM buffer.
   /// @details hsa_amd_vmem_handle_create imports the KFD dmabuf and then queries
   /// this. Rejecting the ioctl makes ROCr report the whole allocation as out of
-  /// memory. The record is per handle; a fresh buffer has an empty one.
+  /// memory. The record belongs to the BO, so a PRIME import reads what the
+  /// exporter set. A fresh buffer has an empty one.
   int gem_metadata(const DrmFileToken &file, drm_amdgpu_gem_metadata *args) {
     if (!args)
       return -EINVAL;
@@ -2818,7 +2836,7 @@ public:
     if (it == gem_entries_.end() || !file || it->second.handle_closed ||
         it->second.drm_file_id != file->id)
       return -ENOENT;
-    auto &gem = it->second;
+    auto &gem = *it->second.object;
     if (args->op == AMDGPU_GEM_METADATA_OP_GET_METADATA) {
       args->data.flags = gem.metadata_flags;
       args->data.tiling_info = gem.tiling_info;
@@ -2858,13 +2876,16 @@ public:
       if (args->op == AMDGPU_GEM_OP_GET_GEM_CREATE_INFO) {
         if (args->value == 0)
           return -EINVAL;
-        info = it->second.create_info;
+        info = it->second.object->create_info;
         user_pointer = args->value;
       } else if (args->op == AMDGPU_GEM_OP_SET_PLACEMENT) {
         constexpr uint64_t domains =
             AMDGPU_GEM_DOMAIN_CPU | AMDGPU_GEM_DOMAIN_GTT | AMDGPU_GEM_DOMAIN_VRAM;
         if (args->value & ~domains)
           return -EINVAL;
+        // The backing stays in host memory; the preferred domains are what
+        // GET_GEM_CREATE_INFO reports.
+        it->second.object->create_info.domains = args->value;
         return 0;
       } else {
         return -EINVAL;
@@ -2963,10 +2984,24 @@ public:
     gem.drm_file_id = drm_file->id;
     gem.size = size;
     gem.alloc_flags = alloc_flags;
-    gem.create_info.bo_size = size;
-    gem.create_info.alignment = 4096;
-    gem.create_info.domains = (alloc_flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) ? AMDGPU_GEM_DOMAIN_VRAM
-                                                                           : AMDGPU_GEM_DOMAIN_GTT;
+    struct stat st {};
+    const bool identified = real().fstat_fn(dmabuf_fd, &st) == 0;
+    if (identified)
+      gem.object = shared_gem_object_locked(st);
+    if (!gem.object) {
+      // A buffer no GEM handle has seen, such as a KFD export, has no GEM_CREATE
+      // request. Synthesize one from its size and domain.
+      gem.object = std::make_shared<GemObject>();
+      if (identified) {
+        gem.object->device = st.st_dev;
+        gem.object->inode = st.st_ino;
+      }
+      gem.object->create_info.bo_size = size;
+      gem.object->create_info.alignment = 4096;
+      gem.object->create_info.domains = (alloc_flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+                                            ? AMDGPU_GEM_DOMAIN_VRAM
+                                            : AMDGPU_GEM_DOMAIN_GTT;
+    }
     // hsaKmtMemoryGetCpuAddr follows a prime import with GEM_MMAP. A zero offset
     // is "no mapping" and that call fails the VMM handle create.
     const uint64_t map_bytes = (size + 4095) & ~uint64_t{4095};
@@ -2975,6 +3010,17 @@ public:
       next_gem_mmap_offset_ += map_bytes;
     }
     return handle;
+  }
+
+  /// @brief Find the BO state of a live handle backed by the file @p st describes.
+  /// @returns The shared state, or null when no handle uses that file.
+  std::shared_ptr<GemObject> shared_gem_object_locked(const struct stat &st) const {
+    for (const auto &[handle, entry] : gem_entries_) {
+      const auto &object = entry.object;
+      if (object && object->inode != 0 && object->device == st.st_dev && object->inode == st.st_ino)
+        return object;
+    }
+    return {};
   }
 
   /// @brief Turn a GEM handle back into a dma-buf fd (DRM_IOCTL_PRIME_HANDLE_TO_FD).

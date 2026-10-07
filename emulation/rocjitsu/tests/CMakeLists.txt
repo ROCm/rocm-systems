@@ -2091,7 +2091,14 @@ rj_add_interposer_test_suite(
     InterposerDrmTest
     CanonicalSysfsPathsRetainSimulatedDevice
     DeviceInfoReportsActiveCuCount
+    DmabufExportKeepsADriverCpuMapping
+    DmabufExportKeepsAReservedCpuMapping
+    GemMetadataRoundTripsOnABuffer
+    GemOpReportsTheCreateSize
+    GemOpSetPlacementChangesTheReportedDomain
     OpensWithinCurrentDescriptorLimit
+    PrimeHandleToFdReturnsTheBuffer
+    PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock

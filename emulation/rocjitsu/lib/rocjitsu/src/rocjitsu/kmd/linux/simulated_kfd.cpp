@@ -3181,6 +3181,50 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   return 0;
 }
 
+int SimulatedKfd::share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc,
+                                          const char *name) {
+  if (alloc.memfd < 0) {
+    // A USERPTR range is the caller's own memory; amdgpu refuses to export it.
+    if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
+      return -EPERM;
+    int fd = memfd_create(name, MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (fd < 0)
+      return -errno;
+    if (ftruncate(fd, static_cast<off_t>(alloc.size)) != 0) {
+      const int error = errno;
+      libc_passthrough().close(fd);
+      return -error;
+    }
+    // hipMalloc in local mode leaves the bytes in the mapping at the caller's
+    // VA. Copy them in, then map the memfd over that VA, so the caller's
+    // pointer, the GPU pages, and every importer reach one copy. Without a host
+    // pointer, the first mmap of the allocation maps the memfd.
+    if (alloc.host_ptr) {
+      void *staging = safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+      if (staging == MAP_FAILED) {
+        libc_passthrough().close(fd);
+        return -ENOMEM;
+      }
+      std::memcpy(staging, alloc.host_ptr, alloc.size);
+      safe_munmap(staging, alloc.size);
+      if (safe_mmap(alloc.host_ptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd,
+                    0) != alloc.host_ptr) {
+        libc_passthrough().close(fd);
+        return -ENOMEM;
+      }
+    }
+    alloc.memfd = fd;
+    std::lock_guard<std::mutex> flk(owned_fds_mutex_);
+    owned_fds_.insert(fd);
+  }
+  // Upgrade the exporter's PTE mtype to CC (cache coherent) so that
+  // the local GPU sees writes from the importing GPU.  On real hardware
+  // xGMI snoops handle this; in the simulator CC forces L2 invalidate
+  // before every refetch, emulating the cross-GPU coherence protocol.
+  proc.set_page_mtype(alloc.gpu_va, alloc.size, amdgpu::Mtype::CC);
+  return 0;
+}
+
 int SimulatedKfd::export_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
 
@@ -3188,41 +3232,9 @@ int SimulatedKfd::export_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   auto it = proc.allocations_.find(args->handle);
   if (it == proc.allocations_.end())
     return -EINVAL;
-  auto &alloc = it->second;
-  // hipMalloc in local mode records the caller's VA and no memfd. IPC exports
-  // that allocation. When the driver already has a host pointer, copy those
-  // bytes into the memfd and point the GPU pages at it. When it does not, the
-  // memfd only has to exist: the live mapping stays where the runtime put it.
-  if (alloc.memfd < 0) {
-    int promoted_fd = memfd_create("rocjitsu_dmabuf_promote", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-    if (promoted_fd < 0)
-      return -errno;
-    if (ftruncate(promoted_fd, static_cast<off_t>(alloc.size)) != 0) {
-      libc_passthrough().close(promoted_fd);
-      return -errno;
-    }
-    if (alloc.host_ptr) {
-      auto *new_host_ptr =
-          safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, promoted_fd, 0);
-      if (new_host_ptr == MAP_FAILED) {
-        libc_passthrough().close(promoted_fd);
-        return -ENOMEM;
-      }
-      std::memcpy(new_host_ptr, alloc.host_ptr, alloc.size);
-      proc.remap_page_host_ptrs(alloc.gpu_va, alloc.host_ptr, new_host_ptr, alloc.size);
-      if (alloc.host_ptr_owned)
-        safe_munmap(alloc.host_ptr, alloc.size);
-      alloc.host_ptr = new_host_ptr;
-      alloc.host_ptr_owned = true;
-    }
-    alloc.memfd = promoted_fd;
-    {
-      std::lock_guard<std::mutex> flk(owned_fds_mutex_);
-      owned_fds_.insert(promoted_fd);
-    }
-  }
-  if (alloc.memfd < 0)
-    return -EINVAL;
+  if (int rc = share_allocation_locked(proc, it->second, "rocjitsu_dmabuf_promote"); rc != 0)
+    return rc;
+  const auto &alloc = it->second;
   int dupfd = safe_fcntl(alloc.memfd, F_DUPFD_CLOEXEC, 0);
   if (dupfd < 0)
     return -errno;
@@ -3244,60 +3256,8 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
     if (it == proc.allocations_.end())
       return -EINVAL;
     auto &alloc = it->second;
-
-    if (alloc.memfd < 0 && alloc.host_ptr) {
-      int promoted_fd = memfd_create("rocjitsu_ipc_promote", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-      if (promoted_fd < 0)
-        return -errno;
-      if (ftruncate(promoted_fd, static_cast<off_t>(alloc.size)) != 0) {
-        libc_passthrough().close(promoted_fd);
-        return -errno;
-      }
-      auto *new_host_ptr =
-          safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, promoted_fd, 0);
-      if (new_host_ptr == MAP_FAILED) {
-        libc_passthrough().close(promoted_fd);
-        return -ENOMEM;
-      }
-      std::memcpy(new_host_ptr, alloc.host_ptr, alloc.size);
-
-      if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
-        util::Logger::vm("ipc_export: promoting USERPTR to memfd-backed (snapshot copy, not "
-                         "true sharing)");
-      }
-
-      proc.remap_page_host_ptrs(alloc.gpu_va, alloc.host_ptr, new_host_ptr, alloc.size);
-
-      if (alloc.host_ptr_owned)
-        safe_munmap(alloc.host_ptr, alloc.size);
-
-      alloc.host_ptr = new_host_ptr;
-      alloc.host_ptr_owned = true;
-      alloc.memfd = promoted_fd;
-      {
-        std::lock_guard<std::mutex> flk(owned_fds_mutex_);
-        owned_fds_.insert(promoted_fd);
-      }
-    } else if (alloc.memfd < 0) {
-      int new_fd = memfd_create("rocjitsu_ipc_lazy", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-      if (new_fd < 0)
-        return -errno;
-      if (ftruncate(new_fd, static_cast<off_t>(alloc.size)) != 0) {
-        libc_passthrough().close(new_fd);
-        return -errno;
-      }
-      alloc.memfd = new_fd;
-      {
-        std::lock_guard<std::mutex> flk(owned_fds_mutex_);
-        owned_fds_.insert(new_fd);
-      }
-    }
-
-    // Upgrade the exporter's PTE mtype to CC (cache coherent) so that
-    // the local GPU sees writes from the importing GPU.  On real hardware
-    // xGMI snoops handle this; in the simulator CC forces L2 invalidate
-    // before every refetch, emulating the cross-GPU coherence protocol.
-    proc.set_page_mtype(alloc.gpu_va, alloc.size, amdgpu::Mtype::CC);
+    if (int rc = share_allocation_locked(proc, alloc, "rocjitsu_ipc_promote"); rc != 0)
+      return rc;
 
     alloc_size = alloc.size;
     alloc_flags = alloc.flags;
