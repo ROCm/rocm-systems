@@ -43,6 +43,8 @@ from __future__ import absolute_import
 
 import re
 
+from rocprofv3.doctor_result import DOCTOR_COMMAND
+
 INSTALL_SYSTEM_PACKAGE = "system-package"
 INSTALL_THEROCK_PACKAGE = "therock-package"
 INSTALL_PYTHON_WHEEL = "python-wheel"
@@ -75,10 +77,10 @@ DEFAULT_ROOT = "/opt/rocm"
 THEROCK_PACKAGE_GLOB = "/opt/rocm/core*"
 
 SOURCE_OVERRIDE = "--rocm-root"
-SOURCE_SCRIPT = "location of rocprofv3-doctor"
+SOURCE_SCRIPT = "install prefix of rocprofv3"
 SOURCE_PATH = "rocprofv3 on PATH"
 SOURCE_DEFAULT = "default location"
-SOURCE_NOT_FOUND = "location of rocprofv3-doctor; no ROCm installation found"
+SOURCE_NOT_FOUND = "install prefix of rocprofv3; no ROCm installation found"
 
 _WHEEL_RE = re.compile(r"/(site|dist)-packages/_rocm_sdk_[^/]+(/|$)")
 _THEROCK_PACKAGE_RE = re.compile(r"^/opt/rocm/core(-[^/]+)?(/|$)")
@@ -181,6 +183,18 @@ def known_installations(accessor):
     return found
 
 
+def install_prefix_of(accessor, script_path):
+    """``<prefix>`` for a script installed as ``<prefix>/libexec/rocprofiler-sdk/X``
+    (the doctor) or ``<prefix>/bin/X`` (rocprofv3 and the other tools)."""
+    script_dir = accessor.dirname(accessor.realpath(script_path))
+    parent = accessor.dirname(script_dir)
+    if accessor.basename(script_dir) == "rocprofiler-sdk" and (
+        accessor.basename(parent) == "libexec"
+    ):
+        return accessor.dirname(parent)
+    return parent
+
+
 def detect_rocm_root(accessor, script_path, override=None):
     """Locate the ROCm root to inspect; return ``(root, how_it_was_found)``.
 
@@ -188,7 +202,7 @@ def detect_rocm_root(accessor, script_path, override=None):
     tree the user named, even a broken one, is the point of the flag.
     Otherwise the first of these that holds a ROCm tree wins:
 
-    1. the prefix this script is installed under (the same rule rocprofv3 uses)
+    1. the prefix this script is installed under, which is rocprofv3's prefix
     2. ROCM_PATH / ROCM_HOME / ROCM_DIR
     3. the prefix of the rocprofv3 found on PATH
     4. the TheRock wheel importable by this interpreter
@@ -202,8 +216,7 @@ def detect_rocm_root(accessor, script_path, override=None):
 
     candidates = []
     if script_path:
-        script_dir = accessor.dirname(accessor.realpath(script_path))
-        candidates.append((accessor.dirname(script_dir), SOURCE_SCRIPT))
+        candidates.append((install_prefix_of(accessor, script_path), SOURCE_SCRIPT))
     for var in ROOT_ENV_VARS:
         value = accessor.getenv(var)
         if value:
@@ -300,5 +313,5 @@ def reinstall_hint(accessor, component="rocprofiler-sdk"):
         "{} is not managed by a package manager (a TheRock tarball, a source\n"
         "build, or a custom prefix). Re-extract or rebuild {} in that tree,\n"
         "or point the tool at a complete installation:\n"
-        "  rocprofv3-doctor --rocm-root /path/to/rocm".format(root, package)
+        "  {} --rocm-root /path/to/rocm".format(root, package, DOCTOR_COMMAND)
     )

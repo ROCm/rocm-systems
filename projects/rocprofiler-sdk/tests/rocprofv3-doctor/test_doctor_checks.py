@@ -784,7 +784,7 @@ def test_doctor_checks_profiler_lock_ignores_own_pid(checks):
         pid=4242,
         files=["/proc/4242/cmdline"],
         file_contents={
-            "/proc/4242/cmdline": "/usr/bin/python3\x00/opt/rocm/bin/rocprofv3-doctor\x00",
+            "/proc/4242/cmdline": "/usr/bin/python3\x00/opt/rocm/libexec/rocprofiler-sdk/rocprofv3-doctor\x00",
         },
     )
     result = checks["counters"].check_no_profiler_lock(accessor)
@@ -803,6 +803,48 @@ def test_doctor_checks_profiler_lock_does_not_hide_profiler_named_doctor(checks)
     result = checks["counters"].check_no_profiler_lock(accessor)
     assert result.status == checks["status"].STATUS_WARN
     assert "9002" in result.detail
+
+
+@pytest.mark.parametrize(
+    "cmdline",
+    [
+        # another doctor run, through rocprofv3 and through the libexec script
+        "/usr/bin/python3\x00/opt/rocm/bin/rocprofv3\x00--doctor\x00--format\x00json\x00",
+        "/usr/bin/python3\x00/opt/rocm/libexec/rocprofiler-sdk/rocprofv3-doctor\x00",
+        # the shell that launched this run, e.g. a CI step
+        "/bin/bash\x00-c\x00cd /tmp && rocprofv3 --doctor --format json > r.json\x00",
+        # a wrapper shell with unrelated `--` tokens before the doctor command
+        "/bin/bash\x00-c\x00set -- a b; shopt -u extglob -- && rocprofv3 --doctor\x00",
+    ],
+)
+def test_doctor_checks_profiler_lock_ignores_other_doctor_runs(checks, cmdline):
+    """Copilot review: a `rocprofv3 --doctor` process inspects the GPU but holds
+    no profiling lock, so it is not a competing profiler."""
+    accessor = make_healthy_accessor(
+        pid=4242,
+        files=["/proc/9004/cmdline"],
+        file_contents={"/proc/9004/cmdline": cmdline},
+    )
+    result = checks["counters"].check_no_profiler_lock(accessor)
+    assert result.status == checks["status"].STATUS_PASS, result.detail
+
+
+def test_doctor_checks_profiler_lock_reports_app_with_doctor_argument(checks):
+    """--doctor after `--` belongs to the profiled application: that process
+    is a real profiling session."""
+    accessor = make_healthy_accessor(
+        pid=4242,
+        files=["/proc/9005/cmdline"],
+        file_contents={
+            "/proc/9005/cmdline": (
+                "/usr/bin/python3\x00/opt/rocm/bin/rocprofv3\x00--kernel-trace\x00"
+                "--\x00./app\x00--doctor\x00"
+            )
+        },
+    )
+    result = checks["counters"].check_no_profiler_lock(accessor)
+    assert result.status == checks["status"].STATUS_WARN
+    assert "9005" in result.detail
 
 
 def test_doctor_checks_profiler_lock_clean_when_nothing_running(checks):

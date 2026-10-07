@@ -42,6 +42,12 @@ CONST_VERSION_INFO = {
     "rocm_version": "@rocm_version_FULL_VERSION@",
 }
 
+# `rocprofv3 --doctor` execs this script. SYNC: DOCTOR_FLAG and DOCTOR_COMMAND in
+# source/lib/python/rocprofv3/doctor_result.py, and source/libexec/rocprofiler-sdk/
+# rocprofv3-doctor/CMakeLists.txt for where it is installed.
+DOCTOR_FLAG = "--doctor"
+DOCTOR_LIBEXEC_DIR = "@CMAKE_INSTALL_LIBEXECDIR@"
+
 # Perfetto's TraceConfig BufferConfig.size_kb field is a uint32_t, and the
 # tracing service allocates size_kb * 1024 bytes and rejects the config when
 # that byte count does not fit in a uint32_t. So although the option is named
@@ -1128,13 +1134,13 @@ For attachment profiling of running processes:
 
     # NOTE: --doctor is intercepted in main() before parse_arguments() runs, so
     # this entry exists only to document the flag in --help. Any remaining
-    # arguments are forwarded verbatim to rocprofv3-doctor, which is why the
+    # arguments are forwarded verbatim to the doctor, which is why the
     # interception cannot be deferred to argparse: flags such as --format have
-    # incompatible meanings in the two tools.
+    # incompatible meanings in the two.
     advanced_options.add_argument(
-        "--doctor",
+        DOCTOR_FLAG,
         action="store_true",
-        help="""Run the rocprofv3-doctor self-diagnostic tool and exit. Any remaining arguments are passed to rocprofv3-doctor (for example: rocprofv3 --doctor --format json).""",
+        help="""Check whether this machine and ROCm installation are ready for profiling, report what would stop rocprofv3 from working and how to fix it, then exit. Options after --doctor configure the check (for example: rocprofv3 --doctor --format json); see rocprofv3 --doctor --help.""",
         default=False,
     )
 
@@ -2409,24 +2415,64 @@ def run(app_args, args, **kwargs):
         return exit_code
 
 
-def dispatch_doctor(raw_args):
-    """Run rocprofv3-doctor with the remaining arguments; return its exit code.
+def find_doctor_script():
+    """Path of the script behind --doctor, or None.
 
-    Intercepted before parse_arguments() because rocprofv3 and rocprofv3-doctor
-    both define --format and --output with different meanings; letting argparse
-    see the doctor's flags would be an error rather than a passthrough.
+    Installed and build trees keep it at <prefix>/<libexecdir>/rocprofiler-sdk/;
+    a source checkout keeps it under source/libexec/.
     """
-    args = [itr for itr in raw_args if itr != "--doctor"]
-    bin_dir = os.path.dirname(os.path.realpath(__file__))
+    prefix = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    libexec_dirs = ["libexec"]
+    if not DOCTOR_LIBEXEC_DIR.startswith("@"):
+        libexec_dirs.insert(0, DOCTOR_LIBEXEC_DIR)
+    candidates = [
+        os.path.join(prefix, libexec_dir, "rocprofiler-sdk", "rocprofv3-doctor")
+        for libexec_dir in libexec_dirs
+    ]
+    candidates.append(
+        os.path.join(
+            prefix,
+            "libexec",
+            "rocprofiler-sdk",
+            "rocprofv3-doctor",
+            "rocprofv3-doctor.py",
+        )
+    )
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
-    # installed next to this script; fall back to the source-tree name so the
-    # passthrough also works from an uninstalled checkout
-    for name in ("rocprofv3-doctor", "rocprofv3-doctor.py"):
-        candidate = os.path.join(bin_dir, name)
-        if os.path.exists(candidate):
-            return subprocess.call([sys.executable, candidate] + args)
 
-    sys.stderr.write("rocprofv3: rocprofv3-doctor was not found in {}\n".format(bin_dir))
+def dispatch_doctor(raw_args):
+    """Replace this process with the doctor, passing the remaining arguments.
+
+    Intercepted before parse_arguments() because rocprofv3 and the doctor both
+    define --format and --output with different meanings; letting argparse see
+    the doctor's flags would be an error rather than a passthrough.
+
+    exec rather than a child process: no rocprofv3 process lingers while the
+    doctor runs (it would otherwise appear to the doctor as a running
+    profiler), and signals and the exit status pass straight through.
+    Returns only when the doctor cannot be started.
+    """
+    args = [itr for itr in raw_args if itr != DOCTOR_FLAG]
+    script = find_doctor_script()
+    if script is None:
+        sys.stderr.write(
+            "rocprofv3: the {} component is not installed next to this rocprofv3 "
+            "({}); reinstall rocprofiler-sdk\n".format(
+                DOCTOR_FLAG, os.path.dirname(os.path.realpath(__file__))
+            )
+        )
+        return 2
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        os.execv(sys.executable, [sys.executable, script] + args)
+    except OSError as exc:
+        sys.stderr.write("rocprofv3: cannot run {} ({})\n".format(script, exc))
     return 2
 
 
@@ -2435,7 +2481,7 @@ def main(argv=None):
     # only rocprofv3's own options count: everything after "--" belongs to the
     # application and must reach it verbatim, "--doctor" included
     profiler_args = raw_args[: raw_args.index("--")] if "--" in raw_args else raw_args
-    if "--doctor" in profiler_args:
+    if DOCTOR_FLAG in profiler_args:
         return dispatch_doctor(profiler_args)
 
     cmd_args, app_args = parse_arguments(argv)

@@ -28,6 +28,7 @@ import fnmatch
 import traceback
 
 from rocprofv3.doctor_result import (
+    DOCTOR_COMMAND,
     PROBE_PASSIVE,
     PROBE_VALUES,
     Result,
@@ -327,7 +328,7 @@ def run_isolated(check, accessor):
             detail="the check itself raised an unhandled exception; this says "
             "nothing about the system",
             remediation=(
-                "This is a rocprofv3-doctor bug; please report it with the "
+                "This is a bug in " + DOCTOR_COMMAND + "; please report it with the "
                 "traceback shown by --verbose or --format json."
             ),
             data={"traceback": traceback.format_exc()},
@@ -339,7 +340,7 @@ def run_isolated(check, accessor):
                 type(result).__name__
             ),
             remediation=(
-                "This is a rocprofv3-doctor bug; please report it against the "
+                "This is a bug in " + DOCTOR_COMMAND + "; please report it against the "
                 "check id shown above."
             ),
         )

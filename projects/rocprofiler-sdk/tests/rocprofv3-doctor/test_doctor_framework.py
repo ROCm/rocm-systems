@@ -673,3 +673,45 @@ def test_doctor_framework_rocprofv3_doctor_after_separator_is_application_arg(
 
     assert launcher.main(["--doctor", "--format", "json"]) == 0
     assert dispatched == [["--doctor", "--format", "json"]]
+
+
+def _load_launcher(rocprofv3_path, name):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, rocprofv3_path)
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+    return launcher
+
+
+def test_doctor_framework_rocprofv3_doctor_execs_the_libexec_script(
+    rocprofv3_path, monkeypatch
+):
+    """rocprofv3 replaces itself with the doctor (no lingering parent process),
+    found under libexec, with --doctor removed from the forwarded options."""
+    launcher = _load_launcher(rocprofv3_path, "rocprofv3_launcher_exec")
+    calls = []
+
+    def fake_execv(path, argv):
+        calls.append((path, argv))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(launcher.os, "execv", fake_execv)
+    with pytest.raises(SystemExit):
+        launcher.main(["--doctor", "--only", "install"])
+
+    (path, argv) = calls[0]
+    script = argv[1]
+    assert path == argv[0]
+    assert "libexec" in script.split("/")
+    assert script.endswith(("rocprofv3-doctor", "rocprofv3-doctor.py"))
+    assert argv[2:] == ["--only", "install"]
+
+
+def test_doctor_framework_rocprofv3_doctor_reports_missing_script(
+    rocprofv3_path, monkeypatch, capsys
+):
+    launcher = _load_launcher(rocprofv3_path, "rocprofv3_launcher_missing")
+    monkeypatch.setattr(launcher, "find_doctor_script", lambda: None)
+    assert launcher.main(["--doctor"]) == 2
+    assert "not installed" in capsys.readouterr().err

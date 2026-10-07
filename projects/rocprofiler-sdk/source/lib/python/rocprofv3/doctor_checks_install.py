@@ -36,6 +36,7 @@ from rocprofv3.doctor_layout import (
 )
 from rocprofv3.doctor_registry import register
 from rocprofv3.doctor_result import (
+    DOCTOR_COMMAND,
     make_fail,
     make_pass,
     make_skip,
@@ -180,7 +181,7 @@ def _library_check(accessor, name, subdirs, remediation, failure_factory):
 
 LOCATE_ROOT_HINT = (
     "Point the tool at the ROCm installation that contains rocprofv3:\n"
-    "  rocprofv3-doctor --rocm-root <prefix>\n"
+    "  " + DOCTOR_COMMAND + " --rocm-root <prefix>\n"
     "Where that prefix is depends on how ROCm was installed:\n"
     "  ROCm system packages      /opt/rocm or /opt/rocm-X.Y.Z\n"
     "  TheRock system packages   /opt/rocm/core-X.Y\n"
@@ -406,9 +407,9 @@ def check_version_consistency(accessor):
                     tool_version, real, lib_version
                 ),
                 "Use a rocprofv3 from the same ROCm installation as the library:\n"
-                "  rocprofv3-doctor --rocm-root {}".format(
-                    accessor.dirname(accessor.dirname(real))
-                ),
+                "  "
+                + DOCTOR_COMMAND
+                + " --rocm-root {}".format(accessor.dirname(accessor.dirname(real))),
                 data,
             )
         return make_warn(

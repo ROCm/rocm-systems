@@ -22,11 +22,21 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-"""rocprofv3-doctor: diagnose a ROCprofiler-SDK installation and system setup."""
+"""The script behind ``rocprofv3 --doctor``: check a ROCprofiler-SDK installation
+and the system it runs on.
+
+Installed as ``<prefix>/libexec/rocprofiler-sdk/rocprofv3-doctor`` -- deliberately
+not on PATH. ``rocprofv3 --doctor`` execs it with its remaining arguments.
+"""
 
 import argparse
 import os
 import sys
+
+# How users invoke this tool, used in help and messages.
+# SYNC: DOCTOR_COMMAND in source/lib/python/rocprofv3/doctor_result.py and the
+# flag dispatched in source/bin/rocprofv3.py main().
+COMMAND = "rocprofv3 --doctor"
 
 # version info for rocprofiler-sdk / rocprofv3, substituted by configure_file
 CONST_VERSION_INFO = {
@@ -42,8 +52,25 @@ def _substituted(value):
 
 
 def _script_prefix():
-    """``$PREFIX`` for the installed layout ``$PREFIX/bin/rocprofv3-doctor``."""
-    return os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    """``$PREFIX`` for the layout ``$PREFIX/libexec/rocprofiler-sdk/rocprofv3-doctor``.
+
+    The build tree uses the same relative layout.
+    """
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+
+
+def _source_package_dir():
+    """``source/lib/python`` when running out of a source checkout, else None.
+
+    The script sits at source/libexec/rocprofiler-sdk/rocprofv3-doctor/ there.
+    """
+    here = os.path.dirname(os.path.realpath(__file__))
+    for _ in range(3):
+        here = os.path.dirname(here)
+    candidate = os.path.join(here, "lib", "python")
+    if os.path.isdir(os.path.join(candidate, "rocprofv3")):
+        return candidate
+    return None
 
 
 def _bootstrap_package(rocm_root_override):
@@ -74,7 +101,9 @@ def _bootstrap_package(rocm_root_override):
             )
         )
     # running straight out of a source checkout
-    candidates.append(os.path.join(_script_prefix(), "lib", "python"))
+    source_dir = _source_package_dir()
+    if source_dir:
+        candidates.append(source_dir)
 
     # Prepend rather than append, and drop any cached partial import: a
     # rocprofv3.py sitting next to this script (or in the cwd) would otherwise
@@ -96,7 +125,7 @@ def _bootstrap_package(rocm_root_override):
 
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(
-        prog="rocprofv3-doctor",
+        prog=COMMAND,
         description=(
             "Inspect the ROCprofiler-SDK installation and system configuration, "
             "and report what would prevent rocprofv3 from working."
@@ -106,7 +135,7 @@ def parse_arguments(argv=None):
             "exit codes:\n"
             "  0  no check failed (warnings are not failures)\n"
             "  1  at least one check failed\n"
-            "  2  rocprofv3-doctor itself could not run, an --only pattern\n"
+            "  2  the doctor itself could not run, an --only pattern\n"
             "     matched no check, or a check broke (status error) and none failed\n"
         ),
     )
@@ -209,7 +238,7 @@ def _use_color(args):
 def _header(doctor, accessor):
     tool_version = CONST_VERSION_INFO["version"]
     rocm_version = CONST_VERSION_INFO["rocm_version"]
-    parts = ["rocprofv3-doctor"]
+    parts = [COMMAND]
     if _substituted(tool_version):
         parts.append("v{}".format(tool_version))
     if _substituted(rocm_version):
@@ -226,7 +255,7 @@ def main(argv=None):
         doctor = _bootstrap_package(args.rocm_root)
     except ImportError as exc:
         sys.stderr.write(
-            "rocprofv3-doctor: cannot import the rocprofv3 Python package "
+            COMMAND + ": cannot import the rocprofv3 Python package "
             "({}).\n"
             "Try: export PYTHONPATH={}/lib/python3/site-packages:$PYTHONPATH\n".format(
                 exc, _script_prefix()
@@ -237,7 +266,7 @@ def main(argv=None):
     try:
         doctor.validate_registry()
     except ValueError as exc:
-        sys.stderr.write("rocprofv3-doctor: invalid check registry ({})\n".format(exc))
+        sys.stderr.write("{}: invalid check registry ({})\n".format(COMMAND, exc))
         return doctor.EXIT_TOOL_ERROR
 
     if args.version:
@@ -265,10 +294,10 @@ def main(argv=None):
             include_default_disabled=args.run_smoke_test,
         )
     except doctor.SelectionError as exc:
-        sys.stderr.write("rocprofv3-doctor: {}\n".format(exc))
+        sys.stderr.write("{}: {}\n".format(COMMAND, exc))
         return doctor.EXIT_TOOL_ERROR
     except Exception as exc:  # noqa: BLE001 -- the runner itself failing is exit 2
-        sys.stderr.write("rocprofv3-doctor: internal error ({})\n".format(exc))
+        sys.stderr.write("{}: internal error ({})\n".format(COMMAND, exc))
         return doctor.EXIT_TOOL_ERROR
 
     if args.format == "json":
@@ -315,7 +344,7 @@ def main(argv=None):
                     )
         except (IOError, OSError) as exc:
             sys.stderr.write(
-                "rocprofv3-doctor: cannot write {} ({})\n".format(args.output, exc)
+                "{}: cannot write {} ({})\n".format(COMMAND, args.output, exc)
             )
             return doctor.EXIT_TOOL_ERROR
 

@@ -20,13 +20,19 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-"""Core value types for the rocprofv3-doctor check framework.
+"""Core value types for the ``rocprofv3 --doctor`` check framework.
 
 Deliberately dependency-free (no ``dataclasses``, no ``enum``) so the module
 imports cleanly on the Python 3.6 floor supported by the SDK.
 """
 
 from __future__ import absolute_import
+
+# How users invoke the doctor, for messages that tell them what to run.
+# SYNC: COMMAND in source/libexec/rocprofiler-sdk/rocprofv3-doctor/rocprofv3-doctor.py
+# and the flag dispatched in source/bin/rocprofv3.py main().
+DOCTOR_FLAG = "--doctor"
+DOCTOR_COMMAND = "rocprofv3 " + DOCTOR_FLAG
 
 # status values -- the outcome of running a single check
 STATUS_PASS = "pass"

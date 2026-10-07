@@ -18,8 +18,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 **rocprofv3 (CLI):**
 
-  - `rocprofv3-doctor` self-diagnostic tool:
-    - New standalone command (`rocprofv3-doctor`) and integrated flag (`rocprofv3 --doctor`) that inspects the ROCprofiler-SDK installation and system configuration and reports what would prevent profiling from working.
+  - `rocprofv3 --doctor` setup check:
+    - New `rocprofv3 --doctor` option that inspects the ROCprofiler-SDK installation and system configuration and reports what would prevent profiling from working, with a fix for each problem.
     - Covers 10 check groups: installation, driver/device, runtime stack, counter collection, environment variables, container/virtualization, Python environment, filesystem, companion tools, and optional live smoke tests.
     - Verifies that the ROCm libraries actually load (missing dependencies, mixed ROCm versions, old `libstdc++`), not only that they exist, and explains failed or crashed commands by matching their output against known error messages. Each diagnosis separates what the output shows from the candidate cause, and rates the cause `likely` only when facts on the machine corroborate it.
     - Every check declares what it does to the machine (`passive`, `process`, or `gpu`); child processes are time-limited and their whole process tree is killed on timeout, Python package imports run in a child process, and the only file written is an exclusively-created temporary probe.

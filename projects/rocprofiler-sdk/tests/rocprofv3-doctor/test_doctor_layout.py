@@ -144,6 +144,18 @@ def test_doctor_layout_detects_from_script_through_alternatives(layout):
     assert source == layout.SOURCE_SCRIPT
 
 
+def test_doctor_layout_detects_from_libexec_script(layout):
+    """The doctor is installed as <prefix>/libexec/rocprofiler-sdk/rocprofv3-doctor;
+    its install prefix is three levels up, not two."""
+    files, dirs = _tree(TARBALL)
+    accessor = FakeAccessor(rocm_root=None, files=files, dirs=dirs)
+    script = TARBALL + "/libexec/rocprofiler-sdk/rocprofv3-doctor"
+    assert layout.install_prefix_of(accessor, script) == TARBALL
+    root, source = layout.detect_rocm_root(accessor, script)
+    assert root == TARBALL
+    assert source == layout.SOURCE_SCRIPT
+
+
 def test_doctor_layout_detects_tarball_from_rocm_home(layout):
     accessor = tarball_accessor(rocm_root=None, env={"ROCM_HOME": TARBALL})
     root, source = layout.detect_rocm_root(accessor, "/elsewhere/bin/rocprofv3-doctor")
@@ -257,12 +269,12 @@ def test_doctor_layout_rocm_root_failure_is_layout_neutral(checks):
 
 
 def test_doctor_layout_rocm_root_pass_reports_kind_and_source(checks):
-    accessor = therock_package_accessor(rocm_root_source="location of rocprofv3-doctor")
+    accessor = therock_package_accessor(rocm_root_source="install prefix of rocprofv3")
     result = checks["install"].check_rocm_root(accessor)
     assert result.status == checks["status"].STATUS_PASS
     assert result.data["install_kind"] == "therock-package"
     assert "TheRock system packages" in result.detail
-    assert "rocprofv3-doctor" in result.detail
+    assert "found via install prefix of rocprofv3" in result.detail
 
 
 # ----------------------------------------------------------------------

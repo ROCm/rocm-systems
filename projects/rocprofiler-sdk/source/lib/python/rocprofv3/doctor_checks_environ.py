@@ -27,6 +27,7 @@ from __future__ import absolute_import
 
 from rocprofv3.doctor_registry import register
 from rocprofv3.doctor_result import (
+    DOCTOR_COMMAND,
     make_fail,
     make_pass,
     make_warn,
@@ -113,7 +114,7 @@ def check_run_as_user(accessor):
         "as LD_LIBRARY_PATH, LD_PRELOAD, and ROCM_PATH, so the results do not "
         "describe {0}'s profiling session".format(invoker),
         "Re-run without sudo, as the user who runs rocprofv3:\n"
-        "  rocprofv3-doctor\n"
+        "  " + DOCTOR_COMMAND + "\n"
         "If you also run rocprofv3 itself with sudo (for example for device-wide\n"
         "counters), these results apply; use `sudo -E` for both so the\n"
         "environment is kept.",

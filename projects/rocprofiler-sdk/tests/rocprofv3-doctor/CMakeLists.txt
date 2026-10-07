@@ -16,12 +16,15 @@ set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 # NOTE: none of these tests require a GPU. rocprofv3-doctor is expected to report skip
 # (not fail) for GPU-dependent checks on a machine without one, and the assertions below
 # only cover the schema/exit-code contract, so they hold either way.
+#
+# The two execute tests go through `rocprofv3 --doctor`, as users do; validate.py also
+# drives the libexec script directly (rocprofiler-sdk::rocprofv3-doctor) to test it alone.
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-doctor-text
-    COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-doctor>
+    COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --doctor
             --no-color
-    DEPENDS rocprofiler-sdk::rocprofv3-doctor
+    DEPENDS rocprofiler-sdk::rocprofv3 rocprofiler-sdk::rocprofv3-doctor
     TIMEOUT 120
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
@@ -30,9 +33,9 @@ rocprofiler_add_integration_execute_test(
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-doctor-list-checks
-    COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-doctor>
+    COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --doctor
             --list-checks
-    DEPENDS rocprofiler-sdk::rocprofv3-doctor
+    DEPENDS rocprofiler-sdk::rocprofv3 rocprofiler-sdk::rocprofv3-doctor
     TIMEOUT 60
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"

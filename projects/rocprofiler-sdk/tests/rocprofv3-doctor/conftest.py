@@ -41,7 +41,7 @@ def pytest_addoption(parser):
         "--doctor-path",
         action="store",
         default=None,
-        help="path to the rocprofv3-doctor executable under test",
+        help="path to the doctor script (behind rocprofv3 --doctor) under test",
     )
     parser.addoption(
         "--rocprofv3-path",
@@ -79,11 +79,18 @@ def rocprofv3_package(request):
 
 @pytest.fixture
 def doctor_path(request):
-    """Path to the rocprofv3-doctor script, or the source-tree copy."""
+    """Path to the doctor script behind rocprofv3 --doctor, or the source copy."""
     configured = request.config.getoption("--doctor-path")
     if configured:
         return configured
-    return os.path.join(_repo_root(), "source", "bin", "rocprofv3-doctor.py")
+    return os.path.join(
+        _repo_root(),
+        "source",
+        "libexec",
+        "rocprofiler-sdk",
+        "rocprofv3-doctor",
+        "rocprofv3-doctor.py",
+    )
 
 
 @pytest.fixture
