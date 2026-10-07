@@ -315,9 +315,10 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   `std::ostringstream` (`LOG_INFO(ss)` is the house pattern); log unknown IDs
   with their value through an enum-to-string helper.
 - **CX4 Reuse first** — For each new helper, search for one that already does
-  the job: `amd_smi_utils`, `rocm_smi_utils` (`TextFileTagContents_t`,
-  split/parse helpers), `rocm_smi_main.cc` (`GetEnvVarUInteger`). Promote a
-  file-local helper to a utils header instead of cloning it.
+  the job: `amd_smi_utils` (`read_env_ms`), `rocm_smi_utils`
+  (`TextFileTagContents_t`, split/parse helpers). Promote a file-local helper
+  to its own layer's utils header instead of cloning it; rocm_smi cannot
+  include amd_smi headers.
 - **CX5 Conversions, bounds and sizes** — Spell out signed↔unsigned and
   narrowing conversions; check size arithmetic and indices for overflow and
   wrap; parse with `std::from_chars` (C++17) and handle empty lines instead of
@@ -387,11 +388,12 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   index run, not "first token is a digit"); one preset per hardware surprise is
   not a policy, and one-off caches have been turned down before.
 - **PR4 Ticket line** — The description passes the bot's reference gate
-  (`tools/systems_pr_bot/policy.yml`) when any one of these appears anywhere
-  in it: `JIRA ID` or `ISSUE ID` followed by a key, number or link; a closing
-  keyword (`Closes #N`); a GitHub issue URL; or a bare `#N`, even one citing a
-  related PR. So `JIRA ID: TBD` passes when the body cites `#N` elsewhere. One
-  ticket per ASIC defect (RC4).
+  (`tools/systems_pr_bot/policy.yml`) with any one of: a line that starts with
+  `JIRA ID` or `ISSUE ID` (no bullet or text before it) followed by a key,
+  number or link; or, anywhere, a closing keyword (`Closes #N`), a GitHub
+  issue URL, or a bare `#N` after a space or at a line start, even one citing
+  a related PR. So `JIRA ID: TBD` passes when the body cites `#N` elsewhere.
+  One ticket per ASIC defect (RC4).
 
 ## Helper Index
 
@@ -406,7 +408,7 @@ Maintainers point authors to these instead of new code (CX4, TS5, AP3).
 | Device sysfs path and read | `readDevInfo()`, `get_sys_file_path_by_type()` (`rocm_smi_device.h`) |
 | Parse sectioned `key: value` sysfs text (e.g. `pp_od_clk_voltage`) | `TextFileTagContents_t` (`rocm_smi_utils.h`; used in `rocm_smi.cc`) |
 | Root check | `is_sudo_user()` (`rocm_smi_utils.h`) |
-| Environment variable as integer | `GetEnvVarUInteger()` (file-static in `rocm_smi_main.cc`: promote it) |
+| Environment variable as integer, all builds | `read_env_ms()` (`amd_smi_utils.h`, amd_smi layer); `GetEnvVarUInteger()` in `rocm_smi_main.cc` reads only in `DEBUG` builds |
 | Python expected statuses | `expect_status()` (exact accept list), `status_sweep()`; `check_ret()` over-accepts, see TS5 (`tests/python/common/common.py`) |
 | Privileged or destructive test gates | `AMDSMI_NON_PRIVILEGED` (`amdsmitst`), `AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1` (Python) |
 
@@ -417,9 +419,11 @@ Prefer running a check to asserting it.
 - **Fail-without-fix (TS1)** — In a scratch worktree, never the author's tree,
   reverse-apply the non-test part of the diff, rebuild, and run only the new
   tests: they must fail there and pass on the PR head. Reverting C++ needs a
-  library rebuild (`amdsmitst` and the Python tests both load it); a
-  Python-only revert does not. If the reverse patch does not apply, reverse
-  only the hunk under test.
+  library rebuild; a Python-only revert does not. Python tests load the first
+  library `amdsmi_wrapper` finds (often a bundled or installed one), so run
+  each pass with `AMDSMI_LIB_OVERRIDE=<that build>/src/libamd_smi.so` and check
+  `amdsmi_wrapper._loaded_lib_path`. If the reverse patch does not apply,
+  reverse only the hunk under test.
 
   ```bash
   git worktree add --detach "${TMPDIR:-/tmp}/amdsmi-agent-mutation" <head-sha>
