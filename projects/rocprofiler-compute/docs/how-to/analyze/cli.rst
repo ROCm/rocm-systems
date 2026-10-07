@@ -114,8 +114,8 @@ There are three high-level GPU analysis views:
 
 .. _cli-memory-chart-viewing:
 
-The memory chart is a wide diagram drawn at a fixed width. It does not shrink to
-fit the terminal, so in a narrow window every chart line wraps and the boxes,
+The memory chart is a wide diagram whose width follows its content, not the
+terminal. It does not shrink to fit the terminal, so in a narrow window every chart line wraps and the boxes,
 arrows, and bandwidth labels no longer line up. Widening the window until one
 chart line fits on a single row fixes this. If you cannot resize, use one of the
 following instead.

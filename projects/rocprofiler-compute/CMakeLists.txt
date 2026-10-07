@@ -626,31 +626,10 @@ add_test(
 )
 
 add_test(
-    NAME test_mem_chart_gfx11
+    NAME test_memory_chart_mem_chart
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx11.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_mem_chart_common
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_common.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_common.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_mem_chart_gfx9
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx9.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx9.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_mem_chart_gfx1250
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx1250.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx1250.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_mem_chart.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_mem_chart.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1096,10 +1075,7 @@ if(${ENABLE_COVERAGE})
         test_list_metrics_cli
         test_memory_chart_loader
         test_memory_chart_units
-        test_mem_chart_common
-        test_mem_chart_gfx9
-        test_mem_chart_gfx11
-        test_mem_chart_gfx1250
+        test_memory_chart_mem_chart
         test_membw_engine
         test_membw_guidance
         test_membw_metric_extract

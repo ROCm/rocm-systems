@@ -53,10 +53,7 @@ test_categories:
       - test_conftest
       - test_memory_chart_loader
       - test_memory_chart_units
-      - test_mem_chart_common
-      - test_mem_chart_gfx9
-      - test_mem_chart_gfx11
-      - test_mem_chart_gfx1250
+      - test_memory_chart_mem_chart
       - test_membw_engine
       - test_membw_guidance
       - test_membw_metric_extract
@@ -148,10 +145,7 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_memory_chart_loader
       - test_memory_chart_units
-      - test_mem_chart_common
-      - test_mem_chart_gfx9
-      - test_mem_chart_gfx11
-      - test_mem_chart_gfx1250
+      - test_memory_chart_mem_chart
       - test_membw_engine
       - test_membw_guidance
       - test_membw_metric_extract
@@ -247,10 +241,7 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_memory_chart_loader
       - test_memory_chart_units
-      - test_mem_chart_common
-      - test_mem_chart_gfx9
-      - test_mem_chart_gfx11
-      - test_mem_chart_gfx1250
+      - test_memory_chart_mem_chart
       - test_membw_engine
       - test_membw_guidance
       - test_membw_metric_extract
@@ -346,10 +337,7 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_memory_chart_loader
       - test_memory_chart_units
-      - test_mem_chart_common
-      - test_mem_chart_gfx9
-      - test_mem_chart_gfx11
-      - test_mem_chart_gfx1250
+      - test_memory_chart_mem_chart
       - test_membw_engine
       - test_membw_guidance
       - test_membw_metric_extract
