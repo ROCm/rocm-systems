@@ -60,7 +60,7 @@ storage_t::impl::get_uuid() const
 }
 
 profiler_hub::version_t
-storage_t::impl::get_schema_version() const
+storage_t::impl::get_storage_version() const
 {
     return m_schema_version;
 }
