@@ -821,6 +821,20 @@ ROCSHMEM_ALLTOALL_WG_WRAPPER(ulong,     unsigned long)
 ROCSHMEM_ALLTOALL_WG_WRAPPER(ulonglong, unsigned long long)
 #undef ROCSHMEM_ALLTOALL_WG_WRAPPER
 
+// Collective - Alltoall (ctx untyped mem wg)
+ROCSHMEM_DEVICE_API void rocshmem_ctx_alltoallmem_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team,
+    void *dest, const void *source, int nelems) {
+  rocshmem::rocshmem_ctx_alltoallmem_wg(ctx, team, dest, source, nelems);
+}
+
+// Collective - Broadcast (ctx untyped mem wg)
+ROCSHMEM_DEVICE_API void rocshmem_ctx_broadcastmem_wg(
+    rocshmem_ctx_t ctx, rocshmem_team_t team,
+    void *dest, const void *source, int nelems, int PE_root) {
+  rocshmem::rocshmem_ctx_broadcastmem_wg(ctx, team, dest, source, nelems, PE_root);
+}
+
 // Collective - SUM Reduce
 ROCSHMEM_DEVICE_API int rocshmem_tile_sum_reduce(
     rocshmem_team_t team, void* dst_data, const void* src_data,
