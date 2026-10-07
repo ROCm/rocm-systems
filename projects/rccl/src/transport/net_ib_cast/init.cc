@@ -142,6 +142,19 @@ static int IbCastSpeed(int speed) {
 
 extern "C" int ncclIbCastTestSpeed(int speed) { return IbCastSpeed(speed); }
 
+// Per-device record of which branch populated IbCastDevs[dev].speed, test-only
+// (so NCCL_IB_QUERY_PORT_SPEED=0 tests can assert the fallback was actually used,
+// not just that it produced the same value as the query would have).
+static bool IbCastDevSpeedFromQuery[MAX_IB_DEVS];
+
+extern "C" ncclResult_t ncclIbCastTestSpeedSource(int dev, int* fromQuery) {
+  if (fromQuery == NULL || dev < 0 || dev >= IbCastNDevs) return ncclInvalidArgument;
+  *fromQuery = IbCastDevSpeedFromQuery[dev] ? 1 : 0;
+  return ncclSuccess;
+}
+
+extern "C" int ncclIbCastTestGetNDevs(void) { return IbCastNDevs; }
+
 // Determine whether RELAXED_ORDERING is enabled and possible
 static int IbCastRelaxedOrderingCapable(void) {
   int roMode = ncclParamIbCastPciRelaxedOrdering();
@@ -508,10 +521,12 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             if (wrap_ibv_query_port_speed(context, port_num, &querySpeed) == ncclSuccess && querySpeed != 0) {
               // ibv_query_port_speed returns speed in granularity of 100 Mbps
               IbCastDevs[IbCastNDevs].speed = querySpeed * 100;
+              IbCastDevSpeedFromQuery[IbCastNDevs] = true;
             } else {
               // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
               int portSpeed = portAttr.active_speed_ex ? portAttr.active_speed_ex : portAttr.active_speed;
               IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portSpeed) * IbCastWidth(portAttr.active_width);
+              IbCastDevSpeedFromQuery[IbCastNDevs] = false;
             }
             IbCastDevs[IbCastNDevs].context = context;
             IbCastDevs[IbCastNDevs].pdRefs = 0;
