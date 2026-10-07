@@ -1574,25 +1574,8 @@ TEST_F(UBR_MultiSegment, NetProxyPartialFinalSegment)
     if (MPITestConstants::detectNodeCount() != 2) {
         GTEST_SKIP() << "Requires exactly two nodes to exercise NET proxy registration";
     }
-    {
-        // An IPC peer on the same node hangs this test before HIP 7.17 (ROCm 10.2).
-        constexpr int kFirstHipWithoutIpcHang = 71700000;
-        MPI_Comm localComm = MPI_COMM_NULL;
-        int localSize = 1, maxLocalSize = 1, hipVersion = 0;
-        if (MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
-                                &localComm) == MPI_SUCCESS) {
-            MPI_Comm_size(localComm, &localSize);
-            MPI_Comm_free(&localComm);
-        }
-        MPI_Allreduce(&localSize, &maxLocalSize, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-        (void)hipRuntimeGetVersion(&hipVersion);
-        // Nodes can run different HIP runtimes; skip on the oldest so all ranks agree.
-        MPI_Allreduce(MPI_IN_PLACE, &hipVersion, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-        if (maxLocalSize > 1 && hipVersion < kFirstHipWithoutIpcHang) {
-            GTEST_SKIP() << "HIP " << hipVersion << " hangs with an intra-node IPC peer; "
-                         << "run 1 rank per node";
-        }
-    }
+    // Before HIP 7.17, a peer proxy's hipMemMap waits on kernels in blocking streams.
+    test_stream_flags_ = hipStreamNonBlocking;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
     ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
