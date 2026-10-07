@@ -1005,7 +1005,9 @@ hsa_status_t KfdDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clo
 
   const bool precise_timestamps =
       core::Runtime::runtime_singleton_ != nullptr &&
-      core::Runtime::runtime_singleton_->flag().enable_high_precision_timestamps();
+      core::Runtime::runtime_singleton_->flag().enable_high_precision_timestamps() &&
+      core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(
+          hsaKmtGetClockCountersPrecise) != nullptr;
 
   HSAKMT_STATUS err = precise_timestamps
       ? HSAKMT_CALL(hsaKmtGetClockCountersPrecise(node_id, clock_counter))

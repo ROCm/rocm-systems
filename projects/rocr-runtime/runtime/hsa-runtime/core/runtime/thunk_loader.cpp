@@ -288,8 +288,9 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtGetClockCounters) = (HSAKMT_DEF(hsaKmtGetClockCounters)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetClockCounters");
       if (HSAKMT_PFN(hsaKmtGetClockCounters) == nullptr) goto LOAD_ERROR;
 
+      // Optional. An older libhsakmt has no precise entry; GetClockCounters
+      // falls back to the single-sample query when this stays null.
       HSAKMT_PFN(hsaKmtGetClockCountersPrecise) = (HSAKMT_DEF(hsaKmtGetClockCountersPrecise)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetClockCountersPrecise");
-      if (HSAKMT_PFN(hsaKmtGetClockCountersPrecise) == nullptr) goto LOAD_ERROR;
 
       HSAKMT_PFN(hsaKmtPmcGetCounterProperties) = (HSAKMT_DEF(hsaKmtPmcGetCounterProperties)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtPmcGetCounterProperties");
       if (HSAKMT_PFN(hsaKmtPmcGetCounterProperties) == nullptr) goto LOAD_ERROR;
