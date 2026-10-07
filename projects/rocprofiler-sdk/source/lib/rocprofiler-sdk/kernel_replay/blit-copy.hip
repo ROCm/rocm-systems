@@ -45,7 +45,7 @@ copy_item(const copy_descriptor_t& copy, std::uint64_t item_offset)
 {
     const auto  byte_offset = item_offset * bytes_per_item;
     const auto* src_bytes   = reinterpret_cast<const global_byte_t*>(copy.source_address);
-    auto*       dst_bytes   = reinterpret_cast<global_byte_t*>(copy.destination_address);
+    auto*       dst_bytes   = reinterpret_cast<global_byte_t*>(copy.dest_address);
 
     if(copy.size - byte_offset >= bytes_per_item)
     {
