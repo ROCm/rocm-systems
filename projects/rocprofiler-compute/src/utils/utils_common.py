@@ -70,6 +70,16 @@ def format_metric_id(table_id: int, position: int) -> str:
     return f"{table_index(table_id)}.{position}"
 
 
+def is_mem_chart_panel(panel_config: dict[str, Any]) -> bool:
+    """True when every table of a panel is drawn as the memory chart."""
+    sources = panel_config.get("data source") or []
+    return bool(sources) and all(
+        table.get("cli_style") == "mem_chart"
+        for source in sources
+        for table in source.values()
+    )
+
+
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
     """Map GPU architectures to the shared analysis-config directory name."""
     if gpu_arch is None:

@@ -32,7 +32,11 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import convert_filter_blocks_to_panel_ids, table_index
+from utils.utils_common import (
+    convert_filter_blocks_to_panel_ids,
+    is_mem_chart_panel,
+    table_index,
+)
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
 
@@ -722,14 +726,6 @@ def process_table_data(
     return result_df
 
 
-def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
-    """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
-    sources = panel.get("data source") or []
-    return bool(sources) and all(
-        tcfg.get("cli_style") == "mem_chart" for ds in sources for tcfg in ds.values()
-    )
-
-
 def format_table_output(
     args: argparse.Namespace,
     table_config: dict[str, Any],
@@ -1098,7 +1094,7 @@ def show_all(
             if not hasattr(output, "isatty") or not output.isatty():
                 panel_content = strip_ansi(panel_content)
             # A panel drawn entirely as the memory chart carries its own heading
-            if mem_chart_data and _panel_is_mem_chart_only(panel):
+            if mem_chart_data and is_mem_chart_panel(panel):
                 print(panel_content, file=output)
             else:
                 print(f"\n{'-' * 80}", file=output)
