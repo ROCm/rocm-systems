@@ -3426,16 +3426,15 @@ amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_hand
  *  totals. Counts are derived purely from ::amdsmi_get_processor_type and do not require
  *  ENABLE_ESMI_LIB; on builds without ESMI, @p nr_cpusockets and @p nr_cpucores will be 0.
  *
- *  @param[in] processor_handles A pointer to a block of memory to which the
- *  ::amdsmi_processor_handle values will be written. This value may be NULL.
+ *  @param[in] processor_handles The processor handles to classify. Must not be NULL.
  *
- *  @param[in] processor_count total processor count per socket
+ *  @param[in] processor_count Number of handles in @p processor_handles. Must not be NULL.
  *
- *  @param[out] nr_cpusockets Total number of cpu sockets
+ *  @param[out] nr_cpusockets Total number of cpu sockets. Must not be NULL.
  *
- *  @param[out] nr_cpucores Total number of cpu cores
+ *  @param[out] nr_cpucores Total number of cpu cores. Must not be NULL.
  *
- *  @param[out] nr_gpus Total number of gpu devices
+ *  @param[out] nr_gpus Total number of gpu devices. Must not be NULL.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
