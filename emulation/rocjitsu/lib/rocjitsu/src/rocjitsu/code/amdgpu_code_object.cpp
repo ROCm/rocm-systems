@@ -340,7 +340,7 @@ AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch,
 
   std::optional<uint32_t> min_count;
   for (const KernelDescriptorInfo &kernel : kernels) {
-    const uint32_t granulated = AMDHSA_BITS_GET(
+    const uint32_t granulated = RJ_AMDHSA_BITS_GET(
         kernel.descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
     const uint32_t count = sgpr_count_from_granulated(granulated, arch);
     min_count = min_count ? std::min(*min_count, count) : count;

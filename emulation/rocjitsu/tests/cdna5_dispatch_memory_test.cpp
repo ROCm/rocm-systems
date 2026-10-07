@@ -234,7 +234,8 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
   } args{0x11111111u, 0x22222222u, 0x33333333u};
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(&args), sizeof(args), kKernargAddr);
@@ -262,7 +263,8 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
   const std::array<uint32_t, 3> args{0x11111111u, 0x22222222u, 0x33333333u};
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(args.data()),
@@ -292,7 +294,8 @@ TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload)
     args[i] = 0x1000u + i;
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(args.data()),
@@ -326,7 +329,8 @@ TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   write_global_u32(*sim.memory, kKernargAddr + 4, kExpected);
@@ -366,7 +370,8 @@ TEST(Gfx1250SimulationTest, SLoadB32WritesVccHalves) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   write_global_u32(*sim.memory, kKernargAddr, kVccLo);
@@ -399,7 +404,8 @@ TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(&kExpected), sizeof(kExpected),
@@ -448,7 +454,8 @@ TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   write_global_u32(*sim.memory, kKernargAddr, kSgprValue);

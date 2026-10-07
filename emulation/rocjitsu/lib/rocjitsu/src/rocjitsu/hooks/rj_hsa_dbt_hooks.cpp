@@ -23,6 +23,7 @@
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
@@ -67,12 +68,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "rocjitsu/code/kernel_descriptor_abi.h"
-RJ_DIAGNOSTIC_POP
 
 // Test seams live outside the anonymous namespace so the test-only translation
 // unit can reach them, but they stay at hidden visibility: only

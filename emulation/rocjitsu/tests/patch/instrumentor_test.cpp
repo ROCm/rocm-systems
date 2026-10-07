@@ -11,6 +11,7 @@
 #include "rocjitsu/code/builders/smem_builders.h"
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/builders/vector_builders.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
@@ -23,12 +24,6 @@
 #include "rocjitsu/isa/register_set.h"
 
 #include "../dbi_test_util.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "rocjitsu/code/kernel_descriptor_abi.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -2459,9 +2454,9 @@ TEST(InstrumentorEntryPrologue, AWiderVgprAllocationAdmitsAFifthArgument) {
   ASSERT_EQ(kernels.size(), 1u);
   const kd::kernel_descriptor_t &desc = kernels.front().descriptor;
   EXPECT_EQ(
-      AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+      RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
       1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET), 1u);
 
   const auto result = patch_five_log_buffer_args(target);
   ASSERT_TRUE(result.errors.empty()) << result.errors.front();

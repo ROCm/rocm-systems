@@ -6,16 +6,11 @@
 /// @file amdgpu_elf_test_support.h
 /// @brief Shared AMDGPU ELF fixtures for CPU-only code-object tests.
 
-#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/instruction.h"
-
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "rocjitsu/code/kernel_descriptor_abi.h"
-RJ_DIAGNOSTIC_POP
 
 #include <cstddef>
 #include <cstdint>

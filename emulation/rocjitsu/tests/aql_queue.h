@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/aql/amd_vendor_packets.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -15,7 +16,6 @@
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/hsa.h"
-#include "rocjitsu/vm/amdgpu/aql/amd_vendor_packets.h"
 RJ_DIAGNOSTIC_POP
 
 #include <array>

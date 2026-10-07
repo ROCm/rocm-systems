@@ -339,10 +339,10 @@ public:
     using namespace rocjitsu::amdhsa;
     kernel_descriptor_t descriptor{};
     descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    1);
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    12);
+    RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                       COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 1);
+    RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                       COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12);
     backing_->store(kKernelObjectVa, descriptor);
     backing_->store(kKernelObjectVa + sizeof(descriptor), S_ENDPGM_GFX12);
 

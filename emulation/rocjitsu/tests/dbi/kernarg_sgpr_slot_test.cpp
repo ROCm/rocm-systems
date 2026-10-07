@@ -25,13 +25,8 @@
 #include "dbi_sim.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
-#include "rocjitsu/code/kernel_descriptor_scan.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "rocjitsu/code/kernel_descriptor_abi.h"
-RJ_DIAGNOSTIC_POP
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 
 #include <gtest/gtest.h>
 

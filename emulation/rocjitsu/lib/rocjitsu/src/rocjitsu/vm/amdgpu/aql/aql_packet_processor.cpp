@@ -3,11 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "rocjitsu/vm/amdgpu/aql/amd_vendor_packets.h"
-RJ_DIAGNOSTIC_POP
 
 #include <array>
 #include <bit>
