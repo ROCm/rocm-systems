@@ -2554,14 +2554,14 @@ template <typename Inst, typename UnOp>
 /// the true16 form selects the source half and writes the selected destination
 /// half per the ISA's op_sel[3] policy.
 /// The operation's result is rounded to F16 first; the shared OMOD/CLAMP stage
-/// then acts on that half. With rounded_result, the operation is a TRANS-unit
-/// one, whose OMOD overflow rounds to nearest in every MODE. input_policy flushes
+/// then acts on that half. `transcendental` selects the TRANS-unit output
+/// policy, whose OMOD overflow rounds to nearest in every MODE. input_policy flushes
 /// the source half before widening; ABS/NEG only change the sign, so the order
 /// relative to them does not matter.
 template <bool True16, typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool
-try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op, bool rounded_result = false,
+try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op, bool transcendental = false,
                                  input_denormal::Policy input_policy = {}) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.vdst.simd_capable())
@@ -2571,7 +2571,7 @@ try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op, bool rou
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
   const output_modifier::Policy output_policy =
-      rounded_result
+      transcendental
           ? transcendental_output_modifier_policy<fp_format::F16>(wf, inst.inst_.omod,
                                                                   inst.inst_.clamp)
           : output_modifier_policy<fp_format::F16>(wf, inst.inst_.omod, inst.inst_.clamp);

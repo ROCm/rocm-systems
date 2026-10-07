@@ -3051,12 +3051,12 @@ def _simd_probe_line(
             else 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16'
         )
         transcendental = template_name.rsplit('_', 1)[0].upper() in ROUNDED_F16_OPS
-        rounded = ', true' if transcendental else ''
+        fp16_args = ', true' if transcendental else ''
         if transcendental or template_name.split('_')[1] in _INPUT_FLUSHED_ROUNDING:
             # The glue flushes the raw half before widening it for the functor.
             policy = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
-            rounded = f', {"true" if transcendental else "false"}, {policy}'
-        return f'  {macro}({spec3unaf16}{rounded});'
+            fp16_args = f', {"true" if transcendental else "false"}, {policy}'
+        return f'  {macro}({spec3unaf16}{fp16_args});'
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
     # the VOP3 form reads src0/src1 and carries abs/neg/omod/clamp modifiers.
     # f32 ops apply the modifiers in-vector (bit-exact); integer/bitwise ops
