@@ -131,7 +131,7 @@ precisely the ones left without a trailer and absent from the root index, while
 the parent that exited cleanly needs no repair. Sub-archives that already carry
 a clean trailer are skipped without being read.
 
-### Archive Format (v7)
+### Archive Format (v8)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -326,13 +326,13 @@ The generator classifies each API:
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 When adding HIP API support, update this script to classify the API in the appropriate capture and playback policy sets. APIs requiring non-trivial serialization or replay belong in `MANUAL_CAPTURE_APIS` and/or `MANUAL_PLAYBACK_APIS`; intentionally unsupported replay APIs belong in `NOOP_PLAYBACK_APIS`.
 
-## Archive Format (v7)
+## Archive Format (v8)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 7
+HRR_VERSION = 8
 ```
 
 Version history, so an archive written by an older runtime can be placed:
@@ -362,12 +362,16 @@ Version history, so an archive written by an older runtime can be placed:
   `HRR_FILE_FLAG_PACKED_HOST_RECTS` in `hrr_file_header.reserved`. A v6 reader
   ignores that field and would replay a packed blob with the recorded pitch,
   reading past its end. See 2D/3D Memcpy and Memset below.
+- **v8** records `hipDeviceFlushGPUDirectRDMAWrites`, appended to
+  `HipDispatchTable`. That slot takes the first compiler ID and shifts the
+  compiler API IDs up by one. A v7 reader would decode those events as the
+  wrong API.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 7)
+                      events.bin HRR_VERSION = 8)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
@@ -1361,7 +1365,7 @@ The event wire format (finding H5):
   shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
   (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
   normally instead of being dropped at 65535 bytes. This is the change that bumped
-  `HRR_VERSION` to 4; the current version is 7, see Archive Format above. The
+  `HRR_VERSION` to 4; the current version is 8, see Archive Format above. The
   writer's single-record buffer path now writes any oversized record straight through.
 - **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
   a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch

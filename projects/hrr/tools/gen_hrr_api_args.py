@@ -1993,8 +1993,11 @@ _HEADER_PREAMBLE = """\
  * old recording.
  * v7: the host blobs of the pitched copies are packed, and the writer sets
  * HRR_FILE_FLAG_PACKED_HOST_RECTS. A v6 reader ignored the flag and replayed
- * a packed blob with the recorded pitch, reading past its end. */
-#define HRR_VERSION ((uint16_t)7u)
+ * a packed blob with the recorded pitch, reading past its end.
+ * v8: hipDeviceFlushGPUDirectRDMAWrites was appended to HipDispatchTable,
+ * taking the first compiler ID and shifting the compiler API IDs up by one.
+ * A v7 reader would decode those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)8u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
