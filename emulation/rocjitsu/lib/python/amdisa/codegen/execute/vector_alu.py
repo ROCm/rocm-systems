@@ -13,7 +13,10 @@ vop3_modifiers helpers.
 from __future__ import annotations
 
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
-from amdisa.codegen.execute.floating_policy import F16_FLUSHED_SOURCE_CALLS
+from amdisa.codegen.execute.floating_policy import (
+    F16_FLUSHED_SOURCE_CALLS,
+    F16_TRANSCENDENTAL_CALLS,
+)
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
@@ -460,7 +463,7 @@ def gen_vector_unary(
         expr = math_map_f16.get(op, f's /* TODO: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            if op in ('log2', 'exp2', 'rcp', 'rsq', 'sqrt', 'sin', 'cos'):
+            if op in F16_TRANSCENDENTAL_CALLS:
                 L.extend(
                     [
                         '    const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod('
