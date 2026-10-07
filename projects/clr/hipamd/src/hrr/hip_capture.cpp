@@ -2208,7 +2208,9 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
 // memory without a free, so its wrapper keeps only what survived it.
 //
 // The kernel handle wrappers fill the known-handle set that snapshot_launch
-// checks before it reads a handle the application passed.
+// checks before it reads a handle the application passed. hipKernelGetFunction
+// is not among them: it casts its argument without checking it, so a success
+// from it says nothing about the handle.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -2222,7 +2224,6 @@ decltype(HipDispatchTable::hipFree_fn)         g_shim_hipFree         = nullptr;
 decltype(HipDispatchTable::hipDeviceReset_fn)  g_shim_hipDeviceReset  = nullptr;
 decltype(HipDispatchTable::hipModuleGetFunction_fn)        g_shim_hipModuleGetFunction = nullptr;
 decltype(HipDispatchTable::hipGetFuncBySymbol_fn)          g_shim_hipGetFuncBySymbol   = nullptr;
-decltype(HipDispatchTable::hipKernelGetFunction_fn)        g_shim_hipKernelGetFunction = nullptr;
 decltype(HipDispatchTable::hipModuleEnumerateFunctions_fn) g_shim_hipModuleEnumerateFunctions =
     nullptr;
 }  // namespace
@@ -2306,11 +2307,6 @@ static hipError_t known_hipGetFuncBySymbol(hipFunction_t* functionPtr, const voi
   if (r == hipSuccess && functionPtr) known_fn_add(*functionPtr, nullptr);
   return r;
 }
-static hipError_t known_hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
-  hipError_t r = g_shim_hipKernelGetFunction(pFunc, kernel);
-  if (r == hipSuccess && pFunc) known_fn_add(*pFunc, nullptr);
-  return r;
-}
 static hipError_t known_hipModuleEnumerateFunctions(hipFunction_t* functions,
                                                     unsigned int numFunctions,
                                                     hipModule_t module) {
@@ -2343,7 +2339,6 @@ static void install_pinned_tracking() {
   if (HIP_HRR_HOST_SNAPSHOTS) {
     HRR_WRAP(known, hipModuleGetFunction)
     HRR_WRAP(known, hipGetFuncBySymbol)
-    HRR_WRAP(known, hipKernelGetFunction)
     HRR_WRAP(known, hipModuleEnumerateFunctions)
   }
 #undef HRR_WRAP
