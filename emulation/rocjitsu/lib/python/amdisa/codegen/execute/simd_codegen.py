@@ -2018,8 +2018,14 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
 
 
 # VOP3 f16 unary operations widen to f32 for modifiers and narrow the result.
-# Integral rounding preserves input denormals. Transcendentals apply half
-# denormal, overflow and NaN policies and round to f16 before OMOD.
+# Input policy per entry:
+# - CEIL and FLOOR receive a source half flushed under MODE input denormals
+#   (_INPUT_FLUSHED_ROUNDING).
+# - TRUNC and RNDNE keep the source unflushed; a subnormal gives a signed zero
+#   either way.
+# - FRACT keeps the source unflushed; its input flush is not implemented yet.
+# - Transcendentals receive a flushed source half, apply the half overflow and
+#   NaN policies, and round to f16 before OMOD.
 SIMD_VOP3_UNARY_FP16: dict[str, str] = {
     'v_ceil_f16_vop3': '[](auto a) { return util::ceil_simd(a); }',
     'v_floor_f16_vop3': '[](auto a) { return util::floor_simd(a); }',

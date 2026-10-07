@@ -707,8 +707,9 @@ inline output_modifier::Policy output_modifier_policy(const Wavefront &wf, uint3
 /// @details The TRANS unit rounds OMOD overflow to nearest in every MODE, so
 /// overflow gives infinity unless FP16_OVFL saturates an F16 result. gfx1201
 /// captures show infinity under round-toward-zero for F16 and F32 results.
-// ISA discrepancy: the ISA expects OMOD overflow to follow the MODE round mode,
-// but transcendental results overflow to infinity in every mode, as gfx1201 does.
+/// ISA discrepancy: the ISA expects OMOD overflow to follow the MODE round
+/// mode, but transcendental results overflow to infinity in every mode, as
+/// gfx1201 does. This policy therefore forces `round_mode = 0`.
 template <typename Fmt>
 inline output_modifier::Policy
 transcendental_output_modifier_policy(const Wavefront &wf, uint32_t omod, uint32_t clamp) {
