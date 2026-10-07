@@ -642,16 +642,18 @@ start_context(rocprofiler_context_id_t context_id)
     if(cfg->dispatch_spm) status = rocprofiler::spm::start_context(cfg);
     if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
     if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->start_context();
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+    // Ahead of start_agent_ctx() so that it starts under the marker. PC sampling never shares a
+    // context with counter collection (pc_sampling/service.cpp, counters/controller.cpp), so no
+    // context can observe the reordering.
+    if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
+#endif
 
-    // Released before the services below: start_agent_ctx() calls the tool's profile callback
-    // synchronously, and a tool that calls back into the lifecycle API from there would wait on
-    // this marker forever.
+    // Released before start_agent_ctx(): it calls the tool's profile callback synchronously, and a
+    // tool that calls back into the lifecycle API from there would wait on this marker forever.
     _release_pending();
 
     if(cfg->device_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-    if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
-#endif
 
     return status;
 }
