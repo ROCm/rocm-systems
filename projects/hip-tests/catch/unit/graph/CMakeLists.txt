@@ -91,6 +91,30 @@ hip_add_exe_to_target(NAME GraphsTest1
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
+# Classic-path graph whose edge order is the 7.2 stream-id gap. The flag is
+# read when the runtime loads, so it has to be set before the process starts.
+if(HIP_PLATFORM MATCHES "amd")
+  set_source_files_properties(hipGraphClassicForkJoin.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  add_executable(GraphsClassicForkJoinTest EXCLUDE_FROM_ALL
+    hipGraphClassicForkJoin.cc
+    $<TARGET_OBJECTS:Main_Object>
+    $<TARGET_OBJECTS:KERNELS>)
+  set_target_properties(GraphsClassicForkJoinTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(GraphsClassicForkJoinTest Catch2::Catch2 ${GPGPU_LINKER_LIBRARIES})
+  if(UNIX)
+    target_link_libraries(GraphsClassicForkJoinTest stdc++fs -ldl pthread rt)
+  endif()
+  add_dependencies(build_tests GraphsClassicForkJoinTest)
+  add_dependencies(GraphsClassicForkJoinTest hip_tests_config)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS GraphsClassicForkJoinTest)
+
+  add_test(NAME Unit_hipGraphClassic_ForkJoin_StreamPool
+    COMMAND ${CMAKE_COMMAND} -E env
+      "DEBUG_HIP_GRAPH_CLASSIC_PATH=1"
+      $<TARGET_FILE:GraphsClassicForkJoinTest>
+      "Unit_hipGraphClassic_ForkJoin_StreamPool")
+endif()
+
 set(TEST_SRC
   hipStreamGetCaptureInfo.cc
   hipStreamEndCapture.cc

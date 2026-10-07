@@ -331,6 +331,13 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       const std::vector<hip::Stream*>& streams  //!< A pool of streams to use in graph's execution
   ) {
     assert(stream_id_ != -1 && "Stream ID wasn't initialized");
+    assert(stream_id_ < static_cast<size_t>(streams.size()) && "stream_id_ out of bounds");
+    if (!(stream_id_ < static_cast<size_t>(streams.size()))) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "[hipGraph] stream_id_ %d is out of bounds for a pool of size %zu",
+              static_cast<int>(stream_id_), streams.size());
+      return;
+    }
     stream_ = streams[stream_id_];
     // Reset the launch ID after the stream assignment
     launch_id_ = -1;
