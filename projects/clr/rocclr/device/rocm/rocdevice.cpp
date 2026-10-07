@@ -803,9 +803,12 @@ bool Device::createBlitProgram() {
     extraKernel = SchedulerSourceCode;
   }
 
+  // Some blit kernels require atomics, for which we use CL2.0 standard
+  static constexpr char kBlitOptions[] = "-cl-std=CL2.0";
+
   blitProgram_ = new BlitProgram(context_);
   // Create blit programs
-  if (blitProgram_ == nullptr || !blitProgram_->create(this, extraKernel, "")) {
+  if (blitProgram_ == nullptr || !blitProgram_->create(this, extraKernel, kBlitOptions)) {
     delete blitProgram_;
     blitProgram_ = nullptr;
     LogError("Couldn't create blit kernels!");
