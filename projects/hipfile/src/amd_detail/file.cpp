@@ -78,7 +78,10 @@ File::File(UnregisteredFile &&uf, const PassKey<FileMap> &)
       m_is_regular_file{(uf.stx.stx_mask & STATX_TYPE) && S_ISREG(uf.stx.stx_mode)},
       m_on_ext4_ordered{uf.mountinfo && uf.mountinfo->type == FilesystemType::ext4 &&
                         uf.mountinfo->options.ext4.journaling_mode == ExtJournalingMode::ordered},
-      m_on_xfs{uf.mountinfo && uf.mountinfo->type == FilesystemType::xfs}
+      m_on_xfs{uf.mountinfo && uf.mountinfo->type == FilesystemType::xfs},
+      m_on_nfs_rdma{uf.mountinfo && uf.mountinfo->type == FilesystemType::nfs &&
+                    (uf.mountinfo->options.nfs.proto == NfsProto::rdma ||
+                     uf.mountinfo->options.nfs.proto == NfsProto::rdma6)}
 {
 }
 
@@ -137,6 +140,12 @@ bool
 File::onXfs() const noexcept
 {
     return m_on_xfs;
+}
+
+bool
+File::onNfsRdma() const noexcept
+{
+    return m_on_nfs_rdma;
 }
 
 shared_ptr<IFile>
