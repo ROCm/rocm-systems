@@ -20,9 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-"""Public entry points for rocprofv3-doctor: run the checks, render a report.
+"""Public entry points for ``rocprofv3 --doctor``: run the checks, render a report.
 
-The ``source/bin/rocprofv3-doctor`` script is a thin argparse wrapper over this
+The ``source/libexec/rocprofiler-sdk/rocprofv3-doctor`` script, which
+``rocprofv3 --doctor`` execs, is a thin argparse wrapper over this
 module; all of the interesting logic lives here so it can be unit-tested
 without spawning a subprocess.
 """

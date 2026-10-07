@@ -1,18 +1,18 @@
 .. meta::
-  :description: Documentation of the usage of rocprofv3-doctor
-  :keywords: ROCprofiler-SDK tool, rocprofv3-doctor, diagnostics, troubleshooting, rocprofv3 not working, ROCprofiler-SDK troubleshooting, GPU profiling diagnostics
+  :description: Documentation of rocprofv3 --doctor, which checks whether a machine is ready for profiling
+  :keywords: ROCprofiler-SDK tool, rocprofv3 --doctor, rocprofv3-doctor, diagnostics, troubleshooting, rocprofv3 not working, ROCprofiler-SDK troubleshooting, GPU profiling diagnostics
 
 .. _using-rocprofv3-doctor:
 
-======================
-Using rocprofv3-doctor
-======================
+===========================================
+Checking your setup with rocprofv3 --doctor
+===========================================
 
-``rocprofv3-doctor`` is a self-diagnostic CLI tool that inspects your machine and your
-ROCprofiler-SDK installation, and reports what would prevent ``rocprofv3`` from working.
+``rocprofv3 --doctor`` inspects your machine and your ROCprofiler-SDK installation, and
+reports what would prevent ``rocprofv3`` from working.
 
 When ``rocprofv3`` fails with a message that does not obviously point at a cause, run
-``rocprofv3-doctor`` first. It checks the installation, the driver and device nodes, the
+``rocprofv3 --doctor`` first. It checks the installation, the driver and device nodes, the
 runtime library stack, counter-collection permissions, the environment, container device
 passthrough, the Python environment, the output filesystem, and the companion tools --
 then prints a copy-pasteable remediation for anything it finds.
@@ -72,8 +72,11 @@ killed. A default run takes about a second on a healthy machine.
 Installation
 ------------
 
-``rocprofv3-doctor`` is installed alongside ``rocprofv3``, in the ``bin`` directory of
-your ROCm installation. Where that is depends on how ROCm was installed:
+``--doctor`` is an option of ``rocprofv3``, so there is nothing separate to install or
+put on your ``PATH``: wherever ``rocprofv3`` runs, ``rocprofv3 --doctor`` does. (The
+checks themselves are installed under ``<prefix>/libexec/rocprofiler-sdk/``, which is
+not meant to be run directly.) ``rocprofv3`` is in the ``bin`` directory of your ROCm
+installation, which depends on how ROCm was installed:
 
 .. list-table::
    :header-rows: 1
@@ -90,7 +93,7 @@ your ROCm installation. Where that is depends on how ROCm was installed:
    * - TheRock tarball, source build, or custom prefix
      - ``<prefix>/bin``
 
-If ``rocprofv3-doctor`` is not already on your ``PATH``, add that directory, for example:
+If ``rocprofv3`` is not already on your ``PATH``, add that directory, for example:
 
 .. code-block:: bash
 
@@ -99,20 +102,16 @@ If ``rocprofv3-doctor`` is not already on your ``PATH``, add that directory, for
 Basic usage
 -----------
 
-Run the tool with no arguments to check everything:
-
-.. code-block:: bash
-
-   rocprofv3-doctor
-
-The same report is available through ``rocprofv3`` itself:
+Run it with no further options to check everything:
 
 .. code-block:: bash
 
    rocprofv3 --doctor
 
-Any arguments after ``--doctor`` are forwarded to ``rocprofv3-doctor``, so
-``rocprofv3 --doctor --format json`` works exactly like ``rocprofv3-doctor --format json``.
+Options after ``--doctor`` configure the check rather than profiling, for example
+``rocprofv3 --doctor --format json``. ``rocprofv3 --doctor --help`` lists them. Do not
+combine ``--doctor`` with profiling options: it checks the setup and exits, and runs no
+application.
 
 Understanding the output
 ------------------------
@@ -122,8 +121,8 @@ short title:
 
 .. code-block:: shell
 
-   rocprofv3-doctor v1.4.0  (ROCm 10.0.0)
-   Checking: /opt/rocm-10.0.0  (found via location of rocprofv3-doctor; ROCm system packages)
+   rocprofv3 --doctor v1.4.0  (ROCm 10.0.0)
+   Checking: /opt/rocm-10.0.0  (found via install prefix of rocprofv3; ROCm system packages)
 
      Installation
      ============
@@ -157,7 +156,7 @@ The status tags mean:
        with ``--skip``. The detail line names the dependency, so a single root cause
        produces one failure rather than a cascade.
    * - ``ERR``
-     - The check itself broke (a ``rocprofv3-doctor`` bug). This says nothing about your
+     - The check itself broke (a ``rocprofv3 --doctor`` bug). This says nothing about your
        system; the detail asks you to report it with the traceback from ``--verbose``.
 
 Below the summary, a **How to Fix** section repeats every failure and actionable warning
@@ -180,7 +179,7 @@ Exit codes
    * - ``1``
      - At least one check produced ``FAIL``.
    * - ``2``
-     - ``rocprofv3-doctor`` itself could not run (for example, the ``rocprofv3`` Python
+     - ``rocprofv3 --doctor`` itself could not run (for example, the ``rocprofv3`` Python
        package could not be imported), an ``--only`` pattern matched no check, or a check
        broke (``ERR``) and none failed. A ``FAIL`` outranks an ``ERR``: findings about the
        system come first.
@@ -198,7 +197,7 @@ attaching to bug reports:
 
 .. code-block:: bash
 
-   rocprofv3-doctor --format json
+   rocprofv3 --doctor --format json
 
 .. code-block:: json
 
@@ -207,7 +206,7 @@ attaching to bug reports:
      "tool_version": "1.4.0",
      "rocm_version": "10.0.0",
      "rocm_root": "/opt/rocm",
-     "rocm_root_source": "location of rocprofv3-doctor",
+     "rocm_root_source": "install prefix of rocprofv3",
      "install_kind": "system-package",
      "timestamp_utc": "2026-09-15T12:34:56Z",
      "summary": { "pass": 41, "warn": 6, "fail": 2, "skip": 3, "error": 0, "total": 52 },
@@ -232,7 +231,7 @@ change. CI scripts should assert on it:
 
 .. code-block:: bash
 
-   rocprofv3-doctor --format json > doctor.json
+   rocprofv3 --doctor --format json > doctor.json
    python3 -c "
    import json, sys
    d = json.load(open('doctor.json'))
@@ -247,7 +246,7 @@ List every available check id and group:
 
 .. code-block:: bash
 
-   rocprofv3-doctor --list-checks
+   rocprofv3 --doctor --list-checks
 
 Run only part of the catalog with ``--only``, or exclude part of it with ``--skip``. Both
 flags are repeatable, match against either the check id or the group name, and accept
@@ -259,10 +258,10 @@ clean run:
 
 .. code-block:: bash
 
-   rocprofv3-doctor --only driver              # only the driver group
-   rocprofv3-doctor --only driver.kfd-*        # only the KFD checks
-   rocprofv3-doctor --only driver --only python
-   rocprofv3-doctor --skip counters.avail-enumeration
+   rocprofv3 --doctor --only driver              # only the driver group
+   rocprofv3 --doctor --only driver.kfd-*        # only the KFD checks
+   rocprofv3 --doctor --only driver --only python
+   rocprofv3 --doctor --skip counters.avail-enumeration
 
 Skipping a specific check is the right response when you know a check does not apply to
 your environment -- for example ``counters.avail-enumeration`` on a deliberately
@@ -276,20 +275,20 @@ passing ones. This is the most useful form to attach to a bug report:
 
 .. code-block:: bash
 
-   rocprofv3-doctor --verbose
+   rocprofv3 --doctor --verbose
 
 ``--quiet`` prints only failing and warning checks:
 
 .. code-block:: bash
 
-   rocprofv3-doctor --quiet
+   rocprofv3 --doctor --quiet
 
 ``--output FILE`` writes the report to a file in addition to stdout. The file copy is
 always written without color codes:
 
 .. code-block:: bash
 
-   rocprofv3-doctor --output rocprofv3-doctor-report.txt
+   rocprofv3 --doctor --output rocprofv3-doctor-report.txt
 
 Smoke testing
 -------------
@@ -299,8 +298,8 @@ the checks with ``--only``, to also run the ``smoke`` checks:
 
 .. code-block:: bash
 
-   rocprofv3-doctor --run-smoke-test
-   rocprofv3-doctor --only smoke
+   rocprofv3 --doctor --run-smoke-test
+   rocprofv3 --doctor --only smoke
 
 They can take 30 seconds or more, which is why they are opt-in. What they establish is
 deliberately narrow:
@@ -398,10 +397,10 @@ process and a ``possible`` cause.
 ROCm installation layouts
 -------------------------
 
-ROCm is not always under ``/opt/rocm``. ``rocprofv3-doctor`` inspects the first of these
+ROCm is not always under ``/opt/rocm``. ``rocprofv3 --doctor`` inspects the first of these
 that contains a ROCm installation:
 
-#. The prefix ``rocprofv3-doctor`` itself is installed under (symlinks resolved).
+#. The prefix ``rocprofv3`` itself is installed under (symlinks resolved).
 #. ``ROCM_PATH``, ``ROCM_HOME``, or ``ROCM_DIR``.
 #. The prefix of the ``rocprofv3`` found on ``PATH``.
 #. A TheRock Python package (``_rocm_sdk_core``) importable by the current interpreter.
@@ -420,10 +419,10 @@ Override the root explicitly when several installations exist side by side:
 
 .. code-block:: bash
 
-   rocprofv3-doctor --rocm-root /opt/rocm-6.2.0
-   rocprofv3-doctor --rocm-root /opt/rocm/core-10.0
-   rocprofv3-doctor --rocm-root "$(rocm-sdk path --root)"
-   rocprofv3-doctor --rocm-root ~/therock/install
+   rocprofv3 --doctor --rocm-root /opt/rocm-6.2.0
+   rocprofv3 --doctor --rocm-root /opt/rocm/core-10.0
+   rocprofv3 --doctor --rocm-root "$(rocm-sdk path --root)"
+   rocprofv3 --doctor --rocm-root ~/therock/install
 
 Common findings
 ---------------

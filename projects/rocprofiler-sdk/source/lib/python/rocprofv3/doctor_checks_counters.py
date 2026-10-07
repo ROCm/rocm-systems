@@ -39,6 +39,8 @@ from rocprofv3.doctor_result import (
     make_fail,
     make_pass,
     make_warn,
+    DOCTOR_COMMAND,
+    DOCTOR_FLAG,
     PROBE_GPU,
     SEV_INFO,
     SEV_WARNING,
@@ -114,6 +116,34 @@ def check_cap_perfmon(accessor):
     )
 
 
+def is_doctor_run(argv, accessor):
+    """True when ``argv`` is a doctor run rather than a profiling session.
+
+    Recognizes the doctor script itself, and ``rocprofv3 --doctor`` with the
+    flag among the options that follow that rocprofv3 -- up to its ``--``,
+    after which the arguments belong to the profiled application, so
+    ``rocprofv3 ... -- app --doctor`` is a real profiling session. Scoping the
+    flag to the rocprofv3 word, not to the whole line, also handles shells
+    whose command text has unrelated ``--`` tokens before it. Matching is
+    exact on purpose: a profiler whose output directory is called
+    "doctor-results" must still be reported.
+    """
+    seen_separator = False
+    for index, argument in enumerate(argv):
+        name = accessor.basename(argument)
+        if name in ("rocprofv3-doctor", "rocprofv3-doctor.py") and not seen_separator:
+            return True
+        if name in ("rocprofv3", "rocprofv3.py"):
+            for option in argv[index + 1 :]:
+                if option == "--":
+                    break
+                if option == DOCTOR_FLAG:
+                    return True
+        if argument == "--":
+            seen_separator = True
+    return False
+
+
 @register(
     id="counters.no-profiler-lock",
     group="counters",
@@ -149,6 +179,16 @@ def check_no_profiler_lock(accessor):
         # the profiler name only ever appears in a later argument -- checking
         # argv[0] alone would miss the exact case this check exists to catch.
         arguments = cmdline.split(" ")
+        # Checked on both the real argv and the whitespace-split command line:
+        # a shell such as `bash -c "rocprofv3 --doctor ..."` (our own parent,
+        # in CI) carries its whole command as one argument. Skipping a shell
+        # that wraps a real profiler loses nothing -- the profiler is its own
+        # process and is scanned on its own.
+        argv = [arg for arg in content.split("\x00") if arg]
+        if is_doctor_run(argv, accessor) or is_doctor_run(arguments, accessor):
+            # another doctor run, or the shell that launched this one: it may
+            # inspect the GPU, but it holds no profiling lock
+            continue
         matched = None
         for argument in arguments:
             basename = accessor.basename(argument)
@@ -160,9 +200,6 @@ def check_no_profiler_lock(accessor):
                 break
 
         if matched:
-            # a doctor subprocess of our own run is not a competing profiler
-            if "rocprofv3-doctor" in cmdline:
-                continue
             others.append("{} ({})".format(pid, cmdline[:80]))
 
     data = {"candidate_processes": others, "own_pid": own_pid}
@@ -212,7 +249,7 @@ def check_avail_enumeration(accessor):
         return make_fail(
             "rocprofv3-avail timed out after 15 seconds -- the driver may be hung",
             "Check dmesg for amdgpu errors:\n  sudo dmesg | grep -i amdgpu\n"
-            "Skip this check with: rocprofv3-doctor --skip "
+            "Skip this check with: " + DOCTOR_COMMAND + " --skip "
             "counters.avail-enumeration",
             data,
         )

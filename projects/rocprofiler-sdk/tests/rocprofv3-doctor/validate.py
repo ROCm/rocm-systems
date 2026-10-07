@@ -170,6 +170,14 @@ def test_validate_doctor_help(doctor_path):
     assert "--list-checks" in result.stdout
 
 
+def test_validate_rocprofv3_doctor_help_names_the_command(rocprofv3_path):
+    """Users only ever type `rocprofv3 --doctor`; help must say so."""
+    result = _run(rocprofv3_path, ["--doctor", "--help"])
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("usage: rocprofv3 --doctor")
+    assert "--list-checks" in result.stdout
+
+
 def test_validate_rocprofv3_doctor_passthrough(rocprofv3_path):
     """rocprofv3 --doctor must behave exactly like the standalone tool."""
     result = _run(rocprofv3_path, ["--doctor", "--format", "json"])
