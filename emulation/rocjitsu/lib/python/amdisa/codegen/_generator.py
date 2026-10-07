@@ -9329,6 +9329,19 @@ class CodeGenerator:
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('data0')};")
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
+        if esz in (4, 8):
+            # Snapshot full-word payloads once per register. Keep the scalar
+            # path for a range that crosses the wave's physical storage block.
+            L.append('  if (exec) {')
+            L.append(
+                f'    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, {stride // 4}, exec);'
+            )
+            L.append('    if (data.valid()) {')
+            L.append('      data.copy_dwords_lane_major(d->store_data, exec);')
+            L.append('      set_data(std::move(d));')
+            L.append('      return;')
+            L.append('    }')
+            L.append('  }')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):
