@@ -103,6 +103,17 @@ RE_GRID = re.compile(r"grid=\[([^\]]+)\], workgroup=\[([^\]]+)\]")
 RE_CIJK = re.compile(r"(Cijk_[A-Za-z0-9_]+)")
 RE_CAPTURE_HIP = re.compile(r"\[capture\] HIP_SO=(\S+)")
 RE_VERSION_MISMATCH = re.compile(r"\[HRR\] Version mismatch: file=(\d+) reader=(\d+)")
+# Replay maps each allocation at its recorded address, so a device pointer the
+# program stored in device memory stays true. An allocation that could not be
+# placed replays elsewhere, and a stored copy of its address is then stale: a
+# kernel reading through it fails or faults exactly like a workload defect.
+RE_PLACEMENT_NOT_PLACED = re.compile(
+    r"\[HRR\] Placement: (\w+)(?: (0x[0-9a-fA-F]+))?(?: \(\d+ bytes\))? not placed at "
+    r"its recorded address: ([^\n]*?)\. It replays elsewhere"
+)
+RE_PLACEMENT_SUMMARY = re.compile(
+    r"Placement\s+: (\d+) placed at capture address, (\d+) fell back"
+)
 
 
 @dataclass
@@ -139,6 +150,8 @@ class Finding:
     capture_comgr_version: str | None = None
     capture_device_count: int | None = None
     capture_gcn_arch: str | None = None
+    placement_fallbacks: int | None = None
+    placement_named: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -358,6 +371,20 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
     if m:
         finding.kernels_launched = int(m.group(1))
 
+    named = 0
+    for m in RE_PLACEMENT_NOT_PLACED.finditer(text):
+        named += 1
+        what = f"{m.group(1)} {m.group(2)}" if m.group(2) else m.group(1)
+        entry = f"{what}: {m.group(3)}"
+        if entry not in finding.placement_named:
+            finding.placement_named.append(entry)
+    m = RE_PLACEMENT_SUMMARY.search(text)
+    if m:
+        finding.placement_fallbacks = int(m.group(2))
+    elif named and finding.placement_fallbacks is None:
+        # The replay stopped before its summary; the named lines are a floor.
+        finding.placement_fallbacks = named
+
     new_class = _classify(text, finding)
     if new_class != "unknown" or finding.fault_class in (None, "unknown"):
         finding.fault_class = new_class
@@ -478,6 +505,34 @@ def finalize(finding: Finding) -> Finding:
             "at all, so an untranslated pointer here would fault exactly like a "
             "workload defect. Confirm against the user's original failure "
             "signature before reporting this as their bug."
+        )
+
+    # An allocation that was not placed moved, so any copy of its address the
+    # program stored in device memory is stale. A failure downstream of that is
+    # a replay-fidelity problem until shown otherwise. The verdict stands, as
+    # for the ATen case: the evidence still says what the GPU did.
+    if finding.placement_fallbacks and finding.fault_class in (
+        "nan_inf_divergence",
+        "illegal_memory_access",
+        "read_only_page_fault",
+        "replay_aborted",
+        "replay_fatal_api",
+    ):
+        shown = "; ".join(finding.placement_named[:3])
+        more = (
+            f" (and {len(finding.placement_named) - 3} more named)"
+            if len(finding.placement_named) > 3
+            else ""
+        )
+        finding.notes.append(
+            f"replay fidelity: {finding.placement_fallbacks} allocation(s) were "
+            f"not placed at their recorded address"
+            + (f" ({shown}{more})" if shown else "")
+            + ". A device pointer the program stored in device memory for one of "
+            "them is stale in replay, and a kernel reading through it fails or "
+            "faults like a workload defect. Look for '[HRR h2d-scan]' lines "
+            "naming the payload that stored it, and confirm against the user's "
+            "original failure signature before reporting this as their bug."
         )
 
     finding.kernel_family = _kernel_family(finding.kernel_name)

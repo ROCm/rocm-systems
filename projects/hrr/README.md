@@ -116,6 +116,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--progress-seconds S` | Heartbeat at most every `S` seconds |
 | `--version` | Print the archive format version this build reads, the revision it was built from, and the HIP runtime it is linked against, then exit (no GPU) |
 | `--warn-untranslated-args` | Report kernel-arg pointers that resolve in no allocation, VMM reservation or region (they reach the GPU as null) — the measurement that says a capture lost allocations below the HIP API |
+| `--no-placement` | Let the runtime choose every allocation's address instead of placing it at its recorded one (see *Capture-address placement*) |
 | `--no-regions` | Ignore any external region annotations in the archive |
 | `--regions-strict` | Count intra-segment out-of-bounds findings toward the exit code (default: report only) |
 | `--guard-segments` | VMM-back every device allocation and leave an unmapped span after it (diagnostic) |
@@ -137,21 +138,46 @@ outside the runtime writes those ranges down as
 [`producers/pytorch/hrr_torch_regions.py`](producers/pytorch/hrr_torch_regions.py)
 for the reference PyTorch producer.
 
-**Fidelity.** With annotations present and no guard flag, replay's memory layout
-is exactly what it would have been without them; the annotations are read, not
-acted on, except that a segment HIP never saw now gets allocated, so pointers
-into it resolve instead of reaching the GPU as an address from another process.
-Fidelity therefore only increases. The two `--guard-*` flags are the deliberate
+**Fidelity.** With annotations present and no guard flag, the annotations are
+read, not acted on, with one exception: a segment HIP never saw now gets
+allocated, so pointers into it resolve instead of reaching the GPU as an address
+from another process. With placement on, that segment is held before `hipInit`
+and backed at its recorded address, like every placed allocation. Annotations
+never move an allocation HIP saw, so fidelity only increases. The two `--guard-*` flags are the deliberate
 exception: they move memory so that an out-of-bounds access faults instead of
 landing in a live neighbour, and are off by default for that reason.
 `--guard-blocks` restores every guarded block and releases the relocation before
 the next event, so the divergence is confined to the launch under examination.
 
+### Capture-address placement
+
+A program can store a device pointer in device memory, as vLLM's block table
+does. That pointer reaches the GPU inside an H2D payload, which replay restores
+byte for byte, so translation cannot fix it. Replay therefore maps each device
+allocation at the address it had in the recording, and the stored copy stays
+true. The summary line `Placement : N placed at capture address, M fell back`
+counts the result.
+
+An allocation that cannot be placed replays at a new address, and a line on
+stderr names it: `[HRR] Placement: <api> <address> (<size> bytes) not placed at
+its recorded address: <reason>`. The first 16 are always printed; `--verbose`
+prints the rest. Once anything has fallen back, replay scans every H2D payload
+for an address of an allocation that moved, and names the payload. Managed
+memory, `hipExtMallocWithFlags` with a flag, pitched, 3D and array allocations,
+and graph memory nodes are never placed. `__device__` globals are outside it
+altogether. See `DESIGN.md` for the full list.
+
+Placement is off, with a line saying why, under `--no-placement`, under
+`--guard-segments`, when `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` is above 1, and on a
+device without virtual memory management. A D2H mismatch in a replay that
+printed a "not placed" line may be the stale pointer, not a bug in the
+recorded program.
+
 ### Replay environment
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` | `1` | Multiply replayed `hipMalloc` size for pool-style headroom (`256` for legacy MIOpen-style workloads; uses more VRAM) |
+| `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` | `1` | Multiply replayed `hipMalloc` size for pool-style headroom (`256` for legacy MIOpen-style workloads; uses more VRAM). Above `1` it turns placement off |
 | `HIP_HRR_REPLAY_ALLOC_PAD_MAX` | `1073741824` (1 GiB) | Cap per-allocation padded size |
 | `HIP_HRR_REPLAY_ZERO_INIT` | on | Zero-fill replay allocations so OOB reads see zeros (`0` to skip) |
 | `HIP_HRR_REPLAY_TRACE_KERNELS` | off | Same as `--trace-kernels` |
@@ -167,7 +193,8 @@ the next event, so the divergence is confined to the launch under examination.
 | `HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL` | `0` | Dump pointer translation map, and the allocation each argument lands in, at kernel ordinal `N` (debug) |
 | `HIP_HRR_REPLAY_SCAN_ARGS_ORDINAL` | `0` | Before kernel `N`, read back each pointer argument's allocation and report words that are recorded addresses (debug) |
 | `HIP_HRR_REPLAY_SCAN_ARGS_BYTES` | `4096` | Per-allocation cap for the argument scan |
-| `HIP_HRR_REPLAY_SCAN_H2D` | off | Report recorded addresses inside replayed H2D payloads (debug) |
+| `HIP_HRR_REPLAY_SCAN_H2D` | off | Report recorded addresses inside replayed H2D payloads from the first copy. The scan starts by itself once an allocation is not placed |
+| `HIP_HRR_REPLAY_PLACE_DENY` | unset | Comma-separated recorded addresses whose range placement treats as taken, so they fall back (testing) |
 | `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` | off | Report kernels taking a pointer into host memory, whose contents replay cannot restore (debug) |
 | `HIP_HRR_REPLAY_FILL_BYTE` | `0` | Byte to fill fresh allocations with; set it to e.g. `0xa5` to expose kernels reading memory nothing wrote (debug) |
 | `HIP_HRR_REPLAY_EXPLAIN_ADDR` | unset | At the scan ordinal, report whether an address is recorded, live, or neither, and whether the GPU can read it (debug) |
