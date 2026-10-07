@@ -681,7 +681,38 @@ TEST(WaitcheckTarget, GdsProtectsAddressAndDataSourcesUntilExpcnt) {
     EXPECT_TRUE(events[1].check_defs);
   }
   NamedInstruction always_gds("ds_ordered_count");
-  EXPECT_EQ(Target::classify_events(always_gds, ROCJITSU_CODE_ARCH_CDNA4).value().size(), 2u);
+  auto events_result = Target::classify_events(always_gds, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(events_result.succeeded());
+  const auto events = std::move(events_result).value();
+  ASSERT_EQ(events.size(), 2u);
+  EXPECT_EQ(events[1].counter, WaitCounterKind::Exp);
+  EXPECT_EQ(events[1].registers, TrackedRegisterSource::VectorUses);
+  EXPECT_TRUE(events[1].check_defs);
+  EXPECT_TRUE(events[1].check_exec_defs);
+}
+
+TEST(WaitcheckTarget, Cdna4GdsUsesOnlyLgkmcnt) {
+  auto expect_ds_only = [](const Instruction &inst) {
+    SCOPED_TRACE(inst.mnemonic());
+    auto events_result = Target::classify_events(inst, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(events_result.succeeded());
+    const auto events = std::move(events_result).value();
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].counter, WaitCounterKind::Ds);
+    EXPECT_EQ(events[0].kind, WaitEventKind::Gds);
+    EXPECT_EQ(events[0].registers, TrackedRegisterSource::Defs);
+  };
+  for (const std::array<uint32_t, 2> words :
+       {std::array<uint32_t, 2>{0xd86d0000u, 1u},        // ds_read_b32 v0, v1 gds.
+        std::array<uint32_t, 2>{0xd81b0000u, 0x201u},    // ds_write_b32 v1, v2 gds.
+        std::array<uint32_t, 2>{0xd8010000u, 0x201u}}) { // ds_add_u32 v1, v2 gds.
+    auto inst = decode(words, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(inst, nullptr);
+    expect_ds_only(*inst);
+  }
+  // This opcode implies GDS without consulting an encoded GDS bit.
+  NamedInstruction always_gds("ds_ordered_count");
+  expect_ds_only(always_gds);
 }
 
 TEST(WaitcheckTarget, TimestampAndBarrierStateHaveScalarResults) {
