@@ -93,9 +93,10 @@
  *          HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH, HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED,
  *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
  *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
+ * - 1.37 - hsa_amd_memory_async_batch_copy: HSA_AMD_MEMORY_COPY_OP_RECT
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 36
+#define HSA_AMD_INTERFACE_VERSION_MINOR 37
 
 #ifdef __cplusplus
 extern "C" {
