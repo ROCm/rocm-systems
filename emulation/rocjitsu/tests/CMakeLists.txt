@@ -606,6 +606,7 @@ add_executable(
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     scalar_buffer_test.cpp
+    scalar_cache_policy_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
     amdgpu_elf_test_support.cpp
