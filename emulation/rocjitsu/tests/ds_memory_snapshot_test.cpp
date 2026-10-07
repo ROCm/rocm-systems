@@ -205,94 +205,98 @@ constexpr std::array kStoreTargets = {
 TEST(DsMemorySnapshot, DwordStoresPreservePayloadAndObservedValues) {
   constexpr std::array opcodes = {cdna4::kDsWriteB32Ds, cdna4::kDsWriteB64Ds, cdna4::kDsWriteB96Ds,
                                   cdna4::kDsWriteB128Ds};
-  for (uint32_t wave : {32u, 64u}) {
-    SnapshotFixture fx(wave);
-    ASSERT_NE(fx.wf, nullptr);
-    fx.seed();
-    fx.cu->set_plugin_group(fx.group);
-    for (uint32_t width = 1; width <= opcodes.size(); ++width)
-      for (uint8_t data : {uint8_t{0}, uint8_t{254}, uint8_t{255}})
-        for (bool acc : {false, true})
-          for (bool alias : {false, true})
-            for (uint64_t exec : {uint64_t{0}, uint64_t{0xa55aa55aa55aa55a}, ~uint64_t{0}}) {
-              exec &= wave == 64 ? ~uint64_t{0} : 0xffffffffu;
-              SCOPED_TRACE(testing::Message()
-                           << "wave=" << wave << " width=" << width << " data=" << unsigned(data)
-                           << " acc=" << acc << " alias=" << alias << " exec=" << exec);
-              fx.wf->set_exec(exec);
-              fx.wf->set_vgpr_write_mask(0x5555555555555555ull);
-              fx.observer->reads.clear();
-              fx.observer->callbacks.clear();
-              const uint8_t address = alias ? data : 7;
-              auto inst = fx.issue(opcodes[width - 1], data, address, acc);
-              ASSERT_NE(inst, nullptr);
-              const auto *state = inst->data_as<VectorMemState>();
-              ASSERT_NE(state, nullptr);
-              ASSERT_EQ(state->store_data.size(), wave * width * sizeof(uint32_t));
-              EXPECT_EQ(state->exec_mask, exec);
-              EXPECT_EQ(state->lane_mask, exec);
-              std::set<Read> expected_reads;
-              for (uint32_t lane = 0; lane < wave; ++lane) {
-                const bool active = (exec >> lane) & 1;
-                if (active)
-                  expected_reads.emplace(address, lane, ExecutionPlugin::kFullByteMask,
-                                         SnapshotFixture::word(address, lane));
-                const uint32_t expected_address =
-                    active ? SnapshotFixture::word(address, lane) + kOffset + fx.wf->lds_base()
-                           : 0u;
-                EXPECT_EQ(state->per_lane_addr[lane], expected_address);
-                for (uint32_t element = 0; element < width; ++element) {
-                  const uint32_t reg = data + (acc ? 256u : 0u) + element;
-                  const uint32_t expected =
-                      active && reg < 512 ? SnapshotFixture::word(reg, lane) : 0;
-                  uint32_t actual;
-                  std::memcpy(&actual, state->store_data.data() + (lane * width + element) * 4, 4);
-                  EXPECT_EQ(actual, expected);
-                  if (active && reg < 512)
-                    expected_reads.emplace(reg, lane, ExecutionPlugin::kFullByteMask, expected);
-                }
+  constexpr uint32_t wave = 64;
+  SnapshotFixture fx(wave);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.seed();
+  fx.cu->set_plugin_group(fx.group);
+  for (uint32_t width = 1; width <= opcodes.size(); ++width)
+    for (uint8_t data : {uint8_t{0}, uint8_t{254}, uint8_t{255}})
+      for (bool acc : {false, true})
+        for (bool alias : {false, true})
+          for (uint64_t exec : {uint64_t{0}, uint64_t{0xa55aa55aa55aa55a}, ~uint64_t{0}}) {
+            SCOPED_TRACE(testing::Message()
+                         << "wave=" << wave << " width=" << width << " data=" << unsigned(data)
+                         << " acc=" << acc << " alias=" << alias << " exec=" << exec);
+            fx.wf->set_exec(exec);
+            fx.wf->set_vgpr_write_mask(0x5555555555555555ull);
+            fx.observer->reads.clear();
+            fx.observer->callbacks.clear();
+            const uint8_t address = alias ? data : 7;
+            auto inst = fx.issue(opcodes[width - 1], data, address, acc);
+            ASSERT_NE(inst, nullptr);
+            const auto *state = inst->data_as<VectorMemState>();
+            ASSERT_NE(state, nullptr);
+            ASSERT_EQ(state->store_data.size(), wave * width * sizeof(uint32_t));
+            EXPECT_EQ(state->exec_mask, exec);
+            EXPECT_EQ(state->lane_mask, exec);
+            std::set<Read> expected_reads;
+            for (uint32_t lane = 0; lane < wave; ++lane) {
+              const bool active = (exec >> lane) & 1;
+              if (active)
+                expected_reads.emplace(address, lane, ExecutionPlugin::kFullByteMask,
+                                       SnapshotFixture::word(address, lane));
+              const uint32_t expected_address =
+                  active ? SnapshotFixture::word(address, lane) + kOffset + fx.wf->lds_base() : 0u;
+              EXPECT_EQ(state->per_lane_addr[lane], expected_address);
+              for (uint32_t element = 0; element < width; ++element) {
+                const uint32_t reg = data + (acc ? 256u : 0u) + element;
+                const uint32_t expected =
+                    active && reg < 512 ? SnapshotFixture::word(reg, lane) : 0;
+                uint32_t actual;
+                std::memcpy(&actual, state->store_data.data() + (lane * width + element) * 4, 4);
+                EXPECT_EQ(actual, expected);
+                if (active && reg < 512)
+                  expected_reads.emplace(reg, lane, ExecutionPlugin::kFullByteMask, expected);
               }
-              EXPECT_EQ(fx.observer->reads, expected_reads);
-              std::vector<ReadCallback> expected_callbacks;
-              if (exec) {
-                expected_callbacks.emplace_back(address, exec, ExecutionPlugin::kFullByteMask);
-                const uint32_t data_base = data + (acc ? 256u : 0u);
-                if (data_base + width <= fx.register_count) {
-                  for (uint32_t element = 0; element < width; ++element)
-                    expected_callbacks.emplace_back(data_base + element, exec,
-                                                    ExecutionPlugin::kFullByteMask);
-                } else {
-                  for (uint32_t lane = 0; lane < wave; ++lane)
-                    if ((exec >> lane) & 1)
-                      for (uint32_t element = 0; element < width; ++element)
-                        if (data_base + element < fx.register_count)
-                          expected_callbacks.emplace_back(data_base + element, uint64_t{1} << lane,
-                                                          ExecutionPlugin::kFullByteMask);
-                }
-              }
-              EXPECT_EQ(fx.observer->callbacks, expected_callbacks);
             }
-  }
+            EXPECT_EQ(fx.observer->reads, expected_reads);
+            std::vector<ReadCallback> expected_callbacks;
+            if (exec) {
+              expected_callbacks.emplace_back(address, exec, ExecutionPlugin::kFullByteMask);
+              const uint32_t data_base = data + (acc ? 256u : 0u);
+              if (data_base + width <= fx.register_count) {
+                for (uint32_t element = 0; element < width; ++element)
+                  expected_callbacks.emplace_back(data_base + element, exec,
+                                                  ExecutionPlugin::kFullByteMask);
+              } else {
+                for (uint32_t lane = 0; lane < wave; ++lane)
+                  if ((exec >> lane) & 1)
+                    for (uint32_t element = 0; element < width; ++element)
+                      if (data_base + element < fx.register_count)
+                        expected_callbacks.emplace_back(data_base + element, uint64_t{1} << lane,
+                                                        ExecutionPlugin::kFullByteMask);
+              }
+            }
+            EXPECT_EQ(fx.observer->callbacks, expected_callbacks);
+          }
 }
 
 TEST(DsMemorySnapshot, OutstandingLogicalZeroPayloadSurvivesLaterIssue) {
-  for (uint32_t wave : {32u, 64u}) {
-    SnapshotFixture fx(wave);
-    ASSERT_NE(fx.wf, nullptr);
-    fx.wf->set_exec(wave == 64 ? ~uint64_t{0} : 0xffffffffu);
-    auto first = fx.issue(cdna4::kDsWriteB64Ds, 0, 0, false);
-    ASSERT_NE(first, nullptr);
-    const auto payload = first->data_as<VectorMemState>()->store_data;
-    const auto addresses = first->data_as<VectorMemState>()->per_lane_addr;
-    EXPECT_TRUE(std::ranges::all_of(payload, [](uint8_t byte) { return byte == 0; }));
-    fx.seed();
-    auto second = fx.issue(cdna4::kDsWriteB64Ds, 0, 0, false);
-    ASSERT_NE(second, nullptr);
-    EXPECT_NE(second->data_as<VectorMemState>()->store_data, payload);
-    EXPECT_EQ(first->data_as<VectorMemState>()->store_data, payload);
-    EXPECT_EQ(first->data_as<VectorMemState>()->per_lane_addr, addresses);
+  for (const auto &target : kStoreTargets) {
+    for (uint32_t wave : target.wave_sizes) {
+      if (wave == 0)
+        continue;
+      SCOPED_TRACE(testing::Message() << "arch=" << target.arch << " wave=" << wave);
+      SnapshotFixture fx(wave, target.arch, 256);
+      ASSERT_NE(fx.wf, nullptr);
+      fx.wf->set_exec(wave == 64 ? ~uint64_t{0} : 0xffffffffu);
+      const auto words = target.encode(target.opcodes[1], 0, 0);
+      auto first = fx.issue_encoded(words);
+      ASSERT_NE(first, nullptr);
+      const auto payload = first->data_as<VectorMemState>()->store_data;
+      const auto addresses = first->data_as<VectorMemState>()->per_lane_addr;
+      EXPECT_TRUE(std::ranges::all_of(payload, [](uint8_t byte) { return byte == 0; }));
+      fx.seed();
+      auto second = fx.issue_encoded(words);
+      ASSERT_NE(second, nullptr);
+      EXPECT_NE(second->data_as<VectorMemState>()->store_data, payload);
+      EXPECT_EQ(first->data_as<VectorMemState>()->store_data, payload);
+      EXPECT_EQ(first->data_as<VectorMemState>()->per_lane_addr, addresses);
+    }
   }
 }
+
 TEST(DsMemorySnapshot, DwordStoresCoverEveryGeneratedTarget) {
   constexpr uint8_t data = 11, address = 7;
   for (const auto &target : kStoreTargets) {
@@ -397,6 +401,58 @@ TEST(DsMemorySnapshot, BoundaryFallbackDoesNotReadNeighborWave) {
     const std::vector<ReadCallback> expected = {{7, 1, ExecutionPlugin::kFullByteMask},
                                                 {511, 1, ExecutionPlugin::kFullByteMask}};
     EXPECT_EQ(fx.observer->callbacks, expected);
+  }
+}
+
+TEST(DsMemorySnapshot, Rdna4Wave32BoundaryFallbackPreservesPayloadAndCallbacks) {
+  constexpr uint32_t wave = 32;
+  constexpr uint8_t data = 255, address = 7;
+  constexpr uint64_t exec = (uint64_t{1} << 1) | (uint64_t{1} << 17) | (uint64_t{1} << 31);
+  for (uint16_t opcode : {rdna4::kDsStoreB96Vds, rdna4::kDsStoreB128Vds}) {
+    SnapshotFixture fx(wave, ROCJITSU_CODE_ARCH_RDNA4, 256, 2);
+    ASSERT_NE(fx.wf, nullptr);
+    auto *neighbor = fx.cu->dispatch_wf(1, 0, 104, 256, wave);
+    ASSERT_NE(neighbor, nullptr);
+    ASSERT_EQ(neighbor->vgpr_alloc().base, fx.wf->vgpr_alloc().base + 256);
+    fx.seed();
+    for (uint32_t reg = 0; reg < 3; ++reg)
+      for (uint32_t lane = 0; lane < wave; ++lane)
+        fx.cu->write_vgpr(neighbor->vgpr_alloc().base + reg, lane, 0xaabbcc00 + reg);
+    fx.wf->set_exec(exec);
+    fx.cu->set_plugin_group(fx.group);
+    auto inst = fx.issue_encoded(
+        encode_store<rdna4::VdsBuilderFields, rdna4::build_vds>(opcode, data, address));
+    ASSERT_NE(inst, nullptr);
+    const auto *state = inst->data_as<VectorMemState>();
+    ASSERT_NE(state, nullptr);
+    const uint32_t width = opcode == rdna4::kDsStoreB96Vds ? 3 : 4;
+    ASSERT_EQ(state->store_data.size(), wave * width * sizeof(uint32_t));
+    EXPECT_EQ(state->exec_mask, exec);
+    EXPECT_EQ(state->lane_mask, exec);
+    std::set<Read> expected_reads;
+    std::vector<ReadCallback> expected_callbacks = {
+        {address, exec, ExecutionPlugin::kFullByteMask}};
+    for (uint32_t lane = 0; lane < wave; ++lane) {
+      SCOPED_TRACE(testing::Message() << "width=" << width << " lane=" << lane);
+      const bool active = (exec >> lane) & 1;
+      EXPECT_EQ(state->per_lane_addr[lane],
+                active ? SnapshotFixture::word(address, lane) + kOffset + fx.wf->lds_base() : 0u);
+      for (uint32_t element = 0; element < width; ++element) {
+        uint32_t value;
+        std::memcpy(&value, state->store_data.data() + (lane * width + element) * sizeof(value),
+                    sizeof(value));
+        EXPECT_EQ(value, active && element == 0 ? SnapshotFixture::word(data, lane) : 0u);
+      }
+      if (active) {
+        expected_reads.emplace(address, lane, ExecutionPlugin::kFullByteMask,
+                               SnapshotFixture::word(address, lane));
+        expected_reads.emplace(data, lane, ExecutionPlugin::kFullByteMask,
+                               SnapshotFixture::word(data, lane));
+        expected_callbacks.emplace_back(data, uint64_t{1} << lane, ExecutionPlugin::kFullByteMask);
+      }
+    }
+    EXPECT_EQ(fx.observer->reads, expected_reads);
+    EXPECT_EQ(fx.observer->callbacks, expected_callbacks);
   }
 }
 
