@@ -135,9 +135,11 @@ copy, and both ranges must be accessible to it. The force-SDMA argument does
 not change this path because its native copies use SDMA. Pitched rectangular
 copy submits its rows through one native queue. Linear and broadcast batch
 operations reuse one queue for their device and staged host entries in
-descriptor order. The frontend waits for dependency signals, retains signal
-storage and runtime-owned memory until native retirement, and decrements the
-completion signal after each successful copy. Each batch operation may use
+descriptor order. Multi-entry copies from a CPU source use the first
+destination GPU; peer destinations must be accessible to that GPU. The
+frontend waits for dependency signals and retains signal storage and
+runtime-owned memory until native retirement. It decrements the completion
+signal after each successful copy. Each batch operation may use
 its own completion signal or share one with other operations.
 Each operation releases its memory borrow and decrements its signal when it
 retires. An asynchronous failure sets the completion signal negative.
