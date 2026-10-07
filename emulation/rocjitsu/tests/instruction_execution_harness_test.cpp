@@ -9279,3 +9279,38 @@ TEST(SdwaOutputScalingTest, FloatingConversionsUseDestinationFormat) {
     }
   }
 }
+
+TEST(InstructionExecution, Cdna2GwsInstructionsRetire) {
+  amdgpu::GpuMemory gpu_mem("gws_mem");
+  amdgpu::L2Cache l2("gws_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gws", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+
+  // Encodings from the CDNA2 test table. Each one used to halt the wave.
+  const std::array<std::array<uint32_t, 2>, 6> encodings = {{
+      {{0xD9300000U, 0}},
+      {{0xD9320000U, 0}},
+      {{0xD9340000U, 0}},
+      {{0xD9360000U, 0}},
+      {{0xD9380000U, 0}},
+      {{0xD93A0000U, 0}},
+  }};
+  for (const auto &words : encodings) {
+    amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded()) << inst->mnemonic();
+    EXPECT_FALSE(wf->instruction_execution_failed()) << inst->mnemonic();
+    if (!wf->is_halted())
+      wf->halt();
+  }
+}

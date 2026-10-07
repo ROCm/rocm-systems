@@ -1111,6 +1111,16 @@ public:
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
     if (drop_set_vgpr_msb && std::string_view(inst->mnemonic()) == "s_set_vgpr_msb")
       return util::Result::success();
+    // Global Wave Sync (ds_gws_init, ds_gws_barrier, and the semaphore forms) is
+    // a real instruction. The generated bodies report it unimplemented, which
+    // halts the wave before s_endpgm, so the dispatch completion signal is never
+    // written and HIP waits forever. Retiring the op matches hardware for a
+    // kernel whose lanes do not consume another wave's result at that point.
+    // A dispatch-wide wait needs an arrival count the command processor does not
+    // keep, and waiting on only this CU's waves would deadlock a grid that spans
+    // compute units.
+    if (inst->mnemonic().starts_with("ds_gws_"))
+      return util::Result::success();
     // The decoded instruction already selects its ISA execution callback.
     inst->execute(*inst, &wf);
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
