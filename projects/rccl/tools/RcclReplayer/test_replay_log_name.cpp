@@ -1,8 +1,9 @@
 /* Copyright © Advanced Micro Devices, Inc., or its affiliates. */
 
-// Host-only check of ParseLogName; build and run with "make test".
+// Host-only check of ParseLogName and MatchHostsByRankCount; build and run with "make test".
 
 #include <cstdio>
+#include <map>
 #include <string>
 
 #include "replay_log_name.hpp"
@@ -31,6 +32,24 @@ void ExpectReject(const std::string& name, const std::string& base, const std::s
   }
 }
 
+void ExpectMatch(const char* what, const std::map<std::string, int>& replayRanks,
+                 const std::map<std::string, int>& logCounts, const std::map<std::string, std::string>& want) {
+  std::map<std::string, std::string> got;
+  if (!MatchHostsByRankCount(replayRanks, logCounts, &got) || got != want) {
+    printf("FAIL: %s: host pairing differs\n", what);
+    failures++;
+  }
+}
+
+void ExpectNoMatch(const char* what, const std::map<std::string, int>& replayRanks,
+                   const std::map<std::string, int>& logCounts) {
+  std::map<std::string, std::string> got;
+  if (MatchHostsByRankCount(replayRanks, logCounts, &got)) {
+    printf("FAIL: %s: accepted\n", what);
+    failures++;
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -42,16 +61,27 @@ int main() {
   ExpectParse("replayer_log.1270.quanta-cx77-11.bin", "replayer_log", ".bin", 1270, "quanta-cx77-11");
   ExpectReject("rep.1275.host.json", "rep", "");
   ExpectReject("rep.1275.host", "rep", ".bin");
+  ExpectReject("rep.1275.hostname", "rep", ".bin");
   ExpectReject("rep.host.amd.com", "rep", "");
   ExpectReject("rep.1275.", "rep", "");
   ExpectReject("rep.1275", "rep", "");
   ExpectReject("rep2.1275.host", "rep", "");
   ExpectReject("rep.99999999999.host", "rep", "");
   ExpectReject("other.1275.host", "rep", "");
+  ExpectReject("abc.1275.host", "rep", "");
+  ExpectReject("rep..host", "rep", "");
+  // Recorded 1 + 3 ranks: the host replaying 3 ranks must get the host that left 3 logs, whatever the name order.
+  ExpectMatch("uneven", {{"a", 3}, {"b", 1}}, {{"x", 1}, {"y", 3}}, {{"a", "y"}, {"b", "x"}});
+  ExpectMatch("names against count order", {{"a", 1}, {"b", 3}}, {{"x", 3}, {"y", 1}}, {{"a", "y"}, {"b", "x"}});
+  ExpectMatch("even", {{"a", 8}, {"b", 8}}, {{"x", 8}, {"y", 8}}, {{"a", "x"}, {"b", "y"}});
+  ExpectNoMatch("same totals, other split", {{"a", 2}, {"b", 2}}, {{"x", 1}, {"y", 3}});
+  ExpectNoMatch("fewer replay hosts", {{"a", 4}}, {{"x", 1}, {"y", 3}});
+  ExpectNoMatch("fewer replay hosts, first count equal", {{"a", 1}}, {{"x", 1}, {"y", 3}});
+  ExpectNoMatch("more ranks than logs", {{"a", 4}, {"b", 4}}, {{"x", 4}, {"y", 3}});
   if (failures != 0) {
-    printf("%d ParseLogName check(s) failed\n", failures);
+    printf("%d log name check(s) failed\n", failures);
     return 1;
   }
-  printf("ParseLogName checks passed\n");
+  printf("Log name checks passed\n");
   return 0;
 }

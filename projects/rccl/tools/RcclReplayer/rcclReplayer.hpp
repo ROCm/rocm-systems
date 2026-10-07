@@ -14,11 +14,6 @@
 #include <hip/hip_bfloat16.h>
 #include "hip/hip_fp16.h"
 
-// Forward declaration for ncclInfo
-// - recorder.h declares functions that take 'const ncclInfo&' as parameter
-// - These functions are only used during recording (by recorder.cc), not during replay
-// - RcclReplayer only uses rcclApiCall struct
-struct ncclInfo;
 #include "recorder.h"
 
 // NOTE: Parsing is based on this line logging collective information in enqueue.cc
@@ -55,7 +50,6 @@ struct DeviceMemAllocation
 {
   void*                 base = NULL;
   size_t                size = 0;
-  int                   lastLineUsed = -1;
   bool                  ncclMemAllocated = false; // owned by ncclMemAlloc/ncclMemFree, never hipFree'd here
 };
 

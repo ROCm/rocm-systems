@@ -11,6 +11,7 @@
 #include <unordered_set>
 
 #include "rcclReplayer.hpp"
+#include "replay_last_use.hpp"
 #include "replay_log_name.hpp"
 
 #include <dirent.h>
@@ -60,10 +61,7 @@ Replayer::Replayer(const std::string& logname, int json_format, int rank, int si
 
 void Replayer::parse()
 {
-  // A grouped call only launches at the outermost GroupEnd, so its buffers and streams must outlive that line.
-  int groupDepth = 0;
-  std::unordered_set<void*> groupBuffers;
-  std::unordered_set<hipStream_t> groupStreams;
+  LastUseTracker lastUse;
 
   while (log.read(line, rcclCallSize)) // istream::get fail here when running into newline
   {
@@ -73,47 +71,29 @@ void Replayer::parse()
     {
       DeviceMemAllocation& mem = dMemMap[call.sendPtrBase];
       mem.size = std::max(mem.size, call.sendPtrExtent);
-      mem.lastLineUsed = lineNum;
-      if (groupDepth > 0) {
-        groupBuffers.insert(call.sendPtrBase);
-      }
+      lastUse.UseBuffer(call.sendPtrBase, lineNum);
     }
     if (call.recvPtrBase)
     {
       DeviceMemAllocation& mem = dMemMap[call.recvPtrBase];
       mem.size = std::max(mem.size, call.recvPtrExtent);
-      mem.lastLineUsed = lineNum;
-      if (groupDepth > 0) {
-        groupBuffers.insert(call.recvPtrBase);
-      }
+      lastUse.UseBuffer(call.recvPtrBase, lineNum);
     }
     if (call.stream)
     {
-      streams[call.stream].second = lineNum;
-      if (groupDepth > 0) {
-        groupStreams.insert(call.stream);
-      }
+      lastUse.UseStream(call.stream, lineNum);
     }
 
     switch (call.type) {
     case rrGroupStart:
     {
-      groupDepth++;
+      lastUse.GroupStart();
       break;
     }
     case rrGroupEnd:
     case rrGroupSimulatedEnd:
     {
-      if (groupDepth > 0 && --groupDepth == 0) {
-        for (void* base : groupBuffers) {
-          dMemMap[base].lastLineUsed = lineNum;
-        }
-        for (hipStream_t stream : groupStreams) {
-          streams[stream].second = lineNum;
-        }
-        groupBuffers.clear();
-        groupStreams.clear();
-      }
+      lastUse.GroupEnd(lineNum);
       break;
     }
     case rrCommInitRank:
@@ -206,13 +186,17 @@ void Replayer::parse()
     lineNum++;
   }
 
-  for (const auto& [base, mem] : dMemMap) {
-    if (mem.lastLineUsed >= 0 && !mem.ncclMemAllocated) {
-      buffersToFree[mem.lastLineUsed].push_back(base);
+  if (lastUse.depth() > 0) {
+    printf("[WARNING ] Rank %d : log ends inside ncclGroupStart, so the calls of that group are never launched\n",
+           myRank);
+  }
+  for (const auto& [base, lastLine] : lastUse.buffers()) {
+    if (!dMemMap.at(base).ncclMemAllocated) {
+      buffersToFree[lastLine].push_back(base);
     }
   }
-  for (const auto& [stream, info] : streams) {
-    streamsToDestroy[info.second].push_back(stream);
+  for (const auto& [stream, lastLine] : lastUse.streams()) {
+    streamsToDestroy[lastLine].push_back(static_cast<hipStream_t>(stream));
   }
 
   // exchange communicator info
@@ -470,6 +454,8 @@ void Replayer::replay()
     case rrMemFree:
     {
       NCCL_CALL(ncclMemFree(dMemMap[call.recvbuff].base));
+      // A later buffer recorded at the same address must be allocated again, not mapped to this freed one.
+      dMemMap[call.recvbuff].base = NULL;
       break;
     }
 
@@ -680,11 +666,11 @@ int main(int argc, char **argv)
     MPI_Gather(hostname, MPI_MAX_PROCESSOR_NAME, MPI_CHAR,
                allhosts.data(), MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0, MPI_COMM_WORLD);
 
-    // All hostnames in the recorded program
-    std::unordered_set<std::string> hostnames;
+    // Ranks per host in this replay
+    std::map<std::string, int> hostRanks;
     for (int i = 0; i < numMpiRanks; i++)
     {
-      hostnames.insert(std::string(allhosts.data() + i * MPI_MAX_PROCESSOR_NAME)); // assuming null terminator included
+      hostRanks[std::string(allhosts.data() + i * MPI_MAX_PROCESSOR_NAME)]++; // assuming null terminator included
     }
 
     // Register all hostnames and pid from recorder logs
@@ -709,27 +695,25 @@ int main(int argc, char **argv)
       }
       closedir(d);
     }
-    // Double check number of nodes and number of processes match for recorder and replayer
-    if (logHosts.size() != hostnames.size() || a != numMpiRanks) {
-      printf("[ERROR   ] Rank 0 : found %d logs from %zu hosts for %s%s, replaying %d ranks on %zu hosts\n", a,
-             logHosts.size(), output_file.c_str(), output_extension.c_str(), numMpiRanks, hostnames.size());
+    // Each replay host takes the logs of one recorded host that ran as many ranks
+    std::map<std::string, int> logCounts;
+    for (const auto& [host, filePids] : logHosts) {
+      logCounts[host] = filePids.size();
+    }
+    std::map<std::string, std::string> hostAssignment;
+    if (!MatchHostsByRankCount(hostRanks, logCounts, &hostAssignment)) {
+      printf("[ERROR   ] Rank 0 : found %d logs from %zu hosts for %s%s, replaying %d ranks on %zu hosts; "
+             "ranks per host must match logs per host\n", a, logHosts.size(), output_file.c_str(),
+             output_extension.c_str(), numMpiRanks, hostRanks.size());
       fflush(stdout);
       MPI_Abort(MPI_COMM_WORLD, 1);
     }
-    // Assign mapping of replayer hostname to recorder hostname
-    std::unordered_map<std::string, std::string> hostAssignment;
-    auto it = logHosts.begin();
-    for (const auto &host : hostnames)
-    {
-      hostAssignment[host] = (*it).first;
-      it++;
-    }
     for (int i = 0; i < numMpiRanks; i++)
     {
-      std::string host(allhosts.data() + i * MPI_MAX_PROCESSOR_NAME);
-      strcpy(allhosts.data() + i * MPI_MAX_PROCESSOR_NAME, hostAssignment[host].c_str());
-      pids[i] = logHosts[hostAssignment[host]].back();
-      logHosts[hostAssignment[host]].pop_back();
+      const std::string& logHost = hostAssignment.at(std::string(allhosts.data() + i * MPI_MAX_PROCESSOR_NAME));
+      strcpy(allhosts.data() + i * MPI_MAX_PROCESSOR_NAME, logHost.c_str());
+      pids[i] = logHosts[logHost].back();
+      logHosts[logHost].pop_back();
     }
 
     // Distribute the target log for each rank (pid and hostname)
