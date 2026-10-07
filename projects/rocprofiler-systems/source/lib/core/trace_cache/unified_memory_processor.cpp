@@ -108,7 +108,7 @@ format_time(std::uint64_t nanoseconds)
 
 unified_memory_processor_t::unified_memory_processor_t(
     std::shared_ptr<agent_manager> agent_mgr, int pid, output_file_sink_view output_sink)
-: processor_t<unified_memory_processor_t>()
+: sample_processor_interface()
 , m_agent_manager(std::move(agent_mgr))
 , m_pid(pid)
 , m_output_dir(config::get_ump_absolute_path())
@@ -226,7 +226,7 @@ unified_memory_processor_t::handle_page_migrate(const kfd_sample& sample)
     }
 
     auto [src_label, dst_label] = std::move(*agent_ids);
-    auto direction              = classify_direction(src_label, dst_label);
+    auto const direction        = classify_direction(src_label, dst_label);
 
     // Float-to-int overflow is UB ([conv.fpint]); guard NaN/inf/sign/2^64.
     std::uint64_t size_bytes = 0;
@@ -289,10 +289,10 @@ std::optional<std::pair<std::uint32_t, std::uint32_t>>
 unified_memory_processor_t::parse_node_id_pair(const std::string& src_label,
                                                const std::string& dst_label) const
 {
-    auto parse_one = [](const std::string& s, std::uint32_t& out) -> bool {
+    auto const parse_one = [](const std::string& s, std::uint32_t& out) -> bool {
         const char* first = s.data();
         const char* last  = s.data() + s.size();
-        auto        res   = std::from_chars(first, last, out);
+        auto const  res   = std::from_chars(first, last, out);
         return res.ec == std::errc{} && res.ptr == last;
     };
 
@@ -320,7 +320,7 @@ unified_memory_processor_t::resolve_gpu_bucket_id(const std::string&  src_label,
 
     const auto [src_node_id, dst_node_id] = *ids;
     const auto is_gpu_node                = [this](std::uint32_t node_id) {
-        auto it = m_node_type_cache.find(node_id);
+        auto const it = m_node_type_cache.find(node_id);
         return it != m_node_type_cache.end() && it->second == agent_type::gpu;
     };
 
@@ -356,8 +356,8 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
     }
     const auto [src_node_id, dst_node_id] = *ids;
 
-    auto src_it = m_node_type_cache.find(src_node_id);
-    auto dst_it = m_node_type_cache.find(dst_node_id);
+    auto const src_it = m_node_type_cache.find(src_node_id);
+    auto const dst_it = m_node_type_cache.find(dst_node_id);
 
     if(src_it == m_node_type_cache.end() || dst_it == m_node_type_cache.end())
     {
@@ -458,14 +458,14 @@ unified_memory_processor_t::extract_gpu_name(const std::string& src_label,
     }
     const auto [src_node_id, dst_node_id] = *ids;
 
-    auto src_it = m_gpu_name_cache.find(src_node_id);
+    auto const src_it = m_gpu_name_cache.find(src_node_id);
     if(src_it != m_gpu_name_cache.end())
     {
         return src_it->second.empty() ? fmt::format("GPU {}", src_node_id)
                                       : src_it->second;
     }
 
-    auto dst_it = m_gpu_name_cache.find(dst_node_id);
+    auto const dst_it = m_gpu_name_cache.find(dst_node_id);
     if(dst_it != m_gpu_name_cache.end())
     {
         return dst_it->second.empty() ? fmt::format("GPU {}", dst_node_id)
@@ -486,7 +486,7 @@ unified_memory_processor_t::write_text_output(std::ostream& out) const
         out << "    Count  Avg Size  Min Size  Max Size  Total Size  Total Time    "
                "Migration Throughput  Name\n";
 
-        auto print_stats = [&](const migration_stats& stats, const char* name) {
+        auto const print_stats = [&](const migration_stats& stats, const char* name) {
             if(stats.count > 0)
             {
                 out << std::setw(9) << stats.count << "  " << std::setw(8)
@@ -538,7 +538,8 @@ unified_memory_processor_t::write_json_output(std::ostream& out) const
         device["device_id"]   = device_id;
         device["device_name"] = summary.device_name;
 
-        auto create_migration_json = [](const migration_stats& stats) -> nlohmann::json {
+        auto const create_migration_json =
+            [](const migration_stats& stats) -> nlohmann::json {
             nlohmann::json obj;
             obj["count"]            = stats.count;
             obj["avg_size_bytes"]   = stats.avg_size_bytes();

@@ -26,6 +26,32 @@ F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32
 # Mixed-type conversions that accept VOP3 ABS/NEG on a floating half source.
 F16_INPUT_CONVERSION_DTYPES = frozenset({'i16_f16', 'u16_f16', 'f32_f16'})
 
+# Floating VOPC relations that read their sources; F and T/TRU are constants.
+FLOAT_COMPARE_RELATIONS = frozenset(
+    {
+        'lt',
+        'eq',
+        'le',
+        'gt',
+        'lg',
+        'ge',
+        'o',
+        'u',
+        'nge',
+        'nlg',
+        'ngt',
+        'nle',
+        'neq',
+        'nlt',
+    }
+)
+FLOAT_COMPARE_DTYPES = frozenset({'f16', 'f32', 'f64'})
+
+
+def is_float_relation(dtype: str | None, op: str | None) -> bool:
+    """Whether a compare is a floating relation evaluated by shared/comparison.h."""
+    return dtype in FLOAT_COMPARE_DTYPES and op in FLOAT_COMPARE_RELATIONS
+
 
 @dataclass
 class InstructionSemantics:
@@ -687,7 +713,9 @@ def _derive_sopc(name: str) -> InstructionSemantics | None:
             )
     if name == 'S_SET_GPR_IDX_ON':
         return InstructionSemantics(name, 'gpr_idx', operation='on')
-    # Unrecognized SOPC instructions (S_SETVSKIP, …) → nop
+    if name == 'S_SETVSKIP':
+        return InstructionSemantics(name, 'set_vskip')
+    # Unrecognized SOPC instructions → nop
     return InstructionSemantics(name, 'nop')
 
 

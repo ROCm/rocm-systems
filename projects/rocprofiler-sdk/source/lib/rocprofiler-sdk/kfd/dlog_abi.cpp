@@ -60,8 +60,8 @@ static_assert(offsetof(kfd_ioctl_dlog_args, buffer_size) == 16, "dlog request bu
 static_assert(offsetof(kfd_ioctl_dlog_args, stream_fd) == 20, "dlog request stream_fd moved");
 
 // The stream-info OUT struct read via KFD_DLOG_STREAM_OP_INFO: the reader indexes
-// wptr[]/rptr[] and derives geometry from these offsets, so their layout is ABI.
-static_assert(sizeof(kfd_dlog_stream_info) == 72, "stream_info ABI size changed");
+// wptr[] and derives geometry from these offsets, so their layout is ABI.
+static_assert(sizeof(kfd_dlog_stream_info) == 64, "stream_info ABI size changed");
 static_assert(alignof(kfd_dlog_stream_info) == 8, "stream_info alignment changed");
 static_assert(offsetof(kfd_dlog_stream_info, abi_version) == 0, "stream_info abi_version moved");
 static_assert(offsetof(kfd_dlog_stream_info, fw_record_size) == 4,
@@ -74,17 +74,22 @@ static_assert(offsetof(kfd_dlog_stream_info, mmap_size) == 24, "stream_info mmap
 static_assert(offsetof(kfd_dlog_stream_info, records_offset) == 32,
               "stream_info records_offset moved");
 static_assert(offsetof(kfd_dlog_stream_info, wptr_offset) == 40, "stream_info wptr_offset moved");
-static_assert(offsetof(kfd_dlog_stream_info, rptr_offset) == 48, "stream_info rptr_offset moved");
-static_assert(offsetof(kfd_dlog_stream_info, gpu_id) == 56, "stream_info gpu_id moved");
-static_assert(offsetof(kfd_dlog_stream_info, target_pid) == 60, "stream_info target_pid moved");
-static_assert(offsetof(kfd_dlog_stream_info, pasid) == 64, "stream_info pasid moved");
-static_assert(offsetof(kfd_dlog_stream_info, flags) == 68, "stream_info flags moved");
+static_assert(offsetof(kfd_dlog_stream_info, gpu_id) == 48, "stream_info gpu_id moved");
+static_assert(offsetof(kfd_dlog_stream_info, target_pid) == 52, "stream_info target_pid moved");
+static_assert(offsetof(kfd_dlog_stream_info, pasid) == 56, "stream_info pasid moved");
+static_assert(offsetof(kfd_dlog_stream_info, flags) == 60, "stream_info flags moved");
 
 // The stream-status OUT struct read via KFD_DLOG_STREAM_OP_STATUS.
 static_assert(sizeof(kfd_dlog_stream_status) == 16, "stream_status ABI size changed");
 static_assert(offsetof(kfd_dlog_stream_status, status) == 0, "stream_status status moved");
 static_assert(offsetof(kfd_dlog_stream_status, target_exit_count) == 8,
               "stream_status target_exit_count moved");
+
+// The stream fd ioctl arg struct: op/pad (8 bytes) + the 64-byte info union = 72
+// bytes, and that size is baked into KFD_DLOG_STREAM_IOC via _IOWR. A size change
+// re-encodes the ioctl number and breaks the handshake with the kernel.
+static_assert(sizeof(kfd_dlog_stream_args) == 72, "stream_args ABI size changed");
+static_assert(_IOC_SIZE(KFD_DLOG_STREAM_IOC) == 72, "KFD_DLOG_STREAM_IOC size changed");
 
 // The firmware record the drain parses out of the ring: 20-byte stride, and each
 // field at the byte offset copy_pipes()/pair_records() read. kFwRecBytes and the

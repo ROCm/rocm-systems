@@ -518,6 +518,7 @@ pub enum AmdsmiVramTypeT {
     AmdsmiVramTypeHbm2e = 3,
     AmdsmiVramTypeHbm3 = 4,
     AmdsmiVramTypeHbm3e = 5,
+    AmdsmiVramTypeHbm4 = 6,
     AmdsmiVramTypeDdr2 = 10,
     AmdsmiVramTypeDdr3 = 11,
     AmdsmiVramTypeDdr4 = 12,
@@ -1680,10 +1681,14 @@ pub struct AmdsmiDriverInfoT {
     pub driver_version: [::std::os::raw::c_char; 256usize],
     pub driver_date: [::std::os::raw::c_char; 256usize],
     pub driver_name: [::std::os::raw::c_char; 256usize],
+    pub driver_kernel_version: [::std::os::raw::c_char; 256usize],
+    pub amdgpu_driver_version: [::std::os::raw::c_char; 256usize],
+    pub driver_build_version: [::std::os::raw::c_char; 256usize],
+    pub driver_full_version: [::std::os::raw::c_char; 256usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiDriverInfoT"][::std::mem::size_of::<AmdsmiDriverInfoT>() - 768usize];
+    ["Size of AmdsmiDriverInfoT"][::std::mem::size_of::<AmdsmiDriverInfoT>() - 1792usize];
     ["Alignment of AmdsmiDriverInfoT"][::std::mem::align_of::<AmdsmiDriverInfoT>() - 1usize];
     ["Offset of field: AmdsmiDriverInfoT::driver_version"]
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_version) - 0usize];
@@ -1691,6 +1696,14 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_date) - 256usize];
     ["Offset of field: AmdsmiDriverInfoT::driver_name"]
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_name) - 512usize];
+    ["Offset of field: AmdsmiDriverInfoT::driver_kernel_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_kernel_version) - 768usize];
+    ["Offset of field: AmdsmiDriverInfoT::amdgpu_driver_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoT, amdgpu_driver_version) - 1024usize];
+    ["Offset of field: AmdsmiDriverInfoT::driver_build_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_build_version) - 1280usize];
+    ["Offset of field: AmdsmiDriverInfoT::driver_full_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_full_version) - 1536usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -3409,7 +3422,9 @@ pub struct AmdsmiNpmInfoT {
     pub status: AmdsmiNpmStatusT,
     pub limit: u64,
     pub ubb_power_threshold: u32,
-    pub reserved: [u64; 5usize],
+    pub max_node_power_limit: u64,
+    pub current_node_power: u32,
+    pub reserved: [u64; 3usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -3421,8 +3436,12 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiNpmInfoT, limit) - 8usize];
     ["Offset of field: AmdsmiNpmInfoT::ubb_power_threshold"]
         [::std::mem::offset_of!(AmdsmiNpmInfoT, ubb_power_threshold) - 16usize];
+    ["Offset of field: AmdsmiNpmInfoT::max_node_power_limit"]
+        [::std::mem::offset_of!(AmdsmiNpmInfoT, max_node_power_limit) - 24usize];
+    ["Offset of field: AmdsmiNpmInfoT::current_node_power"]
+        [::std::mem::offset_of!(AmdsmiNpmInfoT, current_node_power) - 32usize];
     ["Offset of field: AmdsmiNpmInfoT::reserved"]
-        [::std::mem::offset_of!(AmdsmiNpmInfoT, reserved) - 24usize];
+        [::std::mem::offset_of!(AmdsmiNpmInfoT, reserved) - 40usize];
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -5150,6 +5169,9 @@ extern "C" {
         node_handle: AmdsmiNodeHandle,
         info: *mut AmdsmiTrayInfoT,
     ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_npm_limit(node_handle: AmdsmiNodeHandle, limit: u64) -> AmdsmiStatusT;
 }
 extern "C" {
     pub fn amdsmi_get_fw_info(

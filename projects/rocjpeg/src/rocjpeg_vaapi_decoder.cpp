@@ -193,9 +193,13 @@ bool RocJpegVaapiMemoryPool::DeleteIdleEntry() {
  * @brief Adds a pool entry to the memory pool for a specific surface format.
  *
  * This function adds a pool entry to the memory pool for a specific surface format.
- * If the memory pool for the given surface format is not full, the new entry is added to the pool.
- * If the memory pool is full, the oldest entry is removed from the pool and replaced with the new entry.
- * If the removed entry has associated resources (VA context, VA surface, HIP memory), they are destroyed and freed.
+ *
+ * max_pool_size_ is a reuse/eviction target, not a hard cap on live allocations. When the pool has
+ * reached the target, an idle entry is evicted first so memory is recycled rather than grown. If no
+ * idle entry exists, every entry is still in flight and the pool is allowed to grow past the target:
+ * on a GPU with a single JPEG core the batched decoder submits one image per call, so each image in
+ * the batch holds its own busy entry and a batch larger than the target legitimately needs more live
+ * entries than the target allows. Failing here would reject valid work.
  *
  * @param surface_format The surface format for which the pool entry is being added.
  * @param pool_entry The pool entry to be added.
@@ -205,16 +209,11 @@ RocJpegStatus RocJpegVaapiMemoryPool::AddPoolEntry(uint32_t surface_format, cons
     std::lock_guard<std::mutex> lock(pool_mutex_);
     size_t total_mem_pool_size = GetTotalMemPoolSize();
     auto& entries = mem_pool_[surface_format];
-    if (total_mem_pool_size < max_pool_size_) {
-        entries.push_back(pool_entry);
-    } else {
-        if (DeleteIdleEntry()) {
-            entries.push_back(pool_entry);
-        } else {
-            ErrorLog(g_rocjpeg_logger, "Cannot find an idle entry in the the memory pool!");
-            return ROCJPEG_STATUS_INVALID_PARAMETER;
-        }
+    if (total_mem_pool_size >= max_pool_size_) {
+        // Best-effort eviction to stay near the target; growing past it is valid when all entries are busy.
+        DeleteIdleEntry();
     }
+    entries.push_back(pool_entry);
     return ROCJPEG_STATUS_SUCCESS;
 }
 

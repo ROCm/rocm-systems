@@ -787,6 +787,74 @@ TEST_F(RmaProxyDescriptorTest, PutOp_NoSignalCopiesTheDataOperationOnly) {
   EXPECT_EQ(0u, op.signal.op);
 }
 
+// Account for each window's offset within a shared backing allocation.
+TEST_F(RmaProxyDescriptorTest, Put_TwoWindowsCarvedFromOneAllocationDoNotAlias) {
+  void* allocation = reinterpret_cast<void*>(0x100000);
+  constexpr size_t kHeadCarve = 0;
+  constexpr size_t kTailCarve = 0x1000;
+  constexpr size_t kCallerOff = 64;
+
+  ncclDevrMemory headMemory{};
+  ncclDevrMemory tailMemory{};
+  headMemory.primaryAddr = allocation;
+  tailMemory.primaryAddr = allocation;
+  headMemory.bigOffset = 0x8000;
+  tailMemory.bigOffset = 0xC000;
+  headMemory.rmaHostWins[kContext] = reinterpret_cast<void*>(0xA110);
+  tailMemory.rmaHostWins[kContext] = reinterpret_cast<void*>(0xA220);
+
+  ncclDevrWindow head{};
+  ncclDevrWindow tail{};
+  head.memory = &headMemory;
+  tail.memory = &tailMemory;
+  head.userPtr = static_cast<char*>(allocation) + kHeadCarve;
+  tail.userPtr = static_cast<char*>(allocation) + kTailCarve;
+  head.bigOffset = headMemory.bigOffset + kHeadCarve;
+  tail.bigOffset = tailMemory.bigOffset + kTailCarve;
+  // Handles stored on the window itself must not win while backing memory is set.
+  head.rmaHostWins[kContext] = reinterpret_cast<void*>(0x1111);
+  tail.rmaHostWins[kContext] = reinterpret_cast<void*>(0x2222);
+
+  ncclRmaPutSignalOp op{};
+  ASSERT_EQ(ncclSuccess,
+            ncclRmaProxyPutBuildOp(comm_.get(), ctx_.get(), kContext, false,
+                                   &head, kCallerOff, &tail, kCallerOff, 128,
+                                   kPeer, 0, NCCL_SIGNAL_NONE, &op));
+
+  EXPECT_EQ(kHeadCarve + kCallerOff, op.srcOff);
+  EXPECT_EQ(kTailCarve + kCallerOff, op.dstOff);
+  EXPECT_NE(op.srcOff, op.dstOff);
+  EXPECT_EQ(headMemory.rmaHostWins[kContext], op.srcHandle);
+  EXPECT_EQ(tailMemory.rmaHostWins[kContext], op.dstHandle);
+  EXPECT_NE(op.srcHandle, op.dstHandle);
+  EXPECT_NE(head.rmaHostWins[kContext], op.srcHandle);
+  EXPECT_NE(tail.rmaHostWins[kContext], op.dstHandle);
+
+  ncclTaskRma task{};
+  task.srcWinHost = &tail;
+  task.srcWinOffset = 0;
+  task.peerWinHost = &head;
+  task.peerWinOffset = 32;
+  task.count = 16;
+  task.datatype = ncclInt8;
+  task.peer = kPeer;
+  task.ctx = kContext;
+  task.signalIdx = 0;
+  task.signalMode = NCCL_SIGNAL_NONE;
+  ncclRmaProxyDesc desc{};
+
+  ASSERT_EQ(ncclSuccess,
+            ncclRmaProxyPutDescFromTask(comm_.get(), ctx_.get(), plan_.get(),
+                                        &task, &desc));
+
+  EXPECT_EQ(kTailCarve, desc.putSignal.srcOff);
+  EXPECT_EQ(kHeadCarve + 32, desc.putSignal.dstOff);
+  EXPECT_EQ(16u, desc.putSignal.size);
+  EXPECT_EQ(tailMemory.rmaHostWins[kContext], desc.putSignal.srcHandle);
+  EXPECT_EQ(headMemory.rmaHostWins[kContext], desc.putSignal.dstHandle);
+  EXPECT_NE(desc.putSignal.srcHandle, desc.putSignal.dstHandle);
+}
+
 TEST_F(RmaProxyDescriptorTest, PutOp_NonPersistentSignalUsesTheOrdinarySignalHandle) {
   ncclRmaPutSignalOp op{};
 

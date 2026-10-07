@@ -32,9 +32,9 @@ both admission and issue accounting (two units for transfers larger than a DWORD
 but readiness still requires zero. Mixed hardware event types sharing a counter retain separate ordered-class
 positions: a nonzero wait proves an ordered result complete only when at least that
 many younger operations in its own class follow it. Generic FLAT on older CDNA is treated
-conservatively as unordered. Zero waits reset this ordering state. FLAT keeps both queue
-entries even when all lanes use one segment; register dependencies are restricted using
-the resolved routing masks. Mixed global/shared FLAT functional execution still has the
+conservatively as unordered. Zero waits reset this ordering state. FLAT contributes only
+to memory domains used by its resolved requests; register dependencies follow the
+resolved routing masks. Mixed global/shared FLAT functional execution still has the
 existing first-request-lane routing limitation; the checker does not repair memory
 routing.
 
@@ -56,10 +56,17 @@ partial wait. CDNA5 async load and store completion classes are separate;
 async barrier arrive orders with async loads. Proven completion also releases the
 associated replay translation prefix.
 
+FLAT admission is address-dependent, so the checker applies its memory-counter
+capacity constraints after routing, before checking result writeback. The instruction
+cannot use an unused domain's full counter to prove an older request complete. Address
+and other source operands are read before this inference is available.
+
 ## FLAT register readiness
 
-FLAT contributes to both VMEM and DS counters even when every active lane selects
-one address space. Its global/scratch and LDS portions can complete independently;
+FLAT contributes to VMEM when at least one lane requests global/scratch memory and
+to DS when at least one lane requests LDS memory. This conditional-participation
+rule is the runtime model across AMD GPU targets; physical validation on every
+architecture is not established. Its global/scratch and LDS portions can complete independently;
 RDNA4 ISA section 5.7.1.3 describes complementary lane masks for these portions.
 The checker uses the resolved address of each lane, rather than the functional
 pipeline's first-lane route, to associate a returned VGPR lane with its counter.
@@ -93,7 +100,7 @@ wait requirements on untested architectures or under all schedules.
 |---|---|
 | Global, scratch, buffer, typed buffer, image loads and returning atomics | Load queue; track returned registers |
 | Stores and atomics without return | Store queue, or the shared legacy VMEM queue; no destination register |
-| Generic FLAT loads, stores and atomics | VMEM and DS queues; returned lanes depend on DS for the resolved shared aperture and VMEM for global/scratch |
+| Generic FLAT loads, stores and atomics | Only the VMEM/DS queues used by resolved requests; returned lanes depend on DS for the shared aperture and VMEM for global/scratch |
 | LDS/GDS, including permutation, swizzle and DS no-op | DS/legacy LGKM queue; returning forms track registers. GDS also contributes to EXP |
 | Scalar loads, atomics, cache operations, timestamps, barrier-state and wave-ID queries | KM/legacy LGKM queue; returned scalar registers are tracked |
 | Messages, including message returns | KM/legacy LGKM queue. Return forms contribute two units, with the result pending through the return unit |
@@ -108,8 +115,9 @@ wait requirements on untested architectures or under all schedules.
 | Tensor DMA loads/stores | TENSOR queue |
 | gfx1250 scalar address operations and multi-group VMEM, including async LDS transfers | X translation queue; protect source dwords against overwrite, plus VMEM EXEC. One X unit per instruction, independently of completion-counter units. Tensor DMA has no X event |
 
-Zero-EXEC vector producers still contribute positions behind pending requests; an empty
-queue may skip them. Scalar producers do not depend on EXEC. Prefetches that do not
+Zero-EXEC vector producers generally still contribute positions behind pending requests;
+an empty queue may skip them. FLAT contributes no VMEM/DS position without a requesting
+lane. Scalar producers do not depend on EXEC. Prefetches that do not
 increment completion counters contribute no entries.
 If a zero-EXEC instruction occupies an X position but no completion position, it
 has no completion-to-X mapping. Waiting on that empty completion counter cannot

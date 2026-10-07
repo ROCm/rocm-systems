@@ -31,12 +31,16 @@ class TestPythonPackageStaging(unittest.TestCase):
             "amdsmi_interface_utils.py": "VALUE = 1\n",
             "amdsmi_wrapper.py": "VALUE = 1\n",
             "README.md": "Package description\n",
+            "THIRD_PARTY_LICENSES/LGPL-2.1.txt": "Test third-party license\n",
+            "THIRD_PARTY_LICENSES/NOTICE.md": "Test third-party notice\n",
             "setup.py": "NAME = 'amdsmi'\n",
             "pyproject.toml.in": "[project]\nname = 'amdsmi'\nversion = '1.0'\n",
             "_version.py.in": "__version__ = '1.0'\n",
         }
         for name, content in self.inputs.items():
-            (self.interface / name).write_text(content, encoding="utf-8")
+            path = self.interface / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
         (self.source / "LICENSE").write_text("Test license\n", encoding="utf-8")
         (self.source / "CMakeLists.txt").write_text(
             "cmake_minimum_required(VERSION 3.20)\n"
@@ -100,6 +104,8 @@ class TestPythonPackageStaging(unittest.TestCase):
             "README.md",
             "setup.py",
             "LICENSE",
+            "THIRD_PARTY_LICENSES/LGPL-2.1.txt",
+            "THIRD_PARTY_LICENSES/NOTICE.md",
         ):
             with self.subTest(source=name):
                 source = self.source / name if name == "LICENSE" else self.interface / name
