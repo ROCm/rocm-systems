@@ -30,7 +30,7 @@ use crate::platform::memory::{
     KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation,
 };
 use rocddi::device::Device;
-use rocddi::gpu::{CopyRect, GpuCopySequence};
+use rocddi::gpu::{CopyRect, GpuCopySequence, GpuCopyTimestamps};
 use rocddi::memory::{
     Allocation, DeviceAccess, MemoryKind, VirtualAddress, VirtualDeviceMapping, VirtualHostMapping,
     VirtualMemory,
@@ -39,7 +39,8 @@ use rocddi::session::{Session, SessionLifetime};
 use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
 
 use crate::ffi::*;
-use crate::runtime::{Runtime, boundary, initialized_mut, lock, map_error};
+use crate::runtime::{AsyncCopyProfiling, Runtime, boundary, initialized_mut, lock, map_error};
+use crate::signal::{AsyncCopyClock, AsyncCopyProfile};
 
 const GPU_POOL_COARSE: u64 = 1;
 const GPU_POOL_FINE: u64 = 2;
@@ -4313,6 +4314,14 @@ fn release_async_resources(
     // it retains all signal storage until after this worker exits.
 }
 
+fn complete_async_signal_value(signal: &crate::signal::AmdSignal, success: bool) {
+    if success {
+        signal.value.fetch_sub(1, Ordering::Release);
+    } else {
+        signal.value.store(-1, Ordering::Release);
+    }
+}
+
 fn finish_async_signal(completion: HsaSignal, success: bool) {
     if completion.handle == 0 {
         return;
@@ -4321,11 +4330,39 @@ fn finish_async_signal(completion: HsaSignal, success: bool) {
     // shutdown keeps its storage mapped until all workers have joined.
     let _ = unsafe {
         crate::signal::with_signal(completion, |signal| {
-            if success {
-                signal.value.fetch_sub(1, Ordering::Release);
-            } else {
-                signal.value.store(-1, Ordering::Release);
+            complete_async_signal_value(signal, success);
+        })
+    };
+}
+
+fn finish_async_copy_signal(
+    completion: HsaSignal,
+    success: bool,
+    profile: Option<AsyncCopyProfile>,
+) {
+    if completion.handle == 0 {
+        return;
+    }
+    let profile = if success { profile } else { None };
+    let mut guard = lock().ok();
+    if let Some(runtime) = guard.as_mut().and_then(|guard| guard.as_mut()) {
+        if let Some(record) = runtime
+            .async_signal_refs
+            .get_mut(&(completion.handle as usize))
+        {
+            record.copy_profile = profile;
+        }
+    }
+    // SAFETY: Submission retains this signal until the worker exits, and
+    // shutdown keeps its storage mapped until all workers have joined. The
+    // registry lock orders profile publication with the completion update.
+    let _ = unsafe {
+        crate::signal::with_signal(completion, |signal| {
+            if let Some(profile) = profile {
+                signal.start_ts.store(profile.start, Ordering::Relaxed);
+                signal.end_ts.store(profile.end, Ordering::Relaxed);
             }
+            complete_async_signal_value(signal, success);
         })
     };
 }
@@ -4541,17 +4578,15 @@ enum AsyncCopyRoute {
         index: usize,
         entry: GpuCopyEntry,
     },
-    GpuRect {
-        device: Box<Device>,
-        rect: CopyRect,
-    },
     GpuBatch {
         device: Box<Device>,
+        index: usize,
         entries: Vec<GpuCopyEntry>,
     },
 }
 
 enum GpuCopyEntry {
+    Rect(CopyRect),
     Linear {
         destination: u64,
         source: u64,
@@ -5201,16 +5236,27 @@ fn execute_gpu_entries(
     device: &Device,
     entries: impl IntoIterator<Item = GpuCopyEntry>,
     sdma_ring: Option<u32>,
+    timed: bool,
     stop: &AtomicBool,
-) -> Result<(), CopyRouteFailure> {
+) -> Result<Option<GpuCopyTimestamps>, CopyRouteFailure> {
     let gpu = copy_gpu(device)?;
     let mut sequence = match sdma_ring {
         Some(ring) => GpuCopySequence::begin_on_sdma_ring(gpu, stop, ring),
         None => GpuCopySequence::begin(gpu, stop),
     }
     .map_err(CopyRouteFailure::from)?;
+    if timed {
+        sequence.enable_timing().map_err(CopyRouteFailure::from)?;
+    }
     for entry in entries {
         let outcome = match entry {
+            GpuCopyEntry::Rect(rect) => {
+                // SAFETY: Preparation validated every selected row and keeps
+                // its mapped backing live until native retirement.
+                unsafe { sequence.copy_rect(rect) }
+                    .map(|()| SyncGpuCopyOutcome::Done)
+                    .map_err(CopyRouteFailure::from)
+            }
             GpuCopyEntry::Linear {
                 destination,
                 source,
@@ -5249,30 +5295,61 @@ fn execute_gpu_entries(
             }
         }
     }
-    Ok(())
+    if timed {
+        sequence
+            .finish_timing()
+            .map(Some)
+            .map_err(CopyRouteFailure::from)
+    } else {
+        Ok(None)
+    }
+}
+
+fn system_copy_tick(device: Option<&Device>) -> Result<u64, CopyRouteFailure> {
+    let device = device.ok_or_else(|| CopyRouteFailure::retired(ERROR))?;
+    let counters = copy_gpu(device)?
+        .clock_counters()
+        .map_err(|error| CopyRouteFailure::retired(map_error(error)))?;
+    if counters.system == 0 {
+        return Err(CopyRouteFailure::retired(ERROR));
+    }
+    Ok(counters.system)
+}
+
+fn gpu_copy_profile(index: usize, ticks: Option<GpuCopyTimestamps>) -> Option<AsyncCopyProfile> {
+    ticks.map(|ticks| AsyncCopyProfile {
+        clock: AsyncCopyClock::Gpu(index),
+        start: ticks.start,
+        end: ticks.end,
+    })
 }
 
 fn execute_copy_route(
     route: AsyncCopyRoute,
     sdma_ring: Option<u32>,
+    profile_enabled: bool,
+    host_clock: Option<&Device>,
     stop: &AtomicBool,
-) -> (bool, bool) {
+) -> Result<Option<AsyncCopyProfile>, CopyRouteFailure> {
     match route {
-        AsyncCopyRoute::Noop => (true, false),
+        AsyncCopyRoute::Noop => Ok(None),
         AsyncCopyRoute::Host {
             destination,
             source,
             size,
         } => {
             if stop.load(Ordering::Acquire) {
-                return (false, false);
+                return Err(CopyRouteFailure::retired(ERROR));
             }
+            let start = profile_enabled
+                .then(|| system_copy_tick(host_clock))
+                .transpose()?;
             let needs_loaded_mapping = matches!(&source, HostCopySource::LoadedAddress(..))
                 || matches!(&destination, HostCopyDestination::LoadedAddress(..));
             let guard = if needs_loaded_mapping {
                 match lock() {
                     Ok(guard) => Some(guard),
-                    Err(_) => return (false, false),
+                    Err(_) => return Err(CopyRouteFailure::retired(ERROR)),
                 }
             } else {
                 None
@@ -5289,7 +5366,7 @@ fn execute_copy_route(
                 HostCopySource::Address(address, _) => *address,
                 HostCopySource::LoadedAddress(address, _) => {
                     let Some(host) = loaded_host(*address) else {
-                        return (false, false);
+                        return Err(CopyRouteFailure::retired(INVALID_ALLOCATION));
                     };
                     host
                 }
@@ -5299,7 +5376,7 @@ fn execute_copy_route(
                 HostCopyDestination::Address(address) => address,
                 HostCopyDestination::LoadedAddress(address) => {
                     let Some(host) = loaded_host(address) else {
-                        return (false, false);
+                        return Err(CopyRouteFailure::retired(INVALID_ALLOCATION));
                     };
                     host
                 }
@@ -5310,31 +5387,38 @@ fn execute_copy_route(
             // permits overlapping ranges.
             unsafe { std::ptr::copy(source_host as *const u8, destination_host as *mut u8, size) };
             fence(Ordering::SeqCst);
-            (true, false)
-        }
-        AsyncCopyRoute::Gpu { device, entry, .. } => {
-            match execute_gpu_entries(&device, std::iter::once(entry), sdma_ring, stop) {
-                Ok(()) => (true, false),
-                Err(failure) => (false, failure.operands_may_be_live),
+            drop(guard);
+            let end = profile_enabled
+                .then(|| system_copy_tick(host_clock))
+                .transpose()?;
+            let profile = start.zip(end).map(|(start, end)| AsyncCopyProfile {
+                clock: AsyncCopyClock::System,
+                start,
+                end,
+            });
+            if profile.is_some_and(|profile| profile.end < profile.start) {
+                return Err(CopyRouteFailure::retired(ERROR));
             }
+            Ok(profile)
         }
-        AsyncCopyRoute::GpuBatch { device, entries } => {
-            match execute_gpu_entries(&device, entries, None, stop) {
-                Ok(()) => (true, false),
-                Err(failure) => (false, failure.operands_may_be_live),
-            }
-        }
-        AsyncCopyRoute::GpuRect { device, rect } => {
-            let Ok(gpu) = device.gpu() else {
-                return (false, false);
-            };
-            // SAFETY: Validation covers all rows and keeps both backing owners
-            // live until the native copy reports retirement.
-            match unsafe { gpu.copy_rect(rect, stop) } {
-                Ok(()) => (true, false),
-                Err(failure) => (false, failure.operands_may_be_live),
-            }
-        }
+        AsyncCopyRoute::Gpu {
+            device,
+            index,
+            entry,
+        } => execute_gpu_entries(
+            &device,
+            std::iter::once(entry),
+            sdma_ring,
+            profile_enabled,
+            stop,
+        )
+        .map(|ticks| gpu_copy_profile(index, ticks)),
+        AsyncCopyRoute::GpuBatch {
+            device,
+            index,
+            entries,
+        } => execute_gpu_entries(&device, entries, None, profile_enabled, stop)
+            .map(|ticks| gpu_copy_profile(index, ticks)),
     }
 }
 
@@ -5372,6 +5456,19 @@ fn enqueue_copy_job(
             }
         }
     }
+    let profile_enabled = matches!(
+        pending.runtime.async_copy_profiling,
+        AsyncCopyProfiling::Enabled
+    );
+    let host_clock = if profile_enabled
+        && tasks
+            .iter()
+            .any(|task| matches!(&task.route, AsyncCopyRoute::Host { .. }))
+    {
+        pending.runtime.gpus.first().map(|gpu| gpu.device.clone())
+    } else {
+        None
+    };
     let worker_handles = pending.handles.clone();
     let quarantine = pending.runtime.async_copy_quarantine.clone();
     let stop = pending.runtime.stop_workers.clone();
@@ -5384,13 +5481,26 @@ fn enqueue_copy_job(
             }))
             .unwrap_or(false);
             for task in tasks {
-                let (success, may_be_live) = if execute {
+                let result = if execute {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        execute_copy_route(task.route, task.sdma_ring, &stop)
+                        execute_copy_route(
+                            task.route,
+                            task.sdma_ring,
+                            profile_enabled,
+                            host_clock.as_ref(),
+                            &stop,
+                        )
                     }))
-                    .unwrap_or((false, true))
+                    .unwrap_or(Err(CopyRouteFailure {
+                        status: ERROR,
+                        operands_may_be_live: true,
+                    }))
                 } else {
-                    (false, false)
+                    Err(CopyRouteFailure::retired(ERROR))
+                };
+                let (success, may_be_live, profile) = match result {
+                    Ok(profile) => (true, false, profile),
+                    Err(failure) => (false, failure.operands_may_be_live, None),
                 };
                 if may_be_live {
                     quarantine.store(true, Ordering::Release);
@@ -5398,7 +5508,7 @@ fn enqueue_copy_job(
                 // Release only this operation's backing before publishing its
                 // completion. Later operations keep their own borrows.
                 release_async_resources(&[], &task.borrowed_memory, may_be_live);
-                finish_async_signal(task.completion, success);
+                finish_async_copy_signal(task.completion, success, profile);
                 execute = success;
             }
             release_async_resources(&worker_handles, &[], false);
@@ -5406,6 +5516,15 @@ fn enqueue_copy_job(
         Ok(worker) => worker,
         Err(_) => return OUT_OF_RESOURCES,
     };
+    for completion in pending.handles.iter().skip(dependency_len) {
+        if let Some(record) = pending
+            .runtime
+            .async_signal_refs
+            .get_mut(&(completion.handle as usize))
+        {
+            record.copy_profile = None;
+        }
+    }
     pending.transfer_to_worker();
     pending.runtime.workers.push(worker);
     SUCCESS
@@ -5719,10 +5838,11 @@ fn resolve_batch_copy_entries(
         prepared_entries.push(prepared);
         borrowed_memory.extend(resolved.borrowed_memory);
     }
-    let (_, device) = selected.ok_or(INVALID_ARGUMENT)?;
+    let (index, device) = selected.ok_or(INVALID_ARGUMENT)?;
     Ok((
         AsyncCopyRoute::GpuBatch {
             device,
+            index,
             entries: prepared_entries,
         },
         borrowed_memory,
@@ -5955,9 +6075,10 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
         enqueue_async_copy(
             runtime,
             ResolvedAsyncCopy {
-                route: AsyncCopyRoute::GpuRect {
+                route: AsyncCopyRoute::Gpu {
                     device: Box::new(runtime.gpus[index].device.clone()),
-                    rect: CopyRect {
+                    index,
+                    entry: GpuCopyEntry::Rect(CopyRect {
                         destination,
                         source,
                         width: u64::from(range.x),
@@ -5967,7 +6088,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
                         source_pitch: src.pitch as u64,
                         destination_slice: dst.slice as u64,
                         source_slice: src.slice as u64,
-                    },
+                    }),
                 },
                 borrowed_memory: [Some(dst_base), Some(src_base)],
             },

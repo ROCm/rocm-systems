@@ -225,10 +225,28 @@ struct AsyncSignalHandler {
     arg: CallbackArg,
 }
 
-/// Dispatcher references retain signal storage after the public handle dies.
+/// Clock domain of a completed asynchronous copy's raw timestamps.
+#[derive(Clone, Copy)]
+pub(crate) enum AsyncCopyClock {
+    System,
+    Gpu(usize),
+}
+
+/// Timestamps and clock provenance retained outside the public signal ABI.
+#[derive(Clone, Copy)]
+pub(crate) struct AsyncCopyProfile {
+    pub(crate) clock: AsyncCopyClock,
+    pub(crate) start: u64,
+    pub(crate) end: u64,
+}
+
+/// Dispatcher and copy worker references retain signal storage after the
+/// public handle dies. A completed copy keeps its timing until this signal is
+/// reused or destroyed, even after the worker releases its reference.
 pub(crate) struct AsyncSignalRecord {
     references: u32,
     retired: Arc<AtomicBool>,
+    pub(crate) copy_profile: Option<AsyncCopyProfile>,
 }
 
 impl AsyncSignalRecord {
@@ -237,6 +255,7 @@ impl AsyncSignalRecord {
             // Existing waiters must keep observing the prior retirement even
             // when a new IPC attachment publishes the same numeric handle.
             self.retired = Arc::new(AtomicBool::new(false));
+            self.copy_profile = None;
         }
     }
 }
@@ -514,6 +533,7 @@ impl Runtime {
                 entry.insert(AsyncSignalRecord {
                     references: 1,
                     retired: Arc::new(AtomicBool::new(false)),
+                    copy_profile: None,
                 });
             }
             Entry::Occupied(mut entry) => {
@@ -536,8 +556,11 @@ impl Runtime {
         if record.references != 0 {
             return;
         }
-        if !record.retired.load(Ordering::Acquire) || self.finish_signal_storage(address) == SUCCESS
-        {
+        if record.retired.load(Ordering::Acquire) {
+            if self.finish_signal_storage(address) == SUCCESS {
+                self.async_signal_refs.remove(&address);
+            }
+        } else if record.copy_profile.is_none() {
             self.async_signal_refs.remove(&address);
         }
     }
@@ -610,7 +633,7 @@ impl Runtime {
             imported.references = imported.references.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
             let address = *address;
             if let Some(record) = self.async_signal_refs.get_mut(&address) {
-                if record.references == 0 {
+                if record.references == 0 && record.retired.load(Ordering::Acquire) {
                     self.async_signal_refs.remove(&address);
                 } else {
                     record.revive();
@@ -669,6 +692,15 @@ impl Runtime {
     fn destroy_signal(&mut self, signal: HsaSignal) -> Status {
         let address = signal.handle as usize;
         if !self.owns_signal(signal) {
+            if self.async_signal_refs.get(&address).is_some_and(|record| {
+                record.references == 0 && record.retired.load(Ordering::Acquire)
+            }) {
+                let status = self.finish_signal_storage(address);
+                if status == SUCCESS {
+                    self.async_signal_refs.remove(&address);
+                }
+                return status;
+            }
             return INVALID_SIGNAL;
         }
         if let Some(imported) = self.imported_ipc_signals.get_mut(&address) {
@@ -677,11 +709,23 @@ impl Runtime {
                 return SUCCESS;
             }
         }
+        if self
+            .async_signal_refs
+            .get(&address)
+            .is_some_and(|record| record.references == 0)
+        {
+            let status = self.finish_signal_storage(address);
+            if status == SUCCESS {
+                self.async_signal_refs.remove(&address);
+            }
+            return status;
+        }
         if let Some(record) = self.async_signal_refs.get_mut(&address) {
             // ROCr also retains each async registration. Keep the mapped IPC
             // allocation and any interrupt event live until the last handler
             // returns false, even after the public reference is destroyed.
             record.retired.store(true, Ordering::Release);
+            record.copy_profile = None;
             if let Some(imported) = self.imported_ipc_signals.get_mut(&address) {
                 imported.references = 0;
             }
@@ -2848,6 +2892,7 @@ mod tests {
         let mut record = AsyncSignalRecord {
             references: 1,
             retired: Arc::new(AtomicBool::new(false)),
+            copy_profile: None,
         };
         let prior_waiter = record.retired.clone();
         record.retired.store(true, Ordering::Release);

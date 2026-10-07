@@ -490,6 +490,13 @@ impl Drop for InFlightToken {
     }
 }
 
+/// Process-wide setting captured by each accepted asynchronous copy.
+#[derive(Clone, Copy)]
+pub(crate) enum AsyncCopyProfiling {
+    Disabled,
+    Enabled,
+}
+
 /// Complete process-global HSA state.
 ///
 /// Every integer handle and public pointer accepted by this frontend must map
@@ -512,6 +519,7 @@ pub(crate) struct Runtime {
     pub(crate) locked_allocations: Vec<LockedMemory>,
     pub(crate) async_copy_borrows: HashMap<usize, usize>,
     pub(crate) async_copy_quarantine: Arc<AtomicBool>,
+    pub(crate) async_copy_profiling: AsyncCopyProfiling,
     pub(crate) vmem_reservations: BTreeMap<usize, VmemReservation>,
     pub(crate) vmem_handles: HashMap<u64, VmemHandle>,
     pub(crate) vmem_mappings: BTreeMap<usize, VmemMapping>,
@@ -741,6 +749,7 @@ impl Runtime {
             locked_allocations: Vec::new(),
             async_copy_borrows: HashMap::new(),
             async_copy_quarantine: Arc::new(AtomicBool::new(false)),
+            async_copy_profiling: AsyncCopyProfiling::Disabled,
             vmem_reservations: BTreeMap::new(),
             vmem_handles: HashMap::new(),
             vmem_mappings: BTreeMap::new(),
