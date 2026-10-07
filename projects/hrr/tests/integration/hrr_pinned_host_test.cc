@@ -1080,14 +1080,15 @@ constexpr int kCaptureTimeoutSec = 120;
 
 void capture_case(const char* direct_case, const fs::path& cap,
                   const std::vector<std::pair<std::string, std::string>>& env = {}) {
-  hrr::test::SpawnProc proc(hrr_test_exe());
+  hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
   set_proc_search_path(proc);
   const int ret = proc.runWithTimeout(std::string("\"") + direct_case + "\"",
                                       kCaptureTimeoutSec);
   INFO("Capture of " << direct_case << " exit: " << ret
-       << (ret == hrr::test::SpawnProc::kKilledOnTimeout ? " (hung, killed)" : ""));
+       << (ret == hrr::test::SpawnProc::kKilledOnTimeout ? " (hung, killed)" : "")
+       << "\nWorkload output:\n" << proc.getOutput());
   REQUIRE(ret == 0);
 }
 
