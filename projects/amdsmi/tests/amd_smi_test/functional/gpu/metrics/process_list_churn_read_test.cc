@@ -3,6 +3,7 @@
 
 #include "process_list_churn_read.h"
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <poll.h>
@@ -13,13 +14,17 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <map>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -43,6 +48,7 @@ static_assert(sizeof(kfd_ioctl_acquire_vm_args) == 8 &&
 
 const char kKfdProcRoot[] = "/sys/class/kfd/kfd/proc/";
 constexpr size_t kMaxProcs = 512;
+constexpr uint64_t kPageSize = 4096;
 constexpr int kChurnThreads = 3;
 constexpr auto kChurnTime = std::chrono::seconds(8);
 
@@ -86,11 +92,39 @@ bool RunChurnProcess(uint32_t kfd_gpu_id, const char* render_node) {
          WEXITSTATUS(wstatus) == 0;
 }
 
+uint64_t KfdVram(const std::string& pid, uint32_t kfd_gpu_id) {
+  std::ifstream file(kKfdProcRoot + pid + "/vram_" + std::to_string(kfd_gpu_id));
+  uint64_t vram = 0;
+  return (file >> vram) ? vram : 0;
+}
+
+// KFD names processes by host PID, which differs from fork()'s result inside a
+// container's PID namespace, so find the entries holding exactly the helper's
+// VRAM.
+std::vector<pid_t> FindHelperKfdPids(pid_t helper, uint32_t kfd_gpu_id, uint64_t vram) {
+  if (KfdVram(std::to_string(helper), kfd_gpu_id) == vram) return {helper};
+  std::vector<pid_t> found;
+  if (DIR* dir = opendir(kKfdProcRoot)) {
+    while (const dirent* entry = readdir(dir)) {
+      const std::string name = entry->d_name;
+      const bool is_pid =
+          !name.empty() && std::all_of(name.begin(), name.end(),
+                                       [](unsigned char c) { return std::isdigit(c) != 0; });
+      if (is_pid && KfdVram(name, kfd_gpu_id) == vram) {
+        found.push_back(static_cast<pid_t>(std::stol(name)));
+      }
+    }
+    closedir(dir);
+  }
+  return found;
+}
+
 struct HelperStopper {
   pid_t pid;
+  pid_t kfd_pid;
   ~HelperStopper() {
     kill(pid, SIGKILL);
-    const std::string path = kKfdProcRoot + std::to_string(pid);
+    const std::string path = kKfdProcRoot + std::to_string(kfd_pid);
     for (int i = 0; i < 500; ++i) {
       if (waitpid(pid, nullptr, WNOHANG) != 0 && access(path.c_str(), F_OK) != 0) break;
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -146,7 +180,10 @@ void TestProcessListChurnRead::Run(void) {
   const uint32_t kfd_gpu_id = static_cast<uint32_t>(kfd_info.kfd_id);
   const std::string render_node = "/dev/dri/renderD" + std::to_string(enum_info.drm_render);
 
-  // The helper is a GPU process that lives through the whole test.
+  // The helper is a GPU process that lives through the whole test. The `tag`
+  // pages tell concurrent runs of this test apart, and the 6 MiB base keeps it
+  // apart from the other process-list tests' helpers.
+  const uint64_t helper_vram = (6ULL << 20) + (std::random_device{}() % 255 + 1) * kPageSize;
   int fds[2];
   ASSERT_EQ(pipe(fds), 0);
   const pid_t parent = getpid();
@@ -159,12 +196,12 @@ void TestProcessListChurnRead::Run(void) {
   if (helper == 0) {
     close(fds[0]);
     if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0 || getppid() != parent) _exit(1);
-    const int err = BindKfd(kfd_gpu_id, render_node.c_str(), 2ULL << 20);
+    const int err = BindKfd(kfd_gpu_id, render_node.c_str(), helper_vram);
     if (write(fds[1], &err, sizeof(err)) != sizeof(err) || err != 0) _exit(1);
     for (;;) pause();
   }
   close(fds[1]);
-  HelperStopper stopper{helper};
+  HelperStopper stopper{helper, helper};
   int err = -1;  // stays -1 without a report
   pollfd ready{fds[0], POLLIN, 0};
   if (poll(&ready, 1, 30000) == 1) {
@@ -177,19 +214,25 @@ void TestProcessListChurnRead::Run(void) {
     GTEST_SKIP() << "Cannot use the GPU through KFD: errno " << err;
   }
   ASSERT_EQ(err, 0) << "The helper could not bind to the GPU";
-  // KFD names processes by host PID, so under another PID namespace it does not
-  // list the helper by the PID seen here.
-  if (access((kKfdProcRoot + std::to_string(helper)).c_str(), F_OK) != 0) {
-    GTEST_SKIP() << "KFD does not list the helper under its own PID";
-  }
+  const std::vector<pid_t> kfd_pids = FindHelperKfdPids(helper, kfd_gpu_id, helper_vram);
+  // A second match is another run of this test that drew the same tag.
+  if (kfd_pids.size() > 1) GTEST_SKIP() << "Another process holds the helper's exact VRAM";
+  ASSERT_EQ(kfd_pids.size(), 1u) << "KFD does not report exactly the helper's VRAM";
+  const pid_t kfd_pid = kfd_pids[0];
+  stopper.kfd_pid = kfd_pid;
 
   std::vector<amdsmi_proc_info_t> procs(kMaxProcs);
-  auto query = [&](bool* listed) {
+  auto query = [&](pid_t pid, bool* listed) {
     uint32_t count = static_cast<uint32_t>(procs.size());
-    const amdsmi_status_t st = amdsmi_get_gpu_process_list(gpu, &count, procs.data());
+    amdsmi_status_t st = amdsmi_get_gpu_process_list(gpu, &count, procs.data());
+    if (st == AMDSMI_STATUS_OUT_OF_RESOURCES) {
+      procs.resize(count + 64);
+      count = static_cast<uint32_t>(procs.size());
+      st = amdsmi_get_gpu_process_list(gpu, &count, procs.data());
+    }
     *listed = false;
     for (uint32_t i = 0; st == AMDSMI_STATUS_SUCCESS && i < count && i < procs.size(); ++i) {
-      *listed |= procs[i].pid == static_cast<uint32_t>(helper);
+      *listed |= procs[i].pid == static_cast<uint32_t>(pid);
     }
     return st;
   };
@@ -198,9 +241,15 @@ void TestProcessListChurnRead::Run(void) {
   bool listed = false;
   for (const auto give_up = Clock::now() + std::chrono::seconds(10);
        !listed && Clock::now() < give_up;) {
-    if (query(&listed) != AMDSMI_STATUS_SUCCESS || !listed) {
+    if (query(kfd_pid, &listed) != AMDSMI_STATUS_SUCCESS || !listed) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+  }
+  // In a container rocm_smi may list this namespace's PIDs instead of KFD's.
+  bool listed_by_own_pid = false;
+  if (!listed && kfd_pid != helper && query(helper, &listed_by_own_pid) == AMDSMI_STATUS_SUCCESS &&
+      listed_by_own_pid) {
+    GTEST_SKIP() << "The library lists the helper by this PID namespace's PID";
   }
   ASSERT_TRUE(listed) << "GPU 0 does not list the helper";
 
@@ -223,7 +272,7 @@ void TestProcessListChurnRead::Run(void) {
   int unlisted = 0;
   std::map<amdsmi_status_t, int> errors;
   for (const auto end = Clock::now() + kChurnTime; Clock::now() < end; ++calls) {
-    const amdsmi_status_t st = query(&listed);
+    const amdsmi_status_t st = query(kfd_pid, &listed);
     if (st != AMDSMI_STATUS_SUCCESS) {
       ++errors[st];
     } else if (!listed) {
