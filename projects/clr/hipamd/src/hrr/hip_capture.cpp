@@ -2315,8 +2315,8 @@ static hipError_t pinned_hipDeviceReset() {
   for (auto& [base, a] : held) {
     const uintptr_t host = a.alias_of ? a.alias_of : base;
     if (amd::MemObjMap::FindMemObj(reinterpret_cast<const void*>(host)) == nullptr) continue;
-    g_pinned_shadow_bytes += a.charged;
-    g_pinned.emplace(base, std::move(a));
+    const size_t charged = a.charged;
+    if (g_pinned.emplace(base, std::move(a)).second) g_pinned_shadow_bytes += charged;
   }
   // A survivor's alias that did not survive is unlinked.
   for (auto& [base, a] : g_pinned)
