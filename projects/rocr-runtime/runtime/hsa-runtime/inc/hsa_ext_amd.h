@@ -87,9 +87,10 @@
  * - 1.33 - hsa_amd_agent_set_attribute: GL2 persisting cache size control
  * - 1.34 - hsa_amd_vmem_get_vmem_info
  * - 1.35 - tools-only: hsa_amd_enable_high_precision_timestamps
+ * - 1.36 - hsa_amd_memory_async_batch_copy: HSA_AMD_MEMORY_COPY_OP_RECT
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 35
+#define HSA_AMD_INTERFACE_VERSION_MINOR 36
 
 #ifdef __cplusplus
 extern "C" {
