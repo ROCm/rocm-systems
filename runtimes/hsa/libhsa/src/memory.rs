@@ -505,6 +505,16 @@ fn pool_access(same_owner: bool, storage: PoolStorage, linked: bool, same_hive: 
     }
 }
 
+fn gpu_pool_host_visible(runtime: &Runtime, index: usize) -> bool {
+    let endpoint = &runtime.gpus[index].endpoint;
+    endpoint.local_memory_bytes != 0
+        && endpoint.host_visible_local_memory_bytes >= endpoint.local_memory_bytes
+}
+
+fn gpu_pool_coherent(pool_kind: u64, uncached: bool, pcie: bool) -> bool {
+    pool_kind == GPU_POOL_FINE || uncached || pcie
+}
+
 fn agent_pool_relationship(
     runtime: &Runtime,
     agent: HsaAgent,
@@ -539,7 +549,15 @@ fn agent_pool_relationship(
         None
     };
     let linked = same || link.is_some_and(|link| link.hop_count() != 0);
-    (pool_access(same, storage, linked, same_hive), link)
+    let cpu_cannot_access_local = agent.handle == CPU_AGENT
+        && owner_gpu.is_some_and(|index| !gpu_pool_host_visible(runtime, index))
+        && matches!(storage, PoolStorage::LocalCoarse | PoolStorage::LocalFine);
+    let access = if cpu_cannot_access_local {
+        POOL_ACCESS_NEVER
+    } else {
+        pool_access(same, storage, linked, same_hive)
+    };
+    (access, link)
 }
 
 fn pool_link_info(link: Option<MemoryLinkInfo>) -> PoolLinkInfo {
@@ -1100,8 +1118,8 @@ unsafe fn memory_pool_allocate(
             (
                 index,
                 MemoryKind::DeviceLocal {
-                    host_visible: true,
-                    coherent: pool_kind == GPU_POOL_FINE || flags & ALLOC_PCIE != 0,
+                    host_visible: gpu_pool_host_visible(runtime, index),
+                    coherent: gpu_pool_coherent(pool_kind, uncached, flags & ALLOC_PCIE != 0),
                     uncached,
                     contiguous: flags & ALLOC_CONTIGUOUS != 0,
                 },
@@ -1146,14 +1164,17 @@ unsafe fn memory_pool_allocate(
             Ok(allocation) => allocation,
             Err(error) => return map_error(error),
         };
-        let Some(host) = allocation.info().host_address else {
-            return OUT_OF_RESOURCES;
-        };
+        let info = allocation.info();
+        let pointer_value = info.host_address.unwrap_or(info.device_address as usize);
         let accessible = vec![HsaAgent {
             handle: GPU_AGENT_BASE + device_index as u64,
         }];
         let alloc_flags = POINTER_ALLOC_NONPAGED
-            | POINTER_ALLOC_HOST_ACCESS
+            | if info.host_address.is_some() {
+                POINTER_ALLOC_HOST_ACCESS
+            } else {
+                0
+            }
             | if flags & ALLOC_CONTIGUOUS != 0 {
                 POINTER_ALLOC_CONTIGUOUS
             } else {
@@ -1172,7 +1193,7 @@ unsafe fn memory_pool_allocate(
                 0
             };
         runtime.allocations.insert(
-            host,
+            pointer_value,
             Memory::new(
                 allocation,
                 size,
@@ -1183,7 +1204,7 @@ unsafe fn memory_pool_allocate(
             ),
         );
         // SAFETY: The caller supplied writable output storage.
-        unsafe { pointer.write(host as *mut c_void) };
+        unsafe { pointer.write(pointer_value as *mut c_void) };
         SUCCESS
     })
 }
@@ -2593,6 +2614,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
+        let uncached = flags & u64::from(ALLOC_UNCACHED) != 0;
         let (device_index, kind) = if cpu_pool(pool) {
             (0, MemoryKind::System)
         } else if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
@@ -2603,8 +2625,8 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
                 index,
                 MemoryKind::DeviceLocal {
                     host_visible: false,
-                    coherent: pool_kind == GPU_POOL_FINE,
-                    uncached: flags & u64::from(ALLOC_UNCACHED) != 0,
+                    coherent: gpu_pool_coherent(pool_kind, uncached, false),
+                    uncached,
                     contiguous: false,
                 },
             )
@@ -2618,7 +2640,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
             kind,
             size as u64,
             memory_type == MEMORY_TYPE_PINNED,
-            flags & u64::from(ALLOC_UNCACHED) != 0,
+            uncached,
         ) {
             Ok(memory) => memory,
             Err(error) => return map_error(error),
