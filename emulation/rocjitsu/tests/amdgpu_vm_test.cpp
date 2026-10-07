@@ -4798,6 +4798,68 @@ TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) 
   EXPECT_EQ(fixture.cp()->registered_queue_count_for_test(), 0u);
 }
 
+TEST(CommandProcessorTest, LogicalScratchBackingGrowsForLargerDispatches) {
+  using namespace rocr::llvm::amdhsa;
+  VmFixture fixture("cdna3", 1, 2);
+  constexpr uint64_t ring = 0x8000, descriptor = 0xa000, doorbell = 0x9010;
+  constexpr uint64_t read = descriptor + offsetof(amd_queue_t, read_dispatch_id);
+  constexpr uint64_t write = descriptor + offsetof(amd_queue_t, write_dispatch_id);
+  constexpr uint64_t backing = 0x400000;
+  constexpr uint32_t private_bytes = 256, wave_bytes = private_bytes * 64;
+  std::vector<size_t> allocation_sizes;
+  fixture.cp()->set_scratch_backing_resolver([](uint32_t) { return backing; });
+  fixture.cp()->set_scratch_backing_allocator([&](uint32_t, uint64_t address, size_t size) {
+    EXPECT_EQ(address, backing);
+    allocation_sizes.push_back(size);
+    const std::vector<uint8_t> scratch(size);
+    fixture.mem()->load_image(scratch.data(), scratch.size(), address);
+    return true;
+  });
+  const uint32_t code = SOPP_S_ENDPGM;
+  const uint64_t kernel = fixture.write_kernel(0x1000, &code, sizeof(code));
+  fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                         private_bytes);
+  ASSERT_NE(fixture.cp()->register_queue({
+                .address_space = fixture.cp()->default_address_space(),
+                .queue_id = 1,
+                .ring_base_va = ring,
+                .ring_size = 64,
+                .read_ptr_va = read,
+                .write_ptr_va = write,
+                .doorbell_va = doorbell,
+                .doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled,
+                .uses_kfd_queue_abi = true,
+                .queue_desc_va = descriptor,
+            }),
+            0u);
+  auto *snapshots = fixture.capture_halts();
+  uint32_t completed_waves = 0;
+  for (uint32_t round = 1; round <= 2; ++round) {
+    const uint32_t waves = round == 1 ? 1 : 4;
+    auto packet = make_dispatch_packet(kernel, 0, waves * 64, 64);
+    packet.private_segment_size = private_bytes;
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), ring);
+    fixture.mem()->write64(write, round);
+    fixture.mem()->write64(doorbell, round);
+    fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+    for (uint32_t step = 0; step < 100 && snapshots->snapshots().size() < completed_waves + waves;
+         ++step)
+      if (!fixture.engine->step())
+        break;
+    ASSERT_EQ(snapshots->snapshots().size(), completed_waves + waves);
+    ASSERT_EQ(allocation_sizes.size(), round);
+    EXPECT_EQ(allocation_sizes.back(), waves * wave_bytes);
+    for (uint32_t wave = 0; wave < waves; ++wave) {
+      const auto &snapshot = snapshots->snapshots()[completed_waves + wave];
+      EXPECT_EQ(snapshot.scratch_base, backing + wave * wave_bytes);
+      EXPECT_LE(snapshot.scratch_base + wave_bytes, backing + allocation_sizes.back());
+    }
+    completed_waves += waves;
+    EXPECT_NE(fixture.mem()->read32(descriptor + offsetof(amd_queue_t, compute_tmpring_size)), 0u);
+    EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+  }
+}
+
 TEST(CommandProcessorTest, RuntimeScratchStrideAndBackingOverrideTheFallbackAllocator) {
   using namespace rocr::llvm::amdhsa;
   VmFixture fixture("cdna5", 1, 2, 64, 104, 256, 2);
@@ -4889,6 +4951,11 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
                     /*num_shader_engines=*/2);
   fixture.cp()->set_scratch_wave_divisor(2);
   fixture.cp()->set_scratch_xcc_layout_for_test(kXccId, kXccCount);
+  uint32_t allocation_requests = 0;
+  fixture.cp()->set_scratch_backing_allocator([&](uint32_t, uint64_t, size_t) {
+    ++allocation_requests;
+    return false;
+  });
   const uint32_t code[] = {SOPP_S_ENDPGM};
   const uint64_t kernel = fixture.write_kernel(0x4000, code, sizeof(code));
   fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
@@ -5000,6 +5067,8 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
 
   EXPECT_EQ(scratch_requests, 1u)
       << "the second dispatch used alternate scratch past its maximum-use index";
+  EXPECT_EQ(allocation_requests, 0u)
+      << "expired runtime scratch must not reach the fallback allocator";
   EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(kQueueId, kProcessId), 2u);
   EXPECT_EQ(fixture.mem()->read64(read_pointer), 3u);
   EXPECT_EQ(fixture.mem()->read64(alternate_last_used), 1u);

@@ -299,9 +299,10 @@ with unknown or unrepresentable geometry issue an `s_getreg_b32` warning and
 write zero.
 
 Whole-register `WAVE_HW_ID1` reads expose the modeled wave, SIMD, WGP, and
-shader-array IDs on gfx1201 and gfx1250. The model supports two shader arrays
-per engine; gfx1201 represents two CUs per WGP and accepts shader-array widths
-up to 32 CUs. gfx1201 also exposes the shader-engine ID in `WAVE_HW_ID1`;
+shader-array IDs on gfx1200, gfx1201, and gfx1250. The model supports two shader
+arrays per engine; RDNA4 (gfx1200 and gfx1201) represents two CUs per WGP and
+accepts shader-array widths up to 32 CUs. RDNA4 also exposes the shader-engine
+ID in `WAVE_HW_ID1`;
 gfx1250 obtains it through `MSG_RTN_GET_SE_AID_ID`, with SE in bits [3:0]
 and the command processor's XCC rank in bits [19:16].
 Unmodeled capability and reserved bits read as zero in a whole-register read;
@@ -315,7 +316,9 @@ default size to support WGP-ID reads.
 
 The topology has no shader-array level. Within each shader engine, the first
 `num_cu_per_sh` CU children form array 0, the next form array 1, and so on.
-The WGP ID is the CU's shader-engine-local index modulo `num_cu_per_sh`.
+The shader-array-local CU index is the shader-engine-local index modulo
+`num_cu_per_sh`. The WGP ID is that index divided by two on RDNA4 and the
+unscaled index on gfx1250.
 For gfx1250 shader engines, KFD CU-mask bit order varies XCD fastest, followed
 by shader engine, array, and WGP. Within an engine, array `a` and WGP `w` select
 CU child `a * num_cu_per_sh + w`, which reports `WGP_ID = w`. The KFD mask loop
