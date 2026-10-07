@@ -1748,7 +1748,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_LaunchByPtr) {
 // runs it later, when the host may have changed the bytes again. The manifest
 // says so. Replay applies no record to a kernel it replays into a graph
 // capture, and says so; a record is spliced onto the captured launch to show
-// it.
+// it. A second spliced record, shorter than its blob, is still checked and
+// rejected: not being applied does not exempt a record from the checks.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_GraphCapture) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_graph.hrr");
@@ -1766,23 +1767,27 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_GraphCapture) {
   REQUIRE(kls[0]->snapshots.size() == 2);
   CHECK(kls[1]->snapshots.empty());
 
-  // Copy launch 0's first record onto launch 1.
+  // Copy launch 0's first record onto launch 1, then the same record with a
+  // length 8 bytes short of its blob.
   std::vector<uint8_t> events = read_bytes(archive / "events.bin");
   const auto spans = launch_spans(events);
   REQUIRE(spans.size() == 2);
   const size_t rec = record_at(events, spans, kls, 0, 0);
-  const std::vector<uint8_t> record(events.begin() + rec, events.begin() + rec + 41);
+  std::vector<uint8_t> records(events.begin() + rec, events.begin() + rec + 41);
+  records.insert(records.end(), events.begin() + rec, events.begin() + rec + 41);
+  const uint64_t short_len = kChunk - 8;
+  std::memcpy(records.data() + 41 + 16, &short_len, 8);
   const size_t n_at = num_snapshots_at(events, spans[1]);
   uint16_t n = 0;
   std::memcpy(&n, events.data() + n_at, 2);
   REQUIRE(n == 0);
-  n = 1;
+  n = 2;
   std::memcpy(events.data() + n_at, &n, 2);
   hrr_event_header hdr;
   std::memcpy(&hdr, events.data() + spans[1].first, sizeof(hdr));
-  hdr.payload_length += 41;
+  hdr.payload_length += records.size();
   std::memcpy(events.data() + spans[1].first, &hdr, sizeof(hdr));
-  events.insert(events.begin() + spans[1].second, record.begin(), record.end());
+  events.insert(events.begin() + spans[1].second, records.begin(), records.end());
   write_bytes(archive / "events.bin", events);
 
   auto [rc, out] = replay(archive);
@@ -1790,10 +1795,11 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_GraphCapture) {
   CHECK(rc < 128);
   CHECK(out.find("pinned host snapshots are not applied to kernels replayed into a "
                  "graph capture") != std::string::npos);
-  // Counted on a line of its own, not as rejected.
+  // The valid record is counted on a line of its own, not as rejected.
   unsigned long long restored = 0, rejected = 0;
   host_snapshot_summary(out, restored, rejected);
-  CHECK(rejected == 0);
+  CHECK(rejected == 1);
+  CHECK(count_of(out, "does not match the size of its blob") == 1);
   CHECK(host_snapshots_in_graph(out) == 1);
 }
 

@@ -652,7 +652,8 @@ the live allocation it lands in. It uses the record only when all of these hold:
   computed without overflow;
 - the record count fits inside the event, and the launch-attribute tail before
   the records is well formed;
-- to apply a direction 0 record: the blob exists and its size equals `length`.
+- for a direction 0 record, applied or not: the blob exists and its size
+  equals `length`.
 
 A record that fails a check is named on stderr with its reason and counted as
 rejected; nothing is written for it. When the count runs past the end of the

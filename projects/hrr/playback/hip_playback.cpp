@@ -1015,8 +1015,9 @@ static void decode_kernel_args(
 // Write back the pinned host bytes a launch read at capture time. Each record
 // names a chunk of a pinned allocation and the blob holding its bytes. The
 // archive is untrusted input, so a record is used only when its direction is
-// known, its range lies inside a live host allocation and, to be applied, its
-// blob is exactly its length; any other record is skipped with a message.
+// known, its range lies inside a live host allocation and, for direction 0,
+// its blob is exactly its length, applied or not; any other record is skipped
+// with a message.
 //
 // Direction 0 is applied. The restore is not stream-ordered: replay waits on
 // the host for the launch stream to drain, then copies the bytes in with
@@ -1088,16 +1089,21 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
             skip(i, ptr, off, len, "is out of bounds of its allocation");
             continue;
         }
-        if (direction == 1 || !apply) {
-            if (direction == 0)
-                ctx.host_snapshots_in_graph.fetch_add(1, std::memory_order_relaxed);
+        if (direction == 1) {
             if (rec_bases_out) rec_bases_out->insert(arec);
             continue;
         }
+        // Checked whether or not it is applied: a record that fails here is
+        // rejected under graph capture too.
         auto blob = ctx.load_snapshot_blob(hlo, hhi);
         if (!blob) { skip(i, ptr, off, len, "has no blob in the archive"); continue; }
         if (blob->size() != len) {
             skip(i, ptr, off, len, "does not match the size of its blob");
+            continue;
+        }
+        if (!apply) {
+            ctx.host_snapshots_in_graph.fetch_add(1, std::memory_order_relaxed);
+            if (rec_bases_out) rec_bases_out->insert(arec);
             continue;
         }
         // Earlier work on this stream may still be reading or writing the buffer.
