@@ -78,11 +78,9 @@ static ncclChannelToUd nccl_channel_ud_map[MAX_IB_DEVS][MAXCHANNELS][ncclIbChann
 static bool nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
 static std::atomic<unsigned int> nccl_p2p_udma_idx[MAX_IB_DEVS] = {};
 
-enum ncclIbCastUBMA {
-  ncclIbCastUBMALow,
-  ncclIbCastUBMAHigh,
-  ncclIbCastUBMANone,
-};
+constexpr int8_t ncclIbCastUBMANone = (int8_t)-1;
+constexpr int8_t ncclIbCastUBMALow = (int8_t) IONIC_UDMA_MASK_LOW;
+constexpr int8_t ncclIbCastUBMALow = (int8_t) IONIC_UDMA_MASK_HIGH;
 
 static ncclIbCastUBMA ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* createQpAttrs) {
   if (rcclParamIbCastUDMAPolicy() == 2) {
@@ -555,11 +553,9 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   // cannot overwrite the mask, and so policy 0's channel map stays consistent.
   std::lock_guard<std::mutex> lock(IbCastDevs[createQpAttrs->ibDevN].mutex);
 
-  enum ncclIbCastUBMA udma_id = ncclIbCastSelectUDMA(createQpAttrs);
-  if (udma_id == ncclIbCastUBMAHigh) {
-    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
-  } else if (udma_id == ncclIbCastUBMALow) {
-    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
+  int8_t udma_id = ncclIbCastSelectUDMA(createQpAttrs);
+  if (udma_id != ncclIbCastUBMANone) {
+    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, (uint8_t)udma_id);
   }
 
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
