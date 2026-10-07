@@ -11,7 +11,8 @@
   "env_variables": {
     "NCCL_DEBUG": "INFO",
     "RCCL_USE_AMD_SMI_LIB": "0",
-    "HSA_NO_SCRATCH_RECLAIM": "1"
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "RCCL_TDM_LL128_ENABLE": "1"
   },
   "mpi_args": [
     "--mca pml ob1",
@@ -144,9 +145,32 @@
           "test_filter": "AllGather.UserBufferRegistration:AllGather.ManagedMemUserBufferRegistration"
         }
       ]
+    },
+    "tdm_capability": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {},
+      "tests": [
+        {
+          "name": "TDM_Capability",
+          "description": "Fails when the SDK cannot build the tensor data mover, which would otherwise compile TDM_LL128_ON away and leave the suites below covering nothing",
+          "test_filter": "TdmCopyTest.HostCapabilityMatchesArch"
+        }
+      ]
     }
   },
   "test_suites": [
+    {
+      "name": "TDM LL128 - Toolchain capability",
+      "description": "Guards the three suites below: a build without tensor-data-mover support makes them vacuous",
+      "config": "tdm_capability",
+      "enabled": true
+    },
     {
       "name": "TDM LL128 - Ring",
       "description": "Unit suite under forced Ring + LL128 on a TDM-enabled build",
