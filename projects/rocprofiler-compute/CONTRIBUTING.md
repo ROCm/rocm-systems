@@ -236,6 +236,66 @@ If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
 
+## Memory Chart Layouts
+
+The memory chart (`analyze` panel 300) is drawn from one JSON layout per architecture
+family in [`src/memory_chart/layouts/`](src/memory_chart/layouts/). A layout states the
+blocks, how they nest, and which panel 300 metric each block and arrow shows;
+[`src/memory_chart/loader.py`](src/memory_chart/loader.py) checks it and works out
+positions and arrow directions. To add an architecture:
+
+1. Copy the layout of the closest architecture, for example `gfx950.json`, and set
+   `archs` to the analysis-config directory names it serves.
+2. Edit its blocks and arrows until every metric of the architecture's
+   `0300_memory_chart.yaml` is shown, and nothing else is.
+3. Check it without a GPU: `./tools/memory_chart_preview.py path/to/layout.json`.
+4. Run `python -m pytest tests/unit/memory_chart`.
+
+`analyze` and the tests find the layout by its `archs`. No Python changes are needed
+unless the architecture's panel 300 config uses a unit that
+[`src/memory_chart/units.py`](src/memory_chart/units.py) has no display rule for; the
+tests list such units. The pre-commit hook rewrites layouts in the canonical style with
+`./tools/memory_chart_layout_format.py`.
+
+### Layout fields
+
+| Field | Meaning |
+|---|---|
+| `archs` | Analysis-config directory names the layout serves. |
+| `description` | One line on what the chart shows. |
+| `scope` | `labels`: the two scope-bar labels. `split`: the block where the right-hand label starts. |
+| `columns` | Columns from left to right, each a list of blocks from top to bottom. The first column is the compute side. |
+| `arrows` | Arrows from a block to a block in the next column, or to a block attached to it. |
+
+A block has an `id` and a `title`, and optionally:
+
+- `metrics`: `{"metric", "title", "category"}` entries. `metric` is the panel 300 metric
+  name; `title` is the label on the chart.
+- `note`: a short fixed label, such as the memory type.
+- `children`: blocks drawn inside this one. Its metrics and arrows go on the children.
+- `above`, `below`: labelled boxes drawn above or below this one, such as xGMI and PCIe.
+  Arrows from this block to them draw as `||` connectors.
+- `stall_level`: the membw analysis level (`GL1`, `GL2`, `EA`) whose active stalls are
+  listed in this block.
+
+An arrow has `from`, `to`, `metric`, `title`, `category`, and an optional `group` header.
+
+### Categories
+
+| Category | Used on | Drawn as |
+|---|---|---|
+| `read` | arrows, metrics | Read color; the arrow points back to the requester (`<--`). |
+| `write` | arrows, metrics | Write color; the arrow points forward (`-->`). |
+| `atomic` | arrows, metrics | Atomic color; the arrow points both ways (`<->`). |
+| `neutral` | arrows, metrics | Default color; the arrow points both ways. For mixed traffic or values outside the legend. |
+| `util`, `hit`, `stall` | metrics | Utilization, hit, or stall color. |
+| `bw` | metrics | Bandwidth color. |
+
+Outside the first column, which is a compact list, a percent metric in `util`, `hit`,
+`stall`, or `neutral` also gets a progress bar. An arrow whose unit is a count, such as
+`(Requests + $normUnit)`, is a request arrow (`Read : 119`); other arrows show a label, a
+value, and an arrow line.
+
 ## Analysis Database Schema Diagrams
 
 The two diagrams in the [analysis data dump docs](docs/how-to/analyze/cli.rst) are
