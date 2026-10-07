@@ -2259,7 +2259,9 @@ def _destination_result(
     """Return (dtype, bits, transcendental) for a result rounded to its format.
 
     gfx1201 applies OMOD, then CLAMP, to the result after rounding it to its
-    destination format. Returns None for operations that keep another path.
+    destination format. Every target uses this order; it is measured on
+    gfx1201 and gfx1100 and extrapolated to RDNA3.5 and CDNA1-5 (see
+    output_modifier.h). Returns None for operations that keep another path.
     """
     if _is_integral_rounding(node):
         rounded = _lower_expr(node, ctx)

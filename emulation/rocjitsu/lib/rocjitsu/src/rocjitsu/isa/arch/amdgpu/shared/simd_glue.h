@@ -675,6 +675,9 @@ inline uint32_t effective_vop3_omod_f64(const Wavefront &wf, uint32_t omod) {
 
 /// @brief Resolve instruction fields and wave MODE into an output policy for `Fmt`.
 /// @details Architecture rules decide whether OMOD is active and CLAMP clears NaNs.
+/// Once active, every target applies OMOD and CLAMP to the result rounded to
+/// `Fmt`. That order is measured on gfx1201 and gfx1100 and extrapolated to
+/// RDNA3.5 and CDNA1-5; see output_modifier.h for the evidence per target.
 /// @param omod VOP3 OMOD field.
 /// @param clamp VOP3 CLAMP field.
 template <typename Fmt>
