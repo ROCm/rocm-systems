@@ -129,13 +129,13 @@ An archive with several `pid-*` directories is one archive. Send the whole direc
 What the archive holds, per process, and it is worth reading out to whoever has to approve the transfer:
 
 - **`events.bin`**: every successful HIP call the process made, with its arguments: sizes, device addresses, stream handles, kernel names.
-- **`blobs/`**: the host buffers those calls carried, byte for byte and in the clear. For a serving stack that means prompts and generated text; for training, the data and the weights that were copied to the device.
+- **`blobs/`**: the host buffers those calls carried, byte for byte and in the clear. For a serving stack that means prompts and generated text; for training, the data and the weights that were copied to the device. They also hold pinned host snapshots: the whole of every pinned host buffer a kernel read, as the host left it before each launch, which for a serving stack means token IDs and request state, including stale data from earlier requests.
 - **`code_objects/`**: the compiled GPU kernels the process loaded, which is the application's own binary code and a separate disclosure question from customer data.
 - **`manifest.json`**: process and parent process ids, event and blob counts, the clean-shutdown flag, the HIP and comgr versions that captured, and the device's name, architecture, PCI location and UUID.
 - **`regions/*.hrrr`**: the framework allocator's own layout, when a producer ran alongside capture.
 - **`writer_state.json`**: the checkpoint cursor, present only while a capture is mid-flight.
 
-Apart from the few exceptions in step 2, failed HIP calls are not recorded, and nothing that never crossed a HIP call is. The archive is exactly as sensitive as the data the workload handled, so where it may go has to be agreed before it is uploaded.
+Apart from the few exceptions in step 2, failed HIP calls are not recorded. Data that never crossed a HIP call is not recorded either, with one exception: pinned host buffers that kernels read are captured, unless capture ran with `HIP_HRR_HOST_SNAPSHOTS=0`, even though the program filled them with plain CPU writes. The manifest's `host_snapshots` field says which. The archive is at least as sensitive as the data the workload handled, so where it may go has to be agreed before it is uploaded. DESIGN.md, Threat Model: Pinned Host Snapshots, lists what the snapshots contain.
 
 `verify --json` gives each process's counts and sizes in a form you can attach to the request; the device details are in each `manifest.json`. For a multi-process archive, `hrr-playback --info` against the archive root prints a table covering every process at once. The cross-check in `verify` reports on one process, which is enough to judge the capture and not enough for a disclosure inventory.
 

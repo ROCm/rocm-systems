@@ -38,9 +38,10 @@ selected APIs add extra work:
 - **Kernel launches:** argument scanning and embedded-pointer detection run per
   launch; memoization exists because naive per-word probing would dominate cost on
   large workloads.
-- **Kernels that read pinned host memory:** the launch waits for its stream, then
-  compares each pinned allocation it points into against a shadow copy and writes
-  the changed 256 KiB chunks as blobs. See Pinned Host Snapshots below.
+- **Kernels that read pinned host memory:** before the launch, capture compares
+  each pinned allocation it points into against a shadow copy and writes the
+  changed 256 KiB chunks as blobs. It never waits for the stream. See Pinned Host
+  Snapshots below.
 
 Expect **higher host CPU use, extra I/O, and longer runtimes** versus an uncaptured
 run — often acceptable for debugging and repro, but HRR is not intended for
@@ -365,6 +366,12 @@ Version history, so an archive written by an older runtime can be placed:
   at the end of the arguments, so it would skip the restores and replay the
   kernel on a buffer nobody filled. See Pinned Host Snapshots below.
 
+  The reader accepts exactly the current version, and rejects a v7 archive on
+  purpose although its layout is a subset of v8. v7 was on `develop` for a few
+  hours only, and capture is compiled out of every release build, so no v7
+  archive is expected to need replaying. One version to read keeps one code path
+  to test.
+
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -503,32 +510,74 @@ hipLaunchKernel(k, h, ...) <- kernel reads h directly
 
 **Which memory.** Capture keeps a map from base address to size of every pinned
 allocation this process made. `hipHostMalloc`, `hipHostAlloc`, `hipMallocHost`,
-`hipMemAllocHost` and `hipHostRegister` add to it. `hipHostFree`, `hipFreeHost`,
-`hipFree` and `hipHostUnregister` remove the entry before the memory is
-released, under the same lock the snapshot holds while it reads, so a concurrent
-free cannot pull the buffer out from under a read. `hipExtHostAlloc` has no
-implementation in CLR and is not tracked.
+`hipMemAllocHost` and `hipHostRegister` add to it. When the device alias of a
+registered range (what `hipHostGetDevicePointer` returns) differs from the host
+address, it is added too, as a second name for the same bytes; a launch through
+the alias records the host range. `hipHostFree`, `hipFreeHost`, `hipFree` and
+`hipHostUnregister` remove the entry before the memory is released.
+`hipDeviceReset` keeps only the entries whose memory the runtime still knows
+after the reset. `hipExtHostAlloc` has no implementation in CLR and is not
+tracked.
+
+A snapshot claims one allocation at a time and holds no lock while it compares,
+copies and writes that allocation's bytes. A free of the same allocation waits
+for the claim to end, so it cannot pull the buffer out from under a read.
+Launches and frees that touch other allocations do not wait. A fork takes the
+map's lock in its `pthread_atfork` prepare handler, before the writer's lock, so
+the child never inherits it held; the child starts its shadows over, because its
+archive holds none of the parent's blobs.
 
 **Which launches.** Every launch shim checks the launch's argument words against
 that map: the value of a whole-pointer argument, and every 8-byte-aligned word of
-any other argument. A word is looked up in the map and nowhere else. An arbitrary
-scalar is never handed to `hipPointerGetAttributes`. This covers
-`hipModuleLaunchKernel`, `hipModuleLaunchCooperativeKernel`,
-`hipExtModuleLaunchKernel`, `hipLaunchKernel`, `hipLaunchCooperativeKernel` and
-their `_spt` forms, `hipDrvLaunchKernelEx`, `hipLaunchKernelExC` and the `<<<>>>`
-path through `hipLaunchByPtr`. Graph kernel nodes are not covered yet.
+any other argument at an 8-byte-aligned kernarg offset. A word is first checked
+against the lowest and highest tracked address without a lock, then looked up
+in the map and nowhere else. An arbitrary scalar is never handed to
+`hipPointerGetAttributes`. This covers `hipModuleLaunchKernel`,
+`hipModuleLaunchCooperativeKernel`, `hipExtModuleLaunchKernel`,
+`hipLaunchKernel`, `hipLaunchCooperativeKernel` and their `_spt` forms,
+`hipDrvLaunchKernelEx`, `hipLaunchKernelExC` and the `<<<>>>` path through
+`hipLaunchByPtr`. An `_spt` launch on the null stream is checked against the
+per-thread stream it runs on.
 
-A pinned word inside a by-value struct is also added to that argument's
-`value_kind == 3` offsets, so replay translates it to the replay's own buffer.
-The device-pointer scan does not flag it, because `hipPointerGetAttributes`
-reports host memory.
+A `hipFunction_t` the application passes is read only once capture knows it is
+a real kernel: it came from `hipModuleGetFunction`, `hipGetFuncBySymbol`,
+`hipKernelGetFunction` or `hipModuleEnumerateFunctions`, or an earlier launch of
+it succeeded. Reading the signature of an invalid handle would crash before the
+runtime could return its error. A launch by host stub resolves the stub through
+the runtime first, and an unknown stub gets no snapshot.
 
-**When.** The snapshot is taken before the real launch, so the bytes are the
-ones the kernel will read. The shim first waits for the launch's stream, because
-earlier work on it may still be writing the buffer. A stream under graph capture
-cannot be synchronized and its launch does not run now, so that launch gets no
-snapshot and the manifest lists `pinned host snapshot` under `unreplayable_apis`.
-The HIP last-error the application sees is saved and restored around both calls.
+**Out of scope.** Graph kernel nodes, and launches into a stream under graph
+capture, get no snapshot. The bytes a captured launch reads are the ones present
+when the graph is launched, which can be many times and long after capture; a
+snapshot taken at capture would be wrong for all of them. Such a launch is listed
+under `unreplayable_apis` as `pinned host snapshot`. This includes a null-stream
+launch while another stream captures in global mode
+(`hipErrorStreamCaptureImplicit`).
+
+**Struct words.** A pinned word inside a by-value argument is added to that
+argument's `value_kind == 3` offsets when it falls inside an allocation this
+launch recorded, so replay translates it to the replay's own buffer. The
+device-pointer scan does not flag it, because `hipPointerGetAttributes` reports
+host memory. On replay, a word in a `value_kind == 3` argument that resolves to
+pinned host memory is rewritten only when the launch's snapshot records name that
+allocation. Device words keep the rule in Kernel Argument Capture below.
+
+**When.** The snapshot is taken before the real launch, without waiting for the
+launch's stream. Waiting would be exact, but it can hang the application: earlier
+work on the stream may wait on a flag in pinned memory (`hipStreamWaitValue32`)
+that the host sets only after this launch returns. Capture asks the stream with
+`hipStreamQuery` instead:
+
+- idle: the bytes are the ones the kernel will read, and the snapshot is exact;
+- busy: the bytes are read anyway. A chunk that changed since its last record is
+  recorded for replay to restore (direction 0). A chunk that did not change is
+  recorded as unchanged (direction 1), and replay leaves it to the replayed
+  device work, which may have written it before the kernel ran. The manifest
+  counts these launches as `host_snapshots_unordered`.
+
+The query hands back an asynchronous error the stream holds; capture puts it
+back, so the application still sees it. The HIP last-error the application sees
+is saved and restored around every call capture makes.
 
 **What is stored.** Each allocation is cut into 256 KiB chunks. A shadow copy of
 the last recorded bytes finds the chunks that changed, and only those are written
@@ -536,9 +585,11 @@ as blobs. Every chunk still gets a record on every launch, with the hash of its
 current contents. Recording only the changed chunks would be wrong when device
 work rewrites the buffer between launches and the host then puts the old bytes
 back: replay would keep the device-written bytes. An unchanged buffer therefore
-adds records to each launch but no blob. The shadow costs one host copy of every
-snapshotted allocation. A forked child starts its shadows over, because its
-archive holds none of the parent's blobs.
+adds records to each launch but no blob. The manifest counts the chunks written
+as `host_snapshot_chunks`. The shadows together cost one host copy of every
+snapshotted allocation, bounded by `HIP_HRR_HOST_SNAPSHOT_TOTAL_MB`. A chunk whose
+blob could not be written keeps no hash, so the next launch writes it again, and
+the allocation is left out of that launch.
 
 Each record is 41 bytes, after the launch-attribute tail:
 
@@ -548,7 +599,8 @@ u64 offset     byte offset of the chunk
 u64 length
 u64 hash_lo    blob holding the chunk
 u64 hash_hi
-u8  direction  0 = host contents before the launch
+u8  direction  0 = restore the host contents before the launch
+               1 = unchanged, read while the stream was busy; leave alone
 ```
 
 **Controls.**
@@ -558,26 +610,36 @@ u8  direction  0 = host contents before the launch
   unfilled buffers.
 - `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (default 64) is the largest allocation
   snapshotted. A larger one is skipped and listed under `unreplayable_apis`.
-- A launch that would need more than 65535 records keeps the first 65535 and is
-  listed the same way.
+  `0` snapshots none, while the manifest still says `"host_snapshots": true`.
+- `HIP_HRR_HOST_SNAPSHOT_TOTAL_MB` (default 1024) bounds the shadow copies of all
+  allocations together. An allocation whose first snapshot would pass it is
+  skipped and listed the same way. `0` snapshots none.
+- A launch that would need more than 65535 records keeps the allocations that
+  fit and lists the launch the same way.
 
 **Replay.** Before each launch, replay translates each record's pointer and finds
-the live allocation it lands in. It applies the record only when all of these hold:
+the live allocation it lands in. It uses the record only when all of these hold:
 
+- the direction is 0 or 1;
 - the allocation is pinned host memory (`hipHostMalloc` family or
   `hipHostRegister`);
 - `offset + length` fits inside the allocation from the translated pointer,
   computed without overflow;
-- the blob exists and its size equals `length`;
-- the record count fits inside the event;
-- the launch is not being replayed into a graph capture.
+- the record count fits inside the event, and the launch-attribute tail before
+  the records is well formed;
+- to apply a direction 0 record: the blob exists and its size equals `length`,
+  and the launch is not being replayed into a graph capture.
 
 A record that fails a check is named on stderr with its reason and counted as
-rejected; nothing is written for it. Replay then waits for the launch's stream
-and copies the chunk only when the buffer holds different bytes. The summary
-prints the chunks restored and the records rejected.
-`HIP_HRR_REPLAY_AUDIT_HOST_ARGS` skips allocations restored this way. It now also
-reports struct words that land in host memory but were not marked as pointers at
+rejected; nothing is written for it. The restore is not stream-ordered: replay
+waits on the host for the launch's stream to drain, then copies a chunk with
+`memcpy` only when the buffer holds different bytes. The summary prints the
+chunks restored and the records rejected. Snapshot blobs are held in a cache of
+at most 256 MiB, oldest out first, rather than the unbounded blob cache.
+
+`HIP_HRR_REPLAY_AUDIT_HOST_ARGS` reports host memory a kernel reads that replay
+did not fill: a pointer argument into a pinned allocation no record names, and a
+by-value word that lands in pinned memory but was not marked as a pointer at
 capture.
 
 ### Threat Model: Pinned Host Snapshots
@@ -611,27 +673,39 @@ synthetic inputs when the archive has to be shared.
 - `HIP_HRR_HOST_SNAPSHOTS=0` records no pinned contents. The manifest says so,
   so a reader of the archive knows the pinned inputs are missing.
 - `HIP_HRR_HOST_SNAPSHOT_MAX_MB` limits the size of any one snapshotted
-  allocation. It bounds a single allocation, not the archive: a buffer that
-  changes on every launch adds a blob per changed chunk per launch. The writer's
-  disk-space guard still applies.
+  allocation, and `HIP_HRR_HOST_SNAPSHOT_TOTAL_MB` the capture's memory for
+  shadows. Neither bounds the archive: a buffer that changes on every launch
+  adds a blob per changed chunk per launch. The writer's disk-space guard still
+  applies.
 
 **Replaying an untrusted archive.** Archive contents are untrusted. A record can
 only write into a pinned host allocation replay made, inside its bounds, and only
 the bytes of a blob of exactly the recorded length. A record that names device
-memory, no allocation, a range outside its allocation or a blob of another size
-is refused. This does not make an untrusted archive safe to replay: the archive
-also supplies the kernels and their arguments, and a snapshot exists to put
-chosen bytes in front of those kernels.
+memory, no allocation, a range outside its allocation, an unknown direction or a
+blob of another size is refused. This does not make an untrusted archive safe to
+replay: the archive also supplies the kernels and their arguments, and a snapshot
+exists to put chosen bytes in front of those kernels.
 
 **Residual risks.**
 
-- Replay caches every blob it loads for the rest of the run. A long archive with
-  many distinct snapshots can exhaust host memory.
+- A launch on a busy stream records the bytes as they were when it was queued,
+  not when it ran. Device work queued ahead of it that writes the buffer, or a
+  host thread that writes it in between, makes the replayed input differ.
+- Replay waits for the stream to drain before it restores a direction 0
+  record. Capture did not wait, so a stream blocked on a value that only a
+  later replayed call releases would hang the replay there. Replay of
+  `hipStreamWaitValue*` does not wait today, so no such stream exists yet.
+- A by-value scalar whose value happens to fall inside a pinned allocation the
+  launch recorded is rewritten on replay as if it were a pointer.
+- A pinned pointer inside a by-value struct is not translated when its
+  allocation was not recorded: over a cap, under graph capture, or with
+  snapshots off. The kernel then gets the capture-time host address, as before
+  snapshots existed.
+- A kernel handle that never passed through the wrapped producers is not
+  snapshotted on its first launch; from its second launch on it is.
 - An allocation freed through a path capture does not wrap stays in the map.
   A later launch whose argument points into the freed range would read memory
   that is no longer mapped.
-- A fork while another thread holds the snapshot lock leaves the child with that
-  lock held, and the child's first snapshot deadlocks.
 
 ## Kernel Argument Capture
 
@@ -720,8 +794,8 @@ This detector is a value-based heuristic with three deliberate properties:
   `HIP_HRR_PTR_RELAX=1` disables the replay-side guard for debugging.
 
 **Scope:** this scan flags only `hipMemoryTypeDevice`/`Unified` words. Words that
-point into a pinned allocation capture tracks are added separately, from the
-pinned allocation map (see Pinned Host Snapshots), so replay translates them too.
+point into a pinned allocation the launch's snapshot recorded are added
+separately (see Pinned Host Snapshots), so replay translates them too.
 Any other host pointer embedded by value keeps its capture-time host VA at replay,
 which is invalid in the replay process.
 
@@ -1251,8 +1325,8 @@ not recorded in these cases:
   memory reached through XNACK or `hipMallocManaged` memory;
 - the kernel is launched into a stream under graph capture, or through a graph
   kernel node;
-- the allocation is larger than `HIP_HRR_HOST_SNAPSHOT_MAX_MB`, or snapshots are
-  off.
+- the allocation is larger than `HIP_HRR_HOST_SNAPSHOT_MAX_MB`, its shadow copy
+  would pass `HIP_HRR_HOST_SNAPSHOT_TOTAL_MB`, or snapshots are off.
 
 Bytes a kernel writes into host memory are not recorded either. A D2H check sees
 them only when the application copies them out with a HIP call.
@@ -1486,7 +1560,8 @@ The event wire format (finding H5):
 `needs_ordering()` forces handle-lifecycle events into global capture order so a
 consumer never runs before its handle is created. The previously-missing
 handle-*creating* APIs — `hipHostRegister`, `hipHostGetDevicePointer`, `hipHostMalloc`,
-`hipMemAddressReserve`, `hipMemCreate` (plus `hipHostUnregister`) — are now ordered
+`hipHostAlloc`, `hipMemAllocHost`, `hipMemAddressReserve`, `hipMemCreate` (plus
+`hipHostUnregister`) — are now ordered
 (finding H6), restoring symmetry with their already-ordered destroy/free counterparts.
 Under `--multi-thread`, a cross-thread consumer (e.g. `hipMemMap`) can no longer
 dispatch before the create populates the translation map and silently

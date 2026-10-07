@@ -93,7 +93,8 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance) |
 | `HIP_HRR_HOST_SNAPSHOTS` | on | Record the pinned host buffers each kernel reads, before the launch, so replay can refill them. `0` records none; the archive then holds no pinned host contents. Snapshots can hold token IDs and request state: keep archives private (see DESIGN.md, Threat Model: Pinned Host Snapshots) |
-| `HIP_HRR_HOST_SNAPSHOT_MAX_MB` | `64` | Largest pinned allocation snapshotted, in MiB. A larger one is skipped and listed under `unreplayable_apis` in the manifest |
+| `HIP_HRR_HOST_SNAPSHOT_MAX_MB` | `64` | Largest pinned allocation snapshotted, in MiB. A larger one is skipped and listed under `unreplayable_apis` in the manifest. `0` snapshots none |
+| `HIP_HRR_HOST_SNAPSHOT_TOTAL_MB` | `1024` | Host memory, in MiB, for the shadow copies of all snapshotted allocations together. An allocation that would pass it is skipped and listed under `unreplayable_apis`. `0` snapshots none |
 
 ### `hrr-playback` CLI options
 
@@ -212,7 +213,7 @@ Code objects read back from the runtime must start with `\x7fELF`,
 `__CLANG_OFFLOAD_BUNDLE__` or `CCOB`; capture warns and records none rather
 than storing an image that fails only at replay with HIP error 200.
 
-Capture wire version must match the `hrr-playback` reader (see DESIGN.md wire-format notes).
+Capture wire version must match the `hrr-playback` reader exactly (see DESIGN.md wire-format notes). This is intentional: a v7 archive is rejected by a v8 reader, since v7 lived on `develop` for a few hours and capture is compiled out of release builds.
 
 ## Agent tooling
 
