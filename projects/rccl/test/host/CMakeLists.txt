@@ -70,7 +70,6 @@ endforeach()
 # literal; a check label may be passed on without its ": ".
 set(_rccl_ras_labels
   "ras/diagnostics_gpu.cc|GPU inventory: "
-  "ras/diagnostics_gpu.cc|CUDA driver version: "
   "ras/diagnostics_gpu.cc|ECC: "
   "ras/diagnostics_env.cc|NCCL environment: "
   "ras/ras.cc|NCCL DIAG === RAS Diagnostics ==="
@@ -84,6 +83,11 @@ foreach(_entry IN LISTS _rccl_ras_labels)
     "the RAS labels in test/RasDiagnosticsTests.cpp")
   rccl_assert_source_line("${_rccl_ras_tests}" "= \"${_label}\"" "the report lines it labels in src/${_ras_cc}")
 endforeach()
+# The driver label is a macro on the AMD SMI arm of diagnostics_gpu.cc.
+rccl_assert_source_line("${_rccl_src_root}/ras/diagnostics_gpu.cc"
+  "#define RAS_DIAG_DRIVER_LABEL \"HIP driver version\"" "kDriver in test/RasDiagnosticsTests.cpp")
+rccl_assert_source_line("${_rccl_ras_tests}" "= \"HIP driver version: \""
+  "RAS_DIAG_DRIVER_LABEL in src/ras/diagnostics_gpu.cc")
 unset(_rccl_ras_tests)
 unset(_rccl_ras_markers)
 unset(_rccl_ras_labels)
