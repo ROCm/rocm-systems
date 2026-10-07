@@ -4084,6 +4084,8 @@ class CodeGenerator:
             if supports_fixed_size_embedding:
                 size_line += ' }'
                 validation_body += ' }'
+            if profile.vskip_affected_encoding(enc_upper):
+                size_line += ' flags_ |= VSKIP_AFFECTED;'
             validation_body += ' return Result::success();'
             if has_encoding_validation:
                 public_members.append(
@@ -6777,6 +6779,14 @@ class CodeGenerator:
                 return self._sleep_body(sem)
             return self._trap_control_body(sem) or '  (void)wf;'
 
+        if cls == 'set_vskip':
+            return (
+                '  const uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);\n'
+                '  const uint32_t bit = amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 31u;\n'
+                '  const uint32_t vskip = ((source >> bit) & 1u) * Wavefront::VSKIP_BIT;\n'
+                '  wf.set_mode_raw((wf.mode_raw() & ~Wavefront::VSKIP_BIT) | vskip);'
+            )
+
         if cls == 'gpr_idx':
             if op == 'on':
                 return (
@@ -9319,6 +9329,19 @@ class CodeGenerator:
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('data0')};")
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
+        if esz in (4, 8):
+            # Snapshot full-word payloads once per register. Keep the scalar
+            # path for a range that crosses the wave's physical storage block.
+            L.append('  if (exec) {')
+            L.append(
+                f'    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, {stride // 4}, exec);'
+            )
+            L.append('    if (data.valid()) {')
+            L.append('      data.copy_dwords_lane_major(d->store_data, exec);')
+            L.append('      set_data(std::move(d));')
+            L.append('      return;')
+            L.append('    }')
+            L.append('  }')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):

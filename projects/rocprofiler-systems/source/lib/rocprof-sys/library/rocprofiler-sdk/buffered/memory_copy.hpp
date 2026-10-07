@@ -91,11 +91,12 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
 
     metadata_registry.add_stream(stream_id);
 
+    const auto name =
+        SdkBackend::get_buffer_tracing_names().at(record->kind, record->operation);
+
     Externals::get_buffer_storage().store(typename Externals::memory_copy_sample_t{
         record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->dst_agent_id.handle, record->src_agent_id.handle,
-        static_cast<std::int32_t>(record->kind),
-        static_cast<std::int32_t>(record->operation), record->bytes,
+        record->dst_agent_id.handle, record->src_agent_id.handle, name, record->bytes,
         record->correlation_id.internal,
         SdkBackend::get_parent_stack_id(record->correlation_id),
         SdkBackend::get_memory_copy_dst_address(*record),
@@ -106,11 +107,11 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
         if(const auto sequent_tid =
                Externals::get_thread_info_sequent_tid(record->thread_id))
         {
-            const auto name =
+            const auto bundle_name =
                 fmt::format("memory_copy: {} -> {}", src_agent->logical_node_id,
                             dst_agent->logical_node_id);
 
-            Externals::write_timemory_bundle(name, *sequent_tid,
+            Externals::write_timemory_bundle(bundle_name, *sequent_tid,
                                              end_timestamp_ns - beg_timestamp_ns);
         }
     }

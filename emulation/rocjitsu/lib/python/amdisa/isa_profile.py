@@ -552,6 +552,20 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def supports_vskip(self) -> bool:
+        """True when MODE.VSKIP suppresses vector instruction issue."""
+        return False
+
+    def vskip_affected_encoding(self, enc_name: str) -> bool:
+        """Whether MODE.VSKIP suppresses this encoding, including VOP subformats."""
+        # XML subformats such as VOP3_SDST_ENC and VOP3P_MFMA omit ENC_.
+        encoding = enc_name.upper().removeprefix('ENC_')
+        return self.supports_vskip and (
+            encoding.startswith('VOP')
+            or encoding in ('MUBUF', 'MTBUF', 'MIMG', 'DS', 'FLAT', 'EXP', 'VINTRP')
+        )
+
+    @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:
         """True when E32 16-bit source selectors can address packed high halves."""
         return False
@@ -1742,6 +1756,10 @@ class CdnaProfile(_AmdgpuProfileBase):
 
     @property
     def supports_gpr_idx(self) -> bool:
+        return True
+
+    @property
+    def supports_vskip(self) -> bool:
         return True
 
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
