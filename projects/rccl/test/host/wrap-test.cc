@@ -4882,9 +4882,18 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
               *out = ncclSymSendNonregRecvReg;
               return ncclSuccess;
             });
-        ncclComm* comm = MakeCommWithArch("gfx942");
+        ncclComm* comm = MakeCommWithArch("gfx950");
         comm->nRanks = 1;
         comm->nNodes = 1;
+        // rccl_arch_thresholds_fakes.cc returns nullptr from rcclGetArchThresholds
+        // (the real .cc is not linked into rccl-UnitTestsMicro).  When the table is
+        // nullptr rcclCeRegMaxTab() returns 0, which makes rcclAllGatherCeRegisteredWindowTab
+        // return false and prevents Branch #3 from firing.  Supply a minimal table
+        // directly so extAlgoArchTable() short-circuits to comm->archThresholds.
+        rcclArchThresholds archTab{};
+        archTab.ceRegMax[ncclFuncAllGather] = kThreshUnlimited;  // no upper cap
+        // ceRegMin stays 0: no lower bound
+        comm->archThresholds = &archTab;
         // Branch #3 requires both CTAPolicy=ZERO and a registered recv window.
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
