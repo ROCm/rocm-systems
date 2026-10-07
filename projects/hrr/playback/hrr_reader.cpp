@@ -141,7 +141,8 @@ RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out) {
 }
 
 FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
-                         uint16_t expected_version, uint16_t* version) {
+                         uint16_t expected_version, uint16_t* version,
+                         uint16_t* flags) {
   FILE* f = fopen(file_path.c_str(), "rb");
   if (!f) {
     fprintf(stderr, "[HRR] Cannot open %s\n", file_path.c_str());
@@ -166,6 +167,7 @@ FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
     return nullptr;
   }
   if (version) *version = fh.version;
+  if (flags) *flags = fh.reserved;
   return f;
 }
 
@@ -312,10 +314,12 @@ bool load_archive(const std::string& path, Archive& archive) {
   archive.path = archive_dir;
 
   std::string events_path = archive_dir + "/events.bin";
-  uint16_t file_version = 0;
-  FILE* f = open_record_stream(events_path, HRR_MAGIC, HRR_VERSION, &file_version);
+  uint16_t file_version = 0, file_flags = 0;
+  FILE* f = open_record_stream(events_path, HRR_MAGIC, HRR_VERSION, &file_version,
+                               &file_flags);
   if (!f) return false;
   archive.version = file_version;
+  archive.flags = file_flags;
 
   // Read events sequentially. read_raw_record handles the framing and the
   // torn-tail recovery; a torn record means the capture was interrupted, and

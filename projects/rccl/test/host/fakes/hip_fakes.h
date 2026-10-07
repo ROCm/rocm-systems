@@ -90,6 +90,9 @@ extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
 extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
 // Defaults to hipErrorInvalidValue with *canAccessPeer = 0, the fail-loud floor's behaviour.
 extern std::function<hipError_t(int* /*canAccessPeer*/, int /*dev1*/, int /*dev2*/)> g_hipDeviceCanAccessPeer;
+// Both default to hipErrorInvalidValue, the fail-loud floor.
+extern std::function<hipError_t(int /*peerDevice*/, unsigned int /*flags*/)> g_hipDeviceEnablePeerAccess;
+extern std::function<hipError_t(int /*peerDevice*/)> g_hipDeviceDisablePeerAccess;
 
 // Deep-path result seams. Default to hipErrorInvalidValue so any call a test
 // hasn't opted into surfaces as an unexpected call; set to hipSuccess to enable
@@ -112,6 +115,7 @@ extern hipError_t g_hipAsyncOpsResult;
 extern int g_hipWarpSize;
 // Backs hipDeviceGetAttribute(hipDeviceAttributeDirectManagedMemAccessFromHost); 1 is the MI300A answer.
 extern int g_hipDirectManagedMemAccess;
+extern int g_hipMemoryPoolsSupported;     // hipDeviceAttributeMemoryPoolsSupported (default 1)
 // A call count alone cannot tell one device copy's operands from another's, so record them per call.
 extern int g_hipMemcpyAsyncCalls;
 struct HipMemcpyAsyncRecord {

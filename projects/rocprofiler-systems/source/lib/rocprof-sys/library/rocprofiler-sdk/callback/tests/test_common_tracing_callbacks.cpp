@@ -80,11 +80,13 @@ TEST_F(common_tracing_callbacks_test, enter_short_circuits_when_externals_are_in
 {
     EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(false));
 
+    constexpr std::uint64_t k_timestamp = 42;
+
     const test_support::callback_tracing_record_t record{};
     test_support::user_data_t                     user_data{};
 
     on_tracing_api_enter<mock_sdk_with_tracing, externals_with_tracing, test_category>(
-        record, &user_data, nullptr);
+        record, &user_data, nullptr, k_timestamp);
 
     EXPECT_EQ(user_data.value, 0);
 }
