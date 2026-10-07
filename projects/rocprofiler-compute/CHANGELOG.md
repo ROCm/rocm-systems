@@ -37,6 +37,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* `--torch-trace` tensor wraps no longer fail `nn.LazyLinear` device/dtype moves.
+
 * Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
 
 ### Upcoming changes
