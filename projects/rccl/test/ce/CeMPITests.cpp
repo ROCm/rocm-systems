@@ -10,6 +10,8 @@
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
+#include "MultiSegmentVmmHelpers.hpp"
+#include "../multisegment/MultiSegmentTestFixture.hpp"
 #include "ResourceGuards.hpp"
 #include "SymmetricBufferHelpers.hpp"
 #include "TestChecks.hpp"
@@ -195,9 +197,11 @@ protected:
         if(comm == nullptr)
             return false;
 
-        return comm->nNodes > 1 && !ncclDevrIsOneLsaTeam(comm) &&
-               comm->symmetricSupport && comm->hostRmaSupport &&
-               comm->config.numRmaCtx > 0;
+        // Hierarchical subcomms are built only for nNodes >= 8. A 2-node job
+        // cannot select this path, so it must skip instead of failing the marker.
+        return comm->nNodes >= 8 && comm->hierarchicalCommsInitialized &&
+               !ncclDevrIsOneLsaTeam(comm) && comm->symmetricSupport &&
+               comm->hostRmaSupport && comm->config.numRmaCtx > 0;
     }
 
     void assertHierarchicalCEPathTaken(int rank, const char* context)
@@ -379,8 +383,8 @@ protected:
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
 
         if(requireScaleOut && !scaleOutPrerequisitesMet())
-            GTEST_SKIP() << "Hierarchical CE prerequisites absent on this communicator; "
-                            "needs symmetric memory (GIN backend) and an RMA context";
+            GTEST_SKIP() << "Hierarchical CE prerequisites absent; needs nNodes >= 8, "
+                            "hierarchicalCommsInitialized, symmetric memory, and an RMA context";
 
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
@@ -494,8 +498,8 @@ protected:
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
 
         if(requireScaleOut && !scaleOutPrerequisitesMet())
-            GTEST_SKIP() << "Hierarchical CE prerequisites absent on this communicator; "
-                            "needs symmetric memory (GIN backend) and an RMA context";
+            GTEST_SKIP() << "Hierarchical CE prerequisites absent; needs nNodes >= 8, "
+                            "hierarchicalCommsInitialized, symmetric memory, and an RMA context";
 
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
@@ -1043,6 +1047,395 @@ TEST_F(CeMPI_Stress, InterleavedCEAllGatherAndSMAllReduce)
     }
 
     assertCEPathTaken("CeMPI_Stress/InterleavedCEAllGatherAndSMAllReduce");
+}
+
+// GPU multi-segment windows. Elastic rejection is UBR_MultiSegment.CE_Elastic_Gating.
+class CeMPI_MultiSegment : public CeMPITest
+{
+protected:
+    static constexpr int    kMaxRanks = 32;
+    static constexpr size_t kSegBytes = 2u * 1024 * 1024;
+
+    void skipUnlessHierarchical()
+    {
+        if(!validateTestPrerequisites(kMinRanks4, kMaxRanks))
+        {
+            GTEST_SKIP() << "Need 4 to " << kMaxRanks << " MPI ranks";
+            return;
+        }
+        if(!isScaleOutTopology())
+        {
+            GTEST_SKIP() << "Need at least 2 nodes and 2 MPI ranks per node";
+            return;
+        }
+        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+        if(!scaleOutPrerequisitesMet())
+        {
+            GTEST_SKIP() << "Hierarchical CE requires nNodes >= 8, hierarchicalCommsInitialized, "
+                            "symmetric memory, and an RMA context";
+            return;
+        }
+    }
+
+    void skipUnlessSingleNode()
+    {
+        if(!validateTestPrerequisites(kMinRanks2, kMaxRanks))
+        {
+            GTEST_SKIP() << "Need 2 to " << kMaxRanks << " MPI ranks";
+            return;
+        }
+        if(isMultiNodeTest())
+        {
+            GTEST_SKIP() << "Single-node CE requires exactly one node";
+            return;
+        }
+        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+        auto* comm = static_cast<ncclComm*>(getActiveCommunicator());
+        if(comm == nullptr || comm->nNodes != 1)
+        {
+            GTEST_SKIP() << "Single-node CE requires nNodes == 1";
+            return;
+        }
+    }
+
+    bool allocPair(bool allGather, int nRanks,
+                   RCCLMultiSegmentTests::VmmWindow& send,
+                   RCCLMultiSegmentTests::VmmWindow& recv)
+    {
+        int dev = 0;
+        if(hipGetDevice(&dev) != hipSuccess)
+            return false;
+        if(!RCCLMultiSegmentTests::AllocUniformGpu(dev, 2, kSegBytes, &send))
+            return false;
+        const size_t recvSeg = allGather ? send.totalSize * static_cast<size_t>(nRanks) / 2
+                                         : kSegBytes;
+        return RCCLMultiSegmentTests::AllocUniformGpu(dev, 2, recvSeg, &recv);
+    }
+
+    enum class Coll { AllGather, AlltoAll, AlltoAllv, Scatter, Gather, AllReduce };
+
+    void run(Coll coll, const char* testId, bool hierarchical = true)
+    {
+        if(hierarchical)
+            skipUnlessHierarchical();
+        else
+            skipUnlessSingleNode();
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+            return;
+
+        int rank = 0, nRanks = 0;
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+        const bool exchange = coll == Coll::AlltoAll || coll == Coll::AlltoAllv;
+        if(exchange && nRanks >= 8 && !isCeAlltoAllDispatchConfigured())
+        {
+            GTEST_SKIP() << "CE AlltoAll needs RCCL_DDA_ENABLE=0; DDA IPC claims AlltoAll first";
+            return;
+        }
+
+        const bool gatherLayout = coll == Coll::AllGather || coll == Coll::Gather;
+        const bool scatter       = coll == Coll::Scatter;
+        RCCLMultiSegmentTests::VmmWindow smallWin, largeWin;
+        const bool allocated = allocPair(gatherLayout || scatter, nRanks, smallWin, largeWin);
+        auto vmmCleanup = RCCLTestGuards::makeScopeGuard([&]() {
+            RCCLMultiSegmentTests::FreeVmmWindow(smallWin);
+            RCCLMultiSegmentTests::FreeVmmWindow(largeWin);
+        });
+        const std::string why = mpiCoordinatedSkipReason(
+            !allocated, "multi-segment VMM allocation unavailable");
+        if(!why.empty())
+        {
+            GTEST_SKIP() << why;
+            return;
+        }
+        // allocPair(true) builds a small send and an nRanks-times receive.
+        // Scatter is that pair swapped.
+        RCCLMultiSegmentTests::VmmWindow& send = scatter ? largeWin : smallWin;
+        RCCLMultiSegmentTests::VmmWindow& recv = scatter ? smallWin : largeWin;
+
+        const size_t elemBytes = sizeof(float);
+        size_t count = 0;
+        if(gatherLayout)
+        {
+            ASSERT_EQ(send.totalSize % elemBytes, 0u);
+            count = send.totalSize / elemBytes;
+            ASSERT_GE(recv.totalSize, count * static_cast<size_t>(nRanks) * elemBytes);
+        }
+        else if(scatter)
+        {
+            ASSERT_EQ(recv.totalSize % elemBytes, 0u);
+            count = recv.totalSize / elemBytes;
+            ASSERT_GE(send.totalSize, count * static_cast<size_t>(nRanks) * elemBytes);
+        }
+        else if(coll == Coll::AllReduce)
+        {
+            ASSERT_EQ(send.totalSize, recv.totalSize);
+            ASSERT_EQ(send.totalSize % elemBytes, 0u);
+            count = send.totalSize / elemBytes;
+            if(nRanks <= 0 || count % static_cast<size_t>(nRanks) != 0)
+            {
+                GTEST_SKIP() << "CE AllReduce requires count divisible by nRanks";
+                return;
+            }
+        }
+        else
+        {
+            ASSERT_EQ(send.totalSize, recv.totalSize);
+            if(send.totalSize % (static_cast<size_t>(nRanks) * elemBytes) != 0)
+            {
+                GTEST_SKIP() << "element count is not divisible by nRanks";
+                return;
+            }
+            count = send.totalSize / (static_cast<size_t>(nRanks) * elemBytes);
+        }
+
+        ncclWindow_t sendWin = nullptr;
+        ncclWindow_t recvWin = nullptr;
+        auto winCleanup = RCCLTestGuards::makeScopeGuard([&]() {
+            if(sendWin) ncclCommWindowDeregister(getActiveCommunicator(), sendWin);
+            if(recvWin) ncclCommWindowDeregister(getActiveCommunicator(), recvWin);
+        });
+        ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(
+            getActiveCommunicator(), send.ptr, send.totalSize, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+        ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(
+            getActiveCommunicator(), recv.ptr, recv.totalSize, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+
+        constexpr int kRoot = 0;
+        if(coll == Coll::AllGather || coll == Coll::Gather)
+        {
+            fillRankScalar(send.ptr, count, rank);
+            if(::testing::Test::HasFatalFailure())
+                return;
+            if(coll == Coll::AllGather)
+            {
+                ASSERT_EQ(ncclSuccess, ncclAllGather(
+                    send.ptr, recv.ptr, count, ncclFloat32,
+                    getActiveCommunicator(), getActiveStream()));
+            }
+            else
+            {
+                ASSERT_EQ(ncclSuccess, ncclGather(
+                    send.ptr, recv.ptr, count, ncclFloat32, kRoot,
+                    getActiveCommunicator(), getActiveStream()));
+            }
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+            if(coll == Coll::AllGather || rank == kRoot)
+            {
+                ASSERT_TRUE(verifyBlockPattern(recv.ptr, count * static_cast<size_t>(nRanks), count));
+            }
+        }
+        else if(scatter)
+        {
+            if(rank == kRoot)
+                fillBlockPattern(send.ptr, count * static_cast<size_t>(nRanks), count);
+            if(::testing::Test::HasFatalFailure())
+                return;
+            ASSERT_EQ(ncclSuccess, ncclScatter(
+                send.ptr, recv.ptr, count, ncclFloat32, kRoot,
+                getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+            ASSERT_TRUE(verifyRankScalar(recv.ptr, count, rank));
+        }
+        else if(coll == Coll::AllReduce)
+        {
+            fillRankScalar(send.ptr, count, rank);
+            if(::testing::Test::HasFatalFailure())
+                return;
+            ASSERT_EQ(ncclSuccess, ncclAllReduce(
+                send.ptr, recv.ptr, count, ncclFloat32, ncclSum,
+                getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+            const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
+            ASSERT_TRUE(verifyBufferData<float>(recv.ptr, count,
+                                                [expectedSum](size_t) { return expectedSum; }));
+        }
+        else
+        {
+            const size_t totalElem = count * static_cast<size_t>(nRanks);
+            const size_t halfCount = count / 2;
+            ASSERT_EQ(hipSuccess, initializeBufferWithPattern<float>(
+                send.ptr, totalElem, [rank, nRanks, count, halfCount](size_t i) {
+                    return static_cast<float>(rank * nRanks + i / count + 1) +
+                           (i % count >= halfCount ? kUpperHalfBias : 0.0f);
+                }));
+            if(coll == Coll::AlltoAll)
+            {
+                ASSERT_EQ(ncclSuccess, ncclAlltoAll(
+                    send.ptr, recv.ptr, count, ncclFloat32,
+                    getActiveCommunicator(), getActiveStream()));
+            }
+            else
+            {
+                size_t counts[kMaxRanks] = {};
+                size_t displs[kMaxRanks] = {};
+                for(int i = 0; i < nRanks; ++i)
+                {
+                    counts[i] = count;
+                    displs[i] = count * static_cast<size_t>(i);
+                }
+                ASSERT_EQ(ncclSuccess, ncclAlltoAllv(
+                    send.ptr, counts, displs, recv.ptr, counts, displs, ncclFloat32,
+                    getActiveCommunicator(), getActiveStream()));
+            }
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+            ASSERT_TRUE(verifyBufferData<float>(
+                recv.ptr, totalElem, [count, nRanks, rank, halfCount](size_t i) {
+                    return static_cast<float>((i / count) * nRanks + rank + 1) +
+                           (i % count >= halfCount ? kUpperHalfBias : 0.0f);
+                }));
+        }
+
+        if(coll == Coll::AllReduce)
+            assertCEAllReducePathTaken(testId);
+        else if(scatter || coll == Coll::Gather)
+            assertCEPathTakenOnRoot(kRoot, rank, testId);
+        else
+            assertCEPathTaken(testId);
+        if(hierarchical)
+            assertHierarchicalCEPathTaken(rank, testId);
+        else if(rank == 0)
+        {
+            EXPECT_EQ(readAllLogs().find(RCCL_CE_HIER_SELECTED_TAG), std::string::npos)
+                << testId << ": single-node CE logged the hierarchical marker";
+        }
+    }
+};
+
+TEST_F(CeMPI_MultiSegment, HierarchicalAllGather)
+{
+    run(Coll::AllGather, "CeMPI_MultiSegment/HierarchicalAllGather");
+}
+
+TEST_F(CeMPI_MultiSegment, HierarchicalAlltoAll)
+{
+    run(Coll::AlltoAll, "CeMPI_MultiSegment/HierarchicalAlltoAll");
+}
+
+TEST_F(CeMPI_MultiSegment, SingleNodeAllGather)
+{
+    run(Coll::AllGather, "CeMPI_MultiSegment/SingleNodeAllGather", /*hierarchical=*/false);
+}
+
+TEST_F(CeMPI_MultiSegment, SingleNodeAlltoAll)
+{
+    run(Coll::AlltoAll, "CeMPI_MultiSegment/SingleNodeAlltoAll", /*hierarchical=*/false);
+}
+
+TEST_F(CeMPI_MultiSegment, SingleNodeAlltoAllv)
+{
+    run(Coll::AlltoAllv, "CeMPI_MultiSegment/SingleNodeAlltoAllv", /*hierarchical=*/false);
+}
+
+TEST_F(CeMPI_MultiSegment, SingleNodeScatter)
+{
+    run(Coll::Scatter, "CeMPI_MultiSegment/SingleNodeScatter", /*hierarchical=*/false);
+}
+
+TEST_F(CeMPI_MultiSegment, SingleNodeGather)
+{
+    run(Coll::Gather, "CeMPI_MultiSegment/SingleNodeGather", /*hierarchical=*/false);
+}
+
+TEST_F(CeMPI_MultiSegment, SingleNodeAllReduce)
+{
+    run(Coll::AllReduce, "CeMPI_MultiSegment/SingleNodeAllReduce", /*hierarchical=*/false);
+}
+
+// recvBuf sits one segment past the window base and CE must still reduce it.
+TEST_F(UBR_MultiSegment, CE_RecvOffset)
+{
+    MultiSegmentBuffer buf;
+    ncclWindow_t win = nullptr;
+    int rank = 0, nRanks = 0;
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+    size_t count = 0, totalBytes = 0;
+    prepareSymmetricLsaRecvOffset(buf, &win, &rank, &nRanks, &sendBuf, &recvBuf, &count, &totalBytes,
+                                  /*requireCeEnv=*/true);
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+    auto winCleanup = makeScopeGuard([&]() {
+        if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+    });
+    if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) return;
+
+    {
+        const std::string why = mpiCoordinatedSkipReason(
+            !ceAllReduceSelected(sendBuf, recvBuf, count),
+            "CE AllReduce was not selected (rcclGetCollImplInfo)");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
+    if (::testing::Test::IsSkipped()) return;
+
+    initSendBuffer<T>(sendBuf, count, rank);
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(
+        sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+        getActiveCommunicator(), getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+    (void)totalBytes;
+}
+
+#ifdef ENABLE_FAULT_INJECTION
+// Phase 3 peer copies use rank * shardBytes without the receive-window offset.
+TEST_F(UBR_MultiSegment, CE_RecvOffset_BeforeLegacyCorruptsResult)
+{
+    MultiSegmentBuffer buf;
+    ncclWindow_t win = nullptr;
+    int rank = 0, nRanks = 0;
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+    size_t count = 0, totalBytes = 0;
+    prepareSymmetricLsaRecvOffset(buf, &win, &rank, &nRanks, &sendBuf, &recvBuf, &count, &totalBytes,
+                                  /*requireCeEnv=*/true);
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+    auto winCleanup = makeScopeGuard([&]() {
+        if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+    });
+    if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) return;
+
+    {
+        const std::string why = mpiCoordinatedSkipReason(
+            !ceAllReduceSelected(sendBuf, recvBuf, count),
+            "CE AllReduce was not selected (rcclGetCollImplInfo)");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
+
+    initSendBuffer<T>(sendBuf, count, rank);
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, totalBytes));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCeFaultSet(
+        getActiveCommunicator(), CE_FAULT_LEGACY_RECV_OFFSET));
+    auto faultCleanup = makeScopeGuard([&]() {
+        HIP_EXPECT(ncclCeFaultClear(getActiveCommunicator()));
+    });
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(
+        sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+        getActiveCommunicator(), getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    const size_t shardElems = count / static_cast<size_t>(nRanks);
+    const T expectedLocal = static_cast<T>(static_cast<float>(nRanks * (nRanks + 1) / 2));
+    const T expectedOther = static_cast<T>(static_cast<float>(0));
+    ASSERT_TRUE(verifyBufferData<T>(recvBuf, count,
+        [shardElems, rank, expectedLocal, expectedOther](size_t i) {
+            return (i / shardElems == static_cast<size_t>(rank)) ? expectedLocal : expectedOther;
+        }))
+        << "BEFORE control did not pin local-shard reduce + memset-0 remote shards";
+    EXPECT_FALSE(verifyAllReduceResult<T>(recvBuf, count, nRanks))
+        << "BEFORE control did not reproduce the legacy receive-window offset corruption";
+}
+#endif
+
+// The GPU window is the control; CE must reject the elastic window.
+TEST_F(UBR_MultiSegment, CE_Elastic_Gating)
+{
+    runCeElasticGating(/*hierarchical=*/false);
+}
+
+TEST_F(UBR_MultiSegment, CE_Elastic_HierarchicalGating)
+{
+    runCeElasticGating(/*hierarchical=*/true);
 }
 
 #endif // MPI_TESTS_ENABLED
