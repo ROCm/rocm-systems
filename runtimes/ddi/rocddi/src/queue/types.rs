@@ -46,6 +46,10 @@ pub enum QueueParameters {
     Aql {
         /// Producer discipline that the caller will uphold.
         producer_mode: QueueProducerMode,
+        /// Allocate native global work synchronization for this queue before
+        /// publishing its transport. KFD permits only one such queue per
+        /// process and device; sharing it is the caller's policy.
+        global_work_sync: bool,
         /// GPU-visible signal payload used by firmware to stop and report AQL
         /// queue errors, or `None` when the frontend does not service them.
         /// The frontend retains the signal storage through queue destruction.

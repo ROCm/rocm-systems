@@ -155,6 +155,13 @@ ring, index page, and doorbell mapping through native teardown, including
 ambiguous CREATE or DESTROY outcomes. Producers own packet encoding, ring
 space, publication order, and completion waits.
 
+An AQL request can set `global_work_sync` when the GPU advertises GWS. The
+Linux backend allocates GWS on the native queue before exposing its transport.
+KFD permits one GWS queue per process and device, so a frontend that serves
+multiple cooperative callers must share that queue. A failed GWS allocation
+destroys the unpublished queue before releasing its ring and control backing;
+an uncertain cleanup retains those owners through process teardown.
+
 ### Ambiguous queue creation
 
 Native queue creation borrows frontend-owned GPU addresses. HSA supplies an
@@ -226,7 +233,8 @@ SDMA ring with device-producer mappings, byte-index, and doorbell progress
 checks. The AQL case submits a barrier through a compute queue and checks GPU
 signal completion and queue retirement. The capability case checks expert
 queue scheduling against KFD 1.20 or newer and the GFX1201 scratch aperture
-against the reported XCC count.
+against the reported XCC count. The GWS AQL case runs the same retirement
+check with native GWS allocated before queue publication.
 The AIS case reads a file into private VRAM and writes it back. Run it with
 `ROCDDI_CTS_AIS_DIR` set to a writable directory on P2P-capable block or NFS
 storage:

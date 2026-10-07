@@ -207,6 +207,7 @@ fn descriptor(
         AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 => QueueParameters::Pm4,
         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL => QueueParameters::Aql {
             producer_mode: producer,
+            global_work_sync: false,
             inactive_signal: None,
             error_event: None,
             scratch,

@@ -59,6 +59,7 @@ fn native_node() -> sysfs::NativeNode {
             control_stack_size: 4096,
             sdma_engines: 2,
             sdma_xgmi_engines: 1,
+            gws_count: 64,
             compute_queues: 4,
             sdma_qualified: true,
         },
@@ -79,6 +80,17 @@ fn descriptor(parameters: QueueParameters) -> QueueRequest {
 fn aql(producer_mode: QueueProducerMode) -> QueueParameters {
     QueueParameters::Aql {
         producer_mode,
+        global_work_sync: false,
+        inactive_signal: None,
+        error_event: None,
+        scratch: None,
+    }
+}
+
+fn gws_aql() -> QueueParameters {
+    QueueParameters::Aql {
+        producer_mode: QueueProducerMode::Multiple,
+        global_work_sync: true,
         inactive_signal: None,
         error_event: None,
         scratch: None,
@@ -121,6 +133,8 @@ struct State {
     expected_aql_queue_type: Option<u32>,
     expected_sdma_engine_id: Option<u32>,
     expected_priority: u32,
+    gws_allocations: usize,
+    gws_errno: Option<i32>,
     scratch_bases: usize,
     scratch_base_errno: Option<i32>,
     svm_attempts: usize,
@@ -592,6 +606,17 @@ impl Fixture {
                         assert_eq!(args.count as usize, mask.len() * 32);
                         assert_eq!(args.mask, mask.as_ptr() as u64);
                         state.cu_masks.push((**args, mask.to_vec()));
+                    }
+                    sys::Call::AllocQueueGws(args) => {
+                        assert!(state.live, "GWS requires a live native queue");
+                        assert_eq!(args.queue_id, 0, "zero is a valid queue ID");
+                        assert_eq!(args.num_gws, 1);
+                        assert_eq!((args.first_gws, args.pad), (0, 0));
+                        state.gws_allocations += 1;
+                        if let Some(errno) = state.gws_errno {
+                            return Err(io::Error::from_raw_os_error(errno));
+                        }
+                        args.first_gws = 0;
                     }
                     sys::Call::DestroyQueue(args) => {
                         assert_eq!(args.queue_id, 0, "zero is a valid queue ID");
@@ -1080,6 +1105,7 @@ fn gfx1201_scratch_populates_the_firmware_queue_control_fields() {
     fixture.state.lock().unwrap().expected_scratch = Some(scratch);
     let desc = descriptor(QueueParameters::Aql {
         producer_mode: QueueProducerMode::Single,
+        global_work_sync: false,
         inactive_signal: None,
         error_event: None,
         scratch: Some(scratch),
@@ -1094,6 +1120,7 @@ fn gfx1201_queue_publishes_its_event_signals() {
     let fixture = Fixture::new(true);
     let desc = descriptor(QueueParameters::Aql {
         producer_mode: QueueProducerMode::Single,
+        global_work_sync: false,
         inactive_signal: Some(0x1234_5000),
         error_event: Some(QueueErrorEvent {
             payload_address: 0x1234_6008,
@@ -1104,6 +1131,54 @@ fn gfx1201_queue_publishes_its_event_signals() {
     let mut queue = fixture.create(desc).unwrap();
     queue.destroy().unwrap();
     fixture.assert_released();
+}
+
+#[test]
+fn gws_queue_allocates_before_publication_and_releases_with_native_queue() {
+    let fixture = Fixture::new(true);
+    let desc = descriptor(gws_aql());
+    let mut queue = fixture.create(desc).unwrap();
+    assert_eq!(fixture.state.lock().unwrap().gws_allocations, 1);
+    queue.destroy().unwrap();
+    fixture.assert_released();
+}
+
+#[test]
+fn failed_gws_allocation_destroys_the_unpublished_queue() {
+    let fixture = Fixture::new(true);
+    let desc = descriptor(gws_aql());
+    let mut unsupported = native_node();
+    unsupported.queues.gws_count = 0;
+    assert!(matches!(
+        Request::validate(&unsupported, desc),
+        Err(error) if error.kind() == ErrorKind::Unsupported
+    ));
+    fixture.state.lock().unwrap().gws_errno = Some(16);
+    assert!(fixture.create(desc).is_err());
+    assert_eq!(fixture.state.lock().unwrap().gws_allocations, 1);
+    fixture.assert_released();
+}
+
+#[test]
+fn failed_gws_rollback_retains_native_backing() {
+    let fixture = Fixture::new(true);
+    {
+        let mut state = fixture.state.lock().unwrap();
+        state.gws_errno = Some(16);
+        state.destroy_errno.push_back(16);
+    }
+    let desc = descriptor(gws_aql());
+    assert!(matches!(
+        fixture.create(desc),
+        Err(Error::QueueBackingMayBeLive { .. })
+    ));
+    let state = fixture.state.lock().unwrap();
+    assert!(state.live);
+    assert_eq!(
+        (state.gws_allocations, state.destroys, state.frees),
+        (1, 1, 0)
+    );
+    assert!(!state.buffers.is_empty());
 }
 
 #[test]
@@ -1180,6 +1255,7 @@ fn invalid_scratch_geometry_fails_before_native_acquisition() {
                 QueueRequest {
                     parameters: QueueParameters::Aql {
                         producer_mode: QueueProducerMode::Single,
+                        global_work_sync: false,
                         inactive_signal: None,
                         error_event: None,
                         scratch: Some(invalid),
@@ -1218,6 +1294,7 @@ fn unsupported_options_and_missing_context_sizes_fail_before_acquisition() {
         QueueRequest {
             parameters: QueueParameters::Aql {
                 producer_mode: QueueProducerMode::Single,
+                global_work_sync: false,
                 inactive_signal: None,
                 error_event: Some(QueueErrorEvent {
                     payload_address: 0x1000,

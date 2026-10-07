@@ -744,6 +744,7 @@ struct ScratchControl {
 #[derive(Clone, Copy)]
 struct AqlControl {
     producer_mode: QueueProducerMode,
+    global_work_sync: bool,
     properties: sysfs::NativeQueueProperties,
     inactive_signal: Option<u64>,
     error_event: Option<QueueErrorEvent>,
@@ -795,6 +796,7 @@ fn validate_aql(
 ) -> Result<AqlControl, Error> {
     let QueueParameters::Aql {
         producer_mode,
+        global_work_sync,
         inactive_signal,
         error_event,
         scratch,
@@ -811,6 +813,12 @@ fn validate_aql(
             "AQL inactive signal handle is null",
         ));
     }
+    if global_work_sync && properties.gws_count == 0 {
+        return Err(error(
+            ErrorKind::Unsupported,
+            "native GPU does not advertise global work synchronization",
+        ));
+    }
     if error_event.is_some_and(|event| {
         event.payload_address == 0
             || event.native_event_token == 0
@@ -823,6 +831,7 @@ fn validate_aql(
     }
     Ok(AqlControl {
         producer_mode,
+        global_work_sync,
         properties,
         inactive_signal,
         error_event,
@@ -1618,6 +1627,18 @@ impl KfdQueue {
             } else {
                 native_error("AMDKFD_IOC_CREATE_QUEUE", source)
             });
+        }
+        if request.aql.is_some_and(|aql| aql.global_work_sync) {
+            if let Err(failure) = queue.vm.kfd().alloc_queue_gws(args.queue_id) {
+                if queue.destroy().is_err() {
+                    std::mem::forget(queue);
+                    return Err(Error::QueueBackingMayBeLive {
+                        operation: "KFD queue cleanup after GWS allocation",
+                        source: None,
+                    });
+                }
+                return Err(native_error("AMDKFD_IOC_ALLOC_QUEUE_GWS", failure));
+            }
         }
         let doorbell =
             queue

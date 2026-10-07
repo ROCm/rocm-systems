@@ -692,11 +692,21 @@ fn gfx1201_user_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
 
 #[test]
 #[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
+fn gfx1201_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
+    gfx1201_aql_barrier(false)
+}
+
+#[test]
+#[ignore = "requires GFX1201 with KFD GWS and a bound DRM render node"]
+fn gfx1201_gws_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
+    gfx1201_aql_barrier(true)
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "one native queue lifetime covers AQL publication, completion, and teardown"
 )]
-fn gfx1201_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
+fn gfx1201_aql_barrier(global_work_sync: bool) -> Result<(), Box<dyn Error>> {
     const AQL_PACKET_BYTES: usize = 64;
     const BARRIER_HEADER: u16 = 3 | (1 << 8) | (2 << 9) | (2 << 11);
 
@@ -713,6 +723,10 @@ fn gfx1201_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
     })?;
     let endpoint = selected.ok_or_else(|| io::Error::other("GFX1201 endpoint is unavailable"))?;
     let device = session.activate(&endpoint)?;
+    let gpu = device.gpu()?;
+    if global_work_sync {
+        assert_ne!(gpu.info().gws_count, 0);
+    }
     let mut signal = device.allocate(
         MemoryKind::System,
         4096,
@@ -738,10 +752,15 @@ fn gfx1201_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
     // SAFETY: The sole producer writes one complete packet before ringing the
     // doorbell. Its completion signal stays mapped until native retirement.
     let mut queue = unsafe {
-        device.gpu()?.create_queue(QueueRequest {
+        gpu.create_queue(QueueRequest {
             ring_size_bytes: 4096,
             parameters: QueueParameters::Aql {
-                producer_mode: QueueProducerMode::Single,
+                producer_mode: if global_work_sync {
+                    QueueProducerMode::Multiple
+                } else {
+                    QueueProducerMode::Single
+                },
+                global_work_sync,
                 inactive_signal: None,
                 error_event: None,
                 scratch: None,

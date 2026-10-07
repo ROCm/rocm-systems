@@ -93,6 +93,7 @@ pub(super) enum Call<'a> {
     DestroyQueue(&'a mut uapi::DestroyQueue),
     UpdateQueue(&'a mut uapi::UpdateQueue),
     SetCuMask(&'a mut uapi::SetCuMask, &'a [u32]),
+    AllocQueueGws(&'a mut uapi::AllocQueueGws),
 }
 
 #[cfg(test)]
@@ -270,6 +271,7 @@ impl Kfd {
                 args.mask = mask.as_ptr() as u64;
                 (uapi::SET_CU_MASK, ptr::from_mut(*args).cast())
             }
+            Call::AllocQueueGws(args) => (uapi::ALLOC_QUEUE_GWS, ptr::from_mut(*args).cast()),
             Call::Wait(args, event) => {
                 args.events = ptr::from_mut(*event) as u64;
                 (uapi::WAIT_EVENTS, ptr::from_mut(*args).cast())
@@ -762,6 +764,15 @@ impl Kfd {
             queue_id,
             pad: 0,
         }))
+    }
+
+    pub(super) fn alloc_queue_gws(&self, queue_id: u32) -> io::Result<()> {
+        let mut args = uapi::AllocQueueGws {
+            queue_id,
+            num_gws: 1,
+            ..uapi::AllocQueueGws::default()
+        };
+        self.call(Call::AllocQueueGws(&mut args))
     }
 
     pub(super) fn update_queue(&self, args: &mut uapi::UpdateQueue) -> io::Result<()> {
