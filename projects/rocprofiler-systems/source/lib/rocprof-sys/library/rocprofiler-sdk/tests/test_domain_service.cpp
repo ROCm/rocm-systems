@@ -6,6 +6,7 @@
 #include "library/rocprofiler-sdk/buffered/kfd/queue.hpp"
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
 #include "library/rocprofiler-sdk/callback/hip/runtime_api.hpp"
+#include "library/rocprofiler-sdk/callback/hip_stream.hpp"
 #include "library/rocprofiler-sdk/callback/ompt/ompt.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
@@ -667,17 +668,17 @@ TEST_F(domain_service_test, finalize_is_a_noop_when_no_domains_are_configured)
 
 TEST_F(domain_service_test, finalize_does_not_invoke_domains_that_leave_on_finalize_unset)
 {
-    // on_code_object_finalize is not defined, so k_code_object.on_finalize is the
+    // hip_stream does not define on_finalize, so k_hip_stream.on_finalize is the
     // default-initialized nullptr; finalize() must skip it rather than call through a
     // null function pointer.
-    constexpr const auto& k_code_object_definition =
-        domains::callback::k_code_object<mock_sdk, externals>;
-    ASSERT_EQ(k_code_object_definition.on_finalize, nullptr);
+    constexpr const auto& k_hip_stream_definition =
+        domains::callback::k_hip_stream<mock_sdk, externals>;
+    ASSERT_EQ(k_hip_stream_definition.on_finalize, nullptr);
 
     g_callback_table = mock_sdk::tracing_names_t{
-        .entries = { { .name       = "code_object",
+        .entries = { { .name       = "hip_stream",
                        .operations = {},
-                       .value      = mock_sdk::CALLBACK_TRACING_CODE_OBJECT } }
+                       .value      = mock_sdk::CALLBACK_TRACING_HIP_STREAM } }
     };
 
     sut_t service;
@@ -687,11 +688,12 @@ TEST_F(domain_service_test, finalize_does_not_invoke_domains_that_leave_on_final
     expect_create_context(context);
     expect_configure_callback(context,
                               static_cast<mock_sdk::callback_tracing_kind_t>(
-                                  mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
-                              k_code_object_definition.on_record, {});
+                                  mock_sdk::CALLBACK_TRACING_HIP_STREAM),
+                              k_hip_stream_definition.on_record, {});
+    expect_code_object_domain_configured();
 
     service.configure(std::vector<domain_selection>{ domain_selection{
-        .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
+        .name = "hip_stream", .group = std::nullopt, .operations = std::nullopt } });
 
     service.finalize();
 }
@@ -724,6 +726,7 @@ TEST_F(domain_service_test,
         context,
         static_cast<mock_sdk::callback_tracing_kind_t>(mock_sdk::CALLBACK_TRACING_OMPT),
         k_ompt_definition.on_record, {});
+    expect_code_object_domain_configured();
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "ompt", .group = std::nullopt, .operations = std::nullopt } });
