@@ -656,10 +656,11 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
 //
 // `snap_bases`, on the kernel-launch path, holds the recorded bases of the
 // pinned host allocations this launch's snapshot records name. For such an
-// allocation capture compared every aligned argument word against it and
-// marked each one inside, so the rescan below leaves alone a word into it that
-// capture did not mark: an unaligned scalar that happens to equal one of its
-// addresses. A pinned allocation the launch has no record for (snapshots off,
+// allocation capture compared the 8-byte-aligned words of 8-byte-aligned
+// arguments against it and marked each one inside, so the rescan below treats
+// a word into it that capture did not mark as a scalar. A pointer capture never
+// examined (an argument at an unaligned kernarg offset, or an unaligned word
+// in a packed struct) is therefore left at its capture-time address. A pinned allocation the launch has no record for (snapshots off,
 // over a cap, under graph capture, a record replay refused) gets no such
 // verdict from capture, and any word that resolves into it is rewritten, as
 // before snapshots existed. Null or empty keeps that rule for every word.

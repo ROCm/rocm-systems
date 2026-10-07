@@ -572,8 +572,9 @@ host memory. On replay, a word that capture marked is rewritten when it
 resolves. The rescan of a `value_kind == 3` argument (Kernel Argument Capture
 below) also rewrites unmarked words that resolve, with one exception: a word
 into a pinned allocation the launch's snapshot records name is left alone.
-Capture compared every aligned word against that allocation and marked those
-inside it, so an unmarked one is an unaligned scalar. A word into a pinned
+Capture compared the 8-byte-aligned words of 8-byte-aligned arguments
+against that allocation and marked those inside it, so an unmarked one is
+treated as a scalar. A word into a pinned
 allocation the launch has no record for is rewritten as before snapshots
 existed: snapshots off, over a cap, under graph capture, or a record replay
 refused.
@@ -668,8 +669,9 @@ at most 256 MiB, oldest out first, rather than the unbounded blob cache.
 
 `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` reports host memory a kernel reads that replay
 did not fill: a pointer argument into a pinned allocation no record names, and a
-by-value word that lands in pinned memory but was not marked as a pointer at
-capture.
+word of a plain by-value argument (`value_kind == 0`) that lands in pinned
+memory. Words of an argument with an embedded device pointer that the rule
+above leaves alone are not reported.
 
 **Tests.** `hrr_pinned_host_test.cc` covers the behaviour above with a capture
 and a replay per case, including a failed launch, every launch entry point, a
@@ -739,9 +741,15 @@ exists to put chosen bytes in front of those kernels.
   when its argument also holds a device pointer, as before snapshots existed.
 - A pinned pointer inside a by-value struct whose allocation the launch did
   not record (over a cap, under graph capture, or with snapshots off) is
-  translated only when the struct also holds a device pointer, as before
-  snapshots existed. Otherwise the kernel gets the capture-time host address.
-  Either way the buffer is not refilled.
+  translated only when the struct also holds a device pointer or a marked
+  pinned pointer, as before snapshots existed. Otherwise the kernel gets the
+  capture-time host address. Either way the buffer is not refilled.
+- A pinned pointer that capture never examined, in an argument at an
+  unaligned kernarg offset or at an unaligned offset inside a packed struct,
+  is not marked. When the launch records its allocation through another
+  argument, replay treats it as a scalar and the kernel gets the capture-time
+  host address. Before snapshots existed the rescan translated it when the
+  argument also held a device pointer.
 - A kernel handle that never passed through the wrapped producers is not
   snapshotted until a launch of it has succeeded while a pinned allocation
   existed. Its first such launch gets no snapshot; the launches after it do.
