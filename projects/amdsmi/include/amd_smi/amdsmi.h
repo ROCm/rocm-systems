@@ -1652,7 +1652,7 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
-#define AMDSMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i)-1))
+#define AMDSMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) - 1))
 
 /**
  * @brief Event notification data returned from event notification API
@@ -2547,9 +2547,9 @@ typedef struct {
    * @brief APU metrics auxiliary data
    *
    * This pointer is non-null only when the queried device reports APU-specific
-   * metrics (APU metrics table versions 2.0 through 2.4, or 3.0). Callers must
-   * validate it before dereferencing. For GPU (discrete) devices, this pointer
-   * will be nullptr.
+   * metrics (APU metrics table versions 2.1 through 2.4, or 3.0; v2.0 is
+   * unsupported). Callers must validate it before dereferencing. For GPU
+   * (discrete) devices, this pointer will be nullptr.
    *
    * **Thread Safety and Lifetime:**
    * The pointed-to storage uses thread-local storage and is invalidated by ANY
@@ -2569,9 +2569,10 @@ typedef struct {
    * - v3.0: format_revision == 3 && content_revision == 0
    *
    * **Field Validity:**
-   * Not all fields are valid for all versions. Fields contain sentinel value
-   * 0xFFFF (65535) when not populated for the current version. Refer to inline
-   * comments in ::amdsmi_apu_metrics_t for per-field version availability; the
+   * Not all fields are valid for all versions. A field the current version does
+   * not populate reads back as the maximum value of its own type: 0xFFFF for
+   * uint16_t, 0xFFFFFFFF for uint32_t and UINT64_MAX for uint64_t. Refer to
+   * inline comments in ::amdsmi_apu_metrics_t for per-field availability; the
    * `v2_4` annotation names the v2.x layout, and a device reporting an earlier
    * v2.1-v2.3 revision leaves the fields that revision omits at the sentinel.
    */
