@@ -1664,16 +1664,24 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     // included: otherwise a setup, registration or close failure returns from this body
     // and leaves connections open and memory still registered for the rest of the
     // process, which is the contamination the helper stopped creating inside itself.
-    // Registrations go before the communicator they belong to. The teardown nulls each
-    // slot as it releases it, so nothing is released twice.
+    // Registrations go before the communicator they belong to. A slot is nulled only
+    // after successful cleanup, so the guard can retry a failed teardown.
     auto connsScope = makeScopeGuard([&]() {
         for (int c = 0; c < kNConns; c++) {
             void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
-            if (comm && rampHandles[c]) DeregisterMemory(comm, rampHandles[c]);
-            if (comm && mhandles[c])    DeregisterMemory(comm, mhandles[c]);
-            if (recvComms[c])   CloseRecvComm(recvComms[c]);
-            if (sendComms[c])   CloseSendComm(sendComms[c]);
-            if (listenComms[c]) CloseListenComm(listenComms[c]);
+            if (comm && rampHandles[c]
+                && DeregisterMemory(comm, rampHandles[c]) == ncclSuccess)
+                rampHandles[c] = nullptr;
+            if (comm && mhandles[c] && DeregisterMemory(comm, mhandles[c]) == ncclSuccess)
+                mhandles[c] = nullptr;
+            if (rampHandles[c] || mhandles[c]) continue;
+            if (recvComms[c] && CloseRecvComm(recvComms[c]) == ncclSuccess)
+                recvComms[c] = nullptr;
+            if (sendComms[c] && CloseSendComm(sendComms[c]) == ncclSuccess)
+                sendComms[c] = nullptr;
+            if (!recvComms[c] && !sendComms[c] && listenComms[c]
+                && CloseListenComm(listenComms[c]) == ncclSuccess)
+                listenComms[c] = nullptr;
         }
     });
 
@@ -1866,30 +1874,39 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     // the hang ListenCloseListen was rewritten to remove. Each slot is also nulled as it
     // is closed, so the guard can stay armed through the loop and close whatever a failure
     // leaves behind.
+    bool teardownOk = true;
     for (int c = 0; c < kNConns; c++) {
         void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
         const ncclResult_t deregRamp = DeregisterMemory(comm, rampHandles[c]);
-        rampHandles[c] = nullptr;
+        if (deregRamp == ncclSuccess) rampHandles[c] = nullptr;
+        else teardownOk = false;
         const ncclResult_t deregMsg = DeregisterMemory(comm, mhandles[c]);
-        mhandles[c] = nullptr;
+        if (deregMsg == ncclSuccess) mhandles[c] = nullptr;
+        else teardownOk = false;
         EXPECT_EQ(deregRamp, ncclSuccess)
             << "deregistering the ramp buffer failed on conn " << c;
         EXPECT_EQ(deregMsg, ncclSuccess)
             << "deregistering the phase-1 buffer failed on conn " << c;
+        if (rampHandles[c] || mhandles[c]) continue;
         if (rank == 0) {
             const ncclResult_t closedRecv = CloseRecvComm(recvComms[c]);
-            recvComms[c] = nullptr;
-            const ncclResult_t closedListen = CloseListenComm(listenComms[c]);
-            listenComms[c] = nullptr;
+            if (closedRecv == ncclSuccess) recvComms[c] = nullptr;
+            else teardownOk = false;
             EXPECT_EQ(closedRecv, ncclSuccess) << "CloseRecvComm failed on conn " << c;
-            EXPECT_EQ(closedListen, ncclSuccess) << "CloseListenComm failed on conn " << c;
+            if (!recvComms[c]) {
+                const ncclResult_t closedListen = CloseListenComm(listenComms[c]);
+                if (closedListen == ncclSuccess) listenComms[c] = nullptr;
+                else teardownOk = false;
+                EXPECT_EQ(closedListen, ncclSuccess) << "CloseListenComm failed on conn " << c;
+            }
         } else {
             const ncclResult_t closedSend = CloseSendComm(sendComms[c]);
-            sendComms[c] = nullptr;
+            if (closedSend == ncclSuccess) sendComms[c] = nullptr;
+            else teardownOk = false;
             EXPECT_EQ(closedSend, ncclSuccess) << "CloseSendComm failed on conn " << c;
         }
     }
-    connsScope.dismiss();
+    if (teardownOk) connsScope.dismiss();
 
     MPI_Barrier(MPI_COMM_WORLD);
 }
