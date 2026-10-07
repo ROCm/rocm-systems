@@ -45,9 +45,9 @@ namespace blit
 {
 struct copy_region_t
 {
-    void*       dst  = nullptr;
-    const void* src  = nullptr;
-    size_t      size = 0;
+    size_t      size   = 0;
+    const void* source = nullptr;
+    void*       dest   = nullptr;
 };
 
 hsa_status_t

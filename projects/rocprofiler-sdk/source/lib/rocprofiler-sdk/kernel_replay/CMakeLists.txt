@@ -1,7 +1,14 @@
 #
 set(ROCPROFILER_LIB_KERNEL_REPLAY_HEADERS
-    blit-copy-kernel.hpp blit-copy.hpp kernel_replay.hpp local_context.hpp
-    memory_snapshot.hpp memory_tracker.hpp replay_callbacks.hpp utils.hpp)
+    blit-copy-kernel.hpp
+    blit-copy.hpp
+    kernel_replay.hpp
+    local_context.hpp
+    memory_snapshot.hpp
+    memory_tracker.hpp
+    replay_callbacks.hpp
+    snapshot-plan.hpp
+    utils.hpp)
 set(ROCPROFILER_LIB_KERNEL_REPLAY_SOURCES
     blit-copy.cpp kernel_replay.cpp local_context.cpp memory_snapshot.cpp
     memory_tracker.cpp replay_callbacks.cpp utils.cpp)

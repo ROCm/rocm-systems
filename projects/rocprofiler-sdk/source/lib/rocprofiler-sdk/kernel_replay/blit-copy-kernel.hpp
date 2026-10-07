@@ -50,9 +50,9 @@ first_local_item(std::uint64_t thread, std::uint64_t stride, std::uint64_t logic
 
 struct copy_descriptor_t
 {
-    std::uint64_t source_address      = 0;
-    std::uint64_t destination_address = 0;
-    std::uint64_t size                = 0;
+    std::uint64_t size           = 0;
+    std::uint64_t source_address = 0;
+    std::uint64_t dest_address   = 0;
 };
 
 struct kernel_args_t
