@@ -1187,24 +1187,35 @@ WriteInterceptor(const void* packets,
             // amd-vkale).
             replay_drain_agent_or_fatal(replay_agent);
 
-            ROCP_FATAL_IF(kernel_replay::blit::prepare(queue) != HSA_STATUS_SUCCESS)
-                << "kernel replay: failed to prepare internal blit kernel";
+            const auto gpu_backend_available =
+                kernel_replay::blit::prepare(queue) == HSA_STATUS_SUCCESS;
+            if(!gpu_backend_available)
+                ROCP_WARNING << "kernel replay: internal blit kernel unavailable; trying "
+                                "pinned-host snapshot backing";
 
             // Save this agent's tracked device allocations so every pass runs against identical
-            // inputs. Prefer GPU-local backing from this agent's pool, with host memory as the
-            // allocation-pressure fallback.
-            const auto snapshot =
-                kernel_replay::memory_snapshot::snap(replay_agent, queue.get_agent().gpu_pool());
+            // inputs. Plan whole-region placement against GPU then pinned-host budgets and
+            // materialize at most one arena per tier before capture starts.
+            const auto snapshot = kernel_replay::memory_snapshot::snap(
+                kernel_replay::memory_snapshot::capture_context_t{
+                    replay_agent,
+                    queue.get_agent().get_rocp_agent()->id,
+                    queue.get_agent().near_cpu(),
+                    queue.get_agent().gpu_pool(),
+                    queue.get_agent().cpu_pool(),
+                    kernel_replay::memory_snapshot::capture_mode::automatic,
+                    gpu_backend_available,
+                });
 
             // Snapshot incomplete, or checked kernel arguments identify memory outside it:
             // restoring only part of what the passes write would corrupt application data, so
             // decline replay. Close the CONFIG sequence, free our drain signal, and run this
             // dispatch once still under the writer lock with its original completion signal, then
             // return.
-            if(!snapshot.ok || !kernel_replay::untracked_memory::can_replay_dispatch(
-                                   dispatch_pkt.kernel_dispatch, snapshot))
+            if(!snapshot.complete() || !kernel_replay::untracked_memory::can_replay_dispatch(
+                                           dispatch_pkt.kernel_dispatch, snapshot))
             {
-                if(!snapshot.ok)
+                if(!snapshot.complete())
                     LOG_FIRST_N(WARNING, 1) << "kernel replay: snapshot capture incomplete; "
                                                "running this dispatch once without replay";
                 kernel_replay::execute_config_phase_exit(
