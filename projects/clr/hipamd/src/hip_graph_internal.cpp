@@ -2921,7 +2921,7 @@ void GraphExecBase::UpdateStreams(hip::Stream* launch_stream) {
 }
 
 // ================================================================================================
-hipError_t Graph::RunOneNode(Node node) {
+hipError_t Graph::RunOneNode(Node node, std::vector<int>& covered) {
   // Clear the storage of the wait nodes
   memset(&wait_order_[0], 0, sizeof(Node) * wait_order_.size());
   amd::Command::EventWaitList waitList;
@@ -2958,30 +2958,54 @@ hipError_t Graph::RunOneNode(Node node) {
         }
       }
     } else {
-      node->SetWait(false);
       // It should be a safe return,
       // since the last edge to this dependency has to submit the command
       return hipSuccess;
     }
   }
 
-  // Create a wait list from the last launches of all dependencies
-  for (auto dep : wait_order_) {
-    if (dep != nullptr) {
-      for (auto command : dep->GetCommands()) {
-        waitList.push_back(command);
-      }
+  // A dependency already waited for by an earlier command on this stream is
+  // covered: later commands on an in-order queue sit behind that wait.
+  // Whichever node on the stream runs first installs the missing waits.
+  const int queues = static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES);
+  const int32_t sid = node->stream_id_;
+  const bool track = sid >= 0 && sid < queues &&
+                     static_cast<int>(covered.size()) == queues * queues;
+  std::vector<int> installedDeps;
+  for (int depSid = 0; depSid < static_cast<int>(wait_order_.size()); ++depSid) {
+    Node dep = wait_order_[depSid];
+    if (dep == nullptr || dep->GetCommands().empty()) {
+      continue;
+    }
+    if (track && depSid < queues && dep->launch_id_ <= covered[sid * queues + depSid]) {
+      continue;
+    }
+    for (auto command : dep->GetCommands()) {
+      waitList.push_back(command);
+    }
+    if (track && depSid < queues) {
+      installedDeps.push_back(depSid);
     }
   }
+  auto commitCovered = [&]() {
+    if (!track) {
+      return;
+    }
+    for (int depSid : installedDeps) {
+      covered[sid * queues + depSid] = wait_order_[depSid]->launch_id_;
+    }
+  };
   if (node->GetType() == hipGraphNodeTypeGraph) {
     // Process child graph separately, since there is no connection
     auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
     if (!reinterpret_cast<hip::ChildGraphNode*>(node)->GetGraphCaptureStatus()) {
-      auto status = child->RunNodes(node->stream_id_, &streams_, &waitList);
+      auto status = child->RunNodes(node->stream_id_, &streams_,
+                                    waitList.empty() ? nullptr : &waitList);
       if (status != hipSuccess) {
         releaseWaitOrderCommands();
         return status;
       }
+      commitCovered();
       // Store the child graph's completion command so that downstream
       // dependency handling can use node->GetCommands() directly,
       // instead of querying getLastQueuedCommand at dependency time
@@ -3009,8 +3033,7 @@ hipError_t Graph::RunOneNode(Node node) {
       releaseWaitOrderCommands();
       return status;
     }
-    // If a wait was requested, then process the list
-    if (node->GetWait() && !waitList.empty()) {
+    if (!waitList.empty()) {
       node->UpdateEventWaitLists(waitList);
     }
     // Start the execution
@@ -3019,20 +3042,15 @@ hipError_t Graph::RunOneNode(Node node) {
       releaseWaitOrderCommands();
       return status;
     }
+    commitCovered();
   }
   // Release commands of dependency nodes that were included in the wait list after enqueue
   releaseWaitOrderCommands();
   // Assign the launch ID of the submitted node
   // This is also applied to childGraphs to prevent them from being reprocessed
   node->launch_id_ = current_id_++;
-  uint32_t i = 0;
   // Execute the nodes in the edges list
   for (auto edge : node->GetEdges()) {
-    // Don't wait in the nodes, executed on the same streams and if it has just one dependency
-    bool wait =
-        ((i < DEBUG_HIP_FORCE_GRAPH_QUEUES) || (edge->GetDependencies().size() > 1)) ? true : false;
-    edge->SetWait(wait);
-    i++;
     // Retain the current node for all its outgoing edges.
     // Each edge will include this node in its waitlist and release it after their commands are
     // enqueued.
@@ -3053,7 +3071,6 @@ hipError_t Graph::RunOneNode(Node node) {
     }
   }
 
-  node->SetWait(false);
   return hipSuccess;
 }
 
@@ -3103,9 +3120,11 @@ hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>*
   }
 
   // Run all commands in the graph
+  const int queues = static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES);
+  std::vector<int> covered(static_cast<size_t>(queues) * queues, -1);
   for (auto node : GetTopoOrder()) {
     node->launch_id_ = -1;
-    auto status = RunOneNode(node);
+    auto status = RunOneNode(node, covered);
     if (status != hipSuccess) {
       return status;
     }

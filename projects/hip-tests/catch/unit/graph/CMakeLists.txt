@@ -125,6 +125,37 @@ add_test(NAME Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2
     $<TARGET_FILE:GraphsCollapseTest>
     "Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2")
 
+# Gated fan-out. The executor flag is read when the runtime loads, so classic
+# and segmented each get their own process. Q=4 makes children i>=4 wrap.
+if(HIP_PLATFORM MATCHES "amd")
+  set_source_files_properties(hipGraphGatedFanoutOrder.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  add_executable(GraphsGatedFanoutTest EXCLUDE_FROM_ALL
+    hipGraphGatedFanoutOrder.cc
+    $<TARGET_OBJECTS:Main_Object>
+    $<TARGET_OBJECTS:KERNELS>)
+  set_target_properties(GraphsGatedFanoutTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(GraphsGatedFanoutTest Catch2::Catch2 ${GPGPU_LINKER_LIBRARIES})
+  if(UNIX)
+    target_link_libraries(GraphsGatedFanoutTest stdc++fs -ldl pthread rt)
+  endif()
+  add_dependencies(build_tests GraphsGatedFanoutTest)
+  add_dependencies(GraphsGatedFanoutTest hip_tests_config)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS GraphsGatedFanoutTest)
+
+  add_test(NAME Unit_hipGraphGatedFanout_Order_Classic
+    COMMAND ${CMAKE_COMMAND} -E env
+      "DEBUG_HIP_GRAPH_CLASSIC_PATH=1"
+      "DEBUG_HIP_FORCE_GRAPH_QUEUES=4"
+      $<TARGET_FILE:GraphsGatedFanoutTest>
+      "Unit_hipGraphGatedFanout_Order_Classic")
+
+  add_test(NAME Unit_hipGraphGatedFanout_Order_Segmented
+    COMMAND ${CMAKE_COMMAND} -E env
+      "DEBUG_HIP_FORCE_GRAPH_QUEUES=4"
+      $<TARGET_FILE:GraphsGatedFanoutTest>
+      "Unit_hipGraphGatedFanout_Order_Segmented")
+endif()
+
 set(TEST_SRC
   hipStreamGetCaptureInfo.cc
   hipStreamEndCapture.cc
