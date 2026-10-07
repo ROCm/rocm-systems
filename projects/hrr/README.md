@@ -91,7 +91,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
-| `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance). Only a Debug build of the HIP runtime (no `NDEBUG`) reads it; a release build ignores it. When a Debug build reads it, capture says so on stderr whatever the log level |
+| `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance). Only a Debug build of the HIP runtime (no `NDEBUG`) reads it; a release build ignores it. Either way capture says on stderr whether it reads it, whatever the log level |
 
 ### `hrr-playback` CLI options
 

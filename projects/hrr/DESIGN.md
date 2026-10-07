@@ -612,7 +612,8 @@ Setting `HIP_HRR_DEBUG_ARGS` enables arg dumps at capture time (see
 (`[HRR args] <kernel> arg[i] kind=.. size=.. value/bytes=..`), and capture says on
 stderr that it is doing so. The dumps are a second copy of the argument bytes the
 archive already holds, outside the archive's permissions, so only a Debug build of
-the HIP runtime (no `NDEBUG`) reads the variable; a release build ignores it. Two markers make
+the HIP runtime (no `NDEBUG`) reads the variable. A release build ignores it and
+says so on stderr. Two markers make
 common failure modes unambiguous:
 
 - `[TRUNCATED:no-bytes]` — the arg's bytes were unavailable at capture (the packed
@@ -628,8 +629,8 @@ common failure modes unambiguous:
 A GPU fault at a small fixed address (e.g. `0x20000`) with all captured pointer
 args translating correctly indicates a **data** divergence (a buffer's *contents*
 differ at replay so the kernel computes an out-of-bounds index), not an argument
-capture problem. Confirm with `HIP_HRR_DEBUG_ARGS` that the nulls are genuine
-before suspecting the `<<<>>>` / kernarg capture path.
+capture problem. Confirm with `HIP_HRR_DEBUG_ARGS` (Debug runtime) that the nulls
+are genuine before suspecting the `<<<>>>` / kernarg capture path.
 
 ## Fat Binary Registration
 

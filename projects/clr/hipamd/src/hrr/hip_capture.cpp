@@ -2477,19 +2477,6 @@ void hip_capture_init() {
       return;
     }
 
-    // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
-    // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
-    // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
-    // level to LOG_INFO (never lower an already-higher level) so enabling
-    // HIP_HRR_DEBUG_ARGS alone is enough to get the traces. Say so on stderr
-    // whatever the log level, since the traces carry argument bytes.
-    if (hrr_dbg_args_enabled()) {
-      fprintf(stderr,
-              "[HRR capture] HIP_HRR_DEBUG_ARGS is set: kernel argument bytes and "
-              "host-to-device copy destinations are also written to the log\n");
-      if (AMD_LOG_LEVEL < amd::LOG_INFO) AMD_LOG_LEVEL = amd::LOG_INFO;
-    }
-
     // Snapshot the fully-initialized dispatch table and install runtime shims here
     // only (see comment above — no static-init capture hook).
     if (!g_installed) {
@@ -2504,6 +2491,31 @@ void hip_capture_init() {
       hip_capture_uninstall();
       return;
     }
+
+    // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
+    // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
+    // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
+    // level to LOG_INFO (never lower an already-higher level) so enabling
+    // HIP_HRR_DEBUG_ARGS alone is enough to get the traces. Say so on stderr
+    // whatever the log level, since the traces carry argument bytes. This runs
+    // only once the writer is open, so a refused open claims nothing.
+    if (hrr_dbg_args_enabled()) {
+      fprintf(stderr,
+              "[HRR capture] HIP_HRR_DEBUG_ARGS is set: kernel argument bytes and "
+              "host-to-device copy destinations are also written to the log\n");
+      if (AMD_LOG_LEVEL < amd::LOG_INFO) AMD_LOG_LEVEL = amd::LOG_INFO;
+    }
+#if !defined(DEBUG)
+    // A release runtime cannot read the flag, so tell whoever set it why no
+    // traces appear rather than leave them looking.
+    else {
+      const std::string dbg = amd::Os::getEnvironment("HIP_HRR_DEBUG_ARGS");
+      if (!dbg.empty() && dbg != "0")
+        fprintf(stderr,
+                "[HRR capture] HIP_HRR_DEBUG_ARGS ignored: only a Debug build of the "
+                "HIP runtime reads it\n");
+    }
+#endif
 
     hrr_cap::writer::set_capture_metadata_json(
         hrr_cap::metadata::collect_json());

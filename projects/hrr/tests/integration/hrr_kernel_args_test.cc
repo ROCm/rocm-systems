@@ -179,15 +179,17 @@ TEST_CASE("Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled", "[.][hrr]") {
 // ---------------------------------------------------------------------------
 // HIP_HRR_DEBUG_ARGS writes kernel argument bytes to the log, a second copy of
 // what the archive holds. Only a Debug build of the runtime may honour it, and
-// that one must say on stderr that it does. With the variable set the log level
-// is 0, so the runtime's own raise to LOG_INFO is what shows the dumps. With it
-// at 0, AMD_LOG_LEVEL=3 is high enough for them to show if anything else turned
-// them on. Both are set in both runs so the parent's environment cannot decide
-// the outcome. AMD_LOG_MASK=0 keeps the per-API traces out; the dumps log with
-// LOG_ALWAYS, which no mask filters.
+// that one must say on stderr that it does. A release build must say on stderr
+// that it ignored it. With the variable set the log level is 0, so the
+// runtime's own raise to LOG_INFO is what shows the dumps. With it at 0,
+// AMD_LOG_LEVEL=3 is high enough for them to show if anything else turned them
+// on. Both are set in both runs, and the log file is unset so the log goes to
+// stderr, so the parent's environment cannot decide the outcome.
+// AMD_LOG_MASK=0 keeps the per-API traces out; the dumps log with LOG_ALWAYS,
+// which no mask filters.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime) {
-  struct Run { bool dumped, noticed; };
+  struct Run { bool dumped, noticed, ignored; };
   auto capture = [](bool debug_args) {
     ScopedDir cap(fs::temp_directory_path() / "hrr_kernel_args_debug.hrr");
     hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true,
@@ -196,6 +198,8 @@ HRR_TEST_CASE(Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime) {
     proc.setEnv("HIP_HRR_DEBUG_ARGS", debug_args ? "1" : "0");
     proc.setEnv("AMD_LOG_LEVEL", debug_args ? "0" : "3");
     proc.setEnv("AMD_LOG_MASK", "0");
+    proc.unsetEnv("AMD_LOG_LEVEL_FILE");
+    proc.unsetEnv("AMD_LOG_ASYNC");
     set_proc_search_path(proc);
     const int ret = proc.run("\"Unit_HRR_KernelArgs_Direct\"");
     const std::string out = proc.getOutput();
@@ -205,20 +209,25 @@ HRR_TEST_CASE(Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime) {
     hrr_single_process_archive(cap.path);
     return Run{out.find("[HRR args] ") != std::string::npos,
                out.find("[HRR capture] HIP_HRR_DEBUG_ARGS is set: kernel "
-                        "argument bytes") != std::string::npos};
+                        "argument bytes") != std::string::npos,
+               out.find("[HRR capture] HIP_HRR_DEBUG_ARGS ignored") !=
+                   std::string::npos};
   };
 
   const Run unset = capture(false);
   CHECK_FALSE(unset.dumped);
   CHECK_FALSE(unset.noticed);
+  CHECK_FALSE(unset.ignored);
 
   const Run set = capture(true);
 #if defined(HRR_TEST_CLR_DEBUG_FLAGS)
   CHECK(set.dumped);
   CHECK(set.noticed);
+  CHECK_FALSE(set.ignored);
 #else
   CHECK_FALSE(set.dumped);
   CHECK_FALSE(set.noticed);
+  CHECK(set.ignored);
 #endif
 }
 
