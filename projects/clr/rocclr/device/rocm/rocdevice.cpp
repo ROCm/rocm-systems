@@ -1256,8 +1256,9 @@ bool Device::populateOCLDeviceConstants() {
     }
   }
   // The host writes these signals through the BAR.
-  graph_device_signals_ =
-      DEBUG_CLR_GRAPH_DEV_SIGNALS && info_.largeBar_ && (device_signal_pool_.handle != 0);
+  const bool device_signals = info_.largeBar_ && (device_signal_pool_.handle != 0);
+  graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && device_signals;
+  queue_device_signals_ = DEBUG_CLR_DEV_SIGNALS && device_signals;
   // Left true by a runtime without the query, since flushing is always correct
   Hsa::agent_get_info(bkendDevice_,
                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
