@@ -93,7 +93,7 @@ Visit order: largest PMC sets first (M1, then HBM-like, M2, M3).
 
 ## 3. TCC series affinity + coverage
 
-The TCC handling in this section is a **short-term solution**. Generalizing it is **out of scope for this design**. [Instance-aware metrics](#instance-aware-metrics-out-of-scope) records that boundary.
+The TCC handling in this section is a **short-term solution**. The TCC rules live in one module so they can be replaced later. Generalizing it is **out of scope for this design**. [Instance-aware metrics](#instance-aware-metrics-out-of-scope) records that boundary.
 
 TCC channel series need packing rules beyond co-locating one Single-pass packable (SPP) metric's PMC set in a single pass. Why: an L2 channel map can change between replays, so a latency ratio that joins a request counter and its level counter from different passes is not one execution.
 
