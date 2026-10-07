@@ -76,6 +76,8 @@ Caller-owned host registration uses coherent KFD USERPTR mappings. Requesting
 uncached registration adds the native uncached flag while retaining coherent
 GPU access. The caller keeps the complete host page cover mapped until native
 teardown succeeds or process teardown resolves uncertain ownership.
+rocddi-owned host pages use the same coherent USERPTR mapping and carry an
+optional uncached placement request through their allocation kind.
 
 A topology endpoint is passive metadata. It is not an activated `Device` and
 does not authorize native execution or memory operations. The current backend

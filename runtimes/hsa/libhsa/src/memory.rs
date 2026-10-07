@@ -129,6 +129,7 @@ impl PointerDescription {
 pub(crate) struct Memory {
     allocation: Allocation,
     description: PointerDescription,
+    pool_global_flags: u32,
     deallocation_callbacks: Vec<RegisteredDeallocationCallback>,
 }
 
@@ -145,14 +146,17 @@ impl Memory {
         allocation: Allocation,
         size: usize,
         owner: HsaAgent,
-        global_flags: u32,
+        pool_global_flags: u32,
+        uncached: bool,
         alloc_flags: u32,
         accessible: Vec<HsaAgent>,
     ) -> Self {
         let info = allocation.info();
         let agent_base = info.device_address as usize;
+        let global_flags = effective_global_flags(pool_global_flags, uncached);
         Self {
             allocation,
+            pool_global_flags,
             description: PointerDescription {
                 pointer_type: POINTER_TYPE_HSA,
                 agent_base,
@@ -178,6 +182,7 @@ impl Memory {
         let agent_base = info.device_address as usize;
         Self {
             allocation,
+            pool_global_flags: POOL_FLAG_COARSE,
             description: PointerDescription {
                 pointer_type: POINTER_TYPE_GRAPHICS,
                 agent_base,
@@ -208,6 +213,7 @@ impl Memory {
         let info = allocation.info();
         Self {
             allocation,
+            pool_global_flags: POOL_FLAG_COARSE,
             description: PointerDescription {
                 pointer_type: POINTER_TYPE_IPC,
                 agent_base: info.device_address as usize,
@@ -420,11 +426,23 @@ fn cpu_pool(pool: HsaMemoryPool) -> bool {
     )
 }
 
-fn cpu_pool_memory_kind(pool: HsaMemoryPool, lifetime: SessionLifetime) -> MemoryKind {
+fn cpu_pool_memory_kind(pool: HsaMemoryPool, lifetime: SessionLifetime, flags: u32) -> MemoryKind {
     if pool.handle == CPU_POOL_KERNARG || lifetime == SessionLifetime::Session {
         MemoryKind::System
     } else {
-        MemoryKind::OwnedHost
+        MemoryKind::OwnedHost {
+            uncached: flags & ALLOC_UNCACHED != 0,
+        }
+    }
+}
+
+fn effective_global_flags(pool_flags: u32, uncached: bool) -> u32 {
+    if uncached {
+        (pool_flags & !(POOL_FLAG_COARSE | POOL_FLAG_EXTENDED_FINE))
+            | POOL_FLAG_FINE
+            | POOL_FLAG_KERNARG
+    } else {
+        pool_flags
     }
 }
 
@@ -1109,7 +1127,7 @@ unsafe fn memory_pool_allocate(
             None => return INVALID_ALLOCATION,
         };
         let (device_index, kind) = if cpu_pool(pool) {
-            (0, cpu_pool_memory_kind(pool, runtime.lifetime))
+            (0, cpu_pool_memory_kind(pool, runtime.lifetime, flags))
         } else if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
             if pool_kind == GPU_POOL_GROUP {
                 return INVALID_ALLOCATION;
@@ -1155,6 +1173,7 @@ unsafe fn memory_pool_allocate(
         } else {
             DeviceAccess::READ | DeviceAccess::WRITE
         };
+        let uncached = flags & ALLOC_UNCACHED != 0 || matches!(kind, MemoryKind::System);
         let allocation = match runtime.gpus[device_index].device.allocate(
             kind,
             rounded as u64,
@@ -1199,6 +1218,7 @@ unsafe fn memory_pool_allocate(
                 size,
                 owner,
                 global_flags,
+                uncached,
                 alloc_flags,
                 accessible,
             ),
@@ -2052,7 +2072,7 @@ unsafe fn memory_lock_to_pool(
         host_base,
         device_base,
         size,
-        global_flags,
+        effective_global_flags(global_flags, flags & ALLOC_UNCACHED != 0),
         accessible,
     ));
     // SAFETY: The caller supplied writable pointer storage.
@@ -3480,7 +3500,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
         let owner = memory.description.owner;
         let storage = if owner.handle == CPU_AGENT {
             PoolStorage::System
-        } else if memory.description.global_flags & POOL_FLAG_FINE != 0 {
+        } else if memory.pool_global_flags & POOL_FLAG_FINE != 0 {
             PoolStorage::LocalFine
         } else {
             PoolStorage::LocalCoarse
@@ -6917,8 +6937,8 @@ mod tests {
     fn cpu_pool_allocations_preserve_their_cache_policy() {
         for pool in [CPU_POOL_FINE, CPU_POOL_EXTENDED, CPU_POOL_COARSE] {
             assert_eq!(
-                cpu_pool_memory_kind(HsaMemoryPool { handle: pool }, SessionLifetime::Process),
-                MemoryKind::OwnedHost
+                cpu_pool_memory_kind(HsaMemoryPool { handle: pool }, SessionLifetime::Process, 0),
+                MemoryKind::OwnedHost { uncached: false }
             );
         }
         assert_eq!(
@@ -6926,13 +6946,14 @@ mod tests {
                 HsaMemoryPool {
                     handle: CPU_POOL_KERNARG,
                 },
-                SessionLifetime::Process
+                SessionLifetime::Process,
+                0
             ),
             MemoryKind::System
         );
         for pool in [CPU_POOL_FINE, CPU_POOL_EXTENDED, CPU_POOL_COARSE] {
             assert_eq!(
-                cpu_pool_memory_kind(HsaMemoryPool { handle: pool }, SessionLifetime::Session),
+                cpu_pool_memory_kind(HsaMemoryPool { handle: pool }, SessionLifetime::Session, 0),
                 MemoryKind::System
             );
         }

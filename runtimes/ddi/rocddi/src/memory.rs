@@ -143,10 +143,13 @@ pub enum MemoryKind {
     /// and persistent host mapping. Host-only allocations instead use
     /// [`Session::allocate_host`](crate::session::Session::allocate_host).
     System,
-    /// rocddi-owned write-back host pages made accessible to the device at the
-    /// same host and device virtual address. The backend may pin, register, or
-    /// otherwise bind those pages without exposing that native mechanism.
-    OwnedHost,
+    /// rocddi-owned host pages made accessible to the device at the same host
+    /// and device virtual address. The backend may pin, register, or otherwise
+    /// bind those pages without exposing that native mechanism.
+    OwnedHost {
+        /// Bypass device caches while retaining coherent device access.
+        uncached: bool,
+    },
     /// Caller-owned host pages made accessible to the device. `address` is the
     /// logical host base and may be subpage aligned. The caller keeps the
     /// complete page cover live until [`Allocation::free`] succeeds. Safe

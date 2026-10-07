@@ -165,7 +165,11 @@ address and report no host address or host-access flag in pointer info. CPU
 agent access to that pool is unavailable. When the full local memory is
 CPU-visible, pool allocations retain a host mapping. The AMD uncached pool
 flag requests coherent and uncached native VRAM placement for pool
-allocations and virtual-memory handles.
+allocations and virtual-memory handles. For CPU pools, it requests coherent,
+uncached rocddi-owned host pages. CPU pool allocations in a secondary KFD
+context use rocddi system backing, which is already uncached. Pointer info
+reports the effective fine-grained and kernarg flags for uncached pool
+allocations and host locks; peer access remains governed by the owning pool.
 For linear asynchronous CPU-to-GPU and GPU-to-CPU copies, rocddi stages a
 CPU-accessible operand that is not mapped to that GPU. The HSA worker reads
 the source after dependency signals complete, copies a staged destination

@@ -768,7 +768,9 @@ impl AllocationDriver for LinuxKfdDriver {
     ) -> Result<Owned<NativeAllocation>, Error> {
         let desc = checked_allocation_desc(size, alignment)?;
         let kind = kind.get();
-        if device.lifetime == SessionLifetime::Session && matches!(kind, MemoryKind::OwnedHost) {
+        if device.lifetime == SessionLifetime::Session
+            && matches!(kind, MemoryKind::OwnedHost { .. })
+        {
             return Err(error(
                 ErrorKind::Unsupported,
                 "secondary KFD contexts cannot bind host-owned pages",
@@ -776,7 +778,7 @@ impl AllocationDriver for LinuxKfdDriver {
         }
         let native_kind = match kind {
             MemoryKind::System => memory::BufferKind::Gtt,
-            MemoryKind::OwnedHost => memory::BufferKind::OwnedUserptr { uncached: false },
+            MemoryKind::OwnedHost { uncached } => memory::BufferKind::OwnedUserptr { uncached },
             MemoryKind::RegisteredHost { .. } => {
                 return Err(error(
                     ErrorKind::DriverContract,
