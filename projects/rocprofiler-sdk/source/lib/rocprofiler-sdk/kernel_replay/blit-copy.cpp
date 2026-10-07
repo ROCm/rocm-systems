@@ -320,13 +320,13 @@ create(const hsa::Queue& queue, const std::vector<copy_region_t>& regions)
     auto total_items = uint64_t{0};
     for(const auto& region : regions)
     {
-        if(!region.dst || !region.src || region.size == 0) return std::nullopt;
+        if(region.size == 0 || !region.source || !region.dest) return std::nullopt;
         const auto item_count = items_for_size(region.size);
         if(item_count > std::numeric_limits<uint64_t>::max() - total_items) return std::nullopt;
         descriptor_data.emplace_back(copy_descriptor_t{
-            reinterpret_cast<uint64_t>(region.src),
-            reinterpret_cast<uint64_t>(region.dst),
             region.size,
+            reinterpret_cast<uint64_t>(region.source),
+            reinterpret_cast<uint64_t>(region.dest),
         });
         total_items += item_count;
     }
