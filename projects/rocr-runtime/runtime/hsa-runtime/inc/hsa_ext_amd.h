@@ -94,9 +94,10 @@
  *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
  *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
  * - 1.37 - hsa_amd_memory_async_batch_copy: HSA_AMD_MEMORY_COPY_OP_RECT
+ * - 1.38 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 37
+#define HSA_AMD_INTERFACE_VERSION_MINOR 38
 
 #ifdef __cplusplus
 extern "C" {
@@ -1039,6 +1040,32 @@ typedef enum hsa_amd_agent_info_s {
    * The type of this attribute is bool.
    */
   HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED = 0xA129,
+  /**
+   * Maximum number of destinations accepted in a single
+   * ::HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST operation submitted to this
+   * agent. Zero if the agent is configured such that it cannot service a
+   * broadcast at all. A GPU agent reporting zero rejects the operation with
+   * ::HSA_STATUS_ERROR_INVALID_ARGUMENT; a CPU agent always reports zero and
+   * rejects it earlier, with ::HSA_STATUS_ERROR_INVALID_AGENT, because a
+   * broadcast requires a GPU source agent.
+   *
+   * This is a ceiling on the destination count, not a guarantee that any
+   * particular copy succeeds: it describes how the agent is configured, not
+   * whether the DMA resources a given copy needs are available at the moment
+   * it is submitted. A broadcast within the reported ceiling can still be
+   * rejected if the agent's DMA engines cannot be brought up.
+   *
+   * A broadcast is carried by the agent's DMA engines, either by a dedicated
+   * multicast packet or by per-destination fan-out. Which of the two services
+   * a given copy depends on the transfer size and on how many destinations
+   * the packet can describe, and is not observable here - a request larger
+   * than one routing can take is served by the other rather than rejected.
+   * The reported count therefore holds at every transfer size, and is the
+   * limit of ::hsa_amd_memory_copy_op_t::num_entries itself on any agent able
+   * to service a broadcast at all.
+   * The type of this attribute is uint32_t.
+   */
+  HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS = 0xA12A
 } hsa_amd_agent_info_t;
 
 /**
