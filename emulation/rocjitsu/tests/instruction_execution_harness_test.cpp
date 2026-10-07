@@ -744,15 +744,24 @@ template <typename Isa> void check_block_transfer_masks(rj_code_arch_t arch) {
             cu.write_vgpr(vb + 32 + word, lane, load ? canary : value(lane, word));
           }
         }
-        const uint16_t opcode = load ? cdna5::kGlobalLoadBlock : cdna5::kGlobalStoreBlock;
-        const auto words = scratch ? cdna5::build_vscratch(opcode, {.saddr = 0x7c,
-                                                                    .vdst = uint8_t(load ? 32 : 0),
-                                                                    .vsrc = uint8_t(load ? 0 : 32),
-                                                                    .vaddr = 0})
-                                   : cdna5::build_vglobal(opcode, {.saddr = 0x7c,
-                                                                   .vdst = uint8_t(load ? 32 : 0),
-                                                                   .vsrc = uint8_t(load ? 0 : 32),
-                                                                   .vaddr = 0});
+        const auto build_words = [&](auto builder, uint16_t opcode) {
+          return builder(opcode, {.saddr = 124,
+                                  .vdst = uint8_t(load ? 32 : 0),
+                                  .vsrc = uint8_t(load ? 0 : 32),
+                                  .vaddr = 0});
+        };
+        std::array<uint32_t, 3> words;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          words = scratch ? build_words(cdna5::build_vscratch,
+                                        load ? cdna5::kScratchLoadBlock : cdna5::kScratchStoreBlock)
+                          : build_words(cdna5::build_vglobal,
+                                        load ? cdna5::kGlobalLoadBlock : cdna5::kGlobalStoreBlock);
+        } else {
+          words = scratch ? build_words(rdna4::build_vscratch,
+                                        load ? rdna4::kScratchLoadBlock : rdna4::kScratchStoreBlock)
+                          : build_words(rdna4::build_vglobal,
+                                        load ? rdna4::kGlobalLoadBlock : rdna4::kGlobalStoreBlock);
+        }
         auto decoder = Decoder::create(arch);
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
         ASSERT_NE(inst, nullptr);

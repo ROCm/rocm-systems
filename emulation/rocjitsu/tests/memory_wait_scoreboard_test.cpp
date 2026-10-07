@@ -2370,16 +2370,24 @@ TEST(MemoryWaitExecutionTest, BlockDependenciesUseCapturedDwordMask) {
           wf->set_m0(mask);
           for (uint32_t reg = 0; reg < 64; ++reg)
             cu->write_vgpr(wf->vgpr_alloc().base + reg, 0, 0);
-          const uint16_t opcode = load ? cdna5::kGlobalLoadBlock : cdna5::kGlobalStoreBlock;
-          const auto words = scratch
-                                 ? cdna5::build_vscratch(opcode, {.saddr = 124,
-                                                                  .vdst = uint8_t(load ? 32 : 0),
-                                                                  .vsrc = uint8_t(load ? 0 : 32),
-                                                                  .vaddr = 0})
-                                 : cdna5::build_vglobal(opcode, {.saddr = 124,
-                                                                 .vdst = uint8_t(load ? 32 : 0),
-                                                                 .vsrc = uint8_t(load ? 0 : 32),
-                                                                 .vaddr = 0});
+          const auto build_words = [&](auto builder, uint16_t opcode) {
+            return builder(opcode, {.saddr = 124,
+                                    .vdst = uint8_t(load ? 32 : 0),
+                                    .vsrc = uint8_t(load ? 0 : 32),
+                                    .vaddr = 0});
+          };
+          std::array<uint32_t, 3> words;
+          if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            words = scratch ? build_words(cdna5::build_vscratch, load ? cdna5::kScratchLoadBlock
+                                                                      : cdna5::kScratchStoreBlock)
+                            : build_words(cdna5::build_vglobal, load ? cdna5::kGlobalLoadBlock
+                                                                     : cdna5::kGlobalStoreBlock);
+          } else {
+            words = scratch ? build_words(rdna4::build_vscratch, load ? rdna4::kScratchLoadBlock
+                                                                      : rdna4::kScratchStoreBlock)
+                            : build_words(rdna4::build_vglobal, load ? rdna4::kGlobalLoadBlock
+                                                                     : rdna4::kGlobalStoreBlock);
+          }
           auto decoder = Decoder::create(arch);
           util::StringDiagnostic error;
           auto decoded = decoder->decode_window(words, 0, error.emitter());
