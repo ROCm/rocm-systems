@@ -246,7 +246,7 @@ void expectAutoSelection(struct ncclTopoSystem* system)
 constexpr int kXgmiPeerRank = 1;
 
 // cpuVendor >= 0 replaces the fixture's CPU vendor, for the host-dependent
-// defaults ncclTopoCheckP2p applies.
+// defaults ncclTopoCheckP2p applies. The CPU arch is forced to x86 as well.
 void checkXgmiPairP2p(int* p2pOut, int* cudaP2pOut, int cpuVendor = -1)
 {
     *p2pOut     = -1;
