@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Native rocddi contract checks for the first GPU target.
@@ -17,13 +18,85 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU16, AtomicU64, Ordering, f
 use std::time::{Duration, Instant};
 
 use rocddi::gpu::queue::{
-    QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
-    QueueRingMemory, SdmaEngineSelection, ring_doorbell,
+    KernelCommand, KernelQueueFormat, QueueAccessWidth, QueueParameters, QueuePriority,
+    QueueProducerMode, QueueRequest, QueueRingMemory, SdmaEngineSelection, ring_doorbell,
 };
 use rocddi::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::interop::linux::{AisFileOperation, ais_transfer};
 use rocddi::memory::{DeviceAccess, HostCachePolicy, MemoryKind};
 use rocddi::session::{Session, SessionLifetime};
+
+#[test]
+#[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
+fn gfx1201_kernel_queue_refresh_contract() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new(SessionLifetime::Process)?;
+    let mut selected = None;
+    session.enumerate(&mut |endpoint| {
+        if endpoint
+            .gpu()
+            .is_some_and(|gpu| (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping) == (12, 0, 1))
+        {
+            selected = Some(endpoint);
+        }
+        Ok(())
+    })?;
+    let endpoint = selected.ok_or_else(|| io::Error::other("GFX1201 endpoint is unavailable"))?;
+    let device = session.activate(&endpoint)?;
+    let gpu = device.gpu()?;
+    let mut command = device.allocate(
+        MemoryKind::System,
+        4096,
+        4096,
+        DeviceAccess::READ | DeviceAccess::EXECUTE,
+    )?;
+    let info = command.info();
+    let host = info
+        .host_address
+        .ok_or_else(|| io::Error::other("command allocation has no host mapping"))?;
+    // SAFETY: The live SYSTEM allocation has at least 32 writable host bytes.
+    // Zero dwords encode SDMA NOP packets on the qualified GFX1201 target.
+    unsafe { std::ptr::write_bytes(host as *mut u8, 0, 32) };
+    fence(Ordering::Release);
+    let mut queue = gpu.create_kernel_queue(KernelQueueFormat::Sdma)?;
+    assert_eq!(queue.refresh_status()?.retired_submission, 0);
+    // SAFETY: The executable command allocation remains live until checked
+    // retirement, including every refresh failure or timeout path below.
+    let submission = unsafe {
+        queue.submit(KernelCommand {
+            device_address: info.device_address,
+            byte_length: 32,
+        })?
+    };
+    assert_eq!(queue.status().retired_submission, 0);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match queue.refresh_status() {
+            Ok(status) if status.retired_submission >= submission => {
+                assert_eq!(status.terminal, None);
+                break;
+            }
+            Ok(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(1)),
+            outcome => {
+                // An unretired command may still read its source after this
+                // test returns. Preserve all providers and backing until exit.
+                std::mem::forget(queue);
+                std::mem::forget(command);
+                std::mem::forget(device);
+                std::mem::forget(session);
+                return Err(Box::new(io::Error::other(format!(
+                    "kernel queue refresh did not retire submission {submission}: {outcome:?}"
+                ))));
+            }
+        }
+    }
+    assert_eq!(queue.status().retired_submission, submission);
+    queue.destroy()?;
+    command.free()?;
+    drop(command);
+    drop(device);
+    session.destroy()?;
+    Ok(())
+}
 
 #[test]
 #[ignore = "requires GFX1201, KFD AIS, and ROCDDI_CTS_AIS_DIR on P2P-capable storage"]

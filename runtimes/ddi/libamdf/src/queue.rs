@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Direct native queues with cached mappings and explicit producer borrows.
@@ -661,6 +662,7 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
             if queue.mappings.load(Ordering::Acquire) != 0 {
                 return Err(BUSY);
             }
+            let mut observation_error = None;
             if !queue.destroying.load(Ordering::Acquire) {
                 // A work-only BUSY rejection also leaves all public queue uses
                 // available. No producer remains after mapping preflight, so the
@@ -671,21 +673,31 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
                     Err(error) if error.kind() == rocddi::ErrorKind::DeviceLost => {
                         queue.observe_error(&error);
                     }
-                    Err(error) => return Err(queue.observe_error(&error)),
+                    Err(error) => observation_error = Some(queue.observe_error(&error)),
                 }
             }
-            // Native destruction can release some backing before a later step
-            // fails. Keep the owner for cleanup retries, but never republish cached
-            // addresses or permit further queue use after that attempt begins.
+            // After the BUSY preflight, every outcome consumes the public
+            // handle. Failed or unproved cleanup retains native backing as a
+            // leak without replaying a partially completed release.
             queue.destroying.store(true, Ordering::Release);
-            // SAFETY: Mapping preflight established that no public producer
-            // borrow remains; the caller has exclusive queue access.
-            if let Err(error) = queue.native.destroy() {
-                return Err(queue.observe_error(&error));
-            }
+            let result = if let Some(status) = observation_error {
+                Err(status)
+            } else {
+                // SAFETY: Mapping preflight established that no public producer
+                // borrow remains; the caller has exclusive queue access.
+                queue
+                    .native
+                    .destroy()
+                    .map_err(|error| queue.observe_error(&error))
+            };
             unregister(&*queue.device_queues);
-            drop(Owned::from_raw(pointer.cast::<Queue>()));
-            Ok(())
+            let owner = Owned::from_raw(pointer.cast::<Queue>());
+            if result.is_err() {
+                std::mem::forget(owner);
+            } else {
+                drop(owner);
+            }
+            result
         }
     })
 }
