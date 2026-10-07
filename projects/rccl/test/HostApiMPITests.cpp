@@ -1520,7 +1520,7 @@ bool a2aVerify(const void* buf, size_t bytes, int nRanks, int src, int dst, int 
  * Runs once with uniform sizes and once with uneven sizes around the copy-engine
  * chunk size; with 3+ ranks on one node the uneven profile is what makes the
  * copy engine split its batches into chunks. Each put lands in its own slot with
- * its own pattern, and the guard after it must stay untouched.
+ * its own pattern, and the rest of the slot after it must stay untouched.
  *
  * A signal that overtook its data is caught only if the copy is still in flight
  * when the receiver reads the slot back, so that ordering is checked
@@ -1604,7 +1604,7 @@ TEST_F(HostApiTest, DenseAllToAllPutSignal)
                 }
                 const size_t bytes = a2aPutBytes(uneven, src, myRank, k);
                 ok = a2aVerify(slot, bytes, nRanks_, src, myRank, k) &&
-                     AllSentinel(slot + bytes, kA2aGuard, kA2aSentinel);
+                     AllSentinel(slot + bytes, kA2aSlot - bytes, kA2aSentinel);
             }
         }
         ASSERT_MPI_TRUE(ok);
