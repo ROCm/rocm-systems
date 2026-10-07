@@ -2438,7 +2438,6 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
   if (!reclaimWorkerStarted) {
     publish(abortCoordination);
     publish(allowPauseAcknowledgment);
-    state->cond.notify_one();
     reclaim.join();
     proxy.join();
     FAIL() << "reclaim worker did not start before the coordination deadline";
