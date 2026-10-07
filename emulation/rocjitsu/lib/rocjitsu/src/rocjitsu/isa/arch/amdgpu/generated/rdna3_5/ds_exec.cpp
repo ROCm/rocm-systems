@@ -565,33 +565,69 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  (void)wf; // sema_release_all is a structural no-op
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  (void)wf; // init is a structural no-op
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  (void)wf; // sema_v is a structural no-op
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  (void)wf; // sema_br is a structural no-op
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  (void)wf; // sema_p is a structural no-op
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  (void)wf; // barrier is a structural no-op
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {

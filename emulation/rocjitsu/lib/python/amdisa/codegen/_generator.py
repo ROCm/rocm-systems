@@ -415,6 +415,7 @@ class CodeGenerator:
         'ds_mskor': 'local',
         'ds_append_consume': 'local',
         'ds_barrier_arrive': 'local',
+        'ds_gws': 'local',
         'ds_read_addtid': 'local',
         'ds_write_addtid': 'local',
         'ds_read_tr_b16': 'local',
@@ -7742,6 +7743,11 @@ class CodeGenerator:
                 return gds_guard + self._gen_ds_append_consume(dst_ops, src_ops, sem)
             return gds_guard + self._gen_ds_barrier_arrive(dst_ops, src_ops, sem)
 
+        if cls == 'ds_gws':
+            # GWS legitimately targets GDS, so (unlike the other DS classes) it
+            # must not be guarded against inst_.gds.
+            return self._gen_ds_gws(dst_ops, src_ops, sem)
+
         if cls in ('ds_permute', 'ds_swizzle'):
             is_swizzle = cls == 'ds_swizzle'
             is_bpermute = 'BPERMUTE' in sem.name.upper()
@@ -8241,6 +8247,7 @@ class CodeGenerator:
             )
         exec_masked = not (
             self._MEMORY_ISSUE_KINDS[sem_class] == 'scalar'
+            or sem.semantic_class == 'ds_gws'
             or (
                 sem.semantic_class.startswith('ds_read_tr_')
                 and self.isa_spec.profile.ds_transpose_ignores_exec
@@ -8966,6 +8973,34 @@ class CodeGenerator:
             L.append('    std::memcpy(&d->store_data[lane * 8], &lo, 4);')
             L.append('    std::memcpy(&d->store_data[lane * 8 + 4], &hi, 4);')
             L.append('  }')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_ds_gws(
+        self, dst: list[str], src: list[str], sem: InstructionSemantics
+    ) -> str:
+        """Generate a GWS (Global Wave Sync) execute() body (DS encoding).
+
+        GWS barrier/init/semaphore operations coordinate scheduling across
+        workgroups. rocjitsu executes workgroups sequentially, so there is no
+        peer to synchronize with and the operation cannot block. It is modeled
+        structurally as a zero-payload GDS store: it issues on the DS pipeline,
+        increments and then immediately retires the lgkmcnt/GDS wait counter,
+        and is observed by plugins, but produces no register result and leaves
+        memory unchanged. A valid (empty) VectorMemState is still published via
+        set_data so the memory pipeline takes the ordinary completion path
+        rather than the producer-without-op diagnostic.
+        """
+        L = []
+        L.append(f'  (void)wf; // {sem.operation} is a structural no-op')
+        L.append(
+            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+        )
+        L.append('  d->elem_size = 4;')
+        L.append('  d->num_elems = 0;')
+        L.append('  d->is_load = false;')
+        L.append('  d->lane_mask = 0;')
+        self._append_wait_counter_type(L, sem, 'ds_gws')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
