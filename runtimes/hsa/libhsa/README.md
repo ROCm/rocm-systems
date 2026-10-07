@@ -67,6 +67,10 @@ advertise the capability and session creation returns
 `HSA_STATUS_ERROR_NOT_SUPPORTED`. Neither the frontend nor rocddi contains a
 PC sampling execution path.
 
+The standalone AMD profiler and AQLprofile extensions are not advertised.
+AMD dispatch and asynchronous copy timing entry points remain available in
+the AMD extension without an extension table.
+
 The product name comes from qualified KFD topology text, with a generic AMD
 name when that text is not a product name. ASIC family comes from the bound
 DRM render node via rocddi's raw ioctl path,
@@ -104,9 +108,16 @@ operation may use its own completion signal or share one with other operations.
 Each operation releases its memory borrow and decrements its signal when it
 retires. An asynchronous failure sets the completion signal negative.
 Uncertain native retirement retains the command buffer and all runtime-owned
-operands for process teardown. Native swap is unavailable on GFX1201. Indirect
-copies, raw wait and signal operations, and asynchronous copy profiling are
-unsupported.
+operands for process teardown. When asynchronous copy profiling is enabled,
+each accepted copy snapshots that setting. rocddi captures GPU ticks around
+the first and last SDMA copy packets for linear, rectangular, and batch
+copies; the query translates those ticks using the copy GPU's correlated
+clock sample. CPU copies sample the same system clock before and after the
+host copy. The completion signal retains the most recent completed copy's
+clock domain and timestamps until another copy accepts it or the signal is
+destroyed. Timing is published before the completion signal changes. Native
+swap is unavailable on GFX1201.
+Indirect copies and raw wait and signal operations are unsupported.
 Zero-byte single copies and rectangles with a zero dimension return success
 without changing the completion signal.
 External semaphore imports and queue operations return unsupported on Linux,

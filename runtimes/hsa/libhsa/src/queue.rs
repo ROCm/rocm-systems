@@ -33,7 +33,7 @@ use rocddi::topology::GpuInfo;
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
 use crate::runtime::{CallbackScope, boundary, initialized_mut, lock, map_error};
-use crate::signal::AmdSignal;
+use crate::signal::{AmdSignal, AsyncCopyClock};
 
 const WRITE_INDEX_OFFSET: usize = 56;
 const READ_INDEX_OFFSET: usize = 128;
@@ -2369,34 +2369,60 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
     time: *mut ProfilingTime,
 ) -> Status {
     boundary(|| {
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
+        let (profile, device) = {
+            let guard = match lock() {
+                Ok(guard) => guard,
+                Err(status) => return status,
+            };
+            let Some(runtime) = guard.as_ref() else {
+                return NOT_INITIALIZED;
+            };
+            if time.is_null() {
+                return INVALID_ARGUMENT;
+            }
+            if !runtime.owns_signal(signal) {
+                return INVALID_SIGNAL;
+            }
+            // SAFETY: owns_signal validated the handle while the registry
+            // lock prevents destruction of its backing storage.
+            if !unsafe {
+                crate::signal::with_signal(signal, |signal| {
+                    signal.value.load(Ordering::Acquire) <= 0
+                })
+            }
+            .unwrap_or(false)
+            {
+                return ERROR;
+            }
+            let Some(profile) = runtime
+                .async_signal_refs
+                .get(&(signal.handle as usize))
+                .and_then(|record| record.copy_profile)
+            else {
+                return ERROR;
+            };
+            let device = match profile.clock {
+                AsyncCopyClock::System => None,
+                AsyncCopyClock::Gpu(index) => {
+                    let Some(gpu) = runtime.gpus.get(index) else {
+                        return ERROR;
+                    };
+                    let Some(token) = runtime.inflight.enter() else {
+                        return OUT_OF_RESOURCES;
+                    };
+                    Some((gpu.device.clone(), token))
+                }
+            };
+            (profile, device)
         };
-        let Some(runtime) = guard.as_ref() else {
-            return NOT_INITIALIZED;
+        let (start, end) = if let Some((device, _call)) = device {
+            match crate::runtime::translate_gpu_interval(&device, profile.start, profile.end) {
+                Ok(interval) => interval,
+                Err(status) => return status,
+            }
+        } else {
+            (profile.start, profile.end)
         };
-        if time.is_null() {
-            return INVALID_ARGUMENT;
-        }
-        if !runtime.owns_signal(signal) {
-            return INVALID_SIGNAL;
-        }
-        // SAFETY: owns_signal validated the handle while the runtime lock
-        // prevents destruction of its backing storage.
-        let Some((start, end)) = (unsafe {
-            crate::signal::with_signal(signal, |signal| {
-                (
-                    signal.start_ts.load(Ordering::Acquire),
-                    signal.end_ts.load(Ordering::Acquire),
-                )
-            })
-        }) else {
-            return INVALID_SIGNAL;
-        };
-        if start == 0 && end == 0 {
-            return ERROR;
-        }
         // SAFETY: The caller supplied writable output storage.
         unsafe { time.write(ProfilingTime { start, end }) };
         SUCCESS

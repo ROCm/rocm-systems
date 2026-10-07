@@ -336,9 +336,7 @@ fn extension_name(extension: u16) -> Option<&'static [u8]> {
 
 fn extension_mask() -> [u8; 128] {
     let mut extensions = [0_u8; 128];
-    for extension in [EXTENSION_AMD_PROFILER, EXTENSION_AMD_LOADER] {
-        extensions[usize::from(extension / 8)] |= 1 << (extension % 8);
-    }
+    extensions[usize::from(EXTENSION_AMD_LOADER / 8)] |= 1 << (EXTENSION_AMD_LOADER % 8);
     extensions
 }
 
@@ -347,9 +345,7 @@ fn supported_extension_minor(extension: u16, version_major: u16) -> Option<u16> 
 }
 
 fn legacy_extension_supported(extension: u16, version_major: u16, version_minor: u16) -> bool {
-    matches!(version_major, 0 | 1)
-        && version_minor == 0
-        && matches!(extension, EXTENSION_AMD_PROFILER | EXTENSION_AMD_LOADER)
+    matches!(version_major, 0 | 1) && version_minor == 0 && extension == EXTENSION_AMD_LOADER
 }
 
 fn legacy_agent_extension_supported(
@@ -1443,7 +1439,13 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
         if guard.as_ref().is_none() {
             return NOT_INITIALIZED;
         }
-        if matches!(extension, EXTENSION_IMAGES | EXTENSION_AMD_PC_SAMPLING) {
+        if matches!(
+            extension,
+            EXTENSION_IMAGES
+                | EXTENSION_AMD_PROFILER
+                | EXTENSION_AMD_AQLPROFILE
+                | EXTENSION_AMD_PC_SAMPLING
+        ) {
             return NOT_SUPPORTED;
         }
         match (extension, version_major) {
@@ -1691,15 +1693,21 @@ pub extern "C" fn hsa_amd_agent_set_async_scratch_limit(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn hsa_amd_profiling_async_copy_enable(_enable: bool) -> Status {
+pub extern "C" fn hsa_amd_profiling_async_copy_enable(enable: bool) -> Status {
     boundary(|| {
-        lock().map_or(ERROR, |runtime| {
-            if runtime.is_some() {
-                NOT_SUPPORTED
-            } else {
-                NOT_INITIALIZED
-            }
-        })
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let Some(runtime) = guard.as_mut() else {
+            return NOT_INITIALIZED;
+        };
+        runtime.async_copy_profiling = if enable {
+            runtime::AsyncCopyProfiling::Enabled
+        } else {
+            runtime::AsyncCopyProfiling::Disabled
+        };
+        SUCCESS
     })
 }
 
@@ -1954,14 +1962,13 @@ mod tests {
         for extension in [
             EXTENSION_IMAGES,
             EXTENSION_FINALIZER,
+            EXTENSION_AMD_PROFILER,
             EXTENSION_AMD_AQLPROFILE,
             EXTENSION_AMD_PC_SAMPLING,
         ] {
             assert_eq!(supported_extension_minor(extension, 1), None);
             assert!(!legacy_extension_supported(extension, 1, 0));
         }
-        assert!(legacy_extension_supported(EXTENSION_AMD_PROFILER, 0, 0));
-        assert!(!legacy_extension_supported(EXTENSION_AMD_PROFILER, 1, 1));
         assert!(legacy_agent_extension_supported(
             EXTENSION_AMD_LOADER,
             true,
@@ -1992,8 +1999,13 @@ mod tests {
 
         let mask = extension_mask();
         assert_eq!(mask[0], 0);
-        assert_eq!(mask[64], 0b0011);
-        for extension in [EXTENSION_IMAGES, EXTENSION_AMD_PC_SAMPLING] {
+        assert_eq!(mask[64], 0b0010);
+        for extension in [
+            EXTENSION_IMAGES,
+            EXTENSION_AMD_PROFILER,
+            EXTENSION_AMD_AQLPROFILE,
+            EXTENSION_AMD_PC_SAMPLING,
+        ] {
             assert_eq!(mask[usize::from(extension / 8)] & (1 << (extension % 8)), 0);
         }
     }
