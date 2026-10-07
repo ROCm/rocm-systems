@@ -55,6 +55,11 @@ F16_TRANSCENDENTAL_CALLS = frozenset(
     call for op in F16_OPERATIONS if op.transcendental for call in op.calls
 )
 
+# Instructions whose F16 source is flushed before widening.
+F16_FLUSHED_SOURCE_OPS = frozenset(
+    op.instruction for op in F16_OPERATIONS if op.flushed_source
+)
+
 # Helper calls whose F16 source the caller flushes before widening.
 F16_FLUSHED_SOURCE_CALLS = frozenset(
     call for op in F16_OPERATIONS if op.flushed_source for call in op.calls

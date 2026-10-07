@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from amdisa.codegen.execute import float_compare, float_minmax
 from amdisa.codegen.execute.floating_policy import (
-    F16_FLUSHED_SOURCE_CALLS,
+    F16_FLUSHED_SOURCE_OPS,
     FLUSH_NEAREST_F32_OPS,
     INPUT_FLUSHED_ROUNDING,
     ROUNDED_F16_OPS,
@@ -3047,10 +3047,13 @@ def _simd_probe_line(
             if true16_vop3
             else 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16'
         )
-        transcendental = template_name.rsplit('_', 1)[0].upper() in ROUNDED_F16_OPS
+        instruction = template_name.rsplit('_', 1)[0].upper()
+        transcendental = instruction in ROUNDED_F16_OPS
         fp16_args = ', true' if transcendental else ''
-        operation = template_name.split('_')[1]
-        if operation in F16_FLUSHED_SOURCE_CALLS or operation in INPUT_FLUSHED_ROUNDING:
+        if (
+            instruction in F16_FLUSHED_SOURCE_OPS
+            or template_name.split('_')[1] in INPUT_FLUSHED_ROUNDING
+        ):
             # The glue flushes the raw half before widening it for the functor.
             policy = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
             fp16_args = f', {"true" if transcendental else "false"}, {policy}'
