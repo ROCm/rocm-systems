@@ -189,8 +189,9 @@ TEST_CASE("Unit_HRR_EmbeddedPtrStruct_Direct", "[.][hrr-direct]") {
 //
 // A mapped host flag is written by the CPU (kFlagSentinel) — NOT a HIP call.
 // Pinned host snapshots would record it, so the roundtrip captures this with
-// HIP_HRR_HOST_SNAPSHOTS=0 and the write stays unrecorded.  A loop of kDivergeIters kernels each write the flag
-// value into an output buffer and read it back (D2H).  At capture every D2H
+// HIP_HRR_HOST_SNAPSHOTS=0 and the write stays unrecorded.  A loop of
+// kDivergeIters kernels each write the flag value into an output buffer and
+// read it back (D2H).  At capture every D2H
 // blob holds kFlagSentinel; at replay the flag buffer is fresh (zero), so every
 // D2H validation fails.  This is the deterministic lever for the divergence
 // guard test — no genuine GPU nondeterminism is involved.

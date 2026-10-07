@@ -489,8 +489,9 @@ struct LaunchBytes {
 // One hipLaunchKernel event: a pointer argument, a 16-byte struct with a
 // pointer at offset 8, a two-attribute tail, then `n_snaps` snapshot records.
 // `declared_snaps` is what the count field says, so a test can make it lie.
+// Every record carries `direction`.
 std::vector<uint8_t> make_launch_event(uint16_t declared_snaps, uint16_t n_snaps,
-                                       uint32_t n_attrs = 2) {
+                                       uint32_t n_attrs = 2, uint8_t direction = 0) {
   LaunchBytes p;
   p.put<uint64_t>(0x5000);                    // stream
   const char name[] = "probe_kernel";
@@ -518,7 +519,7 @@ std::vector<uint8_t> make_launch_event(uint16_t declared_snaps, uint16_t n_snaps
     p.put<uint64_t>(i == 0 ? 262144ull : 4096ull);
     p.put<uint64_t>(0xC0DE0000ull + i);       // hash lo
     p.put<uint64_t>(0xF00D0000ull + i);       // hash hi
-    p.put<uint8_t>(0);                        // direction
+    p.put<uint8_t>(direction);
   }
 
   hrr_event_header hdr{};
@@ -565,6 +566,27 @@ HRR_TEST_CASE(Unit_HRR_Format_KernelLaunchSnapshots) {
     CHECK(s.hash_hi == 0xF00D0000ull + i);
     CHECK(s.direction == 0);
   }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A record's direction byte is read back as written. Direction 1 marks a
+ *     chunk capture found unchanged while the launch stream was busy, which
+ *     replay must not restore; a reader that dropped the byte would turn it
+ *     into a restore.
+ */
+HRR_TEST_CASE(Unit_HRR_Format_KernelLaunchSnapshotsUnchanged) {
+  TmpArchive arc("launch_snapshots_unchanged");
+  arc.write_events(make_launch_event(2, 2, 2, /*direction=*/1));
+
+  hrr::Archive archive;
+  REQUIRE(hrr::load_archive(arc.path(), archive));
+  REQUIRE(archive.events.size() == 1);
+  const hrr::KernelLaunchEvent* kl = archive.events[0].kernel_launch;
+  REQUIRE(kl != nullptr);
+  REQUIRE(kl->snapshots.size() == 2);
+  for (const hrr::BufferSnapshot& s : kl->snapshots) CHECK(s.direction == 1);
 }
 
 /**

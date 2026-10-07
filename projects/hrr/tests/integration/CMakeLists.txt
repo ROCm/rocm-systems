@@ -40,8 +40,9 @@
 # hrr_pinned_host_test.cc covers pinned host buffers a kernel reads directly,
 # with no copy for capture to see: capture snapshots them before each launch
 # and replay writes them back. Contains its own hidden [.][hrr-direct]
-# workload, and edits a captured archive to check that replay refuses
-# snapshot records that do not fit their allocation.
+# workloads: busy streams, size caps, every pinned allocator and free, other
+# launch entry points and graph capture. It edits captured archives to check
+# that replay refuses malformed records and leaves unchanged ones alone.
 #
 # hrr_disk_space_test.cc covers how capture stops before the file system
 # holding the archive fills. The binary defines statvfs, statvfs64 and fsync to
