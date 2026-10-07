@@ -631,7 +631,8 @@ still honours them.
 
 - `HIP_HRR_HOST_SNAPSHOTS=0` turns snapshots off. The manifest then says
   `"host_snapshots": false`, and kernels that read pinned memory replay on
-  unfilled buffers.
+  unfilled buffers. `hipHostRegister` still records its range once, at
+  registration, as it did before snapshots existed.
 - `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (default 64) is the largest allocation
   snapshotted. A larger one is skipped and listed under `unreplayable_apis`.
   `0` snapshots none, while the manifest still says `"host_snapshots": true`.
@@ -703,8 +704,11 @@ synthetic inputs when the archive has to be shared.
 
 **Reducing what is recorded.**
 
-- `HIP_HRR_HOST_SNAPSHOTS=0` records no pinned contents. The manifest says so,
-  so a reader of the archive knows the pinned inputs are missing.
+- `HIP_HRR_HOST_SNAPSHOTS=0` takes no snapshot before any launch. The manifest
+  says so, so a reader of the archive knows the pinned inputs are missing. It
+  does not empty the archive of pinned bytes: `hipHostRegister` records the
+  whole range once, at registration, whatever this flag says. That predates
+  snapshots.
 - `HIP_HRR_HOST_SNAPSHOT_MAX_MB` limits the size of any one snapshotted
   allocation, and `HIP_HRR_HOST_SNAPSHOT_TOTAL_MB` the capture's memory for
   shadows. Neither bounds the archive: a buffer that changes on every launch

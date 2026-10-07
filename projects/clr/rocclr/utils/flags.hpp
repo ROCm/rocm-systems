@@ -280,7 +280,8 @@ release(bool, HIP_HRR_DEBUG_ARGS, false,                                      \
         "H2D destination logging) at LOG_INFO level")                         \
 release(bool, HIP_HRR_HOST_SNAPSHOTS, true,                                   \
         "HRR capture: record pinned host buffers a kernel reads, before each " \
-        "launch. 0 = off (the archive then holds no pinned host contents)")   \
+        "launch. 0 = no snapshots; hipHostRegister still records the range "  \
+        "once, at registration")                                              \
 release(uint, HIP_HRR_HOST_SNAPSHOT_MAX_MB, 64,                               \
         "HRR capture: largest pinned host allocation snapshotted, in MiB; "   \
         "a larger one is skipped and listed in manifest unreplayable_apis. "  \

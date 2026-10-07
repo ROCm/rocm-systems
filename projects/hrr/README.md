@@ -92,7 +92,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 |----------|---------|---------|
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance) |
-| `HIP_HRR_HOST_SNAPSHOTS` | on | Record the pinned host buffers each kernel reads, before the launch, so replay can refill them. `0` records none; the archive then holds no pinned host contents. Snapshots can hold token IDs and request state: keep archives private (see DESIGN.md, Threat Model: Pinned Host Snapshots) |
+| `HIP_HRR_HOST_SNAPSHOTS` | on | Record the pinned host buffers each kernel reads, before the launch, so replay can refill them. `0` takes no snapshot before any launch. `hipHostRegister` still records the registered range once, at registration. Snapshots can hold token IDs and request state: keep archives private (see DESIGN.md, Threat Model: Pinned Host Snapshots) |
 | `HIP_HRR_HOST_SNAPSHOT_MAX_MB` | `64` | Largest pinned allocation snapshotted, in MiB. A larger one is skipped and listed under `unreplayable_apis` in the manifest. `0` snapshots none |
 | `HIP_HRR_HOST_SNAPSHOT_TOTAL_MB` | `1024` | Host memory, in MiB, for the shadow copies of all snapshotted allocations together. An allocation that would pass it is skipped and listed under `unreplayable_apis`. `0` snapshots none |
 
