@@ -3180,7 +3180,8 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
  *
  * @param[out] stream  Pointer to new stream
  * @param[in] flags  Parameters to control stream creation
- * @param[in] priority  Priority of the stream. Lower numbers represent higher priorities. Stream priority is disabled at this time. 
+ * @param[in] priority  Priority of the stream. Lower numbers represent higher priorities.
+ * Stream priority is disabled at this time.
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  * Creates a new asynchronous stream with the specified priority, with its associated current
@@ -3205,8 +3206,8 @@ hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, 
  *
  * @param[in, out] leastPriority  Pointer in which a value corresponding to least priority
  * is returned.
- * @param[in, out] greatestPriority  Pointer in which a value corresponding to greatest priority. Stream priority is disabled at this time. 
- * is returned.
+ * param[in, out] greatestPriority  Pointer in which a value corresponding to
+ * greatest priority. Stream priority is disabled at this time.
  * @returns #hipSuccess
  *
  * Returns in *leastPriority and *greatestPriority the numerical values that correspond to the
