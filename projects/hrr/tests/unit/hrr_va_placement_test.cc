@@ -16,6 +16,7 @@
 
 #include "hrr_test_common.hh"
 #include "hrr_va_placement.h"
+#include "hrr_event_order.h"
 #include "hrr/hrr_api_args.h"
 
 #include <cstring>
@@ -281,6 +282,21 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_ParseDeny) {
   REQUIRE(hrr::parse_place_deny("0x1000, ,0x2000") == std::vector<uint64_t>{0x1000, 0x2000});
   // Zero is no address, and parsing stops at the first thing that is not one.
   REQUIRE(hrr::parse_place_deny("0,0x3000,junk,0x4000") == std::vector<uint64_t>{0x3000});
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_AllocsRunInCaptureOrder) {
+  // A placed allocation takes the address its recorded call returned. If two
+  // threads replay out of capture order, one can take the other's range, so
+  // every call that claims or releases a range has to be ordered.
+  for (uint16_t api : {HRR_API_HIPMALLOC, HRR_API_HIPEXTMALLOCWITHFLAGS,
+                       HRR_API_HIPMALLOCASYNC, HRR_API_HIPMALLOCFROMPOOLASYNC,
+                       HRR_API_HIPMALLOCMANAGED, HRR_API_HIPMEMADDRESSRESERVE,
+                       HRR_API_HIPFREE, HRR_API_HIPFREEASYNC,
+                       HRR_API_HIPMEMADDRESSFREE}) {
+    INFO(hrr_api_names[api]);
+    REQUIRE(hrr_needs_ordering(api));
+  }
+  REQUIRE_FALSE(hrr_needs_ordering(HRR_API_HIPLAUNCHKERNEL));
 }
 
 /**
