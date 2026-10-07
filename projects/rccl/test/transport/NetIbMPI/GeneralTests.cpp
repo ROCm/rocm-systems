@@ -9,6 +9,7 @@
 #include <array>
 #include <map>
 #include <string>
+#include <utility>
 #include <dlfcn.h>
 
 #ifdef MPI_TESTS_ENABLED
@@ -92,12 +93,12 @@ TEST_F(NetIbMPITest, CastPortSpeedMatchesIb) {
     int ndevIb = 0;
     AssertInitAndGetDevices(&ndevIb);
 
-    std::map<std::string, int> ibSpeeds;
+    std::map<std::pair<std::string, int>, int> ibSpeeds;
     for (int i = 0; i < ndevIb; i++) {
         ncclNetProperties_t props;
         memset(&props, 0, sizeof(props));
         ASSERT_EQ(GetDeviceProperties(i, &props), ncclSuccess) << "IB device " << i;
-        ibSpeeds[props.name] = props.speed;
+        ibSpeeds[{props.name, props.port}] = props.speed;
     }
 
     void* castCtx = nullptr;
@@ -112,6 +113,30 @@ TEST_F(NetIbMPITest, CastPortSpeedMatchesIb) {
         ~CastFinalizer() { netIbCast.finalize(ctx); }
     } castFinalizer{castCtx};
 
+    // Determine whether this process is expected to have used ibv_query_port_speed()
+    // (gated on NCCL_IB_QUERY_PORT_SPEED and on libibverbs exporting IBVERBS_1.16),
+    // so we can assert the plugin actually took the path the env var selects, rather
+    // than just checking the resulting speed value (which can coincidentally match
+    // the fallback's on correctly negotiated ports even if the gate is broken).
+    const char* queryEnv = getenv("NCCL_IB_QUERY_PORT_SPEED");
+    bool queryDisabledByEnv = queryEnv && strcmp(queryEnv, "0") == 0;
+    bool symbolAvailable;
+    {
+        void* verbs = dlopen("libibverbs.so.1", RTLD_NOW | RTLD_NOLOAD);
+        symbolAvailable = verbs && dlvsym(verbs, "ibv_query_port_speed", "IBVERBS_1.16") != nullptr;
+        if (verbs) dlclose(verbs);
+    }
+    bool expectQueryUsed = !queryDisabledByEnv && symbolAvailable;
+
+    int nRawDevs = ncclIbCastTestGetNDevs();
+    for (int d = 0; d < nRawDevs; d++) {
+        int fromQuery = -1;
+        ASSERT_EQ(ncclIbCastTestSpeedSource(d, &fromQuery), ncclSuccess) << "raw device " << d;
+        EXPECT_EQ(fromQuery != 0, expectQueryUsed)
+            << "raw device " << d << " speed source disagrees with NCCL_IB_QUERY_PORT_SPEED="
+            << (queryEnv ? queryEnv : "(unset)") << " (symbolAvailable=" << symbolAvailable << ")";
+    }
+
     int ndevCast = 0;
     ASSERT_EQ(netIbCast.devices(&ndevCast), ncclSuccess);
 
@@ -121,9 +146,9 @@ TEST_F(NetIbMPITest, CastPortSpeedMatchesIb) {
         memset(&props, 0, sizeof(props));
         ASSERT_EQ(netIbCast.getProperties(i, &props), ncclSuccess) << "IB-CAST device " << i;
         EXPECT_GT(props.speed, 0) << "IB-CAST device " << props.name << " has invalid speed";
-        auto it = ibSpeeds.find(props.name);
+        auto it = ibSpeeds.find({props.name, props.port});
         if (it == ibSpeeds.end()) continue;
-        EXPECT_EQ(props.speed, it->second) << "Speed mismatch for " << props.name;
+        EXPECT_EQ(props.speed, it->second) << "Speed mismatch for " << props.name << " port " << props.port;
         matched++;
         if (MPIEnvironment::world_rank == 0) {
             TEST_INFO("Device %s: IB speed=%d IB-CAST speed=%d", props.name, it->second, props.speed);
@@ -131,16 +156,12 @@ TEST_F(NetIbMPITest, CastPortSpeedMatchesIb) {
     }
 
     if (MPIEnvironment::world_rank == 0) {
-        const char* queryEnv = getenv("NCCL_IB_QUERY_PORT_SPEED");
         const char* path;
-        if (queryEnv && strcmp(queryEnv, "0") == 0) {
+        if (queryDisabledByEnv) {
             path = "ibv_query_port_speed disabled (NCCL_IB_QUERY_PORT_SPEED=0), active_speed/active_width fallback";
         } else {
-            void* verbs = dlopen("libibverbs.so.1", RTLD_NOW | RTLD_NOLOAD);
-            path = !verbs ? "unknown (libibverbs.so.1 not loaded)"
-                 : dlvsym(verbs, "ibv_query_port_speed", "IBVERBS_1.16") ? "ibv_query_port_speed available"
+            path = symbolAvailable ? "ibv_query_port_speed available"
                  : "ibv_query_port_speed missing, active_speed/active_width fallback";
-            if (verbs) dlclose(verbs);
         }
         TEST_INFO("Port speed source: %s; %d device(s) compared", path, matched);
     }
