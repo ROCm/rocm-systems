@@ -70,17 +70,20 @@ int BindKfd(uint32_t kfd_gpu_id, const char* render_node, uint64_t vram) {
   return ioctl(kfd, kIocAllocMemoryOfGpu, &mem) == 0 ? 0 : errno;
 }
 
-// One short-lived GPU process: it binds, holds for 2 ms, then exits.
-void RunChurnProcess(uint32_t kfd_gpu_id, const char* render_node) {
+// One short-lived GPU process: it binds, holds for 2 ms, then exits. Returns
+// whether it bound.
+bool RunChurnProcess(uint32_t kfd_gpu_id, const char* render_node) {
   const pid_t child = fork();
   if (child == 0) {
     prctl(PR_SET_PDEATHSIG, SIGKILL);
-    BindKfd(kfd_gpu_id, render_node, 0);
+    const int err = BindKfd(kfd_gpu_id, render_node, 0);
     const timespec hold{0, 2000000};
     nanosleep(&hold, nullptr);
-    _exit(0);
+    _exit(err == 0 ? 0 : 1);
   }
-  if (child > 0) waitpid(child, nullptr, 0);
+  int wstatus = 0;
+  return child > 0 && waitpid(child, &wstatus, 0) == child && WIFEXITED(wstatus) &&
+         WEXITSTATUS(wstatus) == 0;
 }
 
 struct HelperStopper {
@@ -203,12 +206,16 @@ void TestProcessListChurnRead::Run(void) {
 
   std::atomic<bool> stop{false};
   std::atomic<int> churned{0};
+  std::atomic<int> churn_failed{0};
   std::vector<std::thread> churn;
   for (int t = 0; t < kChurnThreads; ++t) {
     churn.emplace_back([&] {
       while (!stop) {
-        RunChurnProcess(kfd_gpu_id, render_node.c_str());
-        ++churned;
+        if (RunChurnProcess(kfd_gpu_id, render_node.c_str())) {
+          ++churned;
+        } else {
+          ++churn_failed;
+        }
       }
     });
   }
@@ -230,6 +237,9 @@ void TestProcessListChurnRead::Run(void) {
   for (const auto& [st, n] : errors) failed_calls << " status " << st << " x" << n;
   EXPECT_TRUE(errors.empty()) << "Failed calls:" << failed_calls.str() << " of " << calls;
   EXPECT_EQ(unlisted, 0) << "Lists without the helper, of " << calls << " calls";
+  // Without GPU processes coming and going the test proves nothing.
+  EXPECT_GT(churned, churn_failed)
+      << churned << " churn processes bound to the GPU, " << churn_failed << " did not";
   IF_VERB(STANDARD) {
     std::cout << "\t**" << calls << " calls while " << churned
               << " GPU processes started and exited" << std::endl;
