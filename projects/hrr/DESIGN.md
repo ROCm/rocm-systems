@@ -674,11 +674,13 @@ when the buffer holds different bytes. The summary prints the
 chunks restored and the records rejected. Snapshot blobs are held in a cache of
 at most 256 MiB, oldest out first, rather than the unbounded blob cache.
 
-`HIP_HRR_REPLAY_AUDIT_HOST_ARGS` reports host memory a kernel reads that replay
-did not fill: a pointer argument into a pinned allocation no record names, and a
-word of a plain by-value argument (`value_kind == 0`) that lands in pinned
-memory. Words of an argument with an embedded device pointer that the rule
-above leaves alone are not reported.
+`HIP_HRR_REPLAY_AUDIT_HOST_ARGS` reports host memory a kernel reads that no
+snapshot record names: a pointer argument into such a pinned allocation, and a
+word of a plain by-value argument (`value_kind == 0`) that lands in one. An
+allocation a record names is skipped whether or not replay wrote it, including
+an unchanged (direction 1) record and a record not applied under graph capture.
+Words of an argument with an embedded device pointer that the rule above leaves
+alone are not reported.
 
 **Tests.** `hrr_pinned_host_test.cc` covers the behaviour above with a capture
 and a replay per case, including a failed launch, every launch entry point, a
