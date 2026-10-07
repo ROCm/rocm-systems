@@ -11,13 +11,15 @@
 
 #include <gtest/gtest.h>
 #include <nccl_device.h>
-#include <climits>
 #include <unistd.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <utility>
+#include <vector>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -29,44 +31,21 @@ namespace RcclUnitTesting
 namespace
 {
 
-// External PROXY plugins lose to the built-in proxy; no in-tree backend claims GPI, so the plugin wins.
+// The stub reports GPI, which no in-tree backend claims, so it becomes the active GIN backend.
 constexpr int kGinTypeGpi = NCCL_NET_DEVICE_GIN_GPI;
 
 // Fail the second connect: the first has to have been opened, and released.
 constexpr int kConnections   = 2;
 constexpr int kFailConnectAt = 2;
 
-#ifdef RCCL_GIN_EXAMPLE_PLUGIN_DIR
-constexpr const char* kGinExamplePluginDir = RCCL_GIN_EXAMPLE_PLUGIN_DIR;
-#else
-constexpr const char* kGinExamplePluginDir = nullptr;
-#endif
-
-// Prefer the plugin installed next to this binary, else the build-tree copy.
-std::string ginExamplePluginPath()
+// The stub is built and installed beside the test binary, in the build tree and in an install alike.
+std::string ginFaultPluginPath()
 {
-    char self[PATH_MAX];
-    const ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);
-    if(n > 0)
-    {
-        self[n] = '\0';
-        if(char* slash = strrchr(self, '/'))
-        {
-            *slash = '\0';
-            std::string installed = std::string(self) + "/librccl-gin-example.so";
-            if(access(installed.c_str(), F_OK) == 0)
-                return installed;
-        }
-    }
-
-    if(!kGinExamplePluginDir || kGinExamplePluginDir[0] == '\0')
+    std::error_code       ec;
+    std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if(ec)
         return {};
-    return std::string(kGinExamplePluginDir) + "/librccl-gin-example.so";
-}
-
-bool fileExists(const std::string& path)
-{
-    return !path.empty() && access(path.c_str(), F_OK) == 0;
+    return (exe.parent_path() / RCCL_TEST_GIN_FAULT_PLUGIN_NAME).string();
 }
 
 bool readCounter(const std::string& path, const char* key, int* out)
@@ -95,51 +74,63 @@ bool readCounter(const std::string& path, const char* key, int* out)
 class GinConnectLeakMPITest : public MPITestBase
 {
 protected:
-    std::string counterPath_;
+    std::string                                      counterPath_;
+    std::vector<std::pair<std::string, std::string>> savedEnv_;
+    std::vector<std::string>                         unsetEnv_;
+
+    // Records the previous value so TearDown can hand later tests an untouched environment.
+    int setTestEnv(const char* name, const std::string& value)
+    {
+        if(const char* prev = getenv(name))
+            savedEnv_.emplace_back(name, prev);
+        else
+            unsetEnv_.emplace_back(name);
+        return setenv(name, value.c_str(), 1);
+    }
 
     void SetUp() override
     {
         // Skip on all ranks together: a rank skipping alone would hang its peer.
-        const std::string plugin = ginExamplePluginPath();
-        if(auto reason = mpiCoordinatedSkipReason(
-               !fileExists(plugin),
-               "librccl-gin-example.so not built; rebuild with ENABLE_HOST_API_TESTS=ON");
+        const std::string plugin = ginFaultPluginPath();
+        if(auto reason = mpiCoordinatedSkipReason(plugin.empty() || access(plugin.c_str(), F_OK) != 0,
+                                                  "GIN fault plugin stub not found beside the test binary");
            !reason.empty())
         {
             GTEST_SKIP() << reason;
         }
 
-        const char* counter = getenv("RCCL_GIN_EXAMPLE_COUNTER_FILE");
-        if(auto reason = mpiCoordinatedSkipReason(
-               counter == nullptr || *counter == '\0',
-               "Set RCCL_GIN_EXAMPLE_COUNTER_FILE to a per-node path for the plugin's close counts");
+        char      counterTemplate[] = "/tmp/rccl_gin_counters.XXXXXX";
+        const int fd                = mkstemp(counterTemplate);
+        if(auto reason = mpiCoordinatedSkipReason(fd < 0, "Could not create a counter file in /tmp");
            !reason.empty())
         {
             GTEST_SKIP() << reason;
         }
-        counterPath_ = counter;
-        // A leftover we cannot remove (sticky /tmp) would feed stale counts to the assertions.
-        remove(counterPath_.c_str());
-        if(auto reason = mpiCoordinatedSkipReason(
-               fileExists(counterPath_),
-               "Counter file already exists and could not be removed; set "
-               "RCCL_GIN_EXAMPLE_COUNTER_FILE to a path this user owns");
-           !reason.empty())
-        {
-            GTEST_SKIP() << reason;
-        }
+        close(fd);
+        counterPath_ = counterTemplate;
 
         // Absolute path: an in-process LD_LIBRARY_PATH change never reaches dlopen.
-        setenv("NCCL_GIN_PLUGIN", plugin.c_str(), 1);
-        setenv("NCCL_GIN_ENABLE", "1", 1);
+        ASSERT_EQ(0, setTestEnv("NCCL_GIN_PLUGIN", plugin));
+        ASSERT_EQ(0, setTestEnv("NCCL_GIN_ENABLE", "1"));
         // Without cuMem there is no symmetric support, and ncclGinConnectOnce never runs.
-        setenv("NCCL_CUMEM_ENABLE", "1", 1);
-        setenv("NCCL_GIN_TYPE", std::to_string(kGinTypeGpi).c_str(), 1);
-        setenv("RCCL_GIN_EXAMPLE_DEVICE_TYPE", std::to_string(kGinTypeGpi).c_str(), 1);
-        setenv("NCCL_GIN_NCONNECTIONS", std::to_string(kConnections).c_str(), 1);
-        setenv("RCCL_GIN_EXAMPLE_FAIL_CONNECT_AT", std::to_string(kFailConnectAt).c_str(), 1);
+        ASSERT_EQ(0, setTestEnv("NCCL_CUMEM_ENABLE", "1"));
+        ASSERT_EQ(0, setTestEnv("NCCL_GIN_TYPE", std::to_string(kGinTypeGpi)));
+        ASSERT_EQ(0, setTestEnv("NCCL_GIN_NCONNECTIONS", std::to_string(kConnections)));
+        ASSERT_EQ(0, setTestEnv("RCCL_TEST_GIN_FAULT_FAIL_CONNECT_AT", std::to_string(kFailConnectAt)));
+        ASSERT_EQ(0, setTestEnv("RCCL_TEST_GIN_FAULT_COUNTER_FILE", counterPath_));
 
         MPITestBase::SetUp();
+    }
+
+    void TearDown() override
+    {
+        MPITestBase::TearDown();
+        for(const auto& [name, value] : savedEnv_)
+            setenv(name.c_str(), value.c_str(), 1);
+        for(const auto& name : unsetEnv_)
+            unsetenv(name.c_str());
+        if(!counterPath_.empty())
+            remove(counterPath_.c_str());
     }
 };
 
@@ -159,7 +150,7 @@ TEST_F(GinConnectLeakMPITest, FailedConnectReleasesOpenedComms)
     const bool haveCounters = readCounter(counterPath_, "connect", &connects);
     readCounter(counterPath_, "closeColl", &closeColls);
     readCounter(counterPath_, "closeListen", &closeListens);
-    TEST_INFO("GIN example plugin: connect=%d closeColl=%d closeListen=%d (setupFailed=%d)",
+    TEST_INFO("GIN fault plugin: connect=%d closeColl=%d closeListen=%d (setupFailed=%d)",
               connects, closeColls, closeListens, setupFailed ? 1 : 0);
 
     // Prove the plugin reached the injected failure, or the counts below would pass vacuously.
