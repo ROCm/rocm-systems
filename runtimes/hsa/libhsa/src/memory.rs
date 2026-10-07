@@ -4866,6 +4866,7 @@ fn resolve_async_copy(
     source: usize,
     src_agent: HsaAgent,
     size: usize,
+    copy_gpu_index: Option<usize>,
 ) -> Result<ResolvedAsyncCopy, Status> {
     if size == 0 {
         if (dst_agent.handle != 0 && !runtime.is_agent(dst_agent))
@@ -4884,7 +4885,7 @@ fn resolve_async_copy(
     let src_agent = copy_agent(runtime, src_agent, src_description.as_ref())?;
     let dst_gpu = runtime.gpu_index(dst_agent);
     let src_gpu = runtime.gpu_index(src_agent);
-    if let Some(index) = src_gpu.or(dst_gpu) {
+    if let Some(index) = copy_gpu_index.or(src_gpu.or(dst_gpu)) {
         if !runtime.gpus[index]
             .device
             .gpu()
@@ -5091,6 +5092,7 @@ fn resolve_sync_gpu_copy(
                 source,
                 HsaAgent { handle: 0 },
                 size,
+                None,
             )?;
             let AsyncCopyRoute::Gpu {
                 device,
@@ -5659,6 +5661,7 @@ unsafe fn submit_async_copy(
             src as usize,
             src_agent,
             size,
+            None,
         ) {
             Ok(resolved) => resolved,
             Err(status) => return status,
@@ -5851,6 +5854,12 @@ fn resolve_batch_copy_entries(
         .map_err(|_| OUT_OF_RESOURCES)?;
     let mut selected: Option<(usize, Box<Device>)> = None;
     for entry in entries {
+        if entry.size != 0
+            && runtime.gpu_index(entry.source_agent).is_none()
+            && runtime.gpu_index(entry.destination_agent).is_none()
+        {
+            return Err(INVALID_AGENT);
+        }
         let resolved = resolve_async_copy(
             runtime,
             entry.destination,
@@ -5858,6 +5867,7 @@ fn resolve_batch_copy_entries(
             entry.source,
             entry.source_agent,
             entry.size,
+            selected.as_ref().map(|(index, _)| *index),
         )?;
         let (device, index, prepared) = match resolved.route {
             AsyncCopyRoute::Gpu {
@@ -5870,12 +5880,9 @@ fn resolve_batch_copy_entries(
             }
             _ => return Err(INVALID_AGENT),
         };
-        if selected
-            .as_ref()
-            .is_some_and(|(selected, _)| *selected != index)
-        {
-            return Err(NOT_SUPPORTED);
-        }
+        // A multi-entry operation uses the source GPU, or its first
+        // destination GPU for host sources. Later peer destinations must be
+        // accessible from that same GPU before one ordered DDI submission.
         selected.get_or_insert((index, device));
         prepared_entries.push(prepared);
         borrowed_memory.extend(resolved.borrowed_memory);
