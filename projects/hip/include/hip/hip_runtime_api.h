@@ -3216,7 +3216,7 @@ hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, 
  * value that is outside the meaningful range as specified by this API, the priority is
  * automatically clamped to within the valid range.
  *
- * @warning Stream priority is currently disabled by default to avoid queue-priority-related
+ * @warning Stream priority is currently disabled to avoid queue-priority-related
  * issues in KFD.
  */
 hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority);
