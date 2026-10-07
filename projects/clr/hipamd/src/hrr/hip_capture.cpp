@@ -161,6 +161,272 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 }
 
 // ---------------------------------------------------------------------------
+// Pinned host snapshots
+//
+// A kernel can read pinned host memory directly: the host fills a
+// hipHostMalloc buffer and passes its address, with no memcpy for capture to
+// record. Replay allocates a fresh buffer of the same size and never fills it,
+// so the kernel reads zeros. Before each launch, capture therefore records the
+// pinned allocations the kernel's arguments point into, and replay writes them
+// back before it launches.
+//
+// Only allocations this process made through the pinned allocation APIs are
+// candidates: g_pinned maps each base to its size. An argument word is looked
+// up in that map and nowhere else, so an arbitrary scalar is never handed to
+// hipPointerGetAttributes. The map lock is held while the bytes are read, and
+// the free shims take the entry out under the same lock before the memory is
+// released, so a concurrent free cannot pull the buffer out from under a read.
+//
+// Each allocation is cut into kHostSnapChunk pieces. A shadow copy of the last
+// recorded bytes finds the pieces that changed, and only those are written as
+// blobs. Every piece still gets a record on every launch, with the hash of its
+// current contents. Recording only the changed pieces would be wrong when
+// device work rewrites the buffer between launches: replay would keep the
+// device-written bytes while capture saw the host put the old ones back.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr size_t kHostSnapChunk = 256 * 1024;
+
+struct PinnedAlloc {
+  size_t size = 0;
+  std::vector<uint8_t>          shadow;  // last recorded bytes; empty until first snapshot
+  std::vector<hrr_cap::Hash128> hashes;  // one per chunk, valid while shadow is non-empty
+};
+
+struct HostSnapRecord {
+  uint64_t         ptr;     // capture-time base of the pinned allocation
+  uint64_t         offset;  // byte offset of this chunk within it
+  uint64_t         length;
+  hrr_cap::Hash128 hash;
+};
+
+std::mutex                       g_pinned_mu;
+std::map<uintptr_t, PinnedAlloc> g_pinned;
+// Lock-free fast reject for the launch path: an argument word outside
+// [g_pinned_lo, g_pinned_hi) cannot be a pinned address. The bounds only grow.
+std::atomic<size_t>    g_pinned_count{0};
+std::atomic<uintptr_t> g_pinned_lo{UINTPTR_MAX};
+std::atomic<uintptr_t> g_pinned_hi{0};
+// A forked child writes its own archive with its own blobs, so the shadows the
+// parent built say nothing about what that archive holds. Guarded by g_pinned_mu.
+int g_pinned_shadow_pid = 0;
+
+}  // namespace
+
+static void pinned_track(void* p, size_t size) {
+  if (!p || size == 0) return;
+  const uintptr_t b = reinterpret_cast<uintptr_t>(p);
+  std::lock_guard<std::mutex> lk(g_pinned_mu);
+  PinnedAlloc fresh;
+  fresh.size = size;
+  g_pinned[b] = std::move(fresh);
+  g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
+  if (b < g_pinned_lo.load(std::memory_order_relaxed))
+    g_pinned_lo.store(b, std::memory_order_relaxed);
+  if (b + size > g_pinned_hi.load(std::memory_order_relaxed))
+    g_pinned_hi.store(b + size, std::memory_order_relaxed);
+}
+
+// Take p out of the map before the memory is released. The entry is handed
+// back so a free that fails can put it back.
+static bool pinned_untrack(void* p, PinnedAlloc* out) {
+  if (!p || g_pinned_count.load(std::memory_order_relaxed) == 0) return false;
+  std::lock_guard<std::mutex> lk(g_pinned_mu);
+  auto it = g_pinned.find(reinterpret_cast<uintptr_t>(p));
+  if (it == g_pinned.end()) return false;
+  *out = std::move(it->second);
+  g_pinned.erase(it);
+  g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
+  return true;
+}
+
+static void pinned_retrack(void* p, PinnedAlloc&& a) {
+  std::lock_guard<std::mutex> lk(g_pinned_mu);
+  g_pinned[reinterpret_cast<uintptr_t>(p)] = std::move(a);
+  g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
+}
+
+static bool pinned_maybe(uint64_t v) {
+  return g_pinned_count.load(std::memory_order_relaxed) != 0 &&
+         v >= g_pinned_lo.load(std::memory_order_relaxed) &&
+         v <  g_pinned_hi.load(std::memory_order_relaxed);
+}
+
+// Base of the pinned allocation holding v, or 0. Caller holds g_pinned_mu.
+static uintptr_t pinned_base_of_locked(uint64_t v) {
+  auto it = g_pinned.upper_bound(static_cast<uintptr_t>(v));
+  if (it == g_pinned.begin()) return 0;
+  --it;
+  return (v - it->first < it->second.size) ? it->first : 0;
+}
+
+// Byte offsets of the 8-byte-aligned words of a by-value argument that point
+// into a pinned allocation. The device-pointer scan does not flag them, since
+// hipPointerGetAttributes reports host memory, so without this a struct holding
+// a pinned pointer would replay with the capture-time host address.
+static void pinned_word_offsets(const uint8_t* bytes, uint16_t sz,
+                                std::vector<uint16_t>& offs) {
+  if (!bytes || g_pinned_count.load(std::memory_order_relaxed) == 0) return;
+  std::lock_guard<std::mutex> lk(g_pinned_mu);
+  for (size_t j = 0; j + sizeof(uint64_t) <= sz; j += sizeof(uint64_t)) {
+    uint64_t v;
+    std::memcpy(&v, bytes + j, sizeof(v));
+    if (pinned_maybe(v) && pinned_base_of_locked(v))
+      offs.push_back(static_cast<uint16_t>(j));
+  }
+}
+
+// The argument words of one launch that may point into pinned memory: a
+// whole-pointer argument's value, and every aligned word of any other argument.
+static void pinned_candidate_words(const amd::KernelSignature& sig,
+                                   void** kernel_params, const void* kbuf,
+                                   size_t ksz, std::vector<uint64_t>& out) {
+  auto scan = [&](const uint8_t* bytes, size_t sz, bool is_ptr) {
+    if (!bytes) return;
+    for (size_t j = 0; j + sizeof(uint64_t) <= sz; j += sizeof(uint64_t)) {
+      uint64_t v;
+      std::memcpy(&v, bytes + j, sizeof(v));
+      if (pinned_maybe(v)) out.push_back(v);
+      if (is_ptr) break;
+    }
+  };
+  const uint32_t n_all = sig.numParametersAll();
+  if (kbuf && ksz > 0) {
+    const auto* buf = static_cast<const uint8_t*>(kbuf);
+    for (uint32_t i = 0; i < n_all; i++) {
+      const auto& desc = sig.at(i);
+      if (desc.info_.hidden_ || desc.offset_ + desc.size_ > ksz) continue;
+      scan(buf + desc.offset_, desc.size_, desc.type_ == T_POINTER);
+    }
+  } else if (kernel_params) {
+    uint32_t param_idx = 0;
+    for (uint32_t i = 0; i < n_all; i++) {
+      const auto& desc = sig.at(i);
+      if (desc.info_.hidden_) continue;
+      scan(static_cast<const uint8_t*>(kernel_params[param_idx]), desc.size_,
+           desc.type_ == T_POINTER);
+      param_idx++;
+    }
+  }
+}
+
+static const char* const kHostSnapApi = "pinned host snapshot";
+
+// Record the pinned allocations a launch's arguments point into. Called before
+// the real launch, so the bytes are the ones the kernel will read.
+static void pinned_snapshot_before_launch(hipStream_t stream,
+                                          const amd::KernelSignature& sig,
+                                          void** kernel_params,
+                                          const void* kbuf, size_t ksz,
+                                          std::vector<HostSnapRecord>& out) {
+  out.clear();
+  if (!HIP_HRR_HOST_SNAPSHOTS) return;
+  if (g_pinned_count.load(std::memory_order_relaxed) == 0) return;
+  if (!hrr_cap::writer::is_open()) return;
+
+  std::vector<uint64_t> words;
+  pinned_candidate_words(sig, kernel_params, kbuf, ksz, words);
+  if (words.empty()) return;
+  std::vector<uintptr_t> bases;
+  {
+    std::lock_guard<std::mutex> lk(g_pinned_mu);
+    for (uint64_t v : words)
+      if (uintptr_t b = pinned_base_of_locked(v)) bases.push_back(b);
+  }
+  if (bases.empty()) return;
+  std::sort(bases.begin(), bases.end());
+  bases.erase(std::unique(bases.begin(), bases.end()), bases.end());
+
+  // Earlier work on the stream may still be writing the buffer, so wait for it.
+  // A stream being graph-captured cannot be synchronized (it fails with 901 and
+  // would leave that error behind), and the launch is not run now anyway, so
+  // its pinned inputs are not recorded. Neither call may change the error the
+  // application sees from hipGetLastError.
+  const hipError_t saved_cmd = hip::tls.last_command_error_;
+  const hipError_t saved_err = hip::tls.last_error_;
+  hipStreamCaptureStatus cap_status = hipStreamCaptureStatusNone;
+  const hipError_t cap_r =
+      g_real_table.hipStreamIsCapturing_fn
+          ? g_real_table.hipStreamIsCapturing_fn(stream, &cap_status)
+          : hipErrorNotSupported;
+  const bool capturing = cap_r != hipSuccess || cap_status != hipStreamCaptureStatusNone;
+  if (!capturing) (void)sync_for_d2h_snapshot(stream);
+  hip::tls.last_command_error_ = saved_cmd;
+  hip::tls.last_error_         = saved_err;
+  if (capturing) {
+    hrr_cap::writer::note_unreplayable(
+        kHostSnapApi,
+        "a kernel reading pinned host memory was launched into a stream under "
+        "graph capture; that memory is not recorded");
+    return;
+  }
+
+  const size_t cap = static_cast<size_t>(HIP_HRR_HOST_SNAPSHOT_MAX_MB) << 20;
+  std::lock_guard<std::mutex> lk(g_pinned_mu);
+  const int pid = amd::Os::getProcessId();
+  if (pid != g_pinned_shadow_pid) {
+    for (auto& [base, a] : g_pinned) {
+      a.shadow.clear(); a.shadow.shrink_to_fit(); a.hashes.clear();
+    }
+    g_pinned_shadow_pid = pid;
+  }
+  for (uintptr_t b : bases) {
+    auto it = g_pinned.find(b);
+    if (it == g_pinned.end()) continue;  // freed while the stream drained
+    PinnedAlloc& a = it->second;
+    if (a.size > cap) {
+      hrr_cap::writer::note_unreplayable(
+          kHostSnapApi,
+          "a pinned allocation larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB was not "
+          "recorded");
+      continue;
+    }
+    const size_t n_chunks = (a.size + kHostSnapChunk - 1) / kHostSnapChunk;
+    const bool fresh = a.shadow.empty();
+    if (fresh) {
+      try {
+        a.shadow.resize(a.size);
+        a.hashes.assign(n_chunks, hrr_cap::Hash128{0, 0});
+      } catch (const std::bad_alloc&) {
+        a.shadow.clear(); a.shadow.shrink_to_fit(); a.hashes.clear();
+        hrr_cap::writer::note_unreplayable(
+            kHostSnapApi, "no host memory for the shadow copy of a pinned allocation");
+        continue;
+      }
+    }
+    const auto* live = reinterpret_cast<const uint8_t*>(b);
+    const size_t first_rec = out.size();
+    bool failed = false;
+    for (size_t c = 0; c < n_chunks; c++) {
+      const size_t off = c * kHostSnapChunk;
+      const size_t len = std::min(kHostSnapChunk, a.size - off);
+      if (fresh || std::memcmp(live + off, a.shadow.data() + off, len) != 0) {
+        // Hash the shadow, not the live buffer, so the recorded hash always
+        // matches the bytes kept for the next comparison.
+        std::memcpy(a.shadow.data() + off, live + off, len);
+        const hrr_cap::Hash128 h = hrr_cap::writer::write_blob(a.shadow.data() + off, len);
+        if (h.lo == 0 && h.hi == 0) { failed = true; break; }  // writer closed
+        a.hashes[c] = h;
+      }
+      if (out.size() == UINT16_MAX) {
+        hrr_cap::writer::note_unreplayable(
+            kHostSnapApi, "a launch read more pinned memory than one event can record");
+        return;
+      }
+      out.push_back(HostSnapRecord{b, off, len, a.hashes[c]});
+    }
+    if (failed) {
+      // Start this allocation over next time rather than trust a half-updated
+      // shadow, and record nothing of it for this launch.
+      a.shadow.clear(); a.shadow.shrink_to_fit(); a.hashes.clear();
+      out.resize(first_rec);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Kernel launch event serialization
 //
 // Binary layout of KERNEL_LAUNCH payload (matches hrr_reader.cpp parse_kernel_launch):
@@ -174,15 +440,21 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 //   u32[3] block
 //   u32  shared_mem
 //   u16  num_args
-//   u16  num_snapshots (always 0)
+//   u16  num_snapshots (pinned host snapshot records after the attribute tail)
 //   for each arg:
 //     u8   value_kind  (0=scalar, 1=pointer/gpu addr, 2=hidden,
-//                       3=scalar/struct with embedded gpu pointer(s))
+//                       3=scalar/struct with embedded gpu or pinned pointer(s))
 //     u16  size
 //     u8[] data (size bytes)
 //     if value_kind == 3:
 //       u16   n_ptrs
-//       u16[] ptr_offset (n_ptrs entries: byte offset of each 8-byte gpu ptr)
+//       u16[] ptr_offset (n_ptrs entries: byte offset of each 8-byte pointer)
+//   u32  num_attrs, u32 attr stride, num_attrs * stride bytes
+//   for each snapshot (v8):
+//     u64  ptr_handle (capture-time base of the pinned allocation)
+//     u64  offset, u64 length (the chunk within it)
+//     u64  hash_lo, u64 hash_hi (blob holding the chunk's bytes)
+//     u8   direction (0 = host contents before the launch)
 // ---------------------------------------------------------------------------
 
 // Locate device pointers embedded inside a by-value kernel argument.
@@ -221,10 +493,8 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 //   device VA is a false positive. Replay guards against corrupting such a
 //   scalar by only overwriting a flagged word when the recorded value actually
 //   resolves to a known allocation (see hip_playback.cpp).
-// - Scope: only hipMemoryTypeDevice/Unified words are flagged. A pinned/host
-//   (hipMemoryTypeHost) pointer embedded by value keeps its capture-time host VA
-//   at replay (invalid in the replay process); translating such pointers is
-//   intentionally out of scope.
+// - Scope: only hipMemoryTypeDevice/Unified words are flagged here. Words that
+//   point into a tracked pinned allocation are added by pinned_word_offsets().
 enum class PtrVerdict : uint8_t { Pointer, Scalar };
 
 // A cached per-word verdict. For a Scalar verdict we also remember the exact
@@ -327,7 +597,8 @@ static void serialize_kernel_launch(
     hrr_cap::Hash128            co_hash,
     uint16_t                    api_id = HRR_API_HIPMODULELAUNCHKERNEL,
     const hipLaunchAttribute*   attrs = nullptr,
-    uint32_t                    num_attrs = 0)
+    uint32_t                    num_attrs = 0,
+    const std::vector<HostSnapRecord>* snaps = nullptr)
 {
   // Reserve space for hrr_event_header at front; payload body follows.
   std::vector<uint8_t> payload(sizeof(hrr_event_header), 0);
@@ -374,7 +645,9 @@ static void serialize_kernel_launch(
       if (!sig.at(i).info_.hidden_) num_args++;
   }
   push_u16(num_args);
-  push_u16(0);  // num_snapshots
+  const uint16_t num_snapshots =
+      snaps ? static_cast<uint16_t>(std::min<size_t>(snaps->size(), UINT16_MAX)) : 0;
+  push_u16(num_snapshots);
 
   // HIP_HRR_DEBUG_ARGS dumps every captured arg (kind, size, full bytes,
   // detected embedded-pointer offsets) — used to confirm pointer layout. Use the
@@ -400,6 +673,12 @@ static void serialize_kernel_launch(
     }
     std::vector<uint16_t> offs;
     scan_embedded_ptr_offsets(func_key, idx, bytes, sz, offs);
+    const size_t n_dev = offs.size();
+    pinned_word_offsets(bytes, sz, offs);
+    if (offs.size() != n_dev) {
+      std::sort(offs.begin(), offs.end());
+      offs.erase(std::unique(offs.begin(), offs.end()), offs.end());
+    }
     uint8_t kind = offs.empty() ? 0 : 3;
     push_u8(kind); push_u16(sz);
     if (bytes) push_bytes(bytes, sz);
@@ -471,6 +750,18 @@ static void serialize_kernel_launch(
   push_u32(num_attrs ? static_cast<uint32_t>(sizeof(hipLaunchAttribute)) : 0u);
   if (attrs && num_attrs)
     push_bytes(attrs, static_cast<size_t>(num_attrs) * sizeof(hipLaunchAttribute));
+
+  // Pinned host snapshots, after the tail so a v7 reader of the args and
+  // attributes would see the same bytes in the same place.
+  for (uint16_t i = 0; i < num_snapshots; i++) {
+    const HostSnapRecord& rec = (*snaps)[i];
+    push_u64(rec.ptr);
+    push_u64(rec.offset);
+    push_u64(rec.length);
+    push_u64(rec.hash.lo);
+    push_u64(rec.hash.hi);
+    push_u8(0);  // direction: host contents before the launch
+  }
 
   // payload_length is a uint32_t (wire v4), so the practical ceiling is ~4 GiB —
   // a real launch never approaches it. A per-arg size that exceeds the uint16_t
@@ -618,7 +909,8 @@ static void record_launch(
     void** kernel_params, void** extra,
     uint16_t api_id = HRR_API_HIPMODULELAUNCHKERNEL,
     const hipLaunchAttribute* attrs = nullptr,
-    uint32_t num_attrs = 0)
+    uint32_t num_attrs = 0,
+    const std::vector<HostSnapRecord>* snaps = nullptr)
 {
   amd::Kernel* kernel = hip::asKernel(f);
   if (!kernel) return;
@@ -637,7 +929,36 @@ static void record_launch(
       static_cast<uint32_t>(shared_mem),
       stream, sig, kernel_params, kbuf, ksz,
       kernel_code_object_hash(kernel),
-      api_id, attrs, num_attrs);
+      api_id, attrs, num_attrs, snaps);
+}
+
+// Pre-launch half of record_launch: the pinned host memory the launch's
+// arguments point into, read before the real launch runs the kernel.
+static void snapshot_launch(hipFunction_t f, hipStream_t stream,
+                            void** kernel_params, void** extra,
+                            std::vector<HostSnapRecord>& out) {
+  out.clear();
+  if (g_pinned_count.load(std::memory_order_relaxed) == 0) return;
+  amd::Kernel* kernel = f ? hip::asKernel(f) : nullptr;
+  if (!kernel) return;
+  const void* kbuf = nullptr;
+  size_t      ksz  = 0;
+  if (!kernel_params && extra) parse_kernel_extra(extra, kbuf, ksz);
+  pinned_snapshot_before_launch(stream, kernel->signature(), kernel_params,
+                                kbuf, ksz, out);
+}
+
+// The launches by host stub resolve the stub to its function after the launch
+// to record it. With pinned memory tracked they need it before, for the
+// snapshot, and the same answer serves both.
+static hipFunction_t resolve_stub_if_pinned(const void* host_func) {
+  hipFunction_t f = nullptr;
+  if (g_pinned_count.load(std::memory_order_relaxed) == 0 || !HIP_HRR_HOST_SNAPSHOTS)
+    return nullptr;
+  if (g_real_table.hipGetFuncBySymbol_fn &&
+      g_real_table.hipGetFuncBySymbol_fn(&f, host_func) == hipSuccess)
+    return f;
+  return nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -1074,6 +1395,8 @@ hipError_t capture_hipModuleLaunchKernel(
     unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
     unsigned int sharedMemBytes, hipStream_t stream,
     void** kernelParams, void** extra) {
+  std::vector<HostSnapRecord> snaps;
+  snapshot_launch(f, stream, kernelParams, extra, snaps);
   hipError_t r = g_real_table.hipModuleLaunchKernel_fn(
       f, gridDimX, gridDimY, gridDimZ,
          blockDimX, blockDimY, blockDimZ,
@@ -1081,7 +1404,8 @@ hipError_t capture_hipModuleLaunchKernel(
   if (r == hipSuccess) {
     record_launch(f, gridDimX, gridDimY, gridDimZ,
                      blockDimX, blockDimY, blockDimZ,
-                  sharedMemBytes, stream, kernelParams, extra);
+                  sharedMemBytes, stream, kernelParams, extra,
+                  HRR_API_HIPMODULELAUNCHKERNEL, nullptr, 0, &snaps);
   }
   return r;
 }
@@ -1095,6 +1419,8 @@ hipError_t capture_hipModuleLaunchCooperativeKernel(
     unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
     unsigned int sharedMemBytes, hipStream_t stream,
     void** kernelParams) {
+  std::vector<HostSnapRecord> snaps;
+  snapshot_launch(f, stream, kernelParams, nullptr, snaps);
   hipError_t r = g_real_table.hipModuleLaunchCooperativeKernel_fn(
       f, gridDimX, gridDimY, gridDimZ,
          blockDimX, blockDimY, blockDimZ,
@@ -1103,7 +1429,7 @@ hipError_t capture_hipModuleLaunchCooperativeKernel(
     record_launch(f, gridDimX, gridDimY, gridDimZ,
                      blockDimX, blockDimY, blockDimZ,
                   sharedMemBytes, stream, kernelParams, nullptr,
-                  HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL);
+                  HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL, nullptr, 0, &snaps);
   }
   return r;
 }
@@ -1115,6 +1441,8 @@ hipError_t capture_hipExtModuleLaunchKernel(
     size_t sharedMemBytes, hipStream_t stream,
     void** kernelParams, void** extra,
     hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags) {
+  std::vector<HostSnapRecord> snaps;
+  snapshot_launch(f, stream, kernelParams, extra, snaps);
   hipError_t r = g_real_table.hipExtModuleLaunchKernel_fn(
       f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
          localWorkSizeX,  localWorkSizeY,  localWorkSizeZ,
@@ -1135,7 +1463,8 @@ hipError_t capture_hipExtModuleLaunchKernel(
                   ceil_div(globalWorkSizeY, localWorkSizeY),
                   ceil_div(globalWorkSizeZ, localWorkSizeZ),
                   localWorkSizeX,  localWorkSizeY,  localWorkSizeZ,
-                  static_cast<unsigned>(sharedMemBytes), stream, kernelParams, extra);
+                  static_cast<unsigned>(sharedMemBytes), stream, kernelParams, extra,
+                  HRR_API_HIPMODULELAUNCHKERNEL, nullptr, 0, &snaps);
   }
   return r;
 }
@@ -1144,17 +1473,21 @@ hipError_t capture_hipLaunchKernel(const void* function_address,
                                            dim3 numBlocks, dim3 dimBlocks,
                                            void** args, size_t sharedMemBytes,
                                            hipStream_t stream) {
+  std::vector<HostSnapRecord> snaps;
+  hipFunction_t f = resolve_stub_if_pinned(function_address);
+  snapshot_launch(f, stream, args, nullptr, snaps);
   hipError_t r = g_real_table.hipLaunchKernel_fn(
       function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
   if (r == hipSuccess) {
     // function_address is a host stub pointer, not hipFunction_t — resolve via dispatch table
-    hipFunction_t f = nullptr;
-    if (g_real_table.hipGetFuncBySymbol_fn &&
-        g_real_table.hipGetFuncBySymbol_fn(&f, function_address) == hipSuccess && f) {
+    if (f ||
+        (g_real_table.hipGetFuncBySymbol_fn &&
+         g_real_table.hipGetFuncBySymbol_fn(&f, function_address) == hipSuccess && f)) {
       record_launch(f,
                     numBlocks.x, numBlocks.y, numBlocks.z,
                     dimBlocks.x, dimBlocks.y, dimBlocks.z,
-                    static_cast<unsigned>(sharedMemBytes), stream, args, nullptr);
+                    static_cast<unsigned>(sharedMemBytes), stream, args, nullptr,
+                    HRR_API_HIPMODULELAUNCHKERNEL, nullptr, 0, &snaps);
     }
   }
   return r;
@@ -1170,17 +1503,20 @@ hipError_t capture_hipLaunchKernel_spt(const void* function_address,
                                        dim3 numBlocks, dim3 dimBlocks,
                                        void** args, size_t sharedMemBytes,
                                        hipStream_t stream) {
+  std::vector<HostSnapRecord> snaps;
+  hipFunction_t f = resolve_stub_if_pinned(function_address);
+  snapshot_launch(f, stream, args, nullptr, snaps);
   hipError_t r = g_real_table.hipLaunchKernel_spt_fn(
       function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
   if (r == hipSuccess) {
-    hipFunction_t f = nullptr;
-    if (g_real_table.hipGetFuncBySymbol_fn &&
-        g_real_table.hipGetFuncBySymbol_fn(&f, function_address) == hipSuccess && f) {
+    if (f ||
+        (g_real_table.hipGetFuncBySymbol_fn &&
+         g_real_table.hipGetFuncBySymbol_fn(&f, function_address) == hipSuccess && f)) {
       record_launch(f,
                     numBlocks.x, numBlocks.y, numBlocks.z,
                     dimBlocks.x, dimBlocks.y, dimBlocks.z,
                     static_cast<unsigned>(sharedMemBytes), stream, args, nullptr,
-                    HRR_API_HIPLAUNCHKERNEL_SPT);
+                    HRR_API_HIPLAUNCHKERNEL_SPT, nullptr, 0, &snaps);
     }
   }
   return r;
@@ -1194,17 +1530,20 @@ hipError_t capture_hipLaunchCooperativeKernel(const void* f,
                                               void** kernelParams,
                                               unsigned int sharedMemBytes,
                                               hipStream_t stream) {
+  std::vector<HostSnapRecord> snaps;
+  hipFunction_t fn = resolve_stub_if_pinned(f);
+  snapshot_launch(fn, stream, kernelParams, nullptr, snaps);
   hipError_t r = g_real_table.hipLaunchCooperativeKernel_fn(
       f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream);
   if (r == hipSuccess) {
-    hipFunction_t fn = nullptr;
-    if (g_real_table.hipGetFuncBySymbol_fn &&
-        g_real_table.hipGetFuncBySymbol_fn(&fn, f) == hipSuccess && fn) {
+    if (fn ||
+        (g_real_table.hipGetFuncBySymbol_fn &&
+         g_real_table.hipGetFuncBySymbol_fn(&fn, f) == hipSuccess && fn)) {
       record_launch(fn,
                     gridDim.x, gridDim.y, gridDim.z,
                     blockDimX.x, blockDimX.y, blockDimX.z,
                     sharedMemBytes, stream, kernelParams, nullptr,
-                    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL);
+                    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL, nullptr, 0, &snaps);
     }
   }
   return r;
@@ -1215,17 +1554,20 @@ hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f,
                                                   void** kernelParams,
                                                   uint32_t sharedMemBytes,
                                                   hipStream_t hStream) {
+  std::vector<HostSnapRecord> snaps;
+  hipFunction_t fn = resolve_stub_if_pinned(f);
+  snapshot_launch(fn, hStream, kernelParams, nullptr, snaps);
   hipError_t r = g_real_table.hipLaunchCooperativeKernel_spt_fn(
       f, gridDim, blockDim, kernelParams, sharedMemBytes, hStream);
   if (r == hipSuccess) {
-    hipFunction_t fn = nullptr;
-    if (g_real_table.hipGetFuncBySymbol_fn &&
-        g_real_table.hipGetFuncBySymbol_fn(&fn, f) == hipSuccess && fn) {
+    if (fn ||
+        (g_real_table.hipGetFuncBySymbol_fn &&
+         g_real_table.hipGetFuncBySymbol_fn(&fn, f) == hipSuccess && fn)) {
       record_launch(fn,
                     gridDim.x, gridDim.y, gridDim.z,
                     blockDim.x, blockDim.y, blockDim.z,
                     sharedMemBytes, hStream, kernelParams, nullptr,
-                    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT);
+                    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT, nullptr, 0, &snaps);
     }
   }
   return r;
@@ -1245,33 +1587,40 @@ hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f,
 hipError_t capture_hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
                                         hipFunction_t f, void** params,
                                         void** extra) {
+  std::vector<HostSnapRecord> snaps;
+  if (config) snapshot_launch(f, config->hStream, params, extra, snaps);
   hipError_t r = g_real_table.hipDrvLaunchKernelEx_fn(config, f, params, extra);
   if (r == hipSuccess && config) {
     record_launch(f,
                   config->gridDimX, config->gridDimY, config->gridDimZ,
                   config->blockDimX, config->blockDimY, config->blockDimZ,
                   config->sharedMemBytes, config->hStream, params, extra,
-                  HRR_API_HIPDRVLAUNCHKERNELEX, config->attrs, config->numAttrs);
+                  HRR_API_HIPDRVLAUNCHKERNELEX, config->attrs, config->numAttrs,
+                  &snaps);
   }
   return r;
 }
 
 hipError_t capture_hipLaunchKernelExC(const hipLaunchConfig_t* config,
                                       const void* fPtr, void** args) {
+  std::vector<HostSnapRecord> snaps;
+  hipFunction_t f = config ? resolve_stub_if_pinned(fPtr) : nullptr;
+  if (config) snapshot_launch(f, config->stream, args, nullptr, snaps);
   hipError_t r = g_real_table.hipLaunchKernelExC_fn(config, fPtr, args);
   if (r == hipSuccess && config) {
     // fPtr is a host stub address, not a hipFunction_t: the same resolution
     // hipLaunchKernel needs, and the same reason replay cannot use the
     // recorded value directly.
-    hipFunction_t f = nullptr;
-    if (g_real_table.hipGetFuncBySymbol_fn &&
-        g_real_table.hipGetFuncBySymbol_fn(&f, fPtr) == hipSuccess && f) {
+    if (f ||
+        (g_real_table.hipGetFuncBySymbol_fn &&
+         g_real_table.hipGetFuncBySymbol_fn(&f, fPtr) == hipSuccess && f)) {
       record_launch(f,
                     config->gridDim.x, config->gridDim.y, config->gridDim.z,
                     config->blockDim.x, config->blockDim.y, config->blockDim.z,
                     static_cast<unsigned>(config->dynamicSmemBytes),
                     config->stream, args, nullptr,
-                    HRR_API_HIPLAUNCHKERNELEXC, config->attrs, config->numAttrs);
+                    HRR_API_HIPLAUNCHKERNELEXC, config->attrs, config->numAttrs,
+                    &snaps);
     }
   }
   return r;
@@ -1333,12 +1682,18 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
     kargs  = e.arguments_;  // copy (not move) to leave arguments_ intact for the real launch
   }
 
+  std::vector<HostSnapRecord> snaps;
+  hipFunction_t f = kargs.empty() ? nullptr : resolve_stub_if_pinned(func);
+  if (amd::Kernel* k = f ? hip::asKernel(f) : nullptr)
+    pinned_snapshot_before_launch(stream, k->signature(), nullptr, kargs.data(),
+                                  kargs.size(), snaps);
+
   hipError_t r = g_real_table.hipLaunchByPtr_fn(func);
   if (r == hipSuccess) {
     // func is a host stub pointer — resolve to real hipFunction_t first
-    hipFunction_t f = nullptr;
-    if (g_real_table.hipGetFuncBySymbol_fn &&
-        g_real_table.hipGetFuncBySymbol_fn(&f, func) == hipSuccess && f) {
+    if (f ||
+        (g_real_table.hipGetFuncBySymbol_fn &&
+         g_real_table.hipGetFuncBySymbol_fn(&f, func) == hipSuccess && f)) {
       amd::Kernel* kernel = hip::asKernel(f);
       if (kernel) {
         const amd::KernelSignature& sig = kernel->signature();
@@ -1353,7 +1708,8 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
             block.x, block.y, block.z,
             static_cast<uint32_t>(shared), stream,
             sig, nullptr, kbuf, ksz,
-            kernel_code_object_hash(kernel));
+            kernel_code_object_hash(kernel),
+            HRR_API_HIPMODULELAUNCHKERNEL, nullptr, 0, &snaps);
       }
     }
   }
@@ -1484,12 +1840,18 @@ hipError_t capture_hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int
       std::lock_guard<std::mutex> lk(g_pinned_reg_mu);
       g_pinned_reg_map[hostPtr] = sizeBytes;
     }
+    // Registered memory is read by kernels the same way as hipHostMalloc
+    // memory, and replay backs it with a buffer of its own.
+    pinned_track(hostPtr, sizeBytes);
   }
   return r;
 }
 
 hipError_t capture_hipHostUnregister(void* hostPtr) {
+  PinnedAlloc held;
+  const bool was_tracked = pinned_untrack(hostPtr, &held);
   hipError_t r = g_real_table.hipHostUnregister_fn(hostPtr);
+  if (r != hipSuccess && was_tracked) pinned_retrack(hostPtr, std::move(held));
   if (r == hipSuccess) {
     hrr_args_hipHostUnregister a{};
     a.ret     = static_cast<int32_t>(r);
@@ -1501,6 +1863,81 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
     }
   }
   return r;
+}
+
+// ---------------------------------------------------------------------------
+// Pinned allocation tracking for host snapshots
+//
+// The generated shims for these APIs record the call. These wrappers sit in
+// front of them in g_cap_table and keep g_pinned current: an allocation is
+// added once it succeeds, and a free takes it out before the memory goes, so a
+// launch on another thread never reads a freed buffer. hipFree is wrapped too,
+// because CLR frees pinned host memory through it as well. hipExtHostAlloc has
+// no CLR implementation, so there is nothing to wrap.
+// ---------------------------------------------------------------------------
+
+namespace {
+decltype(HipDispatchTable::hipHostMalloc_fn)   g_shim_hipHostMalloc   = nullptr;
+decltype(HipDispatchTable::hipHostAlloc_fn)    g_shim_hipHostAlloc    = nullptr;
+decltype(HipDispatchTable::hipMallocHost_fn)   g_shim_hipMallocHost   = nullptr;
+decltype(HipDispatchTable::hipMemAllocHost_fn) g_shim_hipMemAllocHost = nullptr;
+decltype(HipDispatchTable::hipHostFree_fn)     g_shim_hipHostFree     = nullptr;
+decltype(HipDispatchTable::hipFreeHost_fn)     g_shim_hipFreeHost     = nullptr;
+decltype(HipDispatchTable::hipFree_fn)         g_shim_hipFree         = nullptr;
+}  // namespace
+
+static hipError_t pinned_hipHostMalloc(void** ptr, size_t size, unsigned int flags) {
+  hipError_t r = g_shim_hipHostMalloc(ptr, size, flags);
+  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
+  return r;
+}
+static hipError_t pinned_hipHostAlloc(void** ptr, size_t size, unsigned int flags) {
+  hipError_t r = g_shim_hipHostAlloc(ptr, size, flags);
+  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
+  return r;
+}
+static hipError_t pinned_hipMallocHost(void** ptr, size_t size) {
+  hipError_t r = g_shim_hipMallocHost(ptr, size);
+  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
+  return r;
+}
+static hipError_t pinned_hipMemAllocHost(void** ptr, size_t size) {
+  hipError_t r = g_shim_hipMemAllocHost(ptr, size);
+  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
+  return r;
+}
+
+template <typename FreeFn>
+static hipError_t pinned_free(FreeFn shim, void* ptr) {
+  PinnedAlloc held;
+  const bool was_tracked = pinned_untrack(ptr, &held);
+  hipError_t r = shim(ptr);
+  if (r != hipSuccess && was_tracked) pinned_retrack(ptr, std::move(held));
+  return r;
+}
+static hipError_t pinned_hipHostFree(void* ptr) { return pinned_free(g_shim_hipHostFree, ptr); }
+static hipError_t pinned_hipFreeHost(void* ptr) { return pinned_free(g_shim_hipFreeHost, ptr); }
+static hipError_t pinned_hipFree(void* ptr)     { return pinned_free(g_shim_hipFree, ptr); }
+
+// Put the wrappers in front of the generated shims, once.
+static void install_pinned_tracking() {
+  static bool done = false;
+  if (done) return;
+  done = true;
+  hrr_cap::writer::set_host_snapshots(HIP_HRR_HOST_SNAPSHOTS);
+#define HRR_WRAP_PINNED(api)                         \
+  if (g_cap_table.api##_fn) {                        \
+    g_shim_##api = g_cap_table.api##_fn;             \
+    g_cap_table.api##_fn = pinned_##api;             \
+  }
+  HRR_WRAP_PINNED(hipHostMalloc)
+  HRR_WRAP_PINNED(hipHostAlloc)
+  HRR_WRAP_PINNED(hipMallocHost)
+  HRR_WRAP_PINNED(hipMemAllocHost)
+  HRR_WRAP_PINNED(hipHostFree)
+  HRR_WRAP_PINNED(hipFreeHost)
+  HRR_WRAP_PINNED(hipFree)
+#undef HRR_WRAP_PINNED
 }
 
 // ---------------------------------------------------------------------------
@@ -2480,6 +2917,7 @@ hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
 
 void hip_capture_install() {
   if (g_installed.exchange(true)) return;
+  install_pinned_tracking();
   std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
               &g_cap_table, sizeof(HipDispatchTable));
 }

@@ -214,6 +214,8 @@ struct BufWriteGuard {
 static std::atomic<uint64_t> g_seq_id{0};
 static std::atomic<uint64_t> g_event_count{0};
 static std::atomic<uint64_t> g_blob_count{0};
+// -1 = not set (no manifest field), 0 = off, 1 = on. See set_host_snapshots().
+static std::atomic<int>      g_host_snapshots{-1};
 
 // In-memory set of blob hex keys already written to disk.
 // Eliminates the fs::exists() stat syscall on repeated blobs (common for weight tensors).
@@ -514,6 +516,9 @@ static void write_manifest_stdio(const char* output_dir, bool complete) {
           complete ? "true" : "false",
           static_cast<unsigned long long>(g_event_count.load()),
           static_cast<unsigned long long>(g_blob_count.load()));
+  if (g_host_snapshots.load() >= 0)
+    fprintf(mf, ",\n  \"host_snapshots\": %s",
+            g_host_snapshots.load() ? "true" : "false");
   {
     std::lock_guard<std::mutex> lk(g_unreplayable_mu);
     if (!g_unreplayable_apis.empty()) {
@@ -978,6 +983,8 @@ void mark_incomplete(const char* reason) {
 
 bool is_incomplete() { return g_capture_incomplete.load(std::memory_order_relaxed); }
 
+void set_host_snapshots(bool enabled) { g_host_snapshots.store(enabled ? 1 : 0); }
+
 void note_unreplayable(const char* api, const char* reason) {
   if (!api) return;
   if (!reason) reason = "(unspecified)";
@@ -1112,6 +1119,10 @@ void emergency_finalize(bool clean_shutdown) {
   p += u64_to_dec(g_event_count.load(), buf + p);
   p = append_lit(buf, p, ",\n  \"blob_count\": ");
   p += u64_to_dec(g_blob_count.load(), buf + p);
+  if (g_host_snapshots.load() >= 0) {
+    p = append_lit(buf, p, ",\n  \"host_snapshots\": ");
+    p = append_lit(buf, p, g_host_snapshots.load() ? "true" : "false");
+  }
   // g_metadata_json is written once during HRR init before event capture starts.
   // The crash path reads it lock-free to avoid taking g_file_mu from an exception callback.
   static constexpr const char* kMetadataFieldPrefix = ",\n  \"metadata\": ";

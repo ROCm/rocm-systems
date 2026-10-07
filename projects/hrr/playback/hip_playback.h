@@ -314,6 +314,11 @@ struct PlaybackContext {
     bool warn_untranslated_args = false;
     std::atomic<uint64_t> untranslated_ptr_args{0};
 
+    // Pinned host snapshot chunks written back before a launch, and records
+    // refused because they did not fit a live host allocation or their blob.
+    std::atomic<uint64_t> host_snapshots_applied{0};
+    std::atomic<uint64_t> host_snapshots_rejected{0};
+
     // ---- Guard pages ----
     // Both off by default: they trade the exact memory layout the replay
     // otherwise reproduces for the ability to make an out-of-bounds access

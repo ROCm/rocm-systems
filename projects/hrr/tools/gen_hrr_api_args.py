@@ -1954,8 +1954,11 @@ _HEADER_PREAMBLE = """\
  * old recording.
  * v7: the host blobs of the pitched copies are packed, and the writer sets
  * HRR_FILE_FLAG_PACKED_HOST_RECTS. A v6 reader ignored the flag and replayed
- * a packed blob with the recorded pitch, reading past its end. */
-#define HRR_VERSION ((uint16_t)7u)
+ * a packed blob with the recorded pitch, reading past its end.
+ * v8: a kernel launch event carries pinned host snapshot records after its
+ * launch-attribute tail (num_snapshots was always 0 before). A v7 reader
+ * would skip the restores and replay the kernel on an unfilled buffer. */
+#define HRR_VERSION ((uint16_t)8u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
