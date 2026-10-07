@@ -241,8 +241,7 @@ inline bool quiets_nan(rj_code_arch_t arch, bool ieee_mode) {
 /// @brief Apply V_CVT_F32_F16 policy to an already decoded and modified half.
 /// @details Raw half decoding preserves signaling NaNs. The caller flushes the
 /// half under MODE before widening it; this applies target-specific NaN quieting.
-inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch,
-                            [[maybe_unused]] uint32_t denorm_mode, bool ieee_mode) {
+inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch, bool ieee_mode) {
   uint32_t bits = std::bit_cast<uint32_t>(source);
   const uint32_t magnitude = bits & 0x7fffffffu;
   if (quiets_nan(arch, ieee_mode) && magnitude > 0x7f800000u)
@@ -893,8 +892,7 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
 /// @brief Evaluate F16 arithmetic before output modifiers and destination rounding.
 /// @details The caller flushes each source half under MODE before widening it.
 template <Arithmetic operation>
-inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_mode,
-                             [[maybe_unused]] uint32_t denorm_mode) {
+inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_mode) {
   detail::ScopedFenv environment(round_mode);
   return detail::evaluate_arithmetic<operation>(static_cast<double>(lhs), static_cast<double>(rhs),
                                                 static_cast<double>(addend));
@@ -902,7 +900,7 @@ inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_
 
 /// @brief Scale an F16 input exactly before output modifiers and final F16 rounding.
 /// @details The caller flushes the source half under MODE before widening it.
-inline double ldexp_f16(float value, int32_t adjustment, [[maybe_unused]] uint32_t denorm_mode) {
+inline double ldexp_f16(float value, int32_t adjustment) {
   detail::ScopedFenv environment(0);
   // Every finite nonzero half lies in [2^-24, 2^16). Bounding the adjustment
   // keeps the intermediate normal in F64 while retaining all F16 rounding

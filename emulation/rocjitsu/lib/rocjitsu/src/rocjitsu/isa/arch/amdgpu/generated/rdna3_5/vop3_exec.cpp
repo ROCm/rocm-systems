@@ -258,7 +258,7 @@ void VCvtF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                             ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
                             input_policy))),
                     0, inst_.abs, inst_.neg),
-                wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode()));
+                wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
                 v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                    wf.ieee_mode(), inst_.omod));
@@ -306,7 +306,7 @@ RJ_NOINLINE void VCvtF32F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                             ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
                             input_policy))),
                     0, inst_.abs, inst_.neg),
-                wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode()));
+                wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
                 v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                    wf.ieee_mode(), inst_.omod));
@@ -4190,7 +4190,7 @@ void VAddF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
                               input_policy))),
                       1, inst_.abs, inst_.neg),
-                  0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                  0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -4255,7 +4255,7 @@ RJ_NOINLINE void VAddF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
                               input_policy))),
                       1, inst_.abs, inst_.neg),
-                  0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                  0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -4308,7 +4308,7 @@ void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
                               input_policy))),
                       1, inst_.abs, inst_.neg),
-                  0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                  0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -4373,7 +4373,7 @@ RJ_NOINLINE void VSubF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
                               input_policy))),
                       1, inst_.abs, inst_.neg),
-                  0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                  0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -4426,7 +4426,7 @@ void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
                               input_policy))),
                       0, inst_.abs, inst_.neg),
-                  0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                  0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -4491,7 +4491,7 @@ RJ_NOINLINE void VSubrevF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
                               input_policy))),
                       0, inst_.abs, inst_.neg),
-                  0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                  0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -4544,7 +4544,7 @@ void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
                               input_policy))),
                       1, inst_.abs, inst_.neg),
-                  0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                  0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -4609,7 +4609,7 @@ RJ_NOINLINE void VMulF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
                               input_policy))),
                       1, inst_.abs, inst_.neg),
-                  0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                  0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -4957,8 +4957,7 @@ void VLdexpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                                   input_policy))),
                           0, inst_.abs, inst_.neg),
                       static_cast<int32_t>(static_cast<int16_t>(
-                          ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))),
-                      wf.fp_denorm_mode_f16_f64()),
+                          ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)))),
                   wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
               output_policy)));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
@@ -5027,8 +5026,7 @@ RJ_NOINLINE void VLdexpF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                   input_policy))),
                           0, inst_.abs, inst_.neg),
                       static_cast<int32_t>(static_cast<int16_t>(
-                          ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))),
-                      wf.fp_denorm_mode_f16_f64()),
+                          ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)))),
                   wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
               output_policy)));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
