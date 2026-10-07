@@ -1026,6 +1026,12 @@ set_property(
 )
 rj_configure_target(waitcheck_c_header_test PRIVATE_INCLUDES WARNINGS)
 rj_add_test(NAME RjWaitcheck.CHeader COMMAND waitcheck_c_header_test LABELS waitcheck)
+set_tests_properties(
+    RjWaitcheck.CHeader
+    PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_shared>"
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(waitcheck_dlopen_test analysis/waitcheck_dlopen_test.cpp)

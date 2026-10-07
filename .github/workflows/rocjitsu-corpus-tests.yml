@@ -257,7 +257,7 @@ jobs:
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
             "rocm[devel,libraries]==${ROCM_SDK_VERSION}"
           ROCM_LIB="$(rocm-sdk path --root)"/lib
-          # Prefer this checkout's libraries over copies bundled in the SDK.
+          # Prefer this checkout's build-root libraries over SDK copies.
           echo "LD_LIBRARY_PATH=${ROCJITSU_BUILD_DIR}:${ROCM_LIB}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
       - name: Build rocjitsu
