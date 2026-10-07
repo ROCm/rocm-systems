@@ -274,7 +274,7 @@ Print a structured summary directly in the chat reply:
 Classify each finding using these labels:
 - **CRASH-TRUNCATED** — archive missing clean trailer; replay may be partial
 - **D2H-FAIL** — output mismatch; note which blobs and max error if logged
-- **MISSING-HANDLE** — null-translated pointer; likely `hipHostAlloc`/texture/IPC gap
+- **MISSING-HANDLE** — null-translated pointer; likely a texture/IPC gap
 - **NOOP-API** — explicit graph, texture object, or symbol API replayed as no-op
 - **BUILD-NEEDED** — `hrr-playback` was absent and had to be built
 - **MULTI-PROCESS** — root archive spans multiple pid sub-archives; triage each separately

@@ -42,6 +42,16 @@
 # headers itself, before and after HIP initialises. It compiles its kernel with
 # hipRTC, so it is a plain C++ translation unit.
 #
+# hrr_pinned_host_test.cc covers pinned host buffers a kernel reads directly,
+# with no copy for capture to see: capture snapshots them before each launch
+# and replay writes them back. Contains its own hidden [.][hrr-direct]
+# workloads: busy streams, launches waiting for another stream, a null-stream
+# kernel replay must drain first, size caps, every pinned allocator and free,
+# every launch entry point, graph capture, a failed launch, a device reset, a
+# failed free, pinned pointers in by-value structs, enumerated handles and
+# handles trusted after a launch. It edits captured archives to check that replay
+# refuses malformed records and leaves unchanged ones alone.
+#
 # hrr_disk_space_test.cc covers how capture stops before the file system
 # holding the archive fills. The binary defines statvfs, statvfs64 and fsync to
 # fake a small file system under HIP_HRR_CAPTURE_OUTPUT when the test sets
@@ -61,6 +71,7 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_regions_test.cc
   hrr_api_matrix_workload_test.cc
   hrr_kernel_args_test.cc
+  hrr_pinned_host_test.cc
   hrr_disk_space_test.cc
 )
 

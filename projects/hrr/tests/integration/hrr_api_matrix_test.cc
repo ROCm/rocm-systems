@@ -503,7 +503,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_T1_Roundtrip", "[hrr][api-matrix]") {
  *   - Covers the graph-mutation family that makes ggml/llama.cpp replay every
  *     token with the first token's parameters (section 8.4a), the stream value
  *     operations whose no-op makes XLA's VMM allocator hang rather than fail
- *     (hazard H2), hipHostAlloc allocating nothing (section 8.6), the
+ *     (hazard H2), hipHostAlloc replayed as a real pinned allocation (it
+ *     allocated nothing before; section 8.6), the
  *     __device__ symbol path MoRI's globalGpuStates arrives through, and
  *     hipModuleLaunchCooperativeKernel, live on Instinct via MIOpen's Winograd
  *     Fury solver.

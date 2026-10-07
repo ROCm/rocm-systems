@@ -943,14 +943,18 @@ extern hipError_t playback_hipFreeArray(PlaybackContext& ctx, const uint8_t* pay
 extern hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipFreeHost — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipFreeHost*>(payload);
+  uint64_t _rec_ptr = a->ptr;
+  void*    _live_ptr = ctx.translate_ptr(_rec_ptr);
+  hipError_t _r = (hipError_t)hipFreeHost(_live_ptr);
+  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
+    hrr_note_recorded_error(ctx, "hipFreeHost", a->ret);
+    return hipSuccess;
   }
-  return hipSuccess;
+  if (_r == hipSuccess) {
+    ctx.remove_alloc(_rec_ptr);
+  }
+  return _r;
 }
 
 static hipError_t playback_hipFreeMipmappedArray(PlaybackContext& ctx, const uint8_t* payload) {
@@ -2397,14 +2401,17 @@ static hipError_t playback_hipGraphicsUnregisterResource(PlaybackContext& ctx, c
 }
 
 static hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipHostAlloc — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipHostAlloc*>(payload);
+  void* _out_ptr = nullptr;
+  hipError_t _r = (hipError_t)hipHostAlloc((void**)&_out_ptr, (size_t)a->size, (unsigned int)a->flags);
+  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
+    hrr_note_recorded_error(ctx, "hipHostAlloc", a->ret);
+    return hipSuccess;
   }
-  return hipSuccess;
+  if (_r == hipSuccess) {
+    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->size), AllocKind::HostMalloc);
+  }
+  return _r;
 }
 
 static hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payload) {
@@ -2605,14 +2612,17 @@ extern hipError_t playback_hipMallocAsync(PlaybackContext& ctx, const uint8_t* p
 extern hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMallocHost — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipMallocHost*>(payload);
+  void* _out_ptr = nullptr;
+  hipError_t _r = (hipError_t)hipMallocHost((void**)&_out_ptr, (size_t)a->size);
+  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
+    hrr_note_recorded_error(ctx, "hipMallocHost", a->ret);
+    return hipSuccess;
   }
-  return hipSuccess;
+  if (_r == hipSuccess) {
+    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->size), AllocKind::HostMalloc);
+  }
+  return _r;
 }
 
 extern hipError_t playback_hipMallocManaged(PlaybackContext& ctx, const uint8_t* payload);
@@ -2665,14 +2675,17 @@ static hipError_t playback_hipMemAdvise(PlaybackContext& ctx, const uint8_t* pay
 }
 
 static hipError_t playback_hipMemAllocHost(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemAllocHost — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipMemAllocHost*>(payload);
+  void* _out_ptr = nullptr;
+  hipError_t _r = (hipError_t)hipMemAllocHost((void**)&_out_ptr, (size_t)a->size);
+  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
+    hrr_note_recorded_error(ctx, "hipMemAllocHost", a->ret);
+    return hipSuccess;
   }
-  return hipSuccess;
+  if (_r == hipSuccess) {
+    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->size), AllocKind::HostMalloc);
+  }
+  return _r;
 }
 
 static hipError_t playback_hipMemAllocPitch(PlaybackContext& ctx, const uint8_t* payload) {
