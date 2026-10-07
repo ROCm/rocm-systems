@@ -1,33 +1,22 @@
-import {
-  AppBar,
-  Box,
-  Button,
-  Chip,
-  IconButton,
-  Stack,
-  Toolbar,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+import { Box, Button, IconButton, Stack, Tooltip, Typography } from '@mui/material';
 import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded';
 import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded';
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
 import CloudSyncRoundedIcon from '@mui/icons-material/CloudSyncRounded';
 import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
-import FiberManualRecordRoundedIcon from '@mui/icons-material/FiberManualRecordRounded';
-import { formatFullDate, formatRelativeTime } from '../../utils/formatters';
+import { formatFullDate } from '../../utils/formatters';
 
-export default function DashboardHeader({
-  data,
-  dataError = null,
-  downloadData,
-  loading = false,
-  mode,
-  onReloadData,
-  onToggleMode,
-}) {
+const titles = { overview: 'Overview', branch: 'Branch Runs', benchmarks: 'Benchmarks', compare: 'Run Comparison' };
+const dateFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const timeFormatter = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' });
+const actionStyles = { width: { xs: 44, sm: 32 }, height: { xs: 44, sm: 32 }, border: 1, borderColor: 'divider', borderRadius: '6px', '& svg': { fontSize: 17 } };
+
+export default function DashboardHeader({ data, dataError = null, downloadData, loading = false, mode, onReloadData, onToggleMode, tab = 'overview' }) {
+  const publicationDate = data?.generatedAt ? new Date(data.generatedAt) : null;
+  const publicationAvailable = publicationDate && Number.isFinite(publicationDate.getTime());
+  const publicationLabel = publicationAvailable ? `${dateFormatter.format(publicationDate)} · ${timeFormatter.format(publicationDate)} UTC` : null;
   const downloadJson = () => {
-    if (!downloadData) return;
+    if (loading || !downloadData) return;
     const blob = new Blob([JSON.stringify(downloadData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -36,126 +25,26 @@ export default function DashboardHeader({
     anchor.click();
     URL.revokeObjectURL(url);
   };
-
   return (
-    <AppBar
-      position="sticky"
-      color="inherit"
-      elevation={0}
-      sx={{
-        borderBottom: 1,
-        borderColor: 'divider',
-        backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'rgba(21,28,43,.92)' : 'rgba(255,255,255,.9)',
-        backdropFilter: 'blur(16px)',
-        '&::after': {
-          content: '""',
-          position: 'absolute',
-          inset: 'auto 0 -1px 0',
-          height: 2,
-          background: 'linear-gradient(90deg, #5566E9, #8A5DE8 42%, #12A594 78%, transparent)',
-        },
-      }}
-    >
-      <Toolbar sx={{ width: '100%', maxWidth: 1600, mx: 'auto', minHeight: { xs: 68, md: 76 }, px: { xs: 2, sm: 3, xl: 4 } }}>
-        <Stack direction="row" sx={{ alignItems: 'center', gap: 1.4, minWidth: 0, flex: 1 }}>
-          <Box sx={{ minWidth: 0 }}>
-            <Stack direction="row" sx={{ alignItems: 'center', gap: 0.8, flexWrap: 'wrap' }}>
-              <Typography sx={{ fontSize: { xs: 16, sm: 19 }, fontWeight: 780, letterSpacing: '-.025em', lineHeight: 1.15 }}>
-                Rocjitsu <Box component="span" sx={{ color: 'text.disabled', fontWeight: 400, mx: 0.45 }}>/</Box>{' '}
-                <Box component="span" sx={{ color: 'text.secondary', fontWeight: 580 }}>Simulation Performance Dashboard</Box>
-              </Typography>
-              {data?.isBeta && (
-                <Chip size="small" label="Beta" color="warning" sx={{ height: 19, fontSize: 9, fontWeight: 800, textTransform: 'uppercase' }} />
-              )}
-            </Stack>
-            <Stack direction="row" sx={{ alignItems: 'center', gap: 0.6, mt: 0.45, color: 'text.secondary' }}>
-              <FiberManualRecordRoundedIcon
-                color={loading ? 'primary' : 'success'}
-                sx={loading ? {
-                  fontSize: 9,
-                  animation: 'dataLoadingPulse 1.25s ease-in-out infinite',
-                  '@keyframes dataLoadingPulse': {
-                    '0%, 100%': { opacity: 0.35, transform: 'scale(.8)' },
-                    '50%': { opacity: 1, transform: 'scale(1.25)' },
-                  },
-                } : { fontSize: 9 }}
-              />
-              {loading ? (
-                <Typography variant="caption">Loading run data…</Typography>
-              ) : data?.generatedAt ? (
-                <Tooltip title={formatFullDate(data.generatedAt)}>
-                  <Typography variant="caption">Updated {formatRelativeTime(data.generatedAt)}</Typography>
-                </Tooltip>
-              ) : (
-                <Typography variant="caption">Data unavailable</Typography>
-              )}
-              {data?.repository && (
-                <>
-                  <Typography variant="caption" sx={{ color: 'text.disabled' }}>·</Typography>
-                  <Typography
-                    component="a"
-                    href={`${data.repository}/tree/develop/emulation/rocjitsu`}
-                    target="_blank"
-                    rel="noreferrer"
-                    variant="caption"
-                    sx={{ color: 'primary.main', textDecoration: 'none', display: { xs: 'none', sm: 'inline-flex' }, alignItems: 'center', gap: 0.4 }}
-                  >
-                    ROCm/rocm-systems <OpenInNewRoundedIcon sx={{ fontSize: 11 }} />
-                  </Typography>
-                </>
-              )}
-            </Stack>
-          </Box>
-        </Stack>
-        <Stack direction="row" sx={{ gap: 0.75, ml: 1 }}>
-          <Tooltip title="Use when dashboard data still appears stale or incorrect after refreshing the page. If the problem continues, clear this site's cached data in your browser settings.">
-            <span>
-              <Button
-                aria-label="Reload all data"
-                color={dataError ? 'primary' : 'inherit'}
-                disabled={loading}
-                onClick={onReloadData}
-                startIcon={<CloudSyncRoundedIcon />}
-                variant="outlined"
-                sx={{
-                  height: 40,
-                  minWidth: { xs: 40, md: 'auto' },
-                  px: { xs: 1, md: 1.5 },
-                  borderColor: dataError ? 'primary.main' : 'divider',
-                  color: dataError ? 'primary.main' : 'inherit',
-                  '&:hover': {
-                    borderColor: 'primary.main',
-                    color: 'primary.main',
-                  },
-                }}
-              >
-                <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>
-                  Reload all data
-                </Box>
-              </Button>
-            </span>
+    <Box component="header" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 2, md: 3 }, py: { xs: 2, md: 2.5 } }}>
+      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5 }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography sx={{ fontSize: 11, lineHeight: '16px', color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Rocjitsu / {titles[tab]}</Typography>
+          <Typography component="h1" variant="h1" sx={{ mt: 0.25 }}>{titles[tab]}</Typography>
+          <Tooltip title={publicationAvailable ? formatFullDate(data.generatedAt) : ''}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              {loading ? 'Loading run data…' : dataError ? 'Data unavailable' : publicationLabel ? <>Data as of <Box component="strong" sx={{ fontWeight: 600, color: 'text.primary' }}><time dateTime={data.generatedAt}>{publicationLabel}</time></Box></> : 'Data unavailable'}
+            </Typography>
           </Tooltip>
-          <Button
-            variant="outlined"
-            color="inherit"
-            startIcon={<DownloadRoundedIcon />}
-            disabled={!downloadData}
-            onClick={downloadJson}
-            sx={{
-              display: { xs: 'none', sm: 'inline-flex' },
-              height: 40,
-              borderColor: 'divider',
-            }}
-          >
-            Download JSON
-          </Button>
-          <Tooltip title={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`}>
-            <IconButton aria-label={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`} onClick={onToggleMode} sx={{ border: 1, borderColor: 'divider', borderRadius: 2.2 }}>
-              {mode === 'dark' ? <LightModeRoundedIcon /> : <DarkModeRoundedIcon />}
-            </IconButton>
-          </Tooltip>
+        </Box>
+        <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center', flexWrap: 'wrap' }}>
+          {data?.repository && <Button component="a" href={data.repository} target="_blank" rel="noreferrer"
+            variant="outlined" color="inherit" startIcon={<OpenInNewRoundedIcon />} sx={{ borderColor: 'divider', height: { xs: 44, sm: 32 }, fontSize: 12, color: 'text.secondary', bgcolor: 'background.default' }}>Repository</Button>}
+          <Tooltip title="Reload all data (bypass cached files)"><span><IconButton aria-label="Reload all data" color={dataError ? 'primary' : 'default'} disabled={loading} onClick={onReloadData} sx={actionStyles}><CloudSyncRoundedIcon /></IconButton></span></Tooltip>
+          <Tooltip title="Download JSON"><span><IconButton aria-label="Download JSON" disabled={loading || !downloadData} onClick={downloadJson} sx={actionStyles}><DownloadRoundedIcon /></IconButton></span></Tooltip>
+          <Tooltip title={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`}><IconButton aria-label={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`} onClick={onToggleMode} sx={actionStyles}>{mode === 'dark' ? <LightModeRoundedIcon /> : <DarkModeRoundedIcon />}</IconButton></Tooltip>
         </Stack>
-      </Toolbar>
-    </AppBar>
+      </Stack>
+    </Box>
   );
 }

@@ -1,0 +1,139 @@
+{
+  "id": "fictional-develop-07",
+  "comparisonId": "fictional-develop-07",
+  "testCatalog": "test-catalogs/fictional-old.json",
+  "plugin": {
+    "id": "vanilla",
+    "name": "Vanilla"
+  },
+  "source": {
+    "branch": "develop",
+    "commit": "0008f1c70008f1c70008f1c70008f1c70008f1c7",
+    "committedAt": "2026-09-18T04:00:00.000Z",
+    "message": "FICTIONAL develop measurement 7"
+  },
+  "execution": {
+    "completedAt": "2026-09-18T06:00:00.000Z",
+    "trigger": "auto",
+    "machine": "fictional-node-a"
+  },
+  "environment": [
+    {
+      "key": "sdk",
+      "label": "Fictional SDK",
+      "value": "test-a"
+    },
+    {
+      "key": "enabled",
+      "label": "Feature enabled",
+      "value": true
+    },
+    {
+      "key": "cores",
+      "label": "CPU cores",
+      "value": 32
+    }
+  ],
+  "configurations": [
+    {
+      "target": "gfx1250",
+      "mode": "ST",
+      "threadCount": 1,
+      "results": [
+        {
+          "testId": "a",
+          "status": "completed",
+          "durationSeconds": 18.6,
+          "error": null
+        },
+        {
+          "testId": "b",
+          "status": "completed",
+          "durationSeconds": 28.6,
+          "error": null
+        },
+        {
+          "testId": "c",
+          "status": "completed",
+          "durationSeconds": 38.6,
+          "error": null
+        }
+      ]
+    },
+    {
+      "target": "gfx1250",
+      "mode": "MT",
+      "threadCount": 8,
+      "results": [
+        {
+          "testId": "a",
+          "status": "completed",
+          "durationSeconds": 23.6,
+          "error": null
+        },
+        {
+          "testId": "b",
+          "status": "completed",
+          "durationSeconds": 33.6,
+          "error": null
+        },
+        {
+          "testId": "c",
+          "status": "completed",
+          "durationSeconds": 43.6,
+          "error": null
+        }
+      ]
+    },
+    {
+      "target": "gfx950",
+      "mode": "ST",
+      "threadCount": 1,
+      "results": [
+        {
+          "testId": "a",
+          "status": "completed",
+          "durationSeconds": 28.6,
+          "error": null
+        },
+        {
+          "testId": "b",
+          "status": "completed",
+          "durationSeconds": 38.6,
+          "error": null
+        },
+        {
+          "testId": "c",
+          "status": "completed",
+          "durationSeconds": 48.6,
+          "error": null
+        }
+      ]
+    },
+    {
+      "target": "gfx950",
+      "mode": "MT",
+      "threadCount": 8,
+      "results": [
+        {
+          "testId": "a",
+          "status": "completed",
+          "durationSeconds": 33.6,
+          "error": null
+        },
+        {
+          "testId": "b",
+          "status": "completed",
+          "durationSeconds": 43.6,
+          "error": null
+        },
+        {
+          "testId": "c",
+          "status": "completed",
+          "durationSeconds": 53.6,
+          "error": null
+        }
+      ]
+    }
+  ]
+}

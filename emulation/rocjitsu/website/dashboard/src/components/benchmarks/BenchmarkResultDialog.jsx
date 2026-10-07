@@ -27,7 +27,8 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
   const provenance = run?.provenance ?? {};
   const commitSha = provenance.rocjitsuCommitSha;
   const testProblemDetails = problemDetails(test?.problem);
-  const environmentDetails = provenanceDetails(provenance);
+  const environmentDetails = [...new Map([...provenanceDetails(provenance), ...(provenance.details ?? []), ...(run?.environment ?? [])].map((detail) => [detail.key, detail])).values()];
+  const configuration = run?.configurations?.find((item) => item.target === test?.target && item.mode === test?.mode);
 
   return (
     <Dialog open={Boolean(record)} onClose={onClose} fullWidth maxWidth="md">
@@ -35,7 +36,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
         <>
           <DialogTitle component="div" sx={{ pr: 7 }}>
             <Typography variant="h2" sx={{ lineHeight: '24px' }}>{test.name}</Typography>
-            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.4, lineHeight: '21px' }}>{test.target} · {test.suite}</Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.4, lineHeight: '21px' }}>{test.target} · {test.mode} · {test.suite}</Typography>
             <IconButton onClick={onClose} aria-label="Close details" sx={{ position: 'absolute', top: 11, right: 11 }}><CloseRoundedIcon /></IconButton>
           </DialogTitle>
           <DialogContent dividers>
@@ -43,6 +44,8 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
             <DetailGrid>
               <DetailItem label="Status"><StatusChip status={test.status} /></DetailItem>
               <DetailItem label="Duration">{formatDuration(test.durationSeconds)}</DetailItem>
+              <DetailItem label="Execution mode">{test.mode}</DetailItem>
+              {configuration?.threadCount != null && <DetailItem label="Simulator threads">{configuration.threadCount}</DetailItem>}
               {test.error && <Box sx={{ gridColumn: '1 / -1' }}><DetailItem label="Error">{test.error}</DetailItem></Box>}
             </DetailGrid>
 
@@ -63,7 +66,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
             {environmentDetails.length > 0 ? (
               <DetailGrid>
                 {environmentDetails.map((detail) => (
-                  <DetailItem key={detail.key} label={detail.label}>{detail.value}</DetailItem>
+                  <DetailItem key={detail.key} label={detail.label}>{String(detail.value)}</DetailItem>
                 ))}
               </DetailGrid>
             ) : (
@@ -73,6 +76,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
             <Divider sx={{ my: 2.5 }} />
             <DetailSectionHeading>Run Provenance</DetailSectionHeading>
             <DetailGrid>
+              <DetailItem label="Run identity">{run.runId}</DetailItem>
               <DetailItem label="Run time">{formatFullDate(run.timestamp)}</DetailItem>
               <DetailItem label="Run type">{run.trigger === 'manual' ? 'Manual' : 'Auto'}</DetailItem>
               {hasDisplayValue(run.machineId) && <DetailItem label="Machine">{run.machineId}</DetailItem>}

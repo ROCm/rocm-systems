@@ -6,8 +6,8 @@ function completed(test) {
   return test?.status === 'completed' && Number.isFinite(test.durationSeconds);
 }
 
-function selectedTests(run, target, suites) {
-  return (run?.tests ?? []).filter((test) => test.target === target && suites.includes(test.suite));
+function selectedTests(run, target, suites, modes) {
+  return (run?.tests ?? []).filter((test) => test.target === target && suites.includes(test.suite) && modes.includes(test.mode));
 }
 
 function durationTotal(tests) {
@@ -39,49 +39,50 @@ export function selectPluginComparisonGroups(data) {
     .sort((left, right) => compareRunsByCommit(left.referenceRun, right.referenceRun));
 }
 
-export function selectPluginComparison(group, target, suites, baselinePluginId = 'vanilla') {
+export function selectPluginComparison(group, target, suites, baselinePluginId = 'vanilla', modes = ['ST', 'MT']) {
   const baselineRun = group?.runs.find((run) => run.plugin.id === baselinePluginId) ?? group?.runs[0] ?? null;
   const pluginRuns = group?.runs ?? [];
-  const baselineTests = selectedTests(baselineRun, target, suites);
-  const baselineById = new Map(baselineTests.map((test) => [test.logicalTestId, test]));
+  const baselineTests = selectedTests(baselineRun, target, suites, modes);
+  const baselineById = new Map(baselineTests.map((test) => [test.testId, test]));
 
   const rows = baselineTests.map((test) => ({
     test,
     values: pluginRuns.map((run) => {
-      const result = selectedTests(run, target, suites)
-        .find((candidate) => candidate.logicalTestId === test.logicalTestId) ?? null;
-      const baseline = baselineById.get(test.logicalTestId);
-      const comparable = completed(result) && completed(baseline) && baseline.durationSeconds !== 0;
+      const result = selectedTests(run, target, suites, modes)
+        .find((candidate) => candidate.testId === test.testId) ?? null;
+      const baseline = baselineById.get(test.testId);
+      const comparable = completed(result) && completed(baseline);
       return {
         run,
         result,
         comparable,
-        delta: comparable ? ((result.durationSeconds - baseline.durationSeconds) / baseline.durationSeconds) * 100 : null,
+        delta: comparable && baseline.durationSeconds > 0 ? ((result.durationSeconds - baseline.durationSeconds) / baseline.durationSeconds) * 100 : null,
       };
     }),
   }));
 
   const summaries = pluginRuns.map((run) => {
-    const tests = selectedTests(run, target, suites);
+    const tests = selectedTests(run, target, suites, modes);
     const completedTests = tests.filter(completed);
     const comparisons = rows
       .map((row) => row.values.find((value) => value.run.runId === run.runId))
       .filter(Boolean);
     const comparable = comparisons.filter((comparison) => comparison.comparable);
+    const ratios = comparable.filter((comparison) => comparison.delta !== null);
     const fullyComparable = rows.length > 0
-      && comparable.length === rows.length
+      && ratios.length === rows.length
       && completedTests.length === tests.length;
-    const geometricMeanRatio = comparable.length > 0
-      ? Math.exp(comparable.reduce((sum, comparison) => sum + Math.log(comparison.result.durationSeconds
-        / baselineById.get(comparison.result.logicalTestId).durationSeconds), 0) / comparable.length)
+    const geometricMeanRatio = ratios.length > 0
+      ? Math.exp(ratios.reduce((sum, comparison) => sum + Math.log(comparison.result.durationSeconds
+        / baselineById.get(comparison.result.testId).durationSeconds), 0) / ratios.length)
       : null;
     const counts = comparable.reduce((result, comparison) => {
-      const state = comparison.delta > PLUGIN_NOISE_TOLERANCE
+      const state = comparison.delta === null ? 'unavailable' : comparison.delta > PLUGIN_NOISE_TOLERANCE
         ? 'slower'
         : comparison.delta < -PLUGIN_NOISE_TOLERANCE ? 'faster' : 'neutral';
       result[state] += 1;
       return result;
-    }, { faster: 0, neutral: 0, slower: 0 });
+    }, { faster: 0, neutral: 0, slower: 0, unavailable: 0 });
 
     return {
       run,
@@ -91,13 +92,13 @@ export function selectPluginComparison(group, target, suites, baselinePluginId =
       timeout: tests.filter((test) => test.status === 'timeout').length,
       duration: completedTests.length === tests.length && tests.length > 0 ? durationTotal(completedTests) : null,
       comparable: comparable.length,
-      overhead: run.runId === baselineRun?.runId ? 0 : geometricMeanRatio == null ? null : (geometricMeanRatio - 1) * 100,
+      overhead: geometricMeanRatio == null ? null : run.runId === baselineRun?.runId ? 0 : (geometricMeanRatio - 1) * 100,
       estimated: run.runId !== baselineRun?.runId && geometricMeanRatio != null && !fullyComparable,
       counts,
     };
   });
 
-  const errors = pluginRuns.flatMap((run) => selectedTests(run, target, suites)
+  const errors = pluginRuns.flatMap((run) => selectedTests(run, target, suites, modes)
     .filter((test) => test.status !== 'completed' && test.error)
     .map((test) => ({ run, test, error: test.error })));
 

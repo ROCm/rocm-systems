@@ -3,7 +3,7 @@ import DurationHistory from './DurationHistory';
 import LargestChanges from './LargestChanges';
 import MetricsGrid from './MetricsGrid';
 import RecentRuns from './RecentRuns';
-import ResultsTable from './ResultsTable';
+
 
 export default function OverviewView({
   viewModel,
@@ -14,15 +14,16 @@ export default function OverviewView({
   onOpenBenchmarks,
 }) {
   return (
-    <Stack sx={{ gap: 1.75 }}>
-      <MetricsGrid metrics={viewModel.metrics} />
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.55fr) minmax(350px, .85fr)' }, gap: 1.75, alignItems: 'stretch' }}>
+    <Stack sx={{ gap: 1.75, minWidth: 0 }}>
+      <MetricsGrid metrics={viewModel.metrics} range={state.historyRange} />
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.7fr) minmax(0, 1fr)' }, gap: 1.75, alignItems: 'stretch' }}>
         <DurationHistory
           history={viewModel.history}
+          filters={state.filters}
+          coverage={viewModel.metrics}
           range={state.historyRange}
           onRangeChange={state.setHistoryRange}
           onOpenBenchmarks={onOpenBenchmarks}
-          showNormalizationNote={viewModel.history.normalized || viewModel.metrics.estimatedBaseline}
         />
         <LargestChanges
           changes={viewModel.changes}
@@ -30,14 +31,6 @@ export default function OverviewView({
           baseline={viewModel.history.firstRun}
         />
       </Box>
-      <ResultsTable
-        results={viewModel.results}
-        run={viewModel.candidate}
-        baseline={viewModel.baseline}
-        repository={data.repository}
-        search={state.search}
-        onSearch={state.setSearch}
-      />
       <RecentRuns data={data} filters={state.filters} onCompareRun={onCompareRun} onExploreRun={onExploreRun} />
     </Stack>
   );

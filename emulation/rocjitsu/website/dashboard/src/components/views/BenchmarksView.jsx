@@ -1,384 +1,106 @@
 import { useMemo, useState } from 'react';
-import {
-  Alert,
-  Box,
-  Button,
-  Chip,
-  IconButton,
-  Paper,
-  Stack,
-  TextField,
-  ToggleButton,
-  ToggleButtonGroup,
-  Tooltip,
-  Typography,
-} from '@mui/material';
-import { alpha } from '@mui/material/styles';
+import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Paper, Stack, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
-import ClearAllRoundedIcon from '@mui/icons-material/ClearAllRounded';
-import MouseRoundedIcon from '@mui/icons-material/MouseRounded';
-import TouchAppRoundedIcon from '@mui/icons-material/TouchAppRounded';
-import BenchmarkPicker, { BenchmarkGridPicker } from '../benchmarks/BenchmarkPicker';
+import AddRoundedIcon from '@mui/icons-material/AddRounded';
+import { BenchmarkGridPicker } from '../benchmarks/BenchmarkPicker';
 import BenchmarkHistoryChart from '../benchmarks/BenchmarkHistoryChart';
 import BenchmarkResultDialog from '../benchmarks/BenchmarkResultDialog';
-import RunDetailsDialog from '../benchmarks/RunDetailsDialog';
-import HistoricalRecords from '../benchmarks/HistoricalRecords';
-import AggregatePerformanceChart from '../benchmarks/AggregatePerformanceChart';
-import Chart from '../shared/Chart';
+import ChartPointSelector from '../benchmarks/ChartPointSelector';
 import SectionCard from '../shared/SectionCard';
-import { selectBenchmarkCatalog } from '../../data/selectors';
+import CategoryTag from '../shared/CategoryTag';
+import { benchmarkRangeData, benchmarkResultChoices, boundedGridSelection, explorerCatalog } from '../benchmarks/benchmarkExplorer';
+import { selectBenchmarkSeries } from '../../data/selectors';
+import { formatFullDate } from '../../utils/formatters';
 
-const MAX_GRID_BENCHMARKS = 8;
-const emptyBenchmark = { id: '' };
-const emptyChartOption = {
-  xAxis: { show: false },
-  yAxis: { show: false },
-  series: [],
-};
-
-function EmptyBenchmarksView({ data, filters }) {
-  const [mode, setMode] = useState('single');
-
-  return (
-    <Box sx={{ display: 'grid', gap: 1.75 }}>
-      <SectionCard
-        title="Benchmark Explorer"
-        subtitle="Benchmark duration history across all official attempts"
-        action={(
-          <ToggleButtonGroup
-            exclusive
-            size="small"
-            value={mode}
-            onChange={(_, nextMode) => nextMode && setMode(nextMode)}
-            aria-label="Benchmark display mode"
-          >
-            <ToggleButton value="single">Single</ToggleButton>
-            <ToggleButton value="grid">Grid</ToggleButton>
-            <ToggleButton value="aggregate">Aggregate</ToggleButton>
-          </ToggleButtonGroup>
-        )}
-      >
-        <TextField
-          disabled
-          fullWidth
-          size="small"
-          label={mode === 'grid' ? 'Benchmarks to graph' : 'Benchmark'}
-          value=""
-          helperText="—"
-        />
-        <Box sx={{ mt: 2 }}>
-          <Chart option={emptyChartOption} height={360} ariaLabel="Empty benchmark history chart" />
-        </Box>
-      </SectionCard>
-      <HistoricalRecords
-        data={data}
-        filters={filters}
-        benchmark={emptyBenchmark}
-        onSelectRecord={() => {}}
-      />
-    </Box>
-  );
-}
-
-function ExplorerToggleButton({ enabled, label, ariaFeature, icon, onClick }) {
-  return (
-    <Button
-      size="small"
-      variant="outlined"
-      color={enabled ? 'primary' : 'inherit'}
-      startIcon={icon}
-      aria-label={`${enabled ? 'Disable' : 'Enable'} ${ariaFeature}`}
-      aria-pressed={enabled}
-      onClick={onClick}
-      sx={{
-        minHeight: 40,
-        bgcolor: (theme) => enabled ? alpha(theme.palette.primary.main, 0.06) : 'transparent',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {label} · {enabled ? 'On' : 'Off'}
-    </Button>
-  );
-}
-
-function FilterOverrideAlert({ benchmarks, available, onReturn }) {
-  if (benchmarks.length === 0) return null;
-  return (
-    <Alert
-      severity="info"
-      variant="outlined"
-      action={available.length > 0 ? <Button color="inherit" size="small" onClick={onReturn}>Return to filtered benchmarks</Button> : null}
-      sx={{ mb: 2 }}
-    >
-      <Typography variant="body2" fontWeight={700}>Outside global Suite filter</Typography>
-      <Typography variant="caption">
-        {benchmarks.length === 1
-          ? 'This benchmark belongs to a suite excluded by the global filter. This local override applies only to Benchmark Explorer.'
-          : 'Some selected benchmarks belong to suites excluded by the global filter. This local override applies only to Benchmark Explorer.'}
-      </Typography>
-    </Alert>
-  );
-}
-
-export default function BenchmarksView({
-  data,
-  filters,
-  initialMode = 'single',
-  selectedRunIds,
-  onSelectRun,
-  onClearSelectedRuns,
-}) {
-  const catalog = useMemo(() => selectBenchmarkCatalog(data, filters), [data, filters]);
-  const initialId = catalog.available[0]?.id ?? catalog.all[0]?.id ?? '';
-  const defaultGridIds = (catalog.available.length > 0 ? catalog.available : catalog.all)
-    .slice(0, 2)
-    .map((test) => test.id);
-  const [mode, setMode] = useState(selectedRunIds.length > 0 ? 'aggregate' : initialMode);
-  const [selectedId, setSelectedId] = useState(initialId);
-  const [gridIds, setGridIds] = useState(defaultGridIds);
-  const [showAll, setShowAll] = useState(false);
-  const [showDetailsOnClick, setShowDetailsOnClick] = useState(true);
-  const [scrollZoomEnabled, setScrollZoomEnabled] = useState(true);
+export default function BenchmarksView({ data, filters, historyRange: controlledRange, onRangeChange, initialBenchmarkIds, selectedBenchmarks, onBenchmarksChange, selectedRunIds = [], onSelectRun, onClearSelectedRuns }) {
+  const catalog = useMemo(() => explorerCatalog(data, filters), [data, filters]);
+  const [localRange, setLocalRange] = useState('ALL');
+  const range = controlledRange ?? localRange;
+  const changeRange = (next) => { setLocalRange(next); onRangeChange?.(next); };
+  const rangedData = useMemo(() => benchmarkRangeData(data, range), [data, range]);
+  const [localSelection, setLocalSelection] = useState(() => boundedGridSelection(initialBenchmarkIds ? initialBenchmarkIds.map((id) => catalog.all.find((test) => test.id === id) ?? { id, name: id, suite: 'Unknown suite' }) : catalog.available.slice(0, 4)));
+  // Undefined preserves the standalone initialBenchmarkIds API. Controlled null
+  // derives first-use defaults without writing state; controlled [] stays empty.
+  const selection = selectedBenchmarks === undefined ? localSelection : selectedBenchmarks ?? catalog.available.slice(0, 4);
+  const changeSelection = (tests) => {
+    const next = boundedGridSelection(tests);
+    if (selectedBenchmarks === undefined) setLocalSelection(next);
+    onBenchmarksChange?.(next);
+  };
+  // Retain the chosen workload identity across scope/data updates, including a
+  // workload no longer present in the latest catalog. Never silently pick another.
+  const selected = selection.map((test) => catalog.all.find((current) => current.id === test.id) ?? test);
+  const [draft, setDraft] = useState(null);
+  const [inspectedBenchmark, setInspectedBenchmark] = useState(null);
   const [selectedRecord, setSelectedRecord] = useState(null);
-  const [selectedRunDetails, setSelectedRunDetails] = useState(null);
-  const selectedTest = catalog.all.find((test) => test.id === selectedId) ?? catalog.all[0];
-  const selectedGridTests = gridIds.map((id) => catalog.all.find((test) => test.id === id)).filter(Boolean);
+  const [unavailable, setUnavailable] = useState(null);
+  const [inspectedChoiceId, setInspectedChoiceId] = useState('');
   const availableIds = new Set(catalog.available.map((test) => test.id));
-  const outsideSingleFilter = selectedTest && !availableIds.has(selectedTest.id) ? [selectedTest] : [];
-  const outsideGridFilter = selectedGridTests.filter((test) => !availableIds.has(test.id));
-  const selectGraphPoint = (record) => {
-    onSelectRun(record.run.runId);
-    if (showDetailsOnClick) setSelectedRecord(record);
+  const resultChoices = useMemo(() => inspectedBenchmark ? benchmarkResultChoices(selectBenchmarkSeries(rangedData, filters, inspectedBenchmark.id)) : [], [rangedData, filters, inspectedBenchmark]);
+  const openRecord = (record) => { onSelectRun?.(record.run.runId); setSelectedRecord(record); };
+  const inspectedChoice = resultChoices.find((choice) => choice.id === inspectedChoiceId) ?? resultChoices[0];
+  const closeInspector = () => {
+    if (selectedRecord) return; // Only the top result dialog handles Escape/backdrop.
+    setInspectedBenchmark(null); setInspectedChoiceId(''); setUnavailable(null);
   };
-  const selectAggregatePoint = (run) => {
-    onSelectRun(run.runId);
-    if (showDetailsOnClick) setSelectedRunDetails(run);
+  const activateChoice = (choice) => {
+    if (choice.record) openRecord(choice.record);
+    else { onSelectRun?.(choice.run.runId); setUnavailable(choice); }
   };
-  // Explicit "open" actions always show details; the click toggle governs chart clicks only.
-  const openGraphPoint = (record) => {
-    onSelectRun(record.run.runId);
-    setSelectedRecord(record);
-  };
-  const openAggregatePoint = (run) => {
-    onSelectRun(run.runId);
-    setSelectedRunDetails(run);
-  };
-
-  const returnSingleToFilters = () => {
-    if (catalog.available.length === 0) return;
-    setSelectedId(catalog.available[0].id);
-    setShowAll(false);
-  };
-  const returnGridToFilters = () => {
-    const next = selectedGridTests.filter((test) => availableIds.has(test.id));
-    setGridIds((next.length > 0 ? next : catalog.available.slice(0, 1)).map((test) => test.id));
-    setShowAll(false);
-  };
-
-  if (!selectedTest) {
-    return <EmptyBenchmarksView data={data} filters={filters} />;
-  }
-
-  const interactionControls = (
-    <Stack direction="row" sx={{ alignItems: 'center', justifyContent: { xs: 'flex-start', md: 'flex-end' }, flexWrap: 'wrap', gap: 0.75 }}>
-      <ExplorerToggleButton
-        enabled={showDetailsOnClick}
-        label="Click details"
-        ariaFeature="details on click"
-        icon={<TouchAppRoundedIcon />}
-        onClick={() => setShowDetailsOnClick((current) => !current)}
-      />
-      <ExplorerToggleButton
-        enabled={scrollZoomEnabled}
-        label="Scroll zoom"
-        ariaFeature="scroll zoom"
-        icon={<MouseRoundedIcon />}
-        onClick={() => setScrollZoomEnabled((current) => !current)}
-      />
-    </Stack>
-  );
-
+  const chartProps = { data, filters, range, selectedRunIds, onSelectRecord: openRecord, onOpenRecord: openRecord, onSelectRun, showDetailsOnClick: true, showPointSelector: false, scrollZoomEnabled: false };
   return (
-    <Box sx={{ display: 'grid', gap: 1.75 }}>
-      <SectionCard
-        title="Benchmark Explorer"
-        subtitle={mode === 'single'
-          ? 'One benchmark across all official attempts, including reruns'
-          : mode === 'grid'
-            ? `Up to ${MAX_GRID_BENCHMARKS} benchmark histories across all official attempts`
-              : 'Selected-suite duration by target across all official attempts, including reruns; catalog changes are shown as breaks'}
-        action={(
-          <Stack sx={{ alignItems: { xs: 'flex-start', sm: 'flex-end' }, gap: 0.75 }}>
-            <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 0.75 }}>
-              <Button
-                size="small"
-                color="inherit"
-                startIcon={<ClearAllRoundedIcon />}
-                disabled={selectedRunIds.length === 0}
-                onClick={onClearSelectedRuns}
-              >
-                Clear selected runs ({selectedRunIds.length})
-              </Button>
-              <ToggleButtonGroup
-                exclusive
-                size="small"
-                value={mode}
-                onChange={(_, nextMode) => {
-                  if (!nextMode) return;
-                  if (nextMode === 'grid' && gridIds.length === 0) setGridIds(defaultGridIds);
-                  setMode(nextMode);
-                }}
-                aria-label="Benchmark display mode"
-              >
-                <ToggleButton value="single">Single</ToggleButton>
-                <ToggleButton value="grid">Grid</ToggleButton>
-                <ToggleButton value="aggregate">Aggregate</ToggleButton>
-              </ToggleButtonGroup>
-            </Stack>
+    <Box data-testid="benchmark-explorer" sx={{ minWidth: 0 }}>
+      <SectionCard title="Benchmark history" subtitle="Selected workloads across the configurations checked in the sidebar" sx={{ minWidth: 0 }} action={<Button variant="outlined" size="small" startIcon={<AddRoundedIcon />} disabled={!catalog.all.length} onClick={() => setDraft(selected)}>Add benchmarks</Button>}>
+        <Stack direction="row" sx={{ justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 1.5 }}>
+          <Typography variant="caption" color="text.secondary">{filters.targets.length} targets · {filters.suites.length} suites · {(filters.modes ?? []).length} execution modes · develop only</Typography>
+          <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+            <Typography role="status" variant="caption" color="text.secondary">{selected.length} of 8 charts{selected.length === 8 ? ' · Remove a workload to free a slot' : ''}</Typography>
+            <ToggleButtonGroup exclusive size="small" value={range} onChange={(_, next) => next && changeRange(next)} aria-label="Benchmark history timeframe">
+              {[['1W', 'Trailing 7 days'], ['1M', 'Trailing 30 days'], ['3M', 'Trailing 90 days'], ['ALL', 'All available history']].map(([value, label]) => <ToggleButton key={value} value={value} aria-label={label} sx={{ minHeight: { xs: 44, sm: 32 }, fontSize: 11, px: 1 }}>{value}</ToggleButton>)}
+            </ToggleButtonGroup>
           </Stack>
-        )}
-      >
-        {mode === 'aggregate' ? (
-          <>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: { xs: 'flex-start', md: 'flex-end' }, gap: 0.75, mb: 1.5 }}>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                {data.runs.length} official attempts · Selected runs remain visible while zooming · {scrollZoomEnabled
-                  ? 'Scroll, pinch, or use the slider to change the visible range'
-                  : 'Use the slider to change the visible range'}
-              </Typography>
-              {interactionControls}
-            </Box>
-            <AggregatePerformanceChart
-              data={data}
-              filters={filters}
-              selectedRunIds={selectedRunIds}
-              onSelectRun={selectAggregatePoint}
-              onOpenRun={openAggregatePoint}
-              showDetailsOnClick={showDetailsOnClick}
-              scrollZoomEnabled={scrollZoomEnabled}
-            />
-          </>
-        ) : mode === 'single' ? (
-          <>
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(320px, 720px) auto' }, alignItems: 'start', gap: 1.5, mb: 2 }}>
-              <BenchmarkPicker
-                allOptions={catalog.all}
-                availableOptions={catalog.available}
-                hiddenCount={catalog.hiddenCount}
-                selected={selectedTest}
-                showingAll={showAll}
-                onChange={(test) => {
-                  setSelectedId(test.id);
-                }}
-                onToggleScope={() => setShowAll((current) => !current)}
-              />
-              {interactionControls}
-            </Box>
-            <FilterOverrideAlert benchmarks={outsideSingleFilter} available={catalog.available} onReturn={returnSingleToFilters} />
-            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.75 }}>
-              {showDetailsOnClick
-                ? 'Dotted segments bridge unavailable measurements. Click any result marker to select its run and open pass/failure details.'
-                : 'Dotted segments bridge unavailable measurements. Click any result marker to select or clear its run.'}
-            </Typography>
-            <BenchmarkHistoryChart
-              data={data}
-              filters={filters}
-              benchmark={selectedTest}
-              selectedRunIds={selectedRunIds}
-              onSelectRecord={selectGraphPoint}
-              onOpenRecord={openGraphPoint}
-              onSelectRun={onSelectRun}
-              showDetailsOnClick={showDetailsOnClick}
-              showPointSelector
-              scrollZoomEnabled={scrollZoomEnabled}
-            />
-          </>
-        ) : (
-          <>
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(360px, 720px) auto' }, alignItems: 'start', gap: 1.5, mb: 2 }}>
-              <BenchmarkGridPicker
-                allOptions={catalog.all}
-                availableOptions={catalog.available}
-                hiddenCount={catalog.hiddenCount}
-                selected={selectedGridTests}
-                showingAll={showAll}
-                maxSelected={MAX_GRID_BENCHMARKS}
-                onChange={(tests) => {
-                  setGridIds(tests.map((test) => test.id));
-                }}
-                onToggleScope={() => setShowAll((current) => !current)}
-              />
-              {interactionControls}
-            </Box>
-            <FilterOverrideAlert benchmarks={outsideGridFilter} available={catalog.available} onReturn={returnGridToFilters} />
-            {selectedGridTests.length > 0 ? (
-              <Box data-testid="benchmark-grid" sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1.5 }}>
-                {selectedGridTests.map((benchmark) => (
-                  <Paper key={benchmark.id} variant="outlined" sx={{ minWidth: 0, p: { xs: 1.25, sm: 1.75 }, borderRadius: 2.5 }}>
-                    <Stack direction="row" sx={{ alignItems: 'flex-start', justifyContent: 'space-between', gap: 1, mb: 0.5 }}>
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="h3">{benchmark.name}</Typography>
-                        <Chip label={benchmark.suite} size="small" variant="outlined" sx={{ mt: 0.65 }} />
-                      </Box>
-                      <Tooltip title="Hide graph">
-                        <IconButton
-                          size="small"
-                          aria-label={`Hide ${benchmark.name} graph`}
-                          onClick={() => {
-                            setGridIds((current) => current.filter((id) => id !== benchmark.id));
-                          }}
-                        >
-                          <CloseRoundedIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                    <BenchmarkHistoryChart
-                      data={data}
-                      filters={filters}
-                      benchmark={benchmark}
-                      height={290}
-                      selectedRunIds={selectedRunIds}
-                      onSelectRecord={selectGraphPoint}
-                      onOpenRecord={openGraphPoint}
-                      onSelectRun={onSelectRun}
-                      showDetailsOnClick={showDetailsOnClick}
-                      showPointSelector
-                      scrollZoomEnabled={scrollZoomEnabled}
-                    />
-                  </Paper>
-                ))}
-              </Box>
-            ) : (
-              <Paper variant="outlined" sx={{ p: 5, borderStyle: 'dashed', textAlign: 'center' }}>
-                <Typography fontWeight={700}>No benchmark graphs selected</Typography>
-                <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>Use the checkbox list above to display up to eight graphs.</Typography>
-              </Paper>
-            )}
-          </>
-        )}
+        </Stack>
+        <Stack direction="row" aria-label="Chart category and mode legend" sx={{ flexWrap: 'wrap', alignItems: 'center', gap: 1.25, borderTop: 1, borderColor: 'divider', pt: 1.5, mb: 2 }}>
+          {filters.targets.map((target) => <CategoryTag key={target} kind="target" label={target} />)}
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}><Box component="span" aria-hidden="true" sx={{ width: 24, borderTop: '2px solid' }} />ST · solid</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}><Box component="span" aria-hidden="true" sx={{ width: 24, borderTop: '2px dashed' }} />MT · dashed</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ ml: { sm: 'auto' } }}>Wall-clock seconds · measured results</Typography>
+        </Stack>
+        {!catalog.all.length && <Alert severity="info">No benchmarks available in the published catalog.</Alert>}
+        {catalog.all.length > 0 && !catalog.available.length && <Alert severity="info" sx={{ mb: 1.5 }}>No benchmarks in the selected targets, suites and execution modes. Retained workloads are shown as unavailable.</Alert>}
+        <Box data-testid="benchmark-grid" sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', '@media (min-width:600px) and (max-width:899px)': { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }, '@media (min-width:1200px)': { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }, '@media (min-width:1800px)': { gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }, gap: 2 }}>
+          {selected.map((benchmark) => <Paper data-testid="benchmark-grid-card" key={benchmark.id} variant="outlined" sx={{ p: 1.75, minWidth: 0, borderRadius: '8px' }}>
+            <Stack direction="row" sx={{ alignItems: 'flex-start', justifyContent: 'space-between', gap: 1, mb: 1 }}>
+              <Box sx={{ minWidth: 0 }}><Typography variant="h3" sx={{ fontSize: 14, lineHeight: '20px', fontWeight: 600, overflowWrap: 'anywhere' }}>{benchmark.name}</Typography><CategoryTag label={benchmark.suite} sx={{ mt: 0.75 }} /></Box>
+              <IconButton size="small" aria-label={`Remove ${benchmark.name} from grid`} onClick={() => changeSelection(selected.filter((test) => test.id !== benchmark.id))} sx={{ width: { xs: 44, sm: 32 }, height: { xs: 44, sm: 32 } }}><CloseRoundedIcon sx={{ fontSize: 18 }} /></IconButton>
+            </Stack>
+            {availableIds.has(benchmark.id) ? <BenchmarkHistoryChart key={`${benchmark.id}:${range}`} {...chartProps} benchmark={benchmark} height={230} /> : <Box role="status" sx={{ minHeight: 230, display: 'grid', placeItems: 'center', textAlign: 'center', color: 'text.secondary', fontSize: 14 }}>Not in this configuration</Box>}
+            <Stack direction="row" sx={{ flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 0.5 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>Published · {data.generatedAt ? formatFullDate(data.generatedAt) : 'Not provided'}</Typography>
+              <Button size="small" aria-label={`Inspect ${benchmark.name} results`} onClick={() => { setUnavailable(null); setInspectedBenchmark(benchmark); }}>Inspect results</Button>
+            </Stack>
+          </Paper>)}
+        </Box>
+        {!selected.length && catalog.all.length > 0 && <Typography role="status" color="text.secondary" sx={{ py: 3 }}>No benchmark graphs selected. Add benchmarks to begin.</Typography>}
+        <Stack direction="row" sx={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mt: 1.5 }}>
+          <Typography variant="caption" color="text.secondary">Each chart is one workload. Missing configurations remain gaps, not zero results.</Typography>
+          {selectedRunIds.length > 0 && <Button size="small" color="inherit" onClick={onClearSelectedRuns}>Clear selected runs ({selectedRunIds.length})</Button>}
+        </Stack>
       </SectionCard>
-
-      {mode === 'single' && (
-        <HistoricalRecords
-          key={`${selectedTest.id}:${filters.targets.join(',')}:${filters.suites.join(',')}`}
-          data={data}
-          filters={filters}
-          benchmark={selectedTest}
-          onSelectRecord={openGraphPoint}
-        />
-      )}
-
-      <BenchmarkResultDialog
-        record={selectedRecord}
-        repository={data.repository}
-        onClose={() => setSelectedRecord(null)}
-      />
-      <RunDetailsDialog
-        run={selectedRunDetails}
-        filters={filters}
-        repository={data.repository}
-        onClose={() => setSelectedRunDetails(null)}
-      />
+      <Dialog open={draft !== null} onClose={() => setDraft(null)} fullWidth maxWidth="sm" aria-labelledby="add-benchmarks-title">
+        <DialogTitle id="add-benchmarks-title">Add benchmarks</DialogTitle>
+        <DialogContent><Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Choose up to eight workloads. Options follow the selected targets, suites and execution modes.</Typography><BenchmarkGridPicker allOptions={catalog.all} availableOptions={catalog.available} hiddenCount={0} selected={draft ?? []} showingAll={false} maxSelected={8} onChange={setDraft} /></DialogContent>
+        <DialogActions><Button color="inherit" onClick={() => setDraft(null)}>Cancel</Button><Button variant="contained" onClick={() => { changeSelection(draft ?? []); setDraft(null); }}>Apply selection</Button></DialogActions>
+      </Dialog>
+      <Dialog open={Boolean(inspectedBenchmark)} disableEnforceFocus={Boolean(selectedRecord)} onClose={closeInspector} fullWidth maxWidth="sm" aria-labelledby="inspect-results-title">
+        <DialogTitle id="inspect-results-title">Inspect results · {inspectedBenchmark?.name}</DialogTitle>
+        <DialogContent>
+          {!resultChoices.length ? <Typography color="text.secondary">No published results in this selected configuration and period.</Typography> : <ChartPointSelector label={`${inspectedBenchmark?.name} result`} actionLabel="Open result details" description="Search and select a published attempt, including failed, timed-out and unavailable results." descriptionId="inspect-result-help" options={resultChoices} selectedId={inspectedChoiceId} onSelectionChange={(id) => { setInspectedChoiceId(id); setUnavailable(null); }} hideAction onActivate={activateChoice} />}
+          {unavailable && <Alert severity="info" sx={{ mt: 1 }}>Unavailable · {unavailable.target} · {unavailable.mode} · {unavailable.run.runId}. No published result; this is not a failed or zero-duration measurement.</Alert>}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 1.5, flexWrap: 'wrap', gap: 1 }}><Button color="inherit" onClick={closeInspector}>Close</Button><Button variant="contained" disabled={!inspectedChoice} onClick={() => activateChoice(inspectedChoice)}>Open result details</Button></DialogActions>
+      </Dialog>
+      <BenchmarkResultDialog record={selectedRecord} repository={data.repository} onClose={() => setSelectedRecord(null)} />
     </Box>
   );
 }

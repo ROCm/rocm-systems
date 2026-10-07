@@ -1,6 +1,7 @@
 import {
   CATALOG_FILE_PATTERN,
   RUN_FILE_PATTERN,
+  validatePublishedManifest,
   validatePublishedDashboardData,
 } from './dashboardValidation.js';
 
@@ -296,9 +297,7 @@ export async function loadDashboardDataFiles({
       resourceType: 'dashboard data index',
     }),
   ]);
-  if (!index || !Array.isArray(index.runFiles)) {
-    throw new Error('Expected the dashboard data index to contain a runFiles array');
-  }
+  validatePublishedManifest(metadata, index);
   const immutableBaseUrl = new URL('./', indexUrl);
   const immutableRequest = {
     fetchImpl,

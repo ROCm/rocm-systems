@@ -7,6 +7,14 @@ the `gh-pages-rocjitsu branch` in the `ROCm/rocm-systems` repository.
 
 **Live website:** [RocJitsu Performance Dashboard](https://rocm.github.io/rocm-systems/rocjitsu-dashboard/)
 
+The consumer accepts **schema 2 only**, with explicitly declared ST/MT
+configurations. No real schema-2 dataset has been published yet; schema-1 data
+requires migration and is not inferred or adapted. The local fixtures are
+fictional test input, not performance measurements. See the
+[schema-2 data contract](docs/website-data-contract.md) for fields, normalization,
+branch-reference rules, local processing and future publisher acceptance. This
+package does not implement that producer or publisher.
+
 ## Quick start: preview with dummy data
 
 Use npm and a Node.js version matching the `engines` field in [package.json](package.json).
@@ -26,14 +34,14 @@ fixture preview always uses port 4174; the production preview uses port 4173.
 The production build writes application files to `dist/` without dummy data and loads
 JSON from the [`gh-pages-rocjitsu` branch](https://raw.githubusercontent.com/ROCm/rocm-systems/refs/heads/gh-pages-rocjitsu/rocjitsu-dashboard/data/).
 The data directory must contain `metadata.json`, `index.json`, `test-catalogs/`, and `runs/`.
-Before every data publication, validate the complete staged data directory:
+Before any future data publication, validate the complete staged data directory:
 
 ```bash
 npm run validate:data -- /absolute/path/to/staged/data
 ```
 
-Do not publish when this command fails. The browser assumes published input is valid
-and fails closed instead of displaying partial history when invalid data bypasses the
+Do not publish when this command fails. The browser uses the same validator and
+fails closed instead of displaying partial history when invalid data bypasses the
 publication gate.
 
 See the [build and test guide](docs/build-and-test.md) for local development with
@@ -68,6 +76,9 @@ for GitHub App secrets, permissions, and Pages configuration.
 
 ## Further documentation
 
+- [Documentation index](docs/README.md): maintained dashboard documentation.
+- [Data-generation guide](docs/data-generation-guide.md): practical starting point
+  for workflow authors generating and staging website input.
 - [Website data contract](docs/website-data-contract.md): JSON schema, comparison
   rules, and data publication requirements.
 - [Test fixtures](tests/fixtures/README.md): focused test cases and generated history.

@@ -1,8 +1,8 @@
 import {
   Box,
+  Alert,
   Button,
   Chip,
-  Divider,
   Stack,
   Table,
   TableBody,
@@ -15,180 +15,57 @@ import {
   useTheme,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
-import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded';
-import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
-import RemoveRoundedIcon from '@mui/icons-material/RemoveRounded';
 import SwapVertRoundedIcon from '@mui/icons-material/SwapVertRounded';
 import RunSelector from '../compare/RunSelector';
+import RunMetadataDiff from '../compare/RunMetadataDiff';
+import ComparisonMetrics from '../compare/ComparisonMetrics';
 import Chart from '../shared/Chart';
-import DetailItem from '../shared/DetailItem';
-import { DetailGrid, DetailSectionHeading } from '../shared/DetailLayout';
 import SectionCard from '../shared/SectionCard';
 import StatusChip from '../shared/StatusChip';
-import { previousCompletedRunForFilters, selectRunComparison } from '../../data/selectors';
-import { commitTimestampFor } from '../../data/runOrdering';
-import { provenanceDetails } from '../../data/provenance';
+import { selectRunComparison } from '../../data/selectors';
 import {
   escapeHtml,
   formatDuration,
-  formatFullDate,
   formatPercent,
   shortSha,
 } from '../../utils/formatters';
-import { changeTone, classifyDurationChange } from '../../utils/performance';
+import { classifyDurationChange } from '../../utils/performance';
 import CommitComparison from '../shared/CommitComparison';
 
 const NOISE_TOLERANCE = 3;
 
-function SummaryStat({ label, value }) {
-  return (
-    <Box sx={{ p: 1.35, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}>
-      <Typography variant="caption" sx={{ color: 'text.secondary' }}>{label}</Typography>
-      <Typography sx={{ fontSize: 20, fontWeight: 770, lineHeight: 1.2, mt: 0.3 }}>{value}</Typography>
-    </Box>
-  );
-}
 
-function AggregateChange({ value, candidate, baseline }) {
-  const state = classifyDurationChange(value, NOISE_TOLERANCE);
-  const tone = changeTone(state);
-  const color = tone === 'neutral' ? 'text.secondary' : `${tone}.main`;
-  return (
-    <Box sx={{ p: 1.35, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}>
-      <Typography variant="caption" sx={{ color: 'text.secondary' }}>Aggregate change</Typography>
-      <Stack direction="row" sx={{ alignItems: 'center', color, mt: 0.3 }}>
-        {state === 'faster' && <ArrowDownwardRoundedIcon sx={{ fontSize: 22 }} />}
-        {state === 'slower' && <ArrowUpwardRoundedIcon sx={{ fontSize: 22 }} />}
-        {state === 'neutral' && <RemoveRoundedIcon sx={{ fontSize: 22 }} />}
-        <Typography sx={{ fontSize: 24, fontWeight: 820, lineHeight: 1.1 }}>
-          {Number.isFinite(value) ? formatPercent(Math.abs(value), false) : '—'}
-        </Typography>
-      </Stack>
-      {Number.isFinite(value) && <CommitComparison candidate={candidate} baseline={baseline} sx={{ mt: 0.3, fontSize: 10 }} />}
-    </Box>
-  );
-}
-
-function HighlightedValue({ different, children }) {
-  return (
-    <Box component="span" sx={different ? { color: 'warning.main', fontWeight: 750 } : undefined}>
-      {children}
-    </Box>
-  );
-}
-
-function RunInformation({ label, run, otherRun, filters, accentColor }) {
-  if (!run) return null;
-  const selectedTests = run.tests.filter((test) => (
-    filters.targets.includes(test.target) && filters.suites.includes(test.suite)
-  ));
-  const otherSelectedTests = (otherRun?.tests ?? []).filter((test) => (
-    filters.targets.includes(test.target) && filters.suites.includes(test.suite)
-  ));
-  const completed = selectedTests.filter((test) => (
-    test.status === 'completed' && Number.isFinite(test.durationSeconds)
-  )).length;
-  const otherCompleted = otherSelectedTests.filter((test) => (
-    test.status === 'completed' && Number.isFinite(test.durationSeconds)
-  )).length;
-  const complete = selectedTests.length > 0 && completed === selectedTests.length;
-  const environment = provenanceDetails(run.provenance);
-  const otherEnvironment = new Map(
-    provenanceDetails(otherRun?.provenance).map((detail) => [detail.key, detail.value]),
-  );
-  const coverage = `${completed}/${selectedTests.length} completed`;
-  const otherCoverage = `${otherCompleted}/${otherSelectedTests.length} completed`;
-
-  return (
-    <Box
-      data-testid={`${label.toLowerCase()}-run-information`}
-      sx={{
-        minWidth: 0,
-        p: { xs: 1.5, sm: 2 },
-        border: 1,
-        borderTop: 3,
-        borderColor: 'divider',
-        borderTopColor: accentColor,
-        borderRadius: 2,
-        bgcolor: 'background.paper',
-      }}
-    >
-      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1.5 }}>
-        <Box sx={{ minWidth: 0 }}>
-          <Typography variant="overline" sx={{ color: 'text.secondary' }}>{label} run</Typography>
-          <Typography component="div" sx={{ fontFamily: 'monospace', fontWeight: 780 }}>
-            {shortSha(run)}
-          </Typography>
-          {run.provenance?.commitMessage && (
-            <Typography variant="caption" sx={{ color: 'text.secondary' }} noWrap title={run.provenance.commitMessage}>
-              {run.provenance.commitMessage}
-            </Typography>
-          )}
-        </Box>
-        <Chip
-          size="small"
-          color={complete ? 'success' : 'error'}
-          variant="outlined"
-          label={complete ? 'Completed' : 'Not completed'}
-        />
-      </Stack>
-      <DetailGrid>
-        <DetailItem label="Coverage">
-          <HighlightedValue different={coverage !== otherCoverage}>{coverage}</HighlightedValue>
-        </DetailItem>
-        <DetailItem label="Test catalog">
-          <HighlightedValue different={run.catalogId !== otherRun?.catalogId}>{run.catalogId}</HighlightedValue>
-        </DetailItem>
-        <DetailItem label="Commit time">{formatFullDate(commitTimestampFor(run))}</DetailItem>
-        <DetailItem label="Run time">{formatFullDate(run.timestamp)}</DetailItem>
-        <DetailItem label="Machine">
-          <HighlightedValue different={run.machineId !== otherRun?.machineId}>{run.machineId}</HighlightedValue>
-        </DetailItem>
-      </DetailGrid>
-      <Divider sx={{ my: 1.75 }} />
-      <DetailSectionHeading>Environment</DetailSectionHeading>
-      {environment.length > 0 ? (
-        <DetailGrid>
-          {environment.map((detail) => (
-            <DetailItem key={detail.key} label={detail.label}>
-              <HighlightedValue different={detail.value !== otherEnvironment.get(detail.key)}>
-                {detail.value}
-              </HighlightedValue>
-            </DetailItem>
-          ))}
-        </DetailGrid>
-      ) : (
-        <Typography variant="body2" sx={{ color: 'text.secondary' }}>No environment details provided.</Typography>
-      )}
-    </Box>
-  );
-}
-
-function TestAvailability({ test }) {
-  return test
+function TestAvailability({ test, run, benchmark }) {
+  const label = !run ? 'No run selected'
+    : !run.configurations?.some(({ target, mode }) => target === benchmark.target && mode === benchmark.mode)
+      ? 'Configuration not published' : 'Unavailable in catalog';
+  return run && test
     ? <StatusChip status={test.status} />
-    : <Chip size="small" variant="outlined" label="Unavailable in catalog" />;
+    : <Chip size="small" variant="outlined" label={label} />;
 }
 
-function ExcludedTestsTable({ comparisons }) {
+function ExcludedTestsTable({ comparisons, comparableCount, baseline, candidate }) {
+  const hasPair = Boolean(baseline && candidate);
   if (comparisons.length === 0) {
     return (
       <Typography sx={{ color: 'text.secondary', py: 3, textAlign: 'center' }}>
-        Every selected benchmark has completed data in both runs.
+        {!hasPair ? 'Select two runs to compare.' : comparableCount > 0
+          ? 'Every selected benchmark has completed data in both runs.'
+          : 'No benchmarks in the selected scope.'}
       </Typography>
     );
   }
 
   return (
-    <TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 2 }}>
+    <TableContainer tabIndex={0} role="region" aria-label="Excluded results scroll area" sx={{ maxWidth: '100%', overflowX: 'auto', border: 1, borderColor: 'divider', borderRadius: 2 }}>
       <Table size="small" sx={{ minWidth: 760 }}>
         <TableHead>
           <TableRow>
             <TableCell>Benchmark</TableCell>
-            <TableCell>Target</TableCell>
+            <TableCell>Target / mode</TableCell>
             <TableCell>Suite</TableCell>
-            <TableCell>Candidate</TableCell>
             <TableCell>Baseline</TableCell>
+            <TableCell>Candidate</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -197,10 +74,10 @@ function ExcludedTestsTable({ comparisons }) {
             return (
               <TableRow key={benchmark.testId}>
                 <TableCell sx={{ fontWeight: 700 }}>{benchmark.name}</TableCell>
-                <TableCell>{benchmark.target}</TableCell>
+                <TableCell>{benchmark.target} · {benchmark.mode}</TableCell>
                 <TableCell>{benchmark.suite}</TableCell>
-                <TableCell><TestAvailability test={comparison.candidateTest} /></TableCell>
-                <TableCell><TestAvailability test={comparison.baselineTest} /></TableCell>
+                <TableCell><TestAvailability run={baseline} benchmark={benchmark} test={comparison.baselineTest} /></TableCell>
+                <TableCell><TestAvailability run={candidate} benchmark={benchmark} test={comparison.candidateTest} /></TableCell>
               </TableRow>
             );
           })}
@@ -217,30 +94,31 @@ export default function CompareRunsView({
   selectedCandidateId,
   onBaselineChange,
   onCandidateChange,
+  onSwap,
 }) {
   const theme = useTheme();
   const compactChart = useMediaQuery(theme.breakpoints.down('sm'));
-  const selectedCandidate = data.runs.find((run) => run.runId === selectedCandidateId);
-  const candidate = selectedCandidate ?? data.latestRun;
-  const defaultBaseline = selectedCandidate
-    ? previousCompletedRunForFilters(data.runs, candidate, filters)
-    : data.runs.at(-2) ?? null;
-  const baseline = data.runs.find((run) => run.runId === selectedBaselineId) ?? defaultBaseline;
+  const publishedRuns = data.allRuns ?? [];
+  const candidate = publishedRuns.find((run) => run.runId === selectedCandidateId) ?? null;
+  const baseline = publishedRuns.find((run) => run.runId === selectedBaselineId) ?? null;
   const viewModel = selectRunComparison(candidate, baseline, filters, NOISE_TOLERANCE);
-  const hasRuns = Boolean(candidate);
-  const runOptions = data.runs.slice().reverse();
-  const maximumDelta = Math.max(...viewModel.comparable.map((item) => Math.abs(item.delta)), 0);
+  const hasRuns = Boolean(candidate && baseline);
+  const runOptions = publishedRuns.slice().sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp) || b.runId.localeCompare(a.runId));
+  const chartItems = viewModel.comparable.filter((item) => Number.isFinite(item.delta));
+  const maximumDelta = Math.max(...chartItems.map((item) => Math.abs(item.delta)), 0);
   const axisLimit = Math.max(5, Math.ceil(maximumDelta * 1.25));
-  const chartHeight = Math.min(720, Math.max(320, viewModel.comparable.length * 34 + 100));
+  const chartHeight = Math.min(720, Math.max(320, chartItems.length * 34 + 100));
   const richLabelStyles = {
     separator: { color: theme.palette.text.disabled },
     target: {
-      color: theme.palette.mode === 'dark' ? '#A9BCD0' : '#3F586E',
+      color: theme.palette.text.secondary,
       fontWeight: 700,
+      fontFamily: theme.typography.fontFamily,
     },
     benchmark: {
       color: theme.palette.text.secondary,
       fontWeight: 520,
+      fontFamily: theme.typography.fontFamily,
     },
   };
 
@@ -254,16 +132,17 @@ export default function CompareRunsView({
   const labelFor = (delta) => {
     const state = stateFor(delta);
     const indicator = state === 'slower' ? '↑' : state === 'faster' ? '↓' : '—';
-    return `${indicator} ${formatPercent(Math.abs(delta), false)}`;
+    return `${indicator} ${formatPercent(delta)}`;
   };
   const categoryFor = (item) => {
-    const target = item.candidateTest.target.replace(/[{}|]/g, '');
+    const target = `${item.candidateTest.target} · ${item.candidateTest.mode}`.replace(/[{}|]/g, '');
     const benchmark = item.candidateTest.name.replace(/[{}|]/g, '');
     const separator = compactChart ? '\n' : '{separator| · }';
     return `{target|${target}}${separator}{benchmark|${benchmark}}`;
   };
 
   const option = {
+    textStyle: { fontFamily: theme.typography.fontFamily, color: theme.palette.text.secondary },
     tooltip: {
       trigger: 'item',
       backgroundColor: theme.palette.background.paper,
@@ -271,7 +150,7 @@ export default function CompareRunsView({
       textStyle: { color: theme.palette.text.primary },
       formatter: ({ data: point }) => [
         `<strong>${escapeHtml(point.comparison.candidateTest.name)}</strong>`,
-        `${escapeHtml(point.comparison.candidateTest.target)} · ${escapeHtml(point.comparison.candidateTest.suite)}`,
+        `${escapeHtml(point.comparison.candidateTest.target)} · ${escapeHtml(point.comparison.candidateTest.mode)} · ${escapeHtml(point.comparison.candidateTest.suite)}`,
         `Candidate ${formatDuration(point.comparison.candidateTest.durationSeconds)}`,
         `Baseline ${formatDuration(point.comparison.baselineTest.durationSeconds)}`,
         `Change ${formatPercent(point.comparison.delta)}`,
@@ -288,18 +167,21 @@ export default function CompareRunsView({
       nameGap: 32,
       min: -axisLimit,
       max: axisLimit,
-      axisLabel: { color: theme.palette.text.secondary, formatter: '{value}%' },
+      axisLabel: { color: theme.palette.text.secondary, fontFamily: theme.typography.fontFamily, formatter: '{value}%' },
+      nameTextStyle: { color: theme.palette.text.secondary, fontFamily: theme.typography.fontFamily },
       axisLine: { show: true, lineStyle: { color: theme.palette.divider } },
       splitLine: { lineStyle: { color: theme.palette.divider, type: 'dashed' } },
     },
     yAxis: {
       type: 'category',
       inverse: true,
-      data: viewModel.comparable.map(categoryFor),
+      data: chartItems.map(categoryFor),
       axisTick: { show: false },
       axisLine: { show: false },
       axisLabel: {
         fontSize: compactChart ? 10 : 11,
+        fontFamily: theme.typography.fontFamily,
+        color: theme.palette.text.secondary,
         width: compactChart ? 100 : 205,
         overflow: 'truncate',
         formatter: (value) => value,
@@ -311,7 +193,7 @@ export default function CompareRunsView({
       barMaxWidth: 18,
       showBackground: true,
       backgroundStyle: { color: theme.palette.action.hover, borderRadius: 6 },
-      data: viewModel.comparable.map((item) => {
+      data: chartItems.map((item) => {
         const performanceColor = colorFor(item.delta);
         return {
           value: item.delta,
@@ -331,6 +213,7 @@ export default function CompareRunsView({
               ? theme.palette.getContrastText(performanceColor)
               : performanceColor,
             fontSize: compactChart ? 10 : 12,
+            fontFamily: theme.typography.fontFamily,
             fontWeight: 700,
             formatter: labelFor(item.delta),
           },
@@ -354,17 +237,17 @@ export default function CompareRunsView({
   };
 
   return (
-    <Box sx={{ display: 'grid', gap: 1.75 }}>
+    <Box data-testid="comparison-results" sx={{ display: 'grid', gap: 1.75, minWidth: 0 }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) auto minmax(0, 1fr)' }, alignItems: 'center', gap: 1.25 }}>
-        <RunSelector label="Candidate run" options={runOptions} value={candidate} onChange={onCandidateChange} />
+        <RunSelector label="Baseline run" options={runOptions} value={baseline} onChange={onBaselineChange} />
         <Button
           size="small"
           variant="outlined"
           startIcon={<SwapVertRoundedIcon />}
           disabled={!baseline || !candidate}
           onClick={() => {
-            onBaselineChange(candidate.runId);
-            onCandidateChange(baseline.runId);
+            if (onSwap) onSwap({ baselineId: candidate.runId, candidateId: baseline.runId });
+            else { onBaselineChange(candidate.runId); onCandidateChange(baseline.runId); }
           }}
           sx={{
             whiteSpace: 'nowrap',
@@ -375,8 +258,10 @@ export default function CompareRunsView({
         >
           Swap
         </Button>
-        <RunSelector label="Baseline run" options={runOptions} value={baseline} onChange={onBaselineChange} />
+        <RunSelector label="Candidate run" options={runOptions} value={candidate} onChange={onCandidateChange} />
       </Box>
+      {!candidate && selectedCandidateId && <Alert severity="info">Selected candidate is unavailable · {selectedCandidateId}. Choose a published attempt; no different run has been substituted.</Alert>}
+      {!baseline && selectedBaselineId && <Alert severity="info">Selected baseline is unavailable · {selectedBaselineId}. Choose a published attempt; no different run has been substituted.</Alert>}
 
       <SectionCard
         title="Performance Change by Benchmark"
@@ -387,57 +272,58 @@ export default function CompareRunsView({
           </>
         )}
       >
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: '1.15fr repeat(4, minmax(0, 1fr))' }, gap: 1 }}>
-          <AggregateChange value={viewModel.aggregateDelta} candidate={candidate} baseline={baseline} />
-          <SummaryStat label="Candidate total" value={hasRuns ? formatDuration(viewModel.candidateDuration) : '—'} />
-          <SummaryStat label="Baseline total" value={hasRuns ? formatDuration(viewModel.baselineDuration) : '—'} />
-          <SummaryStat label="Comparable" value={hasRuns ? viewModel.comparable.length : '—'} />
-          <SummaryStat label="Not comparable" value={hasRuns ? viewModel.notComparable.length : '—'} />
-        </Box>
+        <ComparisonMetrics model={viewModel} candidate={candidate} baseline={baseline} tolerance={NOISE_TOLERANCE} />
         <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.75, mt: 1.25 }}>
           <Chip size="small" color="success" variant="outlined" label={`${hasRuns ? viewModel.counts.faster : '—'} faster`} />
           <Chip size="small" variant="outlined" label={`${hasRuns ? viewModel.counts.neutral : '—'} within ±${NOISE_TOLERANCE}%`} />
           <Chip size="small" color="error" variant="outlined" label={`${hasRuns ? viewModel.counts.slower : '—'} slower`} />
+          {viewModel.counts.unavailable > 0 && <Chip size="small" variant="outlined" label={`${viewModel.counts.unavailable} percentage unavailable`} />}
         </Stack>
         <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
-          Only benchmarks with valid completed durations in both runs are compared.
+          Totals use matched benchmarks with valid completed durations in both runs; bars and faster/slower/noise counts include only available percentage changes.
+          Matching uses exact target + mode + workload identity, not environment equivalence. Exclusions are not zero-duration results. A zero baseline has no percentage ratio.
         </Typography>
-        {viewModel.comparable.length > 0 ? (
+        {chartItems.length > 0 ? (
           <Box sx={{ mx: { xs: -1.25, sm: -0.5 }, mt: 0.75 }}>
             <Chart option={option} height={chartHeight} ariaLabel="Performance change by benchmark comparison chart" />
           </Box>
         ) : (
-          <Typography sx={{ color: 'text.secondary', py: 8, textAlign: 'center' }}>No completed benchmark results are comparable between these runs.</Typography>
+          <Typography sx={{ color: 'text.secondary', py: 8, textAlign: 'center' }}>{!hasRuns ? 'Select baseline and candidate runs to compare benchmark results.' : viewModel.comparable.length ? 'No percentage changes available. Measured zero baselines remain in the results table below.' : 'No completed benchmark results are comparable between these runs.'}</Typography>
+        )}
+        {viewModel.comparable.length > 0 && (
+          <Box component="details" sx={{ mt: 1 }}>
+            <Box component="summary" sx={{ cursor: 'pointer', py: 1, fontSize: 12, fontWeight: 700 }}>View comparable results ({viewModel.comparable.length})</Box>
+            <TableContainer tabIndex={0} role="region" aria-label="Comparable results scroll area">
+              <Table size="small" aria-label="Comparable benchmark results" sx={{ minWidth: 540 }}>
+                <TableHead><TableRow>
+                  <TableCell>Benchmark / target / mode</TableCell><TableCell>Baseline</TableCell><TableCell>Candidate</TableCell><TableCell>Change</TableCell>
+                </TableRow></TableHead>
+                <TableBody>{viewModel.comparable.map((item) => (
+                  <TableRow key={item.candidateTest.testId}>
+                    <TableCell sx={{ overflowWrap: 'anywhere', maxWidth: 320 }}>{item.candidateTest.name} · {item.candidateTest.target} · {item.candidateTest.mode}</TableCell>
+                    <TableCell>{formatDuration(item.baselineTest.durationSeconds)}</TableCell>
+                    <TableCell>{formatDuration(item.candidateTest.durationSeconds)}</TableCell>
+                    <TableCell sx={{ color: colorFor(item.delta), whiteSpace: 'nowrap' }}>{formatPercent(item.delta)} · {Number.isFinite(item.delta) ? stateFor(item.delta) === 'neutral' ? `within ±${NOISE_TOLERANCE}%` : stateFor(item.delta) : 'percentage unavailable'}</TableCell>
+                  </TableRow>
+                ))}</TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
         )}
       </SectionCard>
 
       <SectionCard
         title="Compared Run Information"
-        subtitle="Completeness and catalog availability reflect the active target and suite filters"
+        subtitle="Completeness and catalog availability reflect the active target, suite and mode filters"
       >
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
-          <RunInformation
-            label="Candidate"
-            run={candidate}
-            otherRun={baseline}
-            filters={filters}
-            accentColor="primary.main"
-          />
-          <RunInformation
-            label="Baseline"
-            run={baseline}
-            otherRun={candidate}
-            filters={filters}
-            accentColor="secondary.main"
-          />
-        </Box>
+        <RunMetadataDiff baseline={baseline} candidate={candidate} filters={filters} />
       </SectionCard>
 
       <SectionCard
         title="Tests Not Included in Comparison"
-        subtitle="Catalog availability and benchmark-result status for the active target and suite filters"
+        subtitle="Catalog availability and benchmark-result status for the active target, suite and mode filters"
       >
-        <ExcludedTestsTable comparisons={viewModel.notComparable} />
+        <ExcludedTestsTable comparisons={viewModel.notComparable} comparableCount={viewModel.comparable.length} baseline={baseline} candidate={candidate} />
       </SectionCard>
     </Box>
   );

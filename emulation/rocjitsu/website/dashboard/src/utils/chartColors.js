@@ -7,5 +7,5 @@ const TARGET_COLORS = {
 const targetFallbackColors = ['#2166C1', '#C25430', '#7450B8', '#14826F', '#B7791F'];
 
 export function targetColor(target, index = 0) {
-  return TARGET_COLORS[target] ?? targetFallbackColors[index % targetFallbackColors.length];
+  return Object.hasOwn(TARGET_COLORS, target) ? TARGET_COLORS[target] : targetFallbackColors[index % targetFallbackColors.length];
 }

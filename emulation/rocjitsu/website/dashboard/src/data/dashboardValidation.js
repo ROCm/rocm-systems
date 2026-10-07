@@ -1,518 +1,224 @@
 import { backfillRunIds, compareRunExecution, sortRunsByCommit } from './runOrdering.js';
 
-const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 export const RUN_FILE_PATTERN = /^runs\/[A-Za-z0-9._-]+\.json$/;
 export const CATALOG_FILE_PATTERN = /^test-catalogs\/[A-Za-z0-9._-]+\.json$/;
-const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/i;
-const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-const RUN_STATUSES = new Set(['completed', 'failed', 'timeout']);
+const SHA = /^[0-9a-f]{40}$/i;
+const TOKEN = /^[A-Za-z0-9._-]+$/;
+const CONFIGURATION = /^([A-Za-z0-9._-]+):(ST|MT)$/;
+const ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
+const hasText = (value) => typeof value === 'string' && Boolean(value.trim());
+const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const scalar = (value) => typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value);
+const sameSet = (left, right) => left.length === right.length && [...left].sort().every((v, i) => v === [...right].sort()[i]);
+const identity = (value) => JSON.stringify(value);
+const environmentIdentity = (environment) => identity(environment.map(({ key, value }) => [key, value]).sort(([a], [b]) => a.localeCompare(b)));
+const definitionIdentity = (test) => identity([test.suite, test.name, Object.entries(test.problem).sort(([a], [b]) => a.localeCompare(b))]);
 
-function hasText(value) {
-  return typeof value === 'string' && Boolean(value.trim());
+export function isIsoTimestamp(value) {
+  if (typeof value !== 'string') return false;
+  const match = ISO.exec(value);
+  if (!match || !Number.isFinite(Date.parse(value))) return false;
+  const [, y, m, d, h, min, s, , oh = '0', om = '0'] = match;
+  const date = new Date(`${y}-${m}-${d}T00:00:00.000Z`);
+  return date.getUTCFullYear() === Number(y) && date.getUTCMonth() + 1 === Number(m)
+    && date.getUTCDate() === Number(d) && Number(h) <= 23 && Number(min) <= 59
+    && Number(s) <= 59 && Number(oh) <= 23 && Number(om) <= 59;
 }
 
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+function safeUrl(value, github = false) {
+  if (!hasText(value)) return false;
+  try {
+    const url = new URL(value);
+    return !url.username && !url.password && ['http:', 'https:'].includes(url.protocol)
+      && (!github || url.protocol === 'https:' && url.hostname === 'github.com');
+  } catch { return false; }
 }
 
-function isIsoTimestamp(value) {
-  return hasText(value)
-    && ISO_TIMESTAMP_PATTERN.test(value)
-    && Number.isFinite(Date.parse(value));
-}
-
-function isScalarValue(value) {
-  return typeof value === 'string'
-    || typeof value === 'number' && Number.isFinite(value)
-    || typeof value === 'boolean';
-}
-
-function isEnvironmentValue(value) {
-  return typeof value === 'string'
-    ? hasText(value)
-    : typeof value === 'number' ? Number.isFinite(value) : typeof value === 'boolean';
-}
-
-function isEnvironmentDetail(detail) {
-  return hasText(detail?.key)
-    && hasText(detail?.label)
-    && isEnvironmentValue(detail?.value);
-}
-
-function environmentIdentity(environment) {
-  return JSON.stringify(environment
-    .map(({ key, value }) => [key, value])
-    .sort(([left], [right]) => left.localeCompare(right)));
-}
-
-function isTestDefinition(definition) {
-  return hasText(definition?.id)
-    && hasText(definition?.suite)
-    && hasText(definition?.name)
-    && isPlainObject(definition.problem)
-    && Object.entries(definition.problem).every(([key, value]) => (
-      hasText(key) && isScalarValue(value)
-    ));
-}
-
-function normalizeCatalog(catalog, catalogPath) {
-  if (
-    !isPlainObject(catalog)
-    || !hasText(catalog.id)
-    || !Array.isArray(catalog.tests)
-    || catalog.tests.length === 0
-    || !isPlainObject(catalog.targets)
-    || Object.keys(catalog.targets).length === 0
-  ) {
-    throw new Error(`Test catalog ${catalogPath} does not match the schema-version-${CURRENT_SCHEMA_VERSION} contract`);
+export function validatePublishedManifest(metadata, index) {
+  if (metadata?.schemaVersion === 1) throw new Error('Dashboard schema 1 requires migration to schema 2 with explicitly declared ST/MT configurations');
+  if (metadata?.schemaVersion !== 2) throw new Error(`Unsupported dashboard schema version ${metadata?.schemaVersion ?? '(missing)'}; expected schema 2`);
+  if (!safeUrl(metadata.repository)) throw new Error('Expected dashboard metadata to contain a safe HTTP repository URL');
+  if (typeof metadata.isBeta !== 'boolean' || metadata.canonicalBranch !== 'develop') throw new Error('Expected metadata isBeta boolean and canonicalBranch develop');
+  if (!isIsoTimestamp(index?.generatedAt) || !Array.isArray(index?.runFiles)) throw new Error('Expected index generatedAt strict ISO timestamp and runFiles array');
+  for (const name of index.runFiles) {
+    if (typeof name !== 'string' || !RUN_FILE_PATTERN.test(name)) throw new Error(`Invalid run filename: ${String(name)}`);
   }
-  const catalogIdFromPath = catalogPath.slice('test-catalogs/'.length, -'.json'.length);
-  if (catalog.id !== catalogIdFromPath) {
-    throw new Error(`Test catalog ${catalogPath} must contain id ${catalogIdFromPath}`);
-  }
+  if (new Set(index.runFiles).size !== index.runFiles.length) throw new Error('Duplicate run filename');
+}
 
-  const definitionIds = catalog.tests.map((definition) => definition?.id);
-  if (
-    catalog.tests.some((definition) => !isTestDefinition(definition))
-    || new Set(definitionIds).size !== definitionIds.length
-  ) {
-    throw new Error(`Test catalog ${catalogPath} contains an invalid or duplicate test definition`);
+function validateCatalog(catalog, file) {
+  if (!CATALOG_FILE_PATTERN.test(file) || !object(catalog) || catalog.id !== file.slice(14, -5)
+    || !Array.isArray(catalog.tests) || !object(catalog.configurations) || Object.keys(catalog.configurations).length === 0) {
+    throw new Error(`Test catalog ${file} does not match the schema-2 catalog contract`);
   }
-
-  const definitionIdSet = new Set(definitionIds);
-  for (const [target, testIds] of Object.entries(catalog.targets)) {
-    if (
-      !hasText(target)
-      || !Array.isArray(testIds)
-      || testIds.length === 0
-      || testIds.some((testId) => !hasText(testId) || !definitionIdSet.has(testId))
-      || new Set(testIds).size !== testIds.length
-    ) {
-      throw new Error(`Test catalog ${catalogPath} contains an invalid test set for ${target || '(unknown target)'}`);
-    }
+  const ids = catalog.tests.map((test) => test?.id);
+  if (new Set(ids).size !== ids.length || catalog.tests.some((test) => !hasText(test?.id) || !hasText(test.suite) || !hasText(test.name)
+    || !object(test.problem) || Object.entries(test.problem).some(([key, value]) => !hasText(key) || !scalar(value)))) {
+    throw new Error(`Test catalog ${file} contains an invalid or duplicate test definition`);
   }
-  const referencedDefinitionIds = new Set(Object.values(catalog.targets).flat());
-  const unreferencedDefinition = catalog.tests.find((definition) => (
-    !referencedDefinitionIds.has(definition.id)
-  ));
-  if (unreferencedDefinition) {
-    throw new Error(
-      `Test catalog ${catalogPath} defines ${unreferencedDefinition.id} without assigning it to a target`,
-    );
+  for (const [key, members] of Object.entries(catalog.configurations)) {
+    if (!CONFIGURATION.test(key) || !Array.isArray(members) || members.length === 0 || new Set(members).size !== members.length
+      || members.some((id) => !ids.includes(id))) throw new Error(`Test catalog ${file} contains an invalid configuration ${key}`);
   }
-
   return catalog;
 }
 
 export function validatePublishedResult(result) {
-  if (!isPlainObject(result) || !hasText(result.testId)) throw new Error('Result must contain a testId');
-  const removedField = ['exitCode', 'findings'].find((field) => Object.hasOwn(result, field));
-  if (removedField) throw new Error(`Result ${result.testId} contains removed field ${removedField}`);
-  if (!RUN_STATUSES.has(result.status)) {
-    throw new Error(`Result ${result.testId} has invalid status ${String(result.status)}`);
-  }
-  if (!Object.hasOwn(result, 'durationSeconds')) {
-    throw new Error(`Result ${result.testId} must contain durationSeconds`);
-  }
-  if (!Object.hasOwn(result, 'error')) {
-    throw new Error(`Result ${result.testId} must contain error`);
-  }
+  if (!object(result) || !hasText(result.testId)) throw new Error('Result must contain a testId');
+  const removed = ['exitCode', 'findings'].find((key) => Object.hasOwn(result, key));
+  if (removed) throw new Error(`Result ${result.testId} contains removed field ${removed}`);
+  if (!['completed', 'failed', 'timeout'].includes(result.status)) throw new Error(`Result ${result.testId} has invalid status`);
+  if (!Object.hasOwn(result, 'durationSeconds') || !Object.hasOwn(result, 'error')) throw new Error(`Result ${result.testId} must contain durationSeconds and error`);
   if (result.status === 'completed') {
-    if (!Number.isFinite(result.durationSeconds) || result.durationSeconds <= 0) {
-      throw new Error(`Completed result ${result.testId} must contain a positive durationSeconds`);
-    }
-    if (result.error != null) {
-      throw new Error(`Completed result ${result.testId} cannot contain an error`);
-    }
-  } else if (result.durationSeconds != null) {
-    throw new Error(`${result.status} result ${result.testId} must have a null durationSeconds`);
-  }
-  if (result.error != null && !hasText(result.error)) {
-    throw new Error(`Result ${result.testId} error must be a non-empty string or null`);
-  }
+    if (!Number.isFinite(result.durationSeconds) || result.durationSeconds < 0) throw new Error(`Completed result ${result.testId} must contain nonnegative finite durationSeconds`);
+    if (result.error !== null) throw new Error(`Completed result ${result.testId} cannot contain an error`);
+  } else if (result.durationSeconds !== null) throw new Error(`${result.status} result ${result.testId} must have a null durationSeconds`);
+  if (result.error !== null && !hasText(result.error)) throw new Error(`Result ${result.testId} error must be a non-empty string or null`);
   return result;
 }
 
-function sameStringSet(left, right) {
-  const sortedLeft = [...left].sort();
-  const sortedRight = [...right].sort();
-  return sortedLeft.length === sortedRight.length
-    && sortedLeft.every((value, index) => value === sortedRight[index]);
-}
-
-function normalizePublishedRun(run, catalog) {
-  const source = run?.source;
-  const execution = run?.execution;
-  const environment = run?.environment;
-  const plugin = run?.plugin;
-  const targetGroups = run?.targets;
-  const runLabel = hasText(run?.id) ? run.id : '(unknown)';
-
-  if (
-    !hasText(run?.id)
-    || !hasText(run?.comparisonId)
-    || !hasText(run?.testCatalog)
-    || !plugin
-    || !hasText(plugin.id)
-    || !hasText(plugin.name)
-    || (Object.hasOwn(plugin, 'version') && !hasText(plugin.version))
-    || (Object.hasOwn(plugin, 'options') && !isPlainObject(plugin.options))
-    || !source
-    || !execution
-    || !hasText(source.branch)
-    || !hasText(source.commit)
-    || !COMMIT_SHA_PATTERN.test(source.commit)
-    || !isIsoTimestamp(source.committedAt)
+function normalizeRun(run, catalog, generatedAt) {
+  const source = run?.source; const execution = run?.execution;
+  const plugin = run?.plugin; const environment = run?.environment;
+  if (typeof run?.id !== 'string' || !TOKEN.test(run.id) || !hasText(run.comparisonId) || !hasText(plugin?.id) || !hasText(plugin?.name)
+    || (Object.hasOwn(plugin, 'version') && !hasText(plugin.version)) || (Object.hasOwn(plugin, 'options') && !object(plugin.options))
+    || !hasText(source?.branch) || typeof source.commit !== 'string' || !SHA.test(source.commit ?? '') || !isIsoTimestamp(source.committedAt)
     || (Object.hasOwn(source, 'message') && !hasText(source.message))
-    || !isIsoTimestamp(execution.completedAt)
-    || !['auto', 'manual'].includes(execution.trigger)
-    || !hasText(execution.machine)
-    || !Array.isArray(environment)
-    || environment.some((detail) => !isEnvironmentDetail(detail))
-    || new Set(environment.map((detail) => detail.key)).size !== environment.length
-    || !Array.isArray(targetGroups)
-    || targetGroups.length === 0
-  ) {
-    throw new Error(`Run ${runLabel} does not match the schema-version-${CURRENT_SCHEMA_VERSION} run contract`);
+    || !isIsoTimestamp(execution?.completedAt) || !['auto', 'manual'].includes(execution.trigger) || !hasText(execution.machine)
+    || !Array.isArray(environment) || environment.some((detail) => !hasText(detail?.key) || !hasText(detail?.label) || !scalar(detail?.value))
+    || new Set(environment.map(({ key }) => key)).size !== environment.length || !Array.isArray(run.configurations) || run.configurations.length === 0) {
+    throw new Error(`Run ${run?.id ?? '(unknown)'} does not match the schema-2 run contract`);
   }
-
-  const targetIds = targetGroups.map((targetGroup) => targetGroup?.id);
-  const catalogTargetIds = Object.keys(catalog.targets);
-  if (
-    targetGroups.some((targetGroup) => !hasText(targetGroup?.id) || !Array.isArray(targetGroup.results))
-    || new Set(targetIds).size !== targetIds.length
-    || !sameStringSet(targetIds, catalogTargetIds)
-  ) {
-    throw new Error(`Run ${run.id} does not contain exactly the targets required by ${catalog.id}`);
-  }
-
-  const definitions = new Map(catalog.tests.map((definition) => [definition.id, definition]));
-  const tests = targetGroups.flatMap((targetGroup) => {
-    const expectedIds = catalog.targets[targetGroup.id];
-    const resultIds = targetGroup.results.map((result) => result?.testId);
-    try {
-      targetGroup.results.forEach(validatePublishedResult);
-    } catch (error) {
-      throw new Error(`Run ${run.id} has an invalid ${targetGroup.id} result: ${error.message}`, { cause: error });
-    }
-    if (
-      new Set(resultIds).size !== resultIds.length
-      || !sameStringSet(resultIds, expectedIds)
-    ) {
-      throw new Error(`Run ${run.id} does not contain exactly one valid result for every ${targetGroup.id} catalog test`);
-    }
-
-    return targetGroup.results.map((result) => {
-      const definition = definitions.get(result.testId);
-      return {
-        ...definition,
-        testId: `${targetGroup.id}:${result.testId}`,
-        logicalTestId: result.testId,
-        target: targetGroup.id,
-        durationSeconds: result.durationSeconds ?? null,
-        status: result.status,
-        error: result.error ?? null,
-      };
-    });
+  if (Date.parse(source.committedAt) > Date.parse(execution.completedAt) || Date.parse(execution.completedAt) > Date.parse(generatedAt)) throw new Error(`Run ${run.id} must be committed before completion and completed by publication`);
+  if (Object.hasOwn(source, 'base') && (!hasText(source.base?.branch) || typeof source.base?.commit !== 'string' || !SHA.test(source.base?.commit ?? ''))) throw new Error(`Run ${run.id} has an invalid source base`);
+  if (Object.hasOwn(source, 'pullRequest') && (!Number.isInteger(source.pullRequest?.number) || source.pullRequest.number <= 0
+    || (Object.hasOwn(source.pullRequest, 'url') && (!safeUrl(source.pullRequest.url, true) || !new URL(source.pullRequest.url).pathname.endsWith(`/pull/${source.pullRequest.number}`))))) throw new Error(`Run ${run.id} has an invalid pullRequest`);
+  if (Object.hasOwn(execution, 'workflowUrl') && !safeUrl(execution.workflowUrl, true)) throw new Error(`Run ${run.id} has an unsafe workflowUrl`);
+  const definitions = new Map(catalog.tests.map((test) => [test.id, test]));
+  const seen = new Set();
+  const tests = run.configurations.flatMap((configuration) => {
+    const { target, mode, threadCount, results } = configuration;
+    if (typeof mode !== 'string' || !['ST', 'MT'].includes(mode)) throw new Error(`Run ${run.id} has an invalid configuration mode`);
+    const key = `${target}:${mode}`;
+    if (!hasText(target) || !CONFIGURATION.test(key) || !Object.hasOwn(catalog.configurations, key) || seen.has(key) || !Array.isArray(results)) throw new Error(`Run ${run.id} has an invalid or duplicate configuration ${key}`);
+    if (Object.hasOwn(configuration, 'threadCount') && (!Number.isInteger(threadCount) || (mode === 'ST' ? threadCount !== 1 : threadCount < 2))) throw new Error(`Run ${run.id} has an invalid ${mode} threadCount`);
+    seen.add(key);
+    results.forEach(validatePublishedResult);
+    const ids = results.map(({ testId }) => testId);
+    if (new Set(ids).size !== ids.length || !sameSet(ids, catalog.configurations[key])) throw new Error(`Run ${run.id} must contain exactly one result per ${key} catalog workload`);
+    return results.map(({ testId, status, durationSeconds, error }) => ({ ...definitions.get(testId), status, durationSeconds, error,
+      testId: `${key}:${testId}`, logicalTestId: testId, target, mode }));
   });
-
   return {
-    runId: run.id,
-    comparisonId: run.comparisonId,
-    testCatalog: run.testCatalog,
-    catalogId: catalog.id,
-    plugin: { ...plugin },
-    timestamp: execution.completedAt,
-    commitTimestamp: source.committedAt,
-    trigger: execution.trigger,
-    machineId: execution.machine,
-    targets: targetIds,
-    branch: source.branch,
-    environmentId: environmentIdentity(environment),
-    provenance: {
-      rocjitsuCommitSha: source.commit,
-      ...(hasText(source.message) ? { commitMessage: source.message } : {}),
-      details: environment,
-    },
-    tests,
+    runId: run.id, comparisonId: run.comparisonId, testCatalog: run.testCatalog, catalogId: catalog.id, plugin: { ...plugin },
+    timestamp: execution.completedAt, commitTimestamp: source.committedAt, trigger: execution.trigger, machineId: execution.machine,
+    targets: [...new Set(run.configurations.map(({ target }) => target))], modes: ['ST', 'MT'].filter((mode) => run.configurations.some((c) => c.mode === mode)),
+    branch: source.branch, ...(source.base ? { sourceBase: { ...source.base } } : {}), ...(source.pullRequest ? { pullRequest: { ...source.pullRequest } } : {}),
+    ...(execution.workflowUrl ? { workflowUrl: execution.workflowUrl } : {}), environmentId: environmentIdentity(environment),
+    provenance: { rocjitsuCommitSha: source.commit, ...(source.message ? { commitMessage: source.message } : {}), details: environment },
+    configurations: run.configurations.map(({ target, mode, threadCount }) => ({ target, mode, ...(threadCount === undefined ? {} : { threadCount }) })), tests,
   };
-}
-
-function testDefinitionIdentity(definition) {
-  return JSON.stringify([
-    definition.suite,
-    definition.name,
-    Object.entries(definition.problem ?? {}).sort(([left], [right]) => left.localeCompare(right)),
-  ]);
 }
 
 function comparisonIdentity(run) {
-  return JSON.stringify({
-    testCatalog: run.testCatalog,
-    branch: run.branch,
-    commitTimestamp: run.commitTimestamp,
-    trigger: run.trigger,
-    machineId: run.machineId,
-    environmentId: run.environmentId,
-    targets: [...run.targets].sort(),
-    commit: run.provenance.rocjitsuCommitSha,
-    message: run.provenance.commitMessage ?? null,
-  });
+  return identity([run.testCatalog, run.branch, run.provenance.rocjitsuCommitSha, run.commitTimestamp, run.provenance.commitMessage ?? null,
+    run.sourceBase ? [run.sourceBase.branch, run.sourceBase.commit] : null,
+    run.pullRequest ? [run.pullRequest.number, run.pullRequest.url ?? null] : null, run.machineId, run.environmentId,
+    [...run.configurations].sort((a, b) => `${a.target}:${a.mode}`.localeCompare(`${b.target}:${b.mode}`))]);
 }
 
 function buildDashboardData(raw) {
-  const allRuns = raw?.pluginRuns ?? raw?.runs;
-  if (
-    !raw
-    || raw.schemaVersion !== CURRENT_SCHEMA_VERSION
-    || !Array.isArray(allRuns)
-    || !Array.isArray(raw.testCatalog)
-  ) {
-    throw new Error(`Expected schema-version-${CURRENT_SCHEMA_VERSION} dashboard data with runs and testCatalog arrays`);
+  if (raw?.schemaVersion === 1) throw new Error('Dashboard schema 1 requires migration to schema 2');
+  const sourceRuns = raw?.pluginRuns ?? raw?.allRuns ?? raw?.runs;
+  if (raw?.schemaVersion !== 2 || !Array.isArray(sourceRuns) || !Array.isArray(raw.testCatalog)) throw new Error('Expected schema-2 normalized data with runs and testCatalog');
+  for (const run of sourceRuns) {
+    if (!hasText(run?.runId) || !Array.isArray(run.tests) || !Array.isArray(run.configurations) || !isIsoTimestamp(run.timestamp)
+      || !isIsoTimestamp(run.commitTimestamp) || !hasText(run.branch) || !hasText(run.plugin?.id)) throw new Error('Invalid normalized dashboard run');
   }
-
-  const definitionIds = raw.testCatalog.map((definition) => definition?.id);
-  if (
-    raw.testCatalog.some((definition) => !isTestDefinition(definition))
-    || new Set(definitionIds).size !== definitionIds.length
-  ) {
-    throw new Error('The test catalog contains an invalid or duplicate benchmark definition');
-  }
-
-  const invalidRun = allRuns.find((run) => (
-    !hasText(run?.runId)
-    || !hasText(run?.comparisonId)
-    || !hasText(run?.plugin?.id)
-    || !isIsoTimestamp(run.timestamp)
-    || !isIsoTimestamp(run.commitTimestamp)
-    || !hasText(run.branch)
-    || !['auto', 'manual'].includes(run.trigger)
-    || !hasText(run.machineId)
-    || !Array.isArray(run.targets)
-    || !Array.isArray(run.tests)
-    || !hasText(run.environmentId)
-    || !hasText(run.provenance?.rocjitsuCommitSha)
-  ));
-  if (invalidRun) {
-    throw new Error(`Run ${invalidRun.runId ?? '(unknown)'} is not a valid official develop run`);
-  }
-
-  const commitTimestamps = new Map();
-  const inconsistentCommit = allRuns.find((run) => {
-    const sha = run.provenance.rocjitsuCommitSha;
-    const timestamp = Date.parse(run.commitTimestamp);
-    const existingTimestamp = commitTimestamps.get(sha);
-    if (existingTimestamp !== undefined && existingTimestamp !== timestamp) return true;
-    commitTimestamps.set(sha, timestamp);
-    return false;
-  });
-  if (inconsistentCommit) {
-    throw new Error(
-      `Commit ${inconsistentCommit.provenance.rocjitsuCommitSha} has conflicting committedAt values`,
-    );
-  }
-
-  const pluginRuns = [...allRuns].sort(compareRunExecution);
-  const runs = pluginRuns.filter((run) => run.plugin.id === 'vanilla');
-  const latestCommitRun = sortRunsByCommit(runs).at(-1) ?? null;
-  const targets = [...new Set(runs.flatMap((run) => run.targets))];
-
-  return {
-    ...raw,
-    pluginRuns,
-    runs,
-    latestRun: runs.at(-1) ?? null,
-    latestCommitRun,
-    backfillRunIds: backfillRunIds(runs),
-    targets,
-    suites: [...new Set(raw.testCatalog.map((test) => test.suite))].sort(),
-  };
+  const pluginRuns = [...sourceRuns].sort(compareRunExecution);
+  const allRuns = pluginRuns.filter(({ plugin }) => plugin.id === 'vanilla');
+  const runs = allRuns.filter(({ branch }) => branch === (raw.canonicalBranch ?? 'develop'));
+  return { ...raw, canonicalBranch: raw.canonicalBranch ?? 'develop', pluginRuns, allRuns, runs,
+    targets: [...new Set(allRuns.flatMap(({ targets }) => targets))].sort(), suites: [...new Set(raw.testCatalog.map(({ suite }) => suite))].sort(), modes: ['ST', 'MT'],
+    latestRun: runs.at(-1) ?? null, latestCommitRun: sortRunsByCommit(runs).at(-1) ?? null, backfillRunIds: backfillRunIds(runs) };
 }
 
+// Rehydrate processed normalized JSON through the same wire validator, not a schema bypass.
 export function loadDashboardData(raw) {
-  return buildDashboardData(raw);
+  const shape = buildDashboardData(raw);
+  const seenIds = new Set();
+  for (const run of shape.pluginRuns) {
+    if (seenIds.has(run.runId)) throw new Error(`Duplicate run ID ${run.runId}`);
+    seenIds.add(run.runId);
+  }
+  const catalogs = { ...(raw.catalogs ?? {}) };
+  const runs = shape.pluginRuns.map((run) => {
+    for (const test of run.tests) {
+      if (test.testId !== `${test.target}:${test.mode}:${test.logicalTestId}`
+        || !run.configurations.some((c) => c.target === test.target && c.mode === test.mode)) {
+        throw new Error(`Run ${run.runId} has an invalid normalized test identity`);
+      }
+    }
+    return { id: run.runId, comparisonId: run.comparisonId, testCatalog: run.testCatalog, plugin: run.plugin,
+      source: { branch: run.branch, commit: run.provenance?.rocjitsuCommitSha, committedAt: run.commitTimestamp,
+        ...(Object.hasOwn(run.provenance ?? {}, 'commitMessage') ? { message: run.provenance.commitMessage } : {}),
+        ...(run.sourceBase ? { base: run.sourceBase } : {}), ...(run.pullRequest ? { pullRequest: run.pullRequest } : {}) },
+      execution: { completedAt: run.timestamp, trigger: run.trigger, machine: run.machineId, ...(run.workflowUrl ? { workflowUrl: run.workflowUrl } : {}) },
+      environment: run.provenance?.details ?? [],
+      configurations: run.configurations.map((configuration) => ({ ...configuration,
+        results: run.tests.filter((t) => t.target === configuration.target && t.mode === configuration.mode)
+          .map(({ logicalTestId, status, durationSeconds, error }) => ({ testId: logicalTestId, status, durationSeconds, error })) })),
+    };
+  });
+  const metadata = { schemaVersion: raw.schemaVersion, repository: raw.repository, isBeta: raw.isBeta, canonicalBranch: shape.canonicalBranch };
+  return validatePublishedDashboardData({ metadata, index: { generatedAt: raw.generatedAt, runFiles: runs.map(({ id }) => `runs/${id}.json`) }, runs, catalogs }).data;
 }
 
+// Independent branches, machines and environments are supported; no equality policy applies.
 export function validatePublicationPolicy(runs) {
   if (!Array.isArray(runs)) throw new Error('Expected published runs to be an array');
-  const referenceRun = runs[0];
-  if (!referenceRun) return [];
-
-  return runs.flatMap((run) => {
-    const issues = [];
-    if (run.source.branch !== 'develop') {
-      issues.push({
-        runId: run.id,
-        message: `Run ${run.id} must use source branch develop`,
-      });
-    }
-    if (run.execution.machine !== referenceRun.execution.machine) {
-      issues.push({
-        runId: run.id,
-        message: `Run ${run.id} uses machine ${run.execution.machine}; `
-          + `expected ${referenceRun.execution.machine}`,
-      });
-    }
-    return issues;
-  });
+  return [];
 }
 
-export function validatePublishedDashboardData({
-  metadata,
-  index,
-  runs,
-  runErrors = [],
-  catalogs = {},
-  catalogErrors = {},
-}) {
-  if (metadata?.schemaVersion !== CURRENT_SCHEMA_VERSION) {
-    throw new Error(`Unsupported dashboard schema version ${metadata?.schemaVersion ?? '(missing)'}`);
-  }
-  let repositoryUrl;
-  try {
-    repositoryUrl = new URL(metadata.repository);
-  } catch {
-    throw new Error('Expected dashboard metadata to contain an HTTP repository URL');
-  }
-  if (!['http:', 'https:'].includes(repositoryUrl.protocol)) {
-    throw new Error('Expected dashboard metadata to contain an HTTP repository URL');
-  }
-  if (typeof metadata.isBeta !== 'boolean') {
-    throw new Error('Expected dashboard metadata to contain an isBeta boolean');
-  }
-  if (!index || !isIsoTimestamp(index.generatedAt) || !Array.isArray(index.runFiles)) {
-    throw new Error('Expected the dashboard data index to contain generatedAt and runFiles');
-  }
-  if (!Array.isArray(runs)) {
-    throw new Error('Expected loaded runs to be an array');
-  }
-
-  const normalizedRuns = [];
-  const acceptedSourceRuns = [];
-  const validationFailures = [];
-  const seenRunFiles = new Set();
-  const seenRunIds = new Set();
-  const commitTimestamps = new Map();
-  const comparisonGroups = new Map();
-  const normalizedCatalogs = new Map();
-
-  index.runFiles.forEach((runFile, runIndex) => {
-    const validRunFile = typeof runFile === 'string' && RUN_FILE_PATTERN.test(runFile);
-    let error = runErrors[runIndex] ?? null;
-    if (!validRunFile) error ??= new Error(`Invalid run filename: ${String(runFile)}`);
-    if (validRunFile && seenRunFiles.has(runFile)) error ??= new Error('Duplicate run filename');
-    if (validRunFile) seenRunFiles.add(runFile);
-
+export function validatePublishedDashboardData({ metadata, index, runs, runErrors = [], catalogs = {}, catalogErrors = {} }) {
+  validatePublishedManifest(metadata, index);
+  if (!Array.isArray(runs) || runs.length !== index.runFiles.length) throw new Error('Loaded runs must match index runFiles');
+  const normalizedCatalogs = new Map(); const normalizedRuns = []; const failures = [];
+  index.runFiles.forEach((file, indexPosition) => {
     try {
-      if (error) throw error;
-      const publishedRun = runs[runIndex];
-      if (hasText(publishedRun?.id) && runFile !== `runs/${publishedRun.id}.json`) {
-        throw new Error(`Run ${publishedRun.id} must be published as runs/${publishedRun.id}.json`);
-      }
-      const catalogPath = publishedRun?.testCatalog;
-      if (!hasText(catalogPath) || !CATALOG_FILE_PATTERN.test(catalogPath)) {
-        throw new Error(`Run ${publishedRun?.id ?? '(unknown)'} references an invalid test catalog`);
-      }
-      if (catalogErrors[catalogPath]) throw catalogErrors[catalogPath];
-      let catalog = normalizedCatalogs.get(catalogPath);
-      if (!catalog) {
-        if (!catalogs[catalogPath]) throw new Error(`Unable to load test catalog ${catalogPath}`);
-        catalog = normalizeCatalog(catalogs[catalogPath], catalogPath);
-        normalizedCatalogs.set(catalogPath, catalog);
-      }
-
-      const normalizedRun = normalizePublishedRun(publishedRun, catalog);
-      if (seenRunIds.has(normalizedRun.runId)) throw new Error(`Duplicate run ID ${normalizedRun.runId}`);
-      const commitSha = normalizedRun.provenance.rocjitsuCommitSha;
-      const commitTimestamp = Date.parse(normalizedRun.commitTimestamp);
-      const existingCommitTimestamp = commitTimestamps.get(commitSha);
-      if (existingCommitTimestamp !== undefined && existingCommitTimestamp !== commitTimestamp) {
-        throw new Error(`Commit ${commitSha} has conflicting committedAt values`);
-      }
-
-      const existingGroup = comparisonGroups.get(normalizedRun.comparisonId);
-      if (existingGroup) {
-        if (existingGroup.identity !== comparisonIdentity(normalizedRun)) {
-          throw new Error(`Run ${normalizedRun.runId} does not match comparison ${normalizedRun.comparisonId}`);
-        }
-        if (existingGroup.plugins.has(normalizedRun.plugin.id)) {
-          throw new Error(`Comparison ${normalizedRun.comparisonId} repeats plugin ${normalizedRun.plugin.id}`);
-        }
-        existingGroup.plugins.add(normalizedRun.plugin.id);
-      } else {
-        comparisonGroups.set(normalizedRun.comparisonId, {
-          identity: comparisonIdentity(normalizedRun),
-          plugins: new Set([normalizedRun.plugin.id]),
-        });
-      }
-
-      seenRunIds.add(normalizedRun.runId);
-      commitTimestamps.set(commitSha, commitTimestamp);
-      normalizedRuns.push(normalizedRun);
-      acceptedSourceRuns.push(publishedRun);
-    } catch (runError) {
-      validationFailures.push({
-        runFile: typeof runFile === 'string' ? runFile : String(runFile),
-        message: runError instanceof Error ? runError.message : String(runError),
-      });
-    }
+      if (runErrors[indexPosition]) throw runErrors[indexPosition];
+      const run = runs[indexPosition];
+      if (file !== `runs/${run?.id}.json`) throw new Error(`Run ${run?.id ?? '(unknown)'} filename must match its ID`);
+      if (typeof run.testCatalog !== 'string' || !CATALOG_FILE_PATTERN.test(run.testCatalog)) throw new Error(`Run ${run.id} references an invalid test catalog`);
+      if (catalogErrors[run.testCatalog]) throw catalogErrors[run.testCatalog];
+      if (!normalizedCatalogs.has(run.testCatalog)) normalizedCatalogs.set(run.testCatalog, validateCatalog(catalogs[run.testCatalog], run.testCatalog));
+      normalizedRuns.push(normalizeRun(run, normalizedCatalogs.get(run.testCatalog), index.generatedAt));
+    } catch (error) { failures.push(`- ${file}: ${error.message}`); }
   });
-  if (validationFailures.length > 0) {
-    throw new Error(`Dashboard data failed validation:\n${validationFailures
-      .map(({ runFile, message }) => `- ${runFile}: ${message}`)
-      .join('\n')}`);
+  if (failures.length) throw new Error(`Dashboard data failed validation:\n${failures.join('\n')}`);
+  const ids = new Set(); const commits = new Map(); const groups = new Map(); const definitions = new Map();
+  for (const run of normalizedRuns) {
+    if (ids.has(run.runId)) throw new Error(`Duplicate run ID ${run.runId}`);
+    ids.add(run.runId);
+    const sha = run.provenance.rocjitsuCommitSha; const timestamp = Date.parse(run.commitTimestamp);
+    if (commits.has(sha) && commits.get(sha) !== timestamp) throw new Error(`Commit ${sha} has conflicting committedAt values`);
+    commits.set(sha, timestamp);
+    const group = groups.get(run.comparisonId) ?? [];
+    group.push(run); groups.set(run.comparisonId, group);
   }
-
-  for (const [comparisonId, group] of comparisonGroups) {
-    const hasInstrumentedPlugin = [...group.plugins].some((pluginId) => pluginId !== 'vanilla');
-    if (hasInstrumentedPlugin && !group.plugins.has('vanilla')) {
-      throw new Error(`Comparison ${comparisonId} has plugin runs without a Vanilla baseline`);
-    }
+  for (const [comparisonId, group] of groups) {
+    if (new Set(group.map(({ plugin }) => plugin.id)).size !== group.length) throw new Error(`Comparison ${comparisonId} repeats plugin identity`);
+    if (!group.some(({ plugin }) => plugin.id !== 'vanilla')) continue;
+    if (!group.some(({ plugin }) => plugin.id === 'vanilla')) throw new Error(`Comparison ${comparisonId} has plugin runs without a Vanilla baseline`);
+    if (new Set(group.map(comparisonIdentity)).size !== 1) throw new Error(`Runs do not match plugin comparison ${comparisonId}`);
   }
-
-  const derivedCatalog = new Map();
-  const definitionSources = new Map();
-  [...normalizedRuns]
-    .sort(compareRunExecution)
-    .forEach((run) => run.tests.forEach((test) => {
-      const definition = {
-        id: test.logicalTestId,
-        suite: test.suite,
-        name: test.name,
-        problem: test.problem,
-      };
-      const identity = testDefinitionIdentity(definition);
-      const source = definitionSources.get(definition.id);
-      if (source && source.identity !== identity) {
-        throw new Error(
-          `Test ${definition.id} is defined differently by ${source.catalog} and ${run.testCatalog}; `
-          + 'publish a new test ID whenever the suite, name, or problem changes',
-        );
-      }
-      if (!source) definitionSources.set(definition.id, { identity, catalog: run.testCatalog });
-      derivedCatalog.set(definition.id, definition);
-    }));
-
-  const sourceData = {
-    metadata,
-    index,
-    catalogs: Object.fromEntries(normalizedCatalogs),
-    runs: acceptedSourceRuns,
-  };
-  const data = buildDashboardData({
-    ...metadata,
-    generatedAt: index.generatedAt,
-    testCatalog: [...derivedCatalog.values()],
-    runs: normalizedRuns,
-  });
-
-  if (!data.latestRun) throw new Error('The data files do not contain any Vanilla benchmark runs');
-
-  const publicationIssues = validatePublicationPolicy(acceptedSourceRuns);
-  if (publicationIssues.length > 0) {
-    throw new Error(`Dashboard data failed publication policy:\n${publicationIssues
-      .map(({ runId, message }) => `- ${runId}: ${message}`)
-      .join('\n')}`);
+  for (const [file, catalog] of normalizedCatalogs) for (const definition of catalog.tests) {
+    const previous = definitions.get(definition.id);
+    if (previous && definitionIdentity(previous) !== definitionIdentity(definition)) throw new Error(`Test ${definition.id} is defined differently in ${file}; publish a new test ID`);
+    definitions.set(definition.id, definition);
   }
+  const sourceData = { metadata, index, catalogs: Object.fromEntries(normalizedCatalogs), runs };
+  const data = buildDashboardData({ ...metadata, generatedAt: index.generatedAt, testCatalog: [...definitions.values()], catalogs: sourceData.catalogs, runs: normalizedRuns });
   return { data, sourceData };
 }
