@@ -1065,17 +1065,11 @@
     "gin_connect_leak": {
       "extends": "default",
       "is_gtest": true,
-      "binary": "rccl-GinConnectLeakMPI",
+      "binary": "rccl-UnitTestsMPI",
       "num_ranks": 2,
       "num_nodes": 2,
       "num_gpus": 1,
       "timeout": 180,
-      "env_variables": {
-        "NCCL_GIN_ENABLE": "1",
-        "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_DMABUF_ENABLE": "1",
-        "RCCL_GIN_EXAMPLE_COUNTER_FILE": "/tmp/rccl_gin_example_counters.txt"
-      },
       "description": "ncclGinConnectOnce must release the comms it opened when a later connect fails",
       "tests": [
         {"name": "GinConnectLeak_FailedConnectReleasesOpenedComms", "description": "second connect is made to fail; the first GIN comm and the listen comm must be closed", "test_filter": "GinConnectLeakMPITest.FailedConnectReleasesOpenedComms"}

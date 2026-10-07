@@ -996,6 +996,7 @@ if(BUILD_TESTS)
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
       HostApiCustomGinPluginMPITests.cpp
+      GinConnectLeakMPITests.cpp
       RmaExternalPluginPutSignalMPITests.cpp
       plugin/net_reload_plugin.cpp
       mem_manager/SuspendResumeMPITests.cpp
@@ -1044,6 +1045,20 @@ if(BUILD_TESTS)
 
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
 
+    # Loadable GIN plugin for GinConnectLeakMPITest, built and installed beside the test binary.
+    add_library(rccl-test-gin-fault-plugin SHARED plugin/gin_fault_plugin.cpp)
+    target_include_directories(rccl-test-gin-fault-plugin PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
+    target_link_libraries(rccl-test-gin-fault-plugin PRIVATE hip::host)
+    if(TARGET rccl)
+      add_dependencies(rccl-test-gin-fault-plugin rccl)
+    endif()
+    add_dependencies(rccl-UnitTestsMPI rccl-test-gin-fault-plugin)
+    target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+      RCCL_TEST_GIN_FAULT_PLUGIN_NAME="$<TARGET_FILE_NAME:rccl-test-gin-fault-plugin>")
+    install(TARGETS rccl-test-gin-fault-plugin
+      LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+      COMPONENT tests)
+
     # Hand the in-tree Inspector plugin to InspectorPromP2pMPITests so it can
     # load a profiler without the caller setting NCCL_INSPECTOR_PLUGIN_SO.
     if(TARGET rccl-profiler-inspector)
@@ -1075,27 +1090,6 @@ if(BUILD_TESTS)
       target_compile_definitions(rccl-HostApiCustomGinPluginMPI PRIVATE
         RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
       )
-
-      # Own binary: the GIN plugin is chosen once per process, so the fault env must come first.
-      add_executable(rccl-GinConnectLeakMPI
-        common/main_mpi.cpp
-        common/MPIHelpers.cpp
-        common/MPITestCore.cpp
-        common/MPIEnvironment.cpp
-        common/TestChecks.cpp
-        common/MPIHostUtils.cc
-        GinConnectLeakMPITests.cpp
-      )
-      list(APPEND RCCL_TEST_EXECUTABLES rccl-GinConnectLeakMPI)
-      add_dependencies(rccl-GinConnectLeakMPI rccl-gin-example)
-      target_compile_definitions(rccl-GinConnectLeakMPI PRIVATE
-        RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
-      )
-
-      # Install the plugin next to the test binaries so installed runs find it.
-      rocm_install(FILES "${RCCL_GIN_EXAMPLE_PLUGIN}"
-                   COMPONENT tests
-                   DESTINATION ${CMAKE_INSTALL_BINDIR})
     endif()
   endif()
 
