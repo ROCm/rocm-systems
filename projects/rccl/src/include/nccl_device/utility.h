@@ -510,6 +510,8 @@ template <typename T>
 NCCL_DEVICE_INLINE T loadConst(T const* p) {
 #if NCCL_DEVICE_LOADCONST_USE_LDG
   return loadConstLdg(p);
+#elif defined(__HIP_PLATFORM_AMD__) && defined(__HIP_DEVICE_COMPILE__)
+  return *(__attribute__((address_space(4))) T const*)p;
 #else
   return *p;
 #endif
