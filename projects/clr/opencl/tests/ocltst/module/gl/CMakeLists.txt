@@ -42,7 +42,7 @@ set_target_properties(oclgl PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/ocltst)
 if(UNIX AND NOT APPLE)
   set_target_properties(oclgl PROPERTIES
-    INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib/opencl;$ORIGIN/../lib")
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/opencl;$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
   # Use RUNPATH (not RPATH) so LD_LIBRARY_PATH can override
   target_link_options(oclgl PRIVATE "LINKER:--enable-new-dtags")
 endif()
