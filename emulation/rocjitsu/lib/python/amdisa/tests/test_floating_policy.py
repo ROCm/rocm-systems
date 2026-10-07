@@ -1,17 +1,17 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""F16 policy wiring for production scalar/SIMD and the legacy per-lane generator.
+"""F16 policy wiring for production scalar/SIMD and legacy unary generation.
 
-The per-lane generator is a reference helper without a production caller.
-Explicit expectations catch incorrect policy entries before regeneration.
+Legacy cases check gen_legacy_vector_unary's apply_omod_f16 emission;
+it has no production caller. Explicit expectations catch policy-table mistakes.
 """
 
 import pytest
 
 from amdisa.codegen.execute.simd_codegen import simd_probe_line
 from amdisa.codegen.execute.sema_lower import lower_sema_block
-from amdisa.codegen.execute.vector_alu import gen_vector_unary
+from amdisa.codegen.execute.vector_alu import gen_legacy_vector_unary
 from amdisa.sema_ast import ExecModel, SemaBlock, SemaNode, SemaNodeKind, SemaType
 
 _F16_FLUSH = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
@@ -19,11 +19,10 @@ _F16_POLICY = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())
 _TRANS_OUTPUT = 'amdgpu::transcendental_output_modifier_policy<amdgpu::fp_format::F16>'
 _PLAIN_OUTPUT = 'amdgpu::output_modifier_policy<amdgpu::fp_format::F16>'
 
-# Every F16 TRANS-unit operation, under each helper spelling the generators
-# receive, has its source flushed and the TRANS output policy (gfx1201).
+# Production TRANS spellings use flushed sources and the shared output policy.
 _TRANS_CALLS = ('log', 'log2', 'exp', 'exp2', 'rcp', 'rsq', 'sqrt', 'sin', 'cos')
-_TRANS_PER_LANE_OPS = ('log2', 'exp2', 'rcp', 'rsq', 'sqrt', 'sin', 'cos')
 _TRANS_SIMD = ('log', 'exp', 'rcp', 'rsq', 'sqrt')
+_LEGACY_TRANS_OPS = ('log2', 'exp2', 'rcp', 'rsq', 'sqrt', 'sin', 'cos')
 
 
 def _operand(name: str, idx: int) -> SemaNode:
@@ -94,16 +93,16 @@ def test_scalar_trunc_keeps_source_without_trans_output():
     assert _TRANS_OUTPUT not in result
 
 
-@pytest.mark.parametrize('op', _TRANS_PER_LANE_OPS)
-def test_per_lane_trans_op_flushes_source_and_uses_trans_output(op: str):
-    body = gen_vector_unary(['vdst'], ['src0'], op, 'f16', is_vop3=True)
+@pytest.mark.parametrize('op', _LEGACY_TRANS_OPS)
+def test_legacy_trans_op_flushes_source_and_emits_legacy_omod(op: str):
+    body = gen_legacy_vector_unary(['vdst'], ['src0'], op, 'f16', is_vop3=True)
 
     assert _F16_FLUSH in body
     assert 'amdgpu::fp_mode::apply_omod_f16(result, effective_omod' in body
 
 
-def test_per_lane_trunc_keeps_source_without_trans_output():
-    body = gen_vector_unary(['vdst'], ['src0'], 'trunc', 'f16', is_vop3=True)
+def test_legacy_trunc_keeps_source_without_legacy_omod():
+    body = gen_legacy_vector_unary(['vdst'], ['src0'], 'trunc', 'f16', is_vop3=True)
 
     assert _F16_FLUSH not in body
     assert 'apply_omod_f16(result, effective_omod' not in body

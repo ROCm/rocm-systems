@@ -751,7 +751,9 @@ inline float finalize_omod_f32(float value, uint32_t omod) {
   return std::bit_cast<float>(bits);
 }
 
-/// Apply FP32 output scaling in the caller's established rounding environment.
+/// @brief Scale an F32 host result in the caller's rounding environment.
+/// @details Live scalar/SDWA helper outside the shared raw-bit output stage;
+/// see output_modifier.h for migration scope.
 /// Zeros and tiny arithmetic results become +0 before scaling; a normal result
 /// that becomes tiny when halved retains its sign and flushes before packing.
 inline float apply_omod_f32(float value, uint32_t omod) {
@@ -775,7 +777,8 @@ inline float apply_omod_f32(float value, uint32_t omod) {
 }
 
 /// @brief Scale an already rounded half result represented in F32.
-/// @details Preserve NaNs, flush input subnormals, and round scaling to F16.
+/// @details Live SDWA helper: preserve NaNs, flush input subnormals, and round
+/// scaling to F16. Legacy vector generators also emit calls to this helper.
 inline float apply_omod_f16(float value, uint32_t omod, bool fp16_ovfl) {
   if (omod == 0)
     return value;

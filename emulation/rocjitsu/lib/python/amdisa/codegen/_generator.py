@@ -70,7 +70,6 @@ from amdisa.codegen.shared_baselines import (
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
     vop3_dst_mod,
-    vop3_dst_mod_f64,
 )
 from amdisa.codegen.execute.vector_special import (
     gen_vector_mbcnt,

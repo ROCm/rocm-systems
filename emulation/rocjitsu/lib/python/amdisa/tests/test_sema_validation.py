@@ -32,9 +32,9 @@ from amdisa.codegen.execute.scalar import (
     gen_scalar_unary,
 )
 from amdisa.codegen.execute.vector_alu import (
-    gen_vector_binop,
-    gen_vector_ternary,
-    gen_vector_unary,
+    gen_legacy_vector_binop,
+    gen_legacy_vector_ternary,
+    gen_legacy_vector_unary,
 )
 
 
@@ -145,7 +145,7 @@ class TestVectorBinopValidation:
     )
     def test_vector_binop_has_exec_loop(self, op, dtype):
         sem = _FakeSem(f'V_{op.upper()}_{dtype.upper()}', 'vector_binop', op, dtype)
-        old = gen_vector_binop(['vdst'], ['src0', 'vsrc1'], op, dtype)
+        old = gen_legacy_vector_binop(['vdst'], ['src0', 'vsrc1'], op, dtype)
         new = _new_output(sem, ['src0', 'vsrc1'], ['vdst'], dtype)
         old_props = _extract_properties(old)
         new_props = _extract_properties(new)
@@ -156,7 +156,7 @@ class TestVectorBinopValidation:
         assert new_props['writes_lane']
 
     def test_legacy_i24_mul_uses_unsigned_helper(self):
-        old = gen_vector_binop(['vdst'], ['src0', 'vsrc1'], 'mul', 'i24')
+        old = gen_legacy_vector_binop(['vdst'], ['src0', 'vsrc1'], 'mul', 'i24')
 
         assert '::rocjitsu::amdgpu::mul_i24_u32' in old
         assert 'sv0 * sv1' not in old
@@ -165,7 +165,9 @@ class TestVectorBinopValidation:
 class TestVectorTernaryValidation:
     def test_fma_f32(self):
         sem = _FakeSem('V_FMA_F32', 'vector_ternary', 'fma', 'f32')
-        old = gen_vector_ternary(['vdst'], ['src0', 'src1', 'src2'], 'fma', 'f32')
+        old = gen_legacy_vector_ternary(
+            ['vdst'], ['src0', 'src1', 'src2'], 'fma', 'f32'
+        )
         new = _new_output(sem, ['src0', 'src1', 'src2'], ['vdst'], 'f32')
         old_props = _extract_properties(old)
         new_props = _extract_properties(new)
@@ -178,7 +180,7 @@ class TestVectorUnaryValidation:
     @pytest.mark.parametrize('op', ['floor', 'trunc', 'sqrt'])
     def test_vector_unary_exec_loop(self, op):
         sem = _FakeSem(f'V_{op.upper()}_F32', 'vector_unary', op, 'f32')
-        old = gen_vector_unary(['vdst'], ['src0'], op, 'f32')
+        old = gen_legacy_vector_unary(['vdst'], ['src0'], op, 'f32')
         new = _new_output(sem, ['src0'], ['vdst'], 'f32')
         assert 'for (uint32_t lane' in old
         assert 'for (uint32_t lane' in new

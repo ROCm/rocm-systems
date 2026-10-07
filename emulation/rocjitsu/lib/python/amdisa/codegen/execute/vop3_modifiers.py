@@ -35,6 +35,8 @@ def vop3_dst_mod(
     ``omod_result_type`` selects only the architecture/MODE policy. The emitted
     value remains F32 and is finalized in that format; callers producing a
     narrower destination must also finalize after the architectural narrowing.
+    This live specialized-generator path sits outside the shared raw-bit stage;
+    see output_modifier.h for migration scope.
     """
     if omod_result_type == 'f32':
         omod_expr = (
@@ -60,8 +62,8 @@ def vop3_dst_mod(
     ]
 
 
-def vop3_dst_mod_f64(varname: str, indent: str = '    ') -> list[str]:
-    """Generate MODE-aware VOP3 output modifier lines for a double result."""
+def legacy_vop3_dst_mod_f64(varname: str, indent: str = '    ') -> list[str]:
+    """Emit F64 OMOD/CLAMP for legacy vector generators; no production caller."""
     return [
         f'{indent}const uint32_t effective_omod = amdgpu::fp_mode::effective_omod('
         'wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod);',

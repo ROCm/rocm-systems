@@ -1,13 +1,11 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Vector ALU execute body generators.
+"""Legacy vector ALU body emitters retained for generator tests.
 
-Free functions that emit C++ execute_impl bodies for vector ALU
-instructions: unary, binary, and ternary operations across float,
-integer, and conversion types. Handles VOP3 source modifiers
-(neg/abs) and destination modifiers (omod/clamp) via the extracted
-vop3_modifiers helpers.
+These unary/binary/ternary helpers have no production callers. Production
+emission uses semantic lowering and specialized generators. VOP3 modifiers
+here retain the older per-lane emission through vop3_modifiers.
 """
 
 from __future__ import annotations
@@ -22,7 +20,7 @@ from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
     vop3_dst_mod,
-    vop3_dst_mod_f64,
+    legacy_vop3_dst_mod_f64,
 )
 from amdisa.semantics import F16_INPUT_CONVERSION_DTYPES, F32_TO_INTEGER_DTYPES
 
@@ -49,7 +47,7 @@ def _write_vop3_true16_dst(opnd: str, opsel: str, value: str) -> str:
     )
 
 
-def gen_vector_unary(
+def gen_legacy_vector_unary(
     dst: list[str],
     src: list[str],
     op: str | None,
@@ -58,7 +56,10 @@ def gen_vector_unary(
     has_abs: bool = False,
     arch_name: str = '',
 ) -> str:
-    """Generate vector unary operation body."""
+    """Emit a legacy unary body for tests; no production caller.
+
+    F16 TRANS modifiers use the legacy apply_omod_f16 sequence.
+    """
     L = []
     L.append('  uint64_t exec = wf.exec();')
     if is_vop3 and dtype == 'f16':
@@ -344,7 +345,7 @@ def gen_vector_unary(
         L.append('    int exp = 0;')
         L.append('    double result = std::frexp(s, &exp);')
         if is_vop3:
-            L.extend(vop3_dst_mod_f64('result'))
+            L.extend(legacy_vop3_dst_mod_f64('result'))
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, std::bit_cast<uint64_t>(result));'
         )
@@ -421,7 +422,7 @@ def gen_vector_unary(
                     '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
                 )
             else:
-                L.extend(vop3_dst_mod_f64('result'))
+                L.extend(legacy_vop3_dst_mod_f64('result'))
             L.append(
                 f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, std::bit_cast<uint64_t>(result));'
             )
@@ -542,7 +543,7 @@ def gen_vector_unary(
     return '\n'.join(L)
 
 
-def gen_vector_binop(
+def gen_legacy_vector_binop(
     dst: list[str],
     src: list[str],
     op: str | None,
@@ -550,7 +551,7 @@ def gen_vector_binop(
     is_vop3: bool = False,
     has_abs: bool = False,
 ) -> str:
-    """Generate vector binary operation body."""
+    """Emit a legacy binary body for tests; no production caller."""
     if dst:
         d = dst[0]
         s0, s1 = src[0], src[1]
@@ -597,7 +598,7 @@ def gen_vector_binop(
         expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
         if is_vop3:
             L.append(f'    double result = {expr};')
-            L.extend(vop3_dst_mod_f64('result'))
+            L.extend(legacy_vop3_dst_mod_f64('result'))
             L.append(
                 f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, std::bit_cast<uint64_t>(result));'
             )
@@ -920,7 +921,7 @@ def gen_vector_binop(
     return '\n'.join(L)
 
 
-def gen_vector_ternary(
+def gen_legacy_vector_ternary(
     dst: list[str],
     src: list[str],
     op: str | None,
@@ -928,7 +929,7 @@ def gen_vector_ternary(
     is_vop3: bool = False,
     has_abs: bool = False,
 ) -> str:
-    """Generate vector ternary (3-operand) operation body."""
+    """Emit a legacy ternary body for tests; no production caller."""
     d = dst[0]
     s0, s1, s2 = src[0], src[1], src[2]
 
@@ -1082,7 +1083,7 @@ def gen_vector_ternary(
         expr = f_map.get(op, f'a /* unhandled: {op} */')
         if is_vop3:
             L.append(f'    double result = {expr};')
-            L.extend(vop3_dst_mod_f64('result'))
+            L.extend(legacy_vop3_dst_mod_f64('result'))
             L.append(
                 f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, std::bit_cast<uint64_t>(result));'
             )
