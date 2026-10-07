@@ -68,6 +68,18 @@ hrr::Event ev_reserve(uint64_t ptr, uint64_t size) {
   return place_event(HRR_API_HIPMEMADDRESSRESERVE, a);
 }
 
+hrr::Event ev_ipc_export(uint64_t ptr, int32_t ret = 0) {
+  hrr_args_hipIpcGetMemHandle a{};
+  a.ret = ret; a.devPtr = ptr;
+  return place_event(HRR_API_HIPIPCGETMEMHANDLE, a);
+}
+
+hrr::Event ev_pool_export(uint64_t ptr) {
+  hrr_args_hipMemPoolExportPointer a{};
+  a.dev_ptr = ptr;
+  return place_event(HRR_API_HIPMEMPOOLEXPORTPOINTER, a);
+}
+
 using Ranges = std::vector<VaRange>;
 }  // namespace
 
@@ -210,6 +222,25 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Plan) {
     // The reservation over the pool allocation keeps only what the
     // allocation does not cover.
     REQUIRE(p.vmm == Ranges{{B + 8 * P, B + 10 * P}, {B + 32 * P, B + 40 * P}});
+    REQUIRE(p.exported.empty());
+  }
+
+  SECTION("an allocation exported to another process is left to the runtime") {
+    // The IPC export names an address inside the hipMalloc at B; the pool
+    // export names the pool allocation at B+6P. A failed export and an export
+    // of a reservation take out nothing.
+    events.push_back(ev_ipc_export(B + 16));
+    events.push_back(ev_pool_export(B + 6 * P));
+    events.push_back(ev_ipc_export(B + 4 * P, /*ret=*/1));
+    events.push_back(ev_ipc_export(B + 33 * P));
+    const hrr::PlacementPlan p = hrr::plan_placement(events, segments, {});
+    REQUIRE(p.exported == Ranges{{B, B + P}, {B + 6 * P, B + 8 * P}});
+    REQUIRE(p.alloc == Ranges{{B + P, B + 2 * P},
+                              {B + 4 * P, B + 5 * P},
+                              {B + 64 * P, B + 66 * P}});
+    REQUIRE(p.vmm == Ranges{{B + 6 * P, B + 10 * P}, {B + 32 * P, B + 40 * P}});
+    REQUIRE(hrr::va_overlaps(p.exported, B + 0x80, B + 0x90));
+    REQUIRE_FALSE(hrr::va_overlaps(p.exported, B + P, B + 2 * P));
   }
 
   SECTION("a denied address takes out only its own allocation") {

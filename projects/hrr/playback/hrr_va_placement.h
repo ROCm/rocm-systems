@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <string>
@@ -129,6 +130,14 @@ inline const VaRange* va_find_containing(const std::vector<VaRange>& sorted,
     return (b >= it->base && e <= it->end) ? &*it : nullptr;
 }
 
+// Whether any range in `sorted` overlaps [b, e).
+inline bool va_overlaps(const std::vector<VaRange>& sorted, uint64_t b, uint64_t e) {
+    auto it = std::upper_bound(sorted.begin(), sorted.end(), b,
+                               [](uint64_t v, const VaRange& r) { return v < r.base; });
+    if (it != sorted.begin() && std::prev(it)->end > b) return true;
+    return it != sorted.end() && it->base < e;
+}
+
 // Which allocation APIs are placed, and what range one recorded call claimed.
 // Only successful calls count: a failed one returned no address. Managed
 // memory, and hipExtMallocWithFlags with any flag set (fine-grained, uncached,
@@ -189,6 +198,29 @@ inline PlaceKind placement_event_range(const Event& ev, VaRange* out) {
     return kind;
 }
 
+// The address a recorded call exported for another process, or 0. Both APIs
+// refuse VMM memory, so the allocation holding that address keeps the old path.
+inline uint64_t placement_exported_ptr(const Event& ev) {
+    const auto& p = ev.raw_payload;
+    if (p.size() < sizeof(hrr_event_header)) return 0;
+    switch (ev.header().event_type) {
+        case HRR_API_HIPIPCGETMEMHANDLE: {
+            hrr_args_hipIpcGetMemHandle a;
+            if (p.size() < sizeof(a)) return 0;
+            std::memcpy(&a, p.data(), sizeof(a));
+            return a.ret == 0 ? a.devPtr : 0;
+        }
+        case HRR_API_HIPMEMPOOLEXPORTPOINTER: {
+            hrr_args_hipMemPoolExportPointer a;
+            if (p.size() < sizeof(a)) return 0;
+            std::memcpy(&a, p.data(), sizeof(a));
+            return a.ret == 0 ? a.dev_ptr : 0;
+        }
+        default:
+            return 0;
+    }
+}
+
 struct PlacementPlan {
     // Ranges for the hipMalloc family and the region sidecar's segments. These
     // become placement-owned reservations after hipInit.
@@ -200,6 +232,10 @@ struct PlacementPlan {
     // both lists and held for the whole replay, as if something else in the
     // process had taken them.
     std::vector<VaRange> denied;
+    // Ranges of the allocations the recording exported with hipIpcGetMemHandle
+    // or hipMemPoolExportPointer. Neither works on VMM memory, so these are
+    // left out of `alloc`, not held, and replay where the runtime puts them.
+    std::vector<VaRange> exported;
     size_t alloc_events = 0;
     size_t vmm_events   = 0;
     size_t segments     = 0;
@@ -213,27 +249,41 @@ inline PlacementPlan plan_placement(const std::vector<Event>& events,
                                     const std::vector<uint64_t>& deny,
                                     uint64_t page = kPlacePage) {
     PlacementPlan plan;
-    std::vector<VaRange> alloc, vmm, denied;
-    auto note_deny = [&](const VaRange& r) {
-        for (uint64_t d : deny)
-            if (d >= r.base && d < r.end) { denied.push_back(r); return; }
+    std::vector<VaRange> alloc, vmm, denied, exported;
+    std::vector<uint64_t> exports;
+    for (const auto& ev : events)
+        if (const uint64_t x = placement_exported_ptr(ev)) exports.push_back(x);
+    auto note = [](const std::vector<uint64_t>& addrs, const VaRange& r,
+                   std::vector<VaRange>* out) {
+        for (uint64_t d : addrs)
+            if (d >= r.base && d < r.end) { out->push_back(r); return; }
     };
     for (const auto& ev : events) {
         VaRange r;
         switch (placement_event_range(ev, &r)) {
-            case PlaceKind::Alloc: alloc.push_back(r); ++plan.alloc_events; note_deny(r); break;
-            case PlaceKind::Vmm:   vmm.push_back(r);   ++plan.vmm_events;   note_deny(r); break;
-            case PlaceKind::None:  break;
+            case PlaceKind::Alloc:
+                alloc.push_back(r); ++plan.alloc_events;
+                note(deny, r, &denied); note(exports, r, &exported);
+                break;
+            case PlaceKind::Vmm:
+                vmm.push_back(r); ++plan.vmm_events;
+                note(deny, r, &denied);
+                break;
+            case PlaceKind::None:
+                break;
         }
     }
     for (const auto& s : segments) {
         if (s.end <= s.base) continue;
         alloc.push_back(s);
         ++plan.segments;
-        note_deny(s);
+        note(deny, s, &denied);
     }
-    plan.denied = va_round_merge(std::move(denied), page);
-    plan.alloc  = va_subtract(va_round_merge(std::move(alloc), page), plan.denied);
+    plan.denied   = va_round_merge(std::move(denied), page);
+    plan.exported = va_subtract(va_round_merge(std::move(exported), page), plan.denied);
+    plan.alloc    = va_subtract(va_subtract(va_round_merge(std::move(alloc), page),
+                                            plan.denied),
+                                plan.exported);
     // A VA the recording used for a hipMalloc at one moment and a reservation
     // at another is held as an allocation range. The reservation replayed
     // there then lands elsewhere and is reported as a fallback.

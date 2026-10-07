@@ -178,7 +178,10 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
     char buf[96];
     {
         std::lock_guard<std::mutex> lk(mu_);
-        if (pe == 0 || !va_find_containing(reserved_, pb, pe)) {
+        if (pe != 0 && va_overlaps(plan_.exported, pb, pe)) {
+            why = "the recording exports it to another process, which VMM memory "
+                  "does not support";
+        } else if (pe == 0 || !va_find_containing(reserved_, pb, pe)) {
             why = "its range could not be held";
         } else {
             // The mapping nearest below pe is the only one that can overlap.

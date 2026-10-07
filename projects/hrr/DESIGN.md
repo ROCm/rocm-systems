@@ -1078,7 +1078,9 @@ back.
 
 An allocation falls back to an ordinary one at a new address when its range could
 not be held, when it shares a page with an allocation still live, when it is managed
-or fine-grained memory, or when it is stream-ordered inside a graph capture. Each
+or fine-grained memory, or when it is stream-ordered inside a graph capture. It also
+falls back when the recording exports it with `hipIpcGetMemHandle` or
+`hipMemPoolExportPointer`, because neither accepts VMM memory. Each
 fallback is named on stderr, the summary counts both kinds, and
 `HIP_HRR_REPLAY_SCAN_H2D=1` then reports H2D payloads that hold an address of an
 allocation that moved. `--no-placement` turns the whole mechanism off, and so does
