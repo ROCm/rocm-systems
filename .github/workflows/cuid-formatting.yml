@@ -7,14 +7,6 @@ on:
     paths:
       - 'projects/cuid/**'
   pull_request:
-    paths:
-      - '.github/workflows/cuid-formatting.yml'
-      - 'projects/cuid/**'
-      - '!**/*.md'
-      - '!**/*.rst'
-      - '!**/*.rtf'
-      - '!**/.readthedocs.yaml'
-      - '!projects/cuid/docs/**'
 
 permissions:
   contents: read
@@ -29,21 +21,16 @@ jobs:
   pre-commit:
     name: pre-commit / cuid
     runs-on: ubuntu-24.04
-    env:
-      # PRs diff against the base branch; pushes diff against the pre-push tip.
-      FROM_REF: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || github.event.before }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # Fetch commit/tree history without checking out the source or submodules.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # required for --from-ref/--to-ref
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout: .github/actions/scoped-formatting
 
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-
-      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+      - uses: ./.github/actions/scoped-formatting
         with:
-          # Use the cuid project pre-commit config and only check files changed
-          # in this push/PR.
-          extra_args: >-
-            --config projects/cuid/.pre-commit-config.yaml
-            --from-ref ${{ env.FROM_REF }}
-            --to-ref HEAD
+          include: '^(projects/cuid/|\.github/workflows/cuid-formatting\.yml\Z)'
+          exclude: '(\.(md|rst|rtf)\Z|(^|/)\.readthedocs\.yaml\Z|^projects/cuid/docs/)'
+          config: projects/cuid/.pre-commit-config.yaml

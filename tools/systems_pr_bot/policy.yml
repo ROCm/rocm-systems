@@ -147,45 +147,15 @@ diff:
     - '**/*.asc'
 
 checks:
-  # Each name identifies one workflow, independently of scheduling order.
-  # Paths and branches mirror its pull_request filters, including ordered
-  # exclusions. The policy tests verify these filters against the workflows.
-  # An omitted filter applies to every path or base branch, respectively.
+  # Every named job is scheduled on these target branches. Formatting jobs
+  # inspect complete Git diffs themselves and succeed when their scope is empty.
+  # Path filters here would make enforcement depend on a capped API response.
   required_check_runs:
     - name: pre-commit / runtimes
       branches: [develop]
-      paths:
-        - 'runtimes/**'
-        - '.github/workflows/runtimes-formatting.yml'
-        - '.pre-commit-config.yaml'
     - name: pre-commit
-      paths:
-        - 'emulation/mirage/**'
-        - 'emulation/rocjitsu/**'
-        - '.github/workflows/rocjitsu-*.yml'
-        - '.pre-commit-config.yaml'
     - name: pre-commit / cuid
-      paths:
-        - '.github/workflows/cuid-formatting.yml'
-        - 'projects/cuid/**'
-        - '!**/*.md'
-        - '!**/*.rst'
-        - '!**/*.rtf'
-        - '!**/.readthedocs.yaml'
-        - '!projects/cuid/docs/**'
     - name: pre-commit / rocprofiler-compute
-      paths:
-        - '.github/workflows/rocprofiler-compute-formatting.yml'
-        - 'projects/rocprofiler-compute/**'
-        - '!**/*.md'
-        - '!**/*.rtf'
-        - '!**/*.rst'
-        - '!**/.markdownlint-ci2.yaml'
-        - '!**/.readthedocs.yaml'
-        - '!**/.spellcheck.local.yaml'
-        - '!**/.wordlist.txt'
-        - '!docs/**'
-        - '!projects/*/docs/**'
 
   failure_comments:
     pre-commit:

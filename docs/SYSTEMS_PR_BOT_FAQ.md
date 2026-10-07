@@ -194,18 +194,36 @@ ______________________________________________________________________
 ## 🔎 pre-commit
 
 **What does it check?**
-The bot requires the formatting workflows selected by the PR's changed paths
-and target branch. Each workflow publishes a distinct check name:
+The bot requires the formatting workflows scheduled for the PR's target
+branch. Each workflow publishes a distinct check name:
 `pre-commit / runtimes`, `pre-commit` (RocJITsu), `pre-commit / cuid`, or
-`pre-commit / rocprofiler-compute`. A PR touching several scopes must pass every
-applicable check, including checks that have not appeared yet when polling starts.
+`pre-commit / rocprofiler-compute`. All four run on PRs targeting `develop`;
+the runtimes workflow is restricted to that branch. The bot waits for every
+scheduled check, including checks that have not appeared yet when polling starts.
+
+These PR workflows have no trigger-level path filters. Each named job first
+uses `.github/actions/scoped-formatting` to examine a complete local Git diff
+between the PR's merge base and head. Its include/exclude expressions decide
+whether to run the formatter. A job with no matching inputs succeeds after
+that inspection, without installing formatters or checking out source and
+submodules. The initial checkout fetches commit/tree history and the small
+shared action; file contents are fetched when needed. Changes to the shared
+action activate all four formatting scopes.
+
+GitHub's server-side path filters and PR-files API can omit paths on large
+PRs. Neither controls formatting scheduling or scope selection. Scope
+inspection includes deleted paths and both sides of renames, uses NUL-delimited
+filenames, and fails the job if Git cannot establish an unambiguous comparison.
 
 The runtimes and rocjitsu workflows use the root `.pre-commit-config.yaml`.
 The CUID and rocprofiler-compute workflows use their project configurations.
-Their check names, paths, and branch filters are declared in
-`tools/systems_pr_bot/policy.yml`; automated tests compare those declarations
-with the workflows. Paths with no applicable formatting workflow do not cause
-the bot to wait for a check that cannot be created.
+Their check names and branch filters are declared in
+`tools/systems_pr_bot/policy.yml`; automated tests verify that the named jobs
+are scheduled without path filters or job-level conditions. Workflow-local
+include/exclude expressions control formatting work, not which checks the bot
+requires. The bot's advisory file checks still use the PR-files API and show
+an explicit warning when its file count differs from the PR's total; that
+partial list never removes a required formatting check.
 
 **How to fix**
 Run the checks locally, let them auto-fix where possible, then commit the result:
@@ -293,10 +311,10 @@ Draft PR, pre-commit, CodeQL) do **not** add the label.
 **How are pre-commit and CodeQL shown?**
 
 Required workflows appear in the table under their exact check names. The bot
-selects the expected names from trusted base-branch policy before it polls the
-GitHub API, then reads every page of current check runs. A missing or pending
+selects the expected names by target branch from trusted base-branch policy
+before it polls the GitHub API, then reads every page of current check runs. A missing or pending
 required check keeps the bot waiting; a failure is reported immediately.
-Checks outside the selected scopes do not satisfy or block these requirements.
+Checks outside the target branch's requirements do not satisfy or block them.
 CodeQL is enforced by its own workflows; it is included in this table only if
 its check name is declared in `checks.required_check_runs`. The bot does not
 query code-scanning alerts.
@@ -311,9 +329,10 @@ take effect only after merge. A renamed check cannot satisfy its old name,
 even when it has passed. RocJITsu retains the `pre-commit` name so the base
 policy can still find it while the other workflows gain distinct names.
 
-For a missing check, inspect its name and the workflow's path and branch
-filters. For a running check, inspect its job for queued runners or stalled
-steps. Once the cause is resolved, push a commit to trigger a fresh policy run:
+For a missing check, inspect its name and the workflow's branch filters; required
+formatting checks are scheduled independently of changed paths. For a running
+check, inspect its job for queued runners or stalled steps. Once the cause is
+resolved, push a commit to trigger a fresh policy run:
 
 ```bash
 git commit --allow-empty -m "ci: retrigger policy check"
