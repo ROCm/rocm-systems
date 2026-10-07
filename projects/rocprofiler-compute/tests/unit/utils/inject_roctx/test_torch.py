@@ -218,3 +218,31 @@ def test_lazy_linear_to_under_tensor_wraps(monkeypatch):
     assert isinstance(model.weight, UninitializedParameter)
     torch.zeros(1).to("cpu")
     assert "torch.Tensor.to" in pushes
+
+
+def test_uninitialized_tensor_item_still_raises(monkeypatch):
+    from tests.integration.common import require_torch
+    from utils.inject_roctx._backends import torch as torch_backend
+
+    require_torch()
+    import torch
+    from torch.nn.parameter import UninitializedParameter
+
+    if not torch_backend._resolve_torch():
+        pytest.skip("torch could not be resolved for inject_roctx backend")
+
+    param = UninitializedParameter()
+    with pytest.raises(ValueError, match="uninitialized"):
+        param.item()
+    with pytest.raises(ValueError, match="uninitialized"):
+        param.contiguous()
+
+    monkeypatch.setattr(torch_backend, "_push_scope", lambda *args, **kwargs: None)
+    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    install_tensor_method_wrappers_for_test(monkeypatch, torch_backend, torch)
+
+    wrapped = UninitializedParameter()
+    with pytest.raises(ValueError, match="uninitialized"):
+        wrapped.item()
+    with pytest.raises(ValueError, match="uninitialized"):
+        wrapped.contiguous()
