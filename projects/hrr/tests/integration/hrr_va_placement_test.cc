@@ -206,10 +206,18 @@ void hrr_require_stale(int rc, const std::string& out, uint64_t buf) {
 }
 }  // namespace
 
-TEST_CASE("Unit_HRR_VaPlacement_StoredPointer", "[.][hrr]") {
+HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
 #ifdef _WIN32
   HRR_SKIP("placement needs mmap(MAP_FIXED_NOREPLACE) and is off on Windows");
 #endif
+  // Placement maps every allocation through the VMM API. Without it every
+  // allocation falls back, and there is nothing here to assert.
+  int vmm = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(
+      &vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
+  if (!vmm) {
+    HRR_SKIP("the device does not support virtual memory management");
+  }
   const PlaceCapture& pc = hrr_place_capture();
   INFO("capture: buf=" << hex(pc.buf) << " freed=" << hex(pc.freed)
                        << " again=" << hex(pc.again));
