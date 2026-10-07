@@ -755,12 +755,7 @@ def format_table_output(
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
 
-    # mem_chart diagram mode: one merged chart, no per-table titles (3.1, 3.2, …).
-    # With --view table, keep titles so tabular output stays navigable.
-    skip_mem_chart_title = table_config.get(
-        "cli_style"
-    ) == "mem_chart" and not _tty_view_is_table(args)
-    if "title" in table_config and table_config["title"] and not skip_mem_chart_title:
+    if table_config.get("title"):
         content += f"{table_id_str} {table_config['title']}\n"
 
     if table_id_str == PC_SAMPLING_TABLE_ID:
@@ -1104,7 +1099,8 @@ def show_all(
         ):
             if not hasattr(output, "isatty") or not output.isatty():
                 panel_content = strip_ansi(panel_content)
-            if _panel_is_mem_chart_only(panel) and not _tty_view_is_table(args):
+            # A panel drawn entirely as the memory chart carries its own heading
+            if mem_chart_data and _panel_is_mem_chart_only(panel):
                 print(panel_content, file=output)
             else:
                 print(f"\n{'-' * 80}", file=output)

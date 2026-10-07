@@ -765,18 +765,21 @@ def test_show_operator_summary_renders_na_for_nan_cells(capsys):
 
 
 @pytest.mark.parametrize(
-    "view,expect_chart",
+    "view,gpu_arch,expect_chart",
     [
-        pytest.param(None, True, id="default"),
-        pytest.param("table", False, id="view_table"),
+        pytest.param(None, "gfx950", True, id="default"),
+        pytest.param("table", "gfx950", False, id="view_table"),
+        pytest.param(None, "gfx1030", False, id="arch_without_layout"),
     ],
 )
 def test_show_all_view_table_replaces_memory_chart_panel(
     monkeypatch: pytest.MonkeyPatch,
     view,
+    gpu_arch: str,
     expect_chart: bool,
 ) -> None:
-    """A mem-chart-only panel emits the merged chart, or tables under --view table."""
+    """A mem-chart-only panel emits the merged chart, or tables under --view table
+    or on an architecture without a chart layout."""
     mem_chart_marker = "rendered memory chart"
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
     monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
@@ -807,7 +810,7 @@ def test_show_all_view_table_replaces_memory_chart_panel(
     runs = {
         "fixture": SimpleNamespace(
             dfs={301: df},
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+            sys_info=pd.DataFrame([{"gpu_arch": gpu_arch}]),
         )
     }
 
