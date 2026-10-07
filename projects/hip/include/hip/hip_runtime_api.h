@@ -678,9 +678,17 @@ enum hipComputeMode {
   hipComputeModeExclusiveProcess = 3
 };
 
+/**
+ * The ways a device supports flushing of outstanding GPUDirect RDMA writes.
+ *
+ * The supported options are reported as a bitmask by
+ * hipDeviceAttributeGPUDirectRDMAFlushWritesOptions.
+ */
 enum hipFlushGPUDirectRDMAWritesOptions {
-  hipFlushGPUDirectRDMAWritesOptionHost = 1 << 0,
-  hipFlushGPUDirectRDMAWritesOptionMemOps = 1 << 1
+  hipFlushGPUDirectRDMAWritesOptionHost = 1 << 0,   ///< hipDeviceFlushGPUDirectRDMAWrites() is
+                                                    ///< supported
+  hipFlushGPUDirectRDMAWritesOptionMemOps = 1 << 1  ///< The memory operations API supports
+                                                    ///< remote write ordering
 };
 
 enum hipGPUDirectRDMAWritesOrdering {
@@ -7347,7 +7355,7 @@ hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library
 /**
  * @brief Get the module handle backing a library.
  *
- * Returns the #hipModule_t that @p library was loaded into, so a library can be
+ * Returns the hipModule_t that @p library was loaded into, so a library can be
  * consumed by the module-based APIs
  *
  * @param [out] pMod    Pointer to receive the module handle.
