@@ -93,6 +93,8 @@ Visit order: largest PMC sets first (M1, then HBM-like, M2, M3).
 
 ## 3. TCC series affinity + coverage
 
+The TCC handling in this section is a **short-term solution**. Generalizing it is **out of scope for this design**. [Instance-aware metrics](#instance-aware-metrics-out-of-scope) records that boundary.
+
 TCC channel series need packing rules beyond co-locating one Single-pass packable (SPP) metric's PMC set in a single pass. Why: an L2 channel map can change between replays, so a latency ratio that joins a request counter and its level counter from different passes is not one execution.
 
 On gfx942, TCC allows **4 event bases per pass** (channel instances `[i]` are dimensions of one base, not extra slots). Full policy: [TCC series affinity + coverage](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-tcc-series-affinity-coverage.md).
@@ -138,3 +140,20 @@ flowchart TD
 ```
 
 **Impact:** This layout harden does **not** add a pass. gfx942 stays at **14** passes. It is not a Phase 2 / Single-pass unpackable (SPU) concern. `packable_multi` stays **0** because 1805 remains one PMC set inside one bucket.
+
+TCC balancing and affinity are one case of a broader class: hardware-instance metrics. Today the replicated block is a TCC channel. The same pattern can appear for TCC, TCP, a shader engine, SDMA, or any other hardware block the chip repeats. A TCC-series-affinity concept names today's consumer, and it is the wrong abstraction for the class. The underlying issue is aggregation across multiple hardware instances: each replica exposes its own counters, and a metric has to say how those readings combine and which of them must share a pass.
+
+**Short-term shape (this design).** TCC-specific logic leads to the TCC affinity rules above, which keep the TCC balance metrics in one valid layout.
+
+**Later shape (out of scope).** A hardware-instance metric framework would sit above any one block and produce a TCC balance metric, a TCP balance metric, a shader-engine balance metric, and future metrics of the same kind.
+
+### Instance-aware metrics (out of scope)
+
+That later framework would cover four parts:
+
+- **Per-instance counters.** Each replica of a block exposes its own counter. The channel index on a TCC event is one case.
+- **Aggregation strategies.** A metric may sum, average, or otherwise combine the per-instance readings. That choice belongs to the metric.
+- **Balance metrics.** A balance metric compares instances with each other, such as how evenly traffic is spread.
+- **Affinity requirements.** Some expressions are valid only when the counters they join were collected in the same pass, because the mapping from instance to counter can change between replays. A LEVEL counter paired with its request series is that requirement for TCC.
+
+TCC is only the first consumer. TCP per WGP is the same class, not a second special case to add in this design.

@@ -44,6 +44,7 @@ Surrounding pieces, unchanged by this design:
 | Metrics with no profile PMCs | Nothing to pack. On gfx942 that is 34 of 408 YAML rows. |
 | Intentional values above 100% (VALU dual-issue) and hardware counter defects | Those are not packing bugs. This design does not add a silent analyze-time cap. |
 | Single-XCD L2 channel correction, SQG counter omission | Separate from pass placement and expression bind. |
+| General hardware-instance metric framework | The grouping note treats today's TCC channel rules as a short-term solution; generalizing them is out of scope. |
 
 ### Shipping layout (gfx942 default profile)
 
