@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -18,6 +19,7 @@
 #include "amd_smi/impl/amd_smi_temp_testing.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "test_common.h"
 
 namespace amd::smi {
@@ -144,6 +146,27 @@ auto ToPublicMetrics(const std::vector<std::byte>& blob) -> amd::smi::AMGpuMetri
   EXPECT_EQ(status, RSMI_STATUS_SUCCESS);
   return out;
 }
+
+// Appends a device to the library's list for the duration of a test and puts
+// the list back afterwards, so one test cannot leave the singleton altered for
+// the rest of the binary.
+class ScopedLibraryDevice {
+ public:
+  explicit ScopedLibraryDevice(const std::string& device_path)
+      : devices_(amd::smi::RocmSMI::getInstance().devices()), original_count_(devices_.size()) {
+    devices_.push_back(std::make_shared<amd::smi::Device>(device_path, nullptr));
+  }
+  ~ScopedLibraryDevice() { devices_.resize(original_count_); }
+
+  ScopedLibraryDevice(const ScopedLibraryDevice&) = delete;
+  ScopedLibraryDevice& operator=(const ScopedLibraryDevice&) = delete;
+
+  uint32_t index() const { return static_cast<uint32_t>(original_count_); }
+
+ private:
+  std::vector<std::shared_ptr<amd::smi::Device>>& devices_;
+  std::size_t original_count_;
+};
 
 }  // namespace
 
@@ -357,12 +380,24 @@ constexpr std::size_t kApuV22Size = offsetof(ApuMetrics, m_average_temperature_g
 constexpr std::size_t kApuV23Size = offsetof(ApuMetrics, m_average_cpu_voltage);
 constexpr std::size_t kApuV24Size = offsetof(ApuMetrics, m_average_gfx_current) + sizeof(uint16_t);
 
-// Any byte other than the 0xFF not-applicable sentinel works; this one makes
-// "the device supplied this" obvious in a failure message.
-constexpr uint8_t kFillerByte = 0xAB;
-constexpr uint16_t kFilled16 = 0xABAB;
-constexpr uint32_t kFilled32 = 0xABABABABU;
-constexpr uint64_t kFilled64 = 0xABABABABABABABABULL;
+// Filler that differs per byte offset, so every field reads back a value only
+// its own bytes could have produced: a copy that lands in the wrong member is
+// then visible, which a uniform fill would hide. The range stays inside
+// [0x10, 0xEF], clear of both 0x00 and the 0xFF not-applicable sentinel, so a
+// populated field can never be mistaken for one the revision omits.
+constexpr uint8_t FillByte(std::size_t offset) {
+  return static_cast<uint8_t>(0x10 + (offset % 0xE0));
+}
+
+// The little-endian value a field of type T at `offset` receives from the fill.
+template <typename T>
+constexpr T FilledValue(std::size_t offset) {
+  T value = 0;
+  for (std::size_t index = 0; index < sizeof(T); ++index) {
+    value = static_cast<T>(value | (static_cast<T>(FillByte(offset + index)) << (8 * index)));
+  }
+  return value;
+}
 
 // Fake sysfs tree at <tmp>/<name>/device/gpu_metrics. Binary reads are cached
 // per (device path, read size), so each case needs its own directory.
@@ -395,7 +430,10 @@ class FakeMetricsDevice {
 // the declared size, so bytes past it must never reach the metrics table.
 auto BuildMetricsBlob(std::size_t table_size, uint8_t format_revision, uint8_t content_revision,
                       uint16_t declared_size) -> std::vector<uint8_t> {
-  std::vector<uint8_t> blob(table_size, kFillerByte);
+  std::vector<uint8_t> blob(table_size);
+  for (std::size_t offset = 0; offset < blob.size(); ++offset) {
+    blob[offset] = FillByte(offset);
+  }
   amd::smi::AMDGpuMetricsHeader_v1_t header{};
   header.m_structure_size = declared_size;
   header.m_format_revision = format_revision;
@@ -453,19 +491,29 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
     EXPECT_EQ(metrics.common_header.content_revision, test_case.content_revision);
 
     // Present in every v2.x revision.
-    EXPECT_EQ(apu.temperature_gfx, kFilled16);
-    EXPECT_EQ(apu.average_gfx_activity, kFilled16);
-    EXPECT_EQ(apu.average_socket_power, kFilled16);
-    EXPECT_EQ(apu.average_gfxclk_frequency, kFilled16);
-    EXPECT_EQ(apu.throttle_status, kFilled32);
-    EXPECT_EQ(apu.fan_pwm, kFilled16);
+    EXPECT_EQ(apu.temperature_gfx, FilledValue<uint16_t>(offsetof(ApuMetrics, m_temperature_gfx)));
+    EXPECT_EQ(apu.average_gfx_activity,
+              FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_gfx_activity)));
+    EXPECT_EQ(apu.average_socket_power,
+              FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_socket_power)));
+    EXPECT_EQ(apu.average_gfxclk_frequency,
+              FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_gfxclk_frequency)));
+    EXPECT_EQ(apu.throttle_status, FilledValue<uint32_t>(offsetof(ApuMetrics, m_throttle_status)));
+    EXPECT_EQ(apu.fan_pwm, FilledValue<uint16_t>(offsetof(ApuMetrics, m_fan_pwm)));
 
     // Added by later revisions: read back only when the header declares them.
     EXPECT_EQ(apu.indep_throttle_status,
-              test_case.has_indep_throttle_status ? kFilled64 : UINT64_MAX);
+              test_case.has_indep_throttle_status
+                  ? FilledValue<uint64_t>(offsetof(ApuMetrics, m_indep_throttle_status))
+                  : UINT64_MAX);
     EXPECT_EQ(apu.average_temperature_gfx,
-              test_case.has_average_temperature ? kFilled16 : UINT16_MAX);
-    EXPECT_EQ(apu.average_cpu_voltage, test_case.has_average_voltage ? kFilled16 : UINT16_MAX);
+              test_case.has_average_temperature
+                  ? FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_temperature_gfx))
+                  : UINT16_MAX);
+    EXPECT_EQ(apu.average_cpu_voltage,
+              test_case.has_average_voltage
+                  ? FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_cpu_voltage))
+                  : UINT16_MAX);
   }
 }
 
@@ -537,14 +585,23 @@ TEST(GpuUnit, APUMetricsV30ReadsThroughTheSameUnifiedObject) {
   EXPECT_EQ(metrics.common_header.content_revision, 0);
 
   // Shared with v2.x, plus fields only v3.0 defines.
-  EXPECT_EQ(apu.temperature_gfx, kFilled16);
-  EXPECT_EQ(apu.average_gfx_activity, kFilled16);
-  EXPECT_EQ(apu.temperature_skin, kFilled16);
-  EXPECT_EQ(apu.average_vcn_activity, kFilled16);
-  EXPECT_EQ(apu.average_ipu_power, kFilled16);
-  EXPECT_EQ(apu.average_apu_power, kFilled32);
-  EXPECT_EQ(apu.throttle_residency_prochot, kFilled32);
-  EXPECT_EQ(apu.time_filter_alphavalue, kFilled32);
+  EXPECT_EQ(apu.temperature_gfx, FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_temperature_gfx)));
+  EXPECT_EQ(apu.average_gfx_activity,
+            FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_gfx_activity)));
+  EXPECT_EQ(apu.temperature_skin,
+            FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_temperature_skin)));
+  EXPECT_EQ(apu.average_vcn_activity,
+            FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_vcn_activity)));
+  EXPECT_EQ(apu.average_ipu_power,
+            FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_ipu_power)));
+  EXPECT_EQ(apu.average_apu_power,
+            FilledValue<uint32_t>(offsetof(ApuMetricsV30, m_average_apu_power)));
+  EXPECT_EQ(apu.average_dgpu_power,
+            FilledValue<uint32_t>(offsetof(ApuMetricsV30, m_average_dgpu_power)));
+  EXPECT_EQ(apu.throttle_residency_prochot,
+            FilledValue<uint32_t>(offsetof(ApuMetricsV30, m_throttle_residency_prochot)));
+  EXPECT_EQ(apu.time_filter_alphavalue,
+            FilledValue<uint32_t>(offsetof(ApuMetricsV30, m_time_filter_alphavalue)));
 
   // v2.4-only fields have no v3.0 source, so they stay not-applicable.
   EXPECT_EQ(apu.average_mm_activity, UINT16_MAX);
@@ -577,4 +634,52 @@ TEST(GpuUnit, PlxTemperatureSentinelReportsNotSupported) {
   metric_info.temperature_vrsoc = 42;
   EXPECT_EQ(smi_amdgpu_plx_temp_from_metrics(metric_info, &temperature), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(temperature, 42);
+}
+
+// The header read must keep working for a revision we cannot model: the header
+// is the only way for a caller to discover which revision a device reports, so
+// refusing to read it hides exactly the information needed to diagnose the gap.
+TEST(GpuUnit, MetricsHeaderReadsForAnUnsupportedRevision) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("header_unsupported_v2_5");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(5, sizeof(ApuMetrics)));
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  ASSERT_EQ(device.dev_read_gpu_metrics_header_data(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+
+  const auto& header = device.dev_get_metrics_header();
+  EXPECT_EQ(header.m_format_revision, 2);
+  EXPECT_EQ(header.m_content_revision, 5);
+}
+
+// A table shorter than its own header declares is a data error, not a verdict on
+// the device. Reporting it as unsupported would send a caller looking for a
+// missing feature instead of a truncated read.
+TEST(GpuUnit, TruncatedMetricsTableReportsUnexpectedSize) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("truncated_v2_1");
+  auto blob = BuildApuMetricsBlob(1, static_cast<uint16_t>(kApuV21Size));
+  blob.resize(kApuV21Size / 2);  // the header still claims the whole table
+  fake_device.WriteMetrics(blob);
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  EXPECT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_UNEXPECTED_SIZE);
+}
+
+// The early return that keeps an unsupported revision from reaching the copy
+// stage lives in the public entry point, so exercise that entry point: the
+// Device stage alone stays green with the guard deleted.
+TEST(GpuUnit, PublicMetricsEntryReportsUnsupportedRevision) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("public_unsupported_v2_5");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(5, sizeof(ApuMetrics)));
+
+  const ScopedLibraryDevice library_device(fake_device.path());
+  rsmi_gpu_metrics_t metrics{};
+
+  EXPECT_EQ(rsmi_dev_gpu_metrics_info_get(library_device.index(), &metrics),
+            rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
 }
