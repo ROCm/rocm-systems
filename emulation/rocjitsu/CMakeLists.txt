@@ -61,10 +61,26 @@ if(
     endif()
 endif()
 
-# HSA/KFD headers (local copies from rocr-runtime).
-set(HSA_INCLUDE_DIR
-    "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers"
+# The monorepo provides the HSA and Linux UAPI headers as one CMake target.
+# Detached rocjitsu checkouts can point this at a matching api-headers tree.
+set(RJ_RUNTIME_API_HEADERS_SOURCE_DIR
+    "${PROJECT_SOURCE_DIR}/../../runtimes/api-headers"
+    CACHE PATH
+    "Source directory of runtimes/api-headers"
 )
+if(NOT TARGET rocm_runtime::runtime_headers)
+    if(NOT EXISTS "${RJ_RUNTIME_API_HEADERS_SOURCE_DIR}/CMakeLists.txt")
+        message(
+            FATAL_ERROR
+            "Runtime API headers not found at ${RJ_RUNTIME_API_HEADERS_SOURCE_DIR}; "
+            "set RJ_RUNTIME_API_HEADERS_SOURCE_DIR to runtimes/api-headers"
+        )
+    endif()
+    add_subdirectory(
+        "${RJ_RUNTIME_API_HEADERS_SOURCE_DIR}"
+        "${CMAKE_CURRENT_BINARY_DIR}/runtime-api-headers"
+    )
+endif()
 
 include(rj_log)
 
@@ -404,7 +420,7 @@ target_link_libraries(
         rocjitsu_config
         rocjitsu_dbt_config
         rocjitsu_ip_discovery
-        rocjitsu_drm_headers
+        rocm_runtime::runtime_headers
         util
         flatbuffers
         Threads::Threads
@@ -413,7 +429,6 @@ target_include_directories(
     rocjitsu_shared
     PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
 )
-target_include_directories(rocjitsu_shared SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
 
 # Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

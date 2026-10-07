@@ -9,6 +9,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
@@ -24,7 +25,6 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
 RJ_DIAGNOSTIC_POP
 
@@ -109,14 +109,14 @@ struct XcdDistributionFixture {
       ADD_FAILURE() << "multi-threaded topology requires per-XCD partitioning";
     engine->create();
 
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    ((104 / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                       ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                       ((104 / 8) - 1));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kKdAddr);
     memory->write32(kKdAddr + sizeof(kernel_descriptor_t),
                     build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
@@ -141,7 +141,7 @@ struct Cdna5ScratchTopologyFixture {
     loaded.wire_links(engine->topology());
     engine->create();
 
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     kd.private_segment_fixed_size = 64;
@@ -157,16 +157,16 @@ struct Cdna5ScratchTopologyFixture {
 
 void install_scratch_kernel(amdgpu::GpuMemory &memory, uint32_t private_bytes,
                             rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   const uint32_t vgpr_granule = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 16 : 8;
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / vgpr_granule) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     ((256 / vgpr_granule) - 1));
   // CDNA4 uses this count; CDNA5 ignores it and allocates its fixed scalar file.
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  ((104 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     ((104 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
   kd.private_segment_fixed_size = private_bytes;
   memory.load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kScratchKdAddr);
   memory.write32(kScratchKdAddr + sizeof(kernel_descriptor_t), build_s_endpgm(arch));
@@ -1398,7 +1398,7 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
     });
   }
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   struct alignas(64) Kernel {
     kernel_descriptor_t kd{};
     uint32_t endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
@@ -1408,9 +1408,10 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
   constexpr uint64_t kQueueVa = 0x40000;
   kernel.kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   kernel.kd.private_segment_fixed_size = kPrivateBytes;
-  AMDHSA_BITS_SET(kernel.kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 3);
-  AMDHSA_BITS_SET(kernel.kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  1);
+  RJ_AMDHSA_BITS_SET(kernel.kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     3);
+  RJ_AMDHSA_BITS_SET(kernel.kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     1);
   alignas(64) std::array<hsa_kernel_dispatch_packet_t, 64> ring{};
   hsa_kernel_dispatch_packet_t &pkt = ring[0];
   pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;

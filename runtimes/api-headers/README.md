@@ -21,12 +21,19 @@ These files are mirrors for runtime consumers; their primary sources remain:
   `hrx-system@4aa34130de44c45d68a48575cebfd0ff0610c461`;
 - `hsa`: `projects/rocr-runtime/runtime/hsa-runtime/inc` in this repository;
 - DRM: `projects/rocr-runtime/libhsakmt/include/hsakmt/drm` in this repository;
-- KFD and UDMABUF: `projects/rocr-runtime/libhsakmt/include/hsakmt/linux` in
-  this repository.
+- KFD ioctl and UDMABUF: `projects/rocr-runtime/libhsakmt/include/hsakmt/linux`
+  in this repository.
+- KFD sysfs: Linux `include/uapi/linux/kfd_sysfs.h` at
+  [`e83f63da2ac776fbc30861e4ce8b798df6ee8a7a`](https://github.com/torvalds/linux/blob/e83f63da2ac776fbc30861e4ce8b798df6ee8a7a/include/uapi/linux/kfd_sysfs.h).
 
 The AMDF headers preserve upstream contents except that their copyright line
-names Advanced Micro Devices, Inc. and their SPDX identifier is MIT. The HSA, DRM,
-KFD, and UDMABUF mirrors are byte-identical to their primary files in this
-checkout.
+names Advanced Micro Devices, Inc. and their SPDX identifier is MIT. The HSA,
+DRM, KFD ioctl, and UDMABUF mirrors are byte-identical to their primary files
+in this checkout, except that `kfd_ioctl.h` includes DRM from its shared
+`uapi/linux/drm` location rather than the libhsakmt source-tree path.
+
+`kfd_sysfs.h` contains KFD topology capability definitions used by rocjitsu.
+It is copied verbatim from the Linux revision above; refresh it from that
+upstream file so the per-queue reset and CAP2 definitions remain in sync.
 
 `abce` is not a mirror: `include/abce` is its primary location.

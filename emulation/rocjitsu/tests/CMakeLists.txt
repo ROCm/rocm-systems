@@ -507,7 +507,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             PRIVATE
                 ${ROCJITSU_INCLUDE_DIR}
                 ${ROCJITSU_SRC_DIR}
-                ${HSA_INCLUDE_DIR}
                 $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
                 $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
         )
@@ -1531,7 +1530,7 @@ set(RJ_KMD_PRELOAD_ENV
 add_executable(guest_kfd_test guest_kfd_test.cpp)
 target_include_directories(
     guest_kfd_test
-    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include ${HSA_INCLUDE_DIR}
+    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
 )
 target_link_libraries(guest_kfd_test PRIVATE Threads::Threads GTest::gtest_main)
 rj_configure_target(guest_kfd_test TEST)
@@ -1742,17 +1741,13 @@ target_include_directories(
         ${CMAKE_BINARY_DIR}/include
         ${GENERATED_DIR}
 )
-target_include_directories(
-    hsa_hooks_unit_test
-    SYSTEM
-    PRIVATE ${HSA_INCLUDE_DIR}
-)
 target_link_libraries(
     hsa_hooks_unit_test
     PRIVATE
         # Test-only hook variant: same objects as rocjitsu_hooks plus the
         # exported rj_hsa_dbt_set_topology_nodes_root_for_test seam.
         rocjitsu_hooks_testing
+        rocjitsu_hsa_tools_headers
         ${RJ_OBJECT_LIBS}
         util
         flatbuffers
@@ -1785,14 +1780,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
     )
-    target_include_directories(
-        hsa_hotswap_rocjitsu_unit_test
-        SYSTEM
-        PRIVATE ${HSA_INCLUDE_DIR}
-    )
     target_link_libraries(
         hsa_hotswap_rocjitsu_unit_test
-        PRIVATE hsa_hotswap_rocjitsu_testable GTest::gtest_main
+        PRIVATE
+            hsa_hotswap_rocjitsu_testable
+            rocjitsu_hsa_tools_headers
+            GTest::gtest_main
     )
     if(HAS_GFX1250_DBT_FIXTURE)
         target_compile_definitions(
@@ -1948,10 +1941,6 @@ rj_add_test(
 # and PM4 dispatch through the public driver interface.
 add_executable(interposer_dup_test interposer_dup_test.cpp)
 rj_configure_target(interposer_dup_test TEST)
-target_include_directories(
-    interposer_dup_test
-    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
-)
 target_link_libraries(
     interposer_dup_test
     PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
@@ -2419,15 +2408,11 @@ endif()
 find_library(HSA_RUNTIME64 hsa-runtime64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
 if(HSA_RUNTIME64)
     get_filename_component(RJ_HSA_LIBRARY_DIR "${HSA_RUNTIME64}" DIRECTORY)
-    get_filename_component(RJ_HSA_ROCM_ROOT "${RJ_HSA_LIBRARY_DIR}" DIRECTORY)
-    set(RJ_HSA_INCLUDE_DIR "${RJ_HSA_ROCM_ROOT}/include")
-
     add_executable(hsa_init_test hsa_init_test.cpp)
-    target_include_directories(
+    target_link_libraries(
         hsa_init_test
-        PRIVATE ${RJ_HSA_INCLUDE_DIR} ${HSA_INCLUDE_DIR}
+        PRIVATE rocm_runtime::runtime_headers ${HSA_RUNTIME64} GTest::gtest
     )
-    target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
     target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
     add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_shared)
     if(RJ_INSTALL_TESTS)
@@ -2521,7 +2506,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_translate_test
@@ -2552,7 +2536,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_hooks_test
@@ -2642,7 +2625,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
@@ -2793,7 +2775,6 @@ if(HSA_RUNTIME64)
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_dbi_nop_asm_test
@@ -3138,7 +3119,6 @@ if(HSA_RUNTIME64)
                 PRIVATE
                     ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                     ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
-                    ${RJ_HSA_INCLUDE_DIR}
             )
             target_link_libraries(
                 hsa_dbi_nop_probe_test

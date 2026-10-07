@@ -13,10 +13,8 @@ library_dir=$(cd -- "$1" && pwd)
 test_dir=$(mktemp -d /tmp/rocddi-queue-faults.XXXXXX)
 trap 'rm -rf -- "$test_dir"' EXIT
 
-mkdir -p "$test_dir/include/hsakmt"
-ln -s "$headers/uapi/linux/drm" "$test_dir/include/hsakmt/drm"
 cc -std=gnu11 -fPIC -shared -O2 -Wall -Wextra -Werror -pthread \
-  -I "$test_dir/include" -I "$headers" \
+  -I "$headers" \
   "$script_dir/fault_ioctl.c" -o "$test_dir/fault_ioctl.so"
 cc -std=gnu11 -O2 -Wall -Wextra -Werror -I "$headers" \
   "$script_dir/fault_hsa.c" "$library_dir/libhsa_runtime64.so" \

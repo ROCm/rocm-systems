@@ -24,6 +24,7 @@
 #include "rocjitsu/code/dbt/semantic_translator.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
@@ -57,7 +58,6 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
 
@@ -2599,7 +2599,7 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
 // Equally, a GFX12 word must survive intact on a GFX12 target, including the GFX125-only
 // NAMED_BAR_CNT and an INST_PREF_SIZE above the 63 that GFX11's narrower field can hold.
 TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
   AmdGpuCodeObject probe(image.data(), image.size());
@@ -2611,8 +2611,8 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
   // A GFX12-shaped source word: INST_PREF_SIZE beyond GFX11's 6-bit range, plus a GFX125-only
   // named-barrier allocation.
   uint32_t source_rsrc3 = 0;
-  AMDHSA_BITS_SET(source_rsrc3, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE, 107u);
-  AMDHSA_BITS_SET(source_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT, 3u);
+  RJ_AMDHSA_BITS_SET(source_rsrc3, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE, 107u);
+  RJ_AMDHSA_BITS_SET(source_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT, 3u);
 
   auto patched_rsrc3 = [&](rj_code_arch_t source_arch,
                            rj_code_arch_t target_arch) -> std::optional<uint32_t> {
@@ -2650,15 +2650,15 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
   const auto same_layout = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(same_layout.has_value());
   EXPECT_EQ(*same_layout, source_rsrc3);
-  EXPECT_EQ(AMDHSA_BITS_GET(*same_layout, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE), 107u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*same_layout, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 3u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*same_layout, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE), 107u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*same_layout, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 3u);
 
   // GFX10 targets have no INST_PREF_SIZE and no IMAGE_OP; the GFX12 word must not be inherited.
   for (const rj_code_arch_t gfx10 : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
     const auto rebuilt = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA5, gfx10);
     ASSERT_TRUE(rebuilt.has_value());
     EXPECT_NE(*rebuilt, source_rsrc3);
-    EXPECT_EQ(AMDHSA_BITS_GET(*rebuilt, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE), 0u)
+    EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rebuilt, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE), 0u)
         << "GFX10 reserves the INST_PREF_SIZE bits and requires them to be zero";
   }
 
@@ -2666,21 +2666,21 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
   const auto from_cdna = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(from_cdna.has_value());
   EXPECT_NE(*from_cdna, source_rsrc3);
-  EXPECT_EQ(AMDHSA_BITS_GET(*from_cdna, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 0u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*from_cdna, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 0u);
 
   // The narrow case: GFX11 -> GFX10. Both are "GFX10+" and both use SHARED_VGPR_COUNT, so a
   // coarse family check treats them as interchangeable -- but GFX11's INST_PREF_SIZE at 9:4 and
   // IMAGE_OP at 31 are reserved on GFX10 and must not be carried over.
   uint32_t gfx11_rsrc3 = 0;
-  AMDHSA_BITS_SET(gfx11_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE, 21u);
-  AMDHSA_BITS_SET(gfx11_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_IMAGE_OP, 1u);
+  RJ_AMDHSA_BITS_SET(gfx11_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE, 21u);
+  RJ_AMDHSA_BITS_SET(gfx11_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_IMAGE_OP, 1u);
   source_rsrc3 = gfx11_rsrc3;
   for (const rj_code_arch_t gfx10 : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
     const auto rebuilt = patched_rsrc3(ROCJITSU_CODE_ARCH_RDNA3, gfx10);
     ASSERT_TRUE(rebuilt.has_value());
-    EXPECT_EQ(AMDHSA_BITS_GET(*rebuilt, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE), 0u)
+    EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rebuilt, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE), 0u)
         << "GFX10 reserves INST_PREF_SIZE; a GFX11 word must not be carried over";
-    EXPECT_EQ(AMDHSA_BITS_GET(*rebuilt, COMPUTE_PGM_RSRC3_GFX10_PLUS_IMAGE_OP), 0u)
+    EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rebuilt, COMPUTE_PGM_RSRC3_GFX10_PLUS_IMAGE_OP), 0u)
         << "IMAGE_OP is GFX11+; GFX10 reserves bit 31";
   }
 
@@ -2694,17 +2694,17 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
   // ENABLE_DYNAMIC_VGPR, TCP_SPLIT and ENABLE_DIDT_THROTTLE. A shared "GFX12+" bucket would
   // carry those straight into target-reserved bits.
   uint32_t gfx125_rsrc3 = 0;
-  AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE, 107u);
-  AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT, 3u);
-  AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX125_TCP_SPLIT, 5u);
-  AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR, 1u);
+  RJ_AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE, 107u);
+  RJ_AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT, 3u);
+  RJ_AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX125_TCP_SPLIT, 5u);
+  RJ_AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR, 1u);
   source_rsrc3 = gfx125_rsrc3;
   const auto to_gfx120 = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(to_gfx120.has_value());
-  EXPECT_EQ(AMDHSA_BITS_GET(*to_gfx120, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 0u)
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*to_gfx120, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 0u)
       << "bits 21:14 are reserved on GFX120 and must not inherit GFX125 state";
-  EXPECT_EQ(AMDHSA_BITS_GET(*to_gfx120, COMPUTE_PGM_RSRC3_GFX125_TCP_SPLIT), 0u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*to_gfx120, COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR), 0u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*to_gfx120, COMPUTE_PGM_RSRC3_GFX125_TCP_SPLIT), 0u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*to_gfx120, COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR), 0u);
 
   // GFX125 -> GFX125 keeps all of it.
   const auto gfx125_same = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5);
@@ -2721,7 +2721,7 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
 // leaves room for them is refused rather than clamped: clamping would keep the body's demand
 // while shrinking what the descriptor reserves for it.
 TEST(CodeObjectPatcher, SharedVgprCountIsReconciledWithTheTargetAllocation) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
 
@@ -2743,8 +2743,8 @@ TEST(CodeObjectPatcher, SharedVgprCountIsReconciledWithTheTargetAllocation) {
 
     auto descriptor = read_kernel_descriptor_for_test(rodata->data());
     descriptor.compute_pgm_rsrc3 = 0;
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT,
-                    source_shared);
+    RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT,
+                       source_shared);
     write_kernel_descriptor_for_test(local_image.data() + rodata->sectionOffset(), descriptor);
 
     AmdGpuCodeObject seeded(local_image.data(), local_image.size());
@@ -2765,7 +2765,7 @@ TEST(CodeObjectPatcher, SharedVgprCountIsReconciledWithTheTargetAllocation) {
     if (!outcome.patched)
       return outcome;
     const auto out = patcher.emit();
-    outcome.shared_count = AMDHSA_BITS_GET(
+    outcome.shared_count = RJ_AMDHSA_BITS_GET(
         read_kernel_descriptor_for_test(out.data() + translation.descriptor_file_offset)
             .compute_pgm_rsrc3,
         COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT);
@@ -2808,7 +2808,7 @@ TEST(CodeObjectPatcher, SharedVgprCountIsReconciledWithTheTargetAllocation) {
 }
 
 TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
   AmdGpuCodeObject co(image.data(), image.size());
@@ -2838,49 +2838,49 @@ TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
 
   const auto cdna3_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(cdna3_rsrc1.has_value());
-  EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 0u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 0u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 0u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 0u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 0u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 0u);
 
   const auto rdna1_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA1);
   ASSERT_TRUE(rdna1_rsrc1.has_value());
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna1_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna1_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna1_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna1_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna1_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna1_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
 
   const auto rdna2_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA2);
   ASSERT_TRUE(rdna2_rsrc1.has_value());
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna2_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna2_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna2_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna2_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna2_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna2_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
 
   const auto rdna3_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA3);
   ASSERT_TRUE(rdna3_rsrc1.has_value());
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
 
   const auto rdna3_5_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA3_5);
   ASSERT_TRUE(rdna3_5_rsrc1.has_value());
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
 
   const auto rdna4_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(rdna4_rsrc1.has_value());
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
 
   const auto gfx1250_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(gfx1250_rsrc1.has_value());
-  EXPECT_EQ(AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 0u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 0u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
 }
 
 TEST(CodeObjectPatcher, PreservesPrivateEnableForZeroFixedDynamicStack) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
   AmdGpuCodeObject source_layout(image.data(), image.size());
@@ -2889,9 +2889,10 @@ TEST(CodeObjectPatcher, PreservesPrivateEnableForZeroFixedDynamicStack) {
   ASSERT_NE(source_rodata, nullptr);
 
   kernel_descriptor_t source_descriptor{};
-  AMDHSA_BITS_SET(source_descriptor.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1);
-  AMDHSA_BITS_SET(source_descriptor.kernel_code_properties, KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK,
-                  1);
+  RJ_AMDHSA_BITS_SET(source_descriptor.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
+                     1);
+  RJ_AMDHSA_BITS_SET(source_descriptor.kernel_code_properties,
+                     KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK, 1);
   write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(),
                                    source_descriptor);
 
@@ -2909,11 +2910,11 @@ TEST(CodeObjectPatcher, PreservesPrivateEnableForZeroFixedDynamicStack) {
       read_kernel_descriptor_for_test(patched_image.data() + translation.descriptor_file_offset);
 
   EXPECT_EQ(patched_descriptor.private_segment_fixed_size, 0u);
-  EXPECT_EQ(AMDHSA_BITS_GET(patched_descriptor.kernel_code_properties,
-                            KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK),
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(patched_descriptor.kernel_code_properties,
+                               KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK),
             1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc2,
-                            COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc2,
+                               COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
             1u);
 }
 
@@ -3755,10 +3756,10 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
   ASSERT_FALSE(source_layout.text_sections().empty());
   const auto *source_rodata = find_section(source_layout, ".rodata");
   ASSERT_NE(source_rodata, nullptr);
-  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  ASSERT_GE(source_rodata->size(), sizeof(rocjitsu::amdhsa::kernel_descriptor_t));
 
   auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  RJ_AMDHSA_BITS_SET(source_kd.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
   write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(), source_kd);
 
   const auto *source_text = source_layout.text_sections()[0];
@@ -3798,7 +3799,7 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
 
   const auto *target_rodata = find_section(translated, ".rodata");
   ASSERT_NE(target_rodata, nullptr);
-  ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  ASSERT_GE(target_rodata->size(), sizeof(rocjitsu::amdhsa::kernel_descriptor_t));
   const auto target_kd =
       read_kernel_descriptor_for_test(translated.image_data() + target_rodata->sectionOffset());
   EXPECT_EQ(target_kd.kernel_code_entry_byte_offset, source_kd.kernel_code_entry_byte_offset)
@@ -3829,10 +3830,10 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
   const auto *source_text = source_layout.text_sections()[0];
   const auto *source_rodata = find_section(source_layout, ".rodata");
   ASSERT_NE(source_rodata, nullptr);
-  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  ASSERT_GE(source_rodata->size(), sizeof(rocjitsu::amdhsa::kernel_descriptor_t));
 
   auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  RJ_AMDHSA_BITS_SET(source_kd.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
   source_kd.kernel_code_entry_byte_offset =
       static_cast<int64_t>(source_text->vaddr() + kSourceEntryBytes) -
       static_cast<int64_t>(source_rodata->vaddr());
@@ -3877,7 +3878,7 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
 
   const auto *target_rodata = find_section(translated, ".rodata");
   ASSERT_NE(target_rodata, nullptr);
-  ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  ASSERT_GE(target_rodata->size(), sizeof(rocjitsu::amdhsa::kernel_descriptor_t));
   const auto target_kd =
       read_kernel_descriptor_for_test(translated.image_data() + target_rodata->sectionOffset());
   const int64_t target_entry_text_offset = static_cast<int64_t>(target_rodata->vaddr()) +
@@ -4151,7 +4152,7 @@ TEST(BinaryTranslatorE2E, IncompleteConsumerFailsClosedAtKernargPreloadFirmwareE
   const auto *source_rodata = find_section(source_layout, ".rodata");
   ASSERT_NE(source_rodata, nullptr);
   auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  RJ_AMDHSA_BITS_SET(source_kd.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
   write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(), source_kd);
 
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -4237,13 +4238,13 @@ make_shared_address_taken_helper_image(bool oversized_kernel0_lds) {
   // The sidecar descriptor owns a wrapper ABI that needs an initialized workgroup id and room in
   // the User SGPRs, so the source descriptor has to declare both for the variant to be computable.
   uint32_t rsrc2 = 0;
-  AMDHSA_BITS_SET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
-  AMDHSA_BITS_SET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  RJ_AMDHSA_BITS_SET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
   write_value_for_test<uint32_t>(
       image, rodata->sectionOffset() + offsetof(TestKernelDescriptor, compute_pgm_rsrc2), rsrc2);
   uint16_t properties = 0;
-  AMDHSA_BITS_SET(properties,
-                  rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(properties,
+                     rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
   write_value_for_test<uint16_t>(
       image, rodata->sectionOffset() + offsetof(TestKernelDescriptor, kernel_code_properties),
       properties);

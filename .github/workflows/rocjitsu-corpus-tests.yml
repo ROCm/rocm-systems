@@ -10,6 +10,7 @@ on:
     paths:
       - "emulation/rocjitsu/**"
       - "emulation/mirage/**"
+      - "runtimes/api-headers/**"
       - ".github/scripts/rocjitsu_corpus_translation_comment*.py"
       - ".github/workflows/rocjitsu-*.yml"
   push:
@@ -18,6 +19,7 @@ on:
     paths:
       - "emulation/rocjitsu/**"
       - "emulation/mirage/**"
+      - "runtimes/api-headers/**"
       - ".github/workflows/rocjitsu-*.yml"
   workflow_dispatch:
     inputs:
@@ -194,6 +196,7 @@ jobs:
           sparse-checkout: |
             emulation/rocjitsu
             emulation/mirage
+            runtimes/api-headers
             .github
             shared/machine-readable-isa/isa
 

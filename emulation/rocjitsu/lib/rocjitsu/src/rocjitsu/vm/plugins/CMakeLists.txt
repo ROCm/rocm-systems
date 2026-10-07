@@ -76,7 +76,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             PRIVATE
                 ${ROCJITSU_INCLUDE_DIR}
                 ${ROCJITSU_SRC_DIR}
-                ${HSA_INCLUDE_DIR}
                 # The plugin's object library links util/simdojo PRIVATE, so
                 # pull in their public header paths for the plugin's compile.
                 $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
@@ -87,7 +86,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # link librocjitsu.so (the interposer/simulator image), so loading it
         # never pulls the interposer into the host process and it resolves
         # nothing from the simulator at load time.
-        target_link_libraries(${target} PRIVATE ${object_lib})
+        target_link_libraries(
+            ${target}
+            PRIVATE ${object_lib} rocm_runtime::runtime_headers
+        )
         add_dependencies(${target} flatbuffers_schemas)
         # Hide everything except the loader exports (which carry an explicit
         # default-visibility attribute via ROCJITSU_DEFINE_PLUGIN). This keeps

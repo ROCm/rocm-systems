@@ -16,7 +16,7 @@ namespace rocjitsu {
 
 namespace {
 
-using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
 static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
 
@@ -186,8 +186,8 @@ uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {
   // clear, launch hardware interprets the descriptor as Wave64.
   if (arch_is_rdna(arch)) {
     const bool wave32 =
-        AMDHSA_BITS_GET(desc.kernel_code_properties,
-                        rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
+        RJ_AMDHSA_BITS_GET(desc.kernel_code_properties,
+                           rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
     return wave32 ? 32 : 64;
   }
 
@@ -223,11 +223,11 @@ uint32_t kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, const KD &desc) 
   // gfx1250 widens USER_SGPR_COUNT from the generic five-bit field at [5:1]
   // to a six-bit field at [6:1], allowing valid counts such as 32.
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
-                           rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT);
+    return RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
+                              rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT);
   }
-  return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
-                         rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
+  return RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
+                            rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
 }
 
 void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
@@ -235,44 +235,44 @@ void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
   // Select the same architecture-specific field when rewriting descriptors so
   // DBT and patching do not truncate gfx1250 counts above 31.
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2,
-                    rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgpr_count);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2,
+                       rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgpr_count);
     return;
   }
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
-                  user_sgpr_count);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
+                     user_sgpr_count);
 }
 
 uint32_t kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch, const KD &desc) {
   uint32_t sgprs = kernel_descriptor_user_sgpr_count(arch, desc);
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
-  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
+  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
     ++sgprs;
-  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
+  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
     ++sgprs;
-  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
+  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
     ++sgprs;
-  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
+  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
     ++sgprs;
   return sgprs;
 }
 
 bool has_kernarg_segment_ptr(const KD &desc) {
-  return AMDHSA_BITS_GET(
+  return RJ_AMDHSA_BITS_GET(
              desc.kernel_code_properties,
-             rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0;
+             rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0;
 }
 
 uint16_t kernarg_segment_ptr_slot(const KD &desc) {
   const uint32_t properties = desc.kernel_code_properties;
   uint32_t sgpr = 0;
-  if (AMDHSA_BITS_GET(properties,
-                      rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
+  if (RJ_AMDHSA_BITS_GET(properties,
+                         rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
     sgpr += 4;
-  if (AMDHSA_BITS_GET(properties,
-                      rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
+  if (RJ_AMDHSA_BITS_GET(properties,
+                         rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
     sgpr += 2;
-  if (AMDHSA_BITS_GET(properties, rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
+  if (RJ_AMDHSA_BITS_GET(properties, rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
     sgpr += 2;
   return static_cast<uint16_t>(sgpr);
 }
@@ -284,11 +284,11 @@ std::optional<uint16_t> kernarg_segment_ptr_sgpr(const KD &desc) {
 }
 
 uint32_t kernarg_preload_length(const KD &desc) {
-  return AMDHSA_BITS_GET(desc.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH);
+  return RJ_AMDHSA_BITS_GET(desc.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH);
 }
 
 uint32_t kernarg_preload_offset(const KD &desc) {
-  return AMDHSA_BITS_GET(desc.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET);
+  return RJ_AMDHSA_BITS_GET(desc.kernarg_preload, rocjitsu::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET);
 }
 
 } // namespace rocjitsu

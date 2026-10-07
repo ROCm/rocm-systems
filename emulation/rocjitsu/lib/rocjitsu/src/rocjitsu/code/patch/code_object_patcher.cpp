@@ -6,14 +6,9 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <cassert>
@@ -33,8 +28,8 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace {
 
-using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
-namespace kd = rocr::llvm::amdhsa;
+using KD = rocjitsu::amdhsa::kernel_descriptor_t;
+namespace kd = rocjitsu::amdhsa;
 
 [[nodiscard]] std::vector<Elf64_Shdr> read_section_headers(const std::vector<uint8_t> &image,
                                                            const Elf64_Ehdr &ehdr) {
@@ -239,10 +234,10 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
 [[nodiscard]] bool apply_kernel_descriptor_resource_translation(KD &desc,
                                                                 const KdTranslation &translation,
                                                                 rj_code_arch_t target_arch) {
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  translation.target_vgpr_granulated);
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  translation.target_sgpr_granulated);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     translation.target_vgpr_granulated);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     translation.target_sgpr_granulated);
 
   if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
     // GFX90A-style descriptors encode the first AccVGPR as (field + 1) * 4.
@@ -250,28 +245,28 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
     // lowering needs ordinary VGPR scratch above the source AccVGPR window, so
     // the patcher must write the recomputed base alongside the VGPR allocation.
     const uint32_t encoded_accum_offset = (translation.target_accvgpr_base / 4) - 1;
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
-                    encoded_accum_offset);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                       encoded_accum_offset);
   }
 
   if (target_uses_gfx10_plus_mode_bits(target_arch)) {
     if (target_clears_rsrc1_mode_bits(target_arch)) {
-      AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
-      AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 0);
+      RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
+      RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 0);
     }
     const uint32_t wgp_mode = target_uses_wgp_mode(target_arch) ? 1u : 0u;
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_WGP_MODE, wgp_mode);
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_MEM_ORDERED, 1);
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FWD_PROGRESS, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_WGP_MODE, wgp_mode);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_MEM_ORDERED, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FWD_PROGRESS, 1);
   }
 
   if (target_supports_wave32(target_arch)) {
     const uint32_t wave32 = translation.target_wave_size == 32 ? 1u : 0u;
-    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
-                    wave32);
+    RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
+                       kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, wave32);
   } else {
-    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
-                    0);
+    RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
+                       kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 0);
   }
 
   if (target_uses_gfx10_plus_mode_bits(target_arch)) {
@@ -297,11 +292,11 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
         // The field is 6 bits on GFX11 and 8 on GFX12+; write it through the
         // target's own definition rather than assuming the narrower one.
         if (target_layout == Rsrc3Layout::Gfx120 || target_layout == Rsrc3Layout::Gfx125) {
-          AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE,
-                          inst_pref);
+          RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc3,
+                             kd::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE, inst_pref);
         } else {
-          AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
-                          inst_pref);
+          RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc3,
+                             kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE, inst_pref);
         }
       }
     } else if (rsrc3_layout_has_shared_vgpr_count(target_layout)) {
@@ -317,12 +312,12 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
       // overruns; refuse instead, the way LLVM refuses the same overcommit.
       // Resource planning reserves these blocks before choosing the allocation,
       // so reaching this point means the request was inconsistent.
-      const uint32_t shared = AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
-                                              kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT);
+      const uint32_t shared = RJ_AMDHSA_BITS_GET(
+          desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT);
       if (shared != 0) {
         if (translation.target_wave_size == 32)
           return false;
-        const uint32_t granulated = AMDHSA_BITS_GET(
+        const uint32_t granulated = RJ_AMDHSA_BITS_GET(
             desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
         const uint32_t arch_vgprs = (granulated + 1u) * 4u;
         if (arch_vgprs + rsrc3_shared_vgpr_reserved_registers(shared) > 256u)
@@ -337,8 +332,8 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
     assert(translation.target_accvgpr_base >= 4 &&
            "ACCUM_OFFSET base must encode at least 4 VGPRs");
     assert(translation.target_accvgpr_base % 4 == 0 && "ACCUM_OFFSET base must be 4-VGPR aligned");
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
-                    (translation.target_accvgpr_base / 4 - 1));
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                       (translation.target_accvgpr_base / 4 - 1));
   }
 
   desc.private_segment_fixed_size = translation.target_private_size;
@@ -362,19 +357,20 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   // dynamic LDS. Leaving a guest value here is especially bad for virtual-LDS
   // sidecars: their packet LDS is zero, but stale descriptor bits can still be
   // ORed into hardware command streams on some runtime paths.
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, 0);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, 0);
   set_kernel_descriptor_user_sgpr_count(target_arch, desc, translation.target_user_sgpr_count);
   // Fixed private size can be zero for a kernel that requests its call stack
   // dynamically through the AQL packet. Preserve an existing scratch-enable
   // requirement and also enable it whenever DBT introduces fixed spill space.
   // The skipped-kernel path below intentionally clears the failed guest ABI.
   const uint32_t enable_private_segment =
-      AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) != 0 ||
+      RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) !=
+                  0 ||
               translation.target_private_size != 0
           ? 1u
           : 0u;
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
-                  enable_private_segment);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
+                     enable_private_segment);
   if (translation.skipped) {
     // Skipped kernels are target-ISA no-op stubs. Do not preserve the
     // failed guest kernel's descriptor ABI inputs: ROCR validates the resource
@@ -388,13 +384,13 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
     // skipped-kernel stubs.
     desc.kernarg_size = 0;
     desc.compute_pgm_rsrc1 = 0;
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_32, 3);
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64, 3);
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 1);
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_32, 3);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64, 3);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 1);
     desc.compute_pgm_rsrc3 = 0;
     desc.compute_pgm_rsrc2 = 0;
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
     desc.kernel_code_properties = 0;
     desc.kernarg_preload = 0;
   }

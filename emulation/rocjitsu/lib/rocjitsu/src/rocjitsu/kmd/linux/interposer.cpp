@@ -34,14 +34,14 @@
 
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_ioctl.h"
+#include "uapi/linux/kfd_ioctl.h"
 // Vendored kernel DRM/amdgpu UAPI (MIT). Provides the real drm_version,
 // drm_amdgpu_info, drm_amdgpu_info_device, drm_amdgpu_info_vram_gtt, and
 // drm_amdgpu_memory_info structs so the interposer services the amdgpu DRM
 // ioctl ABI directly. These are kernel ABI, not libdrm library types, so this
 // keeps the interposer independent of libdrm.
-#include <libdrm/amdgpu_drm.h>
-#include <libdrm/drm.h>
+#include <uapi/linux/drm/amdgpu_drm.h>
+#include <uapi/linux/drm/drm.h>
 RJ_DIAGNOSTIC_POP
 
 #include "util/dynamic_loader.h"
