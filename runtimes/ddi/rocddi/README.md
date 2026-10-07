@@ -120,6 +120,15 @@ written after retirement. An uncertain copy keeps staging live for process
 teardown. `supports_linear_copy` reports whether the native path is enabled
 for the activated GPU.
 
+Optional copy-sequence timing owns a system allocation for two GPU clock
+values. After `enable_timing`, the first copy packet writes the start tick and
+every copy packet writes the latest end tick using OSS5 global timestamp
+commands in the same native submission as the copy. `finish_timing` reads the
+raw ticks after final retirement. An uncertain submission retains the
+timestamp allocation and command backing, and reports that the frontend must
+retain its operands. Frontends convert the ticks into their public clock
+domain.
+
 `memory::interop::linux::ais_transfer` borrows a descriptor and a live mapped
 VRAM allocation for one synchronous KFD AIS read or write. The allocation
 owner checks the logical and native backing ranges and supplies its KFD handle;
@@ -211,12 +220,13 @@ cargo test -p rocddi --test cts --locked -- --ignored --skip gfx1201_ais_vram_fi
 
 It copies and fills through ordinary allocations, copies through rocddi-owned
 host staging and a device virtual-memory mapping, and validates copies on each
-advertised DRM DMA ring. It also submits a packet through a targeted user SDMA
-ring with device-producer mappings, byte-index, and doorbell progress checks.
-The AQL case submits a barrier through a compute queue and checks GPU signal
-completion and queue retirement. The capability case checks expert queue
-scheduling against KFD 1.20 or newer and the GFX1201 scratch aperture against
-the reported XCC count.
+advertised DRM DMA ring. It checks profiled SDMA copy ticks against correlated
+native GPU clock samples. It also submits a packet through a targeted user
+SDMA ring with device-producer mappings, byte-index, and doorbell progress
+checks. The AQL case submits a barrier through a compute queue and checks GPU
+signal completion and queue retirement. The capability case checks expert
+queue scheduling against KFD 1.20 or newer and the GFX1201 scratch aperture
+against the reported XCC count.
 The AIS case reads a file into private VRAM and writes it back. Run it with
 `ROCDDI_CTS_AIS_DIR` set to a writable directory on P2P-capable block or NFS
 storage:

@@ -15,13 +15,16 @@ use crate::{Error, ErrorKind};
 const COPY_PACKET_BYTES: usize = 28;
 const FILL_PACKET_BYTES: usize = 20;
 const GCR_PACKET_BYTES: usize = 20;
+const TIMESTAMP_PACKET_BYTES: usize = 12;
 const COMMAND_BYTES: usize = GCR_PACKET_BYTES * 2 + COPY_PACKET_BYTES;
+const TIMED_COMMAND_BYTES: usize = COMMAND_BYTES + TIMESTAMP_PACKET_BYTES * 2;
 const FILL_COMMAND_BYTES: usize = GCR_PACKET_BYTES * 2 + FILL_PACKET_BYTES;
 const MAX_COPY_PACKET_BYTES: u64 = 0x3f_ffe0;
 const MAX_FILL_PACKET_BYTES: u64 = 0x3f_ffe0;
 const MAX_FILL_PACKET_DWORDS: u64 = MAX_FILL_PACKET_BYTES / 4;
 const SDMA_COPY_LINEAR: u32 = 1;
 const SDMA_CONST_FILL_DWORD: u32 = 0x0b | (2 << 30);
+const SDMA_TIMESTAMP_GET_GLOBAL_SYS: u32 = 0x0d | (2 << 8) | (3 << 24);
 const SDMA_USER_GCR: u32 = 0x11 | (1 << 8);
 const GCR_WRITEBACK: u32 = (1 << 31) | (1 << 22);
 const GCR_INVALIDATE: u32 = (1 << 30) | (1 << 25) | (1 << 24) | (1 << 23);
@@ -145,41 +148,86 @@ fn validate_fill_range(destination: u64, count: u64) -> Result<(), CopyFailure> 
     Ok(())
 }
 
-fn encode_cache_envelope(command: &mut [u32; COMMAND_BYTES / 4], trailing_gcr: usize) {
-    *command = [0; COMMAND_BYTES / 4];
+fn encode_cache_envelope(command: &mut [u32], trailing_gcr: usize) {
+    command.fill(0);
     command[0] = SDMA_USER_GCR;
     command[2] = GCR_WRITEBACK | GCR_INVALIDATE;
     command[trailing_gcr] = SDMA_USER_GCR;
     command[trailing_gcr + 2] = GCR_WRITEBACK;
 }
 
+fn encode_copy(command: &mut [u32], destination: u64, source: u64, size: u32) {
+    // The command allocation is reused only after native retirement. Every
+    // word is written, including reserved fields, before the release fence.
+    encode_cache_envelope(command, 12);
+    encode_copy_packet(command, 5, destination, source, size);
+}
+
 #[allow(
     clippy::cast_possible_truncation,
     reason = "packet addresses are deliberately split into their low and high dwords"
 )]
-fn encode_copy(command: &mut [u32; COMMAND_BYTES / 4], destination: u64, source: u64, size: u32) {
-    // The command allocation is reused only after native retirement. Every
-    // word is written, including reserved fields, before the release fence.
-    encode_cache_envelope(command, 12);
-    command[5] = SDMA_COPY_LINEAR;
-    command[6] = size - 1;
-    command[8] = source as u32;
-    command[9] = (source >> 32) as u32;
-    command[10] = destination as u32;
-    command[11] = (destination >> 32) as u32;
+fn encode_copy_packet(
+    command: &mut [u32],
+    offset: usize,
+    destination: u64,
+    source: u64,
+    size: u32,
+) {
+    command[offset] = SDMA_COPY_LINEAR;
+    command[offset + 1] = size - 1;
+    command[offset + 3] = source as u32;
+    command[offset + 4] = (source >> 32) as u32;
+    command[offset + 5] = destination as u32;
+    command[offset + 6] = (destination >> 32) as u32;
 }
 
 #[allow(
     clippy::cast_possible_truncation,
     reason = "the packet address is deliberately split into low and high dwords"
 )]
-fn encode_fill(command: &mut [u32; COMMAND_BYTES / 4], destination: u64, value: u32, count: u32) {
+fn encode_fill(command: &mut [u32], destination: u64, value: u32, count: u32) {
     encode_cache_envelope(command, 10);
     command[5] = SDMA_CONST_FILL_DWORD;
     command[6] = destination as u32;
     command[7] = (destination >> 32) as u32;
     command[8] = value;
     command[9] = (count - 1) * 4;
+}
+
+#[derive(Clone, Copy)]
+struct TimingAddresses {
+    start: Option<u64>,
+    end: u64,
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "packet addresses are deliberately split into their low and high dwords"
+)]
+fn encode_timestamp(command: &mut [u32], offset: usize, address: u64) {
+    command[offset] = SDMA_TIMESTAMP_GET_GLOBAL_SYS;
+    command[offset + 1] = address as u32;
+    command[offset + 2] = (address >> 32) as u32;
+}
+
+fn encode_timed_copy(
+    command: &mut [u32],
+    destination: u64,
+    source: u64,
+    size: u32,
+    timing: TimingAddresses,
+) -> u64 {
+    let copy_offset = 5 + usize::from(timing.start.is_some()) * TIMESTAMP_PACKET_BYTES / 4;
+    let end_offset = copy_offset + COPY_PACKET_BYTES / 4;
+    let trailing_gcr = end_offset + TIMESTAMP_PACKET_BYTES / 4;
+    encode_cache_envelope(command, trailing_gcr);
+    if let Some(start) = timing.start {
+        encode_timestamp(command, 5, start);
+    }
+    encode_copy_packet(command, copy_offset, destination, source, size);
+    encode_timestamp(command, end_offset, timing.end);
+    ((trailing_gcr + GCR_PACKET_BYTES / 4) * 4) as u64
 }
 
 #[derive(Clone, Copy)]
@@ -197,25 +245,33 @@ enum SdmaCommand {
 }
 
 impl SdmaCommand {
-    const fn byte_length(&self) -> u64 {
-        match self {
-            Self::Copy { .. } => COMMAND_BYTES as u64,
-            Self::Fill { .. } => FILL_COMMAND_BYTES as u64,
-        }
-    }
-
-    fn encode(&self, words: &mut [u32; COMMAND_BYTES / 4]) {
+    fn encode(
+        &self,
+        words: &mut [u32; TIMED_COMMAND_BYTES / 4],
+        timing: Option<TimingAddresses>,
+    ) -> u64 {
         match *self {
             Self::Copy {
                 destination,
                 source,
                 size,
-            } => encode_copy(words, destination, source, size),
+            } => {
+                if let Some(timing) = timing {
+                    encode_timed_copy(words, destination, source, size, timing)
+                } else {
+                    encode_copy(words, destination, source, size);
+                    COMMAND_BYTES as u64
+                }
+            }
             Self::Fill {
                 destination,
                 value,
                 count,
-            } => encode_fill(words, destination, value, count),
+            } => {
+                debug_assert!(timing.is_none());
+                encode_fill(words, destination, value, count);
+                FILL_COMMAND_BYTES as u64
+            }
         }
     }
 }
@@ -229,6 +285,14 @@ struct CopyResources {
     command_address: u64,
     pending: Option<u64>,
     submitting: bool,
+    submitted_any: bool,
+    timing: Option<TimingState>,
+}
+
+struct TimingState {
+    start: u64,
+    end: u64,
+    started: bool,
 }
 
 impl CopyResources {
@@ -252,6 +316,8 @@ impl CopyResources {
             command_address: 0,
             pending: None,
             submitting: false,
+            submitted_any: false,
+            timing: None,
         };
         resources.host_address = resources.command.info().host_address.ok_or_else(|| {
             resources.failure(Error::Operation {
@@ -294,11 +360,17 @@ impl CopyResources {
                 detail: "SDMA copy was cancelled",
             }));
         }
+        let timing = self.timing.as_ref().and_then(|timing| {
+            matches!(command, SdmaCommand::Copy { .. }).then_some(TimingAddresses {
+                start: (!timing.started).then_some(timing.start),
+                end: timing.end,
+            })
+        });
         // SAFETY: The allocation owns a writable host mapping of at least one
-        // page. The command is at most 68 bytes and no prior submission reaches
+        // page. The command is at most 92 bytes and no prior submission reaches
         // it before this write.
-        let words = unsafe { &mut *(self.host_address as *mut [u32; COMMAND_BYTES / 4]) };
-        command.encode(words);
+        let words = unsafe { &mut *(self.host_address as *mut [u32; TIMED_COMMAND_BYTES / 4]) };
+        let byte_length = command.encode(words, timing);
         fence(Ordering::Release);
         self.submitting = true;
         // SAFETY: Packet bytes, synchronization, and backing lifetime are
@@ -306,7 +378,7 @@ impl CopyResources {
         let submission = unsafe {
             self.queue.submit(KernelCommand {
                 device_address: self.command_address,
-                byte_length: command.byte_length(),
+                byte_length,
             })
         };
         // The driver contract reports ambiguity as an accepted identity, so
@@ -314,6 +386,12 @@ impl CopyResources {
         // set, so Drop retains the command and queue backing.
         self.submitting = false;
         let submission = submission.map_err(|error| self.failure(error))?;
+        self.submitted_any = true;
+        if timing.is_some() {
+            if let Some(timing) = self.timing.as_mut() {
+                timing.started = true;
+            }
+        }
         self.pending = Some(submission);
         loop {
             let wait = self.queue.wait(submission, NATIVE_WAIT_NS, 0);
@@ -383,6 +461,20 @@ impl Drop for CopyResources {
     }
 }
 
+/// Raw global GPU clock ticks around a native SDMA copy sequence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GpuCopyTimestamps {
+    /// Global GPU clock when the first copy packet began.
+    pub start: u64,
+    /// Global GPU clock after the final copy packet completed.
+    pub end: u64,
+}
+
+struct CopyTiming {
+    _allocation: Allocation,
+    host_address: usize,
+}
+
 /// An ordered GFX1201 SDMA copy sequence sharing one native queue and command
 /// allocation. Each operation retires before the next begins. A failed
 /// operation makes the sequence terminal, so an unretired packet cannot be
@@ -392,6 +484,7 @@ pub struct GpuCopySequence<'device, 'cancel> {
     cancel: &'cancel AtomicBool,
     resources: CopyResources,
     staging: Option<Allocation>,
+    timing: Option<CopyTiming>,
     terminal_retention: Option<bool>,
 }
 
@@ -435,6 +528,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
             cancel,
             resources: CopyResources::new(&gpu, format)?,
             staging: None,
+            timing: None,
             terminal_retention: None,
         })
     }
@@ -467,6 +561,82 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         }
     }
 
+    /// Enables GPU-clock capture around this sequence's copy packets. Call
+    /// before the first copy. The timestamp backing is owned until all native
+    /// packets retire, including after a failed wait.
+    ///
+    /// # Errors
+    /// Returns an invalid-state, allocation, or native mapping failure.
+    #[allow(unsafe_code)]
+    pub fn enable_timing(&mut self) -> Result<(), CopyFailure> {
+        self.active()?;
+        if self.timing.is_some() || self.resources.submitted_any {
+            return Err(invalid(
+                "SDMA copy timing must start before the first packet",
+            ));
+        }
+        let (allocation, host_address, start) = match self
+            .gpu
+            .staging(16, DeviceAccess::READ | DeviceAccess::WRITE)
+        {
+            Ok(staging) => staging,
+            Err(failure) => return self.record(Err(failure)),
+        };
+        let Some(end) = start.checked_add(8) else {
+            return self.record(Err(invalid("SDMA timestamp address overflows")));
+        };
+        // SAFETY: The new system allocation owns 16 writable host bytes.
+        unsafe { std::ptr::write_bytes(host_address as *mut u8, 0, 16) };
+        fence(Ordering::Release);
+        self.resources.timing = Some(TimingState {
+            start,
+            end,
+            started: false,
+        });
+        self.timing = Some(CopyTiming {
+            _allocation: allocation,
+            host_address,
+        });
+        Ok(())
+    }
+
+    /// Returns raw global GPU ticks captured by the first and final copy
+    /// packets after every operation in the sequence has retired.
+    ///
+    /// # Errors
+    /// Returns an invalid-state or native timestamp failure.
+    #[allow(unsafe_code)]
+    pub fn finish_timing(&mut self) -> Result<GpuCopyTimestamps, CopyFailure> {
+        self.active()?;
+        if !self
+            .resources
+            .timing
+            .as_ref()
+            .is_some_and(|timing| timing.started)
+        {
+            return Err(invalid("SDMA copy timing has no completed copy"));
+        }
+        let timing = self
+            .timing
+            .take()
+            .ok_or_else(|| invalid("SDMA copy timing has no backing"))?;
+        self.resources.timing = None;
+        fence(Ordering::Acquire);
+        // SAFETY: The timing allocation is at least 16 bytes, page aligned,
+        // and native wait proved the final timestamp write retired.
+        let (start, end) = unsafe {
+            let address = timing.host_address as *const u64;
+            (address.read_volatile(), address.add(1).read_volatile())
+        };
+        if start == 0 || end == 0 || end < start {
+            return Err(CopyFailure::retired(Error::Operation {
+                kind: ErrorKind::DriverContract,
+                detail: "SDMA copy returned invalid GPU timestamps",
+            }));
+        }
+        Ok(GpuCopyTimestamps { start, end })
+    }
+
     /// Copies a non-overlapping GPU-addressable range after earlier sequence
     /// operations have retired.
     ///
@@ -486,8 +656,27 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         source: u64,
         size: u64,
     ) -> Result<(), CopyFailure> {
+        // SAFETY: A linear range is one row and one slice of the same mapped
+        // source and destination backing required by this method.
+        unsafe { self.copy_rect(CopyRect::linear(destination, source, size)) }
+    }
+
+    /// Copies a pitched, non-overlapping GPU-addressable rectangle after
+    /// earlier sequence operations have retired. Timing spans the first
+    /// through final native copy packet when enabled.
+    ///
+    /// # Safety
+    /// Every selected source and destination row must remain GPU-accessible
+    /// with the required permissions. Their backing must remain live until
+    /// retirement, or until conclusive teardown after a failure with
+    /// `operands_may_be_live`.
+    ///
+    /// # Errors
+    /// Returns shape, cancellation, or native failures with the operand
+    /// retention requirement.
+    #[allow(unsafe_code)]
+    pub unsafe fn copy_rect(&mut self, rect: CopyRect) -> Result<(), CopyFailure> {
         self.active()?;
-        let rect = CopyRect::linear(destination, source, size);
         if let Err(failure) = rect.validate() {
             return self.record(Err(failure));
         }
@@ -587,7 +776,14 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
 
 impl Drop for GpuCopySequence<'_, '_> {
     fn drop(&mut self) {
-        self.release_staging(self.resources.pending.is_some() || self.resources.submitting);
+        self.resources.refresh_retirement();
+        let retain = self.resources.pending.is_some() || self.resources.submitting;
+        self.release_staging(retain);
+        if let Some(timing) = self.timing.take() {
+            if retain {
+                std::mem::forget(timing);
+            }
+        }
     }
 }
 
@@ -834,6 +1030,63 @@ mod tests {
         assert_eq!(command[12], SDMA_USER_GCR);
         assert_eq!(command[14], GCR_WRITEBACK);
         assert_eq!(command[16], 0);
+    }
+
+    #[test]
+    fn gfx1201_timed_copy_brackets_packets_with_global_gpu_timestamps() {
+        let copy = SdmaCommand::Copy {
+            destination: 0x1234_5678_9abc_def0,
+            source: 0xfeed_face_cafe_babe,
+            size: 64,
+        };
+        let mut command = [u32::MAX; TIMED_COMMAND_BYTES / 4];
+        let byte_length = copy.encode(
+            &mut command,
+            Some(TimingAddresses {
+                start: Some(0xaabb_ccdd_1122_3344),
+                end: 0x5566_7788_99aa_bbcc,
+            }),
+        );
+        assert_eq!(byte_length, TIMED_COMMAND_BYTES as u64);
+        assert_eq!(command[0], SDMA_USER_GCR);
+        assert_eq!(command[2], GCR_WRITEBACK | GCR_INVALIDATE);
+        assert_eq!(
+            &command[5..18],
+            &[
+                SDMA_TIMESTAMP_GET_GLOBAL_SYS,
+                0x1122_3344,
+                0xaabb_ccdd,
+                SDMA_COPY_LINEAR,
+                63,
+                0,
+                0xcafe_babe,
+                0xfeed_face,
+                0x9abc_def0,
+                0x1234_5678,
+                SDMA_TIMESTAMP_GET_GLOBAL_SYS,
+                0x99aa_bbcc,
+                0x5566_7788,
+            ]
+        );
+        assert_eq!(command[18], SDMA_USER_GCR);
+        assert_eq!(command[20], GCR_WRITEBACK);
+        assert_eq!(&command[21..], &[0, 0]);
+
+        let byte_length = copy.encode(
+            &mut command,
+            Some(TimingAddresses {
+                start: None,
+                end: 0x5566_7788_99aa_bbcc,
+            }),
+        );
+        assert_eq!(
+            byte_length,
+            (TIMED_COMMAND_BYTES - TIMESTAMP_PACKET_BYTES) as u64
+        );
+        assert_eq!(command[5], SDMA_COPY_LINEAR);
+        assert_eq!(command[12], SDMA_TIMESTAMP_GET_GLOBAL_SYS);
+        assert_eq!(command[15], SDMA_USER_GCR);
+        assert_eq!(&command[20..], &[0, 0, 0]);
     }
 
     #[test]
