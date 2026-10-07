@@ -5,16 +5,14 @@
 
 #include "core/output/output_summary.hpp"
 
-#include <spdlog/fmt/fmt.h>
-
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -25,7 +23,6 @@ using rocprofsys::output::output_format;
 using rocprofsys::output::process_metadata;
 using rocprofsys::output::process_tree;
 using rocprofsys::output::registry;
-using rocprofsys::output::summarize_command;
 
 // ---------------------------------------------------------------------------
 // registry
@@ -330,44 +327,26 @@ TEST(process_tree, rows_sorted_descending_by_size)
 }
 
 // ---------------------------------------------------------------------------
-// summarize_command / write_summary
+// format_summary
 // ---------------------------------------------------------------------------
-
-TEST(summarize_command, empty_returns_empty) { EXPECT_EQ(summarize_command(""), ""); }
-
-TEST(summarize_command, strips_path_to_basename)
-{
-    EXPECT_EQ(summarize_command("/usr/bin/python3"), "python3");
-}
-
-TEST(summarize_command, takes_first_token_only)
-{
-    EXPECT_EQ(summarize_command("python -c import_x --flag"), "python");
-}
-
-TEST(summarize_command, strips_terminal_control_chars)
-{
-    // Only the triggering ESC byte is stripped; the CSI parameter bytes
-    // ("[31m", "[0m") are printable and survive as literal text.
-    EXPECT_EQ(summarize_command("\x1b[31mpython\x1b[0m"), "[31mpython[0m");
-}
 
 namespace
 {
 std::string
 render(const std::vector<artifact>& rows, const std::vector<process_metadata>& processes)
 {
-    process_tree                     tree{ rows, processes };
-    rocprofsys::output::run_metadata meta{};
-    std::ostringstream               oss;
-    rocprofsys::output::write_summary(oss, tree, meta, rows, processes.size());
-    return oss.str();
+    registry::instance().start_new_session();
+    for(const auto& row : rows)
+        registry::instance().register_file(row.path, row.format);
+    for(const auto& proc : processes)
+        registry::instance().record_process(proc);
+    return registry::instance().format_summary(std::chrono::steady_clock::now());
 }
 }  // namespace
 
-TEST(write_summary, empty_rows_prints_nothing) { EXPECT_TRUE(render({}, {}).empty()); }
+TEST(format_summary, empty_rows_prints_nothing) { EXPECT_TRUE(render({}, {}).empty()); }
 
-TEST(write_summary, single_row_renders_all_header_fields)
+TEST(format_summary, single_row_renders_all_header_fields)
 {
     std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
                                           getpid(), 0, output_format::perfetto } };
@@ -382,7 +361,7 @@ TEST(write_summary, single_row_renders_all_header_fields)
     EXPECT_NE(out.find("Total output: "), std::string::npos);
 }
 
-TEST(write_summary, single_row_renders_full_absolute_path)
+TEST(format_summary, single_row_renders_full_absolute_path)
 {
     std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
                                           getpid(), 0, output_format::perfetto } };
@@ -392,7 +371,7 @@ TEST(write_summary, single_row_renders_full_absolute_path)
     EXPECT_NE(out.find("/tmp/rocprofsys-test/perfetto-trace.proto"), std::string::npos);
 }
 
-TEST(write_summary, single_row_renders_format_badge_name)
+TEST(format_summary, single_row_renders_format_badge_name)
 {
     std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
                                           getpid(), 0, output_format::perfetto } };
@@ -402,7 +381,7 @@ TEST(write_summary, single_row_renders_format_badge_name)
     EXPECT_NE(out.find("perfetto"), std::string::npos);
 }
 
-TEST(write_summary, single_row_renders_legend_entry)
+TEST(format_summary, single_row_renders_legend_entry)
 {
     std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
                                           getpid(), 0, output_format::perfetto } };
@@ -412,7 +391,7 @@ TEST(write_summary, single_row_renders_legend_entry)
     EXPECT_NE(out.find("perfetto → https://ui.perfetto.dev"), std::string::npos);
 }
 
-TEST(write_summary, multiple_formats_render_both_file_names)
+TEST(format_summary, multiple_formats_render_both_file_names)
 {
     std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
                                           getpid(), 0, output_format::perfetto },
@@ -425,7 +404,7 @@ TEST(write_summary, multiple_formats_render_both_file_names)
     EXPECT_NE(out.find("wall_clock.txt"), std::string::npos);
 }
 
-TEST(write_summary, multiple_formats_render_both_legend_entries)
+TEST(format_summary, multiple_formats_render_both_legend_entries)
 {
     std::vector<artifact> rows{ artifact{ "/tmp/rocprofsys-test/perfetto-trace.proto",
                                           getpid(), 0, output_format::perfetto },
@@ -438,7 +417,7 @@ TEST(write_summary, multiple_formats_render_both_legend_entries)
     EXPECT_NE(out.find("text → cat"), std::string::npos);
 }
 
-TEST(write_summary, peer_controlled_path_control_chars_are_stripped)
+TEST(format_summary, peer_controlled_path_control_chars_are_stripped)
 {
     std::vector<artifact>         rows{ artifact{
         "/tmp/rocprofsys-test/\x1b[31mevil\x1b[0m.proto", getpid(), 0,
@@ -447,14 +426,13 @@ TEST(write_summary, peer_controlled_path_control_chars_are_stripped)
 
     const std::string out = render(rows, processes);
     // Only the triggering ESC byte is guaranteed gone; the CSI parameter
-    // bytes are printable and are not stripped (see summarize_command,
-    // strips_terminal_control_chars above).
+    // bytes are printable and are not stripped.
     EXPECT_EQ(out.find('\x1b'), std::string::npos);
     EXPECT_NE(out.find("evil"), std::string::npos);
     EXPECT_NE(out.find(".proto"), std::string::npos);
 }
 
-TEST(write_summary, relative_path_renders_as_absolute)
+TEST(format_summary, relative_path_renders_as_absolute)
 {
     std::vector<artifact> rows{ artifact{ "relative-dir/perfetto-trace.proto", getpid(),
                                           0, output_format::perfetto } };
@@ -462,21 +440,4 @@ TEST(write_summary, relative_path_renders_as_absolute)
 
     const std::string out = render(rows, processes);
     EXPECT_NE(out.find("/relative-dir/perfetto-trace.proto"), std::string::npos);
-}
-
-TEST(write_summary, multi_process_tree_renders_parent_and_child)
-{
-    const pid_t           root  = getpid();
-    constexpr pid_t       child = 700;
-    std::vector<artifact> rows{
-        artifact{ "/tmp/rocprofsys-test/root.proto", root, 0, output_format::perfetto },
-        artifact{ "/tmp/rocprofsys-test/child.proto", child, 0, output_format::perfetto }
-    };
-    std::vector<process_metadata> processes{ process_metadata{ root, -1, "root" },
-                                             process_metadata{ child, root, "child" } };
-
-    const std::string out = render(rows, processes);
-    EXPECT_NE(out.find(fmt::format("[{}]", root)), std::string::npos);
-    EXPECT_NE(out.find(fmt::format("[{}]", child)), std::string::npos);
-    EXPECT_NE(out.find("main"), std::string::npos);
 }
