@@ -214,6 +214,39 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
         assert_eq!(&destination_bytes[..64], &source_bytes[..64]);
     }
 
+    destination_bytes[..64].fill(0xa5);
+    let before = gpu.clock_counters()?.gpu;
+    let mut timed = GpuCopySequence::begin(gpu, &cancel).map_err(|failure| failure.error)?;
+    timed.enable_timing().map_err(|failure| failure.error)?;
+    // SAFETY: Both mapped allocations stay live until the timed copy retires.
+    if let Err(failure) = unsafe {
+        timed.copy_rect(CopyRect {
+            destination: destination_info.device_address,
+            source: source_info.device_address,
+            width: 32,
+            height: 2,
+            depth: 1,
+            destination_pitch: 32,
+            source_pitch: 32,
+            destination_slice: 64,
+            source_slice: 64,
+        })
+    } {
+        drop(timed);
+        if failure.operands_may_be_live {
+            std::mem::forget(source);
+            std::mem::forget(destination);
+            std::mem::forget(device);
+            std::mem::forget(session);
+        }
+        return Err(Box::new(failure.error));
+    }
+    let ticks = timed.finish_timing().map_err(|failure| failure.error)?;
+    drop(timed);
+    let after = gpu.clock_counters()?.gpu;
+    assert!(before <= ticks.start && ticks.start <= ticks.end && ticks.end <= after);
+    assert_eq!(&destination_bytes[..64], &source_bytes[..64]);
+
     destination_bytes.fill(0xa5);
     let rect = CopyRect {
         destination: destination_info.device_address + 4,
