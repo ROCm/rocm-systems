@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Native control used by the implementation-neutral rocddi core.
@@ -281,6 +282,7 @@ pub(crate) trait KernelQueueDriver: ProviderTypes + KernelQueueTypes + Send + Sy
         command: KernelCommand,
     ) -> Result<u64, Error>;
     fn kernel_queue_status(queue: &Self::KernelQueue) -> KernelQueueStatus;
+    fn refresh_kernel_queue(queue: &Self::KernelQueue) -> Result<KernelQueueStatus, Error>;
     fn wait_kernel_queue(
         queue: &Self::KernelQueue,
         submission: u64,
