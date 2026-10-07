@@ -24,6 +24,10 @@ from rocprof_compute_soc.counter_grouping_single_pass import (
     single_pass_packable_enabled_from_env,
     try_allocate_single_pass_packable,
 )
+from rocprof_compute_soc.counter_grouping_tcc import (
+    collectable_tcc_channel_count,
+    tcc_channel_definition,
+)
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface, rocprofv3_avail_interface
 from utils.logger import (
@@ -531,14 +535,18 @@ class OmniSoC_Base:
         counters, matching perfmon allocation.
         """
         out = set(counters)
-        # num_xcd is absent on single-die gfx115x; default to 1.
-        num_xcd = int(getattr(self._mspec, "num_xcd", 1) or 1)
-        l2_banks = int(self._mspec.l2_banks)
+        banks_per_die = int(self._mspec.l2_banks)
+        reported_dies = getattr(self._mspec, "num_xcd", 1) or 1
+        channel_count = collectable_tcc_channel_count(
+            self.get_arch() or "",
+            banks_per_die,
+            int(reported_dies),
+        )
         for counter_name in counters.copy():
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 out.discard(counter_name)
                 base = counter_name.split("[")[0]
-                out.update(f"{base}[{i}]" for i in range(num_xcd * l2_banks))
+                out.update(f"{base}[{i}]" for i in range(channel_count))
         return out
 
     @demarcate
@@ -776,16 +784,12 @@ class OmniSoC_Base:
                 # Add TCC channel counters definitions
                 if is_tcc_channel_counter(ctr):
                     counter_name = ctr.split("[")[0]
-                    idx = int(ctr.split("[")[1].split("]")[0])
-                    xcd_idx = idx // int(self._mspec.l2_banks)
-                    channel_idx = idx % int(self._mspec.l2_banks)
-                    expression = (
-                        f"select({counter_name},"
-                        f"[DIMENSION_XCC=[{xcd_idx}], "
-                        f"DIMENSION_INSTANCE=[{channel_idx}]])"
-                    )
-                    description = (
-                        f"{counter_name} on {xcd_idx}th XCC and {channel_idx}th channel"
+                    channel_index = int(ctr.split("[")[1].split("]")[0])
+                    description, expression = tcc_channel_definition(
+                        self.get_arch() or "",
+                        counter_name,
+                        channel_index,
+                        int(self._mspec.l2_banks),
                     )
                     counter_def = add_counter_extra_config_input_yaml(
                         counter_def,

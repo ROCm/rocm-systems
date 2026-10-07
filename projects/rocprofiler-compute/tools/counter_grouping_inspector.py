@@ -23,6 +23,7 @@ Usage (from the ``rocprofiler-compute`` project root):
 """
 
 import argparse
+import importlib
 import logging
 import sys
 import tempfile
@@ -142,10 +143,12 @@ def run_soc_detect_and_coalesce(
 
     Writes YAML under ``workload_root/perfmon/``.
     """
+    # num_xcd=1 is one reported die, not another arch's XCD count.
+    # The arch SoC replaces l2_banks with that chip's own banks.
     machine_spec = SimpleNamespace(
         rocminfo_lines=None,
         num_xcd=1,
-        l2_banks=4,
+        l2_banks=1,
         gpu_arch=arch,
         gpu_series=mi_gpu_specs.get_gpu_series(arch),
     )
@@ -162,8 +165,13 @@ def run_soc_detect_and_coalesce(
         device=0,
     )
 
-    soc = OmniSoC_Base(cli_args, machine_spec)
-    soc.set_arch(arch)
+    try:
+        soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
+        soc_class = getattr(soc_module, f"{arch}_soc")
+        soc = soc_class(cli_args, machine_spec)
+    except ModuleNotFoundError:
+        soc = OmniSoC_Base(cli_args, machine_spec)
+        soc.set_arch(arch)
     soc.set_perfmon_config(perfmon_config)
 
     counters, _unused_filter_blocks = soc.detect_counters()
