@@ -14,7 +14,10 @@ from unittest import mock
 import pytest
 
 import utils.utils_common as utils_common
-from utils.utils_common import canonical_config_arch
+from utils.utils_common import (
+    canonical_config_arch,
+    panel_metric_ids,
+)
 
 
 class MockArgs:
@@ -1203,6 +1206,19 @@ def test_reconfigure_stdio_utf8_end_to_end_makes_non_ascii_print_safe():
 
 
 ##############################################################################
+
+
+@pytest.mark.misc
+def test_panel_metric_ids_number_each_metric_table_and_skip_repeated_names():
+    panel = {
+        "data source": [
+            {"metric_table": {"id": 301, "metric": {"A": {}, "B": {}, "Dup": {}}}},
+            {"raw_csv_table": {"id": 302, "metric": {"Raw": {}}}},
+            {"metric_table": {"id": 303, "metric": None}},
+            {"metric_table": {"id": 304, "metric": {"C": {}, "Dup": {}}}},
+        ]
+    }
+    assert panel_metric_ids(panel) == {"A": "3.1.0", "B": "3.1.1", "C": "3.4.0"}
 
 
 @pytest.mark.misc

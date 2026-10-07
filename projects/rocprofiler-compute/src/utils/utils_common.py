@@ -80,6 +80,22 @@ def is_mem_chart_panel(panel_config: dict[str, Any]) -> bool:
     )
 
 
+def panel_metric_ids(panel_config: dict[str, Any]) -> dict[str, str]:
+    """Metric name -> metric id for a panel's metric tables.
+
+    Names that appear more than once are left out; they identify no single metric.
+    """
+    ids: dict[str, str] = {}
+    repeated: set[str] = set()
+    for source in panel_config["data source"]:
+        table = source.get("metric_table")
+        for position, name in enumerate((table or {}).get("metric") or {}):
+            if name in ids:
+                repeated.add(name)
+            ids[name] = format_metric_id(table["id"], position)
+    return {name: id_ for name, id_ in ids.items() if name not in repeated}
+
+
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
     """Map GPU architectures to the shared analysis-config directory name."""
     if gpu_arch is None:
