@@ -33,7 +33,7 @@ Why this allocator: the shipping pack minimizes passes for the whole counter lis
 
 ## 2. Flowchart
 
-A **bucket** is one perfmon pass. Flow — Single-pass packable (SPP) placement plus Single-pass unpackable (SPU) residual fill (default). TCC series affinity is **not** in this chart; it is the layout harden in §3.
+A **bucket** is one perfmon pass. Flow — Single-pass packable (SPP) placement plus Single-pass unpackable (SPU) residual fill (default). TCC series affinity is **not** in this chart; it is the layout harden in §3. The TCC event-base budget is still this flow's hardware-block check. §3 times the other TCC rules.
 
 **How an SPP PMC set is placed.** Candidates are the unique sets, visited largest first. For each set the allocator tries buckets already opened before it opens a new one:
 
@@ -97,7 +97,7 @@ TCC channel series need packing rules beyond co-locating one Single-pass packabl
 
 On gfx942, TCC allows **4 event bases per pass** (channel instances `[i]` are dimensions of one base, not extra slots). Full policy: [TCC series affinity + coverage](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-tcc-series-affinity-coverage.md).
 
-1. Pack by **series base**; when a TCC series is selected, expand **all collectable channel instances** in that pass.
+1. Pack by **series base**. Every collectable channel index of a selected series is already in the candidate set before placement. Writing the perfmon file does not add channels later.
 2. Keep affinity pairs in the **same pass** (e.g. `TCC_EA0_RDREQ_LEVEL` with `TCC_EA0_RDREQ`, and WR/ATOMIC analogues) so latency ratios are not joined across replays — L2 channel maps can remap between passes.
 3. Cover every selected series from the profile/YAML set; do **not** prune to runtime-nonzero channels.
 4. Panel **1805**, "L2-Fabric Requests (per normUnit)", stays **one packing group**. Its three columns are collected in one pass: `TCC_EA0_RDREQ` (read), `TCC_EA0_WRREQ` (write and atomic), and `TCC_EA0_ATOMIC` (atomic). On gfx942 that pass is bucket 1 / `pmc_perf_1`, which already holds those three request series together with `TCC_EA0_ATOMIC_LEVEL` (four TCC event bases).
@@ -109,5 +109,32 @@ On gfx942, TCC allows **4 event bases per pass** (channel instances `[i]` are di
    Same-pass bind does not read the extra `RDREQ` / `WRREQ` copies in bucket 1 for 1806 or 1807, because those LEVEL counters are not in that pass.
 
 **Accuracy rule:** the request table is one execution. The latency ratios still use the pass that contains both counters.
+
+### Order relative to the main flow
+
+These rules are not a second copy of the flowchart in §2, and they do not all run after that flow.
+
+**Before placement.** Candidate groups are built first. Panel 1805 stays one group: `TCC_EA0_RDREQ`, `TCC_EA0_WRREQ`, and `TCC_EA0_ATOMIC`. Each latency row is one group of a LEVEL counter plus its request series (1806, 1807, 1808). A TCC name that still ends in `[` is expanded to every collectable channel index here (`detect_counters`, then `iter_metric_groups`), before a bucket is chosen.
+
+**Inside placement.** The TCC event-base budget is the hardware-block check in §2 (`CounterFile.add`). On gfx942 that budget is 4. Another channel of a base already in the bucket does not take another base. Placing the 1805 group and the latency groups is what leaves the extra `RDREQ` and `WRREQ` copies in the pass that also holds `ATOMIC_LEVEL`.
+
+**After buckets exist.** A cleanup then drops a request series from a pass that lacks its LEVEL, and it leaves those extra copies when the 1805 group still needs them in that one pass. Same-pass bind runs at analyze and picks the pass that holds the whole expression, so 1806 and 1807 do not read the copies in bucket 1. Writing `pmc_perf_*.yaml` records the channel instances already in the bucket and emits a `select()` definition for each one. It does not expand the series.
+
+**TCC rule order** (not the general placement flow):
+
+```mermaid
+flowchart TD
+  B[Before placement:<br/>build the candidate groups]
+  B --> G[1805 is one group:<br/>RDREQ, WRREQ, ATOMIC]
+  B --> L[1806, 1807, 1808:<br/>LEVEL plus its request series]
+  B --> C[Channel templates expand to<br/>every collectable index]
+  G --> P
+  L --> P
+  C --> P
+  P[Inside placement:<br/>TCC event-base budget<br/>is the hardware-block check<br/>4 bases on gfx942]
+  P --> R[Placing those groups leaves<br/>extra RDREQ and WRREQ copies<br/>in the 1805 pass]
+  R --> K[After buckets exist:<br/>cleanup keeps those copies<br/>when the 1805 group needs them]
+  K --> N[Analyze: same-pass bind uses<br/>the pass that holds<br/>the whole expression]
+```
 
 **Impact:** This layout harden does **not** add a pass. gfx942 stays at **14** passes. It is not a Phase 2 / Single-pass unpackable (SPU) concern. `packable_multi` stays **0** because 1805 remains one PMC set inside one bucket.
