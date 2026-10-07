@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 add_library(rocm_runtime_api_headers INTERFACE)
 target_include_directories(
     rocm_runtime_api_headers

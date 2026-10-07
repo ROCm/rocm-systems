@@ -509,6 +509,7 @@ producer writes an AQL packet into the ring, then rings the doorbell
 
 The in-flight record the CP builds from that packet is a `DispatchEntry`, which
 carries among other things:
+
 - `kernel_entry_pc` - byte address of kernel code in GPU memory
 - `total_wgs` - workgroups to launch, narrowed to this XCD's share once sharded
 - `wfs_per_workgroup` - wavefronts per workgroup
@@ -549,6 +550,7 @@ stale reads. Supported integer atomics: swap, cmpswap, add, sub,
 smin/umin, smax/umax, and, or, xor, inc, dec.
 
 **Cache management instructions:**
+
 - `s_dcache_inv` / `s_dcache_inv_vol` — invalidate the L1 scalar cache
 - `s_gl1_inv` — invalidate the L1 vector cache
 

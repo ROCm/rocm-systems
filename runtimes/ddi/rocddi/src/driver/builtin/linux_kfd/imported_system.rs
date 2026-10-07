@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Qualified same-device GTT DMA-BUF attachment with an independent DRM owner.
 //!
 //! The BO is validated through its KFD and DRM views before it is published.

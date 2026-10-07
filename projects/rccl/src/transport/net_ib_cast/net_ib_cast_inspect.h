@@ -53,6 +53,14 @@ ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
 ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWrr, bool splitData,
                                      uint32_t splitDataMin);
 
+/* ── Hardware capabilities of a vNic device, probed once and cached. ── */
+struct ncclIbCastDeviceCaps {
+  bool udSupported;
+  bool rdmaReadSupported;
+};
+
+ncclResult_t ncclIbCastGetDeviceCaps(int dev, struct ncclIbCastDeviceCaps* out);
+
 /* ── Test-only wrappers over internal static helpers (host-only, no HW). ── */
 ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx);
 int ncclIbCastTestGidSameSubnet(const uint8_t localGid[16], const uint8_t remoteGid[16], int prefixLen);
