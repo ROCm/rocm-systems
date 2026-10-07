@@ -30,8 +30,7 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int,
   return ncclSuccess;
 }
 
-int ncclDebugLevel = 0;           // read by debug.h before NCCL 2.32.3
-uint32_t ncclDebugLevelMask = 0;  // read by debug.h from NCCL 2.32.3
+uint32_t ncclDebugLevelMask = 0;  // read by debug.h
 uint64_t ncclDebugMask = 0;
 thread_local int ncclDebugNoWarn = 0;
 void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}
@@ -40,9 +39,13 @@ namespace {
 
 // Runs ncclTransportPatConnect on every rank of a communicator whose node n has
 // localRanksPerNode[n] ranks and returns each rank's ncclTransportP2pSetup calls.
+// NVLS is usable with one head per local rank, so a multi-rank node passes the
+// NVLS check and reaches setup unless a PAT-specific guard stops it first.
 std::vector<int> setupCallsPerRank(const std::vector<int>& localRanksPerNode, int patEnable) {
   fakePatEnable = patEnable;
   auto minMax = std::minmax_element(localRanksPerNode.begin(), localRanksPerNode.end());
+  // Sized for every node at the largest local-rank count, so peer lookups stay in bounds.
+  std::vector<int> denseToUserRank(localRanksPerNode.size() * *minMax.second, 0);
   std::vector<int> calls;
   for (int node = 0; node < (int)localRanksPerNode.size(); node++) {
     for (int i = 0; i < localRanksPerNode[node]; i++) {
@@ -55,6 +58,11 @@ std::vector<int> setupCallsPerRank(const std::vector<int>& localRanksPerNode, in
       comm->maxLocalRanks = *minMax.second;
       comm->isOneRPN = comm->maxLocalRanks == 1;
       comm->nChannels = 2;
+      comm->nvlsSupport = 1;
+      comm->nvlsChannels = 2;
+      comm->channels[0].nvls.nHeads = comm->localRanks;
+      comm->channels[0].nvls.headRank = i;
+      comm->denseToUserRank = denseToUserRank.data();
       p2pSetupCalls = 0;
       EXPECT_EQ(ncclSuccess, ncclTransportPatConnect(comm.get()));
       calls.push_back(p2pSetupCalls);
@@ -69,8 +77,8 @@ TEST(PatConnectMicrotest, OneRankPerNodeSetsUpEveryRank) {
   for (int calls : setupCallsPerRank({1, 1}, /*patEnable=*/1)) EXPECT_GT(calls, 0);
 }
 
-// Without NVLS a multi-rank node never connects PAT, so the layout needs a
-// single-rank node for a rank that would.
+// Every rank here would reach setup, so only the uneven-local-ranks guard keeps
+// them all out of it.
 TEST(PatConnectMicrotest, UnevenLocalRanksSkipSetupOnEveryRank) {
   EXPECT_EQ(std::vector<int>({0, 0, 0}), setupCallsPerRank({2, 1}, /*patEnable=*/1));
 }
