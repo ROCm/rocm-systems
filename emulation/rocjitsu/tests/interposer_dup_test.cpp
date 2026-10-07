@@ -874,8 +874,186 @@ TEST(InterposerDrmTest, GemOpReportsTheCreateSize) {
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &op), -1);
   EXPECT_EQ(errno, EFAULT);
 
+  drm_amdgpu_gem_create unaligned{};
+  unaligned.in.bo_size = 4097;
+  unaligned.in.domains = AMDGPU_GEM_DOMAIN_GTT;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_CREATE, &unaligned), 0);
+  op.handle = unaligned.out.handle;
+  op.value = reinterpret_cast<uint64_t>(&info);
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &op), 0);
+  EXPECT_EQ(info.bo_size, 8192u) << "the query reports the allocated size";
+
   EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, GemOpSetPlacementChangesTheReportedDomain) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 4096;
+  create.in.domains = AMDGPU_GEM_DOMAIN_GTT;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+
+  drm_amdgpu_gem_op placement{};
+  placement.handle = create.out.handle;
+  placement.op = AMDGPU_GEM_OP_SET_PLACEMENT;
+  placement.value = AMDGPU_GEM_DOMAIN_CPU;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &placement), 0);
+
+  drm_amdgpu_gem_create_in info{};
+  drm_amdgpu_gem_op query{};
+  query.handle = create.out.handle;
+  query.op = AMDGPU_GEM_OP_GET_GEM_CREATE_INFO;
+  query.value = reinterpret_cast<uint64_t>(&info);
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &query), 0);
+  EXPECT_EQ(info.domains, static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_CPU));
+
+  placement.value = uint64_t{1} << 8;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &placement), -1);
+  EXPECT_EQ(errno, EINVAL);
+
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, PrimeImportSharesTheBufferAndItsMetadata) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int exporter = open_drm_render();
+  ASSERT_GE(exporter, 0);
+  int importer = open_drm_render();
+  ASSERT_GE(importer, 0);
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 4097;
+  create.in.alignment = 4096;
+  create.in.domains = AMDGPU_GEM_DOMAIN_VRAM;
+  ASSERT_EQ(ioctl(exporter, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+
+  drm_amdgpu_gem_mmap source_offset{};
+  source_offset.in.handle = create.out.handle;
+  ASSERT_EQ(ioctl(exporter, DRM_IOCTL_AMDGPU_GEM_MMAP, &source_offset), 0);
+  void *source = mmap(nullptr, 8192, PROT_READ | PROT_WRITE, MAP_SHARED, exporter,
+                      static_cast<off_t>(source_offset.out.addr_ptr));
+  ASSERT_NE(source, MAP_FAILED);
+  static_cast<uint32_t *>(source)[1025] = 0x5EED5EEDu;
+
+  drm_amdgpu_gem_metadata store{};
+  store.handle = create.out.handle;
+  store.op = AMDGPU_GEM_METADATA_OP_SET_METADATA;
+  store.data.tiling_info = 0x11;
+  store.data.data_size_bytes = sizeof(uint32_t);
+  store.data.data[0] = 0xA1B2C3D4u;
+  ASSERT_EQ(ioctl(exporter, DRM_IOCTL_AMDGPU_GEM_METADATA, &store), 0);
+
+  drm_prime_handle prime{};
+  prime.handle = create.out.handle;
+  prime.flags = DRM_CLOEXEC;
+  ASSERT_EQ(ioctl(exporter, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+  uint32_t imported = 0;
+  ASSERT_TRUE(prime_import(importer, prime.fd, &imported));
+  EXPECT_EQ(close(prime.fd), 0);
+
+  drm_amdgpu_gem_metadata query{};
+  query.handle = imported;
+  query.op = AMDGPU_GEM_METADATA_OP_GET_METADATA;
+  ASSERT_EQ(ioctl(importer, DRM_IOCTL_AMDGPU_GEM_METADATA, &query), 0);
+  EXPECT_EQ(query.data.tiling_info, 0x11u);
+  EXPECT_EQ(query.data.data_size_bytes, sizeof(uint32_t));
+  EXPECT_EQ(query.data.data[0], 0xA1B2C3D4u);
+
+  drm_amdgpu_gem_create_in exported_info{};
+  drm_amdgpu_gem_create_in imported_info{};
+  drm_amdgpu_gem_op op{};
+  op.handle = create.out.handle;
+  op.op = AMDGPU_GEM_OP_GET_GEM_CREATE_INFO;
+  op.value = reinterpret_cast<uint64_t>(&exported_info);
+  ASSERT_EQ(ioctl(exporter, DRM_IOCTL_AMDGPU_GEM_OP, &op), 0);
+  op.handle = imported;
+  op.value = reinterpret_cast<uint64_t>(&imported_info);
+  ASSERT_EQ(ioctl(importer, DRM_IOCTL_AMDGPU_GEM_OP, &op), 0);
+  EXPECT_EQ(exported_info.bo_size, 8192u);
+  EXPECT_EQ(imported_info.bo_size, exported_info.bo_size);
+  EXPECT_EQ(imported_info.domains, exported_info.domains);
+
+  drm_amdgpu_gem_mmap imported_offset{};
+  imported_offset.in.handle = imported;
+  ASSERT_EQ(ioctl(importer, DRM_IOCTL_AMDGPU_GEM_MMAP, &imported_offset), 0);
+  EXPECT_NE(imported_offset.out.addr_ptr, 0u);
+  void *view = mmap(nullptr, 8192, PROT_READ, MAP_SHARED, importer,
+                    static_cast<off_t>(imported_offset.out.addr_ptr));
+  ASSERT_NE(view, MAP_FAILED);
+  EXPECT_EQ(static_cast<const uint32_t *>(view)[1025], 0x5EED5EEDu);
+
+  EXPECT_EQ(munmap(view, 8192), 0);
+  EXPECT_EQ(munmap(source, 8192), 0);
+  EXPECT_EQ(close(importer), 0);
+  EXPECT_EQ(close(exporter), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+namespace {
+
+// hipMalloc in local mode allocates at a caller VA without a memfd. Exporting it
+// must keep the caller's CPU mapping on the bytes the dmabuf exposes.
+void check_dmabuf_export_keeps_cpu_mapping(bool reserve_va) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  uint32_t gpu_id = 0;
+  {
+    std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
+    ASSERT_TRUE(gpu_id_file >> gpu_id);
+  }
+  constexpr size_t kBytes = 4096;
+  void *reserved = nullptr;
+  if (reserve_va) {
+    reserved = mmap(nullptr, kBytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    ASSERT_NE(reserved, MAP_FAILED);
+  }
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reserve_va ? reinterpret_cast<uint64_t>(reserved) : 0x500000000000ull;
+  allocation.size = kBytes;
+  allocation.gpu_id = gpu_id;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                     KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  void *mapping =
+      mmap(reserved, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED | (reserve_va ? MAP_FIXED : 0), kfd,
+           static_cast<off_t>(allocation.mmap_offset));
+  ASSERT_NE(mapping, MAP_FAILED);
+  auto *words = static_cast<volatile uint32_t *>(mapping);
+  words[0] = 0x1111u;
+
+  kfd_ioctl_export_dmabuf_args exported{};
+  exported.handle = allocation.handle;
+  exported.flags = O_CLOEXEC;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_EXPORT_DMABUF, &exported), 0);
+  const int dmabuf = static_cast<int>(exported.dmabuf_fd);
+  words[0] = 0x2222u;
+  EXPECT_EQ(msync(mapping, kBytes, MS_SYNC), 0);
+  void *view = mmap(nullptr, kBytes, PROT_READ, MAP_SHARED, dmabuf, 0);
+  ASSERT_NE(view, MAP_FAILED);
+  EXPECT_EQ(static_cast<const uint32_t *>(view)[0], 0x2222u);
+
+  EXPECT_EQ(munmap(view, kBytes), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(munmap(mapping, kBytes), 0);
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = allocation.handle;
+  EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+} // namespace
+
+TEST(InterposerDrmTest, DmabufExportKeepsAReservedCpuMapping) {
+  check_dmabuf_export_keeps_cpu_mapping(true);
+}
+
+TEST(InterposerDrmTest, DmabufExportKeepsADriverCpuMapping) {
+  check_dmabuf_export_keeps_cpu_mapping(false);
 }
 
 TEST(InterposerDrmTest, PrimeHandleToFdReturnsTheBuffer) {
