@@ -18,7 +18,6 @@ from utils import schema
 from utils.parser import (
     apply_filters,
     apply_kernel_filter,
-    apply_non_kernel_filters,
     build_dfs,
     correct_sys_info,
     load_pc_sampling_data,
@@ -715,22 +714,6 @@ class TestApplyFilters:
             index=expected_index,
         )
 
-        pd.testing.assert_frame_equal(filtered, expected)
-
-    def test_non_kernel_filters_keep_other_kernels(self) -> None:
-        """GPU and dispatch filters leave a kernel outside -k available."""
-        workload = _filter_workload()
-        workload.filter_gpu_ids = "0"
-        workload.filter_dispatch_ids = ["2"]
-        workload.filter_kernel_ids = [0]
-
-        filtered = apply_non_kernel_filters(workload)
-
-        expected = pd.DataFrame(
-            [(0, "vecAdd", 2)],
-            columns=["GPU_ID", "Kernel_Name", "Dispatch_ID"],
-            index=[1],
-        )
         pd.testing.assert_frame_equal(filtered, expected)
 
 

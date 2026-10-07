@@ -4,7 +4,7 @@
 """Evaluate the memory bandwidth bottleneck tree against profiled metrics."""
 
 import operator
-from typing import Callable, Dict, Optional
+from typing import Callable, Optional
 
 import pandas as pd
 
@@ -77,10 +77,6 @@ def run_membw_analysis(
     gpu_arch: str,
 ) -> Optional[MemBwAnalysisResult]:
     """Run the full membw pipeline: extract metrics, evaluate tree, return result."""
-    # Skip spec loading when there are no memory bandwidth tables to evaluate.
-    if not any(table_id in dfs for table_id in MEMBW_TABLE_IDS):
-        return None
-
     spec = load_membw_spec(gpu_arch)
     if spec is None:
         return None
@@ -97,7 +93,7 @@ def load_membw_spec(gpu_arch: str) -> Optional[TreeSpec]:
 
 
 def evaluate_membw_dfs(
-    dfs: Dict[int, pd.DataFrame], spec: TreeSpec, gpu_arch: str
+    dfs: dict[int, pd.DataFrame], spec: TreeSpec, gpu_arch: str
 ) -> Optional[MemBwAnalysisResult]:
     """Extract memory bandwidth metrics and evaluate them against a tree spec."""
     membw_dfs = {tid: dfs[tid] for tid in MEMBW_TABLE_IDS if tid in dfs}
