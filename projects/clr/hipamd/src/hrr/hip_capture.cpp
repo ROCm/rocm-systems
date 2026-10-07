@@ -706,7 +706,7 @@ static void pinned_fork_child() {
 }
 
 static void known_fn_add(hipFunction_t f, hipModule_t m) {
-  if (!f) return;
+  if (!f || !HIP_HRR_HOST_SNAPSHOTS) return;
   std::lock_guard<std::mutex> lk(g_known_fn_mu);
   g_known_fns.emplace(f, m);
 }
@@ -2316,12 +2316,14 @@ static hipError_t known_hipModuleEnumerateFunctions(hipFunction_t* functions,
   return r;
 }
 
-// Put the wrappers in front of the generated shims, once.
+// Put the wrappers in front of the generated shims, once. Nothing here reads
+// the HIP_HRR_HOST_SNAPSHOT* flags: an install that runs before Flag::init()
+// would see their defaults. The wrappers are installed whatever the flags say
+// and read them on each call; hip_capture_init() resolves the manifest field.
 static void install_pinned_tracking() {
   static bool done = false;
   if (done) return;
   done = true;
-  hrr_cap::writer::set_host_snapshots(HIP_HRR_HOST_SNAPSHOTS);
   hrr_cap::writer::set_fork_hooks(pinned_fork_prepare, pinned_fork_parent, pinned_fork_child);
 #define HRR_WRAP(prefix, api)                        \
   if (g_cap_table.api##_fn) {                        \
@@ -2336,11 +2338,9 @@ static void install_pinned_tracking() {
   HRR_WRAP(pinned, hipFreeHost)
   HRR_WRAP(pinned, hipFree)
   HRR_WRAP(pinned, hipDeviceReset)
-  if (HIP_HRR_HOST_SNAPSHOTS) {
-    HRR_WRAP(known, hipModuleGetFunction)
-    HRR_WRAP(known, hipGetFuncBySymbol)
-    HRR_WRAP(known, hipModuleEnumerateFunctions)
-  }
+  HRR_WRAP(known, hipModuleGetFunction)
+  HRR_WRAP(known, hipGetFuncBySymbol)
+  HRR_WRAP(known, hipModuleEnumerateFunctions)
 #undef HRR_WRAP
 }
 
@@ -3449,6 +3449,9 @@ void hip_capture_init() {
       hip_capture_build_table();
       hip_capture_install();
     }
+
+    // Flag::init() has run, whenever the shims were installed.
+    hrr_cap::writer::set_host_snapshots(HIP_HRR_HOST_SNAPSHOTS);
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
     // A refused open leaves capture off, so take the shims out of the dispatch

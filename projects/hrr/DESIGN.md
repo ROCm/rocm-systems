@@ -617,7 +617,9 @@ u8  direction  0 = restore the host contents before the launch
                1 = unchanged, read while the stream was busy; leave alone
 ```
 
-**Controls.**
+**Controls.** Capture reads the three flags when it uses them, never when it
+installs its shims, so an install that runs before the environment is read
+still honours them.
 
 - `HIP_HRR_HOST_SNAPSHOTS=0` turns snapshots off. The manifest then says
   `"host_snapshots": false`, and kernels that read pinned memory replay on
