@@ -319,7 +319,7 @@ void VCvtF32F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
             util::f16_to_f32(
                 static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                     amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
-            wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode()))));
+            wf.cu().arch(), wf.ieee_mode()))));
   }
 }
 
@@ -358,7 +358,7 @@ RJ_NOINLINE void VCvtF32F16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
             util::f16_to_f32(
                 static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                     amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
-            wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode()))));
+            wf.cu().arch(), wf.ieee_mode()))));
   }
   dpp_write_mask_scope_.restore();
 }

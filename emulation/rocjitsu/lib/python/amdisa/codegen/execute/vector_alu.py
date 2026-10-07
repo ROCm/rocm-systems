@@ -171,7 +171,7 @@ def gen_vector_unary(
             ),
             'f32_f16': (
                 f'    float s = util::f16_to_f32(static_cast<uint16_t>({_flush_f16(f"amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)")}));\n'
-                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::fp_mode::cvt_f32_f16(s, wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode()));'
+                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::fp_mode::cvt_f32_f16(s, wf.cu().arch(), wf.ieee_mode()));'
             ),
             'f16_u16': (
                 f'    uint16_t s = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));\n'
@@ -687,7 +687,7 @@ def gen_vector_binop(
             'fmin': 'std::fmin(sv0, sv1)',
             'fmax': 'std::fmax(sv0, sv1)',
             'fmac': f'std::fma(sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({d}, lane))))',
-            'ldexp': 'amdgpu::fp_mode::ldexp_f16(sv0, sv1_i, wf.fp_denorm_mode_f16_f64())',
+            'ldexp': 'amdgpu::fp_mode::ldexp_f16(sv0, sv1_i)',
         }
         expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
 

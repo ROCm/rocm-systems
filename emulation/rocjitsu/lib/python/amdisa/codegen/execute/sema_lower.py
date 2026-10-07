@@ -578,7 +578,10 @@ def _mode_arithmetic(
     arguments = operands + (
         ['0.0' if width == 64 else '0.0f'] if len(operands) == 2 else []
     )
-    arguments += [f'wf.fp_round_mode_{mode}()', f'wf.fp_denorm_mode_{mode}()']
+    arguments.append(f'wf.fp_round_mode_{mode}()')
+    # F16 sources are flushed at the register read; the helper takes no MODE.
+    if width != 16:
+        arguments.append(f'wf.fp_denorm_mode_{mode}()')
     if operation == 'FMA' and ctx.dx9_zero_fma:
         operation = 'FMA_DX9_ZERO'
     if width == 32 and operation in ('ADD', 'MUL', 'FMA', 'FMA_DX9_ZERO'):
@@ -645,10 +648,7 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         exp = _lower_expr(node.children[1], ctx)
         if ctx.exec_model == ExecModel.VECTOR and node.ty == SemaType.F16:
             val = _flushed_f16_source(node.children[0], ctx)
-            return (
-                f'amdgpu::fp_mode::ldexp_f16({val}, {exp}, '
-                'wf.fp_denorm_mode_f16_f64())'
-            )
+            return f'amdgpu::fp_mode::ldexp_f16({val}, {exp})'
         val = _lower_expr(node.children[0], ctx)
         if ctx.exec_model == ExecModel.VECTOR and node.ty in (
             SemaType.F32,
@@ -1437,7 +1437,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f16_f32': 'util::f32_to_f16_mode(std::bit_cast<float>(static_cast<uint32_t>({0})), wf.fp16_ovfl())',
     'cvt_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>({0})))',
     # VALU applies MODE policy; keep the existing raw SALU conversion separate.
-    'cvt_f32_f16_valu': 'amdgpu::fp_mode::cvt_f32_f16({0}, wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode())',
+    'cvt_f32_f16_valu': 'amdgpu::fp_mode::cvt_f32_f16({0}, wf.cu().arch(), wf.ieee_mode())',
     'cvt_f32_bf16': 'std::bit_cast<uint32_t>(util::bf16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_fp8': 'std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0})))',
     'cvt_f32_bf8': 'std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})))',
