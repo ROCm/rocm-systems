@@ -171,7 +171,13 @@ def test_function_apply_wrappers_idempotent(monkeypatch):
     monkeypatch.setattr(torch_backend, "_push_scope", _count_push)
     monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
 
-    class Foo(torch.autograd.Function):
+    class FunctionBase(torch.autograd.Function):
+        pass
+
+    # Restrict installation to this test's autograd family.
+    monkeypatch.setattr(torch_backend._STATE, "function", FunctionBase)
+
+    class Foo(FunctionBase):
         @staticmethod
         def forward(ctx, x):
             return x + 1
