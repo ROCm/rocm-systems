@@ -13,10 +13,7 @@ namespace rocjitsu {
 namespace cdna5 {
 
 VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_f16_dpp"
-               : "v_cmpx_lt_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -44,7 +41,7 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -52,7 +49,7 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -70,10 +67,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_f16_dpp"
-          : "v_cmpx_lt_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -86,10 +80,7 @@ DecodeResult decodeVCmpxLtF16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_f16_dpp"
-               : "v_cmpx_eq_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_eq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -117,7 +108,7 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -125,7 +116,7 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -143,10 +134,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_f16_dpp"
-          : "v_cmpx_eq_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -159,10 +147,7 @@ DecodeResult decodeVCmpxEqF16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_f16_dpp"
-               : "v_cmpx_le_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_le_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -190,7 +175,7 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -198,7 +183,7 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -216,10 +201,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_f16_dpp"
-          : "v_cmpx_le_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -232,10 +214,7 @@ DecodeResult decodeVCmpxLeF16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_f16_dpp"
-               : "v_cmpx_gt_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_gt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -263,7 +242,7 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -271,7 +250,7 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -289,10 +268,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_f16_dpp"
-          : "v_cmpx_gt_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -305,10 +281,7 @@ DecodeResult decodeVCmpxGtF16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lg_f16_dpp"
-               : "v_cmpx_lg_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -336,7 +309,7 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -344,7 +317,7 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -362,10 +335,7 @@ namespace detail {
 DecodeResult decodeVCmpxLgF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lg_f16_dpp"
-          : "v_cmpx_lg_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lg_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -378,10 +348,7 @@ DecodeResult decodeVCmpxLgF16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_f16_dpp"
-               : "v_cmpx_ge_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -409,7 +376,7 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -417,7 +384,7 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -435,10 +402,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_f16_dpp"
-          : "v_cmpx_ge_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -451,10 +415,7 @@ DecodeResult decodeVCmpxGeF16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_o_f16_dpp"
-               : "v_cmpx_o_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_o_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -482,7 +443,7 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -490,7 +451,7 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -508,10 +469,7 @@ namespace detail {
 DecodeResult decodeVCmpxOF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_o_f16_dpp"
-          : "v_cmpx_o_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_o_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -524,10 +482,7 @@ DecodeResult decodeVCmpxOF16Vopc(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_u_f16_dpp"
-               : "v_cmpx_u_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_u_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxUF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -555,7 +510,7 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -563,7 +518,7 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -581,10 +536,7 @@ namespace detail {
 DecodeResult decodeVCmpxUF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_u_f16_dpp"
-          : "v_cmpx_u_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_u_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -597,10 +549,7 @@ DecodeResult decodeVCmpxUF16Vopc(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nge_f16_dpp"
-               : "v_cmpx_nge_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -628,7 +577,7 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -636,7 +585,7 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -655,10 +604,7 @@ DecodeResult decodeVCmpxNgeF16Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nge_f16_dpp"
-          : "v_cmpx_nge_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nge_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -671,10 +617,7 @@ DecodeResult decodeVCmpxNgeF16Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlg_f16_dpp"
-               : "v_cmpx_nlg_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nlg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNlgF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -702,7 +645,7 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -710,7 +653,7 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -729,10 +672,7 @@ DecodeResult decodeVCmpxNlgF16Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlg_f16_dpp"
-          : "v_cmpx_nlg_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlg_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -745,10 +685,7 @@ DecodeResult decodeVCmpxNlgF16Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ngt_f16_dpp"
-               : "v_cmpx_ngt_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ngt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -776,7 +713,7 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -784,7 +721,7 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -803,10 +740,7 @@ DecodeResult decodeVCmpxNgtF16Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ngt_f16_dpp"
-          : "v_cmpx_ngt_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ngt_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -819,10 +753,7 @@ DecodeResult decodeVCmpxNgtF16Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nle_f16_dpp"
-               : "v_cmpx_nle_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nle_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNleF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -850,7 +781,7 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -858,7 +789,7 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -877,10 +808,7 @@ DecodeResult decodeVCmpxNleF16Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nle_f16_dpp"
-          : "v_cmpx_nle_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nle_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -893,10 +821,7 @@ DecodeResult decodeVCmpxNleF16Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_neq_f16_dpp"
-               : "v_cmpx_neq_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_neq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -924,7 +849,7 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -932,7 +857,7 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -951,10 +876,7 @@ DecodeResult decodeVCmpxNeqF16Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_neq_f16_dpp"
-          : "v_cmpx_neq_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_neq_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -967,10 +889,7 @@ DecodeResult decodeVCmpxNeqF16Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlt_f16_dpp"
-               : "v_cmpx_nlt_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nlt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNltF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -998,7 +917,7 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -1006,7 +925,7 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -1025,10 +944,7 @@ DecodeResult decodeVCmpxNltF16Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlt_f16_dpp"
-          : "v_cmpx_nlt_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlt_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1041,10 +957,7 @@ DecodeResult decodeVCmpxNltF16Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_f32_dpp"
-               : "v_cmpx_lt_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1095,10 +1008,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_f32_dpp"
-          : "v_cmpx_lt_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1111,10 +1021,7 @@ DecodeResult decodeVCmpxLtF32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_f32_dpp"
-               : "v_cmpx_eq_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_eq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1165,10 +1072,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_f32_dpp"
-          : "v_cmpx_eq_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1181,10 +1085,7 @@ DecodeResult decodeVCmpxEqF32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_f32_dpp"
-               : "v_cmpx_le_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_le_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1235,10 +1136,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_f32_dpp"
-          : "v_cmpx_le_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1251,10 +1149,7 @@ DecodeResult decodeVCmpxLeF32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_f32_dpp"
-               : "v_cmpx_gt_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_gt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1305,10 +1200,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_f32_dpp"
-          : "v_cmpx_gt_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1321,10 +1213,7 @@ DecodeResult decodeVCmpxGtF32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lg_f32_dpp"
-               : "v_cmpx_lg_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1375,10 +1264,7 @@ namespace detail {
 DecodeResult decodeVCmpxLgF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lg_f32_dpp"
-          : "v_cmpx_lg_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lg_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1391,10 +1277,7 @@ DecodeResult decodeVCmpxLgF32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_f32_dpp"
-               : "v_cmpx_ge_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1445,10 +1328,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_f32_dpp"
-          : "v_cmpx_ge_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1461,10 +1341,7 @@ DecodeResult decodeVCmpxGeF32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_o_f32_dpp"
-               : "v_cmpx_o_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_o_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1515,10 +1392,7 @@ namespace detail {
 DecodeResult decodeVCmpxOF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_o_f32_dpp"
-          : "v_cmpx_o_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_o_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1531,10 +1405,7 @@ DecodeResult decodeVCmpxOF32Vopc(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_u_f32_dpp"
-               : "v_cmpx_u_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_u_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxUF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1585,10 +1456,7 @@ namespace detail {
 DecodeResult decodeVCmpxUF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_u_f32_dpp"
-          : "v_cmpx_u_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_u_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1601,10 +1469,7 @@ DecodeResult decodeVCmpxUF32Vopc(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nge_f32_dpp"
-               : "v_cmpx_nge_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1656,10 +1521,7 @@ DecodeResult decodeVCmpxNgeF32Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nge_f32_dpp"
-          : "v_cmpx_nge_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nge_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1672,10 +1534,7 @@ DecodeResult decodeVCmpxNgeF32Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlg_f32_dpp"
-               : "v_cmpx_nlg_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nlg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNlgF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1727,10 +1586,7 @@ DecodeResult decodeVCmpxNlgF32Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlg_f32_dpp"
-          : "v_cmpx_nlg_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlg_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1743,10 +1599,7 @@ DecodeResult decodeVCmpxNlgF32Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ngt_f32_dpp"
-               : "v_cmpx_ngt_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ngt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1798,10 +1651,7 @@ DecodeResult decodeVCmpxNgtF32Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ngt_f32_dpp"
-          : "v_cmpx_ngt_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ngt_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1814,10 +1664,7 @@ DecodeResult decodeVCmpxNgtF32Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nle_f32_dpp"
-               : "v_cmpx_nle_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nle_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNleF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1869,10 +1716,7 @@ DecodeResult decodeVCmpxNleF32Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nle_f32_dpp"
-          : "v_cmpx_nle_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nle_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1885,10 +1729,7 @@ DecodeResult decodeVCmpxNleF32Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_neq_f32_dpp"
-               : "v_cmpx_neq_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_neq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1940,10 +1781,7 @@ DecodeResult decodeVCmpxNeqF32Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_neq_f32_dpp"
-          : "v_cmpx_neq_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_neq_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -1956,10 +1794,7 @@ DecodeResult decodeVCmpxNeqF32Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlt_f32_dpp"
-               : "v_cmpx_nlt_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nlt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNltF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2011,10 +1846,7 @@ DecodeResult decodeVCmpxNltF32Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlt_f32_dpp"
-          : "v_cmpx_nlt_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlt_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -2027,10 +1859,7 @@ DecodeResult decodeVCmpxNltF32Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_f64_dpp"
-               : "v_cmpx_lt_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2065,10 +1894,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_f64_dpp"
-          : "v_cmpx_lt_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2079,10 +1905,7 @@ DecodeResult decodeVCmpxLtF64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_f64_dpp"
-               : "v_cmpx_eq_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_eq_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2117,10 +1940,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_f64_dpp"
-          : "v_cmpx_eq_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2131,10 +1951,7 @@ DecodeResult decodeVCmpxEqF64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_f64_dpp"
-               : "v_cmpx_le_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_le_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2169,10 +1986,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_f64_dpp"
-          : "v_cmpx_le_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2183,10 +1997,7 @@ DecodeResult decodeVCmpxLeF64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_f64_dpp"
-               : "v_cmpx_gt_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_gt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2221,10 +2032,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_f64_dpp"
-          : "v_cmpx_gt_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2235,10 +2043,7 @@ DecodeResult decodeVCmpxGtF64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lg_f64_dpp"
-               : "v_cmpx_lg_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lg_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2273,10 +2078,7 @@ namespace detail {
 DecodeResult decodeVCmpxLgF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lg_f64_dpp"
-          : "v_cmpx_lg_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lg_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2287,10 +2089,7 @@ DecodeResult decodeVCmpxLgF64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_f64_dpp"
-               : "v_cmpx_ge_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ge_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2325,10 +2124,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_f64_dpp"
-          : "v_cmpx_ge_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2339,10 +2135,7 @@ DecodeResult decodeVCmpxGeF64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_o_f64_dpp"
-               : "v_cmpx_o_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_o_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2377,10 +2170,7 @@ namespace detail {
 DecodeResult decodeVCmpxOF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_o_f64_dpp"
-          : "v_cmpx_o_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_o_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2391,10 +2181,7 @@ DecodeResult decodeVCmpxOF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_u_f64_dpp"
-               : "v_cmpx_u_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_u_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxUF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2429,10 +2216,7 @@ namespace detail {
 DecodeResult decodeVCmpxUF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_u_f64_dpp"
-          : "v_cmpx_u_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_u_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2443,10 +2227,7 @@ DecodeResult decodeVCmpxUF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nge_f64_dpp"
-               : "v_cmpx_nge_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nge_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2482,10 +2263,7 @@ DecodeResult decodeVCmpxNgeF64Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nge_f64_dpp"
-          : "v_cmpx_nge_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nge_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2496,10 +2274,7 @@ DecodeResult decodeVCmpxNgeF64Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlg_f64_dpp"
-               : "v_cmpx_nlg_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nlg_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNlgF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2535,10 +2310,7 @@ DecodeResult decodeVCmpxNlgF64Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlg_f64_dpp"
-          : "v_cmpx_nlg_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlg_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2549,10 +2321,7 @@ DecodeResult decodeVCmpxNlgF64Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ngt_f64_dpp"
-               : "v_cmpx_ngt_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ngt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2588,10 +2357,7 @@ DecodeResult decodeVCmpxNgtF64Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ngt_f64_dpp"
-          : "v_cmpx_ngt_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ngt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2602,10 +2368,7 @@ DecodeResult decodeVCmpxNgtF64Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nle_f64_dpp"
-               : "v_cmpx_nle_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nle_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNleF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2641,10 +2404,7 @@ DecodeResult decodeVCmpxNleF64Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nle_f64_dpp"
-          : "v_cmpx_nle_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nle_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2655,10 +2415,7 @@ DecodeResult decodeVCmpxNleF64Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_neq_f64_dpp"
-               : "v_cmpx_neq_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_neq_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2694,10 +2451,7 @@ DecodeResult decodeVCmpxNeqF64Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_neq_f64_dpp"
-          : "v_cmpx_neq_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_neq_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2708,10 +2462,7 @@ DecodeResult decodeVCmpxNeqF64Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlt_f64_dpp"
-               : "v_cmpx_nlt_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_nlt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNltF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2747,10 +2498,7 @@ DecodeResult decodeVCmpxNltF64Vopc(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlt_f64_dpp"
-          : "v_cmpx_nlt_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2761,10 +2509,7 @@ DecodeResult decodeVCmpxNltF64Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_i16_dpp"
-               : "v_cmpx_lt_i16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -2792,7 +2537,7 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -2800,7 +2545,7 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -2818,10 +2563,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_i16_dpp"
-          : "v_cmpx_lt_i16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_i16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -2834,10 +2576,7 @@ DecodeResult decodeVCmpxLtI16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_i16_dpp"
-               : "v_cmpx_eq_i16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_eq_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqI16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -2865,7 +2604,7 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -2873,7 +2612,7 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -2891,10 +2630,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_i16_dpp"
-          : "v_cmpx_eq_i16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_i16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -2907,10 +2643,7 @@ DecodeResult decodeVCmpxEqI16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_i16_dpp"
-               : "v_cmpx_le_i16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_le_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -2938,7 +2671,7 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -2946,7 +2679,7 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -2964,10 +2697,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_i16_dpp"
-          : "v_cmpx_le_i16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_i16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -2980,10 +2710,7 @@ DecodeResult decodeVCmpxLeI16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_i16_dpp"
-               : "v_cmpx_gt_i16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_gt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtI16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -3011,7 +2738,7 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -3019,7 +2746,7 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -3037,10 +2764,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_i16_dpp"
-          : "v_cmpx_gt_i16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_i16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3053,10 +2777,7 @@ DecodeResult decodeVCmpxGtI16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_i16_dpp"
-               : "v_cmpx_ne_i16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ne_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -3084,7 +2805,7 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -3092,7 +2813,7 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -3110,10 +2831,7 @@ namespace detail {
 DecodeResult decodeVCmpxNeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_i16_dpp"
-          : "v_cmpx_ne_i16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_i16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3126,10 +2844,7 @@ DecodeResult decodeVCmpxNeI16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_i16_dpp"
-               : "v_cmpx_ge_i16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ge_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeI16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -3157,7 +2872,7 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -3165,7 +2880,7 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -3183,10 +2898,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_i16_dpp"
-          : "v_cmpx_ge_i16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_i16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3199,10 +2911,7 @@ DecodeResult decodeVCmpxGeI16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_u16_dpp"
-               : "v_cmpx_lt_u16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -3230,7 +2939,7 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -3238,7 +2947,7 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -3256,10 +2965,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_u16_dpp"
-          : "v_cmpx_lt_u16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_u16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3272,10 +2978,7 @@ DecodeResult decodeVCmpxLtU16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_u16_dpp"
-               : "v_cmpx_eq_u16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_eq_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqU16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -3303,7 +3006,7 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -3311,7 +3014,7 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -3329,10 +3032,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_u16_dpp"
-          : "v_cmpx_eq_u16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_u16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3345,10 +3045,7 @@ DecodeResult decodeVCmpxEqU16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_u16_dpp"
-               : "v_cmpx_le_u16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_le_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -3376,7 +3073,7 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -3384,7 +3081,7 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -3402,10 +3099,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_u16_dpp"
-          : "v_cmpx_le_u16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_u16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3418,10 +3112,7 @@ DecodeResult decodeVCmpxLeU16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_u16_dpp"
-               : "v_cmpx_gt_u16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_gt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtU16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -3449,7 +3140,7 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -3457,7 +3148,7 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -3475,10 +3166,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_u16_dpp"
-          : "v_cmpx_gt_u16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_u16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3491,10 +3179,7 @@ DecodeResult decodeVCmpxGtU16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_u16_dpp"
-               : "v_cmpx_ne_u16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ne_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -3522,7 +3207,7 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -3530,7 +3215,7 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -3548,10 +3233,7 @@ namespace detail {
 DecodeResult decodeVCmpxNeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_u16_dpp"
-          : "v_cmpx_ne_u16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_u16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3564,10 +3246,7 @@ DecodeResult decodeVCmpxNeU16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_u16_dpp"
-               : "v_cmpx_ge_u16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ge_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeU16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -3595,7 +3274,7 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -3603,7 +3282,7 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -3621,10 +3300,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_u16_dpp"
-          : "v_cmpx_ge_u16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_u16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3637,10 +3313,7 @@ DecodeResult decodeVCmpxGeU16Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_i32_dpp"
-               : "v_cmpx_lt_i32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -3691,10 +3364,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_i32_dpp"
-          : "v_cmpx_lt_i32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_i32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3707,10 +3377,7 @@ DecodeResult decodeVCmpxLtI32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_i32_dpp"
-               : "v_cmpx_eq_i32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_eq_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -3761,10 +3428,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_i32_dpp"
-          : "v_cmpx_eq_i32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_i32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3777,10 +3441,7 @@ DecodeResult decodeVCmpxEqI32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_i32_dpp"
-               : "v_cmpx_le_i32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_le_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -3831,10 +3492,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_i32_dpp"
-          : "v_cmpx_le_i32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_i32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3847,10 +3505,7 @@ DecodeResult decodeVCmpxLeI32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_i32_dpp"
-               : "v_cmpx_gt_i32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_gt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -3901,10 +3556,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_i32_dpp"
-          : "v_cmpx_gt_i32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_i32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3917,10 +3569,7 @@ DecodeResult decodeVCmpxGtI32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_i32_dpp"
-               : "v_cmpx_ne_i32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ne_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -3971,10 +3620,7 @@ namespace detail {
 DecodeResult decodeVCmpxNeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_i32_dpp"
-          : "v_cmpx_ne_i32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_i32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -3987,10 +3633,7 @@ DecodeResult decodeVCmpxNeI32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_i32_dpp"
-               : "v_cmpx_ge_i32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ge_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4041,10 +3684,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_i32_dpp"
-          : "v_cmpx_ge_i32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_i32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -4057,10 +3697,7 @@ DecodeResult decodeVCmpxGeI32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_u32_dpp"
-               : "v_cmpx_lt_u32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4111,10 +3748,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_u32_dpp"
-          : "v_cmpx_lt_u32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_u32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -4127,10 +3761,7 @@ DecodeResult decodeVCmpxLtU32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_u32_dpp"
-               : "v_cmpx_eq_u32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_eq_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4181,10 +3812,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_u32_dpp"
-          : "v_cmpx_eq_u32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_u32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -4197,10 +3825,7 @@ DecodeResult decodeVCmpxEqU32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_u32_dpp"
-               : "v_cmpx_le_u32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_le_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4251,10 +3876,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_u32_dpp"
-          : "v_cmpx_le_u32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_u32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -4267,10 +3889,7 @@ DecodeResult decodeVCmpxLeU32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_u32_dpp"
-               : "v_cmpx_gt_u32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_gt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4321,10 +3940,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_u32_dpp"
-          : "v_cmpx_gt_u32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_u32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -4337,10 +3953,7 @@ DecodeResult decodeVCmpxGtU32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_u32_dpp"
-               : "v_cmpx_ne_u32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ne_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4391,10 +4004,7 @@ namespace detail {
 DecodeResult decodeVCmpxNeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_u32_dpp"
-          : "v_cmpx_ne_u32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_u32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -4407,10 +4017,7 @@ DecodeResult decodeVCmpxNeU32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_u32_dpp"
-               : "v_cmpx_ge_u32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ge_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4461,10 +4068,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_u32_dpp"
-          : "v_cmpx_ge_u32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_u32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -4477,10 +4081,7 @@ DecodeResult decodeVCmpxGeU32Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_i64_dpp"
-               : "v_cmpx_lt_i64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lt_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4515,10 +4116,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_i64_dpp"
-          : "v_cmpx_lt_i64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4529,10 +4127,7 @@ DecodeResult decodeVCmpxLtI64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_i64_dpp"
-               : "v_cmpx_eq_i64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_eq_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4567,10 +4162,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_i64_dpp"
-          : "v_cmpx_eq_i64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4581,10 +4173,7 @@ DecodeResult decodeVCmpxEqI64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_i64_dpp"
-               : "v_cmpx_le_i64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_le_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4619,10 +4208,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_i64_dpp"
-          : "v_cmpx_le_i64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4633,10 +4219,7 @@ DecodeResult decodeVCmpxLeI64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_i64_dpp"
-               : "v_cmpx_gt_i64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_gt_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4671,10 +4254,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_i64_dpp"
-          : "v_cmpx_gt_i64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4685,10 +4265,7 @@ DecodeResult decodeVCmpxGtI64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_i64_dpp"
-               : "v_cmpx_ne_i64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ne_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4723,10 +4300,7 @@ namespace detail {
 DecodeResult decodeVCmpxNeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_i64_dpp"
-          : "v_cmpx_ne_i64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4737,10 +4311,7 @@ DecodeResult decodeVCmpxNeI64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_i64_dpp"
-               : "v_cmpx_ge_i64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ge_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4775,10 +4346,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_i64_dpp"
-          : "v_cmpx_ge_i64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4789,10 +4357,7 @@ DecodeResult decodeVCmpxGeI64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_u64_dpp"
-               : "v_cmpx_lt_u64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_lt_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4827,10 +4392,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_u64_dpp"
-          : "v_cmpx_lt_u64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4841,10 +4403,7 @@ DecodeResult decodeVCmpxLtU64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_u64_dpp"
-               : "v_cmpx_eq_u64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_eq_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4879,10 +4438,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_u64_dpp"
-          : "v_cmpx_eq_u64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4893,10 +4449,7 @@ DecodeResult decodeVCmpxEqU64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_u64_dpp"
-               : "v_cmpx_le_u64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_le_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4931,10 +4484,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_u64_dpp"
-          : "v_cmpx_le_u64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4945,10 +4495,7 @@ DecodeResult decodeVCmpxLeU64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_u64_dpp"
-               : "v_cmpx_gt_u64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_gt_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4983,10 +4530,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_u64_dpp"
-          : "v_cmpx_gt_u64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4997,10 +4541,7 @@ DecodeResult decodeVCmpxGtU64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_u64_dpp"
-               : "v_cmpx_ne_u64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ne_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5035,10 +4576,7 @@ namespace detail {
 DecodeResult decodeVCmpxNeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_u64_dpp"
-          : "v_cmpx_ne_u64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5049,10 +4587,7 @@ DecodeResult decodeVCmpxNeU64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_u64_dpp"
-               : "v_cmpx_ge_u64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_ge_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5087,10 +4622,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_u64_dpp"
-          : "v_cmpx_ge_u64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5101,10 +4633,7 @@ DecodeResult decodeVCmpxGeU64Vopc(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_class_f16_dpp"
-               : "v_cmpx_class_f16_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_class_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF16Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(16, OperandType::OPR_SRC,
@@ -5132,7 +4661,7 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
   }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const VopcVopDpp8MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp8->vsrc0), true);
     dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
                      (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
                      (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
@@ -5140,7 +4669,7 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const VopcVopDpp16MachineInst *>(inst);
-    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(16, OperandType::OPR_VGPR, static_cast<unsigned short>(dp->vsrc0), true);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -5159,10 +4688,7 @@ DecodeResult decodeVCmpxClassF16Vopc(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_class_f16_dpp"
-          : "v_cmpx_class_f16_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_class_f16_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -5175,10 +4701,7 @@ DecodeResult decodeVCmpxClassF16Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_class_f32_dpp"
-               : "v_cmpx_class_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_class_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5230,10 +4753,7 @@ DecodeResult decodeVCmpxClassF32Vopc(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_class_f32_dpp"
-          : "v_cmpx_class_f32_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_class_f32_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -5246,10 +4766,7 @@ DecodeResult decodeVCmpxClassF32Vopc(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
-    : Vopc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_class_f64_dpp"
-               : "v_cmpx_class_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc("v_cmpx_class_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5285,10 +4802,7 @@ DecodeResult decodeVCmpxClassF64Vopc(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vopc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_class_f64_dpp"
-          : "v_cmpx_class_f64_e32",
-      reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_class_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||

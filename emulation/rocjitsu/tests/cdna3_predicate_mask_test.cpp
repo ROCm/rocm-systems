@@ -84,7 +84,7 @@ struct Fixture {
   void execute(const std::array<uint32_t, 2> &words) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   }
 };
 

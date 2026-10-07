@@ -329,7 +329,7 @@ usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE 
                       [--cpu-dimm-pow-consumption DIMM_ADDR]
                       [--cpu-dimm-thermal-sensor DIMM_ADDR] [--core-boost-limit]
                       [--core-curr-active-freq-core-limit] [--core-energy]
-                      [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                      [--json | --csv] [--file FILE] [--loglevel LEVEL] [--show-unsupported]
 
 If no GPU is specified, returns metric information for all GPUs on the system.
 If no metric argument is provided, all metric information will be displayed.
@@ -431,7 +431,45 @@ Command Modifiers:
   --file FILE                               Saves output into a file on the provided path (stdout by default).
   --loglevel LEVEL                          Set the logging level from the possible choices:
                                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
+  --show-unsupported                        Print every field, including the ones the GPU's gpu_metrics
+                                                table version cannot carry and which are omitted by default;
+                                                affects human-readable output only, since --json and --csv
+                                                always print every field
 ```
+
+The `gpu_metrics` table the driver exposes has a version, and each version
+carries a different set of fields. Fields the detected version cannot carry are
+omitted from human-readable output. Pass `--show-unsupported` to print them as
+`N/A` instead, which restores the output of earlier releases.
+
+`--json` and `--csv` are never filtered. They are consumed by scripts, so they
+keep emitting every field, the `N/A` ones included, and their key and column
+sets are unchanged from earlier releases. `--show-unsupported` is accepted
+alongside them and has no effect.
+
+This is scoped to the metrics table version, not to what the ASIC supports. Only
+fields whose sole sources are the metrics blobs are eligible, such as the
+`hbm_stacks`, `mid`, `aid` and `xcd` temperature arrays and the `uclk_aid` and
+`socclks_mid` clock arrays. Anything the CLI can also read from hwmon or sysfs is
+always printed: the `edge`, `hotspot` and `mem` temperature sensors, the fan
+section, the voltages, and the `gfx_N`, `vclk_N`, `dclk_N`, `mem_N` and
+`socclk_N` clock slots. A field the version *does* carry but the ASIC or driver
+leaves unpopulated also still prints `N/A`.
+
+Filtering never removes a field that reports a value, and it suppresses nothing
+at all when the metrics version is unrecognized or its header cannot be read.
+
+A section named on the command line is never emptied by filtering. Plain
+`amd-smi metric` prints every section, so a section the version can populate
+nothing of is dropped entirely; on a metrics v1.3 GPU that removes the whole
+`throttle` section. Asking for that section by name instead, as in `amd-smi
+metric --throttle`, prints it in full rather than answering with silence. A named
+section that is only partly suppressed is still filtered, so `amd-smi metric
+--usage` on a v1.9 GPU still omits `jpeg_activity`.
+
+`--partition` scopes the data rather than naming a section, so it protects
+nothing and `amd-smi metric --partition` filters exactly like plain `amd-smi
+metric`.
 
 (cmd-process)=
 ### amd-smi process
@@ -618,7 +656,7 @@ Set options for specified devices.
 ~$ amd-smi set --help
 usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-f %]
                    [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
-                   [-a MODE] [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS]
+                   [-a MODE] [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS] [-n WATTS]
                    [--cpu-pwr-limit PWR_LIMIT] [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE [UTIL PPT_LIMIT]]
                    [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
@@ -668,6 +706,9 @@ Set Arguments:
   -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
   --ptl-status STATUS                         Enable or disable the PTL on a GPU processor: 0 for disable and 1 for enable
   --ptl-format FRMT1,FRMT2                    Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
+  -n, --node-power-limit WATTS                Set the node-level (NPM) power limit in watts.
+                                                This is a node-wide setting, not per-GPU.
+                                                Max node power limit: 6000 W
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
@@ -1028,6 +1069,47 @@ Command Modifiers:
                              DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+### amd-smi node
+
+Gets power and baseboard information for the node. Returns information for
+node 0 (OAM_ID 0) on the system. If no node argument is provided, all node
+information will be displayed.
+
+```shell-session
+~$ amd-smi node --help
+usage: amd-smi node [-h] [-p] [-b] [-G] [-T] [--json | --csv] [--file FILE]
+                     [--loglevel LEVEL]
+
+Node arguments:
+  -h, --help                    show this help message and exit
+  -p, --power-management        Displays power management information
+  -b, --base-board-temps        Displays baseboard temperatures
+  -G, --gtt                     Displays GTT (shared GPU memory) size
+  -T, --tray                    Displays compute tray type and accelerator count
+
+Command Modifiers:
+  --json                        Displays output in JSON format (human readable by default).
+  --csv                         Displays output in CSV format (human readable by default).
+  --file FILE                   Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL              Set the logging level from the possible choices:
+                                   DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+This example shows `amd-smi node --tray` output on a system with a UALoE
+session active:
+
+```shell-session
+~$ amd-smi node --tray
+NODE:
+    TRAY:
+        MAX_ACC_PER_TRAY: 8
+        TRAY_TYPE: HELIOS_P
+```
+
+On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
+`AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
+`max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
+
 ## Interpreting the output
 
 When you run an `amd-smi` command, the tool presents detailed information
@@ -1045,7 +1127,7 @@ information, GPU status, and running processes.
 ~$ amd-smi
 +------------------------------------------------------------------------------+
 | AMD-SMI            27.0.0                                                    |
-| amdgpu Version:    6.19.4                                                    |
+| amdgpu Version:    6.19.14.31400000-2370381                                  |
 | ROCm Version:      7.14.0                                                    |
 | Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
@@ -1148,6 +1230,16 @@ Memory) is automatically detected based on the first available sensor.
   which handles current and future versions, so releases from 7.13 onward are no
   longer affected by this mismatch.)
 
+**Empty Section**: In human-readable output, `N/A` on a section header rather than a
+field means the section has no entries. For example, `RDMA_DEVICES: N/A` under an
+AI-NIC means the NIC reported no RDMA device, which is what you see when `ionic` is
+bound but `ionic_rdma` is not loaded. A header also reads `N/A` when the section's
+query failed and the whole section was replaced by `N/A` rather than left empty, which
+is what `NIC`, `SMU`, and `IFWI` in `amd-smi static` and `FW_LIST` in `amd-smi firmware`
+do. JSON output represents an empty section as an empty object. CSV drops the section's
+columns when no device in the run reports it, and fills them with `N/A` when only some
+do.
+
 (cli-ex-static)=
 ### Example output from amd-smi static
 
@@ -1171,8 +1263,11 @@ GPU: 0
         DEVICE_ID: 0x74a0
         SUBSYSTEM_ID: 0x74a0
         REV_ID: 0x00
+        CHIP_REV_ID: 0x01
+        EXTERNAL_REV_ID: 0x47
         ASIC_SERIAL: 0xXXXXXXXXXXXXXXXX
         OAM_ID: 0
+        PHYSICAL_ACC_ID: N/A
         NUM_COMPUTE_UNITS: 228
         TARGET_GRAPHICS_VERSION: gfx942
         FLAGS: 17
@@ -1207,7 +1302,7 @@ GPU: 0
         PTL_FORMAT: N/A
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.19.4
+        VERSION: 6.19.14.31400000-2370381
         OS_KERNEL_VERSION: 5.15.0-generic
     BOARD:
         MODEL_NUMBER: N/A
@@ -1607,17 +1702,36 @@ users inspect and tune the BIOS VRAM carveout and the TTM `pages_limit`
 (shared GTT) respectively. Both features talk directly to kernel UAPI
 interfaces (sysfs / modprobe.d) and do **not** require libdrm.
 
+`amd-smi node -p` / `amd-smi node --power-management` also reports a
+`CURRENT_NODE_POWER` line alongside the existing `LIMIT`/`STATUS`/`THRESHOLD`
+fields: the current (instantaneous) node power draw in watts, read once per
+node rather than once per GPU. Use `amd-smi set -n WATTS` /
+`amd-smi set --node-power-limit WATTS` to change the node-level power limit
+(also a node-wide, not per-GPU, setting):
+
+```shell-session
+~$ amd-smi node -p
+NODE:
+    POWER_MANAGEMENT:
+        LIMIT: 6000 W
+        STATUS: ENABLED
+        THRESHOLD: N/A W
+        CURRENT_NODE_POWER: 5800 W
+```
+
 ### Supported ASICs
 
 | Feature | Hardware | Status |
 |---|---|---|
-| `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported |
+| `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported (amdgpu sysfs node) |
+| `--mem-carveout` (UMA carveout) | UEFI-HII APU platforms (e.g. HP ZBook Ultra G1a, Z2 Mini G1a) that expose the carveout through fwupd | Supported (via the fwupd daemon) |
 | `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — reported as `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)` |
 | `--gtt` (TTM `pages_limit`) | Any amdgpu system, including Instinct MI300A (`amdttm` / `amd-ttm`) and Ryzen APUs (`ttm`) | Supported |
 
 ### Prerequisites
 
 - **UMA carveout:** Linux kernel >= 7.0 (upstream commit [`685b711`](https://github.com/torvalds/linux/commit/685b711); some distros backport it to earlier kernels), an APU VBIOS that advertises ATCS 0xA + IGP info table v2.3, root, and a reboot after changing the index.
+- **UMA carveout (UEFI-HII platforms, via fwupd):**AMD SMI library reads and writes the carveout through the fwupd daemon's D-Bus BIOS-settings interface. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+). PolicyKit brokers authorization (no explicit `sudo`) for writes, and a reboot applies the new size.
 - **GTT (TTM `pages_limit`):** root (to write `/etc/modprobe.d/<module>.conf`), optionally `dracut` (the tool will rebuild the initramfs automatically when `dracut` is present), and a reboot to apply the new limit. amd-smi auto-detects the TTM kernel module name (`ttm`, `amdttm`, or `amd-ttm`) and writes the matching `.conf`.
 
 ### Troubleshooting: `MEM_CARVEOUT: N/A`
@@ -1630,5 +1744,8 @@ prints
 MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)
 ```
 
-This is expected. Use `amd-smi node --gtt` / `amd-smi set --gtt` to tune
-shared GPU memory on those platforms instead.
+On UEFI-HII APU platforms the same knob may still be reachable through fwupd; see
+the fwupd prerequisite above.
+
+This is expected on platforms with no carveout interface. Use `amd-smi node --gtt` /
+`amd-smi set --gtt` to tune shared GPU memory on those platforms instead.

@@ -1,7 +1,7 @@
 ---
 description: "Review a GitHub pull request using the AMD-SMI Review Agent"
 agent: "AMD-SMI Review Agent"
-argument-hint: "<PR_NUMBER> [review-type ...] — e.g. 1234 style tests (or just the number for comprehensive). Add 'fast' to skip rebuttal. Add 'no-build' to skip build step. Add 'inherit' to use the orchestrator's model for subagents instead of the default (Sonnet 4.6)."
+argument-hint: "<PR_NUMBER> [review-type ...] — e.g. 1234 style tests (or just the number for comprehensive). Add 'fast' to skip rebuttal. Add 'no-build' to skip build step. Add 'inherit' to use the orchestrator's model for subagents instead of the default (Sonnet 5)."
 tools: [execute, read, edit, search, agent, web, todo]
 ---
 
@@ -14,7 +14,7 @@ Review a GitHub pull request using the AMD-SMI Review Agent.
 - Remaining: optional review types: `style`, `tests`, `docs`, `architecture`, `security`, `performance`, `build`, `skeptic`
 - Special modifier: `fast` — skips the rebuttal round (comprehensive mode only)
 - Special modifier: `no-build` — skips the build & install step
-- Special modifier: `inherit` — makes all subagents inherit the orchestrator's model (the model you selected in the VS Code model picker) instead of their default (Sonnet 4.6)
+- Special modifier: `inherit` — makes all subagents inherit the orchestrator's model (the model you selected in the VS Code model picker) instead of their default (Sonnet 5)
 - If no types specified, perform a **comprehensive** review (all subagents, with rebuttal)
 
 ## Process

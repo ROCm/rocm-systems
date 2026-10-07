@@ -831,19 +831,59 @@ void KFDQMTest::BasicCuMaskingLinear(int gpuNode) {
         const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
         uint32_t ActiveCU = (pNodeProperties->NumFComputeCores / pNodeProperties->NumSIMDPerCU);
         uint32_t numSEs = pNodeProperties->NumShaderBanks;
+        /*
+         * On a multi-XCC node the driver distributes the linear CU mask across
+         * all XCCs: bit i of the mask is applied to XCC (i % NumXcc). A PM4
+         * dispatch (as used by this test), however, only executes on a single
+         * XCC (pm4_target_xcc defaults to 0). If we set mask bits contiguously,
+         * bits 1..NumXcc-1 land on XCCs that never run the dispatch, so the CU
+         * count on the executing XCC never grows and no speedup is observed.
+         *
+         * To measure scaling on the XCC that actually runs the work, stride the
+         * mask by NumXcc so every enabled CU maps onto XCC0. For single-XCC
+         * parts NumXcc == 1 and this reduces to the original contiguous mask.
+         */
+        uint32_t numXcc = pNodeProperties->NumXcc ? pNodeProperties->NumXcc : 1;
+        uint32_t CUsPerXcc = ActiveCU / numXcc;
+        /*
+         * On gfx12.1 the multi-XCC CU mask ABI is one bit per WGP (the driver
+         * interleaves one WGP bit per XCC), so only CUsPerXcc/2 mask units
+         * address real WGPs on the executing XCC. Sweeping past that point
+         * keeps growing the expected CU count while the measured time has
+         * already saturated (all WGPs on), driving the ratio below tolerance
+         * and failing. Cap the sweep at the WGP count for that case. On other
+         * parts one mask bit maps to one CU, so sweep all CUsPerXcc.
+         */
+        bool oneBitPerWgp = (m_FamilyId >= FAMILY_GFX12) && (numXcc > 1);
+        uint32_t unitsPerXcc = oneBitPerWgp ? CUsPerXcc / 2 : CUsPerXcc;
+        /*
+         * The driver enables the (strided) CU mask round-robin across the
+         * shader engines of the executing XCC, and the dispatch spreads its
+         * workgroups evenly across those engines. The usable parallelism is
+         * therefore bounded by the least-populated engine, so it only grows in
+         * steps of SEsPerXcc: enabling an odd extra CU adds a WGP to one engine
+         * without a matching WGP on the other, yielding no speedup. Compare the
+         * measured time against this SE-balanced effective CU count instead of
+         * the raw CU count so the expectation matches what the HW can deliver.
+         */
+        uint32_t SEsPerXcc = (numXcc > 1 && numSEs >= numXcc) ? numSEs / numXcc : 1;
         LOG() << std::dec << "# Compute cores: " << pNodeProperties->NumFComputeCores << std::endl;
         LOG() << std::dec << "# SIMDs per CU: " << pNodeProperties->NumSIMDPerCU << std::endl;
         LOG() << std::dec << "# Shader engines: " << numSEs << std::endl;
         LOG() << std::dec << "# Active CUs: " << ActiveCU << std::endl;
+        LOG() << std::dec << "# XCCs: " << numXcc << std::endl;
+        LOG() << std::dec << "# Active CUs per XCC: " << CUsPerXcc << std::endl;
+        LOG() << std::dec << "# Mask units per XCC: " << unitsPerXcc << std::endl;
+        LOG() << std::dec << "# Shader engines per XCC: " << SEsPerXcc << std::endl;
         HSAint64 TimewithCU1, TimewithCU;
         uint32_t maskNumDwords = (ActiveCU + 31) / 32; /* Round up to the nearest multiple of 32 */
         uint32_t maskNumBits = maskNumDwords * 32;
         uint32_t mask[maskNumDwords];
         double ratio;
 
-        mask[0] = 0x1;
-        for (int i = 1; i < maskNumDwords; i++)
+        for (uint32_t i = 0; i < maskNumDwords; i++)
             mask[i] = 0x0;
+        mask[0] = 0x1;
 
         /* Execute once to get any HW optimizations out of the way */
         TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
@@ -851,14 +891,22 @@ void KFDQMTest::BasicCuMaskingLinear(int gpuNode) {
         LOG() << "Getting baseline performance numbers (CU Mask: 0x1)" << std::endl;
         TimewithCU1 = GetAverageTimeConsumedwithCUMask(gpuNode, mask, maskNumBits, 3);
 
-        for (int nCUs = 2; nCUs <= ActiveCU; nCUs++) {
-            int maskIndex = (nCUs - 1) / 32;
-            mask[maskIndex] |= 1 << ((nCUs - 1) % 32);
+        for (uint32_t nCUs = 2; nCUs <= unitsPerXcc; nCUs++) {
+            uint32_t maskBit = (nCUs - 1) * numXcc;
+            uint32_t maskIndex = maskBit / 32;
+            mask[maskIndex] |= 1U << (maskBit % 32);
+
+            /* SE-balanced effective CU count (see comment above). Reduces to
+             * nCUs on single-XCC parts (SEsPerXcc handling is a no-op there).
+             */
+            uint32_t effCUs = (SEsPerXcc > 1 && nCUs >= SEsPerXcc) ?
+                              SEsPerXcc * (nCUs / SEsPerXcc) : nCUs;
 
             TimewithCU = TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
-            ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * nCUs);
+            ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * effCUs);
 
-            LOG() << "Expected performance of " << nCUs << " CUs vs 1 CU:" << std::endl;
+            LOG() << "Expected performance of " << nCUs << " CUs (effective "
+                  << effCUs << ") vs 1 CU:" << std::endl;
             LOG() << std::setprecision(2) << CuNegVariance << " <= " << std::fixed << std::setprecision(8)
                   << ratio << " <= " << std::setprecision(2) << CuPosVariance << std::endl;
 
@@ -885,7 +933,7 @@ TEST_F(KFDQMTest, BasicCuMaskingLinear) {
 // ====== ExtendedCuMasking Helper Functions ====== //
 
 
-#define CUMASK_DEBUG 0   // Enable extra output for debugging issues
+#define CUMASK_DEBUG 0           // Enable extra output for debugging issues
 
 #if CUMASK_DEBUG
 #define DBG_PRINT printf
@@ -929,6 +977,31 @@ static void printMask(const char *pHeader, uint32_t *pMask, uint32_t numDwords) 
  *   Special value: -1 (specifies ALL)
  *
  */
+/*
+ * Linear index of a WGP within an XCC: unit = se + sa*numSEs + wgp*numSEs*numSAperSE.
+ * (numSEs is SEs-per-XCC on gfx12.1, global otherwise.)
+ */
+static inline uint32_t cuMaskUnitIndex(const mask_config_t &c, uint32_t se, uint32_t sa, uint32_t wgp) {
+    return se + sa * c.numSEs + wgp * (c.numSEs * c.numSAperSE);
+}
+
+/*
+ * Set the mask bit(s) for one WGP unit, honouring the encoding described by
+ * maskConfig:
+ *   - gfx12.1 (numXcc > 1): one bit per WGP, interleaved across XCCs, so the
+ *     bit lives at (targetXcc + unit * numXcc).
+ *   - legacy (numXcc <= 1): two contiguous bits per WGP at (unit * 2).
+ */
+static inline void cuMaskSetUnit(uint32_t *pMask, const mask_config_t &c, uint32_t unit) {
+    if (c.numXcc > 1) {
+        uint32_t bit = c.targetXcc + unit * c.numXcc;
+        pMask[bit / 32] |= 1U << (bit % 32);
+    } else {
+        uint32_t insLoc = unit * 2;
+        pMask[insLoc / 32] |= 0x3U << (insLoc % 32);
+    }
+}
+
 static bool setCUMask(uint32_t *pMask, mask_config_t maskConfig, uint32_t seMask, uint32_t saMask, uint32_t wgpMask) {
 
     bool result = true;
@@ -941,8 +1014,7 @@ static bool setCUMask(uint32_t *pMask, mask_config_t maskConfig, uint32_t seMask
                         if (((saMask >> j) & 1)) {
                             for (int k = 0; k < maskConfig.numSEs; k++) {
                                 if (((seMask >> k) & 1)) {
-                                    uint32_t insLoc = k * 2 + j * (2 * maskConfig.numSEs) + i * (2 * maskConfig.numSEs * maskConfig.numSAperSE);
-                                    pMask[insLoc / 32] |= (0x3 << (insLoc % 32));
+                                    cuMaskSetUnit(pMask, maskConfig, cuMaskUnitIndex(maskConfig, k, j, i));
                                 }
                             }
                         }
@@ -980,10 +1052,89 @@ static bool setCUMask(uint32_t *pMask, mask_config_t maskConfig, uint32_t seMask
  * When false is returned, we should skipped the specific test scenario.
  *
  */
+/*
+ * gfx12.1 variant of adjustMask.
+ *
+ * This must mirror KFD's mqd_symmetrically_map_cu_mask_v12_1() exactly. That
+ * routine walks physical WGP slots in (wgp, sa, se) order, skipping any (se, sa)
+ * whose active-WGP count is not greater than the current WGP level, and consumes
+ * one interleaved user-mask bit (targetXcc + k*numXcc) per surviving slot -- a
+ * single *global* interleaved compaction across all (se, sa) of the XCC.
+ *
+ * Compacting each (se, sa) column independently is only equivalent when every
+ * column has the same active-WGP count. When counts differ (inactive WGPs),
+ * the surviving high-level slots of later columns shift, so a per-column
+ * model writes bits at the wrong indices. Replicate KFD's enumeration instead:
+ * for each surviving physical slot (se, sa, wgp) at global index k, request it
+ * (set bit targetXcc + k*numXcc) iff the user asked for that (se, sa, wgp).
+ *
+ * An inactive WGP can sit at any position within a column, not just the top:
+ * waves report the *physical* WGP index, so a mid-column gap shows up as a
+ * gap (e.g. physical WGPs 0-5,7 active with 6 missing). We therefore record the
+ * ordered list of surviving physical WGPs per column and map KFD's compacted
+ * slot k to the actual surviving physical WGP before consulting the user mask.
+ */
+static bool adjustMaskXcc(uint32_t *pAdjMask, uint32_t *pMask, mask_config_t c) {
+    bool nonZero = false;
+
+    memset(pAdjMask, 0, sizeof(uint32_t) * c.numDwords);
+
+    const uint32_t nCols = c.numSEs * c.numSAperSE;
+    uint32_t activeCount[nCols];
+    uint32_t survivor[nCols * c.numWGPperSA];
+
+    for (uint32_t se = 0; se < c.numSEs; se++) {
+        for (uint32_t sa = 0; sa < c.numSAperSE; sa++) {
+            const uint32_t col = se * c.numSAperSE + sa;
+            uint32_t active = 0;
+            for (uint32_t wgp = 0; wgp < c.numWGPperSA; wgp++) {
+                uint32_t unit = cuMaskUnitIndex(c, se, sa, wgp);
+                uint32_t bit = c.targetXcc + unit * c.numXcc;
+                if (!(c.pInactiveMask[bit / 32] & (1U << (bit % 32))))
+                    survivor[col * c.numWGPperSA + active++] = wgp;
+            }
+            activeCount[col] = active;
+        }
+    }
+
+    uint32_t k = 0;
+    for (uint32_t slot = 0; slot < c.numWGPperSA; slot++) {
+        for (uint32_t sa = 0; sa < c.numSAperSE; sa++) {
+            for (uint32_t se = 0; se < c.numSEs; se++) {
+                const uint32_t col = se * c.numSAperSE + sa;
+                if (activeCount[col] > slot) {
+                    uint32_t physWgp = survivor[col * c.numWGPperSA + slot];
+                    uint32_t reqUnit = cuMaskUnitIndex(c, se, sa, physWgp);
+                    uint32_t reqBit = c.targetXcc + reqUnit * c.numXcc;
+                    if (pMask[reqBit / 32] & (1U << (reqBit % 32))) {
+                        uint32_t adjBit = c.targetXcc + k * c.numXcc;
+                        pAdjMask[adjBit / 32] |= 1U << (adjBit % 32);
+                        nonZero = true;
+                    }
+                    k++;
+                }
+            }
+        }
+    }
+
+#if CUMASK_DEBUG
+    printf("\nAdjusting mask (Xcc %u, survivors=%u):\n", c.targetXcc, k);
+    printMask("         mask: ", pMask, c.numDwords);
+    printMask("     inactive: ", c.pInactiveMask, c.numDwords);
+    printMask("     adjusted: ", pAdjMask, c.numDwords);
+    printf("\n");
+#endif //CUMASK_DEBUG
+
+    return nonZero;
+}
+
 bool adjustMask(uint32_t *pAdjMask, uint32_t *pMask, mask_config_t maskConfig) {
     int wi = 0;
     int totalBits = maskConfig.numBits;
     bool nonZero = false;
+
+    if (maskConfig.numXcc > 1)
+        return adjustMaskXcc(pAdjMask, pMask, maskConfig);
 
     uint32_t *tempInactiveMask = new uint32_t[maskConfig.numDwords]{};
     uint32_t *tempAdjustMask = new uint32_t[maskConfig.numDwords]{};
@@ -1181,7 +1332,13 @@ static bool testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfig, H
     dispatch.SetArgs(NULL, pOutput);
     dispatch.SetDim(numWorkItems, 1, 1);
 
-    EXPECT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
+    /* On gfx12.1 run the dispatch on the XCC this mask targets (pm4_target_xcc
+     * is encoded in bits 8-15 of the queue percentage). */
+    unsigned int queuePercentage = BaseQueue::DEFAULT_QUEUE_PERCENTAGE;
+    if (maskConfig.numXcc > 1)
+        queuePercentage |= (maskConfig.targetXcc << 8);
+
+    EXPECT_SUCCESS_GPU(queue.Create(gpuNode, BaseQueue::DEFAULT_QUEUE_SIZE, NULL, queuePercentage), gpuNode);
 
     EXPECT_SUCCESS_GPU(queue.SetCUMask(pAdjMask, maskConfig.numBits), gpuNode);
 
@@ -1190,6 +1347,121 @@ static bool testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfig, H
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
     return validateTest(pMask, maskConfig, numWorkItems, pOutput, pResultMask);
+}
+
+
+/*
+ * gfx12.1 multi-XCC variant of the ExtendedCuMasking sub-tests.
+ *
+ * On gfx12.1 the CU mask ABI is one bit per WGP, interleaved across XCCs (the
+ * bit for unit u of XCC x is at x + u*numXcc), and a PM4 dispatch only runs on
+ * the single XCC selected by pm4_target_xcc. The HW_ID1 register the shader
+ * samples reports SE/SA/WGP local to the executing XCC, so we drive each XCC in
+ * turn with per-XCC topology (SEsPerXcc SEs) and validate its WGPs in isolation.
+ *
+ * The same correctness sub-tests as the single-XCC path are run per XCC: full
+ * mask / inactive detection, all SE / SA / WGP combinations, a linear sweep, and
+ * random asymmetric subsets.
+ */
+static void extendedCuMaskingXcc(int gpuNode, const std::string &nodeStr,
+                                 uint32_t numXcc, uint32_t SEsPerXcc,
+                                 uint32_t numSAperSE, uint32_t numWGPperSA,
+                                 uint32_t maskNumDwords, uint32_t maskNumBits,
+                                 HsaMemoryBuffer &programBuffer,
+                                 uint32_t numWorkItems, out_data_t *pOutput) {
+    uint32_t mask[maskNumDwords];
+    uint32_t inactiveMask[maskNumDwords];
+    uint32_t totalConfigTested = 0;
+    const uint32_t randomCount = 250;   // per XCC
+    /*
+     * gridWgpPerXcc is the addressing grid the mask is built on. numWGPperSA is
+     * the per-SA maximum applied uniformly to every SA, so the grid is
+     * SEsPerXcc * numSAperSE * numWGPperSA. This is what the ABI bit layout is
+     * sized to. Grid slots that do not map to real hardware are discovered as
+     * inactive by the full-mask probe below.
+     */
+    const uint32_t gridWgpPerXcc = SEsPerXcc * numSAperSE * numWGPperSA;
+
+    LOG() << nodeStr << " gfx12.1 multi-XCC CU masking: " << numXcc
+          << " XCCs, " << gridWgpPerXcc
+          << " grid WGPs/XCC (1 bit/WGP interleaved)\n";
+
+    for (uint32_t xcc = 0; xcc < numXcc; xcc++) {
+        mask_config_t cfg = { maskNumDwords, maskNumBits, SEsPerXcc,
+                              numSAperSE, numWGPperSA, NULL, numXcc, xcc };
+
+        LOG() << nodeStr << " === XCC " << xcc << " ===\n";
+
+        /* Detect inactive WGPs on this XCC (full mask, then requested & ~result). */
+        memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+        memset(inactiveMask, 0, sizeof(uint32_t) * maskNumDwords);
+        setCUMask(mask, cfg, -1, -1, -1);
+        uint32_t inactiveCount = 0;
+        if (!testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput, inactiveMask)) {
+            for (uint32_t i = 0; i < maskNumDwords; i++) {
+                inactiveMask[i] = mask[i] & ~inactiveMask[i];
+                inactiveCount += __builtin_popcount(inactiveMask[i]);
+            }
+            cfg.pInactiveMask = inactiveMask;
+        }
+        /*
+         * The full-mask probe drives every grid slot, so the slots that report
+         * active are the WGPs that physically exist and are enabled. Anything in
+         * the grid that stays inactive is a non-existent SA1+ top slot.
+         */
+        const uint32_t activeWgp = gridWgpPerXcc - inactiveCount;
+        LOG() << nodeStr << " XCC " << xcc << " active WGPs: " << activeWgp
+              << " (of " << gridWgpPerXcc << " grid)\n";
+
+        // All SE combinations (0 not allowed).
+        for (uint32_t i = 1; i < (1u << SEsPerXcc); i++) {
+            memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+            setCUMask(mask, cfg, i, -1, -1);
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput), gpuNode);
+            totalConfigTested++;
+        }
+
+        // All SA combinations (0 not allowed).
+        for (uint32_t i = 1; i < (1u << numSAperSE); i++) {
+            memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+            setCUMask(mask, cfg, -1, i, -1);
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput), gpuNode);
+            totalConfigTested++;
+        }
+
+        // All WGP combinations (0 not allowed).
+        for (uint32_t i = 1; i < (1u << numWGPperSA); i++) {
+            memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+            setCUMask(mask, cfg, -1, -1, i);
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput), gpuNode);
+            totalConfigTested++;
+        }
+
+        // Linear: enable one WGP unit at a time until all are on.
+        memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+        for (uint32_t u = 0; u < gridWgpPerXcc; u++) {
+            cuMaskSetUnit(mask, cfg, u);
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput), gpuNode);
+            totalConfigTested++;
+        }
+
+        // Random asymmetric subsets of this XCC's WGPs.
+        srand(1 + xcc);
+        for (uint32_t r = 0; r < randomCount; r++) {
+            memset(mask, 0, sizeof(uint32_t) * maskNumDwords);
+            uint32_t wgpMask = (rand() % ((1ULL << gridWgpPerXcc) - 1)) + 1;
+            for (uint32_t u = 0; u < gridWgpPerXcc; u++) {
+                if (wgpMask & (1u << u))
+                    cuMaskSetUnit(mask, cfg, u);
+            }
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, cfg, programBuffer, numWorkItems, pOutput), gpuNode);
+            totalConfigTested++;
+        }
+    }
+
+    LOG() << std::endl;
+    LOG() << nodeStr << " Total config tested: " << totalConfigTested << std::endl;
+    LOG() << std::endl;
 }
 
 
@@ -1235,8 +1507,28 @@ void KFDQMTest::extendedCuMasking(int gpuNode) {
         const uint32_t activeCU = (pProps->NumFComputeCores / pProps->NumSIMDPerCU);
         const uint32_t numSEs = pProps->NumShaderBanks;
         const uint32_t numSAperSE = pProps->NumArrays;
-        const uint32_t numWGPperSA = pProps->NumCUPerArray / 2;
-        const uint32_t maxCU = numSEs * numSAperSE * numWGPperSA * 2;
+        const uint32_t numXcc = pProps->NumXcc ? pProps->NumXcc : 1;
+        const uint32_t SEsPerXcc = (numXcc > 1 && numSEs >= numXcc) ? numSEs / numXcc : numSEs;
+        /*
+         * gfx12.1 (multi-XCC): KFD topology is WGP-granular and the CU mask ABI
+         * is one bit per WGP. The physical WGP-per-SA count is NOT uniform on
+         * these parts: SA0 can hold 9 WGPs and SA1 up to 8 (e.g. gfx1250/MI450 is
+         * 9/8 on SA0 and 8/7 on SA1, 34 physical slots per XCC). KFD's per-XCC
+         * CU-mask ABI walks WGP levels (cu, sh, se) and a
+         * 9th WGP of SA0 (cu == 8, sh == 0) is even mapped to a special hardware
+         * slot. We therefore size the model to the per-SA *maximum* (NumCUPerArray,
+         * which is WGP-granular here, e.g. 9) rather than the average
+         * activeCU/(numSEs*numSAperSE) (which is 8 and truncates SA0's 9th WGP,
+         * shifting every later ABI bit and dropping the last WGP). Shorter columns
+         * (SA1) are discovered as inactive by the full-mask probe.
+         * Pre-gfx12.1 topology is CU-granular (two CUs per WGP), so convert.
+         */
+        const bool wgpGranular = (numXcc > 1);
+        const uint32_t numWGPperSA = wgpGranular
+            ? pProps->NumCUPerArray
+            : (pProps->NumCUPerArray / 2);
+        const uint32_t totalWGP = numSEs * numSAperSE * numWGPperSA;
+        const uint32_t maxCU = totalWGP * 2;
 
         std::ostringstream nodeStream;
         nodeStream << "(Node " << gpuNode << ")";
@@ -1251,18 +1543,25 @@ void KFDQMTest::extendedCuMasking(int gpuNode) {
         LOG() << std::dec << "               Max CUs: " << std::setw(3) << maxCU << std::endl;
         LOG() << std::dec << "        Shader Engines: " << std::setw(3) << numSEs << std::endl;
         LOG() << std::dec << "            SAs per SE: " << std::setw(3) << numSAperSE << std::endl;
-        LOG() << std::dec << "           WGPs per SA: " << std::setw(3) << numWGPperSA << std::endl;
+        LOG() << std::dec << "     WGPs per SA (max): " << std::setw(3) << numWGPperSA << std::endl;
+        LOG() << std::dec << "                  XCCs: " << std::setw(3) << numXcc << std::endl;
+        LOG() << std::dec << "            SEs per XCC: " << std::setw(3) << SEsPerXcc << std::endl;
         LOG() << std::dec << "****************************************" << std::endl;
         logMutex.unlock();
 
-        const uint32_t maskNumDwords = (maxCU + 31) / 32; /* Round up to the nearest multiple of 32 */
+        /*
+         * CU-mask array holds one bit per WGP on gfx12.1 (multi-XCC) and two
+         * bits per WGP (== maxCU) on earlier parts.
+         */
+        const uint32_t maskNumBitsNeeded = wgpGranular ? totalWGP : maxCU;
+        const uint32_t maskNumDwords = (maskNumBitsNeeded + 31) / 32; /* Round up to the nearest multiple of 32 */
         const uint32_t maskNumBits = maskNumDwords * 32;
 
 
         uint32_t mask[maskNumDwords];
         uint32_t inactiveMask[maskNumDwords];
 
-        mask_config_t maskConfig = { maskNumDwords, maskNumBits, numSEs, numSAperSE, numWGPperSA, NULL };
+        mask_config_t maskConfig = { maskNumDwords, maskNumBits, numSEs, numSAperSE, numWGPperSA, NULL, 1, 0 };
 
         /*
          * Note: On system with WGPs, CU bits in the same WGP must be either both set or both unset
@@ -1310,6 +1609,18 @@ void KFDQMTest::extendedCuMasking(int gpuNode) {
         ASSERT_NOTNULL_GPU(pAsm, gpuNode);
         ASSERT_SUCCESS_GPU(pAsm->RunAssembleBuf(CheckCuMaskIsa, programBuffer.As<char*>()), gpuNode);
 
+        /*
+         * gfx12.1 (multi-XCC): the CU mask ABI is one bit per WGP interleaved
+         * across XCCs and a PM4 dispatch runs on a single XCC, so validate each
+         * XCC in turn with a dedicated per-XCC path. The single-XCC flat-SE
+         * flow below is unchanged for all other parts.
+         */
+        if (numXcc > 1) {
+            extendedCuMaskingXcc(gpuNode, nodeStr, numXcc, SEsPerXcc, numSAperSE,
+                                 numWGPperSA, maskNumDwords, maskNumBits,
+                                 programBuffer, numWorkItems, pOutput);
+            return;
+        }
 
        /*
         * Check and record any inactive WPGs.

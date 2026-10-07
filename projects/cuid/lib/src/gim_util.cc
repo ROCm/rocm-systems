@@ -3,7 +3,10 @@
 
 #include "gim_util.h"
 
-#include "cuid_util.h"
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <cctype>
 #include <cerrno>
@@ -11,10 +14,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <unistd.h>
+
+#include "cuid_util.h"
 
 namespace cuid {
 namespace gim {
@@ -27,7 +28,7 @@ namespace {
 // ABI drift.
 
 constexpr size_t kSmiMaxStringLength = 256;
-constexpr size_t kSmiMaxPayload = 1024;          // uint32_t entries
+constexpr size_t kSmiMaxPayload = 1024;  // uint32_t entries
 constexpr size_t kSmiMaxPayloadBytes = kSmiMaxPayload * sizeof(uint32_t);
 constexpr size_t kSmiMaxDevices = 32;
 
@@ -48,16 +49,14 @@ constexpr uint32_t kSmiVersionBeta1 = 0x00000004u;
 constexpr uint32_t kSmiVersionBeta0 = 0x00000003u;
 constexpr uint32_t kSmiVersionAlpha0 = 0x00000002u;
 
-constexpr uint32_t kHandshakeVersions[] = {
-    kSmiVersionBeta4, kSmiVersionBeta3, kSmiVersionBeta2,
-    kSmiVersionBeta1, kSmiVersionBeta0, kSmiVersionAlpha0};
+constexpr uint32_t kHandshakeVersions[] = {kSmiVersionBeta4, kSmiVersionBeta3, kSmiVersionBeta2,
+                                           kSmiVersionBeta1, kSmiVersionBeta0, kSmiVersionAlpha0};
 
 // _IOWR('S', 0, struct smi_ioctl_cmd). The struct size is encoded in the
 // ioctl number, so we use the same total wire size (4108 bytes) the GIM
 // driver expects for its smi_ioctl_cmd transport.
 constexpr size_t kSmiIoctlCmdSize = 4 + 2 + 2 + 4 + kSmiMaxPayloadBytes;
-constexpr unsigned long kSmiIoctlCmd =
-    _IOC(_IOC_READ | _IOC_WRITE, 'S', 0, kSmiIoctlCmdSize);
+constexpr unsigned long kSmiIoctlCmd = _IOC(_IOC_READ | _IOC_WRITE, 'S', 0, kSmiIoctlCmdSize);
 
 #pragma pack(push, 1)
 struct SmiInHdrWire {
@@ -78,8 +77,7 @@ struct SmiIoctlCmdWire {
   SmiOutHdrWire out_hdr;
   uint8_t payload[kSmiMaxPayloadBytes];
 };
-static_assert(sizeof(SmiIoctlCmdWire) == kSmiIoctlCmdSize,
-              "SmiIoctlCmdWire size mismatch");
+static_assert(sizeof(SmiIoctlCmdWire) == kSmiIoctlCmdSize, "SmiIoctlCmdWire size mismatch");
 
 // SMI handshake input/output payload (struct smi_handshake).
 struct SmiHandshakeWire {
@@ -95,21 +93,19 @@ struct SmiDeviceHandleWire {
   uint64_t handle;
   uint64_t device_id;
 };
-static_assert(sizeof(SmiDeviceHandleWire) == 16,
-              "SmiDeviceHandleWire size mismatch");
+static_assert(sizeof(SmiDeviceHandleWire) == 16, "SmiDeviceHandleWire size mismatch");
 
 // One entry of struct smi_server_static_info::devices[] (Linux, natural
 // alignment). dev_id is a 16-byte smi_device_handle_t, so each entry is 40
 // bytes.
 struct SmiServerDeviceWire {
   SmiDeviceHandleWire dev_id;
-  uint64_t bdf;     // union smi_bdf packed 64-bit value
+  uint64_t bdf;  // union smi_bdf packed 64-bit value
   uint8_t failed;
   uint8_t padding[3];
   uint32_t reserved[3];
 };
-static_assert(sizeof(SmiServerDeviceWire) == 40,
-              "SmiServerDeviceWire size mismatch");
+static_assert(sizeof(SmiServerDeviceWire) == 40, "SmiServerDeviceWire size mismatch");
 
 // struct smi_server_static_info (Linux, natural alignment). The trailing
 // reserved area expands the struct to the full 4096-byte SMI payload; the GIM
@@ -120,8 +116,7 @@ struct SmiServerStaticInfoWire {
   SmiServerDeviceWire devices[kSmiMaxDevices];
   uint64_t reserved[351];
 };
-static_assert(sizeof(SmiServerStaticInfoWire) == 4096,
-              "SmiServerStaticInfoWire size mismatch");
+static_assert(sizeof(SmiServerStaticInfoWire) == 4096, "SmiServerStaticInfoWire size mismatch");
 static_assert(sizeof(SmiServerStaticInfoWire) <= kSmiMaxPayloadBytes,
               "SmiServerStaticInfoWire larger than SMI payload");
 
@@ -130,8 +125,7 @@ static_assert(sizeof(SmiServerStaticInfoWire) <= kSmiMaxPayloadBytes,
 struct SmiDeviceInfoWire {
   SmiDeviceHandleWire dev_id;
 };
-static_assert(sizeof(SmiDeviceInfoWire) == 16,
-              "SmiDeviceInfoWire size mismatch");
+static_assert(sizeof(SmiDeviceInfoWire) == 16, "SmiDeviceInfoWire size mismatch");
 
 // struct smi_asic_info (Linux, natural alignment).
 struct SmiAsicInfoWire {
@@ -166,7 +160,7 @@ static_assert(sizeof(SmiAsicInfoWire) <= kSmiMaxPayloadBytes,
               "SmiAsicInfoWire larger than SMI payload");
 
 // Copy a C string field bounded to its array length, ensuring NUL-termination.
-std::string fixed_string_to_std(const char *src, size_t cap) {
+std::string fixed_string_to_std(const char* src, size_t cap) {
   size_t n = 0;
   while (n < cap && src[n] != '\0') {
     ++n;
@@ -174,11 +168,11 @@ std::string fixed_string_to_std(const char *src, size_t cap) {
   return std::string(src, n);
 }
 
-bool is_canonical_bdf(const std::string &bdf) {
+bool is_canonical_bdf(const std::string& bdf) {
   return bdf.size() == 12 && bdf[4] == ':' && bdf[7] == ':' && bdf[10] == '.';
 }
 
-} // namespace
+}  // namespace
 
 // ----------------------------------------------------------------------------
 // GimClient
@@ -194,7 +188,7 @@ GimClient::~GimClient() {
 }
 
 bool GimClient::is_available() {
-  struct stat st {};
+  struct stat st{};
   if (::stat(kGimSmiDevicePath, &st) != 0) {
     return false;
   }
@@ -213,8 +207,8 @@ amdcuid_status_t GimClient::init() {
     int fd = ::open(kGimSmiDevicePath, O_RDWR | O_CLOEXEC);
     if (fd < 0) {
       const int err = errno;
-      LOG(DEBUG, "GIM: open(" << kGimSmiDevicePath
-                              << ") failed: " << std::strerror(err));
+      LOG(DEBUG,
+          "GIM: open(" << kGimSmiDevicePath << ") failed: " << CuidUtilities::errno_string(err));
       if (err == EACCES || err == EPERM) {
         return AMDCUID_STATUS_PERMISSION_DENIED;
       }
@@ -227,12 +221,10 @@ amdcuid_status_t GimClient::init() {
   for (uint32_t version : kHandshakeVersions) {
     SmiHandshakeWire hs{version};
     SmiHandshakeWire resp{};
-    amdcuid_status_t st = do_ioctl(kSmiCmdCodeHandshake, &hs, sizeof(hs), &resp,
-                                   sizeof(resp));
+    amdcuid_status_t st = do_ioctl(kSmiCmdCodeHandshake, &hs, sizeof(hs), &resp, sizeof(resp));
     if (st == AMDCUID_STATUS_SUCCESS) {
       handshake_done_ = true;
-      LOG(DEBUG, "GIM: handshake succeeded with version 0x" << std::hex
-                                                            << version);
+      LOG(DEBUG, "GIM: handshake succeeded with version 0x" << std::hex << version);
       return AMDCUID_STATUS_SUCCESS;
     }
   }
@@ -243,8 +235,8 @@ amdcuid_status_t GimClient::init() {
   return AMDCUID_STATUS_UNSUPPORTED;
 }
 
-amdcuid_status_t GimClient::do_ioctl(uint32_t cmd_code, const void *in,
-                                     size_t in_len, void *out, size_t out_len) {
+amdcuid_status_t GimClient::do_ioctl(uint32_t cmd_code, const void* in, size_t in_len, void* out,
+                                     size_t out_len) {
   if (fd_ < 0) {
     return AMDCUID_STATUS_UNSUPPORTED;
   }
@@ -264,15 +256,14 @@ amdcuid_status_t GimClient::do_ioctl(uint32_t cmd_code, const void *in,
   if (::ioctl(fd_, kSmiIoctlCmd, &cmd) != 0) {
     const int err = errno;
     LOG(DEBUG, "GIM: ioctl(cmd=0x" << std::hex << cmd_code
-                                   << ") failed: " << std::strerror(err));
+                                   << ") failed: " << CuidUtilities::errno_string(err));
     if (err == EACCES || err == EPERM) {
       return AMDCUID_STATUS_PERMISSION_DENIED;
     }
     return AMDCUID_STATUS_UNSUPPORTED;
   }
   if (cmd.out_hdr.status != 0) {
-    LOG(DEBUG, "GIM: SMI cmd 0x" << std::hex << cmd_code
-                                 << " returned status " << std::dec
+    LOG(DEBUG, "GIM: SMI cmd 0x" << std::hex << cmd_code << " returned status " << std::dec
                                  << cmd.out_hdr.status);
     return AMDCUID_STATUS_UNSUPPORTED;
   }
@@ -282,7 +273,7 @@ amdcuid_status_t GimClient::do_ioctl(uint32_t cmd_code, const void *in,
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t GimClient::get_devices(std::vector<GimDeviceEntry> &out) {
+amdcuid_status_t GimClient::get_devices(std::vector<GimDeviceEntry>& out) {
   out.clear();
   amdcuid_status_t st = init();
   if (st != AMDCUID_STATUS_SUCCESS) {
@@ -291,8 +282,7 @@ amdcuid_status_t GimClient::get_devices(std::vector<GimDeviceEntry> &out) {
 
   SmiServerStaticInfoWire info;
   std::memset(&info, 0, sizeof(info));
-  st = do_ioctl(kSmiCmdCodeGetServerStaticInfo, nullptr, 0, &info,
-                sizeof(info));
+  st = do_ioctl(kSmiCmdCodeGetServerStaticInfo, nullptr, 0, &info, sizeof(info));
   if (st != AMDCUID_STATUS_SUCCESS) {
     return st;
   }
@@ -312,8 +302,7 @@ amdcuid_status_t GimClient::get_devices(std::vector<GimDeviceEntry> &out) {
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t GimClient::lookup_dev_id(const std::string &bdf,
-                                          uint64_t &dev_id) {
+amdcuid_status_t GimClient::lookup_dev_id(const std::string& bdf, uint64_t& dev_id) {
   if (!is_canonical_bdf(bdf)) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
@@ -322,7 +311,7 @@ amdcuid_status_t GimClient::lookup_dev_id(const std::string &bdf,
   if (st != AMDCUID_STATUS_SUCCESS) {
     return st;
   }
-  for (const auto &e : devices) {
+  for (const auto& e : devices) {
     if (e.bdf == bdf) {
       dev_id = e.dev_id;
       return AMDCUID_STATUS_SUCCESS;
@@ -331,7 +320,7 @@ amdcuid_status_t GimClient::lookup_dev_id(const std::string &bdf,
   return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 }
 
-amdcuid_status_t GimClient::get_asic_info(uint64_t dev_id, GimAsicInfo &info) {
+amdcuid_status_t GimClient::get_asic_info(uint64_t dev_id, GimAsicInfo& info) {
   amdcuid_status_t st = init();
   if (st != AMDCUID_STATUS_SUCCESS) {
     return st;
@@ -351,8 +340,7 @@ amdcuid_status_t GimClient::get_asic_info(uint64_t dev_id, GimAsicInfo &info) {
   info.subvendor_id = raw.subvendor_id;
   info.device_id = raw.device_id;
   info.rev_id = raw.rev_id;
-  info.asic_serial =
-      fixed_string_to_std(raw.asic_serial, kSmiMaxStringLength);
+  info.asic_serial = fixed_string_to_std(raw.asic_serial, kSmiMaxStringLength);
   info.oam_id = raw.oam_id;
   info.num_of_compute_units = raw.num_of_compute_units;
   info.target_graphics_version = raw.target_graphics_version;
@@ -360,8 +348,7 @@ amdcuid_status_t GimClient::get_asic_info(uint64_t dev_id, GimAsicInfo &info) {
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t GimClient::get_asic_info_for_bdf(const std::string &bdf,
-                                                  GimAsicInfo &info) {
+amdcuid_status_t GimClient::get_asic_info_for_bdf(const std::string& bdf, GimAsicInfo& info) {
   uint64_t dev_id = 0;
   amdcuid_status_t st = lookup_dev_id(bdf, dev_id);
   if (st != AMDCUID_STATUS_SUCCESS) {
@@ -370,14 +357,13 @@ amdcuid_status_t GimClient::get_asic_info_for_bdf(const std::string &bdf,
   return get_asic_info(dev_id, info);
 }
 
-bool GimClient::parse_asic_serial(const std::string &serial, uint64_t &out) {
+bool GimClient::parse_asic_serial(const std::string& serial, uint64_t& out) {
   if (serial.empty()) {
     return false;
   }
   // Accept optional 0x/0X prefix.
   size_t pos = 0;
-  if (serial.size() > 2 && serial[0] == '0' &&
-      (serial[1] == 'x' || serial[1] == 'X')) {
+  if (serial.size() > 2 && serial[0] == '0' && (serial[1] == 'x' || serial[1] == 'X')) {
     pos = 2;
   }
   if (pos >= serial.size()) {
@@ -411,11 +397,14 @@ std::string GimClient::format_bdf(uint64_t packed_bdf) {
   const uint32_t device = static_cast<uint32_t>((packed_bdf >> 3) & 0x1Fu);
   const uint32_t bus = static_cast<uint32_t>((packed_bdf >> 8) & 0xFFu);
   const uint32_t domain = static_cast<uint32_t>((packed_bdf >> 16) & 0xFFFFu);
+  // Bounded by construction: domain is masked to 16 bits (4 hex digits), bus to
+  // 8 (2), device to 5 (2) and function to 3 (1 decimal digit), so the longest
+  // output is 4+1+2+1+2+1+1 = 12 characters plus the NUL. It cannot truncate.
   char buf[16];
-  std::snprintf(buf, sizeof(buf), "%04x:%02x:%02x.%u", domain, bus, device,
-                function);
+  // NOLINTNEXTLINE(cert-err33-c)
+  std::snprintf(buf, sizeof(buf), "%04x:%02x:%02x.%u", domain, bus, device, function);
   return std::string(buf);
 }
 
-} // namespace gim
-} // namespace cuid
+}  // namespace gim
+}  // namespace cuid

@@ -41,16 +41,10 @@ IBVWrapper ibv;
 IBVWrapper::IBVWrapper() {
   int err;
 
-  ibv_handle = dlopen("libibverbs.so", RTLD_NOW);
-
+  ibv_handle = dlopen("libibverbs.so.1", RTLD_NOW);
   if (!ibv_handle) {
-    // Try hard-coded PATH
-    ibv_handle = dlopen("/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW);
-
-    if (!ibv_handle) {
-      LOG_WARN("Could not open libibverbs. Disabled.");
-      return;
-    }
+    LOG_WARN("Could not open libibverbs. Disabled.");
+    return;
   }
 
   err = init_function_table();

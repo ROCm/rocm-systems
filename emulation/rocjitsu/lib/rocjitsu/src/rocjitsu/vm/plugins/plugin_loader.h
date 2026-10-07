@@ -52,7 +52,9 @@ public:
   ///
   /// Loaded shared objects are kept open for the lifetime of the process.
   /// Failures (missing library, missing exports, bad config) are reported to the
-  /// plugin log and skip that plugin without aborting the others.
+  /// plugin log and skip that plugin without aborting the others. This low-level
+  /// entry point is always best-effort; use configure_plugin_group() with
+  /// `"require_all_plugins": true` when every configured plugin is required.
   ///
   /// @returns The number of plugins successfully added to @p group.
   static int load_from_config(const std::string &config_json, ExecutionPluginGroup &group,
@@ -64,6 +66,13 @@ public:
   /// identically regardless of how the VM is brought up.
   ///
   /// @p plugin_dir has the same meaning as in load_from_config().
+  ///
+  /// The optional top-level `"require_all_plugins"` boolean defaults to false,
+  /// preserving best-effort loading. When true, this function throws if any
+  /// plugin listed in `"plugins"` cannot be added. A non-boolean value is
+  /// rejected. When all plugins are required, an explicitly present `"plugins"`
+  /// value must be an object; omitting `"plugins"` is valid and produces an empty
+  /// group.
   ///
   /// @returns A non-null group (empty if the config declares no plugins).
   static std::shared_ptr<ExecutionPluginGroup>

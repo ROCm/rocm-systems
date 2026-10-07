@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include <gtest/gtest.h>
 #include <unistd.h>
 
@@ -64,6 +46,7 @@
 #include "functional/gpu/xgmi/xgmi_read_write.h"
 #include "functional/ifoe/fabric/fabric_read.h"
 #include "functional/ifoe/identity/ifoe_info_read.h"
+#include "functional/ifoe/tray/tray_info_read.h"
 #include "functional/system/cross_process_serialization.h"
 #include "functional/system/hw_topology_read.h"
 #include "functional/system/init_shutdown_refcount.h"
@@ -355,6 +338,11 @@ TEST(IfoeFunctionalReadOnly, TestIfoeInfoRead) {
   if (access("/dev/dxg", F_OK) == 0)
     GTEST_SKIP() << "Skipped on WSL: iFoE NIC not available on DXG backend";
   TestIfoeInfoRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(IfoeFunctionalReadOnly, TestTrayInfoRead) {
+  TestTrayInfoRead tst;
   RunGenericTest(&tst);
 }
 

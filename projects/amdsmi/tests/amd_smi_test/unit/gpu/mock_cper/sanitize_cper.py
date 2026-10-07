@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-#
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # Sanitizes real GFX950 CPER captures into the committed mock fixtures in this
 # folder. The raw captures are NOT committed; this script documents exactly what
 # is stripped so the fixtures are reviewable and reproducible from a fresh

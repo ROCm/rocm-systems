@@ -1017,7 +1017,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
         wait_events.size(), wait_events.data());
 
     if (status != HSA_STATUS_SUCCESS) {
-      gpu().Barriers().ResetCurrentSignal();
+      for (size_t s = 0; s < finalOps.size(); ++s) {
+        gpu().Barriers().ResetCurrentSignal();
+      }
       LogPrintfError("HSA batch copy failed with code %d for engine %d", status, engine);
       return false;
     }
@@ -1041,7 +1043,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 // Get Staging or Pinned memory buffer
 void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePin, bool first_tx,
                                DmaBlitManager::BufferState& buffState) const {
-  bool doHostPinning = enablePin && (size > MinSizeForPinnedXfer);
+  // Pinning is slower than staging on unified-memory devices; skip it there.
+  bool doHostPinning =
+      enablePin && (size > MinSizeForPinnedXfer) && !dev().info().hostUnifiedMemory_;
   size_t copyChunkSize = doHostPinning ? PinXferSize : StagingXferSize;
   size_t xferSize = std::min(size, copyChunkSize);
 
@@ -2844,14 +2848,14 @@ bool KernelBlitManager::ShaderCopyBufferBatchRaw(
   }
   const size_t max_operations_per_dispatch =
       (kernarg_pool_chunk_size - kernarg_reservation) / sizeof(CopyBufferBatchDescriptor);
-  const size_t descriptor_buffer_bytes =
-      max_operations_per_dispatch * sizeof(CopyBufferBatchDescriptor);
   bool attach_signal = false;
 
   for (size_t operation_offset = 0; operation_offset < copy_operations.size();
        operation_offset += max_operations_per_dispatch) {
     const size_t operation_count =
         std::min(max_operations_per_dispatch, copy_operations.size() - operation_offset);
+    // Reserve only the size this dispatch requires.
+    const size_t descriptor_buffer_bytes = operation_count * sizeof(CopyBufferBatchDescriptor);
     void* descriptor_buffer = gpu().allocKernArg(descriptor_buffer_bytes, kCBAlignment);
     CopyBufferBatchDescriptor* descriptors =
         static_cast<CopyBufferBatchDescriptor*>(descriptor_buffer);

@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "ifoe_info_read.h"
 
@@ -27,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <string>
 
@@ -119,6 +101,18 @@ void TestIfoeInfoRead::Run(void) {
     err = amdsmi_get_gpu_asic_info(processor_handles_[0], &asic_info);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(err)
+
+    // physical_acc_id is UALoE-backed; without an active session it stays at
+    // the UINT32_MAX sentinel rather than failing amdsmi_get_gpu_asic_info().
+    if (asic_info.physical_acc_id == std::numeric_limits<uint32_t>::max()) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Physical Accelerator ID: N/A (not supported on this system)" << std::endl;
+      }
+    } else {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Physical Accelerator ID: " << asic_info.physical_acc_id << std::endl;
+      }
+    }
 
     // device name, brand, serial_number
     amdsmi_board_info_t board_info;

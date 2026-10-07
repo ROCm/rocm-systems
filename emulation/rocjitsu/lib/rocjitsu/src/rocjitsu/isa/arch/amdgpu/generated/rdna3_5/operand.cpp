@@ -147,7 +147,7 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     break;
   case OperandType::OPR_SSRC_LANESEL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
-          (encoding_value >= 128 && encoding_value <= 191)))
+          (encoding_value >= 128 && encoding_value <= 192)))
       defer_encoding_error(EncodingError::InvalidLaneSelector);
     break;
   case OperandType::OPR_SSRC_SPECIAL_SCC:
@@ -606,6 +606,8 @@ std::string Operand::name() const {
     break;
   }
   case OperandType::OPR_SSRC_LANESEL: {
+    if (encoding_value_ == 192u)
+      return "64";
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN &&
         encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN,
@@ -690,8 +692,30 @@ std::string Operand::name() const {
     return std::to_string(encoding_value_);
   case OperandType::OPR_SENDMSG:
     return std::to_string(encoding_value_);
-  case OperandType::OPR_SENDMSG_RTN:
+  case OperandType::OPR_SENDMSG_RTN: {
+    switch (static_cast<uint32_t>(encoding_value_) & 0xFFFF) {
+    case 128:
+      return "sendmsg(MSG_RTN_GET_DOORBELL)";
+    case 129:
+      return "sendmsg(MSG_RTN_GET_DDID)";
+    case 130:
+      return "sendmsg(MSG_RTN_GET_TMA)";
+    case 131:
+      return "sendmsg(MSG_RTN_GET_REALTIME)";
+    case 132:
+      return "sendmsg(MSG_RTN_SAVE_WAVE)";
+    case 133:
+      return "sendmsg(MSG_RTN_GET_TBA)";
+    case 134:
+      return "sendmsg(MSG_RTN_GET_TBA_TO_PC)";
+    default:
+      break;
+    }
+    const uint32_t value = static_cast<uint32_t>(encoding_value_) & 0xFFFF;
+    if (value <= 0xFF)
+      return std::format("sendmsg({}, 0, 0)", value);
     return std::to_string(encoding_value_);
+  }
   case OperandType::OPR_SIMM16:
     return std::to_string(encoding_value_);
   case OperandType::OPR_SIMM32:
@@ -762,6 +786,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
+        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN),
+                         reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
@@ -788,6 +817,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SRC: {
@@ -795,6 +830,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
         encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN),
+                         reg_width};
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN),
                          reg_width};
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -831,6 +871,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
+        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN),
+                         reg_width};
     break;
   }
   case OperandType::OPR_SREG_M0_INL: {
@@ -840,6 +885,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN &&
+        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SSRC: {
@@ -847,6 +898,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
         encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN),
+                         reg_width};
+    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN),
                          reg_width};
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -860,6 +916,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN),
+          reg_width};
+    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN),
           reg_width};
     break;
   }
@@ -880,6 +942,26 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
                          reg_width};
     break;
   }
+  default:
+    break;
+  }
+  return std::nullopt;
+}
+
+std::optional<RegClass> Operand::to_special_reg_class() const {
+  switch (opr_type_) {
+  case OperandType::OPR_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_PC:
+    return RegClass::PC;
+  case OperandType::OPR_SDST_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_SDST_M0:
+    return RegClass::M0;
+  case OperandType::OPR_SSRC_SPECIAL_SCC:
+    return RegClass::SCC;
+  case OperandType::OPR_VCC:
+    return RegClass::VCC;
   default:
     break;
   }

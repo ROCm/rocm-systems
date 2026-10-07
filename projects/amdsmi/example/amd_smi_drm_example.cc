@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <pwd.h>
 #include <sys/stat.h>
@@ -43,7 +24,7 @@
       std::cout << "AMDSMI call returned " << RET << " at line " << __LINE__ << std::endl; \
       amdsmi_status_code_to_string(RET, &err_str);                                         \
       std::cout << err_str << std::endl;                                                   \
-      return RET;                                                                          \
+      return static_cast<int>(RET);                                                        \
     }                                                                                      \
   }
 
@@ -623,7 +604,7 @@ int main() {
         }
 
         // Iterate through all available accelerator partition profiles
-        amdsmi_accelerator_partition_profile_config_t profile_config;
+        amdsmi_accelerator_partition_profile_config_t profile_config = {};
         ret = amdsmi_get_gpu_accelerator_partition_profile_config(processor_handles[device_index],
                                                                   &profile_config);
         for (uint32_t profile_idx = 0; profile_idx < profile_config.num_profiles; profile_idx++) {
@@ -639,7 +620,7 @@ int main() {
                     << acceleratorPartitionString(updatePartition) << "): " << err_str << "\n\n";
 
           // Get the current accelerator partition
-          amdsmi_accelerator_partition_profile_t profile;
+          amdsmi_accelerator_partition_profile_t profile = {};
           uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE];
           ret = amdsmi_get_gpu_accelerator_partition_profile(processor_handles[device_index],
                                                              &profile, partition_id);
@@ -1115,6 +1096,16 @@ int main() {
       printf("\tVendor Name: %s\n", asic_info.vendor_name);
       printf("\tSubVendorID: 0x%04x\n", asic_info.subvendor_id);
       printf("\tRevisionID: 0x%02x\n", asic_info.rev_id);
+      if (asic_info.chip_rev_id != UINT32_MAX) {
+        printf("\tChip RevisionID: 0x%02x\n", asic_info.chip_rev_id);
+      } else {
+        printf("\tChip RevisionID: N/A\n");
+      }
+      if (asic_info.external_rev_id != UINT32_MAX) {
+        printf("\tExternal RevisionID: 0x%02x\n", asic_info.external_rev_id);
+      } else {
+        printf("\tExternal RevisionID: N/A\n");
+      }
       printf("\tSubSystemID: 0x%04x\n", asic_info.subsystem_id);
       printf("\tAsic serial: 0x%s\n", asic_info.asic_serial);
       if (asic_info.oam_id != UINT32_MAX) {
@@ -1234,7 +1225,11 @@ int main() {
         CHK_AMDSMI_RET(ret)
         printf("    Output of amdsmi_get_gpu_driver_info:\n");
         printf("\tDriver name: %s\n", driver_info.driver_name);
+        printf("\tamdgpu kernel source version: %s\n", driver_info.driver_kernel_version);
+        printf("\tamdgpu driver version: %s\n", driver_info.amdgpu_driver_version);
         printf("\tDriver version: %s\n", driver_info.driver_version);
+        printf("\tBuild version: %s\n", driver_info.driver_build_version);
+        printf("\tFull version: %s\n", driver_info.driver_full_version);
         printf("\tDriver date: %s\n\n", driver_info.driver_date);
       } else {
         printf("\tamdsmi_get_gpu_driver_info(): not available on this device.\n");
@@ -1386,12 +1381,17 @@ int main() {
       printf("\tGPU PLX temp measurement: %ld\n\n", temp_measurements[AMDSMI_TEMPERATURE_TYPE_PLX]);
 
       // Get RAS features enabled
-      char block_names[14][10] = {"UMC",       "SDMA", "GFX", "MMHUB", "ATHUB", "PCIE_BIF", "HDP",
-                                  "XGMI_WAFL", "DF",   "SMN", "SEM",   "MP0",   "MP1",      "FUSE"};
+      const char* block_names[] = {
+          "UMC",        "SDMA",     "GFX",   "MMHUB",  "ATHUB", "PCIE_BIF", "HDP",     "XGMI_WAFL",
+          "DF",         "SMN",      "SEM",   "MP0",    "MP1",   "FUSE",     "MCA",     "VCN",
+          "JPEG",       "IH",       "MPIO",  "MMSCH",  "MP5",   "ATU",      "DACC_BE", "ECLR",
+          "KPX_SERDES", "LSDMA",    "MPART", "MPIFOE", "MPRAS", "NBIF",     "NBIO",    "OXRP",
+          "PCIE_PL",    "PCS_XGMI", "PIE",   "CS",     "SHUB",  "SSBDCI",   "UCIE_PCS"};
+      const size_t num_block_names = sizeof(block_names) / sizeof(block_names[0]);
       char status_names[7][10] = {"NONE",    "DISABLED", "PARITY", "SING_C",
                                   "MULT_UC", "POISON",   "ENABLED"};
       amdsmi_ras_err_state_t state = {};
-      int index = 0;
+      size_t index = 0;
       printf("    Output of amdsmi_get_gpu_ras_block_features_enabled:\n");
       for (auto block = AMDSMI_GPU_BLOCK_FIRST; block <= AMDSMI_GPU_BLOCK_LAST;
            block = (amdsmi_gpu_block_t)(block * 2)) {
@@ -1401,7 +1401,8 @@ int main() {
           CHK_AMDSMI_RET(ret)
         }
 
-        printf("\tBlock: %s\n", block_names[index]);
+        // Keeps the lookup in bounds if amdsmi_gpu_block_t gains blocks before this list does.
+        printf("\tBlock: %s\n", index < num_block_names ? block_names[index] : "UNKNOWN");
         printf("\tStatus: %s\n", status_names[state]);
         index++;
       }
@@ -1448,7 +1449,7 @@ int main() {
         printf("amdsmi_get_gpu_process_list(): No processes found.\n\n");
       } else {
         std::cout << "Processes found: " << num_process << "\n";
-        amdsmi_proc_info_t process_info_list[num_process];
+        std::vector<amdsmi_proc_info_t> process_info_list(num_process);
         amdsmi_proc_info_t process = {};
         uint64_t mem = 0, gtt_mem = 0, cpu_mem = 0, vram_mem = 0, sdma_usage = 0;
         uint64_t gfx = 0, enc = 0;
@@ -1459,7 +1460,7 @@ int main() {
                  static_cast<uint32_t>(bdf.device_number),
                  static_cast<uint32_t>(bdf.function_number));
         ret = amdsmi_get_gpu_process_list(processor_handles[device_index], &num_process,
-                                          process_info_list);
+                                          process_info_list.data());
         std::cout << "Allocation size for process list: " << num_process << "\n";
         CHK_AMDSMI_RET(ret);
         for (auto idx = uint32_t(0); idx < num_process; ++idx) {
@@ -1484,7 +1485,7 @@ int main() {
             "+=======+"
             "+=============+=============+=============+============"
             "==+=========================================+\n");
-        for (int it = 0; it < static_cast<int>(num_process); it++) {
+        for (uint32_t it = 0; it < num_process; it++) {
           char command[30];
           struct passwd* pwd = nullptr;
           struct stat st;
@@ -1557,8 +1558,7 @@ int main() {
         CHK_AMDSMI_RET(ret)
       }
       printf("    Output of  amdsmi_get_temp_metric:\n");
-      std::cout << "\t\tTemperature: " << std::dec << val_i64 << "C"
-                << "\n\n";
+      std::cout << "\t\tTemperature: " << std::dec << val_i64 << "C" << "\n\n";
 
       // Get frame buffer
       amdsmi_vram_usage_t vram_usage = {};
@@ -2032,8 +2032,7 @@ int main() {
 
         std::cout << "\n";
         std::cout << " ** Note: Values MAX'ed out "
-                  << "(UINTX MAX are unsupported for the version in question) ** "
-                  << "\n\n";
+                  << "(UINTX MAX are unsupported for the version in question) ** " << "\n\n";
       }  // END GPU METRICS OUTPUTS
 
       // Get nearest GPUs
@@ -2087,11 +2086,11 @@ int main() {
         constexpr uint64_t kU64Max = std::numeric_limits<uint64_t>::max();
         constexpr uint8_t kU8Max = std::numeric_limits<uint8_t>::max();
 
-        auto u64_str = [kU64Max](uint64_t v) -> std::string {
+        auto u64_str = [](uint64_t v) -> std::string {
           return (v == kU64Max) ? "N/A" : std::to_string(v);
         };
         // Matches CLI: active flags shown as ACTIVE / NOT ACTIVE / N/A
-        auto active_str = [kU8Max](uint8_t v) -> std::string {
+        auto active_str = [](uint8_t v) -> std::string {
           if (v == kU8Max) return "N/A";
           return v ? "ACTIVE" : "NOT ACTIVE";
         };

@@ -1,23 +1,7 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """GPU events: GPU counter and event notification."""
 
 import unittest
@@ -119,7 +103,11 @@ class TestGpuEvents(unittest.TestCase):
             return None
 
         if supported:
-            start_accept = amdsmi.AmdSmiStatus.SUCCESS
+            # Group support is a stat() on the PMU directory, so it says nothing about
+            # which events exist. See amdgpu_pmu.c in the Linux kernel:
+            #    - gfx906 wires only xgmi_link{0,1}_data_outbound
+            #    - gfx908 wires xgmi_link{0-5}_data_outbound
+            start_accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
         else:
             # No perf event source to open, so the sysfs read behind it returns
             # ENOENT, which the library maps to NOT_SUPPORTED.
@@ -204,6 +192,19 @@ class TestGpuEvents(unittest.TestCase):
                     }
 
         self.common.print("gpu counter results", results)
+
+        # Checked outside the sweep so the per-call failures above are still reported.
+        # A counter only reads back when it opened, so accepting NOT_SUPPORTED on START
+        # would otherwise hide a group that claims support while none of it works.
+        for gpu_idx, groups in results.items():
+            for group_name, group_result in groups.items():
+                if not group_result["supported"]:
+                    continue
+                any_read = any(c is not None for c in group_result["events"].values())
+                self.assertTrue(
+                    any_read,
+                    f"gpu {gpu_idx}: {group_name} reports supported but no counter was read",
+                )
         return
 
     def test_gpu_event(self):

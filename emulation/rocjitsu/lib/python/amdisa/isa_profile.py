@@ -219,12 +219,27 @@ def _modern_rdna_dpp_opcode_rule(
     return DppOpcodeRule.ALLOW
 
 
+class FloatDotAccumulation(Enum):
+    """Numerical accumulation policy for F32-output floating DOT2."""
+
+    HOST_F32 = 'HostF32'
+    GFX11 = 'Gfx11'
+    GFX12 = 'Gfx12'
+
+
 class WaveStateLayout(Enum):
     """Architectural layout of wave status, exception, and trap-control state."""
 
     LEGACY = 'Legacy'
     GFX12 = 'Gfx12'
     GFX12_5 = 'Gfx12_5'
+
+
+class DppCtrlDialect(Enum):
+    """Names and validity rules for DPP_CTRL values."""
+
+    GFX9 = auto()
+    GFX10_PLUS = auto()
 
 
 @dataclass
@@ -419,6 +434,41 @@ class IsaProfile(ABC):
         ...
 
     @property
+    def ds_compare_store_compare_first(self) -> bool:
+        """Whether DS compare-store puts the comparison in DATA0."""
+        return False
+
+    @property
+    def atomic_legacy_minmax(self) -> bool:
+        """Older float-atomic rules preserve selected input bits and propagate SNaNs."""
+        return True
+
+    @property
+    def atomic_source_nan_first(self) -> bool:
+        """L2 ADD NaN order; indexed LDS always prefers the incoming operand."""
+        return False
+
+    def scalar_atomic_denorm_modes(
+        self, operation: str, elem_size: int, *, ds: bool
+    ) -> tuple[str, str]:
+        """Return L2 and LDS denormal-mode expressions for scalar FP atomics.
+
+        Older L2 F32 ADD flushes inputs and preserves outputs; F64 ADD and min/max preserve.
+        Other L2 operations follow MODE. Indexed DS and FLAT-to-LDS follow
+        MODE, except F64 ADD which always preserves denormals.
+        """
+        is_f64 = elem_size == 8
+        mode = 'wf.fp_denorm_mode_f16_f64()' if is_f64 else 'wf.fp_denorm_mode_f32()'
+        lds_mode = '3' if operation == 'fadd' and is_f64 else mode
+        if operation == 'fadd':
+            memory_mode = '3' if is_f64 else '2'
+        elif is_f64 and operation != 'fcmpswap':
+            memory_mode = '3'
+        else:
+            memory_mode = mode
+        return memory_mode, lds_mode
+
+    @property
     def generated_arch_name(self) -> str | None:
         """Override for the logical architecture name used by code generation."""
         return None
@@ -446,6 +496,11 @@ class IsaProfile(ABC):
     @property
     def inst_size_overrides(self) -> dict[str, int]:
         """Per-instruction size overrides in bytes."""
+        return {}
+
+    @property
+    def compatibility_instruction_slots(self) -> dict[tuple[str, int], str]:
+        """Opcode slots owned by instructions synthesized after XML parsing."""
         return {}
 
     @property
@@ -497,8 +552,69 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def supports_vskip(self) -> bool:
+        """True when MODE.VSKIP suppresses vector instruction issue."""
+        return False
+
+    def vskip_affected_encoding(self, enc_name: str) -> bool:
+        """Whether MODE.VSKIP suppresses this encoding, including VOP subformats."""
+        # XML subformats such as VOP3_SDST_ENC and VOP3P_MFMA omit ENC_.
+        encoding = enc_name.upper().removeprefix('ENC_')
+        return self.supports_vskip and (
+            encoding.startswith('VOP')
+            or encoding in ('MUBUF', 'MTBUF', 'MIMG', 'DS', 'FLAT', 'EXP', 'VINTRP')
+        )
+
+    @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:
         """True when E32 16-bit source selectors can address packed high halves."""
+        return False
+
+    @property
+    def renders_gfx11_image_syntax(self) -> bool:
+        """Whether GFX11 image operands and modifiers use canonical syntax."""
+        return False
+
+    @property
+    def has_gfx11_image_address_extension(self) -> bool:
+        """Whether MIMG NSA appends one DWORD of address-register selectors."""
+        return False
+
+    @property
+    def split_ds_2addr_offsets(self) -> bool:
+        """Whether DS 2ADDR instructions render two independent offsets."""
+        return False
+
+    @property
+    def vop3p_absolute_source_instructions(self) -> frozenset[str]:
+        """VOP3P instructions whose NEG fields encode source abs and negate."""
+        return frozenset()
+
+    @property
+    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
+        """GFX11 MIMG instructions with gather-style VDATA sizing."""
+        return frozenset()
+
+    @property
+    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
+        """GFX11 MIMG instructions with a fixed VDATA width in DWORDs."""
+        return {}
+
+    @property
+    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
+        """GFX11 MIMG VADDR widths as ``(default, a16)`` DWORD counts."""
+        return {}
+
+    @property
+    def gfx11_mimg_nsa_group_words(
+        self,
+    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
+        """GFX11 partial-NSA group widths as ``(default, a16)`` tuples."""
+        return {}
+
+    @property
+    def sendmsg_return_symbolic(self) -> bool:
+        """Whether return-message selectors use symbolic assembly syntax."""
         return False
 
     @property
@@ -510,6 +626,97 @@ class IsaProfile(ABC):
     def uses_true16_vop3_opsel(self) -> bool:
         """True when VOP3 16-bit operands use op_sel half selectors."""
         return False
+
+    @property
+    def renders_true16_vop3_operands(self) -> bool:
+        """True when VOP3 operands use explicit ``.l``/``.h`` suffixes."""
+        return False
+
+    @property
+    def vop3_opsel_omissions(self) -> frozenset[str]:
+        """VOP3 instructions whose half selection is shown only on operands."""
+        return frozenset()
+
+    @property
+    def vop3p_source_modifier_omissions(self) -> frozenset[str]:
+        """VOP3P instructions that do not use packed source modifier fields."""
+        return frozenset()
+
+    @property
+    def integer_clamp_dtypes(self) -> dict[str, str]:
+        """Integer instructions that require saturation-aware lowering.
+
+        CLAMP is present in the shared VOP3 encoding, but it is not legal for
+        every opcode in that encoding. Keep the instruction-level policy here
+        instead of inferring support from the encoding field alone. ADD_MIN/MAX
+        always saturate their internal addition; the remaining instructions use
+        this policy to apply their encoded CLAMP modifier.
+        """
+        return {
+            'V_ADDC_CO_U32': 'u32',
+            'V_ADD_MAX_I32': 'i32',
+            'V_ADD_MAX_U32': 'u32',
+            'V_ADD_MIN_I32': 'i32',
+            'V_ADD_MIN_U32': 'u32',
+            'V_ADD_CO_CI_U32': 'u32',
+            'V_ADD_CO_U32': 'u32',
+            'V_ADD_I16': 'i16',
+            'V_ADD_I32': 'i32',
+            'V_ADD_NC_I16': 'i16',
+            'V_ADD_NC_I32': 'i32',
+            'V_ADD_NC_U16': 'u16',
+            'V_ADD_NC_U32': 'u32',
+            'V_ADD_NC_U64': 'u64',
+            'V_ADD_U16': 'u16',
+            'V_ADD_U32': 'u32',
+            'V_MAD_I16': 'i16',
+            'V_MAD_I32_I16': 'i32',
+            'V_MAD_I32_I24': 'i32',
+            'V_MAD_I64_I32': 'i64',
+            'V_MAD_CO_I64_I32': 'i64',
+            'V_MAD_CO_U64_U32': 'u64',
+            'V_MAD_NC_I64_I32': 'i64',
+            'V_MAD_NC_U64_U32': 'u64',
+            'V_MAD_U16': 'u16',
+            'V_MAD_U32_U16': 'u32',
+            'V_MAD_U32_U24': 'u32',
+            'V_MAD_U64_U32': 'u64',
+            'V_MQSAD_PK_U16_U8': 'u16',
+            'V_MQSAD_U32_U8': 'u32',
+            'V_MSAD_U8': 'u32',
+            'V_MUL_I32_I24': 'i32',
+            'V_MUL_U32_U24': 'u32',
+            'V_PK_MAD_I16': 'i16',
+            'V_PK_MAD_U16': 'u16',
+            'V_SAD_HI_U8': 'u32',
+            'V_SAD_U8': 'u32',
+            'V_SAD_U16': 'u32',
+            'V_SAD_U32': 'u32',
+            'V_QSAD_PK_U16_U8': 'u16',
+            'V_SUBBREV_CO_U32': 'u32',
+            'V_SUBB_CO_U32': 'u32',
+            'V_SUBREV_CO_CI_U32': 'u32',
+            'V_SUBREV_CO_U32': 'u32',
+            'V_SUBREV_NC_U32': 'u32',
+            'V_SUBREV_U16': 'u16',
+            'V_SUBREV_U32': 'u32',
+            'V_SUB_CO_CI_U32': 'u32',
+            'V_SUB_CO_U32': 'u32',
+            'V_SUB_I16': 'i16',
+            'V_SUB_I32': 'i32',
+            'V_SUB_NC_I16': 'i16',
+            'V_SUB_NC_I32': 'i32',
+            'V_SUB_NC_U16': 'u16',
+            'V_SUB_NC_U32': 'u32',
+            'V_SUB_NC_U64': 'u64',
+            'V_SUB_U16': 'u16',
+            'V_SUB_U32': 'u32',
+        }
+
+    @property
+    def dpp_ctrl_dialect(self) -> DppCtrlDialect:
+        """DPP_CTRL naming and validity rules for this ISA."""
+        return DppCtrlDialect.GFX9
 
     @property
     def scalar_null_precedes_m0(self) -> bool:
@@ -530,6 +737,11 @@ class IsaProfile(ABC):
     def generate_scaled_wmma_vop3px2(self) -> bool:
         """True when generator should synthesize scaled-WMMA VOP3PX2 support."""
         return False
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        """Additional lane source encodings qualified beyond the XML ranges."""
+        return ((192, 192),)
 
     @property
     def smem_address_uses_access_size(self) -> bool:
@@ -692,6 +904,16 @@ class IsaProfile(ABC):
     def vop3_carry_mask_size_bits(self) -> int | None:
         """Explicit VOP3 carry input/output mask width, if target-specific."""
         return None
+
+    @property
+    def tied_destination_prefixes(self) -> tuple[str, ...]:
+        """Mnemonic prefixes whose encoded destination is also an input."""
+        return ()
+
+    @property
+    def tied_destination_def_widths(self) -> dict[str, int]:
+        """True def widths for tied destinations whose encoded read is wider."""
+        return {}
 
     @property
     def waitcnt_decode(self) -> str:
@@ -871,14 +1093,26 @@ class IsaProfile(ABC):
         """
         ...
 
+    def unique_flat_segment(self, enc_name: str) -> int | None:
+        """Segment required by retained opcodes absent from the parent FLAT table.
+
+        GLOBAL may define standalone opcodes. SCRATCH-only opcode numbers can
+        collide with GLOBAL and are not candidates for parent-table retention.
+        """
+        return 2 if enc_name in ('ENC_FLAT_GLBL', 'ENC_FLAT_GLOBAL') else None
+
     @abstractmethod
-    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
         """True if instructions under this encoding/condition should be skipped.
 
         The base decoder only handles instructions under the ``default``
         encoding condition. Modifier variants (DPP, SDWA) and
         segment-specific FLAT encodings are skipped because they share
-        the parent's decode table and are distinguished at runtime.
+        the parent's decode table and are distinguished at runtime. A default
+        segment form with a unique opcode is retained only when
+        ``unique_flat_segment`` declares its required segment.
         """
         ...
 
@@ -991,7 +1225,8 @@ _FLAT_MODIFIERS_GLC_DLC = [
     EncodingModifier('slc'),
 ]
 
-# GFX12 (RDNA4): SCOPE+TH model; flag modifier is NV only.
+# GFX12 (RDNA4): encoding-specific modifiers beyond the data-driven SCOPE+TH
+# cache policy emitted for every encoding that carries op/scope/th fields.
 _SMEM_MODIFIERS_RDNA4 = [
     EncodingModifier('nv'),
 ]
@@ -1004,6 +1239,10 @@ _VBUFFER_MODIFIERS_RDNA4 = [
 ]
 
 _VFLAT_MODIFIERS_RDNA4 = [
+    EncodingModifier('nv'),
+]
+
+_IMAGE_MODIFIERS_RDNA4 = [
     EncodingModifier('nv'),
 ]
 
@@ -1153,12 +1392,16 @@ class _AmdgpuProfileBase(IsaProfile):
                 return f'ENC_{parent_name}'
         return f'ENC_{parts[0]}'
 
-    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
         if enc_cond != 'default':
             return True
         if self._SKIP_DPP_SDWA:
             if '_VOP_DPP' in enc_name or '_VOP_SDWA' in enc_name:
                 return True
+        if unique_segment_opcode and self.unique_flat_segment(enc_name) is not None:
+            return False
         parts = enc_name.split('_')
         return (
             parts[0] == 'ENC'
@@ -1210,6 +1453,11 @@ class _AmdgpuProfileBase(IsaProfile):
     def uses_cluster_ttmp_workgroup_ids(self) -> bool:
         """Whether the TTMP workgroup-ID payload uses cluster coordinates."""
         return False
+
+    @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        """Select the scalar/SIMD arithmetic contract for floating DOT2."""
+        return FloatDotAccumulation.HOST_F32
 
     @property
     def wave_state_layout(self) -> WaveStateLayout:
@@ -1273,9 +1521,41 @@ class _AmdgpuProfileBase(IsaProfile):
                    6-bit at [9:4], vmcnt 6-bit at [15:10]).
                    ISAs: RDNA3, RDNA3.5.
         'gfx12' — S_WAITCNT removed; replaced by split S_WAIT_* instructions.
-                   ISAs: RDNA4.
+                   ISAs: RDNA4, CDNA5.
         """
         return 'gfx9'
+
+    @property
+    def vmcnt_capacity(self) -> int:
+        """VMCNT's all-ones no-wait value and issue capacity, or zero if absent."""
+        return 0 if self.waitcnt_family == 'gfx12' else (1 << 6) - 1
+
+    @property
+    def lgkmcnt_capacity(self) -> int:
+        """LGKMCNT's all-ones no-wait value and issue capacity, or zero if absent."""
+        if self.waitcnt_family == 'gfx12':
+            return 0
+        return int(self.waitcnt_lgkmcnt_mask, 0)
+
+    @property
+    def vmem_stores_complete_in_order(self) -> bool:
+        """Whether non-FLAT VMEM stores join the ordered VMEM completion class."""
+        return False
+
+    @property
+    def generic_flat_counters_complete_in_order(self) -> bool:
+        """Whether nonzero waits prove progress for generic FLAT operations."""
+        return True
+
+    @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        """Whether vector-memory writes also contribute to EXPCNT."""
+        return False
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        """Whether GDS operations also contribute to EXPCNT."""
+        return False
 
     @property
     def has_mfma(self) -> bool:
@@ -1372,6 +1652,16 @@ class _AmdgpuProfileBase(IsaProfile):
         return ('op_sel', 'op_sel_hi')
 
     @property
+    def vop3p_opsel_hi_high_field(self) -> str:
+        """Return the machine field carrying VOP3P op_sel_hi bit 2."""
+        return 'op_sel_hi_2'
+
+    @property
+    def vop3_opsel_field(self) -> str:
+        """Return the source and destination half-selector field for VOP3."""
+        return 'op_sel'
+
+    @property
     def smem_direct_offset_field(self) -> str | None:
         """Field name of the direct SMEM immediate offset, or ``None``.
 
@@ -1386,6 +1676,11 @@ class _AmdgpuProfileBase(IsaProfile):
         RDNA4 → ``'ioffset'``.
         """
         return None
+
+    @property
+    def global_addtid_offset_expr(self) -> str:
+        """Signed displacement for GLOBAL ADDTID in the legacy 12-bit layout."""
+        return 'static_cast<int32_t>(inst_.offset << 20) >> 20'
 
     @property
     def flat_store_src_field(self) -> str:
@@ -1437,7 +1732,34 @@ class CdnaProfile(_AmdgpuProfileBase):
     """
 
     @property
+    def ds_compare_store_compare_first(self) -> bool:
+        # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
+        return True
+
+    @property
+    def vmem_stores_complete_in_order(self) -> bool:
+        return True
+
+    @property
+    def generic_flat_counters_complete_in_order(self) -> bool:
+        # CDNA1-4 can report early completion for generic FLAT operations on
+        # both VMCNT and LGKMCNT. Fixed GLOBAL/SCRATCH segments remain ordered.
+        return False
+
+    @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        return True
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        return True
+
+    @property
     def supports_gpr_idx(self) -> bool:
+        return True
+
+    @property
+    def supports_vskip(self) -> bool:
         return True
 
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
@@ -1535,6 +1857,12 @@ class CdnaProfile(_AmdgpuProfileBase):
         # bit [3] for destination half selection. Low-destination writes
         # zero the upper half; see the CDNA ISA OP_SEL field description.
         return True
+
+    @property
+    def vop3p_source_modifier_omissions(self) -> frozenset[str]:
+        # These B32 accumulator moves reuse the VOP3P encoding but do not have
+        # packed half-selection or per-half negate semantics.
+        return frozenset({'V_ACCVGPR_READ', 'V_ACCVGPR_WRITE'})
 
     @property
     def d16_loads_zero_unselected_half(self) -> bool:
@@ -1776,6 +2104,23 @@ class Rdna1Profile(_AmdgpuProfileBase):
     _SKIP_DPP_SDWA = True
 
     @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        return True
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        return True
+
+    @property
+    def ds_compare_store_compare_first(self) -> bool:
+        # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
+        return True
+
+    @property
+    def dpp_ctrl_dialect(self) -> DppCtrlDialect:
+        return DppCtrlDialect.GFX10_PLUS
+
+    @property
     def waitcnt_lgkmcnt_mask(self) -> str:
         # RDNA1/2 uses a 6-bit lgkmcnt field at bits [13:8].
         return '0x3F'
@@ -1887,19 +2232,60 @@ class Rdna3Profile(_AmdgpuProfileBase):
     """
 
     _FLAT_SEGMENTS = frozenset({'GLOBAL', 'SCRATCH'})
+
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
     _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
+
+    def normalize_operand_type(
+        self, enc_name: str, field_name: str, operand_type: str
+    ) -> str:
+        # VINTERP uses the same 256..511 VGPR source selectors as VOP3.
+        # The GFX11 XML labels its nine-bit sources as unprefixed VGPR indices.
+        if enc_name.upper() == 'ENC_VINTERP' and field_name in ('src0', 'src1', 'src2'):
+            return 'OPR_SRC_VGPR'
+        return super().normalize_operand_type(enc_name, field_name, operand_type)
+
+    @property
+    def has_gfx11_image_address_extension(self) -> bool:
+        return True
+
+    @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        return True
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        return True
 
     def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
         if enc_name.upper() == 'ENC_SOP1' and cond_name == self._SOP1_BASE_COND:
             return 'default'
         return super().normalize_encoding_condition(enc_name, cond_name)
 
-    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
         if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
             return False
-        return super().skip_inst_encoding(enc_name, enc_cond)
+        return super().skip_inst_encoding(
+            enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
+        )
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # READLANE masks the value to the wave width, not the selector encoding.
+        # RADV emits both inline 64 and literal lane indices.
+        return ((192, 192), (255, 255))
+
+    @property
+    def global_addtid_offset_expr(self) -> str:
+        return 'static_cast<int32_t>(inst_.offset << 19) >> 19'
+
+    @property
+    def ds_compare_store_compare_first(self) -> bool:
+        # RDNA3 DS_CMPSTORE notes explicitly match BUFFER operand order.
+        return False
 
     @property
     def dpp_bound_ctrl_applies_to_inactive_sources(self) -> bool:
@@ -2014,6 +2400,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.GFX11
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_REPLICATED_HALFWAVE
 
@@ -2053,6 +2443,18 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def renders_true16_vop3_operands(self) -> bool:
+        return True
+
+    @property
+    def vop3_opsel_omissions(self) -> frozenset[str]:
+        return frozenset({'V_CNDMASK_B16'})
+
+    @property
+    def dpp_ctrl_dialect(self) -> DppCtrlDialect:
+        return DppCtrlDialect.GFX10_PLUS
+
+    @property
     def smem_direct_offset_field(self) -> str | None:
         return 'offset'
 
@@ -2076,6 +2478,54 @@ class Rdna3_5Profile(Rdna3Profile):
     class so the codegen pipeline can auto-detect RDNA3.5 XML files
     separately from RDNA3.
     """
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # Literal lane indices are only qualified on RDNA3 and RDNA4.
+        return ((192, 192),)
+
+    @property
+    def renders_gfx11_image_syntax(self) -> bool:
+        return True
+
+    @property
+    def split_ds_2addr_offsets(self) -> bool:
+        return True
+
+    @property
+    def vop3p_absolute_source_instructions(self) -> frozenset[str]:
+        return frozenset({'V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16'})
+
+    @property
+    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
+        return frozenset({'IMAGE_MSAA_LOAD'})
+
+    @property
+    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': 4,
+            'IMAGE_BVH64_INTERSECT_RAY': 4,
+        }
+
+    @property
+    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
+            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
+        }
+
+    @property
+    def gfx11_mimg_nsa_group_words(
+        self,
+    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
+            'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
+        }
+
+    @property
+    def sendmsg_return_symbolic(self) -> bool:
+        return True
 
 
 class Rdna4Profile(_AmdgpuProfileBase):
@@ -2112,10 +2562,45 @@ class Rdna4Profile(_AmdgpuProfileBase):
             return 'default'
         return super().normalize_encoding_condition(enc_name, cond_name)
 
-    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
         if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
             return False
-        return super().skip_inst_encoding(enc_name, enc_cond)
+        return super().skip_inst_encoding(
+            enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
+        )
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # READLANE masks the value to the wave width, not the selector encoding.
+        # RADV emits both inline 64 and literal lane indices.
+        return ((192, 192), (255, 255))
+
+    @property
+    def global_addtid_offset_expr(self) -> str:
+        return 'static_cast<int32_t>(inst_.ioffset << 8) >> 8'
+
+    @property
+    def ds_compare_store_compare_first(self) -> bool:
+        return False
+
+    @property
+    def atomic_legacy_minmax(self) -> bool:
+        # RDNA4 chapter 13 / CDNA5 chapter 12 operate on flushed inputs.
+        return False
+
+    @property
+    def atomic_source_nan_first(self) -> bool:
+        return True
+
+    def scalar_atomic_denorm_modes(
+        self, operation: str, elem_size: int, *, ds: bool
+    ) -> tuple[str, str]:
+        # RDNA4 13.2 / CDNA5 12.2: FLAT LDS and L2 both preserve denormals.
+        # Indexed DS retains its independent MODE-controlled policy.
+        _, lds_mode = super().scalar_atomic_denorm_modes(operation, elem_size, ds=ds)
+        return '3', lds_mode if ds else '3'
 
     @property
     def dpp_bound_ctrl_applies_to_inactive_sources(self) -> bool:
@@ -2139,7 +2624,7 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     @property
     def dpp_requires_opsel_lane_alignment(self) -> bool:
-        return True
+        return False
 
     def dpp_opcode_rule(
         self,
@@ -2178,6 +2663,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return Rdna3Profile.waitcnt_decode.fget(self)
 
     @property
+    def compatibility_instruction_slots(self) -> dict[tuple[str, int], str]:
+        return {('ENC_SOPP', 9): 'S_WAITCNT'}
+
+    @property
     def supported_versions(self) -> list[str]:
         return ['1.1.0', '1.1.1']
 
@@ -2208,6 +2697,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def uses_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.GFX12
 
     @property
     def wave_state_layout(self) -> WaveStateLayout:
@@ -2285,6 +2778,18 @@ class Rdna4Profile(_AmdgpuProfileBase):
             'S_BARRIER_WAIT': ('barrier', '', ''),
         }
 
+    @property
+    def renders_true16_vop3_operands(self) -> bool:
+        return True
+
+    @property
+    def vop3_opsel_omissions(self) -> frozenset[str]:
+        return frozenset({'V_CNDMASK_B16'})
+
+    @property
+    def dpp_ctrl_dialect(self) -> DppCtrlDialect:
+        return DppCtrlDialect.GFX10_PLUS
+
     def mnemonic_rule(self, enc_name: str) -> MnemonicRule:
         """RDNA4 mnemonic rules.
 
@@ -2314,6 +2819,14 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return ('opsel', 'opsel_hi')
 
     @property
+    def vop3p_opsel_hi_high_field(self) -> str:
+        return 'opsel_hi_2'
+
+    @property
+    def vop3_opsel_field(self) -> str:
+        return 'opsel'
+
+    @property
     def smem_direct_offset_field(self) -> str | None:
         return 'ioffset'
 
@@ -2324,7 +2837,8 @@ class Rdna4Profile(_AmdgpuProfileBase):
     def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
         """RDNA4 encoding modifiers.
 
-        Uses GFX12 SCOPE+TH model: SMEM/VBUFFER/VFLAT show only NV.
+        Render the GFX12 SCOPE+TH policy and NV flag for every memory encoding
+        that carries those fields.
         """
         upper = enc_name.upper()
         if upper == 'ENC_SMEM':
@@ -2333,6 +2847,8 @@ class Rdna4Profile(_AmdgpuProfileBase):
             return _VBUFFER_MODIFIERS_RDNA4
         if upper in ('ENC_VFLAT', 'ENC_VGLOBAL', 'ENC_VSCRATCH'):
             return _VFLAT_MODIFIERS_RDNA4
+        if upper in ('ENC_VIMAGE', 'ENC_VSAMPLE'):
+            return _IMAGE_MODIFIERS_RDNA4
         return []
 
 
@@ -2343,6 +2859,24 @@ class Cdna5Profile(Rdna4Profile):
     logical target used by parser/codegen rules while generated and handwritten
     C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
+
+    @property
+    def atomic_source_nan_first(self) -> bool:
+        # Preserve the existing L2 policy until qualified on CDNA5 hardware.
+        return False
+
+    @property
+    def vmem_stores_complete_in_order(self) -> bool:
+        return True
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # Literal lane indices are only qualified on RDNA3 and RDNA4.
+        return ((192, 192),)
+
+    @property
+    def global_addtid_offset_expr(self) -> str:
+        return 'signed_ioffset(inst_.ioffset)'
 
     @property
     def generated_arch_name(self) -> str | None:
@@ -2474,10 +3008,14 @@ class Cdna5Profile(Rdna4Profile):
             return 'default'
         return super().normalize_encoding_condition(enc_name, cond_name)
 
-    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
         if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
             return False
-        return super().skip_inst_encoding(enc_name, enc_cond)
+        return super().skip_inst_encoding(
+            enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
+        )
 
     def dpp_opcode_rule(
         self,
@@ -2505,6 +3043,10 @@ class Cdna5Profile(Rdna4Profile):
         renames = dict(super().field_renames(enc_name))
         renames['literal'] = 'simm32'
         return renames
+
+    @property
+    def compatibility_instruction_slots(self) -> dict[tuple[str, int], str]:
+        return {('ENC_VOP1', 103): 'V_PERMLANE64_B32'}
 
     def normalize_operand_field_name(self, enc_name: str, field_name: str) -> str:
         # Keep the concrete gfx1250 operand identity distinct from earlier
@@ -2543,12 +3085,29 @@ class Cdna5Profile(Rdna4Profile):
         return 32
 
     @property
+    def tied_destination_prefixes(self) -> tuple[str, ...]:
+        # SWMMAC is a two-address operation: its encoded VDST supplies C as
+        # well as naming D. Keep the tied read implicit so disassembly prints
+        # the operand only once.
+        return ('V_SWMMAC_',)
+
+    @property
+    def tied_destination_def_widths(self) -> dict[str, int]:
+        # The MRISA encodes the largest (F32 accumulator) view. The BF16F32
+        # form actually writes a packed-BF16 matrix using half as many VGPRs.
+        return {'V_SWMMAC_BF16F32_16X16X64_BF16': 128}
+
+    @property
     def supports_wgp_mode(self) -> bool:
         return False
 
     @property
     def uses_cluster_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def float_dot_accumulation(self) -> FloatDotAccumulation:
+        return FloatDotAccumulation.HOST_F32
 
     @property
     def wave_state_layout(self) -> WaveStateLayout:

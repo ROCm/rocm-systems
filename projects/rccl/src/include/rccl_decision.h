@@ -33,7 +33,7 @@ THE SOFTWARE.
 //
 // `algo` uses the unified identifier space: a native NCCL_ALGO_* value for the
 // standard ring/tree/pat kernel path, or an rcclAddonAlgos_t value (Direct,
-// Symmetric, CE, DDA, ...) for an RCCL-specific backend. Name it via
+// Symmetric, CE, DDA, GIN-SDMA, ...) for an RCCL-specific backend. Name it via
 // rcclGetAlgoName(). Kept as int (not the enum) so this header stays free of the
 // enum's dependencies and can be included by low-level headers like info.h.
 struct rcclCollDecision {
@@ -41,7 +41,7 @@ struct rcclCollDecision {
   int protocol;         // NCCL_PROTO_*
   uint32_t nMaxChannels; // reporting: channels for the kernel path (0 = N/A)
   // Runtime bits computed once at the decision point and carried into
-  // taskAppend() so it never recomputes graph-capture state for AllReduce.
+  // taskAppend() so it never recomputes graph-capture state.
   bool ceCapturing;
   bool ceArGraphAllowed;
 };

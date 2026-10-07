@@ -31,7 +31,9 @@ public:
         if(!m_path.empty())
         {
             for(const auto& f : m_files)
+            {
                 std::remove(f.c_str());
+            }
             ::rmdir(m_path.c_str());
         }
     }
@@ -100,8 +102,8 @@ class preset_registry_test : public ::testing::Test
 
 TEST_F(preset_registry_test, get_settings_loads_metadata_and_settings)
 {
-    temp_dir dir;
-    auto     filepath = dir.write_file("balanced.json", balanced_json);
+    temp_dir   dir;
+    auto const filepath = dir.write_file("balanced.json", balanced_json);
 
     preset_registry registry;
     auto            settings = registry.get_settings(filepath);
@@ -115,7 +117,7 @@ TEST_F(preset_registry_test, get_settings_loads_metadata_and_settings)
     // Verify metadata via explain
     std::ostringstream oss;
     EXPECT_TRUE(registry.explain("balanced", "run", oss));
-    auto output = oss.str();
+    auto const output = oss.str();
     EXPECT_NE(output.find("balanced"), std::string::npos);
     EXPECT_NE(output.find("Balanced profiling mode"), std::string::npos);
     EXPECT_NE(output.find("General-purpose profiling"), std::string::npos);
@@ -123,8 +125,8 @@ TEST_F(preset_registry_test, get_settings_loads_metadata_and_settings)
 
 TEST_F(preset_registry_test, get_settings_resolves_gpu_domain)
 {
-    temp_dir dir;
-    auto     filepath = dir.write_file("gpu-trace.json", gpu_preset_json);
+    temp_dir   dir;
+    auto const filepath = dir.write_file("gpu-trace.json", gpu_preset_json);
 
     preset_registry registry;
     auto            settings = registry.get_settings(filepath);
@@ -132,7 +134,7 @@ TEST_F(preset_registry_test, get_settings_resolves_gpu_domain)
     ASSERT_TRUE(settings.has_value());
     EXPECT_EQ(settings->at(std::string{ env_vars::USE_AMD_SMI }), "true");
     EXPECT_EQ(settings->at(std::string{ env_vars::USE_PROCESS_SAMPLING }), "true");
-    auto metrics = settings->at(std::string{ env_vars::AMD_SMI_METRICS });
+    auto const metrics = settings->at(std::string{ env_vars::AMD_SMI_METRICS });
     EXPECT_NE(metrics.find("temp"), std::string::npos);
     EXPECT_NE(metrics.find("power"), std::string::npos);
 }
@@ -140,17 +142,17 @@ TEST_F(preset_registry_test, get_settings_resolves_gpu_domain)
 TEST_F(preset_registry_test, get_settings_returns_nullopt_for_missing_file)
 {
     preset_registry registry;
-    auto            settings = registry.get_settings("/nonexistent/path/missing.json");
+    auto const      settings = registry.get_settings("/nonexistent/path/missing.json");
     EXPECT_FALSE(settings.has_value());
 }
 
 TEST_F(preset_registry_test, get_settings_returns_nullopt_for_invalid_json)
 {
-    temp_dir dir;
-    auto     filepath = dir.write_file("invalid.json", invalid_json);
+    temp_dir   dir;
+    auto const filepath = dir.write_file("invalid.json", invalid_json);
 
     preset_registry registry;
-    auto            settings = registry.get_settings(filepath);
+    auto const      settings = registry.get_settings(filepath);
     EXPECT_FALSE(settings.has_value());
 }
 
@@ -193,14 +195,14 @@ TEST_F(preset_registry_test, load_all_from_directory)
     registry.list("run", oss);
     ::unsetenv(env_vars::PRESET_DIR);
 
-    auto output = oss.str();
+    auto const output = oss.str();
     EXPECT_NE(output.find("balanced"), std::string::npos);
 }
 
 TEST_F(preset_registry_test, get_settings_returns_consistent_results)
 {
-    temp_dir dir;
-    auto     filepath = dir.write_file("balanced.json", balanced_json);
+    temp_dir   dir;
+    auto const filepath = dir.write_file("balanced.json", balanced_json);
 
     preset_registry registry;
     auto            first  = registry.get_settings(filepath);
@@ -213,8 +215,8 @@ TEST_F(preset_registry_test, get_settings_returns_consistent_results)
 
 TEST_F(preset_registry_test, is_section_enabled_checks)
 {
-    temp_dir dir;
-    auto     filepath = dir.write_file("balanced.json", balanced_json);
+    temp_dir   dir;
+    auto const filepath = dir.write_file("balanced.json", balanced_json);
 
     preset_registry registry;
     // Trigger load via get_settings
@@ -235,8 +237,8 @@ TEST_F(preset_registry_test, get_settings_handles_empty_metadata)
         "tracing": {"enabled": true}
     })";
 
-    temp_dir dir;
-    auto     filepath = dir.write_file("minimal.json", minimal_json);
+    temp_dir   dir;
+    auto const filepath = dir.write_file("minimal.json", minimal_json);
 
     preset_registry registry;
     auto            settings = registry.get_settings(filepath);
@@ -256,7 +258,7 @@ TEST_F(preset_registry_test, list_output_content)
     registry.list("run", oss);
     ::unsetenv(env_vars::PRESET_DIR);
 
-    auto output = oss.str();
+    auto const output = oss.str();
     EXPECT_NE(output.find("Available Presets:"), std::string::npos);
     EXPECT_NE(output.find("balanced"), std::string::npos);
     EXPECT_NE(output.find("rocprof-sys-run"), std::string::npos);
@@ -274,7 +276,7 @@ TEST_F(preset_registry_test, explain_output_content)
     ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_TRUE(result);
-    auto output = oss.str();
+    auto const output = oss.str();
     EXPECT_NE(output.find("Preset: balanced"), std::string::npos);
     EXPECT_NE(output.find(std::string{ env_vars::TRACE }), std::string::npos);
 }
@@ -294,7 +296,7 @@ TEST_F(preset_registry_test, describe_generates_output_tree)
 
     ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry registry;
-    auto            desc = registry.describe("balanced");
+    auto const      desc = registry.describe("balanced");
     ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_NE(desc.find("Tracing:"), std::string::npos);

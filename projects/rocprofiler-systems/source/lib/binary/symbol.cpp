@@ -3,7 +3,7 @@
 
 #include "core/config.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #if !defined(TIMEMORY_USE_BFD)
 #    error "BFD support not enabled"
@@ -21,15 +21,13 @@ typedef Elf32_Word  Elf32_Relr;
 typedef Elf64_Xword Elf64_Relr;
 #endif
 
+#include <algorithm>
 #include <bfd.h>
-#include <coff/external.h>
-#include <coff/internal.h>
 #include <cstddef>
 #include <cstdio>
 #include <dwarf.h>
 #include <elf-bfd.h>
 #include <elfutils/libdw.h>
-#include <libcoff.h>
 
 #include "common/path.hpp"
 #include "core/binary/fwd.hpp"
@@ -42,9 +40,7 @@ typedef Elf64_Xword Elf64_Relr;
 
 #include <timemory/mpl/concepts.hpp>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 namespace
 {
@@ -60,7 +56,10 @@ read_inliner_info(bfd* _inp)
         if(bfd_find_inliner_info(_inp, &_file, &_func, &_line) != 0)
         {
             if(_file && _func && _line > 0)
-                _data.emplace_back(inlined_symbol{ _line, path::realpath(_file), _func });
+            {
+                _data.emplace_back(inlined_symbol{
+                    .line = _line, .file = path::realpath(_file), .func = _func });
+            }
         }
         else
         {
@@ -91,11 +90,15 @@ symbol::operator<(const symbol& _rhs) const
     // if both have non-zero load addresses that are not equal, compare based on load
     // addresses
     if(load_address > 0 && _rhs.load_address > 0 && load_address != _rhs.load_address)
+    {
         return (load_address < _rhs.load_address);
+    }
 
     // if address is same and name is same, return true if load_address is higher
     if(address == _rhs.address && base_type::name == _rhs.base_type::name)
+    {
         return load_address > _rhs.load_address;
+    }
 
     return std::tie(address, base_type::binding, base_type::visibility, base_type::name) <
            std::tie(_rhs.address, _rhs.base_type::binding, base_type::visibility,
@@ -125,10 +128,12 @@ symbol::operator+=(const symbol& _rhs)
         address += _rhs.address;
         utility::combine(inlines, _rhs.inlines);
         utility::combine(dwarf_info, _rhs.dwarf_info);
-        if(_rhs.binding < binding) binding = _rhs.binding;
-        if(_rhs.visibility < visibility) visibility = _rhs.visibility;
+        binding    = std::min(_rhs.binding, binding);
+        visibility = std::min(_rhs.visibility, visibility);
         if(load_address == 0 && _rhs.load_address > load_address)
+        {
             load_address = _rhs.load_address;
+        }
     }
     else
     {
@@ -148,17 +153,19 @@ symbol::read_dwarf_entries(const std::deque<dwarf_entry>& _info)
 {
     for(const auto& itr : _info)
     {
-        if(address.contains(itr.address)) dwarf_info.emplace_back(itr);
+        if(address.contains(itr.address))
+        {
+            dwarf_info.emplace_back(itr);
+        }
     }
 
     // make sure the dwarf info is sorted by address (low to high)
-    std::sort(dwarf_info.begin(), dwarf_info.end(),
-              [](const dwarf_entry& _lhs, const dwarf_entry& _rhs) {
-                  return _lhs.address < _rhs.address;
-              });
+    std::ranges::sort(dwarf_info, [](const dwarf_entry& _lhs, const dwarf_entry& _rhs) {
+        return _lhs.address < _rhs.address;
+    });
 
     // helper for getting the end address
-    auto _get_next_address = [&](auto nitr, uintptr_t _low) {
+    auto const _get_next_address = [&](auto nitr, uintptr_t _low) {
         while(++nitr != dwarf_info.end())
         {
             if(nitr->address.low > _low)
@@ -174,23 +181,25 @@ symbol::read_dwarf_entries(const std::deque<dwarf_entry>& _info)
     {
         // if address is already a range, do not update it
         if(!itr->address.is_range())
+        {
             itr->address = address_range{ itr->address.low,
                                           _get_next_address(itr, itr->address.low) };
+        }
     }
 
-    std::sort(dwarf_info.begin(), dwarf_info.end(),
-              [](const auto& _lhs, const auto& _rhs) {
-                  return std::tie(_lhs.address, _lhs.file, _lhs.line, _lhs.col) <
-                         std::tie(_rhs.address, _rhs.file, _rhs.line, _rhs.col);
-              });
+    std::ranges::sort(dwarf_info, [](const auto& _lhs, const auto& _rhs) {
+        return std::tie(_lhs.address, _lhs.file, _lhs.line, _lhs.col) <
+               std::tie(_rhs.address, _rhs.file, _rhs.line, _rhs.col);
+    });
 
-    dwarf_info.erase(std::unique(dwarf_info.begin(), dwarf_info.end(),
-                                 [](const auto& _lhs, const auto& _rhs) {
-                                     return std::tie(_lhs.address, _lhs.file,
-                                                     _lhs.line) ==
-                                            std::tie(_rhs.address, _rhs.file, _rhs.line);
-                                 }),
-                     dwarf_info.end());
+    dwarf_info.erase(
+        std::ranges::unique(dwarf_info,
+                            [](const auto& _lhs, const auto& _rhs) {
+                                return std::tie(_lhs.address, _lhs.file, _lhs.line) ==
+                                       std::tie(_rhs.address, _rhs.file, _rhs.line);
+                            })
+            .begin(),
+        dwarf_info.end());
 
     return dwarf_info.size();
 }
@@ -200,11 +209,14 @@ symbol::read_dwarf_breakpoints(const std::vector<uintptr_t>& _bkpts)
 {
     for(const auto& itr : _bkpts)
     {
-        if(address.contains(itr)) breakpoints.emplace_back(itr);
+        if(address.contains(itr))
+        {
+            breakpoints.emplace_back(itr);
+        }
     }
 
     // make sure the breakpoints are sorted low to high
-    std::sort(breakpoints.begin(), breakpoints.end());
+    std::ranges::sort(breakpoints);
 
     return breakpoints.size();
 }
@@ -216,12 +228,15 @@ symbol::read_bfd_line_info(bfd_file& _bfd)
     const bfd_vma       _vma     = bfd_section_vma(_section);
     const bfd_size_type _size    = bfd_section_size(_section);
 
-    auto& _pc     = address.low;
-    auto& _pc_end = address.high;
+    auto const& _pc     = address.low;
+    auto&       _pc_end = address.high;
 
-    if(_pc < _vma || _pc >= _vma + _size) return false;
+    if(_pc < _vma || _pc >= _vma + _size)
+    {
+        return false;
+    }
     // add one to vma + size because address range is exclusive of last address
-    if(_pc_end > _vma + _size) _pc_end = (_vma + _size);
+    _pc_end = std::min(_pc_end, _vma + _size);
 
     auto* _inp  = static_cast<bfd*>(_bfd.data);
     auto* _syms = reinterpret_cast<asymbol**>(_bfd.syms);
@@ -234,12 +249,22 @@ symbol::read_bfd_line_info(bfd_file& _bfd)
         if(bfd_find_nearest_line(_inp, _section, _syms, _pc - _vma, &_file, &_func,
                                  &_line) != 0)
         {
-            if(_file) file = _file;
-            if(_func) func = _func;
-            if(_file && strnlen(_file, 1) > 0)
+            if(_file)
+            {
                 file = _file;
+            }
+            if(_func)
+            {
+                func = _func;
+            }
+            if(_file && strnlen(_file, 1) > 0)
+            {
+                file = _file;
+            }
             else if(!_file || strnlen(_file, 1) == 0)
+            {
                 file = bfd_get_filename(_inp);
+            }
             if(!func.empty())
             {
                 file    = path::realpath(file);
@@ -271,7 +296,7 @@ Tp
 symbol::get_inline_symbols(const std::vector<scope_filter>& _filters) const
 {
     using sf         = scope_filter;
-    using value_type = typename Tp::value_type;
+    using value_type = Tp::value_type;
 
     auto _data = Tp{};
 
@@ -307,7 +332,7 @@ Tp
 symbol::get_debug_line_info(const std::vector<scope_filter>& _filters) const
 {
     using sf         = scope_filter;
-    using value_type = typename Tp::value_type;
+    using value_type = Tp::value_type;
 
     auto _data = Tp{};
 
@@ -357,7 +382,9 @@ symbol::serialize(ArchiveT& ar, const unsigned int)
        make_nvp("line", line), make_nvp("func", func), make_nvp("file", file),
        make_nvp("inlines", inlines), make_nvp("dwarf_info", dwarf_info));
     if constexpr(concepts::is_output_archive<ArchiveT>::value)
+    {
         ar(cereal::make_nvp("dfunc", rocprofsys::utility::demangle(func)));
+    }
 }
 
 template void
@@ -399,5 +426,4 @@ symbol::get_debug_line_info<std::deque<symbol>>(
 template std::vector<dwarf_entry>
 symbol::get_debug_line_info<std::vector<dwarf_entry>>(
     const std::vector<scope_filter>& _filters) const;
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

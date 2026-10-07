@@ -27,18 +27,16 @@ namespace hipFile {
 
 struct AsyncOpFallback : AsyncOp {
     size_t      submitted_size;
+    size_t      chunk_bytes_copied;
     void *const gpu_buffer;
+    void       *bounce_buffer_host_ptr;
     void       *bounce_buffer_dev_ptr;
+    size_t      bounce_buffer_size;
 
-private:
-    std::unique_ptr<void, void (*)(void *)> bounce_buffer;
-
-public:
     AsyncOpFallback(IoType ioType, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
                     std::shared_ptr<IStream> stream, size_t *size, hoff_t *fileOffset, hoff_t *bufferOffset,
                     ssize_t *bytesTransferred);
 
-    void *bounceBufferHostPtr();
     void *devPtr();
 
     virtual ~AsyncOpFallback() override;

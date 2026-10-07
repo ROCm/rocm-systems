@@ -568,9 +568,13 @@ Output: Dictionary with fields
 
 Field | Content
 ---|---
-`driver_name` |  driver name
-`driver_version` |  driver_version
-`driver_date` |  driver_date
+``driver_name`` |  driver name
+``driver_kernel_version`` | amdgpu kernel source version, such as ``6.19.14``
+``amdgpu_driver_version`` | amdgpu module version, such as ``31400000``
+``driver_version`` | driver version, such as ``6.19.14.31400000``
+``driver_build_version`` | active DKMS build version, such as ``2370381``
+``driver_full_version`` | composed version, such as ``6.19.14.31400000-2370381``
+``driver_date`` |  driver_date
 
 Exceptions that can be thrown by `amdsmi_get_gpu_driver_info` function:
 
@@ -620,9 +624,12 @@ Field | Content
 `vendor_id` |  vendor id
 `vendor_name` |  vendor name
 `device_id` |  device id
-`rev_id` |  revision id
+`rev_id` |  PCI config-space revision id (`"N/A"` if not supported)
+`chip_rev_id` | amdgpu `chip_rev`; internal chip revision (stepping) as the driver reports it, not decoded (`"N/A"` if not supported)
+`external_rev_id` | amdgpu `external_rev`; family-scoped, so interpret it alongside `device_id` (`"N/A"` if not supported)
 `asic_serial` | asic serial
 `oam_id` | oam id
+`physical_acc_id` | physical accelerator ID (UALoE-backed; `"N/A"` if not supported)
 `num_of_compute_units` | number of compute units on asic
 `target_graphics_version` | hardware graphics version
 `subsystem_id` |  subsystem id
@@ -1776,7 +1783,7 @@ Field | Description
 ---|---
 `pid` | Process ID
 `name` | Name of process. If user does not have permission this will be "N/A"
-`container_name` | Container name, when the process runs inside a container
+`container_name` | Identifier of the container the process runs in, or empty if it is not in a container. For Docker, containerd, CRI-O and Podman this is the full 64-character container ID; for LXC it is the container name
 `gpus` | <table><thead><tr><th>Subfield</th><th>Description</th></tr></thead><tbody><tr><td>`gpu_index`</td><td>GPU index the entry refers to</td></tr><tr><td>`mem`</td><td>Total memory usage on this GPU in Bytes</td></tr><tr><td>`engine_usage`</td><td>`gfx` and `enc` engine usage in ns</td></tr><tr><td>`memory_usage`</td><td>`gtt_mem`, `cpu_mem`, and `vram_mem` usage in Bytes</td></tr><tr><td>`cu_occupancy`</td><td>Number of Compute Units utilized</td></tr><tr><td>`sdma_usage`</td><td>SDMA usage in microseconds</td></tr><tr><td>`evicted_time`</td><td>Time queues are evicted on this GPU in milliseconds</td></tr></tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list_by_pid` function:
@@ -3057,6 +3064,8 @@ Field | Description | Units
 `status` | NPM status (AMDSMI_NPM_STATUS_ENABLED or AMDSMI_NPM_STATUS_DISABLED) | -
 `limit` | Node-level power limit | W
 `ubb_power_threshold` | UBB node power threshold | W
+`max_node_power_limit` | The platform max bound consumed by `amdsmi_set_npm_limit()`: callers should ensure any limit passed to that function does not exceed this value | W
+`current_node_power` | The current (instantaneous) node power (board/node_power), MI450+. Queried once per node rather than once per GPU | W
 
 Exceptions that can be thrown by `amdsmi_get_npm_info` function:
 
@@ -3083,6 +3092,116 @@ try:
         print(npm_info['status'])
         print(npm_info['limit'])
         print(npm_info['ubb_power_threshold'])
+        print(npm_info['max_node_power_limit'])
+        print(npm_info['current_node_power'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_npm_limit
+
+Description: Set the NPM (Node Power Management) power limit for the node
+associated with `node_handle` by writing to the board's
+`cur_node_power_limit` sysfs interface.
+
+This function rejects the request with `AmdSmiLibraryException`
+(`AMDSMI_STATUS_INVAL`) if NPM is disabled on the node
+(`amdsmi_get_npm_info()`'s `status` == `AMDSMI_NPM_STATUS_DISABLED`), since
+writing `board/cur_node_power_limit` while NPM is disabled has no defined
+effect. It also validates `limit` against the platform max bound
+(`amdsmi_get_npm_info()`'s `max_node_power_limit`, sourced from
+`board/max_node_power_limit`) internally before ever issuing the write,
+raising `AmdSmiLibraryException` with `AMDSMI_STATUS_INVAL` if `limit` is `0`
+or greater than that bound. If the platform max bound itself cannot be read
+(e.g. the sysfs interface is missing or returns unexpected data), this
+function fails closed and raises that underlying error rather than silently
+allowing an unbounded `limit` through. The amd-smi CLI's
+`set --node-power-limit` additionally performs the same checks itself ahead
+of calling this function, purely to fail fast and present a friendlier,
+earlier user-facing error message; it is not the only validation and is not
+required for correctness.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+* `limit` new NPM power limit value to request (units match the
+  `board/cur_node_power_limit` sysfs interface). Must satisfy
+  `0 < limit <= UINT64_MAX`; out-of-range values raise
+  `AmdSmiParameterException` rather than silently wrapping modulo 2**64 the
+  way a raw `ctypes.c_uint64()` conversion would. Values that pass this local
+  bound check but are `0` or exceed the platform max are rejected by the
+  underlying library call instead (see Exceptions below)
+
+Output: None. This function raises an exception if the call did not succeed
+(e.g. `AmdSmiLibraryException` with `AMDSMI_STATUS_INVAL` if `limit` is `0` or
+exceeds the platform max bound, `AMDSMI_STATUS_NOT_SUPPORTED` if the sysfs
+interface is unavailable, or `AMDSMI_STATUS_NO_PERM` if the write was
+rejected)
+
+Exceptions that can be thrown by `amdsmi_set_npm_limit` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters, including when `limit` is `0`
+  or exceeds the platform max bound (or when that bound itself cannot be
+  read)
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied (e.g. the write was rejected by
+  the driver for this guest context)
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        amdsmi.amdsmi_set_npm_limit(node_handle, 6000)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_tray_info
+
+Description: Returns node-scoped compute tray type and accelerator count via UALoE.
+
+Input parameters: `node_handle` (reserved for future use; must be `None`)
+
+Output: Dictionary with fields
+
+Field | Description | Units
+---|---|---
+`max_acc_per_tray` | Number of accelerators on the compute tray | -
+`tray_type` | Compute tray type (`HELIOS_P`, `HELIOS_R`, `TITAN`, or `UNKNOWN`) | -
+
+Exceptions that can be thrown by `amdsmi_get_tray_info` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported (no active UALoE session)
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    tray_info = amdsmi.amdsmi_get_tray_info()
+    print(tray_info['max_acc_per_tray'])
+    print(tray_info['tray_type'])
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
