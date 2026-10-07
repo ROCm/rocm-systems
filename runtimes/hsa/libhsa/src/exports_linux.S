@@ -1,3 +1,4 @@
+/* Copyright (c) 2026 Advanced Micro Devices, Inc. */
 /* SPDX-License-Identifier: MIT */
 
 // ROCr HSA ELF symbol versions. The first 280 names match
