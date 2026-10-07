@@ -142,14 +142,9 @@ static int IbCastSpeed(int speed) {
 
 extern "C" int ncclIbCastTestSpeed(int speed) { return IbCastSpeed(speed); }
 
-// Per-device record of which branch populated IbCastDevs[dev].speed, test-only
-// (so NCCL_IB_QUERY_PORT_SPEED=0 tests can assert the fallback was actually used,
-// not just that it produced the same value as the query would have).
-static bool IbCastDevSpeedFromQuery[MAX_IB_DEVS];
-
 extern "C" ncclResult_t ncclIbCastTestSpeedSource(int dev, int* fromQuery) {
   if (fromQuery == NULL || dev < 0 || dev >= IbCastNDevs) return ncclInvalidArgument;
-  *fromQuery = IbCastDevSpeedFromQuery[dev] ? 1 : 0;
+  *fromQuery = IbCastDevs[dev].speedFromQuery ? 1 : 0;
   return ncclSuccess;
 }
 
@@ -521,12 +516,12 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             if (wrap_ibv_query_port_speed(context, port_num, &querySpeed) == ncclSuccess && querySpeed != 0) {
               // ibv_query_port_speed returns speed in granularity of 100 Mbps
               IbCastDevs[IbCastNDevs].speed = querySpeed * 100;
-              IbCastDevSpeedFromQuery[IbCastNDevs] = true;
+              IbCastDevs[IbCastNDevs].speedFromQuery = true;
             } else {
               // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
               int portSpeed = portAttr.active_speed_ex ? portAttr.active_speed_ex : portAttr.active_speed;
               IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portSpeed) * IbCastWidth(portAttr.active_width);
-              IbCastDevSpeedFromQuery[IbCastNDevs] = false;
+              IbCastDevs[IbCastNDevs].speedFromQuery = false;
             }
             IbCastDevs[IbCastNDevs].context = context;
             IbCastDevs[IbCastNDevs].pdRefs = 0;
@@ -736,11 +731,24 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
   ncclResult_t ret = ncclSuccess;
   ncclNetCommConfig_t* netCommConfig = nullptr;
   // Telemetry is initialized and reported by IbCastInitDevices below.
+  // IbCastInitDevices() increments netRefCount before it can fail, so any step below that fails
+  // must unwind what already succeeded itself: init()/finalize() is a strict pair in the net
+  // plugin contract, and finalize() is only ever called after a successful init().
   NCCLCHECK(IbCastInitDevices(logFunction, profFunction));
   // After IbCastInitDevices: the probe QPs must use the final IbCastUseInline, like the resiliency QPs.
-  NCCLCHECK(IbCastCapProbeDevices());
-  NCCLCHECK(IbCastPortRecoveryThreadStart());
-  NCCLCHECK(ncclCalloc(&netCommConfig, 1));
+  if ((ret = IbCastCapProbeDevices()) != ncclSuccess) {
+    IbCastFinalizeDevices();
+    return ret;
+  }
+  if ((ret = IbCastPortRecoveryThreadStart()) != ncclSuccess) {
+    IbCastFinalizeDevices();
+    return ret;
+  }
+  if ((ret = ncclCalloc(&netCommConfig, 1)) != ncclSuccess) {
+    IbCastPortRecoveryThreadStop();
+    IbCastFinalizeDevices();
+    return ret;
+  }
   netCommConfig->trafficClass = config->trafficClass;
   *ctx = (void*)netCommConfig;
   return ret;
