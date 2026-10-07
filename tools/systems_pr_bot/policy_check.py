@@ -99,12 +99,10 @@ class CheckResult:
 
 @dataclass(frozen=True)
 class RequiredCheck:
-    """A uniquely named check and the PR filters that require it."""
+    """A uniquely named check scheduled for the declared target branches."""
 
     # Exact check-run name published by its workflow.
     name: str
-    # Ordered GitHub Actions path patterns; empty means every changed path.
-    paths: List[str]
     # Ordered GitHub Actions base-branch patterns; empty means every branch.
     branches: List[str]
 
@@ -168,28 +166,24 @@ def _load_required_checks(raw_checks: Any) -> List[RequiredCheck]:
     checks: List[RequiredCheck] = []
     names = set()
     for raw in raw_checks:
-        if not isinstance(raw, dict) or set(raw) - {"name", "paths", "branches"}:
+        if not isinstance(raw, dict) or set(raw) - {"name", "branches"}:
             raise ValueError(
-                "Required checks must be mappings with only name, paths, and branches"
+                "Required checks must be mappings with only name and branches"
             )
         name = raw.get("name")
         if not isinstance(name, str) or not name.strip() or name in names:
             raise ValueError(f"Missing or duplicate required check name: {name!r}")
-        filters = []
-        for key in ("paths", "branches"):
-            patterns = raw.get(key, [])
-            if not isinstance(patterns, list) or any(
-                not isinstance(pattern, str) or not pattern.lstrip("!")
-                for pattern in patterns
-            ):
-                raise ValueError(f"{name}: {key} must be a list of nonempty patterns")
-            if patterns and all(pattern.startswith("!") for pattern in patterns):
-                raise ValueError(f"{name}: {key} needs a positive pattern")
-            for pattern in patterns:
-                re.compile(_workflow_filter_regex(pattern.removeprefix("!")))
-            filters.append(patterns)
+        branches = raw.get("branches", [])
+        if not isinstance(branches, list) or any(
+            not isinstance(branch, str) or not branch.lstrip("!") for branch in branches
+        ):
+            raise ValueError(f"{name}: branches must be a list of nonempty patterns")
+        if branches and all(branch.startswith("!") for branch in branches):
+            raise ValueError(f"{name}: branches needs a positive pattern")
+        for branch in branches:
+            re.compile(_workflow_filter_regex(branch.removeprefix("!")))
         names.add(name)
-        checks.append(RequiredCheck(name, *filters))
+        checks.append(RequiredCheck(name, branches))
     return checks
 
 
@@ -204,7 +198,7 @@ class Policy:
     unit_test_patterns: List[str]
     unit_test_exempt_paths: List[str]
     bump_bot_authors: List[str]
-    # Declared checks, narrowed to applicable path/branch rules before polling.
+    # Declared checks, narrowed only by target branch before polling.
     required_checks: List[RequiredCheck]
     precommit_failure_comment: Optional[FailureComment]
 
@@ -335,7 +329,7 @@ def get_pr(owner: str, repo: str, pr_number: int, token: str) -> Dict[str, Any]:
 def iter_pr_files(
     owner: str, repo: str, pr_number: int, token: str
 ) -> Iterable[Dict[str, Any]]:
-    """Yield every file object changed in the PR, transparently paginating.
+    """Yield the PR file objects available through the capped GitHub API.
 
     Each yielded dict includes keys such as `filename`, `status`, `additions`,
     `deletions`, and `changes`.
@@ -346,13 +340,13 @@ def iter_pr_files(
             f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files?per_page=100&page={page}",
             token,
         )
-        if not isinstance(data, list):
+        if not isinstance(data, list) or any(
+            not isinstance(item, dict) for item in data
+        ):
             raise RuntimeError("Unexpected PR files payload")
         if not data:
             return
-        for item in data:
-            if isinstance(item, dict):
-                yield item
+        yield from data
         page += 1
 
 
@@ -383,30 +377,18 @@ def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str
         page += 1
 
 
-def select_required_checks(
-    policy: Policy, pr_files: List[Dict[str, Any]], base_branch: str
-) -> Policy:
-    """Freeze the expected set from trusted policy and PR paths before polling.
+def select_required_checks(policy: Policy, base_branch: str) -> Policy:
+    """Require every scheduled check, independently of the PR file list.
 
-    Removed files also trigger workflow path filters. Renames can match either
-    the old or the new path, so both names participate in scope selection.
+    Named jobs always run on their target branches. Each job evaluates its
+    complete Git diff and reports success when its formatting scope is empty.
     """
-    paths = [
-        str(filename)
-        for item in pr_files
-        for filename in (item.get("filename"), item.get("previous_filename"))
-        if filename
-    ]
     return replace(
         policy,
         required_checks=[
             check
             for check in policy.required_checks
             if _matches_workflow_filter(base_branch, check.branches)
-            and (
-                not check.paths
-                or any(_matches_workflow_filter(path, check.paths) for path in paths)
-            )
         ],
     )
 
@@ -1173,10 +1155,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     pr_files = list(iter_pr_files(owner, repo, pr_number, token))  # type: ignore[arg-type]
+    expected_file_count = pr.get("changed_files")
+    if type(expected_file_count) is not int or expected_file_count < 0:
+        raise RuntimeError("PR payload is missing a valid changed_files count")
+    file_list_warning = (
+        f"GitHub returned {len(pr_files)} of {expected_file_count} changed files. "
+        "This advisory cannot evaluate the complete PR; the files API is capped "
+        "and a concurrent PR update can also change its results. "
+        "Required formatting jobs independently inspect their complete Git diff."
+        if len(pr_files) != expected_file_count
+        else None
+    )
     base_branch = (pr.get("base") or {}).get("ref")
     if not isinstance(base_branch, str) or not base_branch:
         raise RuntimeError("PR payload is missing the base branch")
-    policy = select_required_checks(policy, pr_files, base_branch)
+    policy = select_required_checks(policy, base_branch)
 
     results: List[CheckResult] = []
 
@@ -1201,6 +1194,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     check_errors = []
     ensure_no_forbidden_files(policy, pr_files, check_errors)
+    if file_list_warning:
+        check_errors.append(file_list_warning)
     # Forbidden Files is WARNING-ONLY.
     #
     # NOTE on the two emojis (they are NOT a contradiction):
@@ -1224,6 +1219,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     check_errors = []
     ensure_unit_tests(policy, pr_files, check_errors)
+    if file_list_warning:
+        check_errors.append(file_list_warning)
     ut_note = None
     ut_warn = bool(check_errors)
     if not check_errors and not pr_has_code_files(policy, pr_files):

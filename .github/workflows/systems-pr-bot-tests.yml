@@ -6,10 +6,12 @@ on:
     paths:
       - 'tools/systems_pr_bot/**'
       - '.github/workflows/**'
+      - '.github/actions/scoped-formatting/**'
   pull_request:
     paths:
       - 'tools/systems_pr_bot/**'
       - '.github/workflows/**'
+      - '.github/actions/scoped-formatting/**'
 
 permissions:
   contents: read
@@ -30,6 +32,7 @@ jobs:
           sparse-checkout: |
             tools/systems_pr_bot
             .github/workflows
+            .github/actions/scoped-formatting
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -40,3 +43,6 @@ jobs:
 
       - name: Test policy, pagination, polling, and workflow consistency
         run: python tools/systems_pr_bot/test_policy_check_ut.py -v
+
+      - name: Test formatting scope against real Git histories
+        run: python .github/actions/scoped-formatting/scope_test.py -v

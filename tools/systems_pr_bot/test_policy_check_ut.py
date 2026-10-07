@@ -75,7 +75,7 @@ def make_policy(**overrides: Any) -> pc.Policy:
         ],
         unit_test_exempt_paths=[],
         bump_bot_authors=["assistant-librarian", "systems-assistant", "dependabot"],
-        required_checks=[pc.RequiredCheck("pre-commit", [], [])],
+        required_checks=[pc.RequiredCheck("pre-commit", [])],
         precommit_failure_comment=None,
     )
     defaults.update(overrides)
@@ -537,7 +537,7 @@ class RequiredCheckRunTests(unittest.TestCase):
 
     def test_failure_help_uses_only_selected_scoped_formatting_checks(self) -> None:
         policy = make_policy(
-            required_checks=[pc.RequiredCheck("pre-commit / runtimes", [], [])],
+            required_checks=[pc.RequiredCheck("pre-commit / runtimes", [])],
             precommit_failure_comment=pc.FailureComment(
                 title="Formatting failed", body="Run pre-commit locally."
             ),
@@ -639,112 +639,45 @@ class RequiredCheckScopeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.policy = pc.load_policy(THIS_DIR / "policy.yml")
 
-    def _required(self, *paths: str, branch: str = "develop") -> List[str]:
-        selected = pc.select_required_checks(
-            self.policy, [make_file(path) for path in paths], branch
-        )
-        return [check.name for check in selected.required_checks]
-
-    def test_multi_subtree_requires_both_workflows(self) -> None:
+    def test_develop_requires_all_named_jobs(self) -> None:
+        selected = pc.select_required_checks(self.policy, "develop")
         self.assertEqual(
-            self._required("runtimes/Cargo.toml", "emulation/rocjitsu/rocjitsu.py"),
-            ["pre-commit / runtimes", "pre-commit"],
-        )
-
-    def test_shared_config_requires_both_root_config_workflows(self) -> None:
-        self.assertEqual(
-            self._required(".pre-commit-config.yaml"),
-            ["pre-commit / runtimes", "pre-commit"],
+            [check.name for check in selected.required_checks],
+            [
+                "pre-commit / runtimes",
+                "pre-commit",
+                "pre-commit / cuid",
+                "pre-commit / rocprofiler-compute",
+            ],
         )
 
-    def test_rocjitsu_workflow_change_preserves_precommit_requirement(self) -> None:
-        # The privileged bot reads base-branch policy, so the PR introducing
-        # scoped names must still publish the check that policy requires.
+    def test_other_branches_do_not_require_develop_only_job(self) -> None:
+        selected = pc.select_required_checks(self.policy, "pr-bot-test")
         self.assertEqual(
-            self._required(".github/workflows/rocjitsu-formatting.yml"),
-            ["pre-commit"],
+            [check.name for check in selected.required_checks],
+            ["pre-commit", "pre-commit / cuid", "pre-commit / rocprofiler-compute"],
         )
 
-    def test_base_branch_is_part_of_scope(self) -> None:
-        self.assertEqual(
-            self._required("runtimes/Cargo.toml", branch="pr-bot-test"), []
+    def test_branch_filter_includes_and_excludes(self) -> None:
+        policy = make_policy(
+            required_checks=[
+                pc.RequiredCheck("check", ["release/**", "!release/private/**"])
+            ]
         )
         self.assertEqual(
-            self._required("emulation/mirage/src/lib.rs", branch="pr-bot-test"),
-            ["pre-commit"],
+            pc.select_required_checks(policy, "release/v1").required_checks,
+            policy.required_checks,
         )
-
-    def test_each_project_workflow_and_documentation_exclusions(self) -> None:
-        for scope in ("cuid", "rocprofiler-compute"):
-            with self.subTest(scope=scope):
-                self.assertEqual(
-                    self._required(f"projects/{scope}/src/runtime.cpp"),
-                    [f"pre-commit / {scope}"],
-                )
-                self.assertEqual(
-                    self._required(f".github/workflows/{scope}-formatting.yml"),
-                    [f"pre-commit / {scope}"],
-                )
-                self.assertEqual(self._required(f"projects/{scope}/README.md"), [])
-                self.assertEqual(self._required(f"projects/{scope}/docs/conf.py"), [])
-                self.assertEqual(
-                    self._required(f"projects/{scope}/.readthedocs.yaml"), []
-                )
-
-    def test_removed_files_and_both_rename_paths_trigger_checks(self) -> None:
-        for changed in (
-            make_file("runtimes/old.rs", status="removed"),
-            {
-                **make_file("elsewhere/new.rs", status="renamed"),
-                "previous_filename": "runtimes/old.rs",
-            },
-            {
-                **make_file("runtimes/new.rs", status="renamed"),
-                "previous_filename": "elsewhere/old.rs",
-            },
-        ):
-            with self.subTest(changed=changed):
-                selected = pc.select_required_checks(self.policy, [changed], "develop")
-                self.assertEqual(
-                    [check.name for check in selected.required_checks],
-                    ["pre-commit / runtimes"],
-                )
-
-    def test_no_applicable_workflow_means_no_expected_checks(self) -> None:
-        self.assertEqual(self._required("docs/SYSTEMS_PR_BOT_FAQ.md"), [])
-
-    def test_actions_filters_match_slashes_optional_directories_and_repetition(
-        self,
-    ) -> None:
-        for pattern, value, expected in (
-            ("*.rs", "lib.rs", True),
-            ("*.rs", "src/lib.rs", False),
-            ("**/*.rs", "lib.rs", True),
-            ("**/*.rs", "src/deep/lib.rs", True),
-            ("runtimes/**", "runtimes/file\nname.rs", True),
-            ("projects/*/docs/**", "projects/cuid/docs/conf.py", True),
-            ("projects/*/docs/**", "projects/a/b/docs/conf.py", False),
-            ("*.jsx?", "page.js", True),
-            ("*.jsx?", "page.jsx", True),
-            ("v[12].[0-9]+", "v2.100", True),
-            ("v[12].[0-9]+", "v3.100", False),
-            (r"release/\+?", "release/+", True),
-        ):
-            with self.subTest(pattern=pattern, value=value):
-                self.assertEqual(
-                    pc._matches_workflow_filter(value, [pattern]), expected
-                )
-
-    def test_ordered_negative_filter_can_be_reincluded(self) -> None:
-        patterns = ["runtimes/**", "!**/*.md", "runtimes/README.md"]
-        self.assertTrue(pc._matches_workflow_filter("runtimes/README.md", patterns))
-        self.assertFalse(
-            pc._matches_workflow_filter("runtimes/ddi/README.md", patterns)
+        self.assertEqual(
+            pc.select_required_checks(policy, "release/private/v1").required_checks, []
+        )
+        self.assertEqual(
+            pc.select_required_checks(policy, "develop").required_checks, []
         )
 
     def test_unconditional_requirement_applies_to_any_pr(self) -> None:
         policy = make_policy()
-        selected = pc.select_required_checks(policy, [], "anything")
+        selected = pc.select_required_checks(policy, "anything")
         self.assertEqual(selected.required_checks, policy.required_checks)
 
 
@@ -757,10 +690,20 @@ class RequiredCheckPollingTests(unittest.TestCase):
         *,
         paths: Optional[List[str]] = None,
         body: Optional[str] = None,
+        branch: str = "develop",
+        changed_files: Optional[int] = None,
     ) -> tuple[int, int, int]:
         remaining = iter(snapshots)
         active: List[Dict[str, Any]] = []
         polls = 0
+        files = [
+            make_file(path)
+            for path in (
+                paths
+                if paths is not None
+                else ["runtimes/Cargo.toml", "emulation/rocjitsu/main.py"]
+            )
+        ]
 
         def get(url: str, token: str) -> Any:
             nonlocal active, polls
@@ -774,26 +717,25 @@ class RequiredCheckPollingTests(unittest.TestCase):
                         else "Adds runtime tests and formatting.\nFixes #1234\n"
                         "- [x] Look over the contributing guidelines"
                     ),
-                    "base": {"ref": "develop"},
+                    "base": {"ref": branch},
+                    "changed_files": (
+                        len(files) if changed_files is None else changed_files
+                    ),
                     "user": {"login": "human"},
                 }
             if parsed.path.endswith("/pulls/7/files"):
-                return (
-                    [
-                        make_file(path)
-                        for path in (
-                            paths
-                            if paths is not None
-                            else ["runtimes/Cargo.toml", "emulation/rocjitsu/main.py"]
-                        )
-                    ]
-                    if query["page"] == ["1"]
-                    else []
-                )
+                page = int(query["page"][0])
+                return files[(page - 1) * 100 : page * 100]
+            if parsed.path.endswith("/issues/7/comments"):
+                return []
             if parsed.path.endswith("/commits/sha/check-runs"):
                 page = int(query["page"][0])
                 if page == 1:
-                    active = next(remaining)
+                    # These independent project jobs have already completed.
+                    active = next(remaining) + [
+                        make_check_run("success", "pre-commit / cuid"),
+                        make_check_run("success", "pre-commit / rocprofiler-compute"),
+                    ]
                     polls += 1
                 return {
                     "total_count": len(active),
@@ -812,15 +754,18 @@ class RequiredCheckPollingTests(unittest.TestCase):
             },
             clear=True,
         ), mock.patch.object(pc, "gh_get", side_effect=get), mock.patch.object(
-            pc, "CAN_POST_COMMENTS", False
+            pc, "CAN_POST_COMMENTS", True
         ), mock.patch.object(
             pc, "CAN_MUTATE_PR", False
         ), mock.patch.object(
             pc.time, "sleep"
-        ) as sleep, redirect_stdout(
+        ) as sleep, mock.patch.object(
+            pc, "gh_post", return_value={}
+        ) as post, redirect_stdout(
             io.StringIO()
         ):
             result = pc.main([])
+        self.posted_comments = [call.args[2]["body"] for call in post.call_args_list]
         return result, polls, sleep.call_count
 
     def test_missing_then_pending_then_failing_workflow_never_passes_early(
@@ -861,18 +806,12 @@ class RequiredCheckPollingTests(unittest.TestCase):
         )
         self.assertEqual(self._run([runs]), (1, 1, 0))
 
-    def test_unrelated_checks_do_not_satisfy_or_fail_scoped_requirement(self) -> None:
-        unrelated = [
-            make_check_run("failure"),
-            make_check_run("failure", "pre-commit / cuid"),
-        ]
+    def test_checks_outside_the_target_branch_do_not_block(self) -> None:
+        unrelated = [make_check_run("failure", "pre-commit / runtimes")]
         self.assertEqual(
             self._run(
-                [
-                    unrelated,
-                    unrelated + [make_check_run("success", "pre-commit / runtimes")],
-                ],
-                paths=["runtimes/Cargo.toml"],
+                [unrelated, unrelated + [make_check_run("success", "pre-commit")]],
+                branch="pr-bot-test",
             ),
             (0, 2, 1),
         )
@@ -885,8 +824,37 @@ class RequiredCheckPollingTests(unittest.TestCase):
             (1, 3, 1),
         )
 
-    def test_pr_with_no_applicable_workflows_does_not_wait(self) -> None:
-        self.assertEqual(self._run([[]], paths=["docs/README.md"]), (0, 1, 0))
+    def test_docs_only_pr_waits_for_jobs_to_report_no_work(self) -> None:
+        passed = [
+            make_check_run("success", name)
+            for name in ("pre-commit", "pre-commit / runtimes")
+        ]
+        for paths in ([], ["docs/README.md"]):
+            with self.subTest(paths=paths):
+                self.assertEqual(self._run([[], passed], paths=paths), (0, 2, 1))
+
+    def test_truncated_file_list_does_not_remove_any_required_checks(self) -> None:
+        passed = [
+            make_check_run("success", name)
+            for name in ("pre-commit", "pre-commit / runtimes")
+        ]
+        self.assertEqual(
+            self._run(
+                [[], passed],
+                paths=[f"docs/{index}.md" for index in range(3000)],
+                changed_files=3001,
+            ),
+            (0, 2, 1),
+        )
+        table = next(
+            comment
+            for comment in reversed(self.posted_comments)
+            if "therock-pr-bot-policy-check" in comment
+        )
+        self.assertIn("3000 of 3001", table)
+        self.assertIn("**Forbidden Files** | ⚠️ Warning", table)
+        self.assertIn("**Unit Test** | ⚠️ Warning", table)
+        self.assertNotIn("Unit Test auto-passed", table)
 
 
 # ----------------------------- integration -----------------------------------
@@ -974,7 +942,7 @@ class LoadPolicyTests(unittest.TestCase):
         # min-length is the meaningful text-length gate now.
         self.assertGreaterEqual(policy.description_min_length, 0)
 
-    def test_required_check_names_and_filters_match_workflow_sources(self) -> None:
+    def test_required_jobs_are_scheduled_without_path_or_job_filters(self) -> None:
         policy = pc.load_policy(THIS_DIR / "policy.yml")
         workflows = THIS_DIR.parents[1] / ".github" / "workflows"
         bot_workflow = pc.yaml.load(
@@ -995,7 +963,7 @@ class LoadPolicyTests(unittest.TestCase):
                 if name != "pre-commit" and not name.startswith("pre-commit / "):
                     continue
                 with self.subTest(workflow=path.name):
-                    trigger = workflow["on"]["pull_request"]
+                    trigger = workflow["on"]["pull_request"] or {}
                     self.assertNotIn("paths-ignore", trigger)
                     self.assertNotIn("branches-ignore", trigger)
                     # Formatting experiments on other target branches are
@@ -1008,7 +976,17 @@ class LoadPolicyTests(unittest.TestCase):
                     self.assertNotIn(name, declared)
                     declared.add(name)
                     self.assertIn(name, by_name)
-                    self.assertEqual(by_name[name].paths, trigger.get("paths", []))
+                    self.assertNotIn("paths", trigger)
+                    self.assertNotIn("if", job)
+                    self.assertNotIn("needs", job)
+                    formatting_steps = [
+                        step
+                        for step in job["steps"]
+                        if step.get("uses") == "./.github/actions/scoped-formatting"
+                    ]
+                    self.assertEqual(len(formatting_steps), 1)
+                    self.assertNotIn("if", formatting_steps[0])
+                    self.assertNotIn("continue-on-error", formatting_steps[0])
                     self.assertEqual(
                         by_name[name].branches, trigger.get("branches", [])
                     )
@@ -1023,7 +1001,9 @@ class LoadPolicyTests(unittest.TestCase):
             [{"name": "check", "paths": ["!runtimes/**"]}],
             [{"name": "check", "branches": [""]}],
             [{"name": "check", "pathz": ["runtimes/**"]}],
-            [{"name": "check", "paths": ["[invalid"]}],
+            [{"name": "check", "branches": ["[invalid"]}],
+            [{"name": "check", "branches": ["!develop"]}],
+            [{"name": "check", "branches": "develop"}],
         ):
             with self.subTest(rules=rules), self.assertRaises(ValueError):
                 pc._load_required_checks(rules)

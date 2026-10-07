@@ -1,0 +1,63 @@
+name: Scoped formatting
+description: Inspect a complete Git diff before provisioning and running formatters.
+
+inputs:
+  include:
+    description: Regex selecting changed paths that require formatting.
+    required: true
+  exclude:
+    description: Regex excluding paths from the selected scope.
+    default: ''
+  config:
+    description: Pre-commit configuration, relative to the repository root.
+    default: .pre-commit-config.yaml
+  sparse-checkout:
+    description: Source directories to materialize when formatting is needed; empty means the full tree.
+    default: ''
+  submodules:
+    description: Whether the formatting checkout needs submodules.
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Inspect the complete change scope
+      id: scope
+      shell: bash
+      env:
+        SCOPE_SCRIPT: ${{ github.action_path }}/scope.py
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        INCLUDE: ${{ inputs.include }}
+        EXCLUDE: ${{ inputs.exclude }}
+      run: >-
+        python3 "$SCOPE_SCRIPT"
+        --base "$BASE_SHA" --head "$HEAD_SHA"
+        --include "$INCLUDE" --exclude "$EXCLUDE"
+        --output "$GITHUB_OUTPUT"
+
+    - name: Checkout formatting inputs
+      if: steps.scope.outputs.affected == 'true'
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+        filter: blob:none
+        persist-credentials: false
+        sparse-checkout: ${{ inputs.sparse-checkout }}
+        submodules: ${{ inputs.submodules }}
+
+    - name: Set up Python
+      if: steps.scope.outputs.affected == 'true'
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: '3.12'
+
+    - name: Run pre-commit on the complete change scope
+      if: steps.scope.outputs.affected == 'true'
+      uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+      with:
+        extra_args: >-
+          --show-diff-on-failure
+          --config ${{ inputs.config }}
+          --from-ref ${{ steps.scope.outputs.base }}
+          --to-ref ${{ steps.scope.outputs.head }}
