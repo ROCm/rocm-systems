@@ -139,6 +139,12 @@ protected:
     hipStream_t test_stream_ = nullptr;
 
     /**
+   * @brief Flags for test_stream_; set before createTestCommunicator() to override.
+   * RCCL_TEST_STREAM_NONBLOCKING=1/0 takes precedence when set.
+   */
+    unsigned int test_stream_flags_ = hipStreamDefault;
+
+    /**
    * @brief NCCL unique ID for communicator initialization
    *
    * Generated on rank 0 and broadcast to all ranks.

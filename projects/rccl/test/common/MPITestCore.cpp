@@ -318,7 +318,11 @@ ncclResult_t MPITestCore::createTestCommunicator()
     group_guard.dismiss(); // ncclGroupEnd succeeded, don't call it again
 
     // Create HIP stream - if this fails, comm_guard automatically cleans up test_comm_
-    HIP_TEST_CHECK(hipStreamCreate(&test_stream_));
+    // RCCL_TEST_STREAM_NONBLOCKING=1/0 forces a non-blocking/blocking stream over test_stream_flags_.
+    const char* nb_env = std::getenv("RCCL_TEST_STREAM_NONBLOCKING");
+    if(nb_env && *nb_env)
+        test_stream_flags_ = std::atoi(nb_env) ? hipStreamNonBlocking : hipStreamDefault;
+    HIP_TEST_CHECK(hipStreamCreateWithFlags(&test_stream_, test_stream_flags_));
 
     // RAII guard: Automatically destroys test_stream_ if subsequent operations fail
     auto stream_guard = makeScopeGuard(
