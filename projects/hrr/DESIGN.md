@@ -660,7 +660,8 @@ with `hipEventRecord` to accumulate elapsed time into `total_graph_ms`.
 ## Init / Shutdown
 
 `hip_capture_init()` is called from `hip_context.cpp` at HIP init (after `amd::Runtime`
-and the live `HipDispatchTable` are ready). If `HIP_HRR_CAPTURE_OUTPUT` is set it
+and the live `HipDispatchTable` are ready). If capture is enabled (see [Enable
+Flag](#enable-flag)) it
 snapshots the runtime dispatch table, installs runtime capture shims, opens the writer,
 recovers pre-init fat binaries (compiler-table shims + retroactive sweep),
 registers `hip_capture_shutdown` via `atexit`, and prints the capture notice. Runtime
@@ -680,9 +681,19 @@ a child started with `exec` initialises HIP again and prints its own.
 
 ## Enable Flag
 
-Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a non-empty directory
-(see [README.md](README.md#capture-environment)). Defined as a `cstring` release flag in
-`rocclr/utils/flags.hpp`.
+Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a directory and the process
+was not started in secure-execution mode (see
+[README.md](README.md#capture-environment)). Defined as a `cstring` release flag in
+`rocclr/utils/flags.hpp`. An empty or blank value leaves capture off: the flag parser
+stores an exported empty variable as a single space, and `hrr_capture_requested()` treats
+a value made only of whitespace as unset.
+
+On Linux the kernel sets `AT_SECURE` in the auxiliary vector for a set-user-ID,
+set-group-ID or file-capability exec, and for an LSM transition. Such a process can hold
+privileges that whoever set its environment does not, so it ignores the variable, as
+`secure_getenv()` would, and `hip_capture_init()` prints one line on stderr saying so.
+The check is `hrr_cap::metadata::secure_exec()` in `hip_capture_metadata.cpp`, and it is
+always false off Linux.
 
 ## Playback Tools
 
