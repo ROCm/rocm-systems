@@ -138,6 +138,53 @@ function(rj_add_gfx1151_race_test_case TEST_CASE)
     )
 endfunction()
 
+function(rj_add_vmem_atomic_race_tests ARCH BASE_CONFIG)
+    set(TEST_BIN hip_race_vmem_atomic_${ARCH})
+    rj_add_hip_race_test(
+        ${TEST_BIN}
+        ARCH ${ARCH}
+        SOURCE hip_race_vmem_atomic_test.hip
+        DEPENDENCIES ${RJ_RACE_TEST_SUPPORT_HEADERS}
+    )
+    foreach(TEST_CASE compiler_generated vmcnt_only no_wait expcnt_only)
+        set(CASE_NAME vmem_atomic_${ARCH}_${TEST_CASE})
+        set(SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/racetest_${CASE_NAME})
+        set(RUNTIME_DIR ${SINK_DIR}/runtime)
+        set(INSTALLED_CONFIG_NAME race_${CASE_NAME}.json)
+        set(INSTALLED_CONFIG
+            ${CMAKE_CURRENT_BINARY_DIR}/install-configs/${INSTALLED_CONFIG_NAME}
+        )
+        file(MAKE_DIRECTORY ${RUNTIME_DIR})
+        file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/install-configs)
+        rj_write_race_config(${BASE_CONFIG} ${SINK_DIR} ${SINK_DIR}/config.json)
+        rj_write_race_config(
+            ${BASE_CONFIG} runtime/racetest_${CASE_NAME} ${INSTALLED_CONFIG}
+        )
+        if(RJ_INSTALL_TESTS)
+            install(
+                FILES ${INSTALLED_CONFIG}
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs/tests
+            )
+        endif()
+        rj_add_hip_test_case(
+            ${TEST_BIN} "VmemAtomicRaceTest.${TEST_CASE}"
+            CONFIG ${SINK_DIR}/config.json
+            INSTALL_CONFIG "\${RJ_INSTALLED_CONFIG_DIR}/tests/${INSTALLED_CONFIG_NAME}"
+            NAME "RaceTest.${CASE_NAME}"
+            TIMEOUT 30
+            ENVIRONMENT
+                "ROCJITSU_RUNTIME_DIR=${RUNTIME_DIR}"
+                "RJ_SINK_DIR=${SINK_DIR}"
+        )
+    endforeach()
+endfunction()
+
+rj_add_vmem_atomic_race_tests(
+    gfx942 ${CMAKE_CURRENT_SOURCE_DIR}/race_test_gfx942_config.json
+)
+rj_add_vmem_atomic_race_tests(gfx950 ${RJ_RACE_GFX950_CONFIG})
+rj_add_vmem_atomic_race_tests(gfx1151 ${RJ_RACE_GFX1151_CONFIG})
+
 rj_add_gfx950_race_test_case(vgpr_waitcnt)
 rj_add_gfx950_race_test_case(vgpr_waitcnt_race)
 rj_add_gfx950_race_test_case(global_atomic_vmcnt)

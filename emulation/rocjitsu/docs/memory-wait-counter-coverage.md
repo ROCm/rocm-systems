@@ -172,26 +172,34 @@ producers, zero EXEC, message return units, and FLAT's lane-specific dependencie
 both counter positions. Real-kernel checks supplement these tests; they do not prove
 complete recall across all kernel families.
 
-### Returning-atomic completion on gfx942 and gfx1151
+### VMEM completion and EXP source protection
 
-The CDNA4 EXPCNT correction leaves an open dynamic race-detector follow-up for
-gfx942 (CDNA3) and gfx1151 (RDNA3.5), tracked in the
-[PR #12583 review discussion](https://github.com/ROCm/rocm-systems/pull/12583#discussion_r4150892377).
-The review reports that compiler-generated HIP code for
-`o[i] = atomicAdd(p + i, 1u) * 3u` produces a VGPR read race on those targets
-despite an emitted `s_waitcnt vmcnt(0)` before the use; the gfx950 run is clean.
+VMEM stores and atomics do not contribute to EXPCNT on any supported CDNA or
+RDNA architecture. LLVM's
+[`vmemWriteNeedsExpWaitcnt`](https://github.com/ROCm/llvm-project/blob/32fb4582f0be6df5437ee1cdb9a38724215ede80/llvm/lib/Target/AMDGPU/GCNSubtarget.h#L431)
+restricts VMEM source-register locks to architectures before Sea Islands, which
+predate all supported profiles. Its
+[`getEventsForImpl`](https://github.com/ROCm/llvm-project/blob/32fb4582f0be6df5437ee1cdb9a38724215ede80/llvm/lib/Target/AMDGPU/AMDGPUHWEvents.cpp#L107)
+also classifies FLAT/GLOBAL operations without an EXP source-lock event.
+The [CDNA3 ISA](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf),
+sections 4.4 and 10.4, distinguishes EXP's GWS source-VGPR reads from GLOBAL's
+VM_CNT completion. CDNA4 makes EXP entirely unused; it is not the first
+architecture whose GLOBAL atomics need no EXP wait.
 
-`EventRegistry::allWaitCountersSatisfied` makes destination retirement depend on
-every obligation attached to the event. On these earlier targets, that includes
-the EXP obligation for source-register release. The follow-up must separate
-source-VGPR release from result and memory completion, while preserving required
-source-register and EXEC protection. The legacy generator profile tests preserve
-the existing metadata shape; they do not establish that returning-atomic
-retirement is architecturally correct.
+Incorrect inherited VMEM EXP flags caused the
+[returning-atomic false positives reported on gfx942 and gfx1151](https://github.com/ROCm/rocm-systems/pull/12583#discussion_r4150892377).
+The dynamic race detector waits for every counter obligation on an event before
+retiring it. Attaching an EXP obligation to a returning GLOBAL atomic therefore
+kept its destination pending after the required `s_waitcnt vmcnt(0)`.
+The profiles now omit that unsupported obligation while retaining the atomic's
+VMEM completion counter. This correction does not alter GDS source-register or
+EXEC protection on targets that require it, or generic FLAT's separate
+VMEM/DS obligations.
 
-Validation should cover the compiler-generated probe on gfx942, gfx1151 and
-gfx950: consuming the atomic result after its required VM wait should be clean,
-and a missing-VM-wait control must still report the result dependency. Separate
-source-overwrite controls must retain the required source-release protection on
-targets that use EXP. This completion-model work remains separate from the
-CDNA4-only correction.
+HIP race-detector tests compile `o[i] = atomicAdd(p + i, 1u) * 3u` for gfx942,
+gfx1151 and gfx950 and check both the returned values and atomic updates.
+Explicit instruction sequences verify that a VM-only wait releases the result,
+while no wait and an EXP-only wait still report the missing VM dependency.
+Generator tests cover VMEM metadata across all ten profiles and retain GDS EXP
+obligations. Static waitcheck source-overwrite tests separately require EXP for
+CDNA3/RDNA3 GDS sources.

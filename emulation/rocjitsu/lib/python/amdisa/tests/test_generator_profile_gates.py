@@ -7537,24 +7537,52 @@ def test_vmem_store_issue_metadata_follows_arch_profile(
     assert completion in issue
 
 
-def test_legacy_stores_and_gds_preserve_expcnt_obligations():
+@pytest.mark.parametrize(
+    'arch_name,profile',
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('cdna5', Cdna5Profile()),
+    ],
+)
+def test_supported_vmem_writes_do_not_use_expcnt(arch_name, profile):
     codegen = object.__new__(CodeGenerator)
-    store = InstructionSemantics(
-        'BUFFER_STORE_DWORD', 'buffer_store', elem_size=4, num_elems=1
-    )
+    codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+    for name, semantic_class, fields in (
+        ('BUFFER_STORE_DWORD', 'buffer_store', set()),
+        ('TBUFFER_STORE_FORMAT_X', 'tbuffer_store', set()),
+        ('BUFFER_ATOMIC_ADD', 'buffer_atomic', set()),
+        ('FLAT_STORE_DWORD', 'flat_store', {'seg'}),
+        ('FLAT_ATOMIC_ADD', 'flat_atomic', {'seg'}),
+        ('GLOBAL_STORE_DWORD', 'flat_store', set()),
+        ('GLOBAL_ATOMIC_ADD', 'flat_atomic', set()),
+    ):
+        sem = InstructionSemantics(name, semantic_class, elem_size=4, num_elems=1)
+        issue = codegen._memory_issue_initializer(sem, fields)
+        assert 'amdgpu::WaitCounterType::EXPCNT' not in issue, name
+
+
+def test_legacy_gds_preserves_expcnt_obligations():
+    codegen = object.__new__(CodeGenerator)
     ds = InstructionSemantics('DS_READ_B32', 'ds_read', elem_size=4, num_elems=1)
 
     for arch_name, profile in (
         ('cdna1', Cdna1Profile()),
         ('cdna2', Cdna2Profile()),
         ('cdna3', CdnaProfile()),
+        ('rdna1', Rdna1Profile()),
         ('rdna2', Rdna2Profile()),
         ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
     ):
         codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
-        store_info = codegen._memory_issue_initializer(store, set())
-        assert 'amdgpu::WaitCounterType::EXPCNT' in store_info
-
         ds_info = codegen._memory_issue_initializer(ds, {'gds'})
         assert 'inst_.gds != 0' in ds_info
         assert 'amdgpu::MemoryCompletionClass::GDS' in ds_info

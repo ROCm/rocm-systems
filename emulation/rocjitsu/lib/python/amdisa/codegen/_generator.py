@@ -8165,7 +8165,7 @@ class CodeGenerator:
     def _expcnt_memory_obligation(
         self, sem_class: str, inst_fields: set[str]
     ) -> str | None:
-        """Return the pre-GFX12 write-data/GDS EXPCNT obligation."""
+        """Return a source-register EXPCNT obligation when the profile requires it."""
         kind = self._MEMORY_ISSUE_KINDS[sem_class]
         obligation = self._memory_counter_obligation(
             'amdgpu::WaitCounterType::EXPCNT',
