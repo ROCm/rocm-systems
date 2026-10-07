@@ -5,19 +5,15 @@ Documentation for rocJPEG is available at
 
 ## (unreleased) rocJPEG 1.12.0
 
-### Changed
+### Added
 
-* Changed the single-image decode path to use the unified batched color-conversion kernels with a batch size of one, and removed the per-format single-image HIP kernels. No public API or output change.
+* Added HIP-based color conversion kernels to the batched decode path, improving batched decoding performance.
 
 ## rocJPEG 1.11.0
 
 ### Changed
 
 * Changed the HIP YUV-to-RGB color conversion kernels from the BT.709 standard to BT.601 for color space conversion.
-
-### Added
-
-* Added HIP color-conversion kernels in the batched decode path
 
 ## rocJPEG 1.9.0
 
