@@ -165,10 +165,9 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 
   inst_cache_.set_l2(l2_);
 
-  // Enable pool allocation for the hot decode-execute path.
-  // Instructions decoded during step() are always deleted before the CU
-  // (and its decoder) are destroyed, so pool allocation is safe here.
-  decoder_->enable_pool();
+  // Decoded instructions use heap storage: cache entries and asynchronous
+  // work can outlive an issue quantum and move between execution workers.
+  // Do not install this decoder's pool on the constructing thread.
 
   wfs_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
@@ -447,6 +446,16 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
                                 .process_id = wf.process_id(),
                                 .dispatch_id = wf.dispatch_id(),
                                 .outcome = outcome});
+  if (outcome == VmAccessOutcome::Revoked) {
+    // Fetch revocation is recovered before reaching this terminal path. An
+    // in-flight data access cannot be replayed safely. Notify the live queue
+    // owner after dropping the wave-state lock, rather than invoking a fault
+    // reporter retained by the revoked snapshot. The dispatch still aborts
+    // without publishing a successful completion.
+    defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueMemoryViolation,
+                          /*clear_debug_stop_on_success=*/false,
+                          /*retain_failure_for_debugger=*/false);
+  }
   abort_dispatch(wf.dispatch_id());
 }
 
@@ -832,9 +841,8 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     }
     // Under the current uniform-address-space assumption, FLAT operations
     // targeting the shared aperture use the LDS pipeline. Scratch-targeting
-    // FLATs stay on the global path. Architectural wait-counter obligations
-    // remain properties of the decoded instruction; this route selects only
-    // the memory path used by the emulator.
+    // FLATs stay on the global path. Counter participation is selected from all
+    // requesting lanes below, independently of the first-lane functional route.
     const uint64_t request_lanes = transpose_request_lane_mask(d, wf_size);
     const uint32_t first_lane =
         request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
@@ -863,6 +871,15 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     }
   }
 
+  if (decoded_route_tag == GLOBAL_MEM && inst->mnemonic().starts_with("flat_")) {
+    auto &d = *inst->data_as<VectorMemState>();
+    if (const auto *issue = inst->amdgpu_memory_issue_info()) {
+      const uint64_t requests = transpose_request_lane_mask(d, wf.wf_size());
+      const uint64_t shared = (flat_local_lane_mask | flat_dds_lane_mask) & requests;
+      d.routed_issue_info = issue->for_flat_memory_domains((requests & ~shared) != 0, shared != 0);
+    }
+  }
+
   const uint8_t route_tag = inst->data()->tag();
   // After the aperture rewrite, before the pipeline takes the instruction:
   // this is the one point at which the space, the counter, and the addresses
@@ -874,8 +891,7 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     report_routed_access(*inst, wf, route_tag, decoded_route_tag, normalized_to_local,
                          pre_routing_addresses, flat_local_lane_mask, flat_dds_lane_mask);
 
-  // Resolved FLAT lanes determine which pipeline produces each register result.
-  // Keep both architectural counter entries, including the counter-only one.
+  // Resolved FLAT lanes determine counter participation and result readiness.
   if (config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off &&
       inst->is_memory_wait_producer())
     track_memory_wait(*inst, wf, flat_local_lane_mask | flat_dds_lane_mask);
@@ -994,6 +1010,30 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
           ? inst.data_as<VectorMemState>()->exec_mask
           : wf.exec();
 
+  // FLAT counter admission depends on addresses. It cannot prove operands
+  // ready before those addresses are read; apply it here, before writeback.
+  const bool flat = inst.mnemonic().starts_with("flat_");
+  const uint64_t flat_requests =
+      flat && inst.data() && (inst.data()->tag() == GLOBAL_MEM || inst.data()->tag() == LOCAL_MEM)
+          ? transpose_request_lane_mask(*inst.data_as<VectorMemState>(), wf.wf_size())
+          : 0;
+  const auto flat_counter_lanes = [&](WaitCounterKind counter) {
+    return counter == WaitCounterKind::Ds ? flat_requests & flat_shared_lanes
+                                          : flat_requests & ~flat_shared_lanes;
+  };
+  const auto is_flat_memory_counter = [&](WaitCounterKind counter) {
+    return flat && (counter == WaitCounterKind::Load || counter == WaitCounterKind::Store ||
+                    counter == WaitCounterKind::Ds);
+  };
+  for (const auto &event : classified.value()) {
+    if (!is_flat_memory_counter(event.counter) || !flat_counter_lanes(event.counter))
+      continue;
+    const auto maximum = WaitcheckTarget::maximum_dependency_wait(config_.arch, event.counter);
+    if (maximum.succeeded())
+      scoreboard.backpressure(event.counter, maximum.value() + 1,
+                              scoreboard.issue_units(inst, event, config_.arch));
+  }
+
   struct Destination {
     RegisterRef reg;
     uint64_t lanes;
@@ -1107,6 +1147,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
   std::optional<WaitCounterKind> xcnt_completion;
   for (const auto &event : classified.value()) {
     const auto counter = event.counter;
+    if (is_flat_memory_counter(counter) && !flat_counter_lanes(counter))
+      continue;
     if (counter == WaitCounterKind::X) {
       if (track_xcnt && (xscalar || vector_lanes || scoreboard.outstanding(counter))) {
         const auto sequence = scoreboard.issue_xcnt(xcnt_completion, xscalar);
@@ -1421,7 +1463,8 @@ template <bool EnableAsync>
   };
 
   std::optional<GpuVmAccess> fresh_vm_access;
-  const GpuVmAccess *vm_access = nullptr;
+  const GpuVmAccess *vm_access = active->vm_access();
+  const bool using_retained_vm_access = vm_access != nullptr;
   InstructionVmSnapshot *snapshot = instruction_vm_snapshot_;
   // A callback may recursively issue another wave. Keep its fetch from
   // replacing the snapshot borrowed by this instruction's later debug probes.
@@ -1434,24 +1477,26 @@ template <bool EnableAsync>
       handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
       return;
     }
-    const AddressSpaceHandle address_space = active->address_space();
-    if (snapshot && snapshot->compute_unit == this) {
-      auto &cached = *snapshot;
-      if (cached.owner != gpu_vm_ || cached.address_space != address_space || cached.vmid != vmid ||
-          !cached.access || !cached.access->is_current()) {
-        cached.access =
+    if (vm_access == nullptr) {
+      const AddressSpaceHandle address_space = active->address_space();
+      if (snapshot && snapshot->compute_unit == this) {
+        auto &cached = *snapshot;
+        if (cached.owner != gpu_vm_ || cached.address_space != address_space ||
+            cached.vmid != vmid || !cached.access || !cached.access->is_current()) {
+          cached.access =
+              address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
+          cached.owner = gpu_vm_;
+          cached.address_space = address_space;
+          cached.vmid = vmid;
+        }
+        if (cached.access)
+          vm_access = &*cached.access;
+      } else {
+        fresh_vm_access =
             address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
-        cached.owner = gpu_vm_;
-        cached.address_space = address_space;
-        cached.vmid = vmid;
+        if (fresh_vm_access)
+          vm_access = &*fresh_vm_access;
       }
-      if (cached.access)
-        vm_access = &*cached.access;
-    } else {
-      fresh_vm_access =
-          address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
-      if (fresh_vm_access)
-        vm_access = &*fresh_vm_access;
     }
     if (!vm_access) {
       drain_async_window();
@@ -1492,6 +1537,15 @@ template <bool EnableAsync>
 
   if (fetch_outcome != VmAccessOutcome::Complete) {
     drain_async_window();
+    if (fetch_outcome == VmAccessOutcome::Revoked) {
+      // Invalidation deliberately revokes pinned snapshots. Drop this wave's
+      // retained fast path so the next issue can capture the new translation
+      // epoch, or report a terminal fault if the binding is gone.
+      if (using_retained_vm_access)
+        active->set_vm_access({});
+      request_functional_yield();
+      return;
+    }
     if (fetch_outcome == VmAccessOutcome::Unavailable) {
       request_functional_yield();
       return;
@@ -1510,7 +1564,9 @@ template <bool EnableAsync>
   active->trace_inst_count_++;
 
   util::StringDiagnostic decode_error;
-  DecodeResult decoded = decoder_->decode(words, decode_error.emitter());
+  const bool reuse_decoded = !debug_active();
+  DecodeResult decoded = decoded_inst_cache_.decode(*decoder_, active->pc, vmid, words,
+                                                    decode_error.emitter(), reuse_decoded);
   if (decoded.failed()) {
     drain_async_window();
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(decode rejection) pc=0x",
@@ -1526,10 +1582,18 @@ template <bool EnableAsync>
     return;
   }
   Instruction *inst = decoded.value().get();
+  DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
+                                                       active->pc, vmid, words, reuse_decoded);
 
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
+  // Skipped vector instructions never issue: no register/plugin effects, wait
+  // counter changes, or async matrix submission. Scalar instructions still run.
+  if ((active->mode_raw() & Wavefront::VSKIP_BIT) && inst->is_vskip_affected()) {
+    active->pc += inst_size;
+    return;
+  }
   auto *wait_state = config_.memory_wait_diagnostics == MemoryWaitDiagnostics::Off
                          ? nullptr
                          : active->memory_wait_scoreboard();
@@ -1726,6 +1790,7 @@ template <bool EnableAsync>
   }();
 
   if (execution_result.failed()) [[unlikely]] {
+    return_decoded.discard();
     if constexpr (EnableAsync) {
       if (window)
         window->drain();
@@ -1748,7 +1813,7 @@ template <bool EnableAsync>
   // pc, and allocations are now zeroed, so the after-execute hook, result logging,
   // and pc-advance below must not run on the dead slot. The dedicated
   // onAmdgpuWavefrontHalted hook already fired (with live state) from halt().
-  // s_endpgm is never a memory op, so just reclaim the decoded instruction.
+  // The completed s_endpgm can return to the decoded cache on scope exit.
   //
   // Note the intentional asymmetry: an s_endpgm that defers to ENDING (pending
   // memory waits) is NOT halted here, so it DOES fire onAmdgpuAfterExecuteInstruction
@@ -1930,8 +1995,6 @@ template <bool EnableAsync>
         return;
       }
     }
-  } else {
-    decoded.value().reset();
   }
 
   active->pc += inst_size;

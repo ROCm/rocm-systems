@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /* GFX1201 PM4 qualification for private and host-visible LOCAL memory.
  * Both paths exercise SYSTEM -> LOCAL -> SYSTEM with conservative GCR barriers.
  * The public path also checks CPU reads and writes through a WC LOCAL view. */

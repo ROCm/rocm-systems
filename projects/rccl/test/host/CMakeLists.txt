@@ -32,6 +32,13 @@ rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 0)"
   "fakes/enqueue_fakes.cc: ncclParamGraphRegister()")
+# Real NCCL_PARAM lives in enqueue.cc; init.cc only has the extern. MicroInit
+# does not compile enqueue.cc, so init_fakes.cc supplies the body.
+rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
+  "NCCL_PARAM(P2pLL128Enable, \"P2P_LL128_ENABLE\", -1)" "fakes/init_fakes.cc: ncclParamP2pLL128Enable()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
+  "int64_t ncclParamP2pLL128Enable() { return g_loadParam(\"P2P_LL128_ENABLE\", -1); }"
+  "the P2pLL128Enable fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
@@ -51,6 +58,11 @@ endforeach()
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/gdr-probe-test.cc"
   "${_rccl_reg_access_flags}" "the production registration flags")
 unset(_rccl_reg_access_flags)
+# fakes/topo_stubs.cc copies the AMD arm of topoPathTypeStr; pin both copies to one spelling.
+foreach(_path_cc "${_rccl_src_root}/graph/topo.cc" "${CMAKE_CURRENT_LIST_DIR}/fakes/topo_stubs.cc")
+  rccl_assert_source_line("${_path_cc}" "const char* topoPathTypeStr[] = {\"LOC\", \"XGMI\", \"NVB\", \"C2C\", \"PIX\", \
+\"PXB\", \"P2C\", \"PXN\", \"PHB\", \"SYS\", \"NET\", \"DIS\"};" "fakes/topo_stubs.cc: topoPathTypeStr")
+endforeach()
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.
@@ -65,6 +77,8 @@ function(rccl_define_micro_source_lists)
     rma-ce-test.cc
     ras-test.cc
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
+    ras-collectives-test.cc              # src/ras/collectives.cc
+    ras-diagnostics-test.cc              # src/ras/diagnostics.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     ras-client-test.cc
@@ -283,6 +297,18 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc  # real PtrCheck/CommCheck
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real busId/hash helpers
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # src/diagnostics/p2p.cc; fakes transport/p2p.cc, which rccl-UnitTestsMicro compiles.
+  set(TEST_MICRO_DIAGNOSTICS_SOURCE_FILES
+    diag-p2p-test.cc
+    fakes/dev_runtime_micro_fakes.cc     # bootstrap collectives
+    fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/topo_stubs.cc
+    fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -749,6 +775,10 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
+    # collectives_tmp.cc, not collectives.cc: src/CMakeLists.txt lists src/collectives.cc first,
+    # so add_file_unique() renames this one. Re-check after any source-list reorder.
+    COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/collectives_tmp.cc"
+    RAS_DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_tmp.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
@@ -846,6 +876,10 @@ set(_enq_common_args
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+    # Production librccl always builds this arm (CMakeLists.txt LL128_ENABLED=ON).
+    # Standalone host CI otherwise compiles enqueue.cc without it, so addP2pToPlan's
+    # gfx1250 ENABLE=1 window is unreachable there.
+    ENABLE_LL128
     ENQUEUE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/enqueue.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
 
@@ -909,6 +943,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTaskPrep
     TASK_SCHED_RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/rma_sched.cc"
     TASK_SCHED_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/ce_sched.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_taskprep.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroDiagnostics
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
+  SOURCES ${TEST_MICRO_DIAGNOSTICS_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.

@@ -163,7 +163,9 @@ if(RJ_INSTALL_TESTS)
 
     install(FILES "${RJ_INSTALL_CTEST_FILE}" DESTINATION ${RJ_INSTALL_TEST_DIR})
     install(
-        FILES "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+        FILES
+            "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+            "${PROJECT_SOURCE_DIR}/cmake/rj_run_gtest_shard.cmake"
         DESTINATION ${RJ_INSTALL_TEST_DIR}
     )
     install(
@@ -553,6 +555,7 @@ add_executable(
     gpu_vm_pipeline_test.cpp
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
+    legacy_page_table_cache_test.cpp
     config_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
@@ -571,9 +574,9 @@ add_executable(
     completion_tracker_test.cpp
     mes_engine_test.cpp
     aql_packet_processor_test.cpp
-    pm4_ring_consumer_test.cpp
     pm4_packet_processor_test.cpp
-    pm4_queue_controller_test.cpp
+    packet_processor_contract_test.cpp
+    pm4_compute_queue_test.cpp
     sdma_queue_scheduler_test.cpp
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
@@ -581,6 +584,8 @@ add_executable(
     lds_test.cpp
     lds_counter_test.cpp
     l2_cache_test.cpp
+    l2_maintenance_mutex_test.cpp
+    l2_shard_epoch_test.cpp
     instruction_cache_test.cpp
     async_mma_policy_test.cpp
     matrix_coexecution_test.cpp
@@ -592,6 +597,7 @@ add_executable(
     simdojo_sim_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
+    kfd_events_test.cpp
     decode_smoke_test.cpp
     readlane_selector_test.cpp
     decoder_c_api_test.cpp
@@ -602,7 +608,9 @@ add_executable(
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     scalar_buffer_test.cpp
+    scalar_cache_policy_test.cpp
     transcendental_test.cpp
+    comparison_test.cpp
     amdgpu_elf_test_support.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
@@ -653,8 +661,8 @@ add_executable(
     atomic_semantics_and_decode_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
-    valu_fp_mode_test.cpp
     scalar_scc_test.cpp
+    vskip_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
@@ -670,9 +678,11 @@ add_executable(
     smfmac_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
     swmmac_k64_simd_benchmark.cpp
+    swmmac_k128_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
     simd_correctness/swmmac_k64_simd_exact_test.cpp
     simd_correctness/smfmac_simd_exact_test.cpp
+    simd_correctness/swmmac_k128_simd_exact_test.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -833,16 +843,95 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
     endif()
 endif()
+set(_rj_l2_mutex_cases
+    ReaderRechecksAdmissionAfterWriterEnters
+    WriterWaitsAgainAfterNonzeroCounterWake
+    CoherenceDomainWritersUnderOuterLocks
+    FailedWriterTryReopensReaderAdmission
+    WriterExcludesReadersAndOtherWriters
+    ConcurrentReadersObserveCompleteWriterUpdates
+    PendingWriterClosesAdmissionAndWakesAfterLastReader
+    CollidingReadersOverlapAndWriterWaitsForTheLastOwner
+    ExclusiveUnlockWakesBlockingReaders
+)
+# Exclude exactly the cases registered below, so future cases still participate
+# in normal discovery until they receive an explicit timeout registration.
+set(_rj_gtest_exclusions
+    "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+)
+foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
+    string(
+        APPEND _rj_gtest_exclusions
+        ":L2MaintenanceMutexTest.${_l2_mutex_case}"
+    )
+endforeach()
+
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
-# and the concurrent-close wait test are registered separately so CTest can
-# bound a deadlocked child process.
-rj_add_gtest_tests(
-    rocjitsu_tests
-    TEST_FILTER
-        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+# and the concurrent-close wait test, plus the L2 mutex suite, are registered
+# separately so CTest can bound a deadlocked child process.
+rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
+
+# A failed assertion cannot bound a blocked join or jthread destructor. Give
+# each L2 mutex case its own process timeout in build-tree and installed tests.
+foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
+    rj_add_test(
+        NAME "L2MaintenanceMutexTest.${_l2_mutex_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
+    )
+endforeach()
+
+# GoogleTest registers every parameter before applying its filter. Keep the FP
+# matrices in their own executable so unrelated tests do not pay that cost.
+add_executable(rocjitsu_fp_mode_tests valu_fp_mode_test.cpp)
+target_link_libraries(
+    rocjitsu_fp_mode_tests
+    PRIVATE
+        ${RJ_OBJECT_LIBS}
+        util
+        flatbuffers
+        Threads::Threads
+        GTest::gtest_main
 )
+rj_configure_target(rocjitsu_fp_mode_tests TEST)
+if(RJ_INSTALL_TESTS)
+    rj_install_test_target(rocjitsu_fp_mode_tests)
+endif()
+
+# Batching amortizes registration, and GoogleTest assigns new cases to shards
+# automatically without maintaining per-case filters.
+set(_rj_fp_mode_shards 16)
+math(EXPR _rj_fp_mode_last_shard "${_rj_fp_mode_shards} - 1")
+foreach(_shard RANGE 0 ${_rj_fp_mode_last_shard})
+    set(_shard_env
+        "GTEST_TOTAL_SHARDS=${_rj_fp_mode_shards}"
+        "GTEST_SHARD_INDEX=${_shard}"
+    )
+    set(_shard_output "gtest-results/rocjitsu_fp_mode_${_shard}.xml")
+    rj_add_test(
+        NAME "ValuFpModeTest.Shard${_shard}"
+        COMMAND
+            "${CMAKE_COMMAND}"
+            "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_fp_mode_tests>"
+            "-DTEST_OUTPUT_FILE=${_shard_output}" -P
+            "${PROJECT_SOURCE_DIR}/cmake/rj_run_gtest_shard.cmake"
+        ENVIRONMENT ${_shard_env}
+        INSTALL_COMMAND
+            "${CMAKE_COMMAND}"
+            "-DTEST_EXECUTABLE=bin/rocjitsu_fp_mode_tests"
+            "-DTEST_OUTPUT_FILE=${_shard_output}" -P
+            "rj_run_gtest_shard.cmake"
+        INSTALL_ENVIRONMENT ${_shard_env}
+        LABELS fp-mode
+    )
+endforeach()
 
 # RequestExitWakesAllPartitions may require several runs to show regression
 # (deadlock). Run 30 times with a 10 second timeout to boost chances of seeing
@@ -1183,35 +1272,20 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
         probe_callable_sgpr_probe_gfx950
     )
     rj_configure_target(probe_fixture_test TEST)
+    # Discover each case once instead of combining a whole-binary run with
+    # additional filtered registrations of the same cases.
+    rj_add_gtest_tests(
+        probe_fixture_test
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    # The helper installs the fragment without including it. Keep the installed
+    # probe cases reachable whenever this fixture target is available.
     if(RJ_INSTALL_TESTS)
-        rj_install_test_target(probe_fixture_test)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"probe_fixture_test.cmake\")\n\n"
+        )
     endif()
-    rj_add_test(
-        NAME "ProbeFixture.NopProbeResolvesAndReturns"
-        COMMAND probe_fixture_test
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND "bin/probe_fixture_test"
-    )
-    rj_add_test(
-        NAME "ProbeFixture.ArgProbeReceivesItsArgumentInV0"
-        COMMAND
-            probe_fixture_test
-            --gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND
-            "bin/probe_fixture_test"
-            "--gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0"
-    )
-    rj_add_test(
-        NAME "ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
-        COMMAND
-            probe_fixture_test
-            --gtest_filter=ProbeFixture.CallableSgprUseExceedsKernelDescriptor
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        INSTALL_COMMAND
-            "bin/probe_fixture_test"
-            "--gtest_filter=ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
-    )
 endif()
 
 # Pin the zero-test failure behavior independently of GPU availability. This is

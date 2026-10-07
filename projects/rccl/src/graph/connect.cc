@@ -1011,7 +1011,7 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   int presetChannels = 0;
   const int localRanks = comm->topo->nodes[GPU].count;
   int minHeadNum = INT_MAX;
-  int shared = parent && parent->nvlsSupport && parent->shareResources;
+  int shared = parent && ncclNvlsTransportEnabled(parent) && parent->shareResources;
   int maxChannels;
   int minNchannels, maxNchannels;
   int duplicateCount = 1;

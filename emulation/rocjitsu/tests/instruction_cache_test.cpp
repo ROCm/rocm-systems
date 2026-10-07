@@ -2,8 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -20,6 +25,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -138,6 +144,34 @@ TEST(InstructionCacheTest, FetchMatchesBackingMemoryAtEveryAlignedOffset) {
   }
 }
 
+TEST(InstructionCacheTest, RepeatedMaintenanceAdvancesEpochAndInvalidatesRefills) {
+  GpuMemory memory("memory");
+  InstructionCache cache;
+  uint64_t epoch = cache.epoch();
+  const std::vector<uint8_t> first = fill_code(memory, InstructionCache::kCacheBytes, 0x31);
+  for (unsigned cycle = 0; cycle != 3; ++cycle) {
+    for (unsigned repeat = 0; repeat != 4; ++repeat) {
+      cache.invalidate_all();
+      EXPECT_EQ(cache.epoch(), ++epoch);
+      uint32_t word = 0;
+      EXPECT_FALSE(cache.peek_word(kCodeBase, 0, word));
+    }
+    for (uint32_t offset = 0; offset != InstructionCache::kCacheBytes;
+         offset += InstructionCache::kLineSize) {
+      const auto bytes = fetch_at(cache, memory, kCodeBase + offset);
+      EXPECT_TRUE(std::ranges::equal(bytes, std::span(first).subspan(offset, bytes.size())));
+    }
+  }
+  const std::vector<uint8_t> second = fill_code(memory, InstructionCache::kCacheBytes, 0x72);
+  cache.invalidate_all();
+  EXPECT_EQ(cache.epoch(), ++epoch);
+  for (uint32_t offset = 0; offset != InstructionCache::kCacheBytes;
+       offset += InstructionCache::kLineSize) {
+    const auto bytes = fetch_at(cache, memory, kCodeBase + offset);
+    EXPECT_TRUE(std::ranges::equal(bytes, std::span(second).subspan(offset, bytes.size())));
+  }
+}
+
 // The straddling offsets are the interesting ones: assert they are actually
 // exercised above, so the loop cannot silently stop covering them.
 TEST(InstructionCacheTest, FetchWindowStraddlesALineBoundary) {
@@ -230,6 +264,27 @@ TEST(InstructionCacheTest, LinesDoNotAliasAcrossVmids) {
   EXPECT_EQ(again1, got1) << "the vmid 1 fetch did not cache its line";
 }
 
+TEST(InstructionCacheTest, RepeatedMaintenanceInvalidatesTranslatedRefills) {
+  GpuVm gpu_vm;
+  InstructionCache cache;
+  auto backing = std::make_shared<ExecutableAddressSpace>(0x11);
+  const auto handle = gpu_vm.register_translated(7, backing, backing);
+  ASSERT_TRUE(handle);
+  const auto access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  auto cached = fetch_at(cache, *access);
+  for (uint8_t value : {0x22, 0x33, 0x44}) {
+    backing->fill(value);
+    EXPECT_EQ(fetch_at(cache, *access), cached);
+    const uint64_t epoch = cache.epoch();
+    cache.invalidate_all();
+    cache.invalidate_all();
+    EXPECT_EQ(cache.epoch(), epoch + 2);
+    cached = fetch_at(cache, *access);
+    EXPECT_TRUE(std::ranges::all_of(cached, [value](uint8_t byte) { return byte == value; }));
+  }
+}
+
 TEST(InstructionCacheTest, TranslatedLinesDoNotAliasAcrossRootReplacement) {
   GpuVm gpu_vm;
   InstructionCache icache;
@@ -246,12 +301,35 @@ TEST(InstructionCacheTest, TranslatedLinesDoNotAliasAcrossRootReplacement) {
   ASSERT_TRUE(gpu_vm.replace_translated(handle, replacement, replacement));
   const std::optional<amdgpu::GpuVmAccess> replacement_access = gpu_vm.snapshot(handle);
   ASSERT_TRUE(replacement_access);
+  EXPECT_FALSE(first_access->revoked());
   EXPECT_NE(first_access->cache_namespace(), replacement_access->cache_namespace());
 
   const auto replacement_fetch = fetch_at(icache, *replacement_access);
   EXPECT_TRUE(std::ranges::all_of(replacement_fetch, [](uint8_t byte) { return byte == 0x22; }));
   const auto retained_old_fetch = fetch_at(icache, *first_access);
   EXPECT_TRUE(std::ranges::all_of(retained_old_fetch, [](uint8_t byte) { return byte == 0x11; }));
+}
+
+TEST(InstructionCacheTest, TranslatedHitRejectsARevokedSnapshot) {
+  GpuVm gpu_vm;
+  InstructionCache icache;
+  auto address_space = std::make_shared<ExecutableAddressSpace>(0x11);
+  const amdgpu::AddressSpaceHandle handle =
+      gpu_vm.register_translated(7, address_space, address_space);
+  ASSERT_TRUE(handle);
+  const std::optional<amdgpu::GpuVmAccess> access = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access);
+  ASSERT_FALSE(access->revoked());
+
+  const auto first = fetch_at(icache, *access);
+  EXPECT_TRUE(std::ranges::all_of(first, [](uint8_t byte) { return byte == 0x11; }));
+
+  ASSERT_TRUE(gpu_vm.invalidate(handle));
+  ASSERT_TRUE(access->revoked());
+  std::array<uint8_t, InstructionCache::kFetchBytes> revoked{};
+  std::ranges::fill(revoked, uint8_t{0xcc});
+  EXPECT_EQ(icache.fetch(*access, kCodeBase, revoked.data()), amdgpu::VmAccessOutcome::Revoked);
+  EXPECT_TRUE(std::ranges::all_of(revoked, [](uint8_t byte) { return byte == 0xcc; }));
 }
 
 TEST(InstructionCacheTest, FetchBypassesAnIncompleteCacheLine) {
@@ -359,6 +437,360 @@ private:
   amdgpu::ComputeUnitCore::Config config_{};
   std::unique_ptr<amdgpu::ComputeUnitCore> cu_;
 };
+
+class CountingDecoder : public rocjitsu::Decoder {
+public:
+  explicit CountingDecoder(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+      : decoder_(rocjitsu::Decoder::create(arch)) {}
+
+  rocjitsu::DecodeResult decode(const rj_code_binary_inst_t *words,
+                                const rocjitsu::DecodeErrorEmitter &emit_error) override {
+    ++calls;
+    return decoder_->decode(words, emit_error);
+  }
+  size_t max_instruction_words() const override { return decoder_->max_instruction_words(); }
+
+  unsigned calls = 0;
+
+private:
+  std::unique_ptr<rocjitsu::Decoder> decoder_;
+};
+
+TEST(DecodedInstructionCacheCuTest, ConstructionAndDecoderReplacementPreserveForeignPool) {
+  rocjitsu::Instruction::ScopedHeapAllocation restore_allocator;
+  CountingDecoder foreign_decoder;
+  foreign_decoder.enable_pool();
+  const auto alloc_fn = rocjitsu::Instruction::alloc_fn_;
+  const auto dealloc_fn = rocjitsu::Instruction::dealloc_fn_;
+  const auto pool = rocjitsu::Instruction::alloc_pool_;
+  ASSERT_NE(pool, nullptr);
+  const auto expect_foreign_pool = [&] {
+    EXPECT_EQ(rocjitsu::Instruction::alloc_fn_, alloc_fn);
+    EXPECT_EQ(rocjitsu::Instruction::dealloc_fn_, dealloc_fn);
+    EXPECT_EQ(rocjitsu::Instruction::alloc_pool_, pool);
+  };
+  {
+    CuFixture fixture("decoded_foreign_pool");
+    expect_foreign_pool();
+    fixture.cu()->replace_decoder_for_test(std::make_unique<CountingDecoder>());
+    expect_foreign_pool();
+    fixture.write_program(std::array<uint32_t, 2>{s_mov_b32_s0_imm(17), kSEndpgm});
+    auto *wf = fixture.launch(1, 0);
+    ASSERT_NE(wf, nullptr);
+    fixture.cu()->step();
+    EXPECT_EQ(fixture.read_s0(*wf), 17u);
+    expect_foreign_pool();
+    fixture.cu()->step();
+    expect_foreign_pool();
+  }
+  expect_foreign_pool();
+}
+
+TEST(DecodedInstructionCacheCuTest, LoopDecodesOnceAndReadsCurrentRegisters) {
+  CuFixture fixture("decoded_loop");
+  auto decoder = std::make_unique<CountingDecoder>();
+  auto *counter = decoder.get();
+  fixture.cu()->replace_decoder_for_test(std::move(decoder));
+  // s_mov_b32 s0, s1; s_branch -2. The branch revisits both decoded objects.
+  fixture.write_program(std::array<uint32_t, 2>{0xBE800001u, 0xBF82FFFEu});
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  for (uint32_t value = 1; value <= 10; ++value) {
+    fixture.cu()->write_sgpr(wf->sgpr_alloc().base + 1, value * 19);
+    fixture.cu()->step();
+    EXPECT_EQ(fixture.read_s0(*wf), value * 19);
+    fixture.cu()->step();
+    ASSERT_EQ(wf->pc, kCodeBase);
+  }
+  EXPECT_EQ(counter->calls, 2u);
+}
+
+TEST(DecodedInstructionCacheCuTest, RewrittenLiteralAndDebuggerBypassUseFreshDecodes) {
+  CuFixture fixture("decoded_literal");
+  auto decoder = std::make_unique<CountingDecoder>();
+  auto *counter = decoder.get();
+  fixture.cu()->replace_decoder_for_test(std::move(decoder));
+  fixture.write_program(std::array<uint32_t, 3>{0xBE8000FFu, 17u, kSEndpgm});
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  fixture.cu()->step();
+  EXPECT_EQ(fixture.read_s0(*wf), 17u);
+
+  fixture.memory().write32(kCodeBase + 4, 29u);
+  wf->pc = kCodeBase;
+  fixture.cu()->step();
+  EXPECT_EQ(fixture.read_s0(*wf), 17u);
+  EXPECT_EQ(counter->calls, 1u);
+
+  fixture.cu()->instruction_cache().invalidate_all();
+  wf->pc = kCodeBase;
+  fixture.cu()->step();
+  EXPECT_EQ(fixture.read_s0(*wf), 29u);
+  EXPECT_EQ(counter->calls, 2u);
+
+  fixture.cu()->set_debug_active(true);
+  fixture.memory().write32(kCodeBase + 4, 43u);
+  wf->pc = kCodeBase;
+  fixture.cu()->step();
+  EXPECT_EQ(fixture.read_s0(*wf), 43u);
+  fixture.cu()->set_debug_active(false);
+  wf->pc = kCodeBase;
+  fixture.cu()->step();
+  EXPECT_EQ(fixture.read_s0(*wf), 43u);
+  EXPECT_EQ(counter->calls, 4u);
+}
+
+TEST(DecodedInstructionCacheCuTest, VectorReadsCurrentExecAcrossDispatches) {
+  CuFixture fixture("decoded_vector", 2);
+  auto decoder = std::make_unique<CountingDecoder>();
+  auto *counter = decoder.get();
+  fixture.cu()->replace_decoder_for_test(std::move(decoder));
+  // v_mov_b32_e32 v0, v1; s_branch -2.
+  fixture.write_program(std::array<uint32_t, 2>{0x7E000301u, 0xBF82FFFEu});
+  for (unsigned dispatch = 1; dispatch <= 3; ++dispatch) {
+    auto *wf = fixture.launch(dispatch, dispatch);
+    ASSERT_NE(wf, nullptr);
+    const auto base = wf->vgpr_alloc().base;
+    for (uint64_t mask : {~uint64_t{0}, uint64_t{0}, uint64_t{0x3333333333333333}}) {
+      wf->set_exec(mask);
+      for (unsigned lane = 0; lane < wf->wf_size(); ++lane) {
+        fixture.cu()->write_vgpr(base, lane, 0xDEAD0000u + lane);
+        fixture.cu()->write_vgpr(base + 1, lane, dispatch * 1000 + lane);
+      }
+      fixture.cu()->step();
+      ASSERT_EQ(wf->pc, kCodeBase + 4);
+      for (unsigned lane = 0; lane < wf->wf_size(); ++lane)
+        EXPECT_EQ(fixture.cu()->read_vgpr(base, lane),
+                  ((mask >> lane) & 1) ? dispatch * 1000 + lane : 0xDEAD0000u + lane);
+      fixture.cu()->step();
+      ASSERT_EQ(wf->pc, kCodeBase);
+    }
+    wf->halt();
+  }
+  EXPECT_EQ(counter->calls, 2u);
+}
+
+TEST(DecodedInstructionCacheCuTest, DppDelegatesReadCurrentRegistersAndRestoreAcrossWaves) {
+  CuFixture fixture("decoded_dpp", 2);
+  auto *wf0 = fixture.launch(1, 0);
+  auto *wf1 = fixture.launch(1, 1);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  ASSERT_NE(wf0->vgpr_alloc().base, wf1->vgpr_alloc().base);
+  CountingDecoder decoder;
+  amdgpu::DecodedInstructionCache cache;
+  // v_mov_b32 v0, v1 with DPP quad permutation [1, 0, 3, 2].
+  rocjitsu::cdna4::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.op = rocjitsu::cdna4::kVMovB32Vop1;
+  raw.encoding = rocjitsu::cdna4::encoding::kVop1 >> 2;
+  raw.vdst = 0;
+  raw.vsrc0 = 1;
+  raw.dpp_ctrl = 0xB1;
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+  std::array<uint32_t, 4> words{};
+  std::memcpy(words.data(), &raw, sizeof(raw));
+  const rocjitsu::Instruction *identity = nullptr;
+  for (unsigned repeat = 1; repeat <= 4; ++repeat)
+    for (auto *wf : {wf0, wf1})
+      for (uint64_t mask : {~uint64_t{0}, uint64_t{0}, uint64_t{0x3333333333333333}}) {
+        const auto base = wf->vgpr_alloc().base;
+        const auto value = repeat * 1000 + base;
+        wf->set_exec(mask);
+        for (unsigned lane = 0; lane < wf->wf_size(); ++lane) {
+          fixture.cu()->write_vgpr(base, lane, 0xDEAD0000u + lane);
+          fixture.cu()->write_vgpr(base + 1, lane, value + lane);
+        }
+        auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+        ASSERT_FALSE(decoded.failed());
+        if (!identity)
+          identity = decoded.value().get();
+        EXPECT_EQ(decoded.value().get(), identity);
+        amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                               words);
+        ASSERT_TRUE(fixture.cu()->execute_instruction(decoded.value().get(), *wf).succeeded());
+        EXPECT_EQ(decoded.value()->src_operand(0)->delegate(), nullptr);
+        for (unsigned lane = 0; lane < wf->wf_size(); ++lane)
+          EXPECT_EQ(fixture.cu()->read_vgpr(base, lane),
+                    ((mask >> lane) & 1) ? value + (lane ^ 1u) : 0xDEAD0000u + lane);
+      }
+  EXPECT_EQ(decoder.calls, 1u);
+}
+
+TEST(DecodedInstructionCacheTest, InFlightOwnershipPreventsReuse) {
+  CountingDecoder decoder;
+  amdgpu::DecodedInstructionCache cache;
+  std::array<uint32_t, 4> words{kSNop};
+  std::unique_ptr<rocjitsu::Instruction> in_flight;
+  {
+    auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+    ASSERT_FALSE(decoded.failed());
+    amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                           words);
+    in_flight = std::move(decoded.value());
+  }
+  auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+  ASSERT_FALSE(decoded.failed());
+  EXPECT_NE(decoded.value().get(), in_flight.get());
+  EXPECT_EQ(decoder.calls, 2u);
+}
+
+TEST(DecodedInstructionCacheTest, FailedExecutionAndExceptionsDoNotRetainInstructions) {
+  CountingDecoder decoder;
+  amdgpu::DecodedInstructionCache cache;
+  std::array<uint32_t, 4> words{kSNop};
+  {
+    auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+    ASSERT_FALSE(decoded.failed());
+    amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                           words);
+    returned.discard();
+  }
+  EXPECT_EQ(decoder.calls, 1u);
+  try {
+    auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+    ASSERT_FALSE(decoded.failed());
+    amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                           words);
+    throw std::runtime_error("execution callback failed");
+  } catch (const std::runtime_error &) {
+  }
+  auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+  ASSERT_FALSE(decoded.failed());
+  EXPECT_EQ(decoder.calls, 3u);
+}
+
+TEST(DecodedInstructionCacheTest, BorrowedVopdEncodingIsNotRetainedAcrossIssues) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                          ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    CountingDecoder decoder(arch);
+    amdgpu::DecodedInstructionCache cache;
+    // v_dual_cndmask_b32 v2, v1, v2 :: v_dual_mov_b32 v1, 0.
+    std::array<uint32_t, 4> words{0xCA500501u, 0x02000080u};
+    {
+      auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+      ASSERT_FALSE(decoded.failed());
+      ASSERT_EQ(decoded.value()->raw_encoding(), words.data());
+      amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                             words);
+    }
+    // Use the same bytes from a different fetch buffer on the next issue.
+    auto next_words = words;
+    auto decoded = cache.decode(decoder, kCodeBase, 7, next_words, {});
+    ASSERT_FALSE(decoded.failed());
+    EXPECT_EQ(decoded.value()->raw_encoding(), next_words.data());
+    EXPECT_EQ(decoder.calls, 2u);
+  }
+}
+
+TEST(DecodedInstructionCacheTest, AddressSpacesCollisionsAndClearCauseMisses) {
+  CountingDecoder decoder;
+  amdgpu::DecodedInstructionCache cache;
+  std::array<uint32_t, 4> words{kSNop};
+  auto issue = [&](uint64_t pc, uint32_t vmid) {
+    auto decoded = cache.decode(decoder, pc, vmid, words, {});
+    ASSERT_FALSE(decoded.failed());
+    amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), pc, vmid, words);
+  };
+  issue(kCodeBase, 7);
+  issue(kCodeBase, 7);
+  EXPECT_EQ(decoder.calls, 1u);
+  issue(kCodeBase, 8);
+  issue(kCodeBase, 7);
+  EXPECT_EQ(decoder.calls, 3u);
+  issue(kCodeBase + 4 * amdgpu::DecodedInstructionCache::kNumEntries, 7);
+  issue(kCodeBase, 7);
+  EXPECT_EQ(decoder.calls, 5u);
+  cache.clear();
+  issue(kCodeBase, 7);
+  EXPECT_EQ(decoder.calls, 6u);
+}
+
+TEST(DecodedInstructionCacheTest, DynamicStateIsNotReusedAndPoolLifetimeIsIndependent) {
+  amdgpu::DecodedInstructionCache cache;
+  std::array<uint32_t, 4> words{kSNop};
+  {
+    CountingDecoder decoder;
+    decoder.enable_pool();
+    {
+      auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+      ASSERT_FALSE(decoded.failed());
+      amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                             words);
+      decoded.value()->set_data(std::make_unique<rocjitsu::DynamicInstState>());
+    }
+    auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+    ASSERT_FALSE(decoded.failed());
+    EXPECT_EQ(decoder.calls, 2u);
+    EXPECT_EQ(decoded.value()->data(), nullptr);
+    amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                           words);
+  }
+  // The decoder and its active allocator pool are gone before the cached
+  // instruction is destroyed. Cache entries must have independent storage.
+  cache.clear();
+}
+
+TEST(DecodedInstructionCacheTest, UncachedInstructionsAreHeapBackedWithAnActivePool) {
+  rocjitsu::Instruction::ScopedHeapAllocation restore_allocator;
+  CountingDecoder decoder;
+  decoder.enable_pool();
+  const auto pool = static_cast<rocjitsu::Decoder::Pool *>(rocjitsu::Instruction::alloc_pool_);
+  ASSERT_NE(pool, nullptr);
+  amdgpu::DecodedInstructionCache cache;
+  std::array<uint32_t, 4> words{kSNop};
+  for (unsigned mode = 0; mode < 4; ++mode) {
+    SCOPED_TRACE(mode);
+    std::unique_ptr<rocjitsu::Instruction> in_flight;
+    {
+      const bool enabled = mode != 2;
+      auto decoded = cache.decode(decoder, kCodeBase, 7, words, {}, enabled);
+      ASSERT_FALSE(decoded.failed());
+      EXPECT_FALSE(pool->owns(decoded.value().get()));
+      EXPECT_EQ(rocjitsu::Instruction::alloc_pool_, pool);
+      amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                             words, enabled);
+      if (mode == 0)
+        returned.discard();
+      else if (mode == 1)
+        decoded.value()->set_data(std::make_unique<rocjitsu::DynamicInstState>());
+      else if (mode == 3)
+        in_flight = std::move(decoded.value());
+    }
+    // ArenaAlloc's non-owned-pointer fallback is the supported heap deletion
+    // path even when an unrelated decoder's pool is ambient on this thread.
+    in_flight.reset();
+    EXPECT_EQ(rocjitsu::Instruction::alloc_pool_, pool);
+  }
+  EXPECT_EQ(decoder.calls, 4u);
+}
+
+TEST(DecodedInstructionCacheTest, EntriesOutliveMultipleWorkerPools) {
+  amdgpu::DecodedInstructionCache cache;
+  std::array<uint32_t, 4> words{kSNop};
+  const rocjitsu::Instruction *identity = nullptr;
+  for (unsigned worker = 0; worker < 4; ++worker) {
+    std::thread thread([&] {
+      CountingDecoder decoder;
+      decoder.enable_pool();
+      auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+      ASSERT_FALSE(decoded.failed());
+      EXPECT_FALSE(static_cast<rocjitsu::Decoder::Pool *>(rocjitsu::Instruction::alloc_pool_)
+                       ->owns(decoded.value().get()));
+      if (!identity)
+        identity = decoded.value().get();
+      EXPECT_EQ(decoded.value().get(), identity);
+      EXPECT_EQ(decoder.calls, worker == 0 ? 1u : 0u);
+      amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                             words);
+    });
+    thread.join();
+  }
+  cache.clear();
+}
 
 // A warm instruction-cache line must not hide revocation of the VM snapshot
 // retained by the CU. Exercise both explicit handles and the VMID fallback.

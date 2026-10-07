@@ -976,6 +976,15 @@ class CodeGenerator:
         if (
             inst_sem
             and inst_sem.semantic_class in ('vector_readfirstlane', 'vector_readlane')
+            and opnd.is_output
+            and opnd.operand_type == 'OPR_SREG_NOVCC'
+        ):
+            # CDNA1-4 metadata marks only these two lane-read instructions NOVCC,
+            # but their scalar destinations can hold VCC spill reloads.
+            return 'OPR_SREG'
+        if (
+            inst_sem
+            and inst_sem.semantic_class in ('vector_readfirstlane', 'vector_readlane')
             and opnd.name == 'src0'
             and opnd.is_input
             and 'OPR_SRC_VGPR' in self.isa_spec.operand_types
@@ -1915,6 +1924,12 @@ class CodeGenerator:
             f'    &execute_with_backend<{class_name}>,\n'
             for class_name in self._split_execution_classes
         )
+        # Generated executors follow Instruction's decoded-reuse contract:
+        # non-memory instructions without DynamicInstState can execute again
+        # on another wave. Read values and EXEC from the current context,
+        # restore temporary operand delegates, and assign per-execution flags
+        # on every call. Persistent per-issue state belongs in DynamicInstState,
+        # not decoded encoding or operand members.
         source = textwrap.dedent(f'''\
             {CppFile._prologue_comment()}
             #include "{generated_arch}/execution_backend.h"
@@ -4069,6 +4084,8 @@ class CodeGenerator:
             if supports_fixed_size_embedding:
                 size_line += ' }'
                 validation_body += ' }'
+            if profile.vskip_affected_encoding(enc_upper):
+                size_line += ' flags_ |= VSKIP_AFFECTED;'
             validation_body += ' return Result::success();'
             if has_encoding_validation:
                 public_members.append(
@@ -6762,6 +6779,14 @@ class CodeGenerator:
                 return self._sleep_body(sem)
             return self._trap_control_body(sem) or '  (void)wf;'
 
+        if cls == 'set_vskip':
+            return (
+                '  const uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);\n'
+                '  const uint32_t bit = amdgpu::RegisterAccess(wf).read_scalar(ssrc1) & 31u;\n'
+                '  const uint32_t vskip = ((source >> bit) & 1u) * Wavefront::VSKIP_BIT;\n'
+                '  wf.set_mode_raw((wf.mode_raw() & ~Wavefront::VSKIP_BIT) | vskip);'
+            )
+
         if cls == 'gpr_idx':
             if op == 'on':
                 return (
@@ -7270,15 +7295,12 @@ class CodeGenerator:
 
         if cls == 'vector_readfirstlane':
             L.append('  uint64_t exec = wf.exec();')
-            L.append('  uint32_t val = 0;')
-            L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-            L.append('    if (exec & (1ULL << lane)) {')
             L.append(
-                f'      val = amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane);'
+                '  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0;'
             )
-            L.append('      break;')
-            L.append('    }')
-            L.append('  }')
+            L.append(
+                f'  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar_selected_lane({src_ops[0]}, lane);'
+            )
             L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, val);')
             return '\n'.join(L)
 

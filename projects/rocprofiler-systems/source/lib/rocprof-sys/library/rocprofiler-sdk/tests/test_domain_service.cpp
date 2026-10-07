@@ -5,6 +5,7 @@
 #include "library/rocprofiler-sdk/buffered/kfd/page_fault.hpp"
 #include "library/rocprofiler-sdk/buffered/kfd/queue.hpp"
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
+#include "library/rocprofiler-sdk/callback/ompt/ompt.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -27,10 +29,12 @@ namespace rocprofsys
 namespace
 {
 
+using ::testing::_;
 using ::testing::DoAll;
 using ::testing::ElementsAre;
 using ::testing::Eq;
 using ::testing::InSequence;
+using ::testing::IsEmpty;
 using ::testing::NotNull;
 using ::testing::Return;
 using ::testing::SetArgPointee;
@@ -48,8 +52,10 @@ using domains::test_support::externals;
 using domains::test_support::g_buffer_table;
 using domains::test_support::g_callback_table;
 using domains::test_support::g_externals_mock;
+using domains::test_support::g_metadata_registry_mock;
 using domains::test_support::g_mock;
 using domains::test_support::gmock_externals;
+using domains::test_support::gmock_metadata_registry;
 using domains::test_support::gmock_sdk_backend;
 using domains::test_support::mock_sdk;
 
@@ -74,6 +80,8 @@ protected:
     {
         g_mock           = std::make_unique<StrictMock<gmock_sdk_backend>>();
         g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
+        g_metadata_registry_mock =
+            std::make_unique<StrictMock<gmock_metadata_registry>>();
         g_buffer_table   = {};
         g_callback_table = {};
     }
@@ -82,6 +90,7 @@ protected:
     {
         g_mock.reset();
         g_externals_mock.reset();
+        g_metadata_registry_mock.reset();
     }
 
     // Every production on_configure() body calls add_string(category_name) followed by
@@ -90,7 +99,7 @@ protected:
     void expect_on_configure_ran(std::string_view category_name)
     {
         InSequence seq;
-        EXPECT_CALL(*g_externals_mock, add_string(Eq(category_name))).Times(1);
+        EXPECT_CALL(*g_metadata_registry_mock, add_string(Eq(category_name))).Times(1);
         EXPECT_CALL(*g_externals_mock,
                     get_agents_by_type(Eq(externals::k_agent_type_gpu)))
             .Times(1)
@@ -102,11 +111,6 @@ protected:
         EXPECT_CALL(*g_mock, create_context(NotNull()))
             .Times(1)
             .WillOnce(DoAll(SetArgPointee<0>(context), Return()));
-    }
-
-    void expect_start_context(const mock_sdk::context_id_t& context)
-    {
-        EXPECT_CALL(*g_mock, start_context(Eq(context))).Times(1);
     }
 
     // NOLINTNEXTLINE(readability-function-size)
@@ -220,10 +224,14 @@ TEST_F(domain_service_test,
     expect_configure_buffered(
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0, 1 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
-    expect_start_context(context);
 
+    // No explicit .operations filter: resolve_operations() must resolve to an empty
+    // list rather than enumerating every known operation id, so that
+    // buffered_domain::configure() forwards (nullptr, 0) to the SDK -- some
+    // buffer-tracing kinds silently drop all records when given a non-null array that
+    // enumerates every operation id, even though the configure call reports success.
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "kfd_queue", .group = std::nullopt, .operations = std::nullopt } });
 
@@ -231,7 +239,7 @@ TEST_F(domain_service_test,
     ASSERT_EQ(configuration.size(), 1u);
     EXPECT_EQ(configuration[0].key.mode, domains::collection_mode::buffered);
     EXPECT_EQ(configuration[0].key.value, mock_sdk::BUFFER_TRACING_KFD_QUEUE);
-    EXPECT_THAT(configuration[0].operations, ElementsAre(0u, 1u));
+    EXPECT_THAT(configuration[0].operations, IsEmpty());
 
     expect_destroy_buffer(buffer);
 }
@@ -254,16 +262,18 @@ TEST_F(domain_service_test,
         context,
         static_cast<mock_sdk::callback_tracing_kind_t>(
             mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
-        domains::callback::k_code_object<mock_sdk, externals>.on_record, { 0 });
-    expect_start_context(context);
+        domains::callback::k_code_object<mock_sdk, externals>.on_record, {});
 
+    // No explicit .operations filter: resolve_operations() must resolve to an empty
+    // list so callback_domain::configure() forwards (nullptr, 0) to the SDK instead of
+    // enumerating every known operation id.
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
 
     const auto configuration = service.configuration();
     ASSERT_EQ(configuration.size(), 1u);
     EXPECT_EQ(configuration[0].key.mode, domains::collection_mode::callback);
-    EXPECT_THAT(configuration[0].operations, ElementsAre(0u));
+    EXPECT_THAT(configuration[0].operations, IsEmpty());
 }
 
 TEST_F(domain_service_test, configure_throws_runtime_error_for_unknown_domain_name)
@@ -351,7 +361,6 @@ TEST_F(domain_service_test,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
         domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0, 1 });
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{
         domain_selection{ .name       = "kfd_queue",
@@ -386,9 +395,8 @@ TEST_F(domain_service_test, flush_calls_flush_on_each_configured_buffered_domain
     expect_configure_buffered(
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "kfd_queue", .group = std::nullopt, .operations = std::nullopt } });
@@ -418,9 +426,8 @@ TEST_F(domain_service_test, configure_calls_on_configure_when_domain_defines_it)
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
-        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "kfd_page_fault", .group = std::nullopt, .operations = std::nullopt } });
@@ -447,10 +454,8 @@ TEST_F(domain_service_test, configure_calls_on_configure_for_event_domain_that_d
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT),
-        domains::buffered::kfd::k_event_page_fault<mock_sdk, externals>.on_records,
-        { 0 });
+        domains::buffered::kfd::k_event_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_event_page_fault_category_name);
-    expect_start_context(context);
 
     service.configure(
         std::vector<domain_selection>{ domain_selection{ .name  = "kfd_event_page_fault",
@@ -486,7 +491,6 @@ TEST_F(domain_service_test,
         static_cast<mock_sdk::callback_tracing_kind_t>(
             mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
         domains::callback::k_code_object<mock_sdk, externals>.on_record, {});
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
@@ -520,15 +524,14 @@ TEST_F(domain_service_test,
     expect_configure_buffered(
         context, queue_buffer, queue_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_configure_buffered(
         context, page_fault_buffer, page_fault_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
-        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
-    expect_start_context(context);
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = std::nullopt, .group = "KFD_EVENTS", .operations = std::nullopt } });
@@ -566,15 +569,14 @@ TEST_F(domain_service_test,
     expect_configure_buffered(
         context, queue_buffer, queue_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_configure_buffered(
         context, page_fault_buffer, page_fault_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
-        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
-    expect_start_context(context);
 
     // No name and no group set: match_domains() falls through to its final branch,
     // which selects every available domain.
@@ -608,6 +610,97 @@ TEST_F(domain_service_test, configure_throws_runtime_error_for_unknown_group)
                                   .operations = std::nullopt } });
         },
         std::runtime_error);
+}
+
+// ─── finalize ────────────────────────────────────────────────────────────────
+
+TEST_F(domain_service_test, finalize_is_a_noop_when_no_domains_are_configured)
+{
+    sut_t service;
+
+    service.finalize();
+}
+
+TEST_F(domain_service_test, finalize_does_not_invoke_domains_that_leave_on_finalize_unset)
+{
+    // on_code_object_finalize is not defined, so k_code_object.on_finalize is the
+    // default-initialized nullptr; finalize() must skip it rather than call through a
+    // null function pointer.
+    constexpr const auto& k_code_object_definition =
+        domains::callback::k_code_object<mock_sdk, externals>;
+    ASSERT_EQ(k_code_object_definition.on_finalize, nullptr);
+
+    g_callback_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "code_object",
+                       .operations = {},
+                       .value      = mock_sdk::CALLBACK_TRACING_CODE_OBJECT } }
+    };
+
+    sut_t service;
+
+    const mock_sdk::context_id_t context{ 2 };
+
+    expect_create_context(context);
+    expect_configure_callback(context,
+                              static_cast<mock_sdk::callback_tracing_kind_t>(
+                                  mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
+                              k_code_object_definition.on_record, {});
+
+    service.configure(std::vector<domain_selection>{ domain_selection{
+        .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
+
+    service.finalize();
+}
+
+TEST_F(domain_service_test,
+       finalize_invokes_on_finalize_for_configured_domain_that_defines_it)
+{
+    // ompt is currently the only domain that defines on_finalize (it flushes any OMPT
+    // region still open when the tool shuts down -- see ompt.hpp's
+    // ompt_finalize_orphan_events). Populating its pending-callback storage and
+    // asserting it drains after service.finalize() proves domain_service::finalize()
+    // actually reaches the domain's on_finalize hook end-to-end, rather than merely
+    // not crashing.
+    constexpr const auto& k_ompt_definition =
+        domains::callback::ompt::k_ompt_api<mock_sdk, externals>;
+    ASSERT_NE(k_ompt_definition.on_finalize, nullptr);
+
+    g_callback_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "ompt",
+                       .operations = {},
+                       .value      = mock_sdk::CALLBACK_TRACING_OMPT } }
+    };
+
+    sut_t service;
+
+    const mock_sdk::context_id_t context{ 2 };
+
+    expect_create_context(context);
+    expect_configure_callback(
+        context,
+        static_cast<mock_sdk::callback_tracing_kind_t>(mock_sdk::CALLBACK_TRACING_OMPT),
+        k_ompt_definition.on_record, {});
+
+    service.configure(std::vector<domain_selection>{ domain_selection{
+        .name = "ompt", .group = std::nullopt, .operations = std::nullopt } });
+
+    mock_sdk::callback_tracing_record_t record{};
+    record.operation = static_cast<std::uint32_t>(mock_sdk::OMPT_ID_task_create);
+    record.correlation_id.internal = 42U;
+
+    auto& pending_standard_callbacks =
+        domains::callback::ompt::detail::open_regions<mock_sdk>::s_standard;
+    pending_standard_callbacks.emplace(
+        record.correlation_id.internal,
+        domains::callback::ompt::detail::pending_region<mock_sdk>{
+            record, /*begin_timestamp=*/1, function_args_t{} });
+
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_)).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_)).Times(1);
+
+    service.finalize();
+
+    EXPECT_TRUE(pending_standard_callbacks.empty());
 }
 
 }  // namespace
