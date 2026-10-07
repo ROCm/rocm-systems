@@ -399,7 +399,7 @@ impl KfdVirtualMemory {
             MemoryKind::DeviceLocal { coherent, .. } => {
                 uapi::VRAM | if coherent { uapi::COHERENT } else { 0 }
             }
-            MemoryKind::OwnedHost | MemoryKind::RegisteredHost { .. } => {
+            MemoryKind::OwnedHost { .. } | MemoryKind::RegisteredHost { .. } => {
                 return Err(error(
                     ErrorKind::Unsupported,
                     "virtual-memory handles require platform-managed physical backing",

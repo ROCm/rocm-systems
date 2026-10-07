@@ -394,7 +394,7 @@ impl Fixture {
     ) -> Result<Owned<KfdAllocation>, Error> {
         let kind = match kind {
             MemoryKind::System => BufferKind::Gtt,
-            MemoryKind::OwnedHost => BufferKind::OwnedUserptr { uncached: false },
+            MemoryKind::OwnedHost { uncached } => BufferKind::OwnedUserptr { uncached },
             MemoryKind::RegisteredHost { address, uncached } => {
                 // SAFETY: Scripted KFD replies cannot access this synthetic
                 // address; the fixture tests metadata and rollback only.
@@ -627,7 +627,7 @@ fn secondary_context_rejects_owned_userptr_before_native_allocation() {
         fixture
             .allocate_with_lifetime(
                 crate::session::SessionLifetime::Session,
-                MemoryKind::OwnedHost,
+                MemoryKind::OwnedHost { uncached: false },
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
             .err()
@@ -1335,8 +1335,12 @@ fn allocation_permissions_reach_kfd_without_widening_access() {
                 uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE,
             ),
             (
-                MemoryKind::OwnedHost,
+                MemoryKind::OwnedHost { uncached: false },
                 uapi::USERPTR | uapi::COHERENT | uapi::NO_SUBSTITUTE,
+            ),
+            (
+                MemoryKind::OwnedHost { uncached: true },
+                uapi::USERPTR | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE,
             ),
             (
                 MemoryKind::DeviceLocal {
@@ -1350,7 +1354,7 @@ fn allocation_permissions_reach_kfd_without_widening_access() {
         ] {
             // Verify exact flags before an injected allocation failure, without
             // needing a real render device for these CPU-visible placements.
-            let fixture = if kind == MemoryKind::OwnedHost {
+            let fixture = if matches!(kind, MemoryKind::OwnedHost { .. }) {
                 Fixture::with_owned_userptr([Reply::Allocate(0, Some(12))], placement | flags)
             } else {
                 Fixture::with_flags([Reply::Allocate(0, Some(12))], placement | flags)
@@ -1687,7 +1691,7 @@ fn owned_system_pages_use_one_cpu_and_gpu_address() {
     );
     let mut allocation = fixture
         .allocate(
-            MemoryKind::OwnedHost,
+            MemoryKind::OwnedHost { uncached: false },
             DeviceAccess::READ | DeviceAccess::WRITE,
         )
         .unwrap();

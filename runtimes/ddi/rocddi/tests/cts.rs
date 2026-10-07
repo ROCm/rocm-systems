@@ -640,6 +640,47 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     uncached_memory.free()?;
     uncached_reservation.free()?;
 
+    let mut uncached_host =
+        device.allocate(MemoryKind::OwnedHost { uncached: true }, 4096, 4096, access)?;
+    let uncached_host_info = uncached_host.info();
+    let host_address = uncached_host_info
+        .host_address
+        .ok_or_else(|| io::Error::other("owned host allocation has no host mapping"))?;
+    // SAFETY: The live allocation owns a writable 4096-byte host mapping.
+    let host_bytes = unsafe { std::slice::from_raw_parts_mut(host_address as *mut u8, 4096) };
+    host_bytes.fill(0x7d);
+    destination_bytes.fill(0xa5);
+    // SAFETY: All three allocations stay mapped through both retired copies.
+    // Uncertain retirement retains their owners for process teardown.
+    if let Err(failure) = unsafe {
+        gpu.copy_linear(
+            destination_info.device_address,
+            uncached_host_info.device_address,
+            4096,
+            &cancel,
+        )
+        .and_then(|()| {
+            gpu.copy_linear(
+                uncached_host_info.device_address,
+                source_info.device_address,
+                4096,
+                &cancel,
+            )
+        })
+    } {
+        std::mem::forget(uncached_host);
+        std::mem::forget(source);
+        std::mem::forget(destination);
+        std::mem::forget(device);
+        std::mem::forget(session);
+        return Err(Box::new(failure.error));
+    }
+    let read_matches = destination_bytes.iter().all(|byte| *byte == 0x7d);
+    let write_matches = host_bytes == source_bytes;
+    uncached_host.free()?;
+    assert!(read_matches);
+    assert!(write_matches);
+
     let mut host_pages = Box::new([0_u8; 8192]);
     let host_base = host_pages.as_mut_ptr() as usize;
     let host_address = (host_base + 4095) & !4095;
