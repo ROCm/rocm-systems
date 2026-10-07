@@ -114,7 +114,11 @@ the child naturally switches to its own `pid-<childpid>/` sub-archive. The root
 `version`, `capture_mode`, `owner_pid`, and `processes[]`; each process rewrites
 it best-effort on clean shutdown by scanning existing `pid-*/manifest.json`
 files. Per-process manifests carry `pid`, `parent_pid`, `complete`,
-`event_count`, and `blob_count`.
+`event_count` and `blob_count`; `host_snapshots`, and with snapshots on
+`host_snapshot_chunks` and `host_snapshots_unordered` (see Pinned Host
+Snapshots); `unreplayable_apis` when capture dropped anything; and `metadata`
+when it was collected.
+A manifest that `--repair` rewrote carries only the first five.
 
 Because the PID directory is always part of the archive path, a crashed process
 that is restarted with a new PID creates a new sub-archive rather than resuming
@@ -142,7 +146,8 @@ capture.hrr/
   pid-<pid>/
     events.bin         hrr_file_header(8) + [EventHeader(32) + payload]* + [hrr_eof_record(44)]
     manifest.json      { pid, parent_pid, complete, event_count, blob_count,
-                         host_snapshots }
+                         host_snapshots, host_snapshot_chunks,
+                         host_snapshots_unordered, unreplayable_apis, metadata }
     writer_state.json  checkpoint cursor (present only mid-capture; removed on clean shutdown)
     blobs/<2hex>/      content-addressed host buffers keyed by FNV-1a-128 hash
     code_objects/      .hsaco ELFs (unused in current fat-binary path)
@@ -379,7 +384,8 @@ Version history, so an archive written by an older runtime can be placed:
                       events.bin HRR_VERSION = 8)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count,
-                         host_snapshots }
+                         host_snapshots, host_snapshot_chunks,
+                         host_snapshots_unordered, unreplayable_apis, metadata }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
                        size); present only mid-capture, removed on clean shutdown
     events.bin         8-byte hrr_file_header, then repeated records
@@ -514,8 +520,8 @@ allocation this process made. `hipHostMalloc`, `hipHostAlloc`, `hipMallocHost`,
 registered range (what `hipHostGetDevicePointer` returns) differs from the host
 address, it is added too, as a second name for the same bytes; a launch through
 the alias records the host range. `hipHostFree`, `hipFreeHost`, `hipFree` and
-`hipHostUnregister` remove the entry before the memory is released.
-`hipDeviceReset` keeps only the entries whose memory the runtime still knows
+`hipHostUnregister` remove the entry before the memory is released, and put it
+back when the call fails. `hipDeviceReset` keeps only the entries whose memory the runtime still knows
 after the reset. `hipExtHostAlloc` has no implementation in CLR and is not
 tracked.
 
@@ -540,11 +546,13 @@ in the map and nowhere else. An arbitrary scalar is never handed to
 per-thread stream it runs on.
 
 A `hipFunction_t` the application passes is read only once capture knows it is
-a real kernel: it came from `hipModuleGetFunction`, `hipGetFuncBySymbol`,
-`hipKernelGetFunction` or `hipModuleEnumerateFunctions`, or an earlier launch of
-it succeeded. Reading the signature of an invalid handle would crash before the
-runtime could return its error. A launch by host stub resolves the stub through
-the runtime first, and an unknown stub gets no snapshot.
+a real kernel: it came from `hipModuleGetFunction`, `hipGetFuncBySymbol` or
+`hipModuleEnumerateFunctions`, or an earlier launch of it succeeded. Reading the
+signature of an invalid handle would crash before the runtime could return its
+error. `hipKernelGetFunction` is not trusted: it casts its argument without
+checking it, so its handles are known only after a launch succeeds. A launch by
+host stub resolves the stub through the runtime first, and an unknown stub gets
+no snapshot.
 
 **Out of scope.** Graph kernel nodes, and launches into a stream under graph
 capture, get no snapshot. The bytes a captured launch reads are the ones present
@@ -591,6 +599,12 @@ snapshotted allocation, bounded by `HIP_HRR_HOST_SNAPSHOT_TOTAL_MB`. A chunk who
 blob could not be written keeps no hash, so the next launch writes it again, and
 the allocation is left out of that launch.
 
+The shadow is updated before the launch runs. When the launch then fails, or its
+event cannot be written, the chunks it wrote lose their hashes, so the next
+launch records them for restore again rather than as unchanged. Only launches
+whose event was written count towards `host_snapshot_chunks` and
+`host_snapshots_unordered`.
+
 Each record is 41 bytes, after the launch-attribute tail:
 
 ```
@@ -627,11 +641,14 @@ the live allocation it lands in. It uses the record only when all of these hold:
   computed without overflow;
 - the record count fits inside the event, and the launch-attribute tail before
   the records is well formed;
-- to apply a direction 0 record: the blob exists and its size equals `length`,
-  and the launch is not being replayed into a graph capture.
+- to apply a direction 0 record: the blob exists and its size equals `length`.
 
 A record that fails a check is named on stderr with its reason and counted as
-rejected; nothing is written for it. The restore is not stream-ordered: replay
+rejected; nothing is written for it. When the count runs past the end of the
+event or the tail is malformed, every record the launch claims is counted. A
+valid direction 0 record of a launch replayed into a graph capture is not
+applied either, but it is not rejected: it is counted apart and printed on its
+own summary line. The restore is not stream-ordered: replay
 waits on the host for the launch's stream to drain, then copies a chunk with
 `memcpy` only when the buffer holds different bytes. The summary prints the
 chunks restored and the records rejected. Snapshot blobs are held in a cache of
@@ -641,6 +658,12 @@ at most 256 MiB, oldest out first, rather than the unbounded blob cache.
 did not fill: a pointer argument into a pinned allocation no record names, and a
 by-value word that lands in pinned memory but was not marked as a pointer at
 capture.
+
+**Tests.** `hrr_pinned_host_test.cc` covers the behaviour above with a capture
+and a replay per case, including a failed launch, every launch entry point, a
+free that fails and `hipDeviceReset`. Two paths are untested by design: the
+fork handlers and a blob or event that cannot be written. Each needs a fault
+injected into the process under capture, which no test hook provides.
 
 ### Threat Model: Pinned Host Snapshots
 
