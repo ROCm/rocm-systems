@@ -786,7 +786,8 @@ amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle*
   uint32_t count_gpus = 0;
   amdsmi_processor_type_t processor_type;
 
-  if (processor_count == nullptr || processor_handles == nullptr) {
+  if (processor_count == nullptr || processor_handles == nullptr || nr_cpusockets == nullptr ||
+      nr_cpucores == nullptr || nr_gpus == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
 

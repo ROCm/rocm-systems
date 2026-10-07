@@ -35,6 +35,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
     rocjitsu_plugin_throughput
+    rocjitsu_plugin_instruction_mix
     rocjitsu_plugin_loader
     rocjitsu_vm_risc_v
     rocjitsu_config
@@ -595,9 +596,12 @@ add_executable(
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
+    ds_memory_snapshot_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
     l2_cache_test.cpp
+    l2_maintenance_mutex_test.cpp
+    l2_shard_epoch_test.cpp
     instruction_cache_test.cpp
     async_mma_policy_test.cpp
     matrix_coexecution_test.cpp
@@ -620,6 +624,7 @@ add_executable(
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     scalar_buffer_test.cpp
+    scalar_cache_policy_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
     amdgpu_elf_test_support.cpp
@@ -854,16 +859,50 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
     endif()
 endif()
+set(_rj_l2_mutex_cases
+    ReaderRechecksAdmissionAfterWriterEnters
+    WriterWaitsAgainAfterNonzeroCounterWake
+    CoherenceDomainWritersUnderOuterLocks
+    FailedWriterTryReopensReaderAdmission
+    WriterExcludesReadersAndOtherWriters
+    ConcurrentReadersObserveCompleteWriterUpdates
+    PendingWriterClosesAdmissionAndWakesAfterLastReader
+    CollidingReadersOverlapAndWriterWaitsForTheLastOwner
+    ExclusiveUnlockWakesBlockingReaders
+)
+# Exclude exactly the cases registered below, so future cases still participate
+# in normal discovery until they receive an explicit timeout registration.
+set(_rj_gtest_exclusions
+    "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+)
+foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
+    string(
+        APPEND _rj_gtest_exclusions
+        ":L2MaintenanceMutexTest.${_l2_mutex_case}"
+    )
+endforeach()
+
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
-# and the concurrent-close wait test are registered separately so CTest can
-# bound a deadlocked child process.
-rj_add_gtest_tests(
-    rocjitsu_tests
-    TEST_FILTER
-        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
-)
+# and the concurrent-close wait test, plus the L2 mutex suite, are registered
+# separately so CTest can bound a deadlocked child process.
+rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
+
+# A failed assertion cannot bound a blocked join or jthread destructor. Give
+# each L2 mutex case its own process timeout in build-tree and installed tests.
+foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
+    rj_add_test(
+        NAME "L2MaintenanceMutexTest.${_l2_mutex_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
+    )
+endforeach()
 
 # GoogleTest registers every parameter before applying its filter. Keep the FP
 # matrices in their own executable so unrelated tests do not pay that cost.
