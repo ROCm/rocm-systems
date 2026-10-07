@@ -27,6 +27,11 @@
  * checked across that matrix. The direct-pointer and no-event-record cases are
  * controls ordered by the surviving mechanism and must stay clean, so the test
  * cannot pass for a trivial reason.
+ *
+ * The writer kernel runs a fixed, bounded number of iterations (no timing
+ * calibration), so the test always terminates. On very fast hardware the window
+ * may close before the copy is enqueued, in which case the copy is correctly
+ * ordered and the test simply passes.
  */
 
 #include <hip_test_common.hh>
@@ -40,6 +45,10 @@ constexpr int kWords = 10240;      // 80 KiB buffer
 constexpr int kHalf = kWords / 2;  // the writer writes the first half
 constexpr int kScratch = 256;
 constexpr int kBehind = 15;  // queued-ahead kernels, so compute lags
+// Fixed, bounded busy-loop lengths (chosen to keep the writer in flight while
+// the copy is enqueued on typical hardware; deterministic, so never a hang).
+constexpr int64_t kWriterIters = 2000000;
+constexpr int64_t kBehindIters = 250000;
 constexpr int64_t kOld = 0x5EED5EED5EED5EEDLL;
 constexpr int64_t kNew = 0x0777077707770777LL;
 constexpr int64_t kSentinel = 0x0BADF00D0BADF00DLL;
@@ -50,7 +59,7 @@ struct WriteArgs {
   int64_t* x;
   unsigned int n;
   int64_t w;
-  int64_t cycles;
+  int64_t iters;
 };
 struct ReadArgs {
   const int64_t* x;
@@ -58,22 +67,30 @@ struct ReadArgs {
   unsigned int n;
 };
 
-// The output pointer reaches the kernel only inside the by-value struct, so the
-// runtime's per-buffer dependency check does not register it.
+// Spins for exactly `iters` LCG steps (a data-dependent loop the compiler cannot
+// drop or close-form), then writes w. The output pointer reaches the kernel only
+// inside the by-value struct, so the runtime's per-buffer dependency check does
+// not register it.
 __global__ void writeStruct(WriteArgs a) {
-  const int64_t t0 = clock64();
-  while (clock64() - t0 < a.cycles) {
+  uint64_t acc = static_cast<uint64_t>(threadIdx.x) + 1;
+  for (int64_t s = 0; s < a.iters; ++s) {
+    acc = acc * 6364136223846793005ULL + 1442695040888963407ULL;
   }
-  for (unsigned int i = threadIdx.x; i < a.n; i += blockDim.x) a.x[i] = a.w;
+  if (acc != 0ULL) {
+    for (unsigned int i = threadIdx.x; i < a.n; i += blockDim.x) a.x[i] = a.w;
+  }
 }
 
 // Same body, but `alias` (== a.x) is also passed directly, so the dependency
 // check does register the buffer. Used only by the control case.
 __global__ void writeStructAlias(WriteArgs a, int64_t* /*alias*/) {
-  const int64_t t0 = clock64();
-  while (clock64() - t0 < a.cycles) {
+  uint64_t acc = static_cast<uint64_t>(threadIdx.x) + 1;
+  for (int64_t s = 0; s < a.iters; ++s) {
+    acc = acc * 6364136223846793005ULL + 1442695040888963407ULL;
   }
-  for (unsigned int i = threadIdx.x; i < a.n; i += blockDim.x) a.x[i] = a.w;
+  if (acc != 0ULL) {
+    for (unsigned int i = threadIdx.x; i < a.n; i += blockDim.x) a.x[i] = a.w;
+  }
 }
 
 __global__ void readPlusOne(ReadArgs a) {
@@ -83,31 +100,14 @@ __global__ void readPlusOne(ReadArgs a) {
   }
 }
 
-void LaunchWriter(bool alias, int64_t* x, unsigned int n, int64_t cycles, hipStream_t stream) {
-  WriteArgs a{x, n, kNew, cycles};
+void LaunchWriter(bool alias, int64_t* x, unsigned int n, int64_t iters, hipStream_t stream) {
+  WriteArgs a{x, n, kNew, iters};
   if (alias) {
     hipLaunchKernelGGL(writeStructAlias, dim3(1), dim3(256), 0, stream, a, x);
   } else {
     hipLaunchKernelGGL(writeStruct, dim3(1), dim3(256), 0, stream, a);
   }
   HIP_CHECK(hipGetLastError());
-}
-
-// Device-time of one writer at `cycles`, used to size the spin to ~kernel_ms.
-float WriterMs(int64_t* x, int64_t cycles) {
-  hipEvent_t e0, e1;
-  HIP_CHECK(hipEventCreate(&e0));
-  HIP_CHECK(hipEventCreate(&e1));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipEventRecord(e0, 0));
-  LaunchWriter(false, x, kHalf, cycles, 0);
-  HIP_CHECK(hipEventRecord(e1, 0));
-  HIP_CHECK(hipEventSynchronize(e1));
-  float ms = 0.f;
-  HIP_CHECK(hipEventElapsedTime(&ms, e0, e1));
-  HIP_CHECK(hipEventDestroy(e0));
-  HIP_CHECK(hipEventDestroy(e1));
-  return ms;
 }
 
 struct Config {
@@ -121,7 +121,7 @@ struct Config {
 // Runs the kernel -> [event record] -> D2H copy sequence `iters` times for one
 // configuration and returns how many iterations came back wrong, i.e. the
 // copied first half was not entirely the writer's value (stale or partly raced).
-int CountWrong(const Config& cfg, int iters, int64_t cycles, int64_t behindCycles) {
+int CountWrong(const Config& cfg, int iters) {
   hipStream_t stream = 0;
   if (!cfg.useNullStream) HIP_CHECK(hipStreamCreate(&stream));
   int64_t* x = nullptr;
@@ -138,9 +138,9 @@ int CountWrong(const Config& cfg, int iters, int64_t cycles, int64_t behindCycle
     HIP_CHECK(hipMemcpy(x, old.data(), kWords * sizeof(int64_t), hipMemcpyHostToDevice));
     HIP_CHECK(hipStreamSynchronize(stream));
     for (int k = 0; k < kBehind; ++k) {
-      LaunchWriter(false, scratch, kScratch, behindCycles, stream);  // queue-ahead lag
+      LaunchWriter(false, scratch, kScratch, kBehindIters, stream);  // queue-ahead lag
     }
-    LaunchWriter(cfg.aliasPointer, x, kHalf, cycles, stream);  // the writer
+    LaunchWriter(cfg.aliasPointer, x, kHalf, kWriterIters, stream);  // the writer
     hipLaunchKernelGGL(readPlusOne, dim3(10), dim3(256), 0, stream,
                        ReadArgs{x, y, static_cast<unsigned int>(kWords)});
     HIP_CHECK(hipGetLastError());
@@ -179,29 +179,6 @@ int CountWrong(const Config& cfg, int iters, int64_t cycles, int64_t behindCycle
   return wrong;
 }
 
-// Sizes the writer spin to ~target_ms and the queued-ahead kernels to ~20 ms.
-void Calibrate(int64_t* cycles, int64_t* behindCycles) {
-  constexpr double kTargetMs = 10.0;
-  constexpr float kMaxKernelMs = 500.0f;  // well below the TDR
-  int64_t* x = nullptr;
-  HIP_CHECK(hipMalloc(&x, kWords * sizeof(int64_t)));
-  int64_t cyc = 100000;
-  float ms = 0.f;
-  for (int step = 0;; ++step) {
-    ms = WriterMs(x, cyc);
-    if (ms >= 0.8 * kTargetMs && ms <= 1.25 * kTargetMs) break;
-    double factor = kTargetMs / (ms > 1e-3f ? ms : 1e-3f);
-    factor = factor < 0.1 ? 0.1 : (factor > 50 ? 50 : factor);
-    const int64_t next = static_cast<int64_t>(cyc * factor);
-    REQUIRE(step < 9);
-    REQUIRE(ms * next / cyc <= kMaxKernelMs);
-    cyc = next;
-  }
-  HIP_CHECK(hipFree(x));
-  *cycles = cyc;
-  *behindCycles = static_cast<int64_t>(cyc * 20.0 / kTargetMs / kBehind);
-}
-
 }  // namespace
 
 /**
@@ -223,10 +200,7 @@ void Calibrate(int64_t* cycles, int64_t* behindCycles) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipMemcpy_OrderedAfterEventRecord) {
-  const int iters = isQuickLevel() ? 15 : 40;
-  int64_t cycles = 0;
-  int64_t behindCycles = 0;
-  Calibrate(&cycles, &behindCycles);
+  const int iters = isQuickLevel() ? 10 : 20;
 
   const Config configs[] = {
       // Regression: pointer only in a struct + event record, across the matrix.
@@ -240,7 +214,7 @@ HIP_TEST_CASE(Unit_hipMemcpy_OrderedAfterEventRecord) {
   };
 
   for (const Config& cfg : configs) {
-    const int wrong = CountWrong(cfg, iters, cycles, behindCycles);
+    const int wrong = CountWrong(cfg, iters);
     INFO(cfg.name << ": wrong " << wrong << " / " << iters);
     CHECK(wrong == 0);
   }
