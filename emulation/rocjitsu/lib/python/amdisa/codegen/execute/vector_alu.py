@@ -13,6 +13,7 @@ vop3_modifiers helpers.
 from __future__ import annotations
 
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
+from amdisa.codegen.execute.floating_policy import F16_FLUSHED_SOURCE_CALLS
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
@@ -20,11 +21,6 @@ from amdisa.codegen.execute.vop3_modifiers import (
     vop3_dst_mod_f64,
 )
 from amdisa.semantics import F16_INPUT_CONVERSION_DTYPES, F32_TO_INTEGER_DTYPES
-
-# F16 helpers that expect their source flushed under MODE before widening.
-_F16_FLUSHED_SOURCE_OPS = frozenset(
-    {'exp2', 'log2', 'rcp', 'rsq', 'sqrt', 'sin', 'cos'}
-)
 
 
 def _flush_f16(read: str) -> str:
@@ -435,7 +431,7 @@ def gen_vector_unary(
             if is_vop3
             else f'amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)'
         )
-        if op in _F16_FLUSHED_SOURCE_OPS:
+        if op in F16_FLUSHED_SOURCE_CALLS:
             s_read = _flush_f16(s_read)
         L.append('    float s = util::f16_to_f32(static_cast<uint16_t>(' f'{s_read}));')
         if is_vop3:
