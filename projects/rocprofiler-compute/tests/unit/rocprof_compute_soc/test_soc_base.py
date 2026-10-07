@@ -705,7 +705,8 @@ def test_same_bucket_priority_empty_for_gfx950():
 
 
 def test_expand_tcc_templates(perfmon_config):
-    soc = _make_soc(perfmon_config, num_xcd=2, l2_banks=3)
+    # gfx942 is multi-die, so the reported die count multiplies the banks.
+    soc = _make_soc(perfmon_config, arch="gfx942", num_xcd=2, l2_banks=3)
     result = soc._expand_tcc_template_counters({"TCC_HIT[", "SQ_WAVES"})
 
     # Template replaced with 2*3=6 indexed counters
