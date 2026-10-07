@@ -8,6 +8,8 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <atomic>
+#include <mutex>
+#include <string>
 #include <vector>
 
 /**
@@ -71,6 +73,28 @@ __global__ static void increment_kernel(int* data, int n) {
  * Shared failure flag set by any thread that detects wrong output.
  * ---------------------------------------------------------------------------*/
 static std::atomic<bool> g_failure{false};
+
+/* ---------------------------------------------------------------------------
+ * Library the churners register and unregister. The path is relative to the
+ * process working directory, which CTest sets to the directory holding the test
+ * executable and the companion artifacts built alongside it.
+ * ---------------------------------------------------------------------------*/
+static constexpr const char* kChurnLibrary = "./libLazyLoad.so";
+
+/* ---------------------------------------------------------------------------
+ * dlerror() text of the first load that failed. Catch2 assertions are not
+ * thread safe, so a churner records the reason here and the main thread reports
+ * it once the threads have been joined.
+ * ---------------------------------------------------------------------------*/
+static std::mutex g_dlopen_error_lock;
+static std::string g_dlopen_error;
+
+static void record_dlopen_error(const char* error) {
+  std::lock_guard<std::mutex> lock(g_dlopen_error_lock);
+  if (g_dlopen_error.empty()) {
+    g_dlopen_error = error == nullptr ? "dlerror() reported no error" : error;
+  }
+}
 
 /* ---------------------------------------------------------------------------
  * Per-worker context: owns its own device/host buffers.
@@ -165,10 +189,9 @@ static void* churner_fn(void* arg) {
   pthread_barrier_wait(ctx->barrier);
 
   for (int iter = 0; iter < ctx->iters; ++iter) {
-    void* handle = dlopen("./libLazyLoad.so", RTLD_LAZY);
+    void* handle = dlopen(kChurnLibrary, RTLD_LAZY);
     if (!handle) {
-      /* Catch2 assertions are not thread safe, so the success count is the only
-       * signal a churner can report. */
+      record_dlopen_error(dlerror());
       continue;
     }
 
@@ -187,6 +210,15 @@ static void* churner_fn(void* arg) {
  * ---------------------------------------------------------------------------*/
 HIP_TEST_CASE(Unit_StatCO_ConcurrentDlopenDlcloseWhileLaunching) {
   HIPCHECK(hipSetDevice(0));
+
+  /* One register/unregister cycle on the main thread, before any churner runs.
+   * A library that cannot be loaded at all fails here and names its dlerror(),
+   * rather than surfacing as a zero success count that identifies no cause. */
+  void* preflight = dlopen(kChurnLibrary, RTLD_LAZY);
+  const char* loadError = dlerror();
+  INFO("dlopen failed: " << (loadError == nullptr ? "" : loadError));
+  REQUIRE(preflight != nullptr);
+  REQUIRE(dlclose(preflight) == 0);
 
   constexpr int kWorkers = 4;
   constexpr int kChurners = 1;
@@ -208,6 +240,7 @@ HIP_TEST_CASE(Unit_StatCO_ConcurrentDlopenDlcloseWhileLaunching) {
   constexpr int kN = 1024;  /* Small buffer; latency matters, not bandwidth. */
 
   g_failure.store(false);
+  g_dlopen_error.clear();
 
   pthread_barrier_t barrier;
   REQUIRE(pthread_barrier_init(&barrier, nullptr,
@@ -250,6 +283,7 @@ HIP_TEST_CASE(Unit_StatCO_ConcurrentDlopenDlcloseWhileLaunching) {
 
   /* dlclose drives __hipUnregisterFatBinary. With no successful dlopen the racing
    * erase never ran, so a clean result would be wrong. */
+  INFO("first churner dlopen failure: " << g_dlopen_error);
   REQUIRE(dlopen_success_count.load() > 0);
 
   /* Primary assertion: no kernel produced wrong results and no crash. */
