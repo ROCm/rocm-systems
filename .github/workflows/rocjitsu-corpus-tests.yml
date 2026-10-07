@@ -262,9 +262,15 @@ jobs:
           echo "LD_LIBRARY_PATH=${ROCJITSU_BUILD_DIR}:${ROCM_LIB}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
       - name: Install Python unit test dependencies
+        id: consan_python
+        # The focused assertions and TSan filters exclude the Python suites.
+        if: matrix.test_regex == ''
         run: |
-          uv pip install --system --python "${{ steps.python.outputs.python-path }}" \
+          CONSAN_PYTHON_VENV="${RUNNER_TEMP}/consan-python"
+          uv venv --python "${{ steps.python.outputs.python-path }}" "${CONSAN_PYTHON_VENV}"
+          uv pip install --python "${CONSAN_PYTHON_VENV}/bin/python" \
             -r "${ROCJITSU_SOURCE_DIR}/tests/consan/requirements.txt"
+          echo "python-path=${CONSAN_PYTHON_VENV}/bin/python" >> "${GITHUB_OUTPUT}"
 
       - name: Build rocjitsu
         id: build_rocjitsu
@@ -380,7 +386,7 @@ jobs:
           ROCM_PATH=`rocm-sdk path --root` \
             cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
-            -DPython3_EXECUTABLE="${{ steps.python.outputs.python-path }}" \
+            -DPython3_EXECUTABLE="${{ steps.consan_python.outputs.python-path || steps.python.outputs.python-path }}" \
             -DCMAKE_C_FLAGS="${CFLAGS:-}" \
             -DCMAKE_CXX_FLAGS="${CXXFLAGS:-}" \
             "${CMAKE_CONFIG_FLAGS[@]}" \

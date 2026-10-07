@@ -608,11 +608,21 @@ signals, and health failures as different outcomes.
 
 ## Testing the validation runner
 
-The runner's orchestration and containment behavior has CPU-only unit tests:
+The runner's orchestration and containment behavior has CPU-only unit tests.
+Follow the [test setup instructions](../../../README.md#running-tests) to install
+their dependencies in a separate virtual environment and configure CMake. Run
+the complete set of discovered ConSan Python suites from the repository root:
+
+```sh
+ctest --test-dir emulation/rocjitsu/build -L '^consan-python$' --output-on-failure
+```
+
+For a focused check of the modules below, or without a CMake build, only the
+virtual environment setup is needed:
 
 ```sh
 cd emulation/rocjitsu/tests/dbi/consan
-python3 -m unittest \
+../../../build/consan-python/bin/python -m unittest \
   test_consan_coverage_gate.py \
   test_consan_fault_runner.py \
   test_consan_run_provenance.py \
