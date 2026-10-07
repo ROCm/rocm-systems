@@ -1763,6 +1763,32 @@ TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufSupported_EnablesGdrDirectly) {
   EXPECT_EQ(0, g_gdrSupportCalls);   // GDR fallback NOT called
 }
 
+// supportedGinTypeBitMask is what a new split's AllGather ANDs into
+// globalGinTypeBitMask, so it decides whether ncclGinSetDefaultBackend runs.
+TEST_F(InitMicrotest, FillInfo_LiveGinBackend_AdvertisesItsType) {
+  FillInfoComm c;
+  struct ncclGinState* ginState = &c.get()->sharedRes->ginState;
+  ginState->numActiveBackends = 1;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(info.supportedGinTypeBitMask, BIT(NCCL_GIN_TYPE_PROXY));
+}
+
+// AICOMRCCL-2739: a sibling's host finalize keeps the backend records for
+// ncclGinFinalize. Advertising them would let a new shared split reconnect
+// through a ginInstance whose owning comm may already be freed.
+TEST_F(InitMicrotest, FillInfo_FinalizedGinBackends_AdvertiseNoType) {
+  FillInfoComm c;
+  struct ncclGinState* ginState = &c.get()->sharedRes->ginState;
+  ginState->numActiveBackends = 1;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  ginState->finalized = true;
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(info.supportedGinTypeBitMask, 0u);
+}
+
 // MLOPart detection in fillInfo(). It exists for DPX/XCP/CPX, where HIP exposes each logical GPU as
 // PCI function .N of one physical device and typically only .0 exists in sysfs as a GPU.
 //

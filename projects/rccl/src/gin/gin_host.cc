@@ -31,16 +31,18 @@ constexpr int efaGdaBackendMinVersions[] = {0, NCCL_VERSION(2, 31, 0), NCCL_VERS
 ncclResult_t ncclGetGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
   if (comm == nullptr || ginType == nullptr) return ncclInternalError;
 
-  *ginType = comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL ? NCCL_GIN_TYPE_NONE :
-                                                                  comm->sharedRes->ginState.backends[0].ginType;
+  struct ncclGinState* ginState = &comm->sharedRes->ginState;
+  *ginType = comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL || ginState->finalized ? NCCL_GIN_TYPE_NONE :
+                                                                                         ginState->backends[0].ginType;
   return ncclSuccess;
 }
 
 ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
   if (comm == nullptr || ginType == nullptr) return ncclInternalError;
 
-  *ginType = comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE ? NCCL_GIN_TYPE_NONE :
-                                                                  comm->sharedRes->ginState.backends[0].ginType;
+  struct ncclGinState* ginState = &comm->sharedRes->ginState;
+  *ginType = comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE || ginState->finalized ? NCCL_GIN_TYPE_NONE :
+                                                                                         ginState->backends[0].ginType;
   return ncclSuccess;
 }
 
@@ -93,6 +95,20 @@ void* ncclGinProgress(struct ncclGinState* ginState, int threadIdx) {
 NCCL_PARAM(GinNconnections, "GIN_NCONNECTIONS", -2);
 NCCL_PARAM(GinProxyNthreads, "GIN_PROXY_NTHREADS", 1);
 
+// Mark closed before NULLing, so a failure part-way never leaves NULL ginComms[]
+// with closed still false. Every handle is closed even if one fails; the first
+// error is returned.
+static ncclResult_t ginBackendCloseConnections(struct ncclGinBackendState* backend) {
+  ncclResult_t ret = ncclSuccess;
+  backend->closed = true;
+  for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
+    if (backend->ginComms[commIdx] == NULL) continue;
+    NCCLCHECKIGNORE(backend->ncclGin->closeColl(backend->ginComms[commIdx]), ret);
+    backend->ginComms[commIdx] = NULL;
+  }
+  return ret;
+}
+
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
   ncclTeam_t ginTeam;
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
@@ -107,6 +123,11 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
 
   if (!ginState->supported) {
     WARN("GIN not supported.");
+    return ncclInvalidUsage;
+  }
+
+  if (ginState->finalized) {
+    WARN("GIN was finalized by a communicator sharing these resources and cannot reconnect.");
     return ncclInvalidUsage;
   }
 
@@ -204,11 +225,10 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
       NCCLCHECKGOTO(backend->ncclGin->closeListen(listenComms[backendIdx]), ret, fail);
       listenComms[backendIdx] = NULL;
     }
-    // ginComms[] are live again, so drop the flag a previous ncclGinHostFinalize
-    // set: on a shared sharedRes a surviving splitShare sibling can reconnect GIN,
-    // and leaving it set would have the walks below discard that connection.
-    // The bump is what makes dropping it safe: windows registered against the
-    // handles this just replaced stay identifiable to ncclGinDeregister.
+    // ginComms[] are live again, so drop the flag a failed earlier attempt set;
+    // leaving it would have register / deregister / DevCommSetup skip them. The
+    // bump keeps windows registered against replaced handles identifiable to
+    // ncclGinDeregister.
     backend->closed = false;
     backend->connectGeneration++;
   }
@@ -227,16 +247,7 @@ fail:
     if (listenComms[backendIdx] != NULL) {
       NCCLCHECKIGNORE(backend->ncclGin->closeListen(listenComms[backendIdx]), ret);
     }
-
-    // Mark before NULLing, as ncclGinHostFinalize does: a partially connected
-    // backend must not be left with NULL handles and closed still false.
-    backend->closed = true;
-    for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
-      if (backend->ginComms[commIdx] != NULL) {
-        NCCLCHECKIGNORE(backend->ncclGin->closeColl(backend->ginComms[commIdx]), ret);
-        backend->ginComms[commIdx] = NULL;
-      }
-    }
+    NCCLCHECKIGNORE(ginBackendCloseConnections(backend), ret);
   }
   goto exit;
 }
@@ -511,21 +522,12 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
     }
   }
 
+  ncclResult_t ret = ncclSuccess;
   for (int backendIdx = 0; backendIdx < ginState->numActiveBackends; backendIdx++) {
-    struct ncclGinBackendState* backend = &ginState->backends[backendIdx];
     // Keep ginCommCount and ginInstance: zeroing the count divides by zero in
     // ginDevCommSetupWithBackend, and ginInstance must reach ncclGinFinalize.
-    // closed makes register / deregister / DevCommSetup skip the NULLed handles.
-    // Set before the loop, not after: the loop NULLs each handle it closes, so a
-    // closeColl failure returns from here with handles already gone -- exactly the
-    // state the flag exists to keep callers out of.
-    backend->closed = true;
-    for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
-      if (backend->ginComms[commIdx] != NULL) {
-        NCCLCHECK(backend->ncclGin->closeColl(backend->ginComms[commIdx]));
-        backend->ginComms[commIdx] = NULL;
-      }
-    }
+    // A closeColl failure must not skip the other handles or the reset below.
+    NCCLCHECKIGNORE(ginBackendCloseConnections(&ginState->backends[backendIdx]), ret);
   }
 
   // AICOMRCCL-2739: numActiveBackends and backends[].ginInstance must survive until
@@ -535,6 +537,7 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
   // Resetting field by field also keeps the thread, mutex and atomic members intact.
   // cpuAffinity is not reset: it is overwritten from comm->cpuAffinity before any
   // progress thread starts, so it is never read stale.
+  ginState->finalized = true;
   ginState->connected = false;
   ginState->supported = false;
   ginState->proxyNthreads = 0;
@@ -544,7 +547,7 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
   ginState->asyncResult = ncclSuccess;
   ginState->devComms = NULL;
   ginState->ginConnectionType = NCCL_GIN_CONNECTION_NONE;
-  return ncclSuccess;
+  return ret;
 }
 
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,

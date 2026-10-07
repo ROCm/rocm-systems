@@ -105,6 +105,7 @@ struct ncclGinState {
   ncclResult_t asyncResult;
   struct ncclGinStateDevComm* devComms;
   ncclGinConnectionType_t ginConnectionType;
+  bool finalized;
   int numActiveBackends;
   struct ncclGinBackendState backends[NCCL_GIN_MAX_ACTIVE_BACKENDS];
 };
