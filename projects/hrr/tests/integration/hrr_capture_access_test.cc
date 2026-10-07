@@ -36,8 +36,8 @@
  *     message instead of failing the application's HIP calls (POSIX).
  *
  *   Unit_HRR_CaptureDisabledInForkedChild:
- *     a forked child whose archive cannot be opened says capture is disabled
- *     and leaves no empty pid-<pid> behind (POSIX).
+ *     a forked child whose archive cannot be opened says capture is disabled,
+ *     runs no capture shim, and leaves no empty pid-<pid> behind (POSIX).
  *
  *   Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable:
  *     a base directory that cannot be listed leaves the root manifest as it
@@ -64,6 +64,7 @@
 
 #include "hrr_test_common.hh"
 #include "hrr_test_process.hh"
+#include "hrr_clock_hook.hh"
 
 #include <algorithm>
 #include <csignal>
@@ -252,9 +253,13 @@ TEST_CASE("Unit_HRR_CaptureAbort_Direct", "[.][hrr-direct]") {
 // Hidden ([.]) workload for Unit_HRR_CaptureDisabledInForkedChild: records a
 // few events, then forks with RLIMIT_NOFILE at 3. The capture writer's atfork
 // handler opens the child's archive before fork() returns in the child, so that
-// open cannot get a descriptor and fails. The child restores the limit and
-// leaves at once; it touches no HIP state.
+// open cannot get a descriptor and fails. The child restores the limit, then
+// calls through both dispatch tables. A capture shim left in either would read
+// the clock to timestamp its record, so the child counts its clock reads. It
+// exits 1 if a runtime call read it, 2 if a compiler call did, 3 for both.
 // ---------------------------------------------------------------------------
+static int g_child_clock_reads = 0;
+
 TEST_CASE("Unit_HRR_CaptureForkWithoutFds_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   void* d = nullptr;
@@ -275,7 +280,18 @@ TEST_CASE("Unit_HRR_CaptureForkWithoutFds_Direct", "[.][hrr-direct]") {
   const pid_t child = ::fork();
   if (child == 0) {
     (void)::setrlimit(RLIMIT_NOFILE, &saved);
-    ::_exit(0);
+    t_hrr_clock_hook = [] { ++g_child_clock_reads; };
+    (void)hipGetLastError();
+    const bool runtime_shim = g_child_clock_reads != 0;
+    g_child_clock_reads = 0;
+    dim3 grid, block;
+    size_t shared = 0;
+    hipStream_t stream = nullptr;
+    (void)__hipPushCallConfiguration(dim3(1), dim3(1), 0, nullptr);
+    (void)__hipPopCallConfiguration(&grid, &block, &shared, &stream);
+    const bool compiler_shim = g_child_clock_reads != 0;
+    t_hrr_clock_hook = nullptr;
+    ::_exit((runtime_shim ? 1 : 0) | (compiler_shim ? 2 : 0));
   }
   const int restored = ::setrlimit(RLIMIT_NOFILE, &saved);
   REQUIRE(child > 0);
@@ -283,6 +299,7 @@ TEST_CASE("Unit_HRR_CaptureForkWithoutFds_Direct", "[.][hrr-direct]") {
   int status = 0;
   REQUIRE(::waitpid(child, &status, 0) == child);
   CHECK(WIFEXITED(status));
+  INFO("1: a runtime call still runs a capture shim, 2: a compiler call does, 3: both");
   CHECK(WEXITSTATUS(status) == 0);
   HRR_HIP_CHECK(hipFree(d));
 }
@@ -680,6 +697,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureSurvivesUnusableOutputPath) {
  *   - The child says capture is disabled, and the pid-<pid> it created for
  *     itself is removed again, so a refused capture leaves nothing behind.
  *     The parent's archive is the only one left.
+ *   - The child's runtime and compiler calls no longer run a capture shim.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureDisabledInForkedChild) {
 #ifdef _WIN32
