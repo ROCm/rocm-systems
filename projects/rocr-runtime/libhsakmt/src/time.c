@@ -90,13 +90,25 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCountersPrecise(HSAuint32 NodeId,
 		HsaClockCounters sample;
 		uint64_t elapsed;
 
+		/* A later read can fail after a good sample was already taken.
+		 * Return that sample instead of failing the whole call. The
+		 * caller's output stays unchanged when nothing was collected.
+		 */
 		if (clock_gettime(CLOCK_MONOTONIC_RAW, &before))
-			return HSAKMT_STATUS_ERROR;
-		result = hsaKmtGetClockCountersCtx(&hsakmt_primary_kfd_ctx, NodeId, &sample);
-		if (result != HSAKMT_STATUS_SUCCESS)
+			result = HSAKMT_STATUS_ERROR;
+		else
+			result = hsaKmtGetClockCountersCtx(&hsakmt_primary_kfd_ctx,
+							  NodeId, &sample);
+		if (result == HSAKMT_STATUS_SUCCESS &&
+		    clock_gettime(CLOCK_MONOTONIC_RAW, &after))
+			result = HSAKMT_STATUS_ERROR;
+		if (result != HSAKMT_STATUS_SUCCESS) {
+			if (best_elapsed != UINT64_MAX) {
+				*Counters = best;
+				return HSAKMT_STATUS_SUCCESS;
+			}
 			return result;
-		if (clock_gettime(CLOCK_MONOTONIC_RAW, &after))
-			return HSAKMT_STATUS_ERROR;
+		}
 
 		elapsed = (uint64_t)(after.tv_sec - before.tv_sec) * 1000000000 +
 			  after.tv_nsec - before.tv_nsec;
