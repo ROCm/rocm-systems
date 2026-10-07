@@ -25,8 +25,11 @@
 #include <string>
 #include <vector>
 
+#ifndef _WIN32
+// The placeholder and stderr tests below use mmap and dup2.
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
 
 using hrr::VaRange;
 
@@ -440,6 +443,9 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_MappingOverlap) {
   REQUIRE(hrr::va_mapping_overlapping({}, B, B + P) == nullptr);
 }
 
+// Placement holds its placeholders with mmap, so it is off on Windows and
+// these tests have nothing to hold there.
+#ifndef _WIN32
 namespace {
 // A range of `pages` pages that nothing in this process maps right now.
 uint64_t free_range(size_t pages) {
@@ -595,6 +601,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FallbackLinesCapped) {
     REQUIRE(count_of(err, named) == 3);
   }
 }
+#endif  // _WIN32
 
 /**
  * End doxygen group HRR.

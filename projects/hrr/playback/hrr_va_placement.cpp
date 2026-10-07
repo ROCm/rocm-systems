@@ -55,9 +55,6 @@ void hold_pieces(uint64_t b, uint64_t e, std::vector<VaRange>* out) {
 void drop_hold(uint64_t b, uint64_t e) {
     if (b < e) munmap(reinterpret_cast<void*>(b), e - b);
 }
-#else
-bool hold_exact(uint64_t, uint64_t) { return false; }
-void drop_hold(uint64_t, uint64_t) {}
 #endif
 
 }  // namespace
