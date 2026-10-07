@@ -842,6 +842,27 @@ TEST_F(KfdIoctlTest, CreateQueueAcceptsOlderAndNewerPayloadSizes) {
 // A compute queue created through KFD is replicated onto every XCD so its
 // dispatches can be spread across the whole device; the XCD that owns the queue
 // still reads the ring alone. An SDMA queue is per-engine and is not replicated.
+TEST_F(KfdIoctlTest, MetadataRingOverflowDoesNotChangeGpuMappings) {
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto pages = process->page_table_.size();
+  const auto next_queue = process->next_queue_id_;
+  alignas(8) uint64_t pointers[2]{};
+  kfd_ioctl_create_queue_args args{};
+  args.gpu_id = kGpuId;
+  args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  args.ring_base_address = UINT64_MAX - 255;
+  args.ring_size = 256;
+  args.metadata_ring_size = 256;
+  args.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  args.queue_percentage = 100;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), -EINVAL);
+  EXPECT_EQ(process->page_table_.size(), pages);
+  EXPECT_EQ(process->next_queue_id_, next_queue);
+  EXPECT_EQ(args.queue_id, 0u);
+}
+
 TEST_F(KfdIoctlTest, CreateQueueReplicatesComputeQueueAcrossXcds) {
   const uint32_t num_xcds = soc_->num_xcds();
   ASSERT_GT(num_xcds, 1u);
