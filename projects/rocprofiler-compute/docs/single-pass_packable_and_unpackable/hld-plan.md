@@ -236,7 +236,7 @@ Single-pass packable (SPP) coverage on gfx942 is `packable_multi == 0`. Single-p
 
 The health test report is the before/after comparison artifact for those workload runs. It is not part of the packing algorithm.
 
-Re-check the tickets listed under System Context after Phase 1, and again after Phase 2 where the metric is an SPU parent.
+Re-check the tickets listed under System Context after Phase 1, and again after Phase 2 where the metric is an SPU parent, and generate a summary report.
 
 ### Debugging a bad ratio
 
