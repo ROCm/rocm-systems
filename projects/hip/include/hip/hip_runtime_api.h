@@ -675,9 +675,17 @@ enum hipComputeMode {
   hipComputeModeExclusiveProcess = 3
 };
 
+/**
+ * The ways a device supports flushing of outstanding GPUDirect RDMA writes.
+ *
+ * The supported options are reported as a bitmask by
+ * hipDeviceAttributeGPUDirectRDMAFlushWritesOptions.
+ */
 enum hipFlushGPUDirectRDMAWritesOptions {
-  hipFlushGPUDirectRDMAWritesOptionHost = 1 << 0,
-  hipFlushGPUDirectRDMAWritesOptionMemOps = 1 << 1
+  hipFlushGPUDirectRDMAWritesOptionHost = 1 << 0,   ///< hipDeviceFlushGPUDirectRDMAWrites() is
+                                                    ///< supported
+  hipFlushGPUDirectRDMAWritesOptionMemOps = 1 << 1  ///< The memory operations API supports
+                                                    ///< remote write ordering
 };
 
 enum hipGPUDirectRDMAWritesOrdering {
