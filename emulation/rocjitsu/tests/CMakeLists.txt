@@ -3967,6 +3967,13 @@ if(RJ_ENABLE_HIP_TESTS)
     endif()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        rj_add_hip_test(hip_hw_id_test ARCH gfx950)
+        rj_add_hip_test_case(
+            hip_hw_id_test
+            "HipHwIdTest.FourWaveWorkgroupPreservesSimdIdsAcrossBarrier"
+            TIMEOUT 120
+        )
+
         # This test exercises CDNA ACCVGPR/DS transpose instructions directly
         # in inline assembly, so it must stay on a CDNA target even when the
         # generic HIP smoke tests are built for a local RDNA host such as
