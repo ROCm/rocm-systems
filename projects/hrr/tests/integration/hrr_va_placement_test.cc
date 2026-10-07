@@ -687,7 +687,7 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(nullptr));
   int n = 0;
   HRR_HIP_CHECK(hipGetDeviceCount(&n));
-  REQUIRE(n >= 2);
+  if (n < 2) SKIP("needs at least 2 GPUs; " << n << " visible");
 
   HRR_HIP_CHECK(hipSetDevice(1));
   hipStream_t s1 = nullptr;
