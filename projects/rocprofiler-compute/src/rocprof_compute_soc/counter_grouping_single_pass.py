@@ -8,15 +8,17 @@ SPU) has some perfmon bucket containing its full PMC set. The allocator
 minimizes the number of passes under that hard constraint. Counters not
 required by any packable union use ordinary first-fit. Remaining SPU PMCs
 are placed into existing buckets when possible, and new passes are opened
-only if needed. TCC series affinity keeps LEVEL with matching REQ/ATOMIC in
-the same pass, covers every selected series, and never emits orphan REQ
-duplicates across channel passes (see AIPROFCOMP-865 design).
+only if needed. TCC series affinity keeps each LEVEL with its matching
+request series in the same pass and covers every selected series. An
+independent multi-column EA request row (panel 1805: read, write, and
+atomic, with no LEVEL) stays one packing group, so that pass may keep
+extra request copies whose LEVEL counters live in another pass.
 
-Overlapping packable unions that cannot share one bucket are handled by
+Overlapping packable sets that cannot share one bucket are handled by
 duplicating counters into an additional bucket (additive passes). That
 differs from the legacy heuristic, which places each counter in at most one
-bucket. Affinity forbids duplicating the same EA REQ series into a second
-pass when a LEVEL+REQ home already exists.
+bucket. Latency rows still use the pass that holds each LEVEL together with
+its request series.
 
 Disable with ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1 (or
 ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0) to restore the priority
@@ -59,9 +61,6 @@ _TCC_EA_LEVEL_TO_REQ: Dict[str, str] = {
 _TCC_EA_REQ_TO_LEVEL: Dict[str, str] = {
     req: level for level, req in _TCC_EA_LEVEL_TO_REQ.items()
 }
-# Independent EA count columns (panel 1805); split so they do not force
-# orphan REQ copies into the ATOMIC+LEVEL pass.
-_TCC_EA_INDEPENDENT_REQ_BASES: FrozenSet[str] = frozenset(_TCC_EA_REQ_TO_LEVEL)
 
 
 def try_allocate_single_pass_packable(
@@ -187,12 +186,11 @@ def collect_unique_packable_unions(
 ) -> Tuple[List[FrozenSet[str]], int]:
     """Unique PMC sets for metrics that fit one hardware bucket.
 
-    Multi-column EA REQ tables (for example panel 1805) are split into
-    per-series unions so affinity can keep LEVEL+REQ co-resident without
-    orphan REQ duplicates.
+    An independent multi-column EA request row (panel 1805) stays one
+    packing group so those columns share one pass.
 
     Returns:
-        Unions sorted largest-first, and the packable metric count.
+        Groups sorted largest-first, and the packable metric count.
     """
     seen: Set[FrozenSet[str]] = set()
     unions: List[FrozenSet[str]] = []
@@ -338,33 +336,13 @@ def _next_bucket_number(files: List[CounterFile], floor: int) -> int:
 def _split_independent_tcc_ea_req_union(
     group: FrozenSet[str],
 ) -> List[FrozenSet[str]]:
-    """Split multi-column EA REQ unions (e.g. panel 1805) into per-series groups.
+    """Keep an independent multi-column EA request row as one packing group.
 
-    Independent count columns must not force REQ into a LEVEL-home pass for a
-    different series (orphan REQ dups). Each series is covered alone.
+    Two or more of RDREQ, WRREQ, and ATOMIC, with no LEVEL, stay one group
+    so those columns share one perfmon pass (panel 1805). A LEVEL and its
+    request series also stay in the group they arrived in.
     """
-    bases_in_group = {
-        _tcc_channel_base(ctr) for ctr in group if is_tcc_channel_counter(ctr)
-    }
-    if bases_in_group & set(_TCC_EA_LEVEL_TO_REQ):
-        return [group]
-    independent = bases_in_group & _TCC_EA_INDEPENDENT_REQ_BASES
-    if len(independent) < 2:
-        return [group]
-
-    subgroups: List[FrozenSet[str]] = []
-    remaining = set(group)
-    for base in sorted(independent):
-        series = frozenset(
-            ctr
-            for ctr in group
-            if is_tcc_channel_counter(ctr) and _tcc_channel_base(ctr) == base
-        )
-        subgroups.append(series)
-        remaining -= series
-    if remaining:
-        subgroups.append(frozenset(remaining))
-    return subgroups
+    return [group]
 
 
 def _expand_tcc_ea_affinity_partners(
@@ -565,11 +543,13 @@ def _strip_orphan_tcc_ea_req_duplicates(
     perfmon_config: Dict[str, int],
     required_unions: Optional[List[FrozenSet[str]]] = None,
 ) -> List[CounterFile]:
-    """Remove EA REQ series from non-home passes when a LEVEL+REQ home exists.
+    """Drop an EA request series from a pass that lacks its LEVEL.
 
-    Ban placing the same per-channel EA REQ family in two passes with
-    divergent channel maps (AIPROFCOMP-865 section 1.4). *_sum aggregates
-    are untouched (not channel series).
+    Leave the series in the pass that also holds the matching LEVEL. Keep
+    extra request copies when a multi-column request row needs them to stay
+    complete in one pass. Same-pass bind still selects the pass that holds
+    the whole expression, so a latency row does not read a copy that lacks
+    its LEVEL. Per-channel series only; sum aggregates are left alone.
     """
     if not files:
         return files
@@ -618,8 +598,8 @@ def _strip_orphan_tcc_ea_req_duplicates(
         if required_unions and _count_packable_multi(trial, required_unions) > 0:
             console_debug(
                 "profiling",
-                "single-pass-packable: kept orphan TCC EA REQ series because "
-                "stripping it would break SPP coverage.",
+                "single-pass-packable: kept EA request copies so a "
+                "multi-column request row stays complete in one pass.",
             )
             continue
         updated = trial
