@@ -730,8 +730,7 @@ def backing_supported(backing, devno):
     physical volumes are all local NVMe -- linear, striped and RAID alike (see
     lvm_over_nvme). Any other interposing layer (multipath, dm-crypt, MD RAID,
     loopback) breaks the direct path to the device, so the kernel rejects the
-    IO at runtime (pcie_p2pdma_distance < 0) even when the filesystem and
-    O_DIRECT checks pass.
+    IO at runtime.
 
     Returns None when the backing could not be determined.
     """
