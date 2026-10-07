@@ -31,7 +31,7 @@
 
 // Lean seams for this binary only -- do not pull fakes/nccl_fakes.cc (its
 // std::function seams keep large unrelated graphs live against --gc-sections).
-int ncclDebugLevel = 0;
+uint32_t ncclDebugLevelMask = 0;
 uint64_t ncclDebugMask = 0;
 FILE* ncclDebugFile = nullptr;
 thread_local int ncclDebugNoWarn = 0;
