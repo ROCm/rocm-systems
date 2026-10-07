@@ -498,6 +498,8 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
+    if (inst->soffset != OPR_SMEM_OFFSET_NULL && inst->ioffset)
+      out += " offset:" + std::to_string(inst->ioffset);
     amdgpu::append_gfx12_cache_policy(out, inst->th, inst->scope,
                                       amdgpu::Gfx12TemporalHintKind::Load);
     if (inst->nv)

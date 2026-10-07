@@ -422,6 +422,8 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
+    if (inst->soffset != OPR_SMEM_OFFSET_NULL && inst->soffset != 127 && inst->offset)
+      out += " offset:" + std::to_string(inst->offset);
     if (inst->glc)
       out += " glc";
     if (inst->dlc)

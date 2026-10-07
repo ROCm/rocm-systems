@@ -2287,6 +2287,30 @@ TEST(XcntExecutionTest, ScalarAddressOverwriteNeedsZeroXOrKmWait) {
   }
 }
 
+TEST(XcntExecutionTest, ScalarRegisterOffsetOverwriteNeedsTranslationOrCompletionWait) {
+  // SGPR, both VCC halves, TTMP, M0, and the null-offset control.
+  for (uint8_t selector : {4, 106, 107, 108, 125, 124})
+    for (unsigned wait = 0; wait < 3; ++wait) {
+      SCOPED_TRACE(selector);
+      SCOPED_TRACE(wait);
+      const uint8_t overwritten = selector == 124 ? 4 : selector;
+      std::vector<uint32_t> code;
+      append_instruction(
+          code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = overwritten}));
+      append_instruction(
+          code, cdna5::build_smem(cdna5::kSLoadB32Smem, {.sdata = 8, .soffset = selector}));
+      if (wait)
+        append_instruction(
+            code, cdna5::build_sopp(wait == 1 ? cdna5::kSWaitXcntSopp : cdna5::kSWaitKmcntSopp,
+                                    {.simm16 = 0}));
+      append_instruction(
+          code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = overwritten}));
+      const auto counts = run_xcnt_kernel(code);
+      EXPECT_EQ(counts[0], selector != 124 && !wait ? 1u : 0u);
+      EXPECT_EQ(counts[1], 0u);
+    }
+}
+
 TEST(XcntExecutionTest, VectorAddressAndExecRespectPartialTranslationAndLoadWaits) {
   for (unsigned consumer = 0; consumer < 3; ++consumer)
     for (unsigned wait = 0; wait < 5; ++wait) {
@@ -3647,6 +3671,88 @@ TEST(MemoryWaitExecutionTest, ScalarStoresReadTheirDataAndHaveNoRegisterResult) 
   cu->track_memory_wait(inst, *wf);
   EXPECT_TRUE(state.events().empty());
   EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
+}
+
+TEST(MemoryWaitExecutionTest, ScalarMemoryRegisterOffsetIsCheckedBeforeAddressCalculation) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA3,
+                    ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    GpuMemory memory("smem_offset_wait_memory");
+    L2Cache l2("smem_offset_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    auto cu = ComputeUnitCore::create("smem_offset_wait_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
+    ASSERT_NE(wf, nullptr);
+    auto decoder = Decoder::create(arch);
+    const auto load = [&](uint8_t destination, bool register_offset, uint32_t immediate) {
+      const uint8_t selector = register_offset ? 4 : arch == ROCJITSU_CODE_ARCH_RDNA1 ? 125 : 124;
+      switch (arch) {
+      case ROCJITSU_CODE_ARCH_CDNA4:
+        return cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sdata = destination,
+                                                          .soffset_en = register_offset,
+                                                          .imm = 1,
+                                                          .offset = immediate,
+                                                          .soffset = selector});
+      case ROCJITSU_CODE_ARCH_RDNA1:
+        return rdna1::build_smem(rdna1::kSLoadDwordSmem,
+                                 {.sdata = destination, .offset = immediate, .soffset = selector});
+      case ROCJITSU_CODE_ARCH_RDNA3:
+        return rdna3::build_smem(rdna3::kSLoadB32Smem,
+                                 {.sdata = destination, .offset = immediate, .soffset = selector});
+      case ROCJITSU_CODE_ARCH_RDNA4:
+        return rdna4::build_smem(rdna4::kSLoadB32Smem,
+                                 {.sdata = destination, .ioffset = immediate, .soffset = selector});
+      default:
+        return cdna5::build_smem(cdna5::kSLoadB32Smem,
+                                 {.sdata = destination, .ioffset = immediate, .soffset = selector});
+      }
+    };
+    util::StringDiagnostic error;
+    auto producer = decoder->decode_window(load(4, false, 0), 0, error.emitter());
+    ASSERT_TRUE(producer.succeeded()) << error.message();
+    cu->write_sgpr(wf->sgpr_alloc().base, 0x400000);
+    cu->write_sgpr(wf->sgpr_alloc().base + 1, 0);
+    cu->write_sgpr(wf->sgpr_alloc().base + 4, 16);
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    for (bool register_offset : {false, true})
+      for (uint32_t immediate : {0u, 4u})
+        for (bool waited : {false, true}) {
+          SCOPED_TRACE(register_offset);
+          SCOPED_TRACE(immediate);
+          SCOPED_TRACE(waited);
+          auto consumer =
+              decoder->decode_window(load(8, register_offset, immediate), 0, error.emitter());
+          ASSERT_TRUE(consumer.succeeded()) << error.message();
+          state.clear();
+          cu->track_memory_wait(*producer.value(), *wf);
+          ASSERT_EQ(state.events().size(), 1u);
+          if (waited)
+            state.wait(state.events().front().counter, 0);
+          unsigned reports = 0;
+          state.bind(0x200, &reports,
+                     [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
+          state.check_instruction(*consumer.value(), *wf);
+          EXPECT_EQ(reports, register_offset && !waited ? 1u : 0u);
+          ASSERT_TRUE(cu->execute_instruction(consumer.value().get(), *wf).succeeded());
+          ASSERT_NE(consumer.value()->data(), nullptr);
+          EXPECT_EQ(consumer.value()->data_as<ScalarMemState>()->addr,
+                    0x400000u + (register_offset ? 16 : 0) + immediate);
+          if (register_offset) {
+            EXPECT_EQ(consumer.value()->src_operand(1)->to_register_ref(),
+                      (RegisterRef{RegClass::SGPR, 4, 1}));
+            EXPECT_NE(consumer.value()->disassemble().find(", s4"), std::string::npos);
+            if (immediate)
+              EXPECT_NE(consumer.value()->disassemble().find(" offset:4"), std::string::npos);
+          } else {
+            EXPECT_EQ(consumer.value()->src_operand(1)->const_value(), immediate);
+          }
+        }
+  }
 }
 
 TEST(MemoryWaitExecutionTest, DirectLdsResultsUseWholeQuadsAndValidateM0BeforeExecution) {

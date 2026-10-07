@@ -3656,6 +3656,13 @@ class CodeGenerator:
             )
 
             modifier_lines = ''
+            if enc_upper == 'ENC_SMEM' and profile.smem_direct_offset_field:
+                offset = profile.smem_direct_offset_field
+                register_offset = self._smem_register_offset_condition('inst')
+                modifier_lines += (
+                    f'if ({register_offset} && inst->{offset}) '
+                    f'modifiers_ += " offset:" + std::to_string(inst->{offset});'
+                )
             if profile.renders_gfx11_image_syntax and enc_upper == 'ENC_MIMG':
                 modifier_lines += (
                     'if (!omits_gfx11_mimg_dim_dmask()) {'
@@ -7837,6 +7844,13 @@ class CodeGenerator:
             return '\n'.join(L)
 
         return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: {cls}'
+
+    def _smem_register_offset_condition(self, encoding: str) -> str:
+        condition = f'{encoding}->soffset != OPR_SMEM_OFFSET_NULL'
+        # RDNA address helpers also accept the legacy no-offset sentinel.
+        if self.isa_spec.arch_name.startswith('rdna'):
+            condition += f' && {encoding}->soffset != 127'
+        return condition
 
     def _gen_smem_load(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
@@ -13822,10 +13836,16 @@ class CodeGenerator:
                             '} // namespace'
                         )
                     else:
-                        # RDNA model: direct offset field (no soffset_en/imm).
+                        # RDNA/CDNA5 add the register and immediate offsets.
+                        # As on CDNA1-4, expose the register when present and
+                        # render the immediate as an offset modifier.
+                        register_offset = self._smem_register_offset_condition('enc')
                         smem_body = (
                             'namespace {\n'
                             'Operand make_smem_offset(const Smem::OpEncoding *enc) {\n'
+                            f'  if ({register_offset})\n'
+                            '    return Operand(32, OperandType::OPR_SMEM_OFFSET, '
+                            'static_cast<int>(enc->soffset));\n'
                             f'  return Operand(32, OperandType::OPR_SIMM32, '
                             f'static_cast<int>(enc->{direct_field}));\n'
                             '}\n'

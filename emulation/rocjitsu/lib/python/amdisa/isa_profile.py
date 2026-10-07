@@ -1667,13 +1667,14 @@ class _AmdgpuProfileBase(IsaProfile):
 
         When ``None``, the ISA uses the three-field CDNA model:
         ``soffset_en``, ``imm``, and ``offset``/``soffset``.  When a
-        string (e.g. ``'offset'`` or ``'ioffset'``), the generated
-        ``make_smem_offset`` helper always returns
-        ``enc-><field>`` directly with no conditional logic.
+        string (e.g. ``'offset'`` or ``'ioffset'``), the ISA adds that
+        immediate to the independent ``soffset`` register. The operand
+        model exposes the register when present and renders the immediate
+        as an offset modifier; otherwise the immediate is the operand.
 
         CDNA1/2/3/4 → ``None`` (three-field model).
         RDNA1/2/3/3.5 → ``'offset'``.
-        RDNA4 → ``'ioffset'``.
+        RDNA4/CDNA5 → ``'ioffset'``.
         """
         return None
 
