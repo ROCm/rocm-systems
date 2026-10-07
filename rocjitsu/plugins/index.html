@@ -1005,6 +1005,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#instruction-mix-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instruction Mix Plugin
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#kernel-logging-plugin" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1625,6 +1636,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#instruction-mix-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Instruction Mix Plugin
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#kernel-logging-plugin" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1884,6 +1906,11 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.</p>
 <td>Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown.</td>
 </tr>
 <tr>
+<td><code>InstructionMixPlugin</code></td>
+<td><code>instruction_mix/</code></td>
+<td>Records which ISA mnemonics a run executed and how often, per dispatch and in aggregate, for instruction-mix and instruction-coverage reporting.</td>
+</tr>
+<tr>
 <td><code>PerfsimPlugin</code></td>
 <td><code>perfsim/</code></td>
 <td>Adapts gfx1250 execution observations to an external Perfsim backend implementing FFM observer APIs v8 through v13. Built only when explicitly enabled. See the <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md">Perfsim adapter README</a>.</td>
@@ -1920,14 +1947,27 @@ Dispatches that never reach the execution-end callback are omitted from both
 per-dispatch output and the summary.</p>
 <p>Memory instructions take precedence over their scalar or vector encoding. The
 <code>lds</code> and <code>global</code> families describe the instruction's pre-routing pipeline tag
-or mnemonic fallback: <code>lds</code> covers DS/local-memory instructions, while
-<code>global</code> covers global, scalar-memory, flat, buffer, image, and scratch
-instructions. A later shared-aperture FLAT-to-LDS remap is therefore still
-reported as <code>global</code>. Their <code>execution_seconds</code> measure synchronous instruction
-execution/address generation, not later routing, deferred pipeline completion,
-or stalls charged to wait instructions. Matrix includes MFMA, SMFMAC, WMMA,
-and SWMMAC instructions. Control covers branches, waits, barriers, termination,
-no-ops, sleeps, and delays.</p>
+or mnemonic fallback: <code>lds</code> covers DS/LDS local-memory instructions, while
+<code>global</code> covers global, scalar-memory, flat, buffer, typed-buffer, image,
+tensor, and scratch instructions. A later shared-aperture FLAT-to-LDS remap is
+therefore still reported as <code>global</code>. Their <code>execution_seconds</code> measure
+synchronous instruction execution/address generation, not later routing,
+deferred pipeline completion, or stalls charged to wait instructions. Matrix
+includes MFMA, SMFMAC, WMMA, and SWMMAC instructions. Control covers branches,
+waits, barriers, termination, no-ops, sleeps, and delays, including the LDS-pipe
+<code>ds_nop</code> and the GWS barrier/semaphore instructions, which move no data.</p>
+<p>The mnemonic fallback is not just for synthetic instructions: whole prefix
+families never set the memory-op flag — RDNA4 <code>ds_direct_load</code> and <code>tbuffer_*</code>,
+RDNA3.5 <code>lds_direct_load</code>, the image encodings, the CDNA5 tensor transfers, and
+every scalar-memory encoding, since <code>smem</code> stopped setting the flag when the
+decoded memory-issue metadata landed — and some mnemonics carry it on one
+architecture but not another. Classification is by flag <em>and</em> by prefix so that
+a mnemonic reports the same family whichever architecture executed it.</p>
+<p>Where neither applies, the decoded memory-issue metadata is consulted last: it
+names the completion domain, so an encoding that follows no naming convention
+is still placed. The CDNA5 <code>cluster_load_*</code> set is the live case. The metadata
+is checked after the prefix so that generic FLAT, which reports both LDS and
+VMEM obligations, keeps the <code>global</code> bucket described above.</p>
 <p>For a machine-readable report:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"plugins"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"throughput"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span><span class="w"> </span><span class="p">},</span>
@@ -1935,6 +1975,75 @@ no-ops, sleeps, and delays.</p>
 <span class="p">}</span>
 </code></pre></div>
 <p>The report is written to <code>/tmp/rocjitsu-throughput/throughput.log</code>.</p>
+<h3 id="instruction-mix-plugin">Instruction Mix Plugin<a class="headerlink" href="#instruction-mix-plugin" title="Permanent link">&para;</a></h3>
+<p>The instruction-mix plugin answers "which instructions did this run actually
+execute, and how many of each?". It counts one execution whenever a wavefront
+reaches the before-execute hook, so counts are executed <strong>wave instructions</strong>,
+not active-lane operations — the same convention as the throughput plugin. Both
+plugins classify through the shared <code>plugins/instruction_family.h</code>, so the two
+reports join on mnemonic and agree family for family.</p>
+<p>Offloaded instructions are counted too. The plugin opts in to async
+instructions and counts an issue notification exactly as it counts a
+synchronous execution, because the group ANDs that capability across its
+members: a plugin that stayed with the default would switch MMA offload off for
+every plugin loaded beside it, so a report meant to describe a run would have
+changed how the run executed.</p>
+<p>It subscribes to nothing else. Before-execute and async-issue are where the mix
+is counted, so the plugin opts out of after-execute, memory-instruction
+routing, and the scalar- and vector-register callbacks, none of which it reads.
+These are ORed across the group, so a plugin that does want them still gets
+them -- throughput keeps after-execute for its timing. Declining them matters
+when instruction-mix runs alone: the register hooks in particular keep
+<code>ComputeUnit::observes_register_access_</code> enabled, which puts an ownership check
+and a callback dispatch on every register access.</p>
+<p>It emits one JSON object per line using the <code>rocjitsu.instruction_mix.v1</code>
+schema: one <code>"record":"dispatch"</code> object per completed dispatch and one
+<code>"record":"summary"</code> object at shutdown. Each carries <code>wave_instructions</code>,
+<code>unique_mnemonics</code>, a per-family breakdown (<code>scalar</code>, <code>vector</code>, <code>matrix</code>,
+<code>lds</code>, <code>global</code>, <code>control</code>, <code>other</code> — the same exclusive families the
+throughput plugin uses), and a <code>mnemonics</code> object mapping each executed
+mnemonic to its execution count, the
+encoding format id and opcode of its first sighting, its encoding size in
+bytes, its family, and the first dispatch that reached it. Mnemonics are
+emitted in sorted order so two runs of the same workload produce
+byte-comparable output.</p>
+<p>Two mnemonics need care when joining the report against an ISA inventory. A
+VOPD instruction reports its <em>pair</em>, not either operation: the generated CDNA5
+<code>Vopd</code> constructor joins the two slot names with <code>" :: "</code>, so a record key looks
+like <code>v_dual_add_f32 :: v_dual_mov_b32</code>. An exact-name
+lookup matches neither half and silently loses both. Split on <code>" :: "</code> and look
+the two slot operations up separately — while still counting the record as the
+one wave instruction it is, since the pair issues together.</p>
+<p>A mnemonic absent from the summary was not executed — provided the summary says
+<code>"complete": true</code>. The summary also carries <code>dispatches</code> (how many reached
+execution-end) and <code>incomplete_dispatches</code> (how many were still in flight when
+the run stopped, as a bounded run via <code>rj_vm_request_exit</code> leaves them). An
+unfinished dispatch still contributes its mnemonics to the summary's union, but
+gets no <code>"record":"dispatch"</code> line, because its per-dispatch totals are not
+final. When <code>incomplete_dispatches</code> is non-zero the summary is a subset:
+wavefronts that never halted keep their counts in wavefront-local state that
+the plugin cannot reach at shutdown, so absence no longer proves
+non-execution.</p>
+<p>Turning coverage into a <em>percentage</em> needs a denominator the plugin
+deliberately does not supply: it observes decoded instructions, not the target
+that produced them, so it reports no architecture name. The harness that chose
+the config knows the architecture and joins the report against the
+per-architecture instruction set.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"plugins"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"instruction-mix"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"sinks"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"types"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"file"</span><span class="p">],</span><span class="w"> </span><span class="nt">"dir"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/tmp/rocjitsu-instruction-mix"</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The report is written to <code>/tmp/rocjitsu-instruction-mix/instruction-mix.log</code>.</p>
+<p>Note on mnemonic storage: <code>Instruction::mnemonic()</code> is documented as pointing to
+static storage, but the generated FLAT encoding on every architecture and VOPD
+on gfx11/gfx12 and CDNA5 point it at a per-instruction <code>std::string</code> member
+instead. The returned <code>std::string_view</code> therefore does not outlive the
+instruction, and this plugin copies each mnemonic on first sight rather than
+storing the view. A plugin that keys a long-lived map on the view will read
+freed memory;
+<code>InstructionMixPluginTest.OwnsMnemonicStorageWhenTheSourceIsNotStatic</code> pins the
+behaviour.</p>
 <h3 id="kernel-logging-plugin">Kernel Logging Plugin<a class="headerlink" href="#kernel-logging-plugin" title="Permanent link">&para;</a></h3>
 <p>The logging plugin records kernel dispatch metadata and detects MMA
 (matrix multiply-accumulate) instruction usage:</p>
@@ -1975,9 +2084,9 @@ when every configured plugin is required; startup then fails if any entry
 cannot be loaded. With strict loading, <code>plugins</code> must be an object when present,
 though omitting it is valid and creates an empty plugin group.</p>
 <p>The default bundled plugins are <code>race</code> (<code>RaceDetectorPlugin</code>), <code>logging</code>
-(<code>KernelLoggingPlugin</code>), and <code>throughput</code> (<code>ThroughputPlugin</code>). <code>perfsim</code>
-(<code>PerfsimPlugin</code>) is available only in builds configured with
-<code>ROCJITSU_ENABLE_PERFSIM_PLUGIN=ON</code>.</p>
+(<code>KernelLoggingPlugin</code>), <code>throughput</code> (<code>ThroughputPlugin</code>), and
+<code>instruction-mix</code> (<code>InstructionMixPlugin</code>). <code>perfsim</code> (<code>PerfsimPlugin</code>) is
+available only in builds configured with <code>ROCJITSU_ENABLE_PERFSIM_PLUGIN=ON</code>.</p>
 <h3 id="enabling-plugins-from-the-mirage-cli">Enabling plugins from the mirage CLI<a class="headerlink" href="#enabling-plugins-from-the-mirage-cli" title="Permanent link">&para;</a></h3>
 <p>When launching a workload through mirage, plugins can be selected on the
 command line with <code>--plugin &lt;name&gt;</code> instead of editing a config file.
@@ -2061,7 +2170,8 @@ sink-related environment variables.</p>
 <p>When <code>file</code> is in <code>types</code>, each plugin writes to
 <code>&lt;dir&gt;/&lt;plugin_name&gt;.log</code>. Plugin names are fixed:
 <code>race</code> for <code>RaceDetectorPlugin</code>, <code>logging</code> for <code>KernelLoggingPlugin</code>,
-<code>throughput</code> for <code>ThroughputPlugin</code>, and <code>perfsim</code> for adapter diagnostics. Perfsim's
+<code>throughput</code> for <code>ThroughputPlugin</code>, <code>instruction-mix</code> for
+<code>InstructionMixPlugin</code>, and <code>perfsim</code> for adapter diagnostics. Perfsim's
 own report remains controlled by its <code>GPUCSIM_*</code> configuration.</p>
 <h3 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h3>
 <p>Interactive use — output goes to stderr (the default):</p>
@@ -2292,10 +2402,10 @@ not register values: even a source can alias a destination being written.
 Callbacks must not retain instruction or wave references. There is no completion
 notification. Holding the callback mutex does not provide a complete
 architectural snapshot.</p>
-<p>Throughput and kernel logging support this contract. ConSan keeps synchronous
-execution until its dependency-event access and diagnostic context support
-concurrent register hooks within one wave. Plugins and the host must be rebuilt
-together, as for other execution-plugin interface changes.</p>
+<p>Throughput, instruction mix, and kernel logging support this contract. ConSan
+keeps synchronous execution until its dependency-event access and diagnostic
+context support concurrent register hooks within one wave. Plugins and the host
+must be rebuilt together, as for other execution-plugin interface changes.</p>
 
 
 
