@@ -96,7 +96,7 @@ WITH
             ST.app_id AS app_id,
             ST.sdk_id AS sdk_id,
             BC.benchmark_mode AS benchmark_mode,
-            MIN(ST.mean) AS mean
+            MAX(ST.mean) AS mean
         FROM
             benchmark_statistics ST
             JOIN benchmark_config BC ON BC.id = ST.cfg_id
@@ -107,6 +107,8 @@ WITH
             ST.app_id,
             ST.sdk_id,
             BC.benchmark_mode
+        HAVING
+            COUNT(*) = 1
     )
 SELECT
     ST.id,

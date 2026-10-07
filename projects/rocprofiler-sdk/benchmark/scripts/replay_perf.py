@@ -73,6 +73,7 @@ UNIQUE = [
 ]
 
 REPLAY_FLAG = "--kernel-replay-beta-enabled"
+REPLAY_MODE_ARGS = ["--replay-mode", "kernel"]
 
 # vocabulary shared with the counter_collection_mode column of the benchmark
 # database, so a CSV row here and a row there describe a run the same way
@@ -128,7 +129,7 @@ def _profile_cmd(args, groups, outdir, replay=False, extra=None, multiplex=False
     return (
         [args.rocprofv3]
         + counter_args
-        + ([REPLAY_FLAG] if replay else [])
+        + ([REPLAY_FLAG] + REPLAY_MODE_ARGS if replay else [])
         + (extra or [])
         + ["--output-format", "json", "-d", f"{args.workdir}/{outdir}", "-o", "out", "--"]
         + args.app_cmd

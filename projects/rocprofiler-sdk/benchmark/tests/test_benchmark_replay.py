@@ -418,18 +418,19 @@ class TestReplayView(unittest.TestCase):
         )
         self.assertEqual(self.cursor.fetchall(), [(20.0, None)])
 
-    def test_reference_row_is_not_duplicated_by_repeated_runs(self):
+    def test_ambiguous_single_group_reference_is_not_selected_by_timing(self):
         self.add_config(1, "one group", "single-pass", 1, None)
         self.add_config(2, "one group, again", "single-pass", 1, None)
         self.add_config(3, "four groups, replay", "kernel-replay", 4, 1)
         self.add_statistic(1, 10.0)
-        self.add_statistic(2, 11.0)
+        self.add_statistic(2, 1.0)
         self.add_statistic(3, 20.0)
 
         self.cursor.execute(
-            "SELECT COUNT(*) FROM benchmark_replay_wall_time WHERE cfg_id = 3"
+            "SELECT COUNT(*), single_group_measured, application_replay_projected "
+            "FROM benchmark_replay_wall_time WHERE cfg_id = 3"
         )
-        self.assertEqual(self.cursor.fetchone()[0], 1)
+        self.assertEqual(self.cursor.fetchone(), (1, None, None))
 
     def test_projection_only_applies_to_additive_metrics(self):
         self.add_config(1, "one group", "single-pass", 1, None)

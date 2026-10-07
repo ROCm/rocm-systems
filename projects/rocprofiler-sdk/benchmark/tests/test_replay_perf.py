@@ -82,10 +82,14 @@ class TestCommandConstruction(unittest.TestCase):
     def test_replay_flag_is_absent_unless_requested(self):
         cmd = harness._profile_cmd(self.args, ["GRBM_COUNT"], "out")
         self.assertNotIn(harness.REPLAY_FLAG, cmd)
+        self.assertNotIn("--replay-mode", cmd)
 
-    def test_replay_flag_precedes_the_application(self):
+    def test_replay_mode_is_enabled_before_the_application(self):
         cmd = harness._profile_cmd(self.args, ["GRBM_COUNT"], "out", replay=True)
         self.assertLess(cmd.index(harness.REPLAY_FLAG), cmd.index("--"))
+        replay_mode = cmd.index("--replay-mode")
+        self.assertEqual(cmd[replay_mode : replay_mode + 2], ["--replay-mode", "kernel"])
+        self.assertLess(replay_mode, cmd.index("--"))
 
     def test_application_is_last_and_separated(self):
         cmd = harness._profile_cmd(self.args, ["GRBM_COUNT"], "out")
