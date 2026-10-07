@@ -563,8 +563,6 @@ static bool needs_ordering(uint16_t etype) {
     case HRR_API_HIPHOSTUNREGISTER:
     case HRR_API_HIPHOSTGETDEVICEPOINTER:
     case HRR_API_HIPHOSTMALLOC:
-    case HRR_API_HIPHOSTALLOC:
-    case HRR_API_HIPMEMALLOCHOST:
     case HRR_API_HIPMEMADDRESSRESERVE:
     case HRR_API_HIPMEMCREATE:
     // Stream create / destroy
@@ -1711,20 +1709,6 @@ int main(int argc, char** argv) {
              "allocation, VMM reservation or region%s\n",
              (unsigned long long)untranslated,
              untranslated > 0 ? " — they reached the GPU as null" : "");
-  }
-
-  {
-    const uint64_t applied  = ctx.host_snapshots_applied.load();
-    const uint64_t rejected = ctx.host_snapshots_rejected.load();
-    const uint64_t in_graph = ctx.host_snapshots_in_graph.load();
-    if (applied || rejected)
-      printf("[HRR]   Host snapshots : %llu chunk(s) of pinned host memory "
-             "restored, %llu record(s) rejected\n",
-             (unsigned long long)applied, (unsigned long long)rejected);
-    if (in_graph)
-      printf("[HRR]   Host snapshots : %llu record(s) not applied, their "
-             "launches replayed into a graph capture\n",
-             (unsigned long long)in_graph);
   }
 
   if (ctx.d2h_pass == 0 && ctx.d2h_fail == 0) {

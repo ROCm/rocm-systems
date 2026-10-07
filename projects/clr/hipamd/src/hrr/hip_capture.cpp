@@ -44,7 +44,6 @@
 
 // ROCclr kernel introspection
 #include "device/devkernel.hpp"    // amd::Kernel, KernelParameterDescriptor
-#include "device/device.hpp"       // amd::MemObjMap
 #include "platform/kernel.hpp"     // amd::KernelSignature
 #include "opencl/amdocl/cl_kernel.h"  // T_POINTER enum
 #include "os/os.hpp"               // amd::Os::installExceptionHandlers()
@@ -57,7 +56,6 @@
 #include <atomic>
 #include <cctype>
 #include <climits>
-#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -163,634 +161,6 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 }
 
 // ---------------------------------------------------------------------------
-// Pinned host snapshots
-//
-// A kernel can read pinned host memory directly: the host fills a
-// hipHostMalloc buffer and passes its address, with no memcpy for capture to
-// record. Replay allocates a fresh buffer of the same size and never fills it,
-// so the kernel reads zeros. Before each launch, capture therefore records the
-// pinned allocations the kernel's arguments point into, and replay writes them
-// back before it launches.
-//
-// Only allocations this process made through the pinned allocation APIs are
-// candidates: g_pinned maps each base to its size. An argument word is looked
-// up in that map and nowhere else, so an arbitrary scalar is never handed to
-// hipPointerGetAttributes. A hipHostRegister range is tracked twice when its
-// device alias differs from the host address: the alias entry names the host
-// entry, whose bytes are read and recorded.
-//
-// A snapshot claims one allocation at a time (PinnedAlloc::reading) and
-// releases g_pinned_mu while it compares, copies and writes that allocation's
-// bytes. A free of the same allocation waits for the claim to end before the
-// memory is released, so it cannot pull the buffer out from under a read.
-// Launches and frees that touch other allocations do not wait.
-//
-// Each allocation is cut into kHostSnapChunk pieces. A shadow copy of the last
-// recorded bytes finds the pieces that changed, and only those are written as
-// blobs. Every piece still gets a record on every launch, with the hash of its
-// current contents. Recording only the changed pieces would be wrong when
-// device work rewrites the buffer between launches: replay would keep the
-// device-written bytes while capture saw the host put the old ones back.
-//
-// The snapshot never waits for the work the launch waits for: the launch
-// stream's, the null stream's for a blocking stream, and every blocking
-// stream's for the null stream. That work may wait on a flag the host sets
-// only after this launch returns (hipStreamWaitValue32 on host memory), and
-// waiting would hang the application. Checking it queues nothing either. When
-// that work is still running, the bytes are read anyway: a piece that changed
-// is recorded for replay to restore, and a piece that did not is recorded as
-// unchanged and left alone. The manifest counts such launches as
-// host_snapshots_unordered.
-//
-// The snapshot runs before the launch, so it updates the shadow before it
-// knows whether the launch will be recorded. When the launch fails, the chunks
-// it wrote lose their hashes and the next launch records them again; without
-// that, a busy-stream launch would call them unchanged and replay would never
-// restore them. Only recorded launches are counted in the manifest.
-// ---------------------------------------------------------------------------
-
-namespace {
-
-constexpr size_t kHostSnapChunk = 256 * 1024;
-
-struct PinnedAlloc {
-  size_t    size = 0;
-  uint64_t  gen  = 0;       // tells a reallocation at the same base apart
-  uintptr_t alias_of = 0;   // alias entry: the host base whose bytes it names
-  uintptr_t alias    = 0;   // host entry: its device alias base, 0 if none
-  size_t    charged  = 0;   // bytes counted against HIP_HRR_HOST_SNAPSHOT_TOTAL_MB
-  bool      reading  = false;  // a snapshot owns shadow and hashes; see above
-  std::vector<uint8_t>          shadow;  // last recorded bytes; empty until first snapshot
-  std::vector<hrr_cap::Hash128> hashes;  // one per chunk; {0,0} until its blob is written
-};
-
-// Snapshot record directions. kept in step with hip_playback.cpp.
-constexpr uint8_t kSnapRestore   = 0;  // host contents before the launch
-constexpr uint8_t kSnapUnchanged = 1;  // unchanged since the last record, read
-                                       // while earlier work was still running
-
-struct HostSnapRecord {
-  uint64_t         ptr;     // capture-time base of the pinned allocation
-  uint64_t         offset;  // byte offset of this chunk within it
-  uint64_t         length;
-  hrr_cap::Hash128 hash;
-  uint8_t          direction;
-};
-
-// The address range a launch argument used for a recorded allocation. A
-// by-value argument word is flagged for translation only inside these.
-struct PinnedRange {
-  uintptr_t lo, hi;
-};
-
-// A chunk whose shadow and hash a snapshot updated, named by the allocation's
-// base and generation so a later free and reallocation is told apart.
-struct TouchedChunk {
-  uintptr_t base;
-  uint64_t  gen;
-  size_t    chunk;
-};
-
-// What one launch recorded. The shadow and hash updates it made hold only if
-// the launch event is written: a launch that fails, or an event that cannot
-// be serialized, leaves no record for replay to restore from. Its destructor
-// settles the updates either way.
-struct LaunchSnapshots {
-  std::vector<HostSnapRecord> records;
-  std::vector<PinnedRange>    ranges;
-  std::vector<TouchedChunk>   touched;
-  bool         busy     = false;  // read while earlier work was still running
-  mutable bool recorded = false;  // the launch event naming the records was written
-  LaunchSnapshots() = default;
-  LaunchSnapshots(const LaunchSnapshots&) = delete;
-  LaunchSnapshots& operator=(const LaunchSnapshots&) = delete;
-  ~LaunchSnapshots();
-};
-
-std::mutex                       g_pinned_mu;
-std::condition_variable          g_pinned_cv;  // a claim ended
-std::map<uintptr_t, PinnedAlloc> g_pinned;
-// Lock-free fast reject: a word outside [g_pinned_lo, g_pinned_hi) cannot be a
-// tracked address. The bounds only grow.
-std::atomic<size_t>    g_pinned_count{0};
-std::atomic<uintptr_t> g_pinned_lo{UINTPTR_MAX};
-std::atomic<uintptr_t> g_pinned_hi{0};
-// Bytes held by all shadows together, against HIP_HRR_HOST_SNAPSHOT_TOTAL_MB.
-// Guarded by g_pinned_mu.
-size_t   g_pinned_shadow_bytes = 0;
-uint64_t g_pinned_next_gen     = 1;  // guarded by g_pinned_mu
-
-// Kernel handles the application obtained from the runtime, and the module
-// each came from (null when it has none). A hipFunction_t is a raw pointer to
-// the runtime's kernel object, so reading the signature of an invalid one
-// would crash before the real launch could return its error. Guarded by
-// g_known_fn_mu.
-std::mutex                                     g_known_fn_mu;
-std::unordered_map<hipFunction_t, hipModule_t> g_known_fns;
-
-}  // namespace
-
-static void pinned_drop_shadow_locked(PinnedAlloc& a) {
-  g_pinned_shadow_bytes -= a.charged;
-  a.charged = 0;
-  a.shadow.clear(); a.shadow.shrink_to_fit(); a.hashes.clear();
-}
-
-// Wait until no snapshot holds the entry at b, and return it.
-static std::map<uintptr_t, PinnedAlloc>::iterator pinned_find_unclaimed(
-    std::unique_lock<std::mutex>& lk, uintptr_t b) {
-  auto it = g_pinned.find(b);
-  while (it != g_pinned.end() && it->second.reading) {
-    g_pinned_cv.wait(lk);
-    it = g_pinned.find(b);
-  }
-  return it;
-}
-
-// Erase an entry, and the device alias of a registered range with it.
-static void pinned_erase_locked(std::map<uintptr_t, PinnedAlloc>::iterator it) {
-  const uintptr_t alias = it->second.alias;
-  const uintptr_t alias_of = it->second.alias_of;
-  pinned_drop_shadow_locked(it->second);
-  g_pinned.erase(it);
-  if (alias) {
-    auto a = g_pinned.find(alias);
-    if (a != g_pinned.end() && a->second.alias_of != 0) g_pinned.erase(a);
-  }
-  if (alias_of) {
-    auto h = g_pinned.find(alias_of);
-    if (h != g_pinned.end()) h->second.alias = 0;
-  }
-  g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
-}
-
-// alias_of is the host base when p is the device alias of a registered range.
-static void pinned_track(void* p, size_t size, uintptr_t alias_of = 0) {
-  if (!p || size == 0) return;
-  const uintptr_t b = reinterpret_cast<uintptr_t>(p);
-  std::unique_lock<std::mutex> lk(g_pinned_mu);
-  // An entry already at b belongs to memory freed behind capture's back.
-  if (auto old = pinned_find_unclaimed(lk, b); old != g_pinned.end()) pinned_erase_locked(old);
-  PinnedAlloc fresh;
-  fresh.size     = size;
-  fresh.gen      = g_pinned_next_gen++;
-  fresh.alias_of = alias_of;
-  g_pinned[b] = std::move(fresh);
-  if (alias_of) {
-    auto h = g_pinned.find(alias_of);
-    if (h != g_pinned.end()) h->second.alias = b;
-  }
-  g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
-  if (b < g_pinned_lo.load(std::memory_order_relaxed))
-    g_pinned_lo.store(b, std::memory_order_relaxed);
-  if (b + size > g_pinned_hi.load(std::memory_order_relaxed))
-    g_pinned_hi.store(b + size, std::memory_order_relaxed);
-}
-
-static bool pinned_maybe(uint64_t v) {
-  return g_pinned_count.load(std::memory_order_relaxed) != 0 &&
-         v >= g_pinned_lo.load(std::memory_order_relaxed) &&
-         v <  g_pinned_hi.load(std::memory_order_relaxed);
-}
-
-// What a free took out, so a free that fails can put it back.
-struct PinnedHeld {
-  size_t    size = 0;
-  uintptr_t alias = 0;
-  uintptr_t alias_of = 0;
-};
-
-// Take p out of the map before the memory is released.
-static bool pinned_untrack(void* p, PinnedHeld* out) {
-  const uintptr_t b = reinterpret_cast<uintptr_t>(p);
-  if (!p || !pinned_maybe(b)) return false;
-  std::unique_lock<std::mutex> lk(g_pinned_mu);
-  auto it = pinned_find_unclaimed(lk, b);
-  if (it == g_pinned.end()) return false;
-  out->size     = it->second.size;
-  out->alias    = it->second.alias;
-  out->alias_of = it->second.alias_of;
-  pinned_erase_locked(it);
-  return true;
-}
-
-// The shadow is not put back: the next snapshot starts the allocation over.
-static void pinned_retrack(void* p, const PinnedHeld& h) {
-  pinned_track(p, h.size, h.alias_of);
-  if (h.alias) pinned_track(reinterpret_cast<void*>(h.alias), h.size,
-                            reinterpret_cast<uintptr_t>(p));
-}
-
-// Settle a launch's snapshot. When its event was written, the chunks it wrote
-// are counted. When it was not, their hashes are cleared: the shadow already
-// holds the new bytes, so without this the next launch would find them
-// unchanged and point replay at a blob that no recorded event restores.
-LaunchSnapshots::~LaunchSnapshots() {
-  if (recorded) {
-    for (size_t i = 0; i < touched.size(); i++) hrr_cap::writer::count_host_snapshot_chunk();
-    if (busy && !records.empty()) hrr_cap::writer::count_host_snapshot_unordered();
-    return;
-  }
-  if (touched.empty()) return;
-  std::unique_lock<std::mutex> lk(g_pinned_mu);
-  for (const TouchedChunk& t : touched) {
-    auto it = pinned_find_unclaimed(lk, t.base);
-    if (it == g_pinned.end() || it->second.gen != t.gen) continue;
-    if (t.chunk < it->second.hashes.size()) it->second.hashes[t.chunk] = hrr_cap::Hash128{0, 0};
-  }
-}
-
-// Base of the allocation whose bytes v names, or 0. For a word inside a device
-// alias that is the host base; *arg_base is the base the word itself is in.
-// Caller holds g_pinned_mu.
-static uintptr_t pinned_base_of_locked(uint64_t v, uintptr_t* arg_base) {
-  auto it = g_pinned.upper_bound(static_cast<uintptr_t>(v));
-  if (it == g_pinned.begin()) return 0;
-  --it;
-  if (v - it->first >= it->second.size) return 0;
-  *arg_base = it->first;
-  if (it->second.alias_of == 0) return it->first;
-  return g_pinned.count(it->second.alias_of) ? it->second.alias_of : 0;
-}
-
-// Byte offsets of the 8-byte words of a by-value argument that point into a
-// pinned allocation this launch recorded. The device-pointer scan does not
-// flag them, since hipPointerGetAttributes reports host memory, so without
-// this a struct holding a pinned pointer would replay with the capture-time
-// host address. Only an argument at an 8-byte-aligned kernarg offset can hold
-// a pointer at an aligned word, so the others are not scanned.
-static void pinned_word_offsets(const uint8_t* bytes, uint16_t sz, size_t arg_offset,
-                                const std::vector<PinnedRange>& ranges,
-                                std::vector<uint16_t>& offs) {
-  if (!bytes || ranges.empty() || arg_offset % sizeof(uint64_t) != 0) return;
-  for (size_t j = 0; j + sizeof(uint64_t) <= sz; j += sizeof(uint64_t)) {
-    uint64_t v;
-    std::memcpy(&v, bytes + j, sizeof(v));
-    for (const PinnedRange& r : ranges) {
-      if (v >= r.lo && v < r.hi) {
-        offs.push_back(static_cast<uint16_t>(j));
-        break;
-      }
-    }
-  }
-}
-
-// The argument words of one launch that may point into pinned memory: a
-// whole-pointer argument's value, and every aligned word of any other argument
-// at an aligned kernarg offset.
-static void pinned_candidate_words(const amd::KernelSignature& sig,
-                                   void** kernel_params, const void* kbuf,
-                                   size_t ksz, std::vector<uint64_t>& out) {
-  auto scan = [&](const uint8_t* bytes, size_t sz, size_t arg_offset, bool is_ptr) {
-    if (!bytes || arg_offset % sizeof(uint64_t) != 0) return;
-    for (size_t j = 0; j + sizeof(uint64_t) <= sz; j += sizeof(uint64_t)) {
-      uint64_t v;
-      std::memcpy(&v, bytes + j, sizeof(v));
-      if (pinned_maybe(v)) out.push_back(v);
-      if (is_ptr) break;
-    }
-  };
-  const uint32_t n_all = sig.numParametersAll();
-  if (kbuf && ksz > 0) {
-    const auto* buf = static_cast<const uint8_t*>(kbuf);
-    for (uint32_t i = 0; i < n_all; i++) {
-      const auto& desc = sig.at(i);
-      if (desc.info_.hidden_ || desc.offset_ + desc.size_ > ksz) continue;
-      scan(buf + desc.offset_, desc.size_, desc.offset_, desc.type_ == T_POINTER);
-    }
-  } else if (kernel_params) {
-    uint32_t param_idx = 0;
-    for (uint32_t i = 0; i < n_all; i++) {
-      const auto& desc = sig.at(i);
-      if (desc.info_.hidden_) continue;
-      scan(static_cast<const uint8_t*>(kernel_params[param_idx]), desc.size_,
-           desc.offset_, desc.type_ == T_POINTER);
-      param_idx++;
-    }
-  }
-}
-
-static const char* const kHostSnapApi = "pinned host snapshot";
-
-enum class LaunchStream { Idle, Busy, Capturing, Skip };
-
-// Whether a stream's last queued command is still pending, read the way
-// Device::WaitActiveStreams reads it before a launch waits on that stream. It
-// takes no asynchronous error and queues nothing.
-static bool last_command_pending(hip::Stream* s) {
-  amd::Command* cmd = s->getLastQueuedCommand(true);
-  if (cmd == nullptr) return false;
-  bool ready = s->device().IsHwEventReady(cmd->event());
-  if (!ready) ready = cmd->status() == CL_COMPLETE;
-  if (!ready) cmd->notifyCmdQueue();
-  cmd->release();
-  return !ready;
-}
-
-// Whether the null stream of a blocking stream's device still has work the
-// launch will wait for. The rule is the launch's own (Device::WaitActiveStreams
-// with only the null stream): the null stream's last queued command, done or
-// not. hipStreamQuery on the blocking stream does not look at the null stream,
-// and querying the null stream through the API would take its asynchronous
-// error; this reads the command's status and nothing else.
-static bool null_stream_busy(hip::Stream* hs) {
-  hip::Device* dev = hs->GetDevice();
-  hip::Stream* ns  = dev ? dev->GetNullStream() : nullptr;
-  if (ns == nullptr || ns == hs) return false;
-  return last_command_pending(ns);
-}
-
-// Whether any blocking stream of the current device other than the null stream
-// still has work. A launch into the null stream or hipStreamLegacy waits for
-// all of them (Device::WaitActiveStreams). The null-stream hipStreamQuery would
-// answer the same, but it gets the null stream through NullStream(true), which
-// queues a marker on it that waits for those streams. That marker stays when
-// the launch then fails before it reaches its own stream, and every later
-// launch into a blocking stream would wait behind it: a dependency the
-// application never had, and a hang when one of those streams waits for the
-// host.
-static bool blocking_streams_busy() {
-  hip::Device* dev = hip::getCurrentDevice();
-  if (dev == nullptr) return false;
-  hip::Stream* ns = dev->GetNullStream();
-  bool busy = false;
-  for (amd::CommandQueue* q : dev->devices()[0]->getActiveQueues()) {
-    auto* s = static_cast<hip::Stream*>(q);
-    if (!busy && s != ns && !(s->Flags() & hipStreamNonBlocking) && last_command_pending(s))
-      busy = true;
-    q->release();  // getActiveQueues retained it
-  }
-  return busy;
-}
-
-// Whether the work the launch will wait for has finished, found without
-// waiting for it and without queueing anything. That is the launch stream's
-// earlier work and, for a blocking stream, the null stream's; a launch into
-// hipStreamLegacy or the null stream also waits for every blocking stream of
-// the device. A caller passes the stream the launch really uses: the
-// per-thread entry points use the per-thread stream for nullptr and
-// hipStreamLegacy alike. Skip means the stream is not one the launch can use,
-// so the launch will fail on its own. None of the calls may change the error
-// the application sees from hipGetLastError, nor take an asynchronous error
-// from a stream before the application asks for it.
-static LaunchStream launch_stream_state(hipStream_t stream) {
-  if (!g_real_table.hipStreamIsCapturing_fn || !g_real_table.hipStreamQuery_fn)
-    return LaunchStream::Skip;
-  const hipError_t saved_cmd = hip::tls.last_command_error_;
-  const hipError_t saved_err = hip::tls.last_error_;
-  LaunchStream st = LaunchStream::Skip;
-  hipStream_t s = stream;
-  const bool usable =
-      hip::isValid(s) &&
-      (s == nullptr || s == hipStreamLegacy || !reinterpret_cast<hip::Stream*>(s)->IsDetached());
-  if (usable) {
-    hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
-    const hipError_t cr = g_real_table.hipStreamIsCapturing_fn(s, &status);
-    // A null-stream launch while another stream captures in global mode fails
-    // with hipErrorStreamCaptureImplicit, and is noted like a captured one.
-    if (cr == hipErrorStreamCaptureImplicit ||
-        (cr == hipSuccess && status == hipStreamCaptureStatusActive)) {
-      st = LaunchStream::Capturing;
-    } else if (cr == hipSuccess && status == hipStreamCaptureStatusNone) {
-      // hipStreamQuery(hipStreamLegacy) looks at the null stream alone and
-      // queues nothing; the blocking streams are read below.
-      const bool legacy = s == nullptr || s == hipStreamLegacy;
-      const hipError_t qr = g_real_table.hipStreamQuery_fn(legacy ? hipStreamLegacy : s);
-      switch (qr) {
-        case hipErrorNotReady: st = LaunchStream::Busy; break;
-        case hipSuccess:       st = LaunchStream::Idle; break;
-        case hipErrorStreamCaptureUnsupported:
-        case hipErrorStreamDetached:
-        case hipErrorInvalidHandle:  // == hipErrorInvalidResourceHandle
-        case hipErrorContextIsDestroyed:
-          break;
-        default:
-          // The query handed back the stream's asynchronous error. Its work is
-          // done; put the error back for the application's own query or sync.
-          if (hip::Stream* hs = hip::getStream(s, false)) hs->SetAsyncError(qr);
-          st = LaunchStream::Idle;
-          break;
-      }
-      if (st == LaunchStream::Idle && legacy) {
-        if (blocking_streams_busy()) st = LaunchStream::Busy;
-      } else if (st == LaunchStream::Idle) {
-        auto* hs = reinterpret_cast<hip::Stream*>(s);
-        if (!(hs->Flags() & hipStreamNonBlocking) && null_stream_busy(hs))
-          st = LaunchStream::Busy;
-      }
-    }
-  }
-  hip::tls.last_command_error_ = saved_cmd;
-  hip::tls.last_error_         = saved_err;
-  return st;
-}
-
-// Record the pinned allocations a launch's arguments point into. Called before
-// the real launch, so the bytes are the ones the kernel will read when the
-// stream has nothing queued ahead of it.
-static void pinned_snapshot_before_launch(hipStream_t stream,
-                                          const amd::KernelSignature& sig,
-                                          void** kernel_params,
-                                          const void* kbuf, size_t ksz,
-                                          LaunchSnapshots& out) {
-  if (!HIP_HRR_HOST_SNAPSHOTS) return;
-  if (g_pinned_count.load(std::memory_order_relaxed) == 0) return;
-  if (!hrr_cap::writer::is_open()) return;
-
-  std::vector<uint64_t> words;
-  pinned_candidate_words(sig, kernel_params, kbuf, ksz, words);
-  if (words.empty()) return;
-  struct Hit {
-    uintptr_t base, arg_base;
-    bool operator<(const Hit& o) const {
-      return base != o.base ? base < o.base : arg_base < o.arg_base;
-    }
-    bool operator==(const Hit& o) const { return base == o.base && arg_base == o.arg_base; }
-  };
-  std::vector<Hit> hits;
-  {
-    std::lock_guard<std::mutex> lk(g_pinned_mu);
-    for (uint64_t v : words) {
-      uintptr_t ab = 0;
-      if (uintptr_t b = pinned_base_of_locked(v, &ab)) hits.push_back(Hit{b, ab});
-    }
-  }
-  if (hits.empty()) return;
-  std::sort(hits.begin(), hits.end());
-  hits.erase(std::unique(hits.begin(), hits.end()), hits.end());
-
-  const LaunchStream st = launch_stream_state(stream);
-  if (st == LaunchStream::Skip) return;
-  if (st == LaunchStream::Capturing) {
-    hrr_cap::writer::note_unreplayable(
-        kHostSnapApi,
-        "a kernel reading pinned host memory was launched into a stream under "
-        "graph capture; that memory is not recorded");
-    return;
-  }
-  const bool busy = st == LaunchStream::Busy;
-
-  const size_t cap   = static_cast<size_t>(HIP_HRR_HOST_SNAPSHOT_MAX_MB) << 20;
-  const size_t total = static_cast<size_t>(HIP_HRR_HOST_SNAPSHOT_TOTAL_MB) << 20;
-  std::vector<HostSnapRecord>& recs = out.records;
-  uintptr_t prev = 0;
-  for (const Hit& hit : hits) {
-    if (hit.base == prev) continue;
-    prev = hit.base;
-    PinnedAlloc* a = nullptr;
-    bool fresh = false;
-    {
-      std::unique_lock<std::mutex> lk(g_pinned_mu);
-      auto it = pinned_find_unclaimed(lk, hit.base);
-      if (it == g_pinned.end()) continue;  // freed since the arguments were read
-      a = &it->second;
-      if (a->size > cap || cap == 0) {
-        hrr_cap::writer::note_unreplayable(
-            kHostSnapApi,
-            "a pinned allocation larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB was not "
-            "recorded");
-        continue;
-      }
-      const size_t n_chunks = (a->size + kHostSnapChunk - 1) / kHostSnapChunk;
-      if (recs.size() + n_chunks > UINT16_MAX) {
-        hrr_cap::writer::note_unreplayable(
-            kHostSnapApi, "a launch read more pinned memory than one event can record");
-        continue;
-      }
-      fresh = a->shadow.empty();
-      if (fresh) {
-        if (a->size > total - std::min(total, g_pinned_shadow_bytes)) {
-          hrr_cap::writer::note_unreplayable(
-              kHostSnapApi,
-              "a pinned allocation would take the shadow copies past "
-              "HIP_HRR_HOST_SNAPSHOT_TOTAL_MB and was not recorded");
-          continue;
-        }
-        a->charged = a->size;
-        g_pinned_shadow_bytes += a->size;
-      }
-      a->reading = true;
-    }
-
-    // The claim gives this thread the shadow and hashes, and keeps the bytes
-    // mapped: a free of this allocation waits for the claim to end.
-    const size_t first = recs.size();
-    const uint64_t gen = a->gen;
-    std::vector<size_t> written;  // chunks whose shadow and hash changed below
-    bool failed = false;
-    if (fresh) {
-      try {
-        a->shadow.resize(a->size);
-        a->hashes.assign((a->size + kHostSnapChunk - 1) / kHostSnapChunk,
-                         hrr_cap::Hash128{0, 0});
-      } catch (const std::bad_alloc&) {
-        a->shadow.clear(); a->shadow.shrink_to_fit(); a->hashes.clear();
-        hrr_cap::writer::note_unreplayable(
-            kHostSnapApi, "no host memory for the shadow copy of a pinned allocation");
-        failed = true;
-      }
-    }
-    const auto* live = reinterpret_cast<const uint8_t*>(hit.base);
-    for (size_t c = 0; !failed && c < a->hashes.size(); c++) {
-      const size_t off = c * kHostSnapChunk;
-      const size_t len = std::min(kHostSnapChunk, a->size - off);
-      uint8_t* shadow = a->shadow.data() + off;
-      // A chunk whose blob was never written has no hash to reuse.
-      const bool stored = a->hashes[c].lo != 0 || a->hashes[c].hi != 0;
-      if (stored && std::memcmp(live + off, shadow, len) == 0) {
-        recs.push_back(HostSnapRecord{hit.base, off, len, a->hashes[c],
-                                      busy ? kSnapUnchanged : kSnapRestore});
-        continue;
-      }
-      // Hash the shadow, not the live buffer, so the recorded hash always
-      // matches the bytes kept for the next comparison. A chunk whose blob is
-      // not written keeps no hash, so the next launch compares it afresh.
-      std::memcpy(shadow, live + off, len);
-      a->hashes[c] = hrr_cap::writer::write_blob(shadow, len);
-      if (a->hashes[c].lo == 0 && a->hashes[c].hi == 0) {
-        failed = true;  // the writer closed or the disk refused the blob
-        break;
-      }
-      written.push_back(c);
-      recs.push_back(HostSnapRecord{hit.base, off, len, a->hashes[c], kSnapRestore});
-    }
-    if (failed) {
-      // An allocation that could not be read whole is left out of this
-      // launch, and the chunks it did write are compared afresh next time.
-      recs.resize(first);
-      for (size_t c : written) a->hashes[c] = hrr_cap::Hash128{0, 0};
-    } else {
-      for (size_t c : written) out.touched.push_back(TouchedChunk{hit.base, gen, c});
-    }
-
-    {
-      std::lock_guard<std::mutex> lk(g_pinned_mu);
-      if (a->shadow.empty()) pinned_drop_shadow_locked(*a);
-      a->reading = false;
-    }
-    g_pinned_cv.notify_all();
-  }
-  if (recs.empty()) return;
-
-  // The address ranges the arguments used for what was recorded.
-  {
-    std::lock_guard<std::mutex> lk(g_pinned_mu);
-    for (const Hit& hit : hits) {
-      const bool recorded = std::any_of(recs.begin(), recs.end(), [&](const HostSnapRecord& r) {
-        return r.ptr == hit.base;
-      });
-      auto it = g_pinned.find(hit.arg_base);
-      if (recorded && it != g_pinned.end())
-        out.ranges.push_back(PinnedRange{hit.arg_base, hit.arg_base + it->second.size});
-    }
-  }
-  out.busy = busy;
-}
-
-// Fork hooks, run by the writer's pthread_atfork handlers. A forked child
-// writes its own archive with its own blobs, so the shadows the parent built
-// say nothing about what that archive holds.
-static void pinned_fork_prepare() {
-  g_pinned_mu.lock();
-  g_known_fn_mu.lock();
-}
-
-static void pinned_fork_parent() {
-  g_known_fn_mu.unlock();
-  g_pinned_mu.unlock();
-}
-
-static void pinned_fork_child() {
-  // The threads that held claims do not exist in the child.
-  for (auto& [base, a] : g_pinned) {
-    a.charged = 0;
-    a.reading = false;
-    a.shadow.clear(); a.shadow.shrink_to_fit(); a.hashes.clear();
-  }
-  g_pinned_shadow_bytes = 0;
-  g_known_fn_mu.unlock();
-  g_pinned_mu.unlock();
-}
-
-static void known_fn_add(hipFunction_t f, hipModule_t m) {
-  if (!f || !HIP_HRR_HOST_SNAPSHOTS) return;
-  std::lock_guard<std::mutex> lk(g_known_fn_mu);
-  g_known_fns.emplace(f, m);
-}
-
-static bool known_fn(hipFunction_t f) {
-  std::lock_guard<std::mutex> lk(g_known_fn_mu);
-  return g_known_fns.count(f) != 0;
-}
-
-static void known_fn_forget_module(hipModule_t m) {
-  if (!m) return;
-  std::lock_guard<std::mutex> lk(g_known_fn_mu);
-  for (auto it = g_known_fns.begin(); it != g_known_fns.end();)
-    it = (it->second == m) ? g_known_fns.erase(it) : std::next(it);
-}
-
-// ---------------------------------------------------------------------------
 // Kernel launch event serialization
 //
 // Binary layout of KERNEL_LAUNCH payload (matches hrr_reader.cpp parse_kernel_launch):
@@ -804,26 +174,15 @@ static void known_fn_forget_module(hipModule_t m) {
 //   u32[3] block
 //   u32  shared_mem
 //   u16  num_args
-//   u16  num_snapshots (pinned host snapshot records after the attribute tail)
+//   u16  num_snapshots (always 0)
 //   for each arg:
 //     u8   value_kind  (0=scalar, 1=pointer/gpu addr, 2=hidden,
-//                       3=scalar/struct with embedded gpu pointer(s), or with
-//                         pointer(s) into a pinned allocation this launch's
-//                         snapshot records name)
+//                       3=scalar/struct with embedded gpu pointer(s))
 //     u16  size
 //     u8[] data (size bytes)
 //     if value_kind == 3:
 //       u16   n_ptrs
-//       u16[] ptr_offset (n_ptrs entries: byte offset of each 8-byte pointer)
-//   u32  num_attrs, u32 attr stride, num_attrs * stride bytes
-//   for each snapshot (v8):
-//     u64  ptr_handle (capture-time base of the pinned allocation)
-//     u64  offset, u64 length (the chunk within it)
-//     u64  hash_lo, u64 hash_hi (blob holding the chunk's bytes)
-//     u8   direction (0 = host contents before the launch, for replay to
-//                     restore; 1 = unchanged since the allocation's previous
-//                     record and read while work the launch waits for was
-//                     still running, for replay to leave alone)
+//       u16[] ptr_offset (n_ptrs entries: byte offset of each 8-byte gpu ptr)
 // ---------------------------------------------------------------------------
 
 // Locate device pointers embedded inside a by-value kernel argument.
@@ -862,8 +221,10 @@ static void known_fn_forget_module(hipModule_t m) {
 //   device VA is a false positive. Replay guards against corrupting such a
 //   scalar by only overwriting a flagged word when the recorded value actually
 //   resolves to a known allocation (see hip_playback.cpp).
-// - Scope: only hipMemoryTypeDevice/Unified words are flagged here. Words that
-//   point into a tracked pinned allocation are added by pinned_word_offsets().
+// - Scope: only hipMemoryTypeDevice/Unified words are flagged. A pinned/host
+//   (hipMemoryTypeHost) pointer embedded by value keeps its capture-time host VA
+//   at replay (invalid in the replay process); translating such pointers is
+//   intentionally out of scope.
 enum class PtrVerdict : uint8_t { Pointer, Scalar };
 
 // A cached per-word verdict. For a Scalar verdict we also remember the exact
@@ -966,8 +327,7 @@ static void serialize_kernel_launch(
     hrr_cap::Hash128            co_hash,
     uint16_t                    api_id = HRR_API_HIPMODULELAUNCHKERNEL,
     const hipLaunchAttribute*   attrs = nullptr,
-    uint32_t                    num_attrs = 0,
-    const LaunchSnapshots*      snaps = nullptr)
+    uint32_t                    num_attrs = 0)
 {
   // Reserve space for hrr_event_header at front; payload body follows.
   std::vector<uint8_t> payload(sizeof(hrr_event_header), 0);
@@ -1014,11 +374,7 @@ static void serialize_kernel_launch(
       if (!sig.at(i).info_.hidden_) num_args++;
   }
   push_u16(num_args);
-  const uint16_t num_snapshots =
-      snaps ? static_cast<uint16_t>(std::min<size_t>(snaps->records.size(), UINT16_MAX)) : 0;
-  static const std::vector<PinnedRange> kNoRanges;
-  const std::vector<PinnedRange>& pinned_ranges = snaps ? snaps->ranges : kNoRanges;
-  push_u16(num_snapshots);
+  push_u16(0);  // num_snapshots
 
   // HIP_HRR_DEBUG_ARGS dumps every captured arg (kind, size, full bytes,
   // detected embedded-pointer offsets) — used to confirm pointer layout. Use the
@@ -1029,7 +385,7 @@ static void serialize_kernel_launch(
   // that we additionally scan for embedded device pointers (kind 3 if any are
   // found, else kind 0). `bytes` may be null (unavailable) -> zero-filled.
   auto emit_arg = [&](uint32_t idx, bool is_ptr,
-                      const uint8_t* bytes, uint16_t sz, size_t arg_offset) {
+                      const uint8_t* bytes, uint16_t sz) {
     if (is_ptr) {
       push_u8(1); push_u16(sz);
       if (bytes) push_bytes(bytes, sz);
@@ -1044,12 +400,6 @@ static void serialize_kernel_launch(
     }
     std::vector<uint16_t> offs;
     scan_embedded_ptr_offsets(func_key, idx, bytes, sz, offs);
-    const size_t n_dev = offs.size();
-    pinned_word_offsets(bytes, sz, arg_offset, pinned_ranges, offs);
-    if (offs.size() != n_dev) {
-      std::sort(offs.begin(), offs.end());
-      offs.erase(std::unique(offs.begin(), offs.end()), offs.end());
-    }
     uint8_t kind = offs.empty() ? 0 : 3;
     push_u8(kind); push_u16(sz);
     if (bytes) push_bytes(bytes, sz);
@@ -1098,7 +448,7 @@ static void serialize_kernel_launch(
       uint16_t sz = static_cast<uint16_t>(desc.size_);
       const uint8_t* bytes =
           (desc.offset_ + sz <= ksz) ? buf_bytes + desc.offset_ : nullptr;
-      emit_arg(i, desc.type_ == T_POINTER, bytes, sz, desc.offset_);
+      emit_arg(i, desc.type_ == T_POINTER, bytes, sz);
     }
   } else if (kernel_params) {
     uint32_t param_idx = 0;
@@ -1108,7 +458,7 @@ static void serialize_kernel_launch(
       if (desc.size_ > UINT16_MAX) { arg_oversized = true; break; }
       uint16_t sz = static_cast<uint16_t>(desc.size_);
       emit_arg(i, desc.type_ == T_POINTER,
-               static_cast<const uint8_t*>(kernel_params[param_idx]), sz, desc.offset_);
+               static_cast<const uint8_t*>(kernel_params[param_idx]), sz);
       param_idx++;
     }
   }
@@ -1121,18 +471,6 @@ static void serialize_kernel_launch(
   push_u32(num_attrs ? static_cast<uint32_t>(sizeof(hipLaunchAttribute)) : 0u);
   if (attrs && num_attrs)
     push_bytes(attrs, static_cast<size_t>(num_attrs) * sizeof(hipLaunchAttribute));
-
-  // Pinned host snapshots, after the tail so a v7 reader of the args and
-  // attributes would see the same bytes in the same place.
-  for (uint16_t i = 0; i < num_snapshots; i++) {
-    const HostSnapRecord& rec = snaps->records[i];
-    push_u64(rec.ptr);
-    push_u64(rec.offset);
-    push_u64(rec.length);
-    push_u64(rec.hash.lo);
-    push_u64(rec.hash.hi);
-    push_u8(rec.direction);
-  }
 
   // payload_length is a uint32_t (wire v4), so the practical ceiling is ~4 GiB —
   // a real launch never approaches it. A per-arg size that exceeds the uint16_t
@@ -1154,7 +492,6 @@ static void serialize_kernel_launch(
     hrr_cap::writer::mark_incomplete(reason);
     return;
   }
-  if (snaps) snaps->recorded = true;
   hrr_cap::writer::write_event_raw(api_id,
                                    reinterpret_cast<hrr_event_header*>(payload.data()),
                                    static_cast<uint32_t>(payload.size()));
@@ -1281,15 +618,10 @@ static void record_launch(
     void** kernel_params, void** extra,
     uint16_t api_id = HRR_API_HIPMODULELAUNCHKERNEL,
     const hipLaunchAttribute* attrs = nullptr,
-    uint32_t num_attrs = 0,
-    const LaunchSnapshots* snaps = nullptr)
+    uint32_t num_attrs = 0)
 {
   amd::Kernel* kernel = hip::asKernel(f);
   if (!kernel) return;
-  // The launch succeeded, so the handle is a real kernel: later launches of it
-  // may read its signature before they run. See known_fn().
-  if (HIP_HRR_HOST_SNAPSHOTS && g_pinned_count.load(std::memory_order_relaxed) != 0)
-    known_fn_add(f, nullptr);
 
   const amd::KernelSignature& sig = kernel->signature();
   const void* kbuf = nullptr;
@@ -1305,42 +637,7 @@ static void record_launch(
       static_cast<uint32_t>(shared_mem),
       stream, sig, kernel_params, kbuf, ksz,
       kernel_code_object_hash(kernel),
-      api_id, attrs, num_attrs, snaps);
-}
-
-// Pre-launch half of record_launch: the pinned host memory the launch's
-// arguments point into, read before the real launch runs the kernel.
-// from_runtime says f was just resolved by the runtime from a host stub. A
-// handle the application passed is read only once it is known to be a real
-// kernel, so an invalid one still gets the runtime's error rather than a crash.
-static void snapshot_launch(hipFunction_t f, hipStream_t stream,
-                            void** kernel_params, void** extra,
-                            LaunchSnapshots& out, bool from_runtime = false) {
-  if (!HIP_HRR_HOST_SNAPSHOTS || g_pinned_count.load(std::memory_order_relaxed) == 0) return;
-  if (!f || (!from_runtime && !known_fn(f))) return;
-  amd::Kernel* kernel = hip::asKernel(f);
-  const void* kbuf = nullptr;
-  size_t      ksz  = 0;
-  if (!kernel_params && extra) parse_kernel_extra(extra, kbuf, ksz);
-  pinned_snapshot_before_launch(stream, kernel->signature(), kernel_params,
-                                kbuf, ksz, out);
-}
-
-// The launches by host stub resolve the stub to its function after the launch
-// to record it. With pinned memory tracked they need it before, for the
-// snapshot, and the same answer serves both. An unknown stub must leave the
-// application's last error as it was; the real launch reports it.
-static hipFunction_t resolve_stub_if_pinned(const void* host_func) {
-  hipFunction_t f = nullptr;
-  if (g_pinned_count.load(std::memory_order_relaxed) == 0 || !HIP_HRR_HOST_SNAPSHOTS ||
-      !g_real_table.hipGetFuncBySymbol_fn)
-    return nullptr;
-  const hipError_t saved_cmd = hip::tls.last_command_error_;
-  const hipError_t saved_err = hip::tls.last_error_;
-  const hipError_t r = g_real_table.hipGetFuncBySymbol_fn(&f, host_func);
-  hip::tls.last_command_error_ = saved_cmd;
-  hip::tls.last_error_         = saved_err;
-  return r == hipSuccess ? f : nullptr;
+      api_id, attrs, num_attrs);
 }
 
 // ---------------------------------------------------------------------------
@@ -1759,7 +1056,6 @@ hipError_t capture_hipModuleUnload(hipModule_t module) {
   hipError_t r = g_real_table.hipModuleUnload_fn(module);
   if (r == hipSuccess) {
     forget_program_hash(prog);
-    known_fn_forget_module(module);
     hrr_args_hipModuleUnload a{};
     a.ret    = static_cast<int32_t>(r);
     a.module = reinterpret_cast<uint64_t>(module);
@@ -1778,8 +1074,6 @@ hipError_t capture_hipModuleLaunchKernel(
     unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
     unsigned int sharedMemBytes, hipStream_t stream,
     void** kernelParams, void** extra) {
-  LaunchSnapshots snaps;
-  snapshot_launch(f, stream, kernelParams, extra, snaps);
   hipError_t r = g_real_table.hipModuleLaunchKernel_fn(
       f, gridDimX, gridDimY, gridDimZ,
          blockDimX, blockDimY, blockDimZ,
@@ -1787,8 +1081,7 @@ hipError_t capture_hipModuleLaunchKernel(
   if (r == hipSuccess) {
     record_launch(f, gridDimX, gridDimY, gridDimZ,
                      blockDimX, blockDimY, blockDimZ,
-                  sharedMemBytes, stream, kernelParams, extra,
-                  HRR_API_HIPMODULELAUNCHKERNEL, nullptr, 0, &snaps);
+                  sharedMemBytes, stream, kernelParams, extra);
   }
   return r;
 }
@@ -1802,8 +1095,6 @@ hipError_t capture_hipModuleLaunchCooperativeKernel(
     unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
     unsigned int sharedMemBytes, hipStream_t stream,
     void** kernelParams) {
-  LaunchSnapshots snaps;
-  snapshot_launch(f, stream, kernelParams, nullptr, snaps);
   hipError_t r = g_real_table.hipModuleLaunchCooperativeKernel_fn(
       f, gridDimX, gridDimY, gridDimZ,
          blockDimX, blockDimY, blockDimZ,
@@ -1812,7 +1103,7 @@ hipError_t capture_hipModuleLaunchCooperativeKernel(
     record_launch(f, gridDimX, gridDimY, gridDimZ,
                      blockDimX, blockDimY, blockDimZ,
                   sharedMemBytes, stream, kernelParams, nullptr,
-                  HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL, nullptr, 0, &snaps);
+                  HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL);
   }
   return r;
 }
@@ -1824,8 +1115,6 @@ hipError_t capture_hipExtModuleLaunchKernel(
     size_t sharedMemBytes, hipStream_t stream,
     void** kernelParams, void** extra,
     hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags) {
-  LaunchSnapshots snaps;
-  snapshot_launch(f, stream, kernelParams, extra, snaps);
   hipError_t r = g_real_table.hipExtModuleLaunchKernel_fn(
       f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
          localWorkSizeX,  localWorkSizeY,  localWorkSizeZ,
@@ -1846,8 +1135,7 @@ hipError_t capture_hipExtModuleLaunchKernel(
                   ceil_div(globalWorkSizeY, localWorkSizeY),
                   ceil_div(globalWorkSizeZ, localWorkSizeZ),
                   localWorkSizeX,  localWorkSizeY,  localWorkSizeZ,
-                  static_cast<unsigned>(sharedMemBytes), stream, kernelParams, extra,
-                  HRR_API_HIPMODULELAUNCHKERNEL, nullptr, 0, &snaps);
+                  static_cast<unsigned>(sharedMemBytes), stream, kernelParams, extra);
   }
   return r;
 }
@@ -1856,21 +1144,17 @@ hipError_t capture_hipLaunchKernel(const void* function_address,
                                            dim3 numBlocks, dim3 dimBlocks,
                                            void** args, size_t sharedMemBytes,
                                            hipStream_t stream) {
-  LaunchSnapshots snaps;
-  hipFunction_t f = resolve_stub_if_pinned(function_address);
-  snapshot_launch(f, stream, args, nullptr, snaps, true);
   hipError_t r = g_real_table.hipLaunchKernel_fn(
       function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
   if (r == hipSuccess) {
     // function_address is a host stub pointer, not hipFunction_t — resolve via dispatch table
-    if (f ||
-        (g_real_table.hipGetFuncBySymbol_fn &&
-         g_real_table.hipGetFuncBySymbol_fn(&f, function_address) == hipSuccess && f)) {
+    hipFunction_t f = nullptr;
+    if (g_real_table.hipGetFuncBySymbol_fn &&
+        g_real_table.hipGetFuncBySymbol_fn(&f, function_address) == hipSuccess && f) {
       record_launch(f,
                     numBlocks.x, numBlocks.y, numBlocks.z,
                     dimBlocks.x, dimBlocks.y, dimBlocks.z,
-                    static_cast<unsigned>(sharedMemBytes), stream, args, nullptr,
-                    HRR_API_HIPMODULELAUNCHKERNEL, nullptr, 0, &snaps);
+                    static_cast<unsigned>(sharedMemBytes), stream, args, nullptr);
     }
   }
   return r;
@@ -1886,23 +1170,17 @@ hipError_t capture_hipLaunchKernel_spt(const void* function_address,
                                        dim3 numBlocks, dim3 dimBlocks,
                                        void** args, size_t sharedMemBytes,
                                        hipStream_t stream) {
-  LaunchSnapshots snaps;
-  hipFunction_t f = resolve_stub_if_pinned(function_address);
-  // The per-thread entry points use the per-thread stream for both the null
-  // stream and hipStreamLegacy.
-  snapshot_launch(f, (stream == nullptr || stream == hipStreamLegacy) ? hipStreamPerThread : stream,
-                  args, nullptr, snaps, true);
   hipError_t r = g_real_table.hipLaunchKernel_spt_fn(
       function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
   if (r == hipSuccess) {
-    if (f ||
-        (g_real_table.hipGetFuncBySymbol_fn &&
-         g_real_table.hipGetFuncBySymbol_fn(&f, function_address) == hipSuccess && f)) {
+    hipFunction_t f = nullptr;
+    if (g_real_table.hipGetFuncBySymbol_fn &&
+        g_real_table.hipGetFuncBySymbol_fn(&f, function_address) == hipSuccess && f) {
       record_launch(f,
                     numBlocks.x, numBlocks.y, numBlocks.z,
                     dimBlocks.x, dimBlocks.y, dimBlocks.z,
                     static_cast<unsigned>(sharedMemBytes), stream, args, nullptr,
-                    HRR_API_HIPLAUNCHKERNEL_SPT, nullptr, 0, &snaps);
+                    HRR_API_HIPLAUNCHKERNEL_SPT);
     }
   }
   return r;
@@ -1916,20 +1194,17 @@ hipError_t capture_hipLaunchCooperativeKernel(const void* f,
                                               void** kernelParams,
                                               unsigned int sharedMemBytes,
                                               hipStream_t stream) {
-  LaunchSnapshots snaps;
-  hipFunction_t fn = resolve_stub_if_pinned(f);
-  snapshot_launch(fn, stream, kernelParams, nullptr, snaps, true);
   hipError_t r = g_real_table.hipLaunchCooperativeKernel_fn(
       f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream);
   if (r == hipSuccess) {
-    if (fn ||
-        (g_real_table.hipGetFuncBySymbol_fn &&
-         g_real_table.hipGetFuncBySymbol_fn(&fn, f) == hipSuccess && fn)) {
+    hipFunction_t fn = nullptr;
+    if (g_real_table.hipGetFuncBySymbol_fn &&
+        g_real_table.hipGetFuncBySymbol_fn(&fn, f) == hipSuccess && fn) {
       record_launch(fn,
                     gridDim.x, gridDim.y, gridDim.z,
                     blockDimX.x, blockDimX.y, blockDimX.z,
                     sharedMemBytes, stream, kernelParams, nullptr,
-                    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL, nullptr, 0, &snaps);
+                    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL);
     }
   }
   return r;
@@ -1940,22 +1215,17 @@ hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f,
                                                   void** kernelParams,
                                                   uint32_t sharedMemBytes,
                                                   hipStream_t hStream) {
-  LaunchSnapshots snaps;
-  hipFunction_t fn = resolve_stub_if_pinned(f);
-  snapshot_launch(fn,
-                  (hStream == nullptr || hStream == hipStreamLegacy) ? hipStreamPerThread : hStream,
-                  kernelParams, nullptr, snaps, true);
   hipError_t r = g_real_table.hipLaunchCooperativeKernel_spt_fn(
       f, gridDim, blockDim, kernelParams, sharedMemBytes, hStream);
   if (r == hipSuccess) {
-    if (fn ||
-        (g_real_table.hipGetFuncBySymbol_fn &&
-         g_real_table.hipGetFuncBySymbol_fn(&fn, f) == hipSuccess && fn)) {
+    hipFunction_t fn = nullptr;
+    if (g_real_table.hipGetFuncBySymbol_fn &&
+        g_real_table.hipGetFuncBySymbol_fn(&fn, f) == hipSuccess && fn) {
       record_launch(fn,
                     gridDim.x, gridDim.y, gridDim.z,
                     blockDim.x, blockDim.y, blockDim.z,
                     sharedMemBytes, hStream, kernelParams, nullptr,
-                    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT, nullptr, 0, &snaps);
+                    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT);
     }
   }
   return r;
@@ -1975,40 +1245,33 @@ hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f,
 hipError_t capture_hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
                                         hipFunction_t f, void** params,
                                         void** extra) {
-  LaunchSnapshots snaps;
-  if (config) snapshot_launch(f, config->hStream, params, extra, snaps);
   hipError_t r = g_real_table.hipDrvLaunchKernelEx_fn(config, f, params, extra);
   if (r == hipSuccess && config) {
     record_launch(f,
                   config->gridDimX, config->gridDimY, config->gridDimZ,
                   config->blockDimX, config->blockDimY, config->blockDimZ,
                   config->sharedMemBytes, config->hStream, params, extra,
-                  HRR_API_HIPDRVLAUNCHKERNELEX, config->attrs, config->numAttrs,
-                  &snaps);
+                  HRR_API_HIPDRVLAUNCHKERNELEX, config->attrs, config->numAttrs);
   }
   return r;
 }
 
 hipError_t capture_hipLaunchKernelExC(const hipLaunchConfig_t* config,
                                       const void* fPtr, void** args) {
-  LaunchSnapshots snaps;
-  hipFunction_t f = config ? resolve_stub_if_pinned(fPtr) : nullptr;
-  if (config) snapshot_launch(f, config->stream, args, nullptr, snaps, true);
   hipError_t r = g_real_table.hipLaunchKernelExC_fn(config, fPtr, args);
   if (r == hipSuccess && config) {
     // fPtr is a host stub address, not a hipFunction_t: the same resolution
     // hipLaunchKernel needs, and the same reason replay cannot use the
     // recorded value directly.
-    if (f ||
-        (g_real_table.hipGetFuncBySymbol_fn &&
-         g_real_table.hipGetFuncBySymbol_fn(&f, fPtr) == hipSuccess && f)) {
+    hipFunction_t f = nullptr;
+    if (g_real_table.hipGetFuncBySymbol_fn &&
+        g_real_table.hipGetFuncBySymbol_fn(&f, fPtr) == hipSuccess && f) {
       record_launch(f,
                     config->gridDim.x, config->gridDim.y, config->gridDim.z,
                     config->blockDim.x, config->blockDim.y, config->blockDim.z,
                     static_cast<unsigned>(config->dynamicSmemBytes),
                     config->stream, args, nullptr,
-                    HRR_API_HIPLAUNCHKERNELEXC, config->attrs, config->numAttrs,
-                    &snaps);
+                    HRR_API_HIPLAUNCHKERNELEXC, config->attrs, config->numAttrs);
     }
   }
   return r;
@@ -2070,19 +1333,12 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
     kargs  = e.arguments_;  // copy (not move) to leave arguments_ intact for the real launch
   }
 
-  LaunchSnapshots snaps;
-  // f comes from the runtime, which resolved the stub, so it is a real kernel.
-  hipFunction_t f = kargs.empty() ? nullptr : resolve_stub_if_pinned(func);
-  if (f)
-    pinned_snapshot_before_launch(stream, hip::asKernel(f)->signature(), nullptr,
-                                  kargs.data(), kargs.size(), snaps);
-
   hipError_t r = g_real_table.hipLaunchByPtr_fn(func);
   if (r == hipSuccess) {
     // func is a host stub pointer — resolve to real hipFunction_t first
-    if (f ||
-        (g_real_table.hipGetFuncBySymbol_fn &&
-         g_real_table.hipGetFuncBySymbol_fn(&f, func) == hipSuccess && f)) {
+    hipFunction_t f = nullptr;
+    if (g_real_table.hipGetFuncBySymbol_fn &&
+        g_real_table.hipGetFuncBySymbol_fn(&f, func) == hipSuccess && f) {
       amd::Kernel* kernel = hip::asKernel(f);
       if (kernel) {
         const amd::KernelSignature& sig = kernel->signature();
@@ -2097,8 +1353,7 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
             block.x, block.y, block.z,
             static_cast<uint32_t>(shared), stream,
             sig, nullptr, kbuf, ksz,
-            kernel_code_object_hash(kernel),
-            HRR_API_HIPMODULELAUNCHKERNEL, nullptr, 0, &snaps);
+            kernel_code_object_hash(kernel));
       }
     }
   }
@@ -2229,30 +1484,12 @@ hipError_t capture_hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int
       std::lock_guard<std::mutex> lk(g_pinned_reg_mu);
       g_pinned_reg_map[hostPtr] = sizeBytes;
     }
-    // Registered memory is read by kernels the same way as hipHostMalloc
-    // memory, and replay backs it with a buffer of its own.
-    pinned_track(hostPtr, sizeBytes);
-    // A kernel may be handed the range's device alias instead, which is
-    // tracked as a second name for the same bytes.
-    if (HIP_HRR_HOST_SNAPSHOTS && hostPtr && g_real_table.hipHostGetDevicePointer_fn) {
-      const hipError_t saved_cmd = hip::tls.last_command_error_;
-      const hipError_t saved_err = hip::tls.last_error_;
-      void* dev = nullptr;
-      if (g_real_table.hipHostGetDevicePointer_fn(&dev, hostPtr, 0) == hipSuccess && dev &&
-          dev != hostPtr)
-        pinned_track(dev, sizeBytes, reinterpret_cast<uintptr_t>(hostPtr));
-      hip::tls.last_command_error_ = saved_cmd;
-      hip::tls.last_error_         = saved_err;
-    }
   }
   return r;
 }
 
 hipError_t capture_hipHostUnregister(void* hostPtr) {
-  PinnedHeld held;
-  const bool was_tracked = pinned_untrack(hostPtr, &held);
   hipError_t r = g_real_table.hipHostUnregister_fn(hostPtr);
-  if (r != hipSuccess && was_tracked) pinned_retrack(hostPtr, held);
   if (r == hipSuccess) {
     hrr_args_hipHostUnregister a{};
     a.ret     = static_cast<int32_t>(r);
@@ -2264,165 +1501,6 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
     }
   }
   return r;
-}
-
-// ---------------------------------------------------------------------------
-// Pinned allocation tracking for host snapshots
-//
-// The generated shims for these APIs record the call. These wrappers sit in
-// front of them in g_cap_table and keep g_pinned current: an allocation is
-// added once it succeeds, and a free takes it out before the memory goes, so a
-// launch on another thread never reads a freed buffer. hipFree is wrapped too,
-// because CLR frees pinned host memory through it as well. hipExtHostAlloc has
-// no CLR implementation, so there is nothing to wrap. hipDeviceReset releases
-// memory without a free, so its wrapper keeps only what survived it.
-//
-// The kernel handle wrappers fill the known-handle set that snapshot_launch
-// checks before it reads a handle the application passed. hipKernelGetFunction
-// is not among them: it casts its argument without checking it, so a success
-// from it says nothing about the handle.
-// ---------------------------------------------------------------------------
-
-namespace {
-decltype(HipDispatchTable::hipHostMalloc_fn)   g_shim_hipHostMalloc   = nullptr;
-decltype(HipDispatchTable::hipHostAlloc_fn)    g_shim_hipHostAlloc    = nullptr;
-decltype(HipDispatchTable::hipMallocHost_fn)   g_shim_hipMallocHost   = nullptr;
-decltype(HipDispatchTable::hipMemAllocHost_fn) g_shim_hipMemAllocHost = nullptr;
-decltype(HipDispatchTable::hipHostFree_fn)     g_shim_hipHostFree     = nullptr;
-decltype(HipDispatchTable::hipFreeHost_fn)     g_shim_hipFreeHost     = nullptr;
-decltype(HipDispatchTable::hipFree_fn)         g_shim_hipFree         = nullptr;
-decltype(HipDispatchTable::hipDeviceReset_fn)  g_shim_hipDeviceReset  = nullptr;
-decltype(HipDispatchTable::hipModuleGetFunction_fn)        g_shim_hipModuleGetFunction = nullptr;
-decltype(HipDispatchTable::hipGetFuncBySymbol_fn)          g_shim_hipGetFuncBySymbol   = nullptr;
-decltype(HipDispatchTable::hipModuleEnumerateFunctions_fn) g_shim_hipModuleEnumerateFunctions =
-    nullptr;
-}  // namespace
-
-static hipError_t pinned_hipHostMalloc(void** ptr, size_t size, unsigned int flags) {
-  hipError_t r = g_shim_hipHostMalloc(ptr, size, flags);
-  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
-  return r;
-}
-static hipError_t pinned_hipHostAlloc(void** ptr, size_t size, unsigned int flags) {
-  hipError_t r = g_shim_hipHostAlloc(ptr, size, flags);
-  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
-  return r;
-}
-static hipError_t pinned_hipMallocHost(void** ptr, size_t size) {
-  hipError_t r = g_shim_hipMallocHost(ptr, size);
-  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
-  return r;
-}
-static hipError_t pinned_hipMemAllocHost(void** ptr, size_t size) {
-  hipError_t r = g_shim_hipMemAllocHost(ptr, size);
-  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
-  return r;
-}
-
-template <typename FreeFn>
-static hipError_t pinned_free(FreeFn shim, void* ptr) {
-  PinnedHeld held;
-  const bool was_tracked = pinned_untrack(ptr, &held);
-  hipError_t r = shim(ptr);
-  if (r != hipSuccess && was_tracked) pinned_retrack(ptr, held);
-  return r;
-}
-static hipError_t pinned_hipHostFree(void* ptr) { return pinned_free(g_shim_hipHostFree, ptr); }
-static hipError_t pinned_hipFreeHost(void* ptr) { return pinned_free(g_shim_hipFreeHost, ptr); }
-static hipError_t pinned_hipFree(void* ptr)     { return pinned_free(g_shim_hipFree, ptr); }
-
-// hipDeviceReset releases the device's memory, pinned host memory included,
-// without a free capture sees. Every entry is taken out first, so no launch
-// reads it meanwhile, and only those the runtime still knows are put back.
-static hipError_t pinned_hipDeviceReset() {
-  std::map<uintptr_t, PinnedAlloc> held;
-  {
-    std::unique_lock<std::mutex> lk(g_pinned_mu);
-    g_pinned_cv.wait(lk, [] {
-      return std::none_of(g_pinned.begin(), g_pinned.end(),
-                          [](const auto& e) { return e.second.reading; });
-    });
-    held.swap(g_pinned);
-    g_pinned_shadow_bytes = 0;
-    g_pinned_count.store(0, std::memory_order_relaxed);
-  }
-  hipError_t r = g_shim_hipDeviceReset();
-  {
-    // The reset may free the kernel objects the known handles point to.
-    std::lock_guard<std::mutex> klk(g_known_fn_mu);
-    g_known_fns.clear();
-  }
-  std::lock_guard<std::mutex> lk(g_pinned_mu);
-  for (auto& [base, a] : held) {
-    const uintptr_t host = a.alias_of ? a.alias_of : base;
-    if (amd::MemObjMap::FindMemObj(reinterpret_cast<const void*>(host)) == nullptr) continue;
-    const size_t charged = a.charged;
-    if (g_pinned.emplace(base, std::move(a)).second) g_pinned_shadow_bytes += charged;
-  }
-  // A survivor's alias that did not survive is unlinked.
-  for (auto& [base, a] : g_pinned)
-    if (a.alias && !g_pinned.count(a.alias)) a.alias = 0;
-  g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
-  return r;
-}
-
-static hipError_t known_hipModuleGetFunction(hipFunction_t* function, hipModule_t module,
-                                             const char* kname) {
-  hipError_t r = g_shim_hipModuleGetFunction(function, module, kname);
-  if (r == hipSuccess && function) known_fn_add(*function, module);
-  return r;
-}
-static hipError_t known_hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr) {
-  hipError_t r = g_shim_hipGetFuncBySymbol(functionPtr, symbolPtr);
-  if (r == hipSuccess && functionPtr) known_fn_add(*functionPtr, nullptr);
-  return r;
-}
-static hipError_t known_hipModuleEnumerateFunctions(hipFunction_t* functions,
-                                                    unsigned int numFunctions,
-                                                    hipModule_t module) {
-  hipError_t r = g_shim_hipModuleEnumerateFunctions(functions, numFunctions, module);
-  if (r != hipSuccess || !functions || !HIP_HRR_HOST_SNAPSHOTS ||
-      !g_real_table.hipModuleGetFunctionCount_fn)
-    return r;
-  // The runtime writes only as many entries as the module has kernels; the
-  // rest of the array is the caller's and may hold anything.
-  const hipError_t saved_cmd = hip::tls.last_command_error_;
-  const hipError_t saved_err = hip::tls.last_error_;
-  unsigned int count = 0;
-  if (g_real_table.hipModuleGetFunctionCount_fn(&count, module) != hipSuccess) count = 0;
-  hip::tls.last_command_error_ = saved_cmd;
-  hip::tls.last_error_         = saved_err;
-  for (unsigned int i = 0; i < std::min(count, numFunctions); i++)
-    known_fn_add(functions[i], module);
-  return r;
-}
-
-// Put the wrappers in front of the generated shims, once. Nothing here reads
-// the HIP_HRR_HOST_SNAPSHOT* flags: an install that runs before Flag::init()
-// would see their defaults. The wrappers are installed whatever the flags say
-// and read them on each call; hip_capture_init() resolves the manifest field.
-static void install_pinned_tracking() {
-  static bool done = false;
-  if (done) return;
-  done = true;
-  hrr_cap::writer::set_fork_hooks(pinned_fork_prepare, pinned_fork_parent, pinned_fork_child);
-#define HRR_WRAP(prefix, api)                        \
-  if (g_cap_table.api##_fn) {                        \
-    g_shim_##api = g_cap_table.api##_fn;             \
-    g_cap_table.api##_fn = prefix##_##api;           \
-  }
-  HRR_WRAP(pinned, hipHostMalloc)
-  HRR_WRAP(pinned, hipHostAlloc)
-  HRR_WRAP(pinned, hipMallocHost)
-  HRR_WRAP(pinned, hipMemAllocHost)
-  HRR_WRAP(pinned, hipHostFree)
-  HRR_WRAP(pinned, hipFreeHost)
-  HRR_WRAP(pinned, hipFree)
-  HRR_WRAP(pinned, hipDeviceReset)
-  HRR_WRAP(known, hipModuleGetFunction)
-  HRR_WRAP(known, hipGetFuncBySymbol)
-  HRR_WRAP(known, hipModuleEnumerateFunctions)
-#undef HRR_WRAP
 }
 
 // ---------------------------------------------------------------------------
@@ -3402,7 +2480,6 @@ hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
 
 void hip_capture_install() {
   if (g_installed.exchange(true)) return;
-  install_pinned_tracking();
   std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
               &g_cap_table, sizeof(HipDispatchTable));
 }
@@ -3530,9 +2607,6 @@ void hip_capture_init() {
       hip_capture_build_table();
       hip_capture_install();
     }
-
-    // Flag::init() has run, whenever the shims were installed.
-    hrr_cap::writer::set_host_snapshots(HIP_HRR_HOST_SNAPSHOTS);
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
     // A refused open leaves capture off, so take the shims out of the dispatch

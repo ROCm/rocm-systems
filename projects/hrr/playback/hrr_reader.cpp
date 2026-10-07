@@ -227,12 +227,8 @@ static bool resolve_archive_path(const std::string& input, std::string& resolved
 //   [+12..23] block[3] (uint32_t[3])
 //   [+24..27] shared_mem (uint32_t)
 //   [+28..29] num_args (uint16_t)
-//   [+30..31] num_snapshots (uint16_t)
+//   [+30..31] num_snapshots (uint16_t, always 0)
 //   per arg: u8 value_kind, u16 size, <size> bytes data
-//            (kind 3: u16 n_ptrs, n_ptrs * u16 offsets)
-//   u32 num_attrs, u32 attr stride, num_attrs * stride bytes
-//   per snapshot (41 bytes): u64 ptr_handle, u64 offset, u64 length,
-//            u64 hash_lo, u64 hash_hi, u8 direction (0 restore, 1 leave)
 // ---------------------------------------------------------------------------
 
 static bool parse_kernel_launch(const uint8_t* data, size_t len,
@@ -291,18 +287,7 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
     kl.args.push_back(std::move(arg));
   }
 
-  // Launch-attribute tail. Every in-tree capture writes it; a payload that ends
-  // here with no snapshots is accepted, as before the tail was read.
-  if (p == end && num_snapshots == 0) return true;
-  if (p + 8 > end) return false;
-  uint32_t n_attrs, stride;
-  memcpy(&n_attrs, p, 4); p += 4;
-  memcpy(&stride,  p, 4); p += 4;
-  const uint64_t attr_bytes = static_cast<uint64_t>(n_attrs) * stride;
-  if (attr_bytes > static_cast<uint64_t>(end - p)) return false;
-  p += attr_bytes;
-
-  // Pinned host snapshots
+  // buffer snapshots (always 0 in in-tree captures)
   for (uint16_t i = 0; i < num_snapshots; i++) {
     if (p + 41 > end) return false;
     BufferSnapshot snap;

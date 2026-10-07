@@ -214,17 +214,6 @@ struct BufWriteGuard {
 static std::atomic<uint64_t> g_seq_id{0};
 static std::atomic<uint64_t> g_event_count{0};
 static std::atomic<uint64_t> g_blob_count{0};
-// -1 = not set (no manifest field), 0 = off, 1 = on. See set_host_snapshots().
-static std::atomic<int>      g_host_snapshots{-1};
-// Pinned host chunks stored as blobs, and launches whose pinned inputs were
-// read while earlier work on their stream was still running. Both are written
-// to the manifest when host snapshots are on.
-static std::atomic<uint64_t> g_host_snapshot_chunks{0};
-static std::atomic<uint64_t> g_host_snapshots_unordered{0};
-// Fork hooks of the pinned host snapshot code (set_fork_hooks).
-static std::atomic<void (*)()> g_fork_prepare_hook{nullptr};
-static std::atomic<void (*)()> g_fork_parent_hook{nullptr};
-static std::atomic<void (*)()> g_fork_child_hook{nullptr};
 
 // In-memory set of blob hex keys already written to disk.
 // Eliminates the fs::exists() stat syscall on repeated blobs (common for weight tensors).
@@ -470,23 +459,13 @@ static void index_existing_blobs_locked() {
 }
 
 #ifndef _WIN32
-// The hook's lock is taken before the writer's, as the launch path takes them,
-// so a fork cannot deadlock against a launch that holds one and wants the other.
 static void atfork_prepare() {
-  if (auto hook = g_fork_prepare_hook.load()) hook();
   BufWriteGuard lk;
   if (g_events_fd >= 0)
     flush_buffer_locked();
 }
 
-static void atfork_parent() {
-  if (auto hook = g_fork_parent_hook.load()) hook();
-}
-
 static void atfork_child() {
-  if (auto hook = g_fork_child_hook.load()) hook();
-  g_host_snapshot_chunks.store(0, std::memory_order_relaxed);
-  g_host_snapshots_unordered.store(0, std::memory_order_relaxed);
   std::string dir;
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
@@ -514,7 +493,7 @@ static void atfork_child() {
 static void install_atfork_handlers_once() {
   static std::once_flag once;
   std::call_once(once, [] {
-    pthread_atfork(atfork_prepare, atfork_parent, atfork_child);
+    pthread_atfork(atfork_prepare, nullptr, atfork_child);
   });
 }
 #endif
@@ -535,13 +514,6 @@ static void write_manifest_stdio(const char* output_dir, bool complete) {
           complete ? "true" : "false",
           static_cast<unsigned long long>(g_event_count.load()),
           static_cast<unsigned long long>(g_blob_count.load()));
-  if (g_host_snapshots.load() >= 0)
-    fprintf(mf, ",\n  \"host_snapshots\": %s",
-            g_host_snapshots.load() ? "true" : "false");
-  if (g_host_snapshots.load() > 0)
-    fprintf(mf, ",\n  \"host_snapshot_chunks\": %llu,\n  \"host_snapshots_unordered\": %llu",
-            static_cast<unsigned long long>(g_host_snapshot_chunks.load()),
-            static_cast<unsigned long long>(g_host_snapshots_unordered.load()));
   {
     std::lock_guard<std::mutex> lk(g_unreplayable_mu);
     if (!g_unreplayable_apis.empty()) {
@@ -954,8 +926,6 @@ bool open(const char* output_dir) {
   g_seq_id.store(0, std::memory_order_relaxed);
   g_event_count.store(0, std::memory_order_relaxed);
   g_blob_count.store(0, std::memory_order_relaxed);
-  g_host_snapshot_chunks.store(0, std::memory_order_relaxed);
-  g_host_snapshots_unordered.store(0, std::memory_order_relaxed);
   {
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.clear();
@@ -1007,22 +977,6 @@ void mark_incomplete(const char* reason) {
 }
 
 bool is_incomplete() { return g_capture_incomplete.load(std::memory_order_relaxed); }
-
-void set_host_snapshots(bool enabled) { g_host_snapshots.store(enabled ? 1 : 0); }
-
-void count_host_snapshot_chunk() {
-  g_host_snapshot_chunks.fetch_add(1, std::memory_order_relaxed);
-}
-
-void count_host_snapshot_unordered() {
-  g_host_snapshots_unordered.fetch_add(1, std::memory_order_relaxed);
-}
-
-void set_fork_hooks(void (*prepare)(), void (*parent)(), void (*child)()) {
-  g_fork_prepare_hook.store(prepare);
-  g_fork_parent_hook.store(parent);
-  g_fork_child_hook.store(child);
-}
 
 void note_unreplayable(const char* api, const char* reason) {
   if (!api) return;
@@ -1158,16 +1112,6 @@ void emergency_finalize(bool clean_shutdown) {
   p += u64_to_dec(g_event_count.load(), buf + p);
   p = append_lit(buf, p, ",\n  \"blob_count\": ");
   p += u64_to_dec(g_blob_count.load(), buf + p);
-  if (g_host_snapshots.load() >= 0) {
-    p = append_lit(buf, p, ",\n  \"host_snapshots\": ");
-    p = append_lit(buf, p, g_host_snapshots.load() ? "true" : "false");
-  }
-  if (g_host_snapshots.load() > 0) {
-    p = append_lit(buf, p, ",\n  \"host_snapshot_chunks\": ");
-    p += u64_to_dec(g_host_snapshot_chunks.load(), buf + p);
-    p = append_lit(buf, p, ",\n  \"host_snapshots_unordered\": ");
-    p += u64_to_dec(g_host_snapshots_unordered.load(), buf + p);
-  }
   // g_metadata_json is written once during HRR init before event capture starts.
   // The crash path reads it lock-free to avoid taking g_file_mu from an exception callback.
   static constexpr const char* kMetadataFieldPrefix = ",\n  \"metadata\": ";
@@ -1309,15 +1253,14 @@ Hash128 write_blob(const void* data, size_t len) {
   ensure_dir(subdir);
   std::string path = subdir + "/" + key + ".blob";
 
-  if (!atomic_write_file(path, data, len)) {
-    // Write failed — remove from set so a later call can retry, and return no
-    // hash, so no event names a blob that is not on disk.
+  if (atomic_write_file(path, data, len)) {
+    g_blob_count.fetch_add(1, std::memory_order_relaxed);
+  } else {
+    // Write failed — remove from set so a later call can retry.
     LogPrintfWarning("[HRR capture] Failed to write blob %s", hex);
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.erase(key);
-    return {};
   }
-  g_blob_count.fetch_add(1, std::memory_order_relaxed);
   return h;
 }
 
