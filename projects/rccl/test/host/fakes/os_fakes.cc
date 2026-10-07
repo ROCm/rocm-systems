@@ -60,8 +60,8 @@ ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
   return g_ncclOsSetAffinityResult;
 }
 
-// Must be non-empty and multi-token: ncclInit() takes the third strtok_r token of this, and an empty
-// string makes that NULL, which ncclInit() rejects with ncclSystemError.
+// Needs at least three tokens: ncclInit() keeps the third strtok_r token. Fewer than three,
+// including "", makes verStr NULL and ncclInit() returns ncclSystemError.
 // Also not "1" and not the Hyper-V BIOS string, so numa_balancing / bios_version stay on their benign arms.
 ncclResult_t g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
 int g_ncclOsTopoGetStrFromSysCalls = 0;

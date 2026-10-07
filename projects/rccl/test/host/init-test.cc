@@ -4542,8 +4542,8 @@ TEST_F(InitMicrotestIsolated, NcclInit_NumaBalancingOffAndIommuPassthrough_Warns
       });
 }
 
-// Empty /proc/version (EMFILE, or any read ncclOsTopoGetStrFromSys reports as "") used to reach
-// strstr(NULL, "cray"). The error is returned before call_once, so this stays reachable in a fresh process.
+// An empty read used to reach strstr(NULL, "cray"). The check runs before call_once, so this arm
+// is reachable in-process.
 TEST_F(InitMicrotestIsolated, NcclInit_UnreadableKernelVersion_ReturnsSystemError) {
   RUN_ISOLATED_TEST(
       "Init_NcclInit_UnreadableKernelVersion",

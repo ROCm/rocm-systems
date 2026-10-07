@@ -338,9 +338,9 @@ static ncclResult_t ncclInit() {
   for (int i = 0; i < 2 && verStr != NULL; i++) {
     verStr = strtok_r(NULL, " ", &state);
   }
-  // fopen of /proc/version fails (EMFILE, missing /proc) as an empty string, and strtok_r
-  // then returns NULL. strstr(NULL) is a SIGSEGV; return an error before call_once so a
-  // later init can retry once descriptors are available.
+  // A failed read is reported as "" and ncclSuccess. Fewer than three tokens also leaves
+  // verStr NULL, and strstr(NULL) would SIGSEGV. This runs before call_once, so the failure
+  // is not latched.
   if (verStr == NULL) {
     WARN("Could not read kernel version from /proc/version");
     return ncclSystemError;
