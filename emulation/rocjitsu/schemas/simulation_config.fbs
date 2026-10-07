@@ -28,6 +28,7 @@ table CommandProcessorConfig {
 table ShaderEngineConfig {
   num_compute_units: uint32;       // Number of CUs in this shader engine.
   compute_unit: ComputeUnitConfig; // Shared CU configuration for all CUs.
+  cus_per_shader_array: uint32;    // Shader-array width; absent/zero means unknown.
 }
 
 /// Configuration for an Accelerator Complex Die (XCD).
@@ -41,6 +42,14 @@ table XcdConfig {
 table GpuMemoryConfig {
   size_mb: uint32;              // Memory size in megabytes (for future limits).
   memory_side_cache_mb: uint32; // Memory-side cache size in MB (0 = disabled).
+}
+
+/// Hardware block version advertised through device IP discovery.
+table DeviceIpVersion {
+  hardware_id: uint16; // AMDGPU discovery hardware ID, e.g. GC=11, SDMA0=42, NBIF=108.
+  major: uint8;
+  minor: uint8;
+  revision: uint8;
 }
 
 /// KFD device identity and topology properties for sysfs generation.
@@ -116,6 +125,9 @@ table KfdDeviceInfo {
   // Appended to preserve existing field IDs. Required to be nonzero when
   // num_sdma_engines is nonzero.
   num_sdma_queues_per_engine: uint32;
+  // Versions for instance zero of each block on die zero. Omitted blocks are
+  // not advertised; discovery metadata does not enable execution support.
+  ip_versions: [DeviceIpVersion];
 }
 
 /// How the GPU presents itself on a PCI bus, for front ends that attach it to a

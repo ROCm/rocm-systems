@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /* Pre-initialization ABI check: does not discover or activate GPU devices. */
 #include <hsa/hsa.h>
 #include <stdio.h>

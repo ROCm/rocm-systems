@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "long_path_handoff.h"
 #include "scoped_temp.h"
@@ -19,9 +20,11 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
@@ -100,6 +103,26 @@ bool replace_exactly_once(std::string &text, std::string_view from, std::string_
     return false;
   text.replace(offset, from.size(), to);
   return true;
+}
+
+TEST(SoCTest, SelectsSdmaPacketDialect) {
+  const std::array cases = {
+      std::pair{ROCJITSU_CODE_ARCH_CDNA1, amdgpu::SdmaPacketDialect::Legacy},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA3, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA4, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA5, amdgpu::SdmaPacketDialect::Gfx1250},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA1, amdgpu::SdmaPacketDialect::Legacy},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA3, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA4, amdgpu::SdmaPacketDialect::Gfx11Plus},
+  };
+  for (const auto &[arch, expected] : cases) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    SoC soc("soc", nullptr, arch);
+    EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), expected);
+  }
 }
 
 TEST(ConfigLoaderTest, LoadCdna2Config) {
@@ -361,6 +384,163 @@ TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
     EXPECT_NE(dynamic_cast<SoC *>(build.root.get()), nullptr);
 }
 
+TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
+  auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
+                                    rocjitsu::kEmbeddedSchema);
+  ASSERT_EQ(loaded.device.num_cu_per_sh, 8u);
+  ASSERT_EQ(loaded.extra_gpu_builds.size(), 3u);
+  auto check_build = [](const config::TopologyBuildResult &build) {
+    ASSERT_FALSE(build.xcds.empty());
+    for (auto *xcd : build.xcds) {
+      ASSERT_GT(xcd->num_shader_engines(), 0u);
+      for (uint32_t se_id = 0; se_id < xcd->num_shader_engines(); ++se_id) {
+        auto *se = xcd->shader_engine(se_id);
+        ASSERT_EQ(se->num_compute_units(), 16u);
+        for (uint32_t cu_id : {0u, 5u, 7u, 8u, 13u, 15u}) {
+          auto *cu = se->compute_unit(cu_id);
+          auto *wf = cu->dispatch_wf(0, 0, 32, 8);
+          ASSERT_NE(wf, nullptr);
+          uint32_t value = 0;
+          constexpr uint16_t kWgpId = 23 | (10 << 6) | (3 << 11);
+          EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value),
+                    amdgpu::HwregAccessResult::Success);
+          EXPECT_EQ(value, cu_id % 8);
+          EXPECT_EQ(cu->shader_engine_id(), se_id);
+          EXPECT_EQ(cu->scratch_scoreboard_base(), cu_id * cu->scratch_slots_per_cu());
+          wf->halt();
+        }
+      }
+    }
+  };
+  check_build(loaded.build_result);
+  for (const auto &build : loaded.extra_gpu_builds)
+    check_build(build);
+}
+
+TEST(ConfigLoaderTest, MismatchedShaderArrayGeometryKeepsWgpIdUnsupported) {
+  for (const char *filename : {"gfx1250_mi455x.json", "gfx1250_mi455x_kmd_4gpu.json"}) {
+    SCOPED_TRACE(filename);
+    std::ifstream input(CONFIG_DIR_PATH + "/" + filename);
+    ASSERT_TRUE(input.is_open());
+    const std::string original((std::istreambuf_iterator<char>(input)),
+                               std::istreambuf_iterator<char>());
+    for (const auto &[from, to] : {std::pair{R"("num_cu_per_sh": 8)", R"("num_cu_per_sh": 4)"},
+                                   std::pair{R"("num_shader_arrays_per_engine": 2)",
+                                             R"("num_shader_arrays_per_engine": 1)"}}) {
+      SCOPED_TRACE(to);
+      std::string json = original;
+      ASSERT_TRUE(replace_exactly_once(json, from, to));
+      auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+      auto check_build = [](const config::TopologyBuildResult &build) {
+        for (auto *xcd : build.xcds) {
+          for (auto *se : xcd->shader_engines()) {
+            ASSERT_EQ(se->num_compute_units(), 16u);
+            for (auto *cu : se->compute_units()) {
+              auto *wf = cu->dispatch_wf(0, 0, 32, 8);
+              ASSERT_NE(wf, nullptr);
+              uint32_t value = 0xFFFFFFFFu;
+              constexpr uint16_t kWgpId = 23 | (10 << 6) | (3 << 11);
+              EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value),
+                        amdgpu::HwregAccessResult::Unsupported);
+              EXPECT_EQ(value, 0u);
+              wf->halt();
+            }
+          }
+        }
+      };
+      check_build(loaded.build_result);
+      for (const auto &build : loaded.extra_gpu_builds)
+        check_build(build);
+    }
+  }
+}
+
+TEST(ConfigLoaderTest, LaterShaderEngineMismatchInvalidatesAllShaderArrayWidths) {
+  for (uint32_t second_engine_cus : {2u, 0u}) {
+    SCOPED_TRACE(second_engine_cus);
+    std::string json = R"({
+      "num_threads": 1,
+      "vm": {"arch": "cdna5", "gpu": {"device": {
+        "gfx_target_version": 120500, "num_sdma_engines": 0,
+        "num_cu_per_sh": 2, "num_shader_arrays_per_engine": 2
+      }}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "xcd0", "type": "xcd", "children": [
+          {"name": "l2", "type": "l2_cache"},
+          {"name": "cp", "type": "command_processor"},
+          {"name": "se0", "type": "shader_engine", "children": [
+            {"name": "cu[0:4]", "type": "compute_unit"}
+          ]},
+          {"name": "se1", "type": "shader_engine", "children": []}
+        ]}
+      ]}, "links": []}
+    })";
+    if (second_engine_cus) {
+      ASSERT_TRUE(
+          replace_exactly_once(json, R"("children": [])",
+                               R"("children": [{"name": "cu[0:2]", "type": "compute_unit"}])"));
+    }
+
+    testing::internal::CaptureStderr();
+    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+    const std::string warning = testing::internal::GetCapturedStderr();
+    EXPECT_THAT(warning,
+                testing::HasSubstr("soc.xcd0.se1 has " + std::to_string(second_engine_cus) +
+                                   " compute units; expected 4"));
+    EXPECT_EQ(std::count(warning.begin(), warning.end(), '\n'), 1);
+    ASSERT_EQ(loaded.build_result.xcds.size(), 1u);
+    auto *xcd = loaded.build_result.xcds[0];
+    ASSERT_EQ(xcd->num_shader_engines(), 2u);
+    ASSERT_EQ(xcd->shader_engine(0)->num_compute_units(), 4u);
+    ASSERT_EQ(xcd->shader_engine(1)->num_compute_units(), second_engine_cus);
+    for (auto *se : xcd->shader_engines())
+      for (auto *cu : se->compute_units())
+        EXPECT_EQ(cu->cus_per_shader_array(), 0u);
+  }
+}
+
+TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
+  for (uint32_t num_cus : {4u, 3u}) {
+    SCOPED_TRACE(num_cus);
+    std::string json = R"({
+      "num_threads": 1,
+      "vm": {"arch": "cdna5", "gpu": {"device": {
+        "gfx_target_version": 120500, "num_sdma_engines": 0,
+        "num_cu_per_sh": 2, "num_shader_arrays_per_engine": 2
+      }}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "xcd0", "type": "xcd", "children": [
+          {"name": "l2", "type": "l2_cache"},
+          {"name": "cp", "type": "command_processor"},
+          {"name": "cu[0:CU_COUNT]", "type": "compute_unit"}
+        ]}
+      ]}, "links": []}
+    })";
+    ASSERT_TRUE(replace_exactly_once(json, "CU_COUNT", std::to_string(num_cus)));
+    testing::internal::CaptureStderr();
+    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+    const std::string warning = testing::internal::GetCapturedStderr();
+    if (num_cus == 4) {
+      EXPECT_TRUE(warning.empty());
+    } else {
+      EXPECT_THAT(warning, testing::HasSubstr("soc.xcd0 has 3 compute units; expected 4"));
+    }
+    ASSERT_EQ(loaded.build_result.xcds.size(), 1u);
+    auto *cp = loaded.build_result.xcds[0]->command_processor();
+    ASSERT_NE(cp, nullptr);
+    const auto &cus = cp->compute_units();
+    ASSERT_EQ(cus.size(), num_cus);
+    for (uint32_t cu_index = 0; cu_index < num_cus; ++cu_index) {
+      EXPECT_EQ(cus[cu_index]->cus_per_shader_array(), num_cus == 4 ? 2u : 0u);
+      if (num_cus == 4) {
+        EXPECT_EQ(cus[cu_index]->shader_array_cu_id(), cu_index % 2);
+      }
+    }
+  }
+}
+
 TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
   auto loaded =
       config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);
@@ -513,6 +693,60 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_TRUE(rdna35.soc()->xcd(0)->command_processor()->packed_tid());
   EXPECT_EQ(rdna35.soc()->sdma_queue_scheduler().packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
+}
+
+TEST(ConfigLoaderTest, Gfx1151HighSgprsAndVccStayWithinTheirWave) {
+  auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  // RDNA3.5 ISA section 3.3.1: s0-s105 are general-purpose registers;
+  // selectors 106/107 name VCC, which has separate simulator storage.
+  ASSERT_EQ(cu->config().sgprs_per_wf, 106u);
+  auto *wf = cu->dispatch_wf(0, 0, 106, 8, 32);
+  auto *neighbor = cu->dispatch_wf(1, 0, 106, 8, 32);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_NE(neighbor, nullptr);
+  const uint32_t base = wf->sgpr_alloc().base;
+  const uint32_t neighbor_base = neighbor->sgpr_alloc().base;
+  ASSERT_EQ(neighbor_base, base + 106u);
+  constexpr uint32_t sentinel = 0x12345678u;
+  cu->write_sgpr(neighbor_base, sentinel);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_NE(decoder, nullptr);
+  // LLVM MC gfx1151 encodings exercise both the destination and source
+  // selectors that the undersized 104-register profile could not back.
+  constexpr std::array<uint32_t, 6> words{
+      0xBEE80081u, // s_mov_b32 s104, 1
+      0xBEE90082u, // s_mov_b32 s105, 2
+      0xBE840068u, // s_mov_b32 s4, s104
+      0xBE850069u, // s_mov_b32 s5, s105
+      0xBEEA0083u, // s_mov_b32 vcc_lo, 3
+      0xBE86006Au, // s_mov_b32 s6, vcc_lo
+  };
+  for (uint32_t word : words) {
+    const std::array<uint32_t, 2> encoding{word, 0};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  }
+  EXPECT_EQ(cu->read_sgpr(base + 104), 1u);
+  EXPECT_EQ(cu->read_sgpr(base + 105), 2u);
+  EXPECT_EQ(cu->read_sgpr(base + 4), 1u);
+  EXPECT_EQ(cu->read_sgpr(base + 5), 2u);
+  EXPECT_EQ(cu->read_sgpr(base + 6), 3u);
+  EXPECT_EQ(wf->vcc(), 3u);
+  EXPECT_EQ(cu->read_sgpr(neighbor_base), sentinel);
+  EXPECT_EQ(neighbor->vcc(), 0u);
+
+  EXPECT_TRUE(cu->owns_sgpr_range(*wf, base + 105, 1));
+  EXPECT_FALSE(cu->owns_sgpr_range(*wf, base + 106, 1));
+  amdgpu::RegisterAccess registers(*wf);
+  EXPECT_EQ(registers.read_sgpr(neighbor_base), 0u);
+  registers.write_sgpr(neighbor_base, 0xDEADBEEFu);
+  EXPECT_EQ(cu->read_sgpr(neighbor_base), sentinel);
+  wf->halt();
+  neighbor->halt();
 }
 
 TEST(ConfigLoaderTest, BuildFromJsonString) {
@@ -1815,6 +2049,95 @@ TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
     EXPECT_EQ(cus[15]->scratch_scoreboard_base(), 480u);
     EXPECT_EQ(cus[16]->scratch_scoreboard_base(), 0u);
   }
+}
+
+TEST(CheckpointTest, RoundTripsCdna5WgpIds) {
+  auto source =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  ASSERT_EQ(source.device.num_cu_per_sh, 8u);
+  constexpr uint16_t kWgpId = 23 | (10 << 6) | ((4 - 1) << 11);
+  constexpr std::array<uint32_t, 6> kCuIndices{0, 5, 7, 8, 13, 15};
+  ASSERT_GT(source.soc()->num_xcds(), 0u);
+  auto *source_xcd = source.soc()->xcd(0);
+  ASSERT_GT(source_xcd->num_shader_engines(), 0u);
+  for (auto *se : source_xcd->shader_engines()) {
+    ASSERT_EQ(se->num_compute_units(), 16u);
+    for (uint32_t cu_index : kCuIndices) {
+      auto *cu = se->compute_unit(cu_index);
+      auto *wf = cu->dispatch_wf(0, 0, 32, 8);
+      ASSERT_NE(wf, nullptr);
+      uint32_t value = 0;
+      ASSERT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
+      ASSERT_EQ(value, cu_index % 8);
+    }
+  }
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-cdna5-wgp-checkpoint-");
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  ASSERT_EQ(restored.soc()->num_xcds(), source.soc()->num_xcds());
+  auto *restored_xcd = restored.soc()->xcd(0);
+  ASSERT_EQ(restored_xcd->num_shader_engines(), source_xcd->num_shader_engines());
+  for (auto *se : restored_xcd->shader_engines()) {
+    ASSERT_EQ(se->num_compute_units(), 16u);
+    for (uint32_t cu_index : kCuIndices) {
+      SCOPED_TRACE(se->full_path() + ".cu" + std::to_string(cu_index));
+      auto *cu = se->compute_unit(cu_index);
+      auto *wf = cu->wf(0);
+      ASSERT_NE(wf, nullptr);
+      ASSERT_FALSE(wf->is_halted());
+      uint32_t value = 0;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
+      EXPECT_EQ(value, cu_index % 8);
+      wf->halt();
+    }
+  }
+}
+
+TEST(CheckpointTest, LegacyAbsentShaderArrayWidthKeepsWgpIdUnsupportedAcrossResaves) {
+  flatbuffers::FlatBufferBuilder builder;
+  auto arch = builder.CreateString("cdna5");
+  auto cu_config = fb::CreateComputeUnitConfig(builder, 1, 128, 256, 64);
+  // Use only the fields in the legacy schema, which cannot distinguish two
+  // arrays of eight WGPs from one array of sixteen.
+  auto se_config = fb::CreateShaderEngineConfig(builder, 16, cu_config);
+  auto xcd_config = fb::CreateXcdConfig(builder, 1, se_config);
+  auto gpu_config = fb::CreateAmdgpuConfig(builder, 1, 0, xcd_config);
+  auto vm_config = fb::CreateVirtualMachineConfig(builder, arch, gpu_config);
+  auto simulation_config = fb::CreateSimulationConfig(builder, 0, 1, 0, vm_config);
+  auto checkpoint = fb::CreateSimulationCheckpoint(builder, 0, simulation_config);
+  builder.Finish(checkpoint);
+  const auto *stored_se = fb::GetSimulationCheckpoint(builder.GetBufferPointer())
+                              ->config()
+                              ->vm()
+                              ->gpu()
+                              ->xcd()
+                              ->shader_engine();
+  EXPECT_FALSE(
+      flatbuffers::IsFieldPresent(stored_se, fb::ShaderEngineConfig::VT_CUS_PER_SHADER_ARRAY));
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-legacy-wgp-checkpoint-");
+  checkpoint_file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
+                                         builder.GetSize()));
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  auto *cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(13);
+  auto *wf = cu->dispatch_wf(0, 0, 32, 8);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint16_t kWgpId = 23 | (10 << 6) | ((4 - 1) << 11);
+  uint32_t value = 0xFFFFFFFFu;
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Unsupported);
+  EXPECT_EQ(value, 0u);
+  config::save_checkpoint(checkpoint_file.path(), *restored.soc(), 0, restored.engine_config,
+                          restored.cpu_dispatch_threads);
+  auto resaved = config::restore_checkpoint(checkpoint_file.path());
+  auto *resaved_wf = resaved.soc()->xcd(0)->shader_engine(0)->compute_unit(13)->wf(0);
+  ASSERT_NE(resaved_wf, nullptr);
+  ASSERT_FALSE(resaved_wf->is_halted());
+  value = 0xFFFFFFFFu;
+  EXPECT_EQ(amdgpu::read_hwreg_field(*resaved_wf, kWgpId, value),
+            amdgpu::HwregAccessResult::Unsupported);
+  EXPECT_EQ(value, 0u);
 }
 
 TEST(CheckpointTest, LegacyAbsentCpuDispatchThreadsStaysSerial) {

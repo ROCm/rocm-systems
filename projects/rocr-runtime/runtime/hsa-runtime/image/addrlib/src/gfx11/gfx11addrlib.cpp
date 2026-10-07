@@ -748,6 +748,9 @@ ChipFamily Gfx11Lib::HwlConvertChipFamily(
         case FAMILY_GFX1103:
             m_settings.isGfx1103 = 1;
             break;
+        case FAMILY_GFX117X:
+            // gfx1170/gfx1171 use the base gfx11 tiling/swizzle behavior
+            break;
         default:
             ADDR_ASSERT(!"Unknown chip family");
             break;
