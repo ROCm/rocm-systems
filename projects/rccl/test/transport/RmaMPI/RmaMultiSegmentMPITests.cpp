@@ -1,0 +1,2543 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Multi-segment DMA-BUF registration tests for ncclRmaIbProxy (AIRUNTIME-2351).
+// Run with NCCL_NET=IB NCCL_CUMEM_ENABLE=1.
+
+#ifdef MPI_TESTS_ENABLED
+#ifdef RCCL_HAS_RMA_IB_PROXY
+
+#include "RmaMPITestBase.hpp"
+#include "RmaMultiSegmentHelpers.hpp"
+#include "HybridVmmHelpers.hpp"
+#include "MPIHelpers.hpp"
+#include "transport/net_ib/gin.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <numeric>
+#include <random>
+#include <string>
+#include <vector>
+
+namespace RCCLRmaTests
+{
+
+namespace
+{
+
+constexpr size_t kSegRequestBytes = 2u * 1024 * 1024;
+constexpr int    kNumSegments     = 4;
+constexpr size_t kSignalSize      = 64;
+constexpr size_t kMiB             = 1024u * 1024;
+
+// INFO marker emitted by the backend when the per-segment path fires.
+constexpr const char* kMultiSegMarker = "multi-segment buffer";
+
+// Edge-case payload sizes from 0 up to `maxBytes`, anchored around byte/word,
+// page (4K), 64K, and the per-segment boundary `seg`. Deduplicated + sorted.
+inline std::vector<size_t> EdgeCaseSizes(size_t seg, size_t maxBytes)
+{
+    std::vector<size_t> v;
+    auto add = [&](size_t s) { if (s <= maxBytes) v.push_back(s); };
+    for (size_t s : {size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{7},
+                     size_t{63}, size_t{64}, size_t{65}, size_t{255}, size_t{256},
+                     size_t{4095}, size_t{4096}, size_t{4097},
+                     size_t{65535}, size_t{65536}, size_t{65537}})
+        add(s);
+    // Per-segment boundary neighbourhood (the split points under test).
+    if (seg >= 1)     { add(seg - 1); add(seg); add(seg + 1); add(seg + 4096); }
+    if (2 * seg >= 1) { add(2 * seg - 1); add(2 * seg); add(2 * seg + 1); }
+    add(3 * seg);
+    add(maxBytes ? maxBytes - 1 : 0);
+    add(maxBytes);
+    std::sort(v.begin(), v.end());
+    v.erase(std::unique(v.begin(), v.end()), v.end());
+    return v;
+}
+
+} // namespace
+
+// RMA proxy fixture + NCCL INFO log capture to confirm the per-segment path
+// fired (vs single-MR fallback when cuMem enumeration is unavailable).
+class RmaMultiSegmentMPITest : public RmaMPITestBase
+{
+protected:
+    std::unique_ptr<MPIHelpers::MpiEnvGuard>             cuMemGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugSubsysGuard_;
+    std::unique_ptr<MPIHelpers::TestLogAssertionContext> logCtx_;
+
+    int GetNumContexts() const override { return 1; }
+
+    void SetUp() override
+    {
+        // Per-segment enumeration needs the cuMem path; the marker gate below
+        // covers cases where the param was already cached process-wide.
+        cuMemGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_CUMEM_ENABLE",  "1");
+        debugGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG",         "INFO");
+        debugSubsysGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS",  "ALL");
+
+        RmaMPITestBase::SetUp();
+
+        logCtx_ = std::make_unique<MPIHelpers::TestLogAssertionContext>(
+            MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+    }
+
+    void TearDown() override
+    {
+        // Deregister IB MRs (base TearDown) BEFORE releasing their backing VMM;
+        // freeing VMM under a live DMA-BUF MR aborts/stalls cleanup (AIRUNTIME-2351).
+        RmaMPITestBase::TearDown();
+        for (auto& b : vmmBuffers_)
+            FreeMultiSegmentVmm(*b);
+        vmmBuffers_.clear();
+        for (auto& b : hybridBuffers_)
+            RCCLHybridVmmTests::FreeHybridVmm(*b);
+        hybridBuffers_.clear();
+        logCtx_.reset();
+        debugSubsysGuard_.reset();
+        debugGuard_.reset();
+        cuMemGuard_.reset();
+    }
+
+    std::string readAllLogs() const
+    {
+        if (!logCtx_) return {};
+        return logCtx_->readNcclDebugLog() + logCtx_->readPerRankStderrLog();
+    }
+
+    // Collective skip: if ANY rank wants to skip, all ranks return true so they
+    // GTEST_SKIP together (a unilateral skip would hang peers).
+    bool SyncSkip(bool wantSkip)
+    {
+        return MPIHelpers::anyRankTrue(wantSkip);
+    }
+
+    // True only if EVERY rank observed the per-segment registration marker.
+    bool AllTookMultiSegPath()
+    {
+        return MPIHelpers::allRanksTrue(
+            readAllLogs().find(kMultiSegMarker) != std::string::npos);
+    }
+
+    // Allocate a fixture-owned N-segment VMM window (freed in TearDown after MR
+    // dereg). Returns nullptr on failure so the caller can SyncSkip. Uses the
+    // rank's CURRENT GPU (round-robin assigned by the harness), not the IB-device
+    // index defaultDevice_, or rank>0 would fault touching dev-0 memory.
+    MultiSegmentVmmBuffer* AllocSym(int nSegments, size_t segBytes)
+    {
+        int dev = 0;
+        if (hipGetDevice(&dev) != hipSuccess)
+            return nullptr;
+        auto buf = std::make_unique<MultiSegmentVmmBuffer>();
+        if (!AllocMultiSegmentVmm(dev, nSegments, segBytes, buf.get()))
+            return nullptr;
+        vmmBuffers_.push_back(std::move(buf));
+        return vmmBuffers_.back().get();
+    }
+
+    MultiSegmentVmmBuffer* AllocDeepEpElastic(size_t gpuBytes, size_t cpuBytes)
+    {
+        int dev = 0;
+        if (hipGetDevice(&dev) != hipSuccess)
+            return nullptr;
+        auto buf = std::make_unique<MultiSegmentVmmBuffer>();
+        if (!AllocDeepEpElasticVmm(dev, gpuBytes, cpuBytes, buf.get()))
+            return nullptr;
+        vmmBuffers_.push_back(std::move(buf));
+        return vmmBuffers_.back().get();
+    }
+
+    RCCLHybridVmmTests::HybridVmmBuffer* AllocHybrid(
+        size_t gpuBytes, size_t localCpuBytes, std::string* reason)
+    {
+        int dev = 0;
+        if (hipGetDevice(&dev) != hipSuccess)
+            return nullptr;
+        if (!RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(
+                dev, /*requireReexport=*/true, reason))
+            return nullptr;
+        auto buf = std::make_unique<RCCLHybridVmmTests::HybridVmmBuffer>();
+        if (!RCCLHybridVmmTests::AllocHybridVmm(
+                dev, gpuBytes, localCpuBytes, buf.get(), reason))
+            return nullptr;
+        hybridBuffers_.push_back(std::move(buf));
+        return hybridBuffers_.back().get();
+    }
+
+    bool AllocHybridForLocalRanks(
+        size_t gpuBytes, size_t localCpuBytes, int expectedLocalRanks,
+        RCCLHybridVmmTests::HybridVmmBuffer** out, std::string* reason)
+    {
+        *out = AllocHybrid(gpuBytes, localCpuBytes, reason);
+        if (SyncSkip(*out == nullptr)) {
+            if (reason && reason->empty())
+                *reason = "hybrid VMM allocation failed on another rank";
+            return false;
+        }
+        if (SyncSkip((*out)->localSize != expectedLocalRanks)) {
+            if (reason)
+                *reason = "unexpected number of shared-memory local ranks";
+            return false;
+        }
+        return true;
+    }
+
+    bool AllocSymPair(MultiSegmentVmmBuffer** src, MultiSegmentVmmBuffer** dst,
+                      int nSegments = kNumSegments,
+                      size_t segBytes = kSegRequestBytes)
+    {
+        *src = AllocSym(nSegments, segBytes);
+        *dst = AllocSym(nSegments, segBytes);
+        return !SyncSkip(*src == nullptr || *dst == nullptr);
+    }
+
+    // Skip only when no rank took the per-segment path. A mixed result is a
+    // failure: SyncSkip(ANY miss) would hide a unilateral-success bug.
+    bool MultiSegmentPathAvailable()
+    {
+        const bool local =
+            readAllLogs().find(kMultiSegMarker) != std::string::npos;
+        if (!MPIHelpers::anyRankTrue(local)) return false;
+        if (!AllTookMultiSegPath()) {
+            ADD_FAILURE() << "multi-segment registration was asymmetric across ranks";
+            return true;
+        }
+        return true;
+    }
+
+    void ExpectPayloadIsolated(const void* window, size_t totalSize,
+                               size_t offset, size_t size, int seed,
+                               uint8_t sentinel, const std::string& context)
+    {
+        SCOPED_TRACE(context);
+        const auto* bytes = static_cast<const uint8_t*>(window);
+        EXPECT_TRUE(VerifyBuf(bytes + offset, size, seed));
+        EXPECT_TRUE(AllSentinel(window, offset, sentinel));
+        EXPECT_TRUE(AllSentinel(bytes + offset + size,
+                                totalSize - offset - size, sentinel));
+    }
+
+    void RunIPutSizeSweep(MultiSegmentVmmBuffer* src,
+                          MultiSegmentVmmBuffer* dst,
+                          void* srcMh, void* dstMh, size_t offset,
+                          uint8_t seedBase, uint8_t sentinel)
+    {
+        const size_t total = src->totalSize;
+        const size_t seg = src->segSize;
+        const std::vector<size_t> sizes = EdgeCaseSizes(seg, total - offset);
+        for (size_t idx = 0; idx < sizes.size(); ++idx)
+        {
+            const size_t size = sizes[idx];
+            const uint8_t seed =
+                static_cast<uint8_t>(seedBase + (idx & 0x3F));
+            const std::string context =
+                "size=" + std::to_string(size) +
+                " offset=" + std::to_string(offset);
+            SCOPED_TRACE(context);
+
+            if (worldRank_ == 0 && size > 0)
+                FillBuf(static_cast<uint8_t*>(src->ptr) + offset, size, seed);
+            if (worldRank_ == 1)
+                FillSentinel(dst->ptr, total, sentinel);
+
+            Barrier();
+            bool putOk = true;
+            if (worldRank_ == 0)
+            {
+                void* req = nullptr;
+                putOk = rma_->iput(rmaCtx_, 0, offset, srcMh, size,
+                                   offset, dstMh, 1, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
+                if (putOk) putOk = PollUntilDone(req);
+            }
+            if (!MPIHelpers::allRanksTrue(putOk))
+            {
+                ADD_FAILURE() << "iput sweep failed " << context;
+                return;
+            }
+            Barrier();
+
+            if (worldRank_ == 1)
+                ExpectPayloadIsolated(dst->ptr, total, offset, size,
+                                      seed, sentinel, context);
+            Barrier();
+        }
+    }
+
+    std::vector<std::unique_ptr<MultiSegmentVmmBuffer>> vmmBuffers_;
+    std::vector<std::unique_ptr<RCCLHybridVmmTests::HybridVmmBuffer>> hybridBuffers_;
+};
+
+// Reproducer (AIRUNTIME-2351): a multi-segment window must register per-segment
+// and move data correctly end to end. Flagship positive case.
+TEST_F(RmaMultiSegmentMPITest, Reproducer_MultiSegmentRegistrationAndTransfer)
+{
+    if (!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t kSize = sb->totalSize;
+
+    if (worldRank_ == 0)
+        FillBuf(sb->ptr, kSize, /*seed=*/0xA0);
+
+    void *sendMh = nullptr, *sendGh = nullptr, *recvMh = nullptr, *recvGh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, kSize, &sendMh, &sendGh))
+        << "multi-segment send buffer registration failed (the AIRUNTIME-2351 bug)";
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize, &recvMh, &recvGh))
+        << "multi-segment recv buffer registration failed (the AIRUNTIME-2351 bug)";
+
+    // Confirm the per-segment path fired; otherwise the feature isn't exercised.
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "Buffer registered as a single MR (cuMem disabled or "
+                        "range not segmented) - multi-segment path not exercised";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, /*context=*/0,
+                             /*srcOff=*/0, sendMh, kSize,
+                             /*dstOff=*/0, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+        EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0xA0))
+            << "data corrupted across segment boundaries";
+}
+
+// Register two complete physical mappings plus half of a third. The final MR
+// must be clipped to the requested range, while a transfer ending at the last
+// registered byte succeeds without touching the mapped-but-unregistered tail.
+TEST_F(RmaMultiSegmentMPITest, PartialFinalSegmentRegistrationAndTransfer)
+{
+    if (!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb, /*nSegments=*/3))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t registeredBytes = 2 * sb->segSize + sb->segSize / 2;
+    const size_t transferOffset  = 2 * sb->segSize - 4096;
+    const size_t transferBytes   = registeredBytes - transferOffset;
+    constexpr uint8_t kSentinel  = 0xB7;
+
+    if (worldRank_ == 0)
+        FillBuf(static_cast<uint8_t*>(sb->ptr) + transferOffset,
+                transferBytes, /*seed=*/0x71);
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, rb->totalSize, kSentinel);
+
+    void *sendMh = nullptr, *sendGh = nullptr;
+    void *recvMh = nullptr, *recvGh = nullptr;
+    ASSERT_EQ(ncclSuccess,
+              RegMr(sb->ptr, registeredBytes, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess,
+              RegMr(rb->ptr, registeredBytes, &recvMh, &recvGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, transferOffset, sendMh, transferBytes,
+                             transferOffset, recvMh, 1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+        ExpectPayloadIsolated(rb->ptr, rb->totalSize, transferOffset,
+                              transferBytes, /*seed=*/0x71, kSentinel,
+                              "partial final physical segment");
+}
+
+// Register from a sub-page offset into the first mapping through a sub-page
+// length into the third. Each per-segment DMA-BUF export must cover every page
+// its MR spans, or ibv_reg_dmabuf_mr rejects the first and last segments.
+TEST_F(RmaMultiSegmentMPITest, SubPageBoundsRegistrationAndTransfer)
+{
+    if (!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb, /*nSegments=*/3))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    constexpr size_t kHeadSkip   = 512;
+    constexpr uint8_t kSentinel  = 0xC3;
+    const size_t registeredBytes = 2 * sb->segSize + sb->segSize / 2 + 100 - kHeadSkip;
+    uint8_t* sendBase = static_cast<uint8_t*>(sb->ptr) + kHeadSkip;
+    uint8_t* recvBase = static_cast<uint8_t*>(rb->ptr) + kHeadSkip;
+
+    if (worldRank_ == 0)
+        FillBuf(sendBase, registeredBytes, /*seed=*/0x5D);
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, rb->totalSize, kSentinel);
+
+    void *sendMh = nullptr, *sendGh = nullptr;
+    void *recvMh = nullptr, *recvGh = nullptr;
+    ASSERT_EQ(ncclSuccess,
+              RegMr(sendBase, registeredBytes, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess,
+              RegMr(recvBase, registeredBytes, &recvMh, &recvGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, /*srcOff=*/0, sendMh, registeredBytes,
+                             /*dstOff=*/0, recvMh, 1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+        ExpectPayloadIsolated(rb->ptr, rb->totalSize, kHeadSkip,
+                              registeredBytes, /*seed=*/0x5D, kSentinel,
+                              "sub-page registration bounds");
+}
+
+// IPut starting/ending mid-segment so the WR builder splits on a non-zero
+// per-segment offset on both sides (most prone to addr/lkey/rkey errors).
+TEST_F(RmaMultiSegmentMPITest, IPutCrossSegmentBoundaryAtOffset)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t      segSize   = sb->segSize;
+    const size_t      off       = segSize / 2;              // start mid-first-segment
+    const size_t      kSize     = sb->totalSize - segSize;  // end mid-last-segment
+    constexpr uint8_t kSentinel = 0xCC;
+
+    if (worldRank_ == 0)
+        FillBuf(static_cast<uint8_t*>(sb->ptr) + off, kSize, /*seed=*/0x5A);
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, rb->totalSize, kSentinel);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &recvMh, &recvGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, /*srcOff=*/off, sendMh, kSize,
+                             /*dstOff=*/off, recvMh, 1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+    {
+        ExpectPayloadIsolated(rb->ptr, rb->totalSize, off, kSize,
+                              /*seed=*/0x5A, kSentinel,
+                              "IPut at offset " + std::to_string(off));
+    }
+}
+
+// IGet of a whole multi-segment remote buffer — read opcode through the split.
+TEST_F(RmaMultiSegmentMPITest, IGetMultiSegment)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer* bb = AllocSym(kNumSegments, kSegRequestBytes);
+
+    if (SyncSkip(bb == nullptr))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t kSize = bb->totalSize;
+    if (worldRank_ == 1)
+        FillBuf(bb->ptr, kSize, /*seed=*/0xC3);
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(bb->ptr, kSize, &mh, &gh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/0, mh, kSize,
+                             /*localOff=*/0, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+        EXPECT_TRUE(VerifyBuf(bb->ptr, kSize, /*seed=*/0xC3))
+            << "iget data corrupted across segment boundaries";
+    }
+    Barrier();
+}
+
+// IGet starting/ending mid-segment so the read WR builder splits on a non-zero
+// per-segment offset on both the remote (source) and local (dest) sides. Mirrors
+// IPutCrossSegmentBoundaryAtOffset for the read opcode (only whole-buffer IGet
+// was covered before).
+TEST_F(RmaMultiSegmentMPITest, IGetCrossSegmentBoundaryAtOffset)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t      segSize   = sb->segSize;
+    const size_t      off       = segSize / 2;              // start mid-first-segment
+    const size_t      kSize     = sb->totalSize - segSize;  // end mid-last-segment
+    constexpr uint8_t kSentinel = 0xD4;
+
+    if (worldRank_ == 1)
+        FillBuf(static_cast<uint8_t*>(sb->ptr) + off, kSize, /*seed=*/0x6E);
+    if (worldRank_ == 0)
+        FillSentinel(rb->ptr, rb->totalSize, kSentinel);
+
+    void *srcMh, *srcGh, *dstMh, *dstGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &srcMh, &srcGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &dstMh, &dstGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/off, srcMh, kSize,
+                             /*localOff=*/off, dstMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+
+        ExpectPayloadIsolated(rb->ptr, rb->totalSize, off, kSize,
+                              /*seed=*/0x6E, kSentinel,
+                              "IGet at offset " + std::to_string(off));
+    }
+    Barrier();
+}
+
+// DeepEP Engram pattern (DeepEP/csrc/kernels/backend/symmetric.hpp and
+// DeepEP/csrc/kernels/elastic/engram.hpp): one symmetric VMM window contains a
+// large GPU receive segment followed by an independently-sized CPU storage
+// segment. An IGet reads from a non-zero offset in the remote CPU segment into a
+// different non-zero offset in the local GPU segment. This specifically guards
+// independent local and remote registration-relative offset tracking.
+TEST_F(RmaMultiSegmentMPITest, DeepEP_EngramMixedWindowIGet)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    constexpr size_t kGpuBytes   = 4 * kMiB;
+    constexpr size_t kCpuBytes   = 2 * kMiB;
+    constexpr size_t kRemoteOff  = kGpuBytes + 4096;
+    constexpr size_t kLocalOff   = 64 * 1024;
+    constexpr size_t kPayload    = 128 * 1024;
+    constexpr uint8_t kSentinel  = 0xD7;
+
+    MultiSegmentVmmBuffer* window = AllocDeepEpElastic(kGpuBytes, kCpuBytes);
+    if (SyncSkip(window == nullptr))
+        GTEST_SKIP() << "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime";
+
+    if (worldRank_ == 1)
+        FillBuf(static_cast<uint8_t*>(window->ptr) + kRemoteOff, kPayload, /*seed=*/0x4D);
+    if (worldRank_ == 0)
+        FillSentinel(window->ptr, kGpuBytes, kSentinel);
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iget(rmaCtx_, 0,
+                             /*remoteOff=*/kRemoteOff, mh, kPayload,
+                             /*localOff=*/kLocalOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+        ExpectPayloadIsolated(window->ptr, kGpuBytes, kLocalOff, kPayload,
+                              /*seed=*/0x4D, kSentinel,
+                              "DeepEP CPU-to-GPU IGet");
+    }
+    Barrier();
+}
+
+// Multi-node stress form of the DeepEP Engram fetch pattern. The registered
+// window is [GPU receive area][CPU Engram storage] at DeepEP's 2 MiB alignment.
+// Each IGet reads a changing non-zero remote CPU offset into an unrelated local
+// GPU offset, while sentinels ensure the GPU receive area is not over-written.
+TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
+{
+    if (!SetUpFixture(2, 2)) return;
+    if (MPIEnvironment::cached_multi_node_result != 1)
+        GTEST_SKIP() << "requires exactly one rank on each of two nodes";
+
+    constexpr size_t kGpuBytes  = 8 * kMiB;
+    constexpr size_t kCpuBytes  = 4 * kMiB;
+    constexpr int    kIterations = 32;
+    constexpr uint8_t kSentinel = 0xD9;
+    const std::vector<size_t> payloadSizes = {
+        size_t{1}, size_t{63}, size_t{4095}, size_t{4096},
+        size_t{65535}, size_t{65536}, size_t{131072}, size_t{262144}
+    };
+
+    MultiSegmentVmmBuffer* window = AllocDeepEpElastic(kGpuBytes, kCpuBytes);
+    if (SyncSkip(window == nullptr))
+        GTEST_SKIP() << "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime";
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
+
+    for (int i = 0; i < kIterations; ++i)
+    {
+        const size_t len = payloadSizes[static_cast<size_t>(i) % payloadSizes.size()];
+        const size_t remoteSpan = kCpuBytes - len - 4096;
+        const size_t localSpan = kGpuBytes - len - 65536;
+        const size_t remoteOff = kGpuBytes + 4096 +
+                                 (static_cast<size_t>(i) * 131071) % remoteSpan;
+        const size_t localOff = 65536 +
+                                (static_cast<size_t>(i) * 65537) % localSpan;
+        const uint8_t seed = static_cast<uint8_t>(0x40 + i);
+
+        if (worldRank_ == 1)
+            FillBuf(static_cast<uint8_t*>(window->ptr) + remoteOff, len, seed);
+        if (worldRank_ == 0)
+            FillSentinel(window->ptr, kGpuBytes, kSentinel);
+
+        Barrier();
+        bool getOk = true;
+        if (worldRank_ == 0)
+        {
+            void* req = nullptr;
+            getOk = rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
+                               localOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
+            if (getOk) getOk = PollUntilDone(req);
+        }
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(getOk))
+            << "DeepEP Engram IGet failed at iteration " << i;
+        if (worldRank_ == 0)
+            ExpectPayloadIsolated(window->ptr, kGpuBytes, localOff, len,
+                                  seed, kSentinel,
+                                  "DeepEP Engram iteration " + std::to_string(i));
+        Barrier();
+    }
+}
+
+// DeepEP HybridElasticSymmetricMemory:
+// [GPU][CPU local-rank 0]...[CPU local-rank 3]. Each process imports the same
+// local CPU handles before registration. Fetch from the matching CPU segment
+// on the other node into a non-zero local GPU offset.
+TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
+{
+    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
+                      /*minNodes=*/2, /*maxNodes=*/2))
+        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
+
+    constexpr size_t kGpuBytes = 8 * kMiB;
+    constexpr size_t kCpuBytes = 2 * kMiB;
+    constexpr size_t kPayload = 128 * 1024;
+    constexpr size_t kLocalOff = 64 * 1024;
+    constexpr uint8_t kSentinel = 0xB7;
+
+    std::string reason;
+    RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
+    if (!AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
+        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
+
+    const size_t remoteOff = kGpuBytes + static_cast<size_t>(window->localRank) * kCpuBytes + 4096;
+    const int peer = MPIHelpers::findRemotePeerForLocalRank(window->localRank);
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(peer >= 0)) << "no remote peer for local rank " << window->localRank;
+
+    FillBuf(static_cast<uint8_t*>(window->ptr) + remoteOff, kPayload,
+            static_cast<uint8_t>(0x30 + worldRank_));
+    FillSentinel(window->ptr, kGpuBytes, kSentinel);
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
+
+    Barrier();
+    void* req = nullptr;
+    bool getOk = rma_->iget(rmaCtx_, 0, remoteOff, mh, kPayload,
+                            kLocalOff, mh, peer, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
+    if (getOk) getOk = PollUntilDone(req);
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(getOk)) << "hybrid IGet failed on at least one rank";
+    ExpectPayloadIsolated(window->ptr, kGpuBytes, kLocalOff, kPayload,
+                          static_cast<uint8_t>(0x30 + peer), kSentinel,
+                          "DeepEP hybrid imported CPU IGet");
+    Barrier();
+}
+
+// Multi-node hybrid stress: alternate the remote node's imported CPU-owner
+// segment while varying source/destination offsets and transfer sizes. This
+// exercises segment-window selection, shared-handle lifetime, and independent
+// local/remote cursors with sentinel protection.
+TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
+{
+    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
+                      /*minNodes=*/2, /*maxNodes=*/2))
+        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
+
+    constexpr size_t kGpuBytes = 8 * kMiB;
+    constexpr size_t kCpuBytes = 2 * kMiB;
+    constexpr int kIterations = 32;
+    constexpr uint8_t kSentinel = 0xBC;
+    const std::vector<size_t> sizes = {
+        size_t{1}, size_t{63}, size_t{4095}, size_t{4096},
+        size_t{65535}, size_t{65536}, size_t{131072}, size_t{262144}
+    };
+
+    std::string reason;
+    RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
+    if (!AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
+        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
+
+    for (int i = 0; i < kIterations; ++i)
+    {
+        const size_t len = sizes[static_cast<size_t>(i) % sizes.size()];
+        const size_t sourceInnerOff = 4096 +
+            (static_cast<size_t>(i) * 131071) % (kCpuBytes - len - 4096);
+        const size_t ownCpuOff = kGpuBytes +
+            static_cast<size_t>(window->localRank) * kCpuBytes + sourceInnerOff;
+        const size_t localOff = 65536 +
+            (static_cast<size_t>(i) * 65537) % (kGpuBytes - len - 65536);
+        const uint8_t seed = static_cast<uint8_t>(0x40 + worldRank_ + i);
+
+        FillBuf(static_cast<uint8_t*>(window->ptr) + ownCpuOff, len, seed);
+        FillSentinel(window->ptr, kGpuBytes, kSentinel);
+        Barrier();
+
+        const int sourceLocalRank = (i + window->localRank) % window->localSize;
+        const int peer = MPIHelpers::findRemotePeerForLocalRank(sourceLocalRank);
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(peer >= 0))
+            << "no remote peer for local rank " << sourceLocalRank << " at iteration " << i;
+        const size_t remoteOff = kGpuBytes +
+            static_cast<size_t>(sourceLocalRank) * kCpuBytes + sourceInnerOff;
+
+        void* req = nullptr;
+        bool getOk = rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
+                                localOff, mh, peer, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
+        if (getOk) getOk = PollUntilDone(req);
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(getOk))
+            << "hybrid IGet failed on at least one rank at iteration " << i;
+        ExpectPayloadIsolated(window->ptr, kGpuBytes, localOff, len,
+                              static_cast<uint8_t>(0x40 + peer + i),
+                              kSentinel,
+                              "hybrid IGet iteration " + std::to_string(i));
+        Barrier();
+    }
+}
+
+// Negative hybrid range guard: an IGet that overruns the final imported CPU
+// segment must be rejected before posting and leave the GPU destination intact.
+TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
+{
+    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
+                      /*minNodes=*/2, /*maxNodes=*/2))
+        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
+
+    constexpr size_t kGpuBytes = 8 * kMiB;
+    constexpr size_t kCpuBytes = 2 * kMiB;
+    constexpr uint8_t kSentinel = 0xC7;
+
+    std::string reason;
+    RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
+    if (!AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
+        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    FillSentinel(window->ptr, kGpuBytes, kSentinel);
+    Barrier();
+
+    const int peer = MPIHelpers::findRemotePeerForLocalRank(window->localRank);
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(peer >= 0)) << "no remote peer for local rank " << window->localRank;
+    void* req = nullptr;
+    EXPECT_EQ(ncclInvalidArgument,
+              rma_->iget(rmaCtx_, 0, window->totalSize - 32, mh, 64,
+                         /*localOff=*/0, mh, peer, ncclRmaOptFlagsDefault, &req));
+    EXPECT_EQ(req, nullptr);
+    EXPECT_TRUE(AllSentinel(window->ptr, kGpuBytes, kSentinel));
+    Barrier();
+}
+
+// findRemotePeerForLocalRank must return a rank on another node with the
+// requested local rank, or -1 when no node has one. Pure MPI topology, so it
+// runs even where the hybrid tests that use it are skipped.
+TEST_F(RmaMultiSegmentMPITest, FindRemotePeerForLocalRankTopology)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    int worldSize = 0;
+    MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
+    char localName[MPI_MAX_PROCESSOR_NAME] = {};
+    int nameLength = 0;
+    MPI_Get_processor_name(localName, &nameLength);
+    MPI_Comm localComm = MPI_COMM_NULL;
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &localComm);
+    int localRank = -1;
+    MPI_Comm_rank(localComm, &localRank);
+    MPI_Comm_free(&localComm);
+
+    std::vector<char> names(static_cast<size_t>(worldSize) * MPI_MAX_PROCESSOR_NAME, 0);
+    std::vector<int> localRanks(static_cast<size_t>(worldSize), -1);
+    MPI_Allgather(localName, MPI_MAX_PROCESSOR_NAME, MPI_CHAR,
+                  names.data(), MPI_MAX_PROCESSOR_NAME, MPI_CHAR, MPI_COMM_WORLD);
+    MPI_Allgather(&localRank, 1, MPI_INT, localRanks.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    // Both lookups are collective; every rank makes them before checking.
+    const int peer = MPIHelpers::findRemotePeerForLocalRank(localRank);
+    const int missing = MPIHelpers::findRemotePeerForLocalRank(worldSize);
+
+    auto nameOf = [&](int rank) {
+        return std::string(names.data() + static_cast<size_t>(rank) * MPI_MAX_PROCESSOR_NAME);
+    };
+    bool remoteMatchExists = false;
+    for (int rank = 0; rank < worldSize; ++rank)
+        if (nameOf(rank) != localName && localRanks[static_cast<size_t>(rank)] == localRank)
+            remoteMatchExists = true;
+
+    EXPECT_EQ(missing, -1) << "no node has local rank " << worldSize;
+    if (!remoteMatchExists)
+    {
+        EXPECT_EQ(peer, -1);
+    }
+    else
+    {
+        ASSERT_GE(peer, 0);
+        ASSERT_LT(peer, worldSize);
+        EXPECT_NE(nameOf(peer), localName) << "peer " << peer << " is on this node";
+        EXPECT_EQ(localRanks[static_cast<size_t>(peer)], localRank);
+    }
+}
+
+// Receiver-side flush over a multi-segment buffer: after a plain iput, rank 1
+// must fence EVERY physical segment via iflush (one loopback read per segment)
+// before reading. Exercises the multi-segment flush path; a segment-0-only
+// flush faults here on a multi-segment handle.
+TEST_F(RmaMultiSegmentMPITest, IFlushMultiSegment)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t kSize = sb->totalSize;
+    if (worldRank_ == 0)
+        FillBuf(sb->ptr, kSize, /*seed=*/0x3C);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, kSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize, &recvMh, &recvGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+    {
+        void* freq = nullptr;
+        EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
+            << "multi-segment iflush post failed";
+        // A NULL request means GDR flush is disabled; there is nothing to wait for.
+        if (freq != nullptr)
+            EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
+        EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x3C))
+            << "data corrupted across segment boundaries after flush";
+    }
+    Barrier();
+}
+
+// Flush after a PARTIAL, offset multi-segment iput: only a sub-range straddling
+// an interior boundary is written, then rank 1 flushes the whole handle. Since
+// iflush fences EVERY physical segment (no offset/size args), it must fence the
+// touched segments and leave the untouched sentinel bytes intact. Complements
+// IFlushMultiSegment (which flushes after a full-window iput).
+TEST_F(RmaMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t      segSize   = sb->segSize;
+    const size_t      off       = segSize / 2;              // start mid-first-segment
+    const size_t      kSize     = sb->totalSize - segSize;  // end mid-last-segment
+    constexpr uint8_t kSentinel = 0x71;
+
+    if (worldRank_ == 0)
+        FillBuf(static_cast<uint8_t*>(sb->ptr) + off, kSize, /*seed=*/0x4F);
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, rb->totalSize, kSentinel);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &recvMh, &recvGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, /*srcOff=*/off, sendMh, kSize,
+                             /*dstOff=*/off, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+    {
+        void* freq = nullptr;
+        EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
+            << "multi-segment iflush post failed after partial put";
+        if (freq != nullptr)
+            EXPECT_TRUE(PollUntilDone(freq)) << "multi-segment flush did not complete";
+
+        ExpectPayloadIsolated(rb->ptr, rb->totalSize, off, kSize,
+                              /*seed=*/0x4F, kSentinel,
+                              "partial IPut followed by flush");
+    }
+    Barrier();
+}
+
+// REGRESSION (flush fast path): iflush on an ordinary single-allocation buffer
+// must still fence and verify. IFlushMultiSegment only covers the multi-segment
+// handle and SingleSegmentRegression never flushes, so the nSeg==1 flush path --
+// which the multi-segment change must not regress -- is otherwise untested. No
+// nSegments gate: a single-segment buffer intentionally does NOT take
+// the per-segment path.
+TEST_F(RmaMultiSegmentMPITest, IFlushSingleSegmentRegression)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    const size_t kSize = 1u << 20; // 1 MiB, plain hipMalloc => single segment
+    void* sendBuf = AllocBuf(kSize);
+    void* recvBuf = AllocBuf(kSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+
+    if (worldRank_ == 0)
+        FillBuf(sendBuf, kSize, /*seed=*/0x2D);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kSize, &recvMh, &recvGh));
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+    {
+        void* freq = nullptr;
+        EXPECT_EQ(ncclSuccess, rma_->iflush(rmaCtx_, 0, recvMh, /*peerRank=*/0, &freq))
+            << "single-segment iflush post failed";
+        if (freq != nullptr)
+            EXPECT_TRUE(PollUntilDone(freq)) << "single-segment flush did not complete";
+        EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0x2D))
+            << "data corrupted after single-segment flush";
+    }
+    Barrier();
+}
+
+// IPutSignal over a multi-segment payload: data WRs split per segment, then a
+// chained signal WR. Verifies both payload and the atomic.
+TEST_F(RmaMultiSegmentMPITest, IPutSignalMultiSegment)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t kSize = sb->totalSize;
+
+    void* sigBuf = AllocBuf(kSignalSize);
+    ASSERT_NE(sigBuf, nullptr);
+
+    if (worldRank_ == 0)
+        FillBuf(sb->ptr, kSize, /*seed=*/0x55);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh, *sigMh, *sigGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, kSize,       &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize,       &recvMh, &recvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(sigBuf,  kSignalSize, &sigMh,  &sigGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iputSignal(rmaCtx_, 0,
+                                   /*srcOff=*/0, sendMh, kSize,
+                                   /*dstOff=*/0, recvMh, /*peerRank=*/1,
+                                   /*signalOff=*/0, sigMh, /*signalValue=*/0,
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+    {
+        EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x55))
+            << "multi-segment iputSignal payload mismatch";
+        EXPECT_EQ(ReadSignal(sigBuf), 1u)
+            << "signal not delivered after multi-segment payload";
+    }
+}
+
+// The signal itself lives in a multi-segment window. NEGATIVE: atomics that
+// straddle a segment boundary, are misaligned inside a later segment, or run
+// past the window are rejected without posting. POSITIVE: atomics at the last
+// word of segment 0, the first word of segment 1, and inside segment 2 each
+// land at exactly that offset and nowhere else.
+TEST_F(RmaMultiSegmentMPITest, IPutSignalInLaterSegment)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+    MultiSegmentVmmBuffer* sw = AllocSym(3, kSegRequestBytes);
+    if (SyncSkip(sw == nullptr))
+        GTEST_SKIP() << "multi-segment signal window allocation unavailable";
+
+    const size_t      kSize     = sb->totalSize;
+    const size_t      seg       = sw->segSize;
+    const size_t      sigTotal  = sw->totalSize;
+    constexpr uint8_t kSentinel = 0x6E;
+
+    if (worldRank_ == 0)
+        FillBuf(sb->ptr, kSize, /*seed=*/0x4C);
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, kSize, kSentinel);
+    FillSentinel(sw->ptr, sigTotal, 0);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh, *sigMh, *sigGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, kSize,    &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize,    &recvMh, &recvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(sw->ptr, sigTotal, &sigMh,  &sigGh));
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        const size_t badOffs[] = {seg - 4, seg + 4, sigTotal - 4, sigTotal};
+        for (size_t off : badOffs)
+        {
+            void* req = nullptr;
+            EXPECT_EQ(ncclInvalidArgument,
+                      rma_->iputSignal(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, 1,
+                                       off, sigMh, 0, NCCL_NET_SIGNAL_OP_INC,
+                                       /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
+                << "signal at offset " << off << " must be rejected";
+            EXPECT_EQ(req, nullptr) << "rejected iputSignal at offset " << off << " posted a request";
+        }
+    }
+    Barrier();
+    if (worldRank_ == 1)
+    {
+        EXPECT_TRUE(AllSentinel(rb->ptr, kSize, kSentinel))
+            << "rejected iputSignal wrote the payload";
+        EXPECT_TRUE(AllSentinel(sw->ptr, sigTotal, 0))
+            << "rejected iputSignal wrote the signal window";
+    }
+    Barrier();
+
+    struct { size_t off; uint32_t op; uint64_t value; uint64_t expect; } cases[] = {
+        {2 * seg + 64, NCCL_NET_SIGNAL_OP_INC, 0, 1},
+        {seg - 8,      NCCL_NET_SIGNAL_OP_ADD, 5, 5},
+        {seg,          NCCL_NET_SIGNAL_OP_ADD, 7, 7},
+    };
+    if (worldRank_ == 0)
+    {
+        for (const auto& c : cases)
+        {
+            void* req = nullptr;
+            ASSERT_EQ(ncclSuccess,
+                      rma_->iputSignal(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, 1,
+                                       c.off, sigMh, c.value, c.op,
+                                       /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
+                << "signal at offset " << c.off;
+            ASSERT_TRUE(PollUntilDone(req));
+        }
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+    {
+        EXPECT_TRUE(VerifyBuf(rb->ptr, kSize, /*seed=*/0x4C))
+            << "iputSignal payload mismatch";
+        std::vector<uint64_t> words(sigTotal / sizeof(uint64_t));
+        ASSERT_EQ(hipSuccess, hipMemcpy(words.data(), sw->ptr, sigTotal, hipMemcpyDeviceToHost));
+        for (const auto& c : cases)
+        {
+            EXPECT_EQ(words[c.off / sizeof(uint64_t)], c.expect)
+                << "signal missing at offset " << c.off;
+            words[c.off / sizeof(uint64_t)] = 0;
+        }
+        size_t stray = 0, firstStray = 0;
+        for (size_t i = 0; i < words.size(); i++)
+        {
+            if (words[i] != 0 && stray++ == 0) firstStray = i * sizeof(uint64_t);
+        }
+        EXPECT_EQ(stray, 0u) << "stray signal writes; first at offset " << firstStray;
+    }
+}
+
+// Sweep IPut payloads from 0 to the full window across edge sizes (byte, word,
+// page, 64K, and segment boundaries). Verifies the payload landed and that no
+// byte past `size` was touched (catches over-write / boundary-split errors).
+TEST_F(RmaMultiSegmentMPITest, IPutSizeSweepFromZero)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    constexpr uint8_t kSentinel = 0xBD;
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &recvMh, &recvGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    RunIPutSizeSweep(sb, rb, sendMh, recvMh, /*offset=*/0,
+                     /*seedBase=*/0x40, kSentinel);
+}
+
+// Same sweep but starting at an offset that sits just inside the first segment,
+// so every transfer begins mid-segment and most cross >=1 boundary. Stresses
+// the non-zero per-segment offset arithmetic on both local and remote sides.
+TEST_F(RmaMultiSegmentMPITest, IPutSizeSweepAtBoundaryOffset)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t off = (sb->segSize >= 64) ? sb->segSize - 64 : 0;
+    constexpr uint8_t kSentinel = 0x9C;
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &recvMh, &recvGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    RunIPutSizeSweep(sb, rb, sendMh, recvMh, off,
+                     /*seedBase=*/0x80, kSentinel);
+}
+
+// NEGATIVE: a buffer spanning more than NCCL_RMA_MAX_SEGMENTS must be rejected
+// with ncclInvalidUsage (no truncation, no crash). Gated on the path being live.
+TEST_F(RmaMultiSegmentMPITest, RegisterExceedsMaxSegmentsRejected)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    // Confirm the per-segment path is live first, else the assertion is moot.
+    {
+        MultiSegmentVmmBuffer* probe = AllocSym(2, kSegRequestBytes);
+        if (SyncSkip(probe == nullptr))
+            GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+        void *pmh = nullptr, *pgh = nullptr;
+        EXPECT_EQ(ncclSuccess, RegMr(probe->ptr, probe->totalSize, &pmh, &pgh));
+        if (!MultiSegmentPathAvailable())
+            GTEST_SKIP() << "multi-segment path not exercised on this host";
+    }
+
+    const int kOverCap = NCCL_RMA_MAX_SEGMENTS + 1;
+    MultiSegmentVmmBuffer* big = AllocSym(kOverCap, kSegRequestBytes);
+    if (SyncSkip(big == nullptr))
+        GTEST_SKIP() << "Could not allocate " << kOverCap << " VMM segments";
+
+    void *mh = nullptr, *gh = nullptr;
+    ncclResult_t r = RegMr(big->ptr, big->totalSize, &mh, &gh);
+    EXPECT_EQ(r, ncclInvalidUsage)
+        << "registration of a " << kOverCap << "-segment buffer should be rejected "
+        << "with ncclInvalidUsage (cap=" << NCCL_RMA_MAX_SEGMENTS << "), got " << r;
+    EXPECT_EQ(mh, nullptr) << "no MR handle should be produced on rejection";
+}
+
+// REGRESSION: an ordinary single-allocation buffer must still register and
+// transfer via the nSeg==1 fast path.
+TEST_F(RmaMultiSegmentMPITest, SingleSegmentRegression)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    const size_t kSize = 1u << 20; // 1 MiB, plain hipMalloc => single segment
+
+    void* sendBuf = AllocBuf(kSize);
+    void* recvBuf = AllocBuf(kSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+
+    if (worldRank_ == 0)
+        FillBuf(sendBuf, kSize, /*seed=*/0x77);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kSize, &recvMh, &recvGh));
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+        EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0x77));
+}
+
+// NEGATIVE (cross-rank symmetry guard): ranks register windows with different
+// physical segment counts; the backend must reject collectively with
+// ncclInternalError instead of running the mismatched-stride all-gather.
+TEST_F(RmaMultiSegmentMPITest, RegisterAsymmetricSegmentCountRejected)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    // Distinct counts per rank (2 vs 8) so enumeration is very unlikely to agree.
+    const int myNSeg = (worldRank_ == 0) ? 2 : 8;
+    MultiSegmentVmmBuffer* bb = AllocSym(myNSeg, kSegRequestBytes);
+    if (SyncSkip(bb == nullptr))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    void *mh = nullptr, *gh = nullptr;
+    ncclResult_t r = RegMr(bb->ptr, bb->totalSize, &mh, &gh);
+
+    // Both ranks must have taken the per-segment path, else there is nothing to test.
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    // If enumeration happened to return identical counts there is no asymmetry
+    // to reject (registration succeeds on both ranks); skip rather than misfire.
+    // Skip only if every rank succeeded (identical enumeration). any-rank skip hid unilateral success.
+    if (MPIHelpers::allRanksTrue(r == ncclSuccess))
+        GTEST_SKIP() << "ranks enumerated identical segment counts; no asymmetry";
+
+    EXPECT_EQ(r, ncclInvalidUsage)
+        << "asymmetric per-rank segment count must be rejected (rank " << worldRank_
+        << " requested " << myNSeg << " segments)";
+    EXPECT_EQ(mh, nullptr) << "no MR handle should be produced on rejection";
+}
+
+// POSITIVE: equal segment counts with different per-rank boundaries (asymmetric
+// windows / mixed GPU+CPU splits). Registration keeps a per-rank segOff table
+// and splits the full-window put on each side independently.
+TEST_F(RmaMultiSegmentMPITest, RegisterEqualCountDifferentBoundariesTransfer)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer* bb =
+        worldRank_ == 0 ? AllocDeepEpElastic(4 * kMiB, 2 * kMiB)
+                        : AllocDeepEpElastic(2 * kMiB, 4 * kMiB);
+    if (SyncSkip(bb == nullptr))
+        GTEST_SKIP() << "mixed GPU/CPU VMM allocation unavailable on this host";
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(bb->ptr, bb->totalSize, &mh, &gh));
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    constexpr size_t kTotal = 6 * kMiB;
+    constexpr uint8_t kSentinel = 0xC3;
+    if (worldRank_ == 0)
+        FillBuf(bb->ptr, kTotal, /*seed=*/0x5A);
+    if (worldRank_ == 1)
+        FillSentinel(bb->ptr, kTotal, kSentinel);
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, 0, mh, kTotal, 0, mh, 1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+        EXPECT_TRUE(VerifyBuf(bb->ptr, kTotal, /*seed=*/0x5A));
+}
+
+// NEGATIVE: only rank 0 exceeds the segment cap. Rank 1 successfully registers
+// locally, then both ranks must meet in the status collective, reject, and
+// clean up. If rank 0 returns early this test hangs in registration.
+TEST_F(RmaMultiSegmentMPITest, RankLocalRegistrationFailureRejectedCollectively)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer* probe = AllocSym(2, kSegRequestBytes);
+    if (SyncSkip(probe == nullptr))
+        GTEST_SKIP() << "multi-segment VMM allocation unavailable on this host";
+    void *probeMh = nullptr, *probeGh = nullptr;
+    ASSERT_EQ(ncclSuccess,
+              RegMr(probe->ptr, probe->totalSize, &probeMh, &probeGh));
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    const int myNSeg =
+        worldRank_ == 0 ? NCCL_RMA_MAX_SEGMENTS + 1 : 2;
+    MultiSegmentVmmBuffer* bb = AllocSym(myNSeg, kSegRequestBytes);
+    if (SyncSkip(bb == nullptr))
+        GTEST_SKIP() << "asymmetric failure layout allocation unavailable";
+
+    void *mh = nullptr, *gh = nullptr;
+    const ncclResult_t r = RegMr(bb->ptr, bb->totalSize, &mh, &gh);
+    EXPECT_EQ(r, ncclInvalidUsage);
+    EXPECT_EQ(mh, nullptr);
+}
+
+// POSITIVE after NEGATIVE: the registration consensus buffer is per-comm and
+// reused by every registration. After a collectively rejected registration,
+// later registrations with shrinking and growing segment counts must each see
+// only their own layout and move data across every segment.
+TEST_F(RmaMultiSegmentMPITest, RegistrationAfterCollectiveRejectionTransfers)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer* probe = AllocSym(2, kSegRequestBytes);
+    if (SyncSkip(probe == nullptr))
+        GTEST_SKIP() << "multi-segment VMM allocation unavailable on this host";
+    void *probeMh = nullptr, *probeGh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(probe->ptr, probe->totalSize, &probeMh, &probeGh));
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    const int badNSeg = worldRank_ == 0 ? NCCL_RMA_MAX_SEGMENTS + 1 : 2;
+    MultiSegmentVmmBuffer* bad = AllocSym(badNSeg, kSegRequestBytes);
+    if (SyncSkip(bad == nullptr))
+        GTEST_SKIP() << "asymmetric failure layout allocation unavailable";
+    void *badMh = nullptr, *badGh = nullptr;
+    ASSERT_EQ(ncclInvalidUsage, RegMr(bad->ptr, bad->totalSize, &badMh, &badGh));
+    ASSERT_EQ(badMh, nullptr);
+
+    constexpr uint8_t kSentinel = 0xA5;
+    const int nSegs[] = {4, 2, 3};
+    for (int i = 0; i < (int)(sizeof(nSegs) / sizeof(nSegs[0])); i++)
+    {
+        SCOPED_TRACE(::testing::Message() << "round " << i << " nSeg " << nSegs[i]);
+        MultiSegmentVmmBuffer* bb = AllocSym(nSegs[i], kSegRequestBytes);
+        ASSERT_FALSE(SyncSkip(bb == nullptr)) << "symmetric allocation failed after rejection";
+
+        void *mh = nullptr, *gh = nullptr;
+        ASSERT_EQ(ncclSuccess, RegMr(bb->ptr, bb->totalSize, &mh, &gh));
+        ASSERT_NE(mh, nullptr);
+
+        const uint8_t seed = (uint8_t)(0x30 + i);
+        if (worldRank_ == 0)
+            FillBuf(bb->ptr, bb->totalSize, seed);
+        if (worldRank_ == 1)
+            FillSentinel(bb->ptr, bb->totalSize, kSentinel);
+
+        Barrier();
+        if (worldRank_ == 0)
+        {
+            void* req = nullptr;
+            ASSERT_EQ(ncclSuccess, rma_->iput(rmaCtx_, 0, 0, mh, bb->totalSize, 0, mh, 1,
+                                              ncclRmaOptFlagsDefault, &req));
+            ASSERT_TRUE(PollUntilDone(req));
+        }
+        Barrier();
+
+        if (worldRank_ == 1)
+            EXPECT_TRUE(VerifyBuf(bb->ptr, bb->totalSize, seed));
+        Barrier();
+    }
+}
+
+// NEGATIVE (range guard): out-of-range IPut offsets/sizes must be rejected with
+// ncclInvalidArgument and must NOT post anything (recv stays untouched).
+TEST_F(RmaMultiSegmentMPITest, IPutOutOfRangeRejectedNoCorruption)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t      total     = sb->totalSize;
+    constexpr uint8_t kSentinel = 0xE7;
+
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, total, kSentinel);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, total, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, total, &recvMh, &recvGh));
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        // size exactly one byte past the window.
+        EXPECT_EQ(ncclInvalidArgument,
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, total + 1, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req))
+            << "oversized transfer must be rejected";
+        // valid size but srcOff pushes the source past the end.
+        EXPECT_EQ(ncclInvalidArgument,
+                  rma_->iput(rmaCtx_, 0, /*srcOff=*/1, sendMh, total, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req))
+            << "src offset overrun must be rejected";
+        // valid size but dstOff pushes the destination past the end.
+        EXPECT_EQ(ncclInvalidArgument,
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, total, /*dstOff=*/1, recvMh, 1, ncclRmaOptFlagsDefault, &req))
+            << "dst offset overrun must be rejected";
+        EXPECT_EQ(req, nullptr) << "rejected iput must not produce a request";
+    }
+    Barrier();
+
+    // Nothing was posted, so the receiver's window must be byte-for-byte intact.
+    if (worldRank_ == 1)
+        EXPECT_TRUE(AllSentinel(rb->ptr, total, kSentinel))
+            << "rejected iput corrupted the destination window";
+}
+
+// NEGATIVE (range guard): out-of-range IGet offsets/sizes must be rejected.
+TEST_F(RmaMultiSegmentMPITest, IGetOutOfRangeRejected)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer* bb = AllocSym(kNumSegments, kSegRequestBytes);
+    if (SyncSkip(bb == nullptr))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t total = bb->totalSize;
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(bb->ptr, total, &mh, &gh));
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        EXPECT_EQ(ncclInvalidArgument,
+                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/0, mh, total + 1, 0, mh, 1, ncclRmaOptFlagsDefault, &req))
+            << "oversized iget must be rejected";
+        EXPECT_EQ(ncclInvalidArgument,
+                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/1, mh, total, 0, mh, 1, ncclRmaOptFlagsDefault, &req))
+            << "remote offset overrun must be rejected";
+        EXPECT_EQ(ncclInvalidArgument,
+                  rma_->iget(rmaCtx_, 0, 0, mh, total, /*localOff=*/1, mh, 1, ncclRmaOptFlagsDefault, &req))
+            << "local offset overrun must be rejected";
+        EXPECT_EQ(req, nullptr) << "rejected iget must not produce a request";
+    }
+    Barrier();
+}
+
+// NEGATIVE (range guard): IPutSignal must reject both an out-of-range payload
+// and an out-of-range signal offset (the 8-byte atomic) without posting.
+TEST_F(RmaMultiSegmentMPITest, IPutSignalOutOfRangeRejectedNoCorruption)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t      total     = sb->totalSize;
+    constexpr uint8_t kSentinel = 0x3B;
+
+    void* sigBuf = AllocBuf(kSignalSize);
+    ASSERT_NE(sigBuf, nullptr);
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, total, kSentinel);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh, *sigMh, *sigGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, total,        &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, total,        &recvMh, &recvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(sigBuf,  kSignalSize,  &sigMh,  &sigGh));
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        // Payload past the window (valid signal offset).
+        EXPECT_EQ(ncclInvalidArgument,
+                  rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total + 1, 0, recvMh, 1,
+                                   /*signalOff=*/0, sigMh, 0, NCCL_NET_SIGNAL_OP_INC,
+                                   /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
+            << "oversized iputSignal payload must be rejected";
+        // Signal atomic straddles the end of the signal window (signalOff+8 > size).
+        EXPECT_EQ(ncclInvalidArgument,
+                  rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1,
+                                   /*signalOff=*/kSignalSize - 4, sigMh, 0,
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
+            << "out-of-range signal offset must be rejected";
+        EXPECT_EQ(ncclInvalidArgument,
+                  rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1,
+                                   /*signalOff=*/4, sigMh, 0,
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
+            << "unaligned signal atomic must be rejected";
+        EXPECT_EQ(req, nullptr) << "rejected iputSignal must not produce a request";
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+    {
+        EXPECT_TRUE(AllSentinel(rb->ptr, total, kSentinel))
+            << "rejected iputSignal corrupted the destination window";
+        EXPECT_EQ(ReadSignal(sigBuf), 0u)
+            << "rejected iputSignal must not deliver the signal";
+    }
+}
+
+// SCALE/CORRUPTION variation: exercise EVERY internal segment boundary of a
+// wide (many-segment) window. For each boundary, transfer a chunk that straddles
+// it and verify the payload landed exactly and no neighbouring byte was touched.
+TEST_F(RmaMultiSegmentMPITest, BoundaryStressNoCorruption)
+{
+    if (!SetUpFixture(2, 2)) return;
+
+    constexpr int     kWideSegments = 8; // more boundaries == closer to "at scale"
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb, kWideSegments))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t      total     = sb->totalSize;
+    const size_t      seg       = sb->segSize;
+    const int         nSeg      = sb->nSegments;
+    constexpr uint8_t kSentinel = 0x6F;
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, total, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, total, &recvMh, &recvGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    // Straddle each interior boundary k*seg with a chunk that lands in both the
+    // preceding and following segment, so a WR split happens at every boundary.
+    const size_t kHalf = (seg >= 256) ? 128 : seg / 2;
+    for (int k = 1; k < nSeg; ++k)
+    {
+        const size_t off  = k * seg - kHalf;
+        const size_t len  = 2 * kHalf;
+        const uint8_t seed = static_cast<uint8_t>(0x10 + k);
+
+        if (worldRank_ == 0)
+            FillBuf(static_cast<uint8_t*>(sb->ptr) + off, len, seed);
+        if (worldRank_ == 1)
+            FillSentinel(rb->ptr, total, kSentinel);
+
+        Barrier();
+        if (worldRank_ == 0)
+        {
+            void* req = nullptr;
+            ASSERT_EQ(ncclSuccess,
+                      rma_->iput(rmaCtx_, 0, off, sendMh, len, off, recvMh, 1, ncclRmaOptFlagsDefault, &req))
+                << "iput failed straddling boundary " << k;
+            ASSERT_TRUE(PollUntilDone(req)) << "iput stalled at boundary " << k;
+        }
+        Barrier();
+
+        if (worldRank_ == 1)
+        {
+            ExpectPayloadIsolated(rb->ptr, total, off, len, seed, kSentinel,
+                                  "boundary " + std::to_string(k));
+        }
+        Barrier();
+    }
+
+    // Full-window transfer across all boundaries at once.
+    if (worldRank_ == 0)
+        FillBuf(sb->ptr, total, /*seed=*/0xAB);
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, total, kSentinel);
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+        EXPECT_TRUE(VerifyBuf(rb->ptr, total, /*seed=*/0xAB))
+            << "full multi-segment window transfer corrupted data";
+}
+
+// MULTI-NODE IGET STRESS: DeepEP-style operations use independent remote and
+// local offsets. Repeatedly cross a different physical boundary on each side,
+// exercising remote rkey and local lkey selection while sentinels detect writes
+// outside the requested destination range.
+TEST_F(RmaMultiSegmentMPITest, MultiNodeAsymmetricIGetBoundaryStress)
+{
+    if (!SetUpFixture(2, 2)) return;
+    if (MPIEnvironment::cached_multi_node_result != 1)
+        GTEST_SKIP() << "requires exactly one rank on each of two nodes";
+
+    constexpr int kWideSegments = 8;
+    constexpr int kIterations   = 32;
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb, kWideSegments))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t total = sb->totalSize;
+    const size_t seg = sb->segSize;
+    constexpr uint8_t kSentinel = 0xA7;
+    const std::vector<size_t> edgeWidths = {
+        size_t{1}, size_t{63}, size_t{4095}, size_t{65535}, size_t{131071}
+    };
+
+    void *srcMh, *srcGh, *dstMh, *dstGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, total, &srcMh, &srcGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, total, &dstMh, &dstGh));
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    for (int i = 0; i < kIterations; ++i)
+    {
+        const int remoteBoundary = 1 + (i % (kWideSegments - 1));
+        const int localBoundary = 1 + ((i * 3 + 2) % (kWideSegments - 1));
+        const size_t left = edgeWidths[static_cast<size_t>(i) % edgeWidths.size()];
+        const size_t right = edgeWidths[static_cast<size_t>(i + 3) % edgeWidths.size()];
+        const size_t remoteOff = static_cast<size_t>(remoteBoundary) * seg - left;
+        const size_t localOff = static_cast<size_t>(localBoundary) * seg - left;
+        const size_t len = left + right;
+        const uint8_t seed = static_cast<uint8_t>(0x30 + i);
+
+        if (worldRank_ == 1)
+            FillBuf(static_cast<uint8_t*>(sb->ptr) + remoteOff, len, seed);
+        if (worldRank_ == 0)
+            FillSentinel(rb->ptr, total, kSentinel);
+
+        Barrier();
+        if (worldRank_ == 0)
+        {
+            void* req = nullptr;
+            ASSERT_EQ(ncclSuccess,
+                      rma_->iget(rmaCtx_, 0, remoteOff, srcMh, len,
+                                 localOff, dstMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req))
+                << "iget post failed at iteration " << i;
+            ASSERT_TRUE(PollUntilDone(req)) << "iget stalled at iteration " << i;
+            ExpectPayloadIsolated(rb->ptr, total, localOff, len, seed,
+                                  kSentinel,
+                                  "asymmetric IGet iteration " + std::to_string(i));
+        }
+        Barrier();
+    }
+}
+
+// Post-path fixture: WR batching, request aggregation, contexts and wait order.
+// Each rank puts to the next rank and receives from the previous one, so the
+// same tests run on 2 ranks or N ranks across any number of nodes.
+class RmaMultiSegmentPostMPITest : public RmaMultiSegmentMPITest
+{
+protected:
+    enum class OpKind { Put, Get, PutSignal };
+    enum class WaitOrder { InOrder, Reversed, Shuffled };
+
+    // One segment-split transfer. For a put local is the source; for a get it
+    // is the destination.
+    struct Chain
+    {
+        uint64_t localOff  = 0;
+        uint64_t remoteOff = 0;
+        size_t   size      = 0;
+    };
+
+    struct Op
+    {
+        OpKind   kind      = OpKind::Put;
+        void*    localMh   = nullptr;
+        void*    remoteMh  = nullptr;
+        Chain    chain;
+        int      ctx       = 0;
+        bool     aggregate = false;
+        void*    sigMh     = nullptr;  // nullptr selects sig_
+        uint64_t sigOff    = 0;
+        uint64_t sigAdd    = 0;        // 0 selects NCCL_NET_SIGNAL_OP_INC
+        int      peer      = -1;       // -1 selects SendPeer()
+    };
+
+    struct Region
+    {
+        uint64_t dstOff = 0;
+        size_t   size   = 0;
+        uint64_t srcOff = 0;
+        int      seed   = -1;  // -1 selects Expect::seed
+    };
+
+    // Window bytes expected after a round: `regions` copied from a source filled
+    // with `seed`, the sentinel everywhere else.
+    struct Expect
+    {
+        void*               window = nullptr;
+        size_t              total  = 0;
+        std::vector<Region> regions;
+        int                 seed   = 0;
+    };
+
+    static constexpr uint8_t kSentinel       = 0xD3;
+    static constexpr int     kIbRequestSlots = 256;  // NET_IB_MAX_REQUESTS
+    // Send-queue depth of an RMA queue pair (connect.cc).
+    static constexpr int     kSendQueueWrs   = 2 * kIbRequestSlots + NCCL_RMA_MAX_SIGNAL_WRS;
+
+    int numContexts_ = 1;
+    int GetNumContexts() const override { return numContexts_; }
+
+    MultiSegmentVmmBuffer* src_   = nullptr;
+    MultiSegmentVmmBuffer* dst_   = nullptr;
+    void*                  sig_   = nullptr;
+    void*                  srcMh_ = nullptr;
+    void*                  dstMh_ = nullptr;
+    void*                  sigMh_ = nullptr;
+
+    int SendPeer() const { return (worldRank_ + 1) % worldSize_; }
+    int RecvPeer() const { return (worldRank_ + worldSize_ - 1) % worldSize_; }
+    static int SeedOf(int rank) { return 0x21 + 37 * rank; }
+
+    // Mirrors the backend clamp of NCCL_RMA_IB_WR_BATCHSIZE to [2, 64].
+    static int WrBatchSize()
+    {
+        return std::clamp(MPIHelpers::getEnvParam<int>("NCCL_RMA_IB_WR_BATCHSIZE", 64), 2, 64);
+    }
+
+    // Registers max-segment src_/dst_ windows and a signal word, and fills src_
+    // with this rank's pattern. Returns a skip reason, or "" when ready.
+    std::string PrepareWindows()
+    {
+        if (!AllocSymPair(&src_, &dst_, NCCL_RMA_MAX_SEGMENTS, kSegRequestBytes))
+            return "multi-segment VMM allocation unavailable on this host";
+        sig_ = AllocBuf(kSignalSize);
+        if (SyncSkip(sig_ == nullptr)) return "signal buffer allocation failed";
+        FillBuf(src_->ptr, src_->totalSize, SeedOf(worldRank_));
+        EXPECT_EQ(ncclSuccess, RegMr(src_->ptr, src_->totalSize, &srcMh_));
+        EXPECT_EQ(ncclSuccess, RegMr(dst_->ptr, dst_->totalSize, &dstMh_));
+        EXPECT_EQ(ncclSuccess, RegMr(sig_, kSignalSize, &sigMh_));
+        if (HasFailure()) return "registration failed";
+        if (!MultiSegmentPathAvailable()) return "multi-segment path not exercised on this host";
+        return "";
+    }
+
+    static std::vector<size_t> SegOffTable(const MultiSegmentVmmBuffer& b)
+    {
+        std::vector<size_t> off(1, 0);
+        for (int s = 0; s < b.nSegments; s++)
+            off.push_back(off.back() + (b.segSizes.empty() ? b.segSize : b.segSizes[s]));
+        return off;
+    }
+
+    // Size from (localOff, remoteOff) whose chain is exactly `target` data WRs on
+    // two windows laid out like `b`, or 0 when no in-range size gives that count.
+    static size_t SizeForDataWrs(const MultiSegmentVmmBuffer& b, uint64_t localOff,
+                                 uint64_t remoteOff, int target)
+    {
+        const std::vector<size_t> off = SegOffTable(b);
+        std::vector<size_t> ends;
+        for (size_t o : off)
+        {
+            if (o > localOff) ends.push_back(o - localOff);
+            if (o > remoteOff) ends.push_back(o - remoteOff);
+        }
+        std::sort(ends.begin(), ends.end());
+        ends.erase(std::unique(ends.begin(), ends.end()), ends.end());
+        for (size_t size : ends)
+        {
+            if (localOff + size > b.totalSize || remoteOff + size > b.totalSize) break;
+            const int wrs = ncclRmaCountLayoutDataWrs(off.data(), b.nSegments, off.data(), b.nSegments,
+                                                      localOff, remoteOff, size, NCCL_RMA_MAX_DATA_WRS);
+            if (wrs == target) return size;
+            if (wrs > target) break;
+        }
+        return 0;
+    }
+
+    // Chains with the given data-WR counts, back to back in `b`. The remote side
+    // is shifted half a segment so each spanned segment costs two WRs.
+    static std::vector<Chain> PlanChains(const MultiSegmentVmmBuffer& b, const std::vector<int>& dataWrs)
+    {
+        std::vector<Chain> chains;
+        const size_t half = b.segSize / 2;
+        uint64_t cursor = 0;
+        for (int target : dataWrs)
+        {
+            const size_t size = SizeForDataWrs(b, cursor, cursor + half, target);
+            if (size == 0) return {};
+            chains.push_back({cursor, cursor + half, size});
+            cursor = (cursor + half + size + b.segSize - 1) / b.segSize * b.segSize;
+        }
+        return chains;
+    }
+
+    Op MakeOp(OpKind kind, void* localMh, void* remoteMh, const Chain& chain,
+              int ctx, bool aggregate) const
+    {
+        Op op;
+        op.kind      = kind;
+        op.localMh   = localMh;
+        op.remoteMh  = remoteMh;
+        op.chain     = chain;
+        op.ctx       = ctx;
+        op.aggregate = aggregate;
+        return op;
+    }
+
+    ncclResult_t Post(const Op& op, void** req)
+    {
+        const uint32_t flags = op.aggregate ? ncclRmaOptFlagsAggregateRequests : ncclRmaOptFlagsDefault;
+        const Chain& c = op.chain;
+        const uint32_t peer = op.peer < 0 ? SendPeer() : op.peer;
+        *req = nullptr;
+        switch (op.kind)
+        {
+        case OpKind::Put:
+            return rma_->iput(rmaCtx_, op.ctx, c.localOff, op.localMh, c.size,
+                              c.remoteOff, op.remoteMh, peer, flags, req);
+        case OpKind::Get:
+            return rma_->iget(rmaCtx_, op.ctx, c.remoteOff, op.remoteMh, c.size,
+                              c.localOff, op.localMh, peer, flags, req);
+        case OpKind::PutSignal:
+            return rma_->iputSignal(rmaCtx_, op.ctx, c.localOff, op.localMh, c.size,
+                                    c.remoteOff, op.remoteMh, peer, op.sigOff,
+                                    op.sigMh ? op.sigMh : sigMh_, op.sigAdd,
+                                    op.sigAdd ? NCCL_NET_SIGNAL_OP_ADD : NCCL_NET_SIGNAL_OP_INC,
+                                    /*isStrongSignal=*/false, flags, req);
+        }
+        return ncclInternalError;
+    }
+
+    static Region PutRegion(const Chain& c) { return {c.remoteOff, c.size, c.localOff}; }
+    static Region GetRegion(const Chain& c) { return {c.localOff, c.size, c.remoteOff}; }
+
+    // dst_ contents after RecvPeer() ran the same put plan into this rank.
+    Expect IntoDst(const std::vector<Chain>& puts) const
+    {
+        Expect e{dst_->ptr, dst_->totalSize, {}, SeedOf(RecvPeer())};
+        for (const Chain& c : puts) e.regions.push_back(PutRegion(c));
+        return e;
+    }
+
+    std::vector<size_t> WaitOrderFor(size_t n, WaitOrder order) const
+    {
+        std::vector<size_t> idx(n);
+        std::iota(idx.begin(), idx.end(), size_t{0});
+        if (order == WaitOrder::Reversed) std::reverse(idx.begin(), idx.end());
+        if (order == WaitOrder::Shuffled)
+            std::shuffle(idx.begin(), idx.end(), std::mt19937(0x5EEDu + static_cast<unsigned>(worldRank_)));
+        return idx;
+    }
+
+    // One test() call. A request still pending is drained so it is not leaked.
+    bool DoneOnFirstTest(void* req)
+    {
+        if (req == nullptr) return false;
+        int done = 0;
+        if (rma_->test(collComm_, req, &done) != ncclSuccess) return false;
+        if (done) return true;
+        ADD_FAILURE() << "request was not complete on its first test()";
+        (void)PollUntilDone(req);
+        return false;
+    }
+
+    // Like PollUntilDone, but returns test()'s error, or ncclInProgress on timeout.
+    ncclResult_t PollStatus(void* req, int timeoutMs)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+        for (;;)
+        {
+            int done = 0;
+            const ncclResult_t r = rma_->test(collComm_, req, &done);
+            if (r != ncclSuccess || done) return r;
+            if (std::chrono::steady_clock::now() >= deadline) return ncclInProgress;
+            std::this_thread::sleep_for(std::chrono::microseconds(kPollSleepUs));
+        }
+    }
+
+    // Deregisters now rather than in TearDown.
+    ncclResult_t DeregMr(void* mh)
+    {
+        auto it = std::find(registeredMhandles_.begin(), registeredMhandles_.end(), mh);
+        if (it != registeredMhandles_.end()) registeredMhandles_.erase(it);
+        return rma_->deregMrSym(collComm_, mh);
+    }
+
+    // One D2H copy; reports the first byte that differs from the expectation.
+    void ExpectRegions(const Expect& e)
+    {
+        std::vector<uint8_t> want(e.total, kSentinel), got(e.total);
+        for (const Region& r : e.regions)
+        {
+            const int seed = r.seed < 0 ? e.seed : r.seed;
+            for (size_t i = 0; i < r.size; i++)
+                want[r.dstOff + i] = static_cast<uint8_t>((seed + r.srcOff + i) % 256);
+        }
+        ASSERT_EQ(hipSuccess, hipMemcpy(got.data(), e.window, e.total, hipMemcpyDeviceToHost));
+        const auto diff = std::mismatch(want.begin(), want.end(), got.begin());
+        EXPECT_TRUE(diff.first == want.end())
+            << "first mismatch at offset " << (diff.first - want.begin()) << ": want 0x" << std::hex
+            << int(*diff.first) << " got 0x" << int(*diff.second);
+    }
+
+    // Reset the expected windows, post `ops` (an iflush of dst_ after op
+    // `flushAfter`), wait in `waitIdx` order, then check payloads and signals.
+    void RunAndVerify(const std::vector<Op>& ops, const std::vector<size_t>& waitIdx,
+                      const std::vector<Expect>& expects, uint64_t signals, int flushAfter = -1)
+    {
+        for (const Expect& e : expects) FillSentinel(e.window, e.total, kSentinel);
+        FillSentinel(sig_, kSignalSize, 0);
+        Barrier();
+
+        bool ok = true;
+        std::vector<void*> reqs(ops.size(), nullptr);
+        void* flushReq = nullptr;
+        for (size_t i = 0; i < ops.size(); i++)
+        {
+            const ncclResult_t r = Post(ops[i], &reqs[i]);
+            if (r != ncclSuccess || reqs[i] == nullptr)
+            {
+                ADD_FAILURE() << "op " << i << " post failed: " << r;
+                ok = false;
+            }
+            if (static_cast<int>(i) == flushAfter &&
+                rma_->iflush(rmaCtx_, ops[i].ctx, dstMh_, RecvPeer(), &flushReq) != ncclSuccess)
+            {
+                ADD_FAILURE() << "iflush after op " << i << " failed";
+                ok = false;
+            }
+        }
+        if (flushReq) ok = PollUntilDone(flushReq) && ok;
+        for (size_t i : waitIdx)
+            if (reqs[i]) ok = PollUntilDone(reqs[i]) && ok;
+        if (!MPIHelpers::allRanksTrue(ok))
+        {
+            ADD_FAILURE() << "post or wait failed on at least one rank";
+            return;
+        }
+        Barrier();
+        for (const Expect& e : expects) ExpectRegions(e);
+        EXPECT_EQ(ReadSignal(sig_), signals) << "signals from rank " << RecvPeer();
+        Barrier();
+    }
+};
+
+// Chains up to NCCL_RMA_IB_WR_BATCHSIZE WRs go through the batch; longer ones
+// drain it and post directly. Both sides of that limit must land intact.
+TEST_F(RmaMultiSegmentPostMPITest, ChainsAroundWrBatchSizeLandIntact)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const int batch  = WrBatchSize();
+    const int maxWrs = 2 * src_->nSegments - 1;
+    for (bool aggregate : {false, true})
+    {
+        for (OpKind kind : {OpKind::Put, OpKind::PutSignal})
+        {
+            const int signalWrs = kind == OpKind::PutSignal ? 1 : 0;
+            for (int total : {1, 2, batch - 1, batch, batch + 1, maxWrs, maxWrs + 1})
+            {
+                const int dataWrs = total - signalWrs;
+                if (dataWrs < 1 || dataWrs > maxWrs) continue;
+                SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate << " putSignal="
+                                                  << signalWrs << " wrs=" << total << " batch=" << batch);
+                const std::vector<Chain> chains = PlanChains(*src_, {dataWrs});
+                ASSERT_EQ(chains.size(), 1u);
+                RunAndVerify({MakeOp(kind, srcMh_, dstMh_, chains[0], 0, aggregate)}, {0},
+                             {IntoDst(chains)}, static_cast<uint64_t>(signalWrs));
+                if (HasFailure()) return;
+            }
+        }
+    }
+}
+
+// Aggregated requests share one doorbell that test() on any of them rings.
+// They must complete in any wait order, also with an iflush posted mid-batch.
+TEST_F(RmaMultiSegmentPostMPITest, QueuedRequestsCompleteInAnyWaitOrder)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const std::vector<Chain> chains = PlanChains(*src_, {1, 3, std::min(WrBatchSize() + 1, 7), 2, 5});
+    ASSERT_EQ(chains.size(), 5u);
+    for (bool aggregate : {false, true})
+    {
+        std::vector<Op> ops;
+        uint64_t signals = 0;
+        for (size_t i = 0; i < chains.size(); i++)
+        {
+            const OpKind kind = i % 2 ? OpKind::PutSignal : OpKind::Put;
+            signals += kind == OpKind::PutSignal;
+            ops.push_back(MakeOp(kind, srcMh_, dstMh_, chains[i], 0, aggregate));
+        }
+        for (WaitOrder order : {WaitOrder::InOrder, WaitOrder::Reversed, WaitOrder::Shuffled})
+        {
+            SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate << " order=" << int(order));
+            RunAndVerify(ops, WaitOrderFor(ops.size(), order), {IntoDst(chains)}, signals,
+                         /*flushAfter=*/1);
+            if (HasFailure()) return;
+        }
+    }
+}
+
+// Single-segment and multi-segment requests, puts and gets, share the per-peer
+// QP and batch. Interleaved, each payload must land only in its own range.
+TEST_F(RmaMultiSegmentPostMPITest, InterleavedSingleAndMultiSegmentOps)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    constexpr size_t kPlain = kMiB;
+    void* plainSrc = AllocBuf(kPlain);
+    void* plainDst = AllocBuf(kPlain);
+    MultiSegmentVmmBuffer* getBuf = AllocSym(NCCL_RMA_MAX_SEGMENTS, kSegRequestBytes);
+    if (SyncSkip(plainSrc == nullptr || plainDst == nullptr || getBuf == nullptr))
+        GTEST_SKIP() << "buffer allocation failed";
+    FillBuf(plainSrc, kPlain, SeedOf(worldRank_));
+    void *plainSrcMh = nullptr, *plainDstMh = nullptr, *getMh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(plainSrc, kPlain, &plainSrcMh));
+    ASSERT_EQ(ncclSuccess, RegMr(plainDst, kPlain, &plainDstMh));
+    ASSERT_EQ(ncclSuccess, RegMr(getBuf->ptr, getBuf->totalSize, &getMh));
+
+    const std::vector<Chain> puts = PlanChains(*src_, {3, 5, 2});
+    const std::vector<Chain> gets = PlanChains(*getBuf, {4, 1});
+    ASSERT_EQ(puts.size(), 3u);
+    ASSERT_EQ(gets.size(), 2u);
+    const Chain plainA{0, 0, kPlain / 4};
+    const Chain plainB{kPlain / 4, kPlain / 2, kPlain / 4};
+
+    for (bool aggregate : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate);
+        const std::vector<Op> ops = {
+            MakeOp(OpKind::Put,       srcMh_,     dstMh_,     puts[0], 0, aggregate),
+            MakeOp(OpKind::Put,       plainSrcMh, plainDstMh, plainA,  0, aggregate),
+            MakeOp(OpKind::Get,       getMh,      srcMh_,     gets[0], 0, aggregate),
+            MakeOp(OpKind::PutSignal, plainSrcMh, plainDstMh, plainB,  0, aggregate),
+            MakeOp(OpKind::PutSignal, srcMh_,     dstMh_,     puts[1], 0, aggregate),
+            MakeOp(OpKind::Get,       getMh,      srcMh_,     gets[1], 0, aggregate),
+            MakeOp(OpKind::Put,       srcMh_,     dstMh_,     puts[2], 0, aggregate),
+        };
+        const std::vector<Expect> expects = {
+            IntoDst(puts),
+            {plainDst, kPlain, {PutRegion(plainA), PutRegion(plainB)}, SeedOf(RecvPeer())},
+            {getBuf->ptr, getBuf->totalSize, {GetRegion(gets[0]), GetRegion(gets[1])}, SeedOf(SendPeer())},
+        };
+        RunAndVerify(ops, WaitOrderFor(ops.size(), WaitOrder::Shuffled), expects, /*signals=*/2);
+        if (HasFailure()) return;
+    }
+}
+
+// A zero-size op posts no WR and takes the previous request's id, so it
+// completes only after that request has, which must then test done at once.
+TEST_F(RmaMultiSegmentPostMPITest, ZeroSizeOpsCompleteWithQueuedPredecessor)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const std::vector<Chain> chains = PlanChains(*src_, {3, 4});
+    ASSERT_EQ(chains.size(), 2u);
+    const Chain none{};
+    for (bool aggregate : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate);
+        FillSentinel(dst_->ptr, dst_->totalSize, kSentinel);
+        FillSentinel(sig_, kSignalSize, 0);
+        Barrier();
+
+        bool ok = true;
+        auto post = [&](OpKind kind, void* localMh, void* remoteMh, const Chain& c) {
+            void* req = nullptr;
+            ok = Post(MakeOp(kind, localMh, remoteMh, c, 0, aggregate), &req) == ncclSuccess && req && ok;
+            return req;
+        };
+        void* first   = post(OpKind::Put, srcMh_, dstMh_, chains[0]);
+        void* zeroPut = post(OpKind::Put, srcMh_, dstMh_, none);
+        void* zeroGet = post(OpKind::Get, dstMh_, srcMh_, none);
+        ok = PollUntilDone(zeroPut) && ok;
+        ok = DoneOnFirstTest(first) && ok;
+        ok = DoneOnFirstTest(zeroGet) && ok;
+
+        void* signalOnly = post(OpKind::PutSignal, srcMh_, dstMh_, none);
+        void* second     = post(OpKind::Put, srcMh_, dstMh_, chains[1]);
+        ok = PollUntilDone(second) && ok;
+        ok = DoneOnFirstTest(signalOnly) && ok;
+        ok = DoneOnFirstTest(post(OpKind::Put, srcMh_, dstMh_, none)) && ok;
+
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(ok)) << "post or wait failed on at least one rank";
+        Barrier();
+        ExpectRegions(IntoDst(chains));
+        EXPECT_EQ(ReadSignal(sig_), 1u) << "signal-only put from rank " << RecvPeer();
+        Barrier();
+        if (HasFailure()) return;
+    }
+}
+
+// Each context batches on its own QP. Waiting on one context must not need the
+// others' doorbells, and their still-queued requests must land afterwards.
+TEST_F(RmaMultiSegmentPostMPITest, ContextBatchesDrainIndependently)
+{
+    numContexts_ = std::max(2, MPIHelpers::getEnvParam<int>("RCCL_TEST_RMA_CONTEXTS", 2));
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const std::vector<Chain> chains = PlanChains(*src_, {2, 3, 1, 4, 2, 3});
+    ASSERT_EQ(chains.size(), 6u);
+    std::vector<Op> ops;
+    uint64_t signals = 0;
+    for (size_t i = 0; i < chains.size(); i++)
+    {
+        const OpKind kind = i % 3 == 2 ? OpKind::PutSignal : OpKind::Put;
+        signals += kind == OpKind::PutSignal;
+        ops.push_back(MakeOp(kind, srcMh_, dstMh_, chains[i],
+                             static_cast<int>(i) % numContexts_, /*aggregate=*/true));
+    }
+    std::vector<size_t> waitIdx = WaitOrderFor(ops.size(), WaitOrder::InOrder);
+    std::stable_sort(waitIdx.begin(), waitIdx.end(),
+                     [&](size_t a, size_t b) { return ops[a].ctx > ops[b].ctx; });
+    RunAndVerify(ops, waitIdx, {IntoDst(chains)}, signals);
+}
+
+// A zero-size op on a context's fresh comm has no predecessor and completes at
+// once, even while another context has queued work. A signal-only put routes
+// to the segment holding its offset in a multi-segment signal window.
+TEST_F(RmaMultiSegmentPostMPITest, ZeroSizeOnFreshContextAndSignalOnlyIntoLaterSegment)
+{
+    numContexts_ = 2;
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+    MultiSegmentVmmBuffer* sw = AllocSym(3, kSegRequestBytes);
+    if (SyncSkip(sw == nullptr)) GTEST_SKIP() << "multi-segment signal window allocation unavailable";
+    FillSentinel(sw->ptr, sw->totalSize, 0);
+    void* swMh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(sw->ptr, sw->totalSize, &swMh));
+
+    const std::vector<Chain> chains = PlanChains(*src_, {3});
+    ASSERT_EQ(chains.size(), 1u);
+    const Chain none{};
+    const size_t seg = sw->segSize;
+    const uint64_t sigOffs[] = {seg - 8, seg, 2 * seg + 64};
+    FillSentinel(dst_->ptr, dst_->totalSize, kSentinel);
+    Barrier();
+
+    bool ok = true;
+    void* queued = nullptr;
+    void* fresh  = nullptr;
+    ok = Post(MakeOp(OpKind::Put, srcMh_, dstMh_, chains[0], 0, /*aggregate=*/true), &queued) == ncclSuccess;
+    ok = Post(MakeOp(OpKind::Get, dstMh_, srcMh_, none, 1, /*aggregate=*/true), &fresh) == ncclSuccess && ok;
+    ok = DoneOnFirstTest(fresh) && ok;
+    ok = PollUntilDone(queued) && ok;
+    for (uint64_t off : sigOffs)
+    {
+        Op op = MakeOp(OpKind::PutSignal, srcMh_, dstMh_, none, 1, /*aggregate=*/true);
+        op.sigMh  = swMh;
+        op.sigOff = off;
+        void* req = nullptr;
+        ok = Post(op, &req) == ncclSuccess && PollUntilDone(req) && ok;
+    }
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(ok)) << "post or wait failed on at least one rank";
+    Barrier();
+
+    ExpectRegions(IntoDst(chains));
+    std::vector<uint64_t> words(sw->totalSize / sizeof(uint64_t));
+    ASSERT_EQ(hipSuccess, hipMemcpy(words.data(), sw->ptr, sw->totalSize, hipMemcpyDeviceToHost));
+    for (uint64_t off : sigOffs)
+    {
+        EXPECT_EQ(words[off / sizeof(uint64_t)], 1u) << "signal missing at offset " << off;
+        words[off / sizeof(uint64_t)] = 0;
+    }
+    EXPECT_EQ(std::count(words.begin(), words.end(), uint64_t{0}), static_cast<long>(words.size()))
+        << "stray signal writes in the multi-segment signal window";
+    Barrier();
+}
+
+// Rejected ops return before taking a request slot or a sequence id. Only even
+// ranks reject, 2x the slot pool in total, between queued ops of their own.
+TEST_F(RmaMultiSegmentPostMPITest, RejectedOpsLeaveNoSlotOrSequenceGap)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    constexpr int kBurst          = 64;
+    const bool    rejecter        = worldRank_ % 2 == 0;
+    const size_t  total           = src_->totalSize;
+    const std::vector<Chain> chains = PlanChains(*src_, {3, 2, 4});
+    ASSERT_EQ(chains.size(), 3u);
+
+    for (bool aggregate : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate);
+        FillSentinel(dst_->ptr, dst_->totalSize, kSentinel);
+        Barrier();
+
+        bool ok = true;
+        auto post = [&](const Op& op) {
+            void* req = nullptr;
+            ok = Post(op, &req) == ncclSuccess && req && ok;
+            return req;
+        };
+        auto rejected = [&](int i) {
+            Op op = MakeOp(OpKind::Put, srcMh_, dstMh_, {0, 0, total + 1}, 0, aggregate);
+            if (i % 4 == 1) op = MakeOp(OpKind::Get, dstMh_, srcMh_, {0, 1, total}, 0, aggregate);
+            if (i % 4 == 2)
+            {
+                op = MakeOp(OpKind::PutSignal, srcMh_, dstMh_, chains[0], 0, aggregate);
+                op.sigOff = 4;
+            }
+            void* req = nullptr;
+            const ncclResult_t r = i % 4 == 3
+                ? rma_->iputSignal(rmaCtx_, 0, 0, srcMh_, 0, 0, dstMh_, SendPeer(), 0, sigMh_, 0,
+                                   /*signalOp=*/0xFF, false, ncclRmaOptFlagsDefault, &req)
+                : Post(op, &req);
+            return r != ncclSuccess && req == nullptr;
+        };
+
+        void* first = post(MakeOp(OpKind::Put, srcMh_, dstMh_, chains[0], 0, aggregate));
+        int accepted = 0;
+        for (int i = 0; rejecter && i < kIbRequestSlots; i++) accepted += !rejected(i);
+        EXPECT_EQ(accepted, 0) << "invalid ops were accepted";
+        void* zero = post(MakeOp(OpKind::Put, srcMh_, dstMh_, Chain{}, 0, aggregate));
+        ok = PollUntilDone(zero) && ok;
+        ok = DoneOnFirstTest(first) && ok;
+
+        std::vector<void*> reqs;
+        for (int i = 0; i < kBurst; i++)
+            reqs.push_back(post(MakeOp(OpKind::Put, srcMh_, dstMh_, chains[1 + i % 2], 0, aggregate)));
+        for (auto it = reqs.rbegin(); it != reqs.rend(); ++it)
+            if (*it) ok = PollUntilDone(*it) && ok;
+
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(ok)) << "post or wait failed on at least one rank";
+        Barrier();
+        ExpectRegions(IntoDst(chains));
+        Barrier();
+        if (HasFailure()) return;
+    }
+}
+
+// Every registration reuses the comm's consensus buffer and builds fresh
+// per-rank tables. Many cycles over changing layouts must each move intact data.
+TEST_F(RmaMultiSegmentPostMPITest, RegistrationChurnKeepsTransfersIntact)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const int cycles = MPIHelpers::getEnvParam<int>("RCCL_TEST_RMA_REG_CYCLES", 100);
+    struct Layout { MultiSegmentVmmBuffer* src; MultiSegmentVmmBuffer* dst; };
+    std::vector<Layout> layouts;
+    for (int nSeg : {2, 7, NCCL_RMA_MAX_SEGMENTS})
+    {
+        Layout l{};
+        if (!AllocSymPair(&l.src, &l.dst, nSeg, kSegRequestBytes))
+            GTEST_SKIP() << nSeg << "-segment VMM allocation unavailable";
+        FillBuf(l.src->ptr, l.src->totalSize, SeedOf(worldRank_));
+        layouts.push_back(l);
+    }
+
+    for (int i = 0; i < cycles; i++)
+    {
+        const Layout& l = layouts[i % layouts.size()];
+        SCOPED_TRACE(::testing::Message() << "cycle " << i << " nSeg " << l.src->nSegments);
+        void *srcMh = nullptr, *dstMh = nullptr;
+        ASSERT_EQ(ncclSuccess, RegMr(l.src->ptr, l.src->totalSize, &srcMh));
+        ASSERT_EQ(ncclSuccess, RegMr(l.dst->ptr, l.dst->totalSize, &dstMh));
+        const Chain c{0, 0, l.src->totalSize};
+        RunAndVerify({MakeOp(OpKind::Put, srcMh, dstMh, c, 0, /*aggregate=*/i % 2 == 1)}, {0},
+                     {{l.dst->ptr, l.dst->totalSize, {PutRegion(c)}, SeedOf(RecvPeer())}}, 0);
+        EXPECT_EQ(ncclSuccess, DeregMr(srcMh));
+        EXPECT_EQ(ncclSuccess, DeregMr(dstMh));
+        if (HasFailure()) return;
+    }
+}
+
+// Only a chain's last WR is signaled, so its WRs hold send-queue slots until a
+// test() polls the CQ. Max-length putSignals filling the queue must all land.
+TEST_F(RmaMultiSegmentPostMPITest, IPutSignalFillsSendQueueWithoutTest)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    const int maxWrs = 2 * src_->nSegments - 1;
+    const std::vector<Chain> chains = PlanChains(*src_, {maxWrs});
+    ASSERT_EQ(chains.size(), 1u);
+    const int inflight = kSendQueueWrs / (maxWrs + 1);
+    const std::vector<Op> ops(inflight, MakeOp(OpKind::PutSignal, srcMh_, dstMh_, chains[0], 0, false));
+    RunAndVerify(ops, WaitOrderFor(ops.size(), WaitOrder::Reversed), {IntoDst(chains)},
+                 static_cast<uint64_t>(inflight));
+}
+
+// Opt-in (RCCL_MSEG_SQ_STRESS=1): twice the send queue's worth of putSignals
+// without test(). Overflow is fatal for the context, as upstream: posts fail
+// without a request and every accepted request ends, in success or an error.
+// The flooded context's failure must not reach the comm's other context.
+TEST_F(RmaMultiSegmentPostMPITest, IPutSignalSendQueueOversubscribe)
+{
+    if (SyncSkip(MPIHelpers::getEnvParam<int>("RCCL_MSEG_SQ_STRESS", 0) == 0))
+        GTEST_SKIP() << "set RCCL_MSEG_SQ_STRESS=1 to flood the RMA send queue";
+    numContexts_ = 2;
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+
+    constexpr int kWaitMs = 15000;
+    const int maxWrs = 2 * src_->nSegments - 1;
+    const std::vector<Chain> chains = PlanChains(*src_, {maxWrs});
+    ASSERT_EQ(chains.size(), 1u);
+    const Op op = MakeOp(OpKind::PutSignal, srcMh_, dstMh_, chains[0], 0, false);
+    Barrier();
+
+    int rejected = 0, failed = 0;
+    std::vector<void*> reqs;
+    for (int i = 0; i < 2 * kSendQueueWrs / (maxWrs + 1); i++)
+    {
+        void* req = nullptr;
+        if (Post(op, &req) == ncclSuccess)
+        {
+            if (req) reqs.push_back(req);
+            else ADD_FAILURE() << "accepted post " << i << " returned no request";
+            continue;
+        }
+        rejected++;
+        if (req) ADD_FAILURE() << "rejected post " << i << " returned a request";
+    }
+    for (size_t i = 0; i < reqs.size(); i++)
+    {
+        const ncclResult_t r = PollStatus(reqs[i], kWaitMs);
+        if (r == ncclInProgress) ADD_FAILURE() << "request " << i << " hung after the flood";
+        failed += r != ncclSuccess && r != ncclInProgress;
+    }
+    TEST_INFO("send-queue flood: %zu accepted, %d rejected, %d ended in an error",
+              reqs.size(), rejected, failed);
+
+    EXPECT_TRUE(MPIHelpers::allRanksTrue(!HasFailure())) << "flood hung or misreported on some rank";
+    if (HasFailure()) return;
+
+    // A FAILED request returns before its posted WRs finish, so context 0 can still
+    // write; context 1 uses src and dst bytes the flood never touches, checked alone.
+    const Chain& flood = chains[0];
+    const Chain spare{src_->totalSize - flood.remoteOff, 0, flood.remoteOff};
+    ASSERT_GE(spare.localOff, flood.localOff + flood.size);
+    FillSentinel(dst_->ptr, dst_->totalSize, kSentinel);
+    Barrier();
+    void* req = nullptr;
+    const ncclResult_t r = Post(MakeOp(OpKind::Put, srcMh_, dstMh_, spare, /*ctx=*/1, false), &req);
+    const bool ok = r == ncclSuccess && req != nullptr && PollUntilDone(req);
+    EXPECT_TRUE(MPIHelpers::allRanksTrue(ok)) << "context 1 put failed after the flood: " << r;
+    if (HasFailure()) return;
+    Barrier();
+    ExpectRegions({dst_->ptr, spare.size, {PutRegion(spare)}, SeedOf(RecvPeer())});
+}
+
+// Every rank puts its slot into every peer and gets every peer's slot, driving
+// N-1 queue pairs at once. Slots of total/N bytes cut segments at N-dependent offsets.
+TEST_F(RmaMultiSegmentPostMPITest, AllPairsPutAndGetLandInOwnSlots)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+    MultiSegmentVmmBuffer* getBuf = AllocSym(NCCL_RMA_MAX_SEGMENTS, kSegRequestBytes);
+    if (SyncSkip(getBuf == nullptr)) GTEST_SKIP() << "get window allocation unavailable";
+    void* getMh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(getBuf->ptr, getBuf->totalSize, &getMh));
+
+    const size_t slot = src_->totalSize / worldSize_ / 8 * 8;
+    auto slotOf = [&](int r) { return Chain{r * slot, r * slot, slot}; };
+    for (bool aggregate : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "aggregate=" << aggregate);
+        std::vector<Op> ops;
+        Expect intoDst{dst_->ptr, dst_->totalSize, {}, 0};
+        Expect intoGet{getBuf->ptr, getBuf->totalSize, {}, 0};
+        for (int k = 1; k < worldSize_; k++)
+        {
+            const int to   = (worldRank_ + k) % worldSize_;
+            const int from = (worldRank_ + worldSize_ - k) % worldSize_;
+            Op put = MakeOp(OpKind::Put, srcMh_, dstMh_, slotOf(worldRank_), 0, aggregate);
+            Op get = MakeOp(OpKind::Get, getMh, srcMh_, slotOf(to), 0, aggregate);
+            put.peer = get.peer = to;
+            ops.push_back(put);
+            ops.push_back(get);
+            Region in = PutRegion(slotOf(from));
+            in.seed = SeedOf(from);
+            intoDst.regions.push_back(in);
+            Region got = GetRegion(slotOf(to));
+            got.seed = SeedOf(to);
+            intoGet.regions.push_back(got);
+        }
+        RunAndVerify(ops, WaitOrderFor(ops.size(), WaitOrder::Shuffled), {intoDst, intoGet}, 0);
+        if (HasFailure()) return;
+    }
+}
+
+// Every other rank signals one root through a multi-segment signal window: its
+// own word in segment (rank % nSeg) and one word all of them add to.
+TEST_F(RmaMultiSegmentPostMPITest, ManyToOneSignalsIntoMultiSegmentWindow)
+{
+    if (!SetUpFixture(/*minProcesses=*/2)) return;
+    const std::string skip = PrepareWindows();
+    if (HasFailure()) return;
+    if (!skip.empty()) GTEST_SKIP() << skip;
+    MultiSegmentVmmBuffer* sw = AllocSym(4, kSegRequestBytes);
+    if (SyncSkip(sw == nullptr)) GTEST_SKIP() << "multi-segment signal window allocation unavailable";
+    FillSentinel(sw->ptr, sw->totalSize, 0);
+    void* swMh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(sw->ptr, sw->totalSize, &swMh));
+
+    constexpr int    kRounds = 8;
+    constexpr int    kRoot   = 0;
+    const size_t     seg     = sw->segSize;
+    const uint64_t   shared  = seg + seg / 2;
+    const size_t     slot    = src_->totalSize / worldSize_ / 8 * 8;
+    auto ownOff = [&](int r) { return static_cast<uint64_t>(r % sw->nSegments) * seg + 8 * r; };
+    auto slotOf = [&](int r) { return Chain{r * slot, r * slot, slot}; };
+    FillSentinel(dst_->ptr, dst_->totalSize, kSentinel);
+    Barrier();
+
+    bool ok = true;
+    if (worldRank_ != kRoot)
+    {
+        std::vector<void*> reqs;
+        for (int i = 0; i < kRounds; i++)
+        {
+            Op own = MakeOp(OpKind::PutSignal, srcMh_, dstMh_, slotOf(worldRank_), 0, i % 2 == 1);
+            own.peer   = kRoot;
+            own.sigMh  = swMh;
+            own.sigOff = ownOff(worldRank_);
+            Op add = MakeOp(OpKind::PutSignal, srcMh_, dstMh_, Chain{}, 0, i % 2 == 1);
+            add.peer   = kRoot;
+            add.sigMh  = swMh;
+            add.sigOff = shared;
+            add.sigAdd = static_cast<uint64_t>(worldRank_ + 1);
+            for (const Op& op : {own, add})
+            {
+                void* req = nullptr;
+                ok = Post(op, &req) == ncclSuccess && req && ok;
+                if (req) reqs.push_back(req);
+            }
+        }
+        for (size_t i : WaitOrderFor(reqs.size(), WaitOrder::Shuffled))
+            ok = PollUntilDone(reqs[i]) && ok;
+    }
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(ok)) << "post or wait failed on at least one rank";
+    Barrier();
+
+    if (worldRank_ == kRoot)
+    {
+        Expect payload{dst_->ptr, dst_->totalSize, {}, 0};
+        uint64_t sum = 0;
+        std::vector<uint64_t> words(sw->totalSize / sizeof(uint64_t));
+        ASSERT_EQ(hipSuccess, hipMemcpy(words.data(), sw->ptr, sw->totalSize, hipMemcpyDeviceToHost));
+        for (int r = 0; r < worldSize_; r++)
+        {
+            if (r == kRoot) continue;
+            Region in = PutRegion(slotOf(r));
+            in.seed = SeedOf(r);
+            payload.regions.push_back(in);
+            sum += static_cast<uint64_t>(r + 1);
+            EXPECT_EQ(words[ownOff(r) / sizeof(uint64_t)], uint64_t{kRounds}) << "signals from rank " << r;
+            words[ownOff(r) / sizeof(uint64_t)] = 0;
+        }
+        EXPECT_EQ(words[shared / sizeof(uint64_t)], kRounds * sum) << "shared signal word";
+        words[shared / sizeof(uint64_t)] = 0;
+        EXPECT_EQ(std::count(words.begin(), words.end(), uint64_t{0}), static_cast<long>(words.size()))
+            << "stray signal writes in the multi-segment signal window";
+        ExpectRegions(payload);
+    }
+    Barrier();
+}
+
+} // namespace RCCLRmaTests
+
+#else // !RCCL_HAS_RMA_IB_PROXY
+
+#include <gtest/gtest.h>
+
+TEST(RmaMultiSegmentMPITest, BuildSkipped)
+{
+    GTEST_SKIP() << "IB RMA proxy backend not built into this binary. Skipping multi-segment RMA tests...";
+}
+
+#endif // RCCL_HAS_RMA_IB_PROXY
+
+#endif // MPI_TESTS_ENABLED
