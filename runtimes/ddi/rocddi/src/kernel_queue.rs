@@ -18,6 +18,8 @@ pub enum KernelQueueFormat {
     Pm4,
     /// AMD GPU SDMA command stream submitted to a copy engine.
     Sdma,
+    /// AMD GPU SDMA command stream submitted to one DRM DMA ring.
+    SdmaOnRing(u32),
 }
 
 /// One already-materialized, executable device-memory command range.
@@ -122,6 +124,15 @@ impl KernelQueue {
 }
 
 impl GpuDevice<'_> {
+    /// Returns the DRM DMA ring bitmask available for kernel-mediated SDMA
+    /// submissions on this activated device.
+    ///
+    /// # Errors
+    /// Reports an unqualified target or a native ring-query failure.
+    pub fn available_sdma_rings(&self) -> Result<u32, Error> {
+        self.device.driver.available_sdma_rings(&self.device.state)
+    }
+
     /// Creates a kernel-mediated queue with all bounded resources ready.
     ///
     /// # Errors

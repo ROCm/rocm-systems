@@ -105,8 +105,12 @@ before submission and reuses one native queue across its entries.
 of device-to-device, host-to-device, and device-to-host linear copies. It stages
 each host operand when that entry runs and retires each packet before starting
 the next entry. Any operation failure makes the sequence terminal. rocddi
-encodes OSS5 linear and constant-fill packets with system cache control,
-splits large transfers into bounded packets, and reuses command backing only
+queries the DRM DMA IP ring mask for an activated GFX1201 device.
+`GpuCopySequence::begin_on_sdma_ring` binds its command context to one
+advertised DRM ring; submission and completion waits use that same ring.
+The default copy path uses ring zero. The same native owner encodes OSS5 linear
+and constant-fill packets with system cache control, splits large transfers
+into bounded packets, and reuses command backing only
 after native retirement. A failed wait that cannot prove retirement keeps the
 queue and command allocation live and reports that operand backing must also
 be retained. Frontends own dependency and completion signals, public pointer
@@ -206,12 +210,13 @@ cargo test -p rocddi --test cts --locked -- --ignored --skip gfx1201_ais_vram_fi
 ```
 
 It copies and fills through ordinary allocations, copies through rocddi-owned
-host staging and a device virtual-memory mapping, and submits a packet through
-a targeted user SDMA ring with device-producer mappings, byte-index, and
-doorbell progress checks. It also submits an AQL barrier through a compute
-queue and checks GPU signal completion and queue retirement. The capability
-case checks expert queue scheduling against KFD 1.20 or newer and the GFX1201
-scratch aperture against the reported XCC count.
+host staging and a device virtual-memory mapping, and validates copies on each
+advertised DRM DMA ring. It also submits a packet through a targeted user SDMA
+ring with device-producer mappings, byte-index, and doorbell progress checks.
+The AQL case submits a barrier through a compute queue and checks GPU signal
+completion and queue retirement. The capability case checks expert queue
+scheduling against KFD 1.20 or newer and the GFX1201 scratch aperture against
+the reported XCC count.
 The AIS case reads a file into private VRAM and writes it back. Run it with
 `ROCDDI_CTS_AIS_DIR` set to a writable directory on P2P-capable block or NFS
 storage:

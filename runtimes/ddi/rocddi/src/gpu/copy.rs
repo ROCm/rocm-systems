@@ -232,9 +232,9 @@ struct CopyResources {
 }
 
 impl CopyResources {
-    fn new(gpu: &GpuDevice<'_>) -> Result<Self, CopyFailure> {
+    fn new(gpu: &GpuDevice<'_>, format: KernelQueueFormat) -> Result<Self, CopyFailure> {
         let queue = gpu
-            .create_kernel_queue(KernelQueueFormat::Sdma)
+            .create_kernel_queue(format)
             .map_err(CopyFailure::retired)?;
         let command = gpu
             .device()
@@ -404,6 +404,26 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         gpu: GpuDevice<'device>,
         cancel: &'cancel AtomicBool,
     ) -> Result<Self, CopyFailure> {
+        Self::begin_with_format(gpu, cancel, KernelQueueFormat::Sdma)
+    }
+
+    /// Acquires an ordered copy sequence on one selected DRM DMA ring.
+    ///
+    /// # Errors
+    /// Returns a target-capability, unavailable-ring, or native failure.
+    pub fn begin_on_sdma_ring(
+        gpu: GpuDevice<'device>,
+        cancel: &'cancel AtomicBool,
+        ring: u32,
+    ) -> Result<Self, CopyFailure> {
+        Self::begin_with_format(gpu, cancel, KernelQueueFormat::SdmaOnRing(ring))
+    }
+
+    fn begin_with_format(
+        gpu: GpuDevice<'device>,
+        cancel: &'cancel AtomicBool,
+        format: KernelQueueFormat,
+    ) -> Result<Self, CopyFailure> {
         if !gpu.supports_linear_copy() {
             return Err(CopyFailure::retired(Error::Operation {
                 kind: ErrorKind::Unsupported,
@@ -413,7 +433,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         Ok(Self {
             gpu,
             cancel,
-            resources: CopyResources::new(&gpu)?,
+            resources: CopyResources::new(&gpu, format)?,
             staging: None,
             terminal_retention: None,
         })
@@ -731,7 +751,7 @@ impl GpuDevice<'_> {
                 detail: "linear SDMA copy is not qualified for this GPU",
             }));
         }
-        let mut resources = CopyResources::new(self)?;
+        let mut resources = CopyResources::new(self, KernelQueueFormat::Sdma)?;
         for rect in rects {
             resources.copy_rect(*rect, cancel)?;
         }
@@ -766,7 +786,7 @@ impl GpuDevice<'_> {
                 detail: "SDMA fill is not qualified for this GPU",
             }));
         }
-        let mut resources = CopyResources::new(self)?;
+        let mut resources = CopyResources::new(self, KernelQueueFormat::Sdma)?;
         let mut completed = 0;
         while completed < count {
             let chunk = (count - completed).min(MAX_FILL_PACKET_DWORDS) as u32;
