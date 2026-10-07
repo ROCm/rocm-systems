@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: MIT
 
 import queue
+import select
 import signal
+import sys
 import threading
 
 from amdsmi import amdsmi_exception, amdsmi_interface
@@ -71,7 +73,12 @@ class EventCommands:
         raise SystemExit(128 + signum)
 
     def _read_stdin(self, result_queue):
-        while True:
+        while not self.stop:
+            # check stdin for user input so we don't block in input()
+            ready, _, _ = select.select([sys.stdin], [], [], 0.5)
+            if not ready:
+                continue
+
             try:
                 user_input = input()
             except EOFError:
