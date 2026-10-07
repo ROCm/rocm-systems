@@ -16,7 +16,8 @@ import os
 import re
 import unittest
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+RCCL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC_DIR = os.path.join(RCCL_ROOT, "src")
 
 # Longest-match first so -MMD is not read as -MM or -M, and -MD / -MM are
 # not read as -M. -march and friends fail the trailing boundary.
@@ -35,19 +36,23 @@ REQUIRED = (
 
 
 def _join_continued_lines(text):
-    """Collapse makefile / recipe backslash continuations into logical lines."""
+    """Collapse backslash continuations into (first lineno, logical line)."""
     logical = []
     buf = []
-    for raw in text.splitlines():
+    start = None
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        if start is None:
+            start = lineno
         stripped = raw.rstrip()
         if stripped.endswith("\\"):
             buf.append(stripped[:-1])
             continue
         buf.append(stripped)
-        logical.append("".join(buf))
+        logical.append((start, "".join(buf)))
         buf = []
+        start = None
     if buf:
-        logical.append("".join(buf))
+        logical.append((start, "".join(buf)))
     return logical
 
 
@@ -71,9 +76,9 @@ def _is_depgen_line(line):
 def depgen_sites(text):
     """Return (lineno, line, flags) for each header-dep recipe in `text`."""
     sites = []
-    for i, line in enumerate(_join_continued_lines(text), start=1):
+    for lineno, line in _join_continued_lines(text):
         if _is_depgen_line(line):
-            sites.append((i, line, _dep_flags(line)))
+            sites.append((lineno, line, _dep_flags(line)))
     return sites
 
 
@@ -126,10 +131,33 @@ class TestMakefileDepFlags(unittest.TestCase):
         self.assertEqual(len(sites), 1)
         self.assertEqual(sites[0][2], ("-MM",))
 
+    def test_parser_reports_physical_lineno(self):
+        # Three continued lines plus the recipe: logical index would be 2,
+        # physical line of the -MM rule is 4.
+        text = (
+            "foo = \\\n"
+            "  bar \\\n"
+            "  baz\n"
+            "\t@$(CXX) -MM $< > foo.d.tmp\n"
+        )
+        sites = depgen_sites(text)
+        self.assertEqual(len(sites), 1)
+        self.assertEqual(sites[0][0], 4)
+
+    def test_src_makefile_lineno_is_physical(self):
+        path = os.path.join(SRC_DIR, "Makefile")
+        with open(path) as f:
+            physical = f.read().splitlines()
+        sites = depgen_sites("\n".join(physical) + "\n")
+        self.assertGreaterEqual(len(sites), 2)
+        for lineno, _, _ in sites:
+            self.assertIn("-MM", physical[lineno - 1])
+            self.assertIn(".d.tmp", physical[lineno - 1])
+
     def test_src_makefiles_use_user_only_deps(self):
         failures = []
         for rel, kinds, min_sites in REQUIRED:
-            path = os.path.join(HERE, rel)
+            path = os.path.join(SRC_DIR, rel)
             self.assertTrue(os.path.isfile(path), "missing %s" % path)
             with open(path) as f:
                 text = f.read()

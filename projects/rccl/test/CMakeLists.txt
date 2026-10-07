@@ -45,7 +45,7 @@ if(BUILD_TESTS)
   add_test(
     NAME rccl-makefile-depflags
     COMMAND "${Python3_EXECUTABLE}"
-            "${PROJECT_SOURCE_DIR}/src/test_makefile_depflags.py"
+            "${PROJECT_SOURCE_DIR}/test/test_makefile_depflags.py"
   )
 
   # The kernel-count leak guards and the __hip_atomic_* poison probe
