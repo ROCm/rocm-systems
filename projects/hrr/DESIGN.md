@@ -547,7 +547,9 @@ per-thread stream it runs on.
 
 A `hipFunction_t` the application passes is read only once capture knows it is
 a real kernel: it came from `hipModuleGetFunction`, `hipGetFuncBySymbol` or
-`hipModuleEnumerateFunctions`, or an earlier launch of it succeeded. Reading the
+`hipModuleEnumerateFunctions`, or an earlier launch of it succeeded. Of an
+enumerated array only the entries the runtime wrote count, as many as the
+module has kernels; the rest are the caller's. Reading the
 signature of an invalid handle would crash before the runtime could return its
 error. `hipKernelGetFunction` is not trusted: it casts its argument without
 checking it, so its handles are known only after a launch succeeds. A launch by

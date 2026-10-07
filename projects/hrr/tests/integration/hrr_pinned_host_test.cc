@@ -835,6 +835,56 @@ TEST_CASE("Unit_HRR_PinnedHost_PackedScalar_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(h));
 }
 
+// ===========================================================================
+// hipModuleEnumerateFunctions into an array longer than the module's kernels.
+//
+//   0  read      through the one handle the runtime wrote, its first launch
+//   -  the entries past it still hold what the application put there, which
+//      is not a kernel; each is launched with a zero grid, so the runtime
+//      refuses it, and capture must not read it first
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_Enumerate_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                              hipHostMallocDefault));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+  int n = kPinnedInts;
+  void* args[] = {&h, &out, &n};
+
+  const std::vector<char> code = compile_pinned_rtc();
+  hipModule_t mod = nullptr;
+  HRR_HIP_CHECK(hipModuleLoadData(&mod, code.data()));
+  unsigned int count = 0;
+  HRR_HIP_CHECK(hipModuleGetFunctionCount(&count, mod));
+  REQUIRE(count == 1);
+  hipFunction_t fns[4];
+  for (uintptr_t k = 0; k < 4; ++k) fns[k] = reinterpret_cast<hipFunction_t>(0x10 * (k + 1));
+  HRR_HIP_CHECK(hipModuleEnumerateFunctions(fns, 4, mod));
+  REQUIRE(fns[0] != reinterpret_cast<hipFunction_t>(0x10));
+
+  // 0
+  fill(h, 40);
+  HRR_HIP_CHECK(hipModuleLaunchKernel(fns[0], kEntryBlocks, 1, 1, kThreads, 1, 1, 0, nullptr,
+                                      args, nullptr));
+  check_out(out, [](int i) { return pattern(40, i) * 3 + 1; });
+
+  for (int k = 1; k < 4; ++k) {
+    INFO("entry " << k << " left as " << reinterpret_cast<void*>(fns[k]));
+    REQUIRE(fns[k] == reinterpret_cast<hipFunction_t>(0x10 * (k + 1)));
+    const hipError_t r = hipModuleLaunchKernel(fns[k], 0, 1, 1, kThreads, 1, 1, 0, nullptr,
+                                               args, nullptr);
+    INFO("launch: " << hipGetErrorName(r));
+    CHECK((r == hipErrorInvalidValue || r == hipErrorInvalidConfiguration));
+    (void)hipGetLastError();
+  }
+
+  HRR_HIP_CHECK(hipModuleUnload(mod));
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(h));
+}
+
 namespace {
 constexpr const char* kDirect = "Unit_HRR_PinnedHost_Direct";
 // A capture or replay that takes longer than this has hung.
@@ -1591,6 +1641,33 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_LaunchApis) {
   int d2h_pass = 0, d2h_fail = 0;
   REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
   CHECK(d2h_pass >= 2);
+  CHECK(d2h_fail == 0);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// hipModuleEnumerateFunctions makes known only the handles the runtime wrote.
+// The one real kernel is snapshotted on its first launch; the entries past
+// it get the runtime's error rather than a crash in capture.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_EnumerateFunctions) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_enum.hrr");
+  capture_case("Unit_HRR_PinnedHost_Enumerate_Direct", cap.path);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() == 1);
+  CHECK(kls[0]->snapshots.size() == 2);
+
+  auto [rc, out] = replay(archive);
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+#ifndef _WIN32
+  int d2h_pass = 0, d2h_fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+  CHECK(d2h_pass >= 1);
   CHECK(d2h_fail == 0);
 #endif
 }

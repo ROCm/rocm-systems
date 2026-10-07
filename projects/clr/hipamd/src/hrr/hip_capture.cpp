@@ -2311,8 +2311,19 @@ static hipError_t known_hipModuleEnumerateFunctions(hipFunction_t* functions,
                                                     unsigned int numFunctions,
                                                     hipModule_t module) {
   hipError_t r = g_shim_hipModuleEnumerateFunctions(functions, numFunctions, module);
-  if (r == hipSuccess && functions)
-    for (unsigned int i = 0; i < numFunctions; i++) known_fn_add(functions[i], module);
+  if (r != hipSuccess || !functions || !HIP_HRR_HOST_SNAPSHOTS ||
+      !g_real_table.hipModuleGetFunctionCount_fn)
+    return r;
+  // The runtime writes only as many entries as the module has kernels; the
+  // rest of the array is the caller's and may hold anything.
+  const hipError_t saved_cmd = hip::tls.last_command_error_;
+  const hipError_t saved_err = hip::tls.last_error_;
+  unsigned int count = 0;
+  if (g_real_table.hipModuleGetFunctionCount_fn(&count, module) != hipSuccess) count = 0;
+  hip::tls.last_command_error_ = saved_cmd;
+  hip::tls.last_error_         = saved_err;
+  for (unsigned int i = 0; i < std::min(count, numFunctions); i++)
+    known_fn_add(functions[i], module);
   return r;
 }
 
