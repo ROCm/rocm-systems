@@ -1098,7 +1098,7 @@ void capture_case(const char* direct_case, const fs::path& cap,
 std::pair<int, std::string> replay(
     const fs::path& archive, const std::string& extra_args = "",
     const std::vector<std::pair<std::string, std::string>>& env = {}) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true,
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true,
                             /*capture_stderr=*/true);
   set_proc_search_path(proc);
   proc.setEnv("HIP_HRR_D2H_EXACT", "1");
