@@ -594,6 +594,7 @@ struct ComputeStorage {
 /// Fully validated native queue request used by the acquisition path.
 struct Request {
     ring_size: u32,
+    ring_memory: QueueRingMemory,
     queue_type: u32,
     priority: u32,
     device_producer: bool,
@@ -745,7 +746,6 @@ struct ScratchControl {
 #[derive(Clone, Copy)]
 struct AqlControl {
     producer_mode: QueueProducerMode,
-    ring_memory: QueueRingMemory,
     global_work_sync: bool,
     properties: sysfs::NativeQueueProperties,
     inactive_signal: Option<u64>,
@@ -798,11 +798,11 @@ fn validate_aql(
 ) -> Result<AqlControl, Error> {
     let QueueParameters::Aql {
         producer_mode,
-        ring_memory,
         global_work_sync,
         inactive_signal,
         error_event,
         scratch,
+        ..
     } = desc.parameters
     else {
         return Err(error(
@@ -834,7 +834,6 @@ fn validate_aql(
     }
     Ok(AqlControl {
         producer_mode,
-        ring_memory,
         global_work_sync,
         properties,
         inactive_signal,
@@ -920,7 +919,7 @@ impl Request {
                 (4, None, None)
             }
         };
-        let sdma_target = if let QueueParameters::SdmaByEngine { selection } = desc.parameters {
+        let sdma_target = if let QueueParameters::SdmaByEngine { selection, .. } = desc.parameters {
             let count = properties
                 .sdma_engines
                 .checked_add(properties.sdma_xgmi_engines)
@@ -940,17 +939,23 @@ impl Request {
         } else {
             None
         };
-        if aql.is_some_and(|aql| aql.ring_memory == QueueRingMemory::HostVisibleLocal)
+        let ring_memory = match desc.parameters {
+            QueueParameters::Aql { ring_memory, .. }
+            | QueueParameters::SdmaByEngine { ring_memory, .. } => ring_memory,
+            QueueParameters::Pm4 | QueueParameters::Sdma => QueueRingMemory::System,
+        };
+        if ring_memory == QueueRingMemory::HostVisibleLocal
             && (properties.gfx_target != 120_001
                 || native.public_memory_bytes < u64::from(ring_size).div_ceil(page) * page)
         {
             return Err(error(
                 ErrorKind::Unsupported,
-                "host-visible local AQL ring is unavailable on this GPU",
+                "host-visible local queue ring is unavailable on this GPU",
             ));
         }
         Ok(Self {
             ring_size,
+            ring_memory,
             queue_type,
             device_producer: desc.device_producer,
             compute,
@@ -1473,9 +1478,7 @@ impl KfdQueue {
                 permissions,
             )
         };
-        let local_ring = request
-            .aql
-            .is_some_and(|aql| aql.ring_memory == QueueRingMemory::HostVisibleLocal);
+        let local_ring = request.ring_memory == QueueRingMemory::HostVisibleLocal;
         let ring_kind = if local_ring {
             BufferKind::Vram {
                 public: true,

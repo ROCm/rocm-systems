@@ -100,7 +100,7 @@ fn gws_aql() -> QueueParameters {
 }
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
-enum AqlRingBacking {
+enum RingBacking {
     #[default]
     Userptr,
     Gtt,
@@ -118,7 +118,7 @@ struct State {
     live: bool,
     fail_allocation: Option<u64>,
     reject_userptr: bool,
-    expected_aql_backing: AqlRingBacking,
+    expected_ring_backing: RingBacking,
     create_errno: Option<i32>,
     destroy_errno: VecDeque<i32>,
     free_errno: VecDeque<i32>,
@@ -343,8 +343,8 @@ impl Fixture {
                         let ring = at(args.ring_address);
                         assert_eq!(ring.size, u64::from(args.ring_size).div_ceil(page) * page);
                         let expected_ring_flags =
-                            match (args.queue_type, state.expected_aql_backing) {
-                                (2, AqlRingBacking::Userptr) => {
+                            match (args.queue_type, state.expected_ring_backing) {
+                                (2, RingBacking::Userptr) => {
                                     uapi::USERPTR
                                         | uapi::WRITABLE
                                         | uapi::EXECUTABLE
@@ -352,7 +352,7 @@ impl Fixture {
                                         | uapi::UNCACHED
                                         | uapi::NO_SUBSTITUTE
                                 }
-                                (2, AqlRingBacking::Local) => {
+                                (2 | 4, RingBacking::Local) => {
                                     uapi::VRAM
                                         | uapi::PUBLIC
                                         | uapi::WRITABLE
@@ -671,15 +671,19 @@ impl Fixture {
         lifetime: SessionLifetime,
     ) -> Result<Owned<KfdQueue>, Error> {
         let mut state = self.state.lock().unwrap();
-        state.expected_aql_backing = match desc.parameters {
+        state.expected_ring_backing = match desc.parameters {
             QueueParameters::Aql {
                 ring_memory: QueueRingMemory::HostVisibleLocal,
                 ..
-            } => AqlRingBacking::Local,
-            QueueParameters::Aql { .. } if lifetime == SessionLifetime::Process => {
-                AqlRingBacking::Userptr
             }
-            _ => AqlRingBacking::Gtt,
+            | QueueParameters::SdmaByEngine {
+                ring_memory: QueueRingMemory::HostVisibleLocal,
+                ..
+            } => RingBacking::Local,
+            QueueParameters::Aql { .. } if lifetime == SessionLifetime::Process => {
+                RingBacking::Userptr
+            }
+            _ => RingBacking::Gtt,
         };
         state.expected_aql_queue_type = match desc.parameters {
             QueueParameters::Aql {
@@ -953,6 +957,7 @@ fn targeted_sdma_queues_select_and_report_general_and_xgmi_engines() {
     let fixture = Fixture::new(true);
     let any = descriptor(QueueParameters::SdmaByEngine {
         selection: SdmaEngineSelection::Any,
+        ring_memory: QueueRingMemory::System,
     });
     for expected in [0, 1, 2, 0] {
         fixture.state.lock().unwrap().expected_sdma_engine_id = Some(expected);
@@ -965,6 +970,7 @@ fn targeted_sdma_queues_select_and_report_general_and_xgmi_engines() {
     let mut queue = fixture
         .create(descriptor(QueueParameters::SdmaByEngine {
             selection: SdmaEngineSelection::Id(2),
+            ring_memory: QueueRingMemory::System,
         }))
         .unwrap();
     assert_eq!(queue.info().unwrap().sdma_engine_id, Some(2));
@@ -977,6 +983,7 @@ fn targeted_sdma_queues_select_and_report_general_and_xgmi_engines() {
             &native_node(),
             descriptor(QueueParameters::SdmaByEngine {
                 selection: SdmaEngineSelection::Id(3),
+                ring_memory: QueueRingMemory::System,
             }),
         )
         .is_err()
@@ -987,9 +994,46 @@ fn targeted_sdma_queues_select_and_report_general_and_xgmi_engines() {
 }
 
 #[test]
+fn targeted_sdma_local_ring_is_mapped_and_released() {
+    let desc = descriptor(QueueParameters::SdmaByEngine {
+        selection: SdmaEngineSelection::Id(1),
+        ring_memory: QueueRingMemory::HostVisibleLocal,
+    });
+    let fixture = Fixture::new(true);
+    fixture.state.lock().unwrap().expected_sdma_engine_id = Some(1);
+    let mut queue = fixture.create(desc).unwrap();
+    let info = queue.info().unwrap();
+    assert_ne!(info.ring_host_address, 0);
+    assert_eq!(info.ring_host_address as u64, info.ring_device_address);
+    queue.destroy().unwrap();
+    drop(queue);
+    fixture.assert_released();
+
+    let fixture = Fixture::new(true);
+    fixture.state.lock().unwrap().fail_allocation = Some(2);
+    assert!(fixture.create(desc).is_err());
+    fixture.assert_released();
+    assert_eq!(fixture.state.lock().unwrap().creates, 0);
+
+    let mut native = native_node();
+    native.public_memory_bytes = 0;
+    assert_eq!(
+        Request::validate(&native, desc).err().unwrap().kind(),
+        ErrorKind::Unsupported
+    );
+    native.queues.gfx_target = 120_000;
+    native.public_memory_bytes = 1 << 30;
+    assert_eq!(
+        Request::validate(&native, desc).err().unwrap().kind(),
+        ErrorKind::Unsupported
+    );
+}
+
+#[test]
 fn targeted_sdma_queues_retain_backing_after_ambiguous_native_calls() {
     let desc = descriptor(QueueParameters::SdmaByEngine {
         selection: SdmaEngineSelection::Id(1),
+        ring_memory: QueueRingMemory::System,
     });
     let fixture = Fixture::new(true);
     {
