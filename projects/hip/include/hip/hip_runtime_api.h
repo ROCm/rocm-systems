@@ -3193,7 +3193,7 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
  * The @p flags parameter controls behavior of the stream. The valid values are #hipStreamDefault
  * and #hipStreamNonBlocking.
  *
- * @warning Stream priority is currently disabled by default to avoid queue-priority-related
+ * @warning Stream priority is currently disabled to avoid queue-priority-related
  * issues in KFD.
  *
  * @see hipStreamCreate, hipStreamSynchronize, hipStreamWaitEvent, hipStreamDestroy
