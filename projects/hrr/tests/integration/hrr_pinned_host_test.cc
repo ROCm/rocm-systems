@@ -65,6 +65,16 @@ int env_int(const char* name) {
   return v ? std::atoi(v) : 0;
 }
 
+// A workload that cannot run on this device writes why to the file
+// HRR_PINNED_SKIP_FILE names, so its parent test can skip with that reason,
+// then returns.
+void skip_direct(const std::string& why) {
+  WARN(why);
+  if (const char* path = std::getenv("HRR_PINNED_SKIP_FILE")) {
+    std::ofstream(path) << why;
+  }
+}
+
 void fill(int* h, int which, size_t n = kPinnedInts) {
   for (size_t i = 0; i < n; ++i) h[i] = pattern(which, static_cast<int>(i));
 }
@@ -554,9 +564,28 @@ std::vector<char> compile_pinned_rtc() {
   return code;
 }
 
-// Grid of the entry-point launches: small enough for a cooperative launch to
-// fit on the device at once.
+// Grid of the entry-point launches. The kernels stride over the buffer, so
+// any grid reads all of it.
 constexpr int kEntryBlocks = 64;
+
+// Grid of the cooperative launches: kEntryBlocks, or fewer when a small
+// device cannot hold that many kThreads blocks at once. It covers the
+// strided kernel and, if fn is set, the module kernel. 0 if not even one
+// block fits per CU.
+int coop_entry_blocks(hipFunction_t fn) {
+  int cus = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&cus, hipDeviceAttributeMultiprocessorCount, 0));
+  int per_cu = 0;
+  HRR_HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &per_cu, reinterpret_cast<const void*>(hrr_pinned_read_strided), kThreads, 0));
+  if (fn != nullptr) {
+    int fn_per_cu = 0;
+    HRR_HIP_CHECK(
+        hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&fn_per_cu, fn, kThreads, 0));
+    per_cu = std::min(per_cu, fn_per_cu);
+  }
+  return std::min(kEntryBlocks, per_cu * cus);
+}
 }  // namespace
 
 // ===========================================================================
@@ -573,13 +602,30 @@ constexpr int kEntryBlocks = 64;
 //   6  hipLaunchKernelExC
 //   7  hipLaunchKernelGGL on a registered range after hipHostFree refused it;
 //      capture must still know the range
-// Every launch reads the whole buffer, which holds new bytes each time.
+// Every launch reads the whole buffer, which holds new bytes each time. The
+// cooperative launches take the largest grid up to kEntryBlocks the device
+// holds at once; a device that holds none skips the case.
 // ===========================================================================
 TEST_CASE("Unit_HRR_PinnedHost_EntryPoints_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   int coop = 0;
   HRR_HIP_CHECK(hipDeviceGetAttribute(&coop, hipDeviceAttributeCooperativeLaunch, 0));
   REQUIRE(coop != 0);
+
+  const std::vector<char> code = compile_pinned_rtc();
+  hipModule_t mod = nullptr;
+  HRR_HIP_CHECK(hipModuleLoadData(&mod, code.data()));
+  hipFunction_t fn = nullptr;
+  HRR_HIP_CHECK(hipModuleGetFunction(&fn, mod, "hrr_rtc_pinned_read"));
+  const void* stub = reinterpret_cast<const void*>(hrr_pinned_read_strided);
+  const int coop_blocks = coop_entry_blocks(fn);
+  std::printf("cooperative grid: %d blocks\n", coop_blocks);
+  if (coop_blocks == 0) {
+    HRR_HIP_CHECK(hipModuleUnload(mod));
+    skip_direct("a cooperative launch cannot hold one block of " + std::to_string(kThreads) +
+                " threads per CU on this device");
+    return;
+  }
 
   int* h = nullptr;
   HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
@@ -592,13 +638,6 @@ TEST_CASE("Unit_HRR_PinnedHost_EntryPoints_Direct", "[.][hrr-direct]") {
     return [which](int i) { return pattern(which, i) * 3 + 1; };
   };
 
-  const std::vector<char> code = compile_pinned_rtc();
-  hipModule_t mod = nullptr;
-  HRR_HIP_CHECK(hipModuleLoadData(&mod, code.data()));
-  hipFunction_t fn = nullptr;
-  HRR_HIP_CHECK(hipModuleGetFunction(&fn, mod, "hrr_rtc_pinned_read"));
-  const void* stub = reinterpret_cast<const void*>(hrr_pinned_read_strided);
-
   // 0
   fill(h, 20);
   HRR_HIP_CHECK(hipModuleLaunchKernel(fn, kEntryBlocks, 1, 1, kThreads, 1, 1, 0, nullptr,
@@ -607,7 +646,7 @@ TEST_CASE("Unit_HRR_PinnedHost_EntryPoints_Direct", "[.][hrr-direct]") {
 
   // 1
   fill(h, 21);
-  HRR_HIP_CHECK(hipModuleLaunchCooperativeKernel(fn, kEntryBlocks, 1, 1, kThreads, 1, 1, 0,
+  HRR_HIP_CHECK(hipModuleLaunchCooperativeKernel(fn, coop_blocks, 1, 1, kThreads, 1, 1, 0,
                                                  nullptr, args));
   check_out(out, expect(21));
 
@@ -634,13 +673,13 @@ TEST_CASE("Unit_HRR_PinnedHost_EntryPoints_Direct", "[.][hrr-direct]") {
 
   // 4
   fill(h, 24);
-  HRR_HIP_CHECK(hipLaunchCooperativeKernel(stub, dim3(kEntryBlocks), dim3(kThreads), args, 0,
+  HRR_HIP_CHECK(hipLaunchCooperativeKernel(stub, dim3(coop_blocks), dim3(kThreads), args, 0,
                                            nullptr));
   check_out(out, expect(24));
 
   // 5
   fill(h, 25);
-  HRR_HIP_CHECK(hipLaunchCooperativeKernel_spt(stub, dim3(kEntryBlocks), dim3(kThreads), args,
+  HRR_HIP_CHECK(hipLaunchCooperativeKernel_spt(stub, dim3(coop_blocks), dim3(kThreads), args,
                                                0, nullptr));
   check_out(out, expect(25));
 
@@ -1167,10 +1206,17 @@ TEST_CASE("Unit_HRR_PinnedHost_NoNullBarrier_Direct", "[.][hrr-direct]") {
   REQUIRE(can_wait != 0);
   const int variant = env_int("HRR_PINNED_VARIANT");
   REQUIRE((variant >= 0 && variant <= 2));
+  int coop_blocks = 0;
   if (variant == 1) {
     int coop = 0;
     HRR_HIP_CHECK(hipDeviceGetAttribute(&coop, hipDeviceAttributeCooperativeLaunch, 0));
     REQUIRE(coop != 0);
+    coop_blocks = coop_entry_blocks(nullptr);
+    if (coop_blocks == 0) {
+      skip_direct("a cooperative launch cannot hold one block of " +
+                  std::to_string(kThreads) + " threads per CU on this device");
+      return;
+    }
   }
 
   int* h = nullptr;
@@ -1201,7 +1247,7 @@ TEST_CASE("Unit_HRR_PinnedHost_NoNullBarrier_Direct", "[.][hrr-direct]") {
                                      dim3(kBlocks), dim3(kThreads), args, 0, hipStreamLegacy);
   } else if (variant == 1) {
     launch_err = hipLaunchCooperativeKernel_spt(
-        reinterpret_cast<const void*>(hrr_pinned_read_strided), dim3(kEntryBlocks),
+        reinterpret_cast<const void*>(hrr_pinned_read_strided), dim3(coop_blocks),
         dim3(kThreads), args, 0, hipStreamLegacy);
   } else {
     launch_err = hipLaunchKernel(reinterpret_cast<const void*>(hrr_pinned_read), dim3(1),
@@ -1239,10 +1285,14 @@ constexpr const char* kDirect = "Unit_HRR_PinnedHost_Direct";
 // A capture or replay that takes longer than this has hung.
 constexpr int kCaptureTimeoutSec = 120;
 
-void capture_case(const char* direct_case, const fs::path& cap,
-                  const std::vector<std::pair<std::string, std::string>>& env = {}) {
+// Returns why the workload skipped itself, or an empty string if it ran.
+std::string capture_case(const char* direct_case, const fs::path& cap,
+                         const std::vector<std::pair<std::string, std::string>>& env = {}) {
+  const fs::path skip_file = cap.string() + ".skip";
+  fs::remove(skip_file);
   hrr::test::SpawnProc proc(HRR_TEST_EXE);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
+  proc.setEnv("HRR_PINNED_SKIP_FILE", skip_file.string());
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
   set_proc_search_path(proc);
   const int ret = proc.runWithTimeout(std::string("\"") + direct_case + "\"",
@@ -1250,6 +1300,10 @@ void capture_case(const char* direct_case, const fs::path& cap,
   INFO("Capture of " << direct_case << " exit: " << ret
        << (ret == hrr::test::SpawnProc::kKilledOnTimeout ? " (hung, killed)" : ""));
   REQUIRE(ret == 0);
+  if (!fs::exists(skip_file)) return {};
+  std::string why = read_text_file(skip_file);
+  fs::remove(skip_file);
+  return why.empty() ? std::string("the workload skipped itself") : why;
 }
 
 // Replay with stderr merged and byte-exact D2H checks. The default checks
@@ -2017,8 +2071,9 @@ namespace {
 void no_null_barrier(const char* variant) {
   INFO("HRR_PINNED_VARIANT=" << variant);
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_no_null_barrier.hrr");
-  capture_case("Unit_HRR_PinnedHost_NoNullBarrier_Direct", cap.path,
-               {{"HRR_PINNED_VARIANT", variant}});
+  const std::string skipped = capture_case("Unit_HRR_PinnedHost_NoNullBarrier_Direct",
+                                           cap.path, {{"HRR_PINNED_VARIANT", variant}});
+  if (!skipped.empty()) HRR_SKIP(skipped);
   const fs::path archive = hrr_single_process_archive(cap.path);
 
   auto [rc, out] = replay(archive);
@@ -2347,7 +2402,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_FailedLaunch) {
 HRR_TEST_CASE(Unit_HRR_PinnedHost_EntryPoints) {
   constexpr int kLaunches = 8;
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_entry.hrr");
-  capture_case("Unit_HRR_PinnedHost_EntryPoints_Direct", cap.path);
+  const std::string skipped = capture_case("Unit_HRR_PinnedHost_EntryPoints_Direct", cap.path);
+  if (!skipped.empty()) HRR_SKIP(skipped);
   const fs::path archive = hrr_single_process_archive(cap.path);
 
   const std::string manifest = read_text_file(archive / "manifest.json");
