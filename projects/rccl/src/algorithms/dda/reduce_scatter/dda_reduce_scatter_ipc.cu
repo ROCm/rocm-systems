@@ -56,14 +56,15 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  if (dda::common::ddaAlltoAllSingleBlockGrid(recvcount, sizeof(T)) ) {
+  const dda::common::DdaRsIpcStaging staging = dda::common::ddaReduceScatterIpcStaging(recvcount, sizeof(T));
+  if (staging == dda::common::DdaRsIpcStaging::HostPreCopy) {
+    CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
+  }
+  if (staging == dda::common::DdaRsIpcStaging::FusedInKernel) {
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, kDdaNranks, false, true>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
                           recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   } else {
-    if (totalCount * sizeof(T) > 4194304) {
-       CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-    }
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, kDdaNranks, false, false>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
                           recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
@@ -113,6 +114,10 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
 
   // Check per-rank byte alignment
   if ((recvcount * ncclTypeSize(datatype)) % 16) {
+    return false;
+  }
+
+  if (!dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) {
     return false;
   }
 

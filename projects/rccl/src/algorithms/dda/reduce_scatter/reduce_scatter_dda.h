@@ -34,7 +34,7 @@ __launch_bounds__(512)
     copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
     barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
   } else {
-    if (count * sizeof(T) <= 1048576) {
+    if (count * sizeof(T) <= kDdaRsIpcKernelCopyMaxBytes) {
 #pragma unroll NRANKS
       for (int s = 0; s < NRANKS; ++s) {
         const size_t off = static_cast<size_t>(s) * count;

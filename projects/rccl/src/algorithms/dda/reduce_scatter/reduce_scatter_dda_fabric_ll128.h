@@ -35,7 +35,7 @@ namespace dda::common {
 // reduce), matching the all-reduce one-shot layout rather than the two-shot's
 // halved slots.
 constexpr size_t ddaLL128RsSlotWords(size_t bankSize, int nRanks) {
-  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks, (size_t)kDdaLL128WireWordsPerSlice);
+  return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
 // Fixed-width peer staging for phase 1: unlike one-shot all-reduce, each peer
@@ -66,7 +66,7 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__ void ddaReduceScatterFabricLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
+  __global__ void ddaReduceScatterFabricLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: scratch bases
                                               T* __restrict__ recvbuff, // local user output (one shard)
                                               const T* __restrict__ sendbuff, // local user input (nRanks shards)
                                               size_t shardBytes, // per-rank shard payload; multiple of 16

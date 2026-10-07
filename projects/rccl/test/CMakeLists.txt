@@ -1009,6 +1009,7 @@ if(BUILD_TESTS)
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
       DdaAllReduceMPITests.cpp
+      DdaReduceScatterMPITests.cpp
       DdaFabricSimpleMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )

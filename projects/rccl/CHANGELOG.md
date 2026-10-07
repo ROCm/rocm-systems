@@ -35,6 +35,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Removed
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
+* `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
 
 ### Resolved issues
 * Fixed profiler overhead when no profiler plugin is loaded or only kernel-channel events are enabled.

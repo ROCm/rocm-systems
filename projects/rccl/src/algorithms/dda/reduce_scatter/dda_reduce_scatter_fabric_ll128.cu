@@ -50,6 +50,13 @@ static inline std::pair<dim3, dim3> ddaReduceScatterFabricLL128Geom(ncclComm* co
   if (blocks == 0) {
     blocks = 1;
   }
+  // flatBlockId (blockIdx.x) must stay within the device epoch array.
+  if ((int)blocks > comm->ddaLLEpochLen) {
+    blocks = (unsigned)comm->ddaLLEpochLen;
+    if (blocks == 0) {
+      blocks = 1;
+    }
+  }
   return std::make_pair(dim3(blocks), dim3(threads));
 }
 
@@ -142,7 +149,7 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
   if (shardBytes % 16 != 0) {
     return false;
   }
-  if ((reinterpret_cast<uintptr_t>(sendbuff) % 16) != 0 || (reinterpret_cast<uintptr_t>(recvbuff) % 16) != 0) {
+  if (!dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) {
     return false;
   }
 

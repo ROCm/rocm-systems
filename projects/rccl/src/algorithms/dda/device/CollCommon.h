@@ -179,6 +179,34 @@ inline bool ddaAlltoAllSingleBlockGrid(size_t count, int typeSize) {
   return count < elementsPerThread * kThreadsPerBlock;
 }
 
+// copyFromSrcToDest loads user buffers as uint4, so both pointers have to be
+// 16-byte aligned. Shared by the IPC eligibility checks.
+inline bool ddaUserBuffers16ByteAligned(const void* sendbuff, const void* recvbuff) {
+  return (reinterpret_cast<uintptr_t>(sendbuff) % 16) == 0 &&
+         (reinterpret_cast<uintptr_t>(recvbuff) % 16) == 0;
+}
+
+// Reduce-scatter IPC copies a shard inside the kernel at or below this size.
+// Above it the host pre-copies the whole input into scratch. The cutoff is
+// per shard, matching the kernel, so a multi-rank total cannot stage twice.
+constexpr size_t kDdaRsIpcKernelCopyMaxBytes = 1ULL * 1024 * 1024;
+
+enum class DdaRsIpcStaging {
+  FusedInKernel,    // one block: fuse the sendbuff copy into the kernel
+  PerShardInKernel, // multi-block, shard small enough for the in-kernel copy
+  HostPreCopy,      // multi-block, host cudaMemcpyAsync before launch
+};
+
+inline DdaRsIpcStaging ddaReduceScatterIpcStaging(size_t recvcount, int typeSize) {
+  if (ddaAlltoAllSingleBlockGrid(recvcount, typeSize)) {
+    return DdaRsIpcStaging::FusedInKernel;
+  }
+  if (recvcount * static_cast<size_t>(typeSize) <= kDdaRsIpcKernelCopyMaxBytes) {
+    return DdaRsIpcStaging::PerShardInKernel;
+  }
+  return DdaRsIpcStaging::HostPreCopy;
+}
+
 constexpr uint32_t calcBlockCount(size_t numThreads, size_t threadsPerBlock, size_t maxBlocks) {
   const auto uNumThreads = static_cast<uint64_t>(numThreads);
   const auto uThreadsPerBlock = static_cast<uint64_t>(threadsPerBlock);
