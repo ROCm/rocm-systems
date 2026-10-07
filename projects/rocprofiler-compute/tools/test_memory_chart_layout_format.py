@@ -5,10 +5,14 @@
 """Tests for the memory chart layout formatter."""
 
 import json
+import sys
+from pathlib import Path
 
-from memory_chart_layout_format import format_layout
+sys.path.insert(0, str(Path(__file__).parent))
 
-from memory_chart.loader import layout_files
+from memory_chart_layout_format import format_layout  # noqa: E402
+
+from memory_chart.loader import layout_files  # noqa: E402
 
 
 def reversed_keys(value):
@@ -20,9 +24,7 @@ def reversed_keys(value):
     return value
 
 
-def test_keys_and_blocks_are_written_in_canonical_order():
+def test_keys_are_written_in_loader_order_at_every_level():
     for path in layout_files():
         text = path.read_text(encoding="utf-8")
-        data = reversed_keys(json.loads(text))
-        data["blocks"].reverse()
-        assert format_layout(data) == text, path.name
+        assert format_layout(reversed_keys(json.loads(text))) == text, path.name

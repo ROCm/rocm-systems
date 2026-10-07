@@ -4,15 +4,13 @@
 
 """Check memory chart layouts and rewrite them in the canonical style.
 
-The loader checks each file first. The file is then written with keys in the
-loader's order, blocks in drawing order (each block followed by its nested and
-attached blocks), one block, metric, or arrow per line, and a blank line between
-columns and between arrows of different block pairs.
+Each file is first checked by the layout loader. It is then written with keys in
+the loader's order, one block, metric, or arrow per line, nested blocks indented
+under their parent, and a blank line between arrows of different block pairs.
 
 Usage:
     tools/memory_chart_layout_format.py           # rewrite every layout
-    tools/memory_chart_layout_format.py --check   # report unformatted layouts and
-                                                  # exit 1 without changing them
+    tools/memory_chart_layout_format.py --check   # list files that need it
 """
 
 import argparse
@@ -23,16 +21,14 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from memory_chart.loader import (
+from memory_chart.loader import (  # noqa: E402
     ARROW_KEYS,
     BLOCK_KEYS,
     ITEM_KEYS,
     LAYOUT_KEYS,
     SCOPE_KEYS,
     Keys,
-    LayoutError,
     layout_files,
-    layout_from_json,
     load_layout,
 )
 
@@ -43,32 +39,40 @@ def _inline(obj: dict[str, Any], keys: Keys) -> str:
     )
 
 
-def _block(block: dict[str, Any]) -> list[str]:
-    header = _inline({k: v for k, v in block.items() if k != "content"}, BLOCK_KEYS)
-    content = block.get("content") or []
-    if not content:
-        return [f"    {{{header}}}"]
-    lines = [f'    {{{header}, "content": [']
-    for i, item in enumerate(content):
-        sep = "," if i < len(content) - 1 else ""
-        lines.append(f"      {{{_inline(item, ITEM_KEYS)}}}{sep}")
-    lines.append("    ]}")
+def _block(block: dict[str, Any], indent: str) -> list[str]:
+    # Scalar keys go on the block's first line; list keys each get their own lines
+    lists = [(k, block[k]) for k in BLOCK_KEYS.order if isinstance(block.get(k), list)]
+    lists = [(key, entries) for key, entries in lists if entries]
+    header = _inline(
+        {k: v for k, v in block.items() if not isinstance(v, list)}, BLOCK_KEYS
+    )
+    if not lists:
+        return [f"{indent}{{{header}}}"]
+    lines = [f"{indent}{{{header},"]
+    for n, (key, entries) in enumerate(lists):
+        lines.append(f"{indent}  {json.dumps(key)}: [")
+        for i, entry in enumerate(entries):
+            sep = "," if i < len(entries) - 1 else ""
+            if key == "metrics":  # metric entries, not blocks
+                lines.append(f"{indent}    {{{_inline(entry, ITEM_KEYS)}}}{sep}")
+            else:
+                sub = _block(entry, indent + "    ")
+                sub[-1] += sep
+                lines.extend(sub)
+        lines.append(f"{indent}  ]{',' if n < len(lists) - 1 else ''}")
+    lines.append(f"{indent}}}")
     return lines
 
 
-def _blocks(data: dict[str, Any]) -> list[str]:
-    by_id = {block["id"]: block for block in data["blocks"]}
-    layout = layout_from_json(Path("layout"), data)
-    ordered = list(layout.blocks())
-    # A blank line before the first block of every column after the first
-    column_starts = {column[0].id for column in layout.columns[1:]}
-    lines = ['  "blocks": [']
-    for i, block in enumerate(ordered):
-        if block.id in column_starts:
-            lines.append("")
-        sub = _block(by_id[block.id])
-        sub[-1] += "," if i < len(ordered) - 1 else ""
-        lines.extend(sub)
+def _columns(columns: list[list[dict[str, Any]]]) -> list[str]:
+    lines = ['  "columns": [']
+    for c, column in enumerate(columns):
+        lines.append("    [")
+        for b, block in enumerate(column):
+            sub = _block(block, "      ")
+            sub[-1] += "," if b < len(column) - 1 else ""
+            lines.extend(sub)
+        lines.append(f"    ]{',' if c < len(columns) - 1 else ''}")
     lines.append("  ],")
     return lines
 
@@ -89,8 +93,8 @@ def format_layout(data: dict[str, Any]) -> str:
     """The canonical text of a layout."""
     lines = ["{"]
     for key in LAYOUT_KEYS.order:
-        if key == "blocks":
-            lines += _blocks(data)
+        if key == "columns":
+            lines += _columns(data["columns"])
         elif key == "arrows":
             lines += _arrows(data["arrows"])
         elif key == "scope":
@@ -103,19 +107,11 @@ def format_layout(data: dict[str, Any]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="report unformatted layouts and exit 1 without changing them",
-    )
+    parser.add_argument("--check", action="store_true", help="only report")
     args = parser.parse_args()
     stale = []
     for path in layout_files():
-        try:
-            load_layout(path)
-        except LayoutError as error:
-            print(f"error: {error}", file=sys.stderr)
-            return 1
+        load_layout(path)
         text = path.read_text(encoding="utf-8")
         canonical = format_layout(json.loads(text))
         if text != canonical:
