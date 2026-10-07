@@ -9,11 +9,16 @@ request copies a later cleanup may drop. It is isolated so a later
 hardware-instance design can replace it. See the LLD section
 "Instance-aware metrics (out of scope)".
 
+Single-die chips are a data set. Their L2 channels are the chip's own
+banks. Every other arch is multi-die, and a template expands to one copy
+of those banks per die the caller reports. This module does not invent a
+die count and does not borrow one arch's count for another.
+
 The TCC event-base budget stays the general hardware-block check in
 CounterFile.add. This module does not own that budget.
 """
 
-from typing import Dict, FrozenSet, List, Optional, Set
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 from utils.logger import console_debug, console_warning
 from utils.utils_common import is_tcc_channel_counter
@@ -22,14 +27,82 @@ from .counter_file import CounterFile, flat_counters_in_perfmon_file
 from .counter_grouping_buckets import bucket_counter_set, rebuild_counter_file
 
 # LEVEL series -> matching request series (same-pass affinity).
+# TCC_EA0_* is the MI100 / MI300 / MI350 name. TCC_EA_* is the MI200 name.
 _LEVEL_TO_REQUEST: Dict[str, str] = {
     "TCC_EA0_RDREQ_LEVEL": "TCC_EA0_RDREQ",
     "TCC_EA0_WRREQ_LEVEL": "TCC_EA0_WRREQ",
     "TCC_EA0_ATOMIC_LEVEL": "TCC_EA0_ATOMIC",
+    "TCC_EA_RDREQ_LEVEL": "TCC_EA_RDREQ",
+    "TCC_EA_WRREQ_LEVEL": "TCC_EA_WRREQ",
+    "TCC_EA_ATOMIC_LEVEL": "TCC_EA_ATOMIC",
 }
 _REQUEST_TO_LEVEL: Dict[str, str] = {
     request: level for level, request in _LEVEL_TO_REQUEST.items()
 }
+
+# Chips whose L2/TCC channels are the die itself. gfx908 is MI100.
+# gfx1150-gfx1153 are the RDNA 3.5 parts that share analysis_configs/gfx115x.
+# gfx115x is that shared config name. Multi-die archs are absent here on
+# purpose: gfx90a, gfx940, gfx941, gfx942, gfx950, and gfx1250.
+_SINGLE_DIE_ARCHS: FrozenSet[str] = frozenset({
+    "gfx908",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx115x",
+})
+
+
+def collectable_tcc_channel_count(
+    arch: str,
+    banks_per_die: int,
+    die_count: int,
+) -> int:
+    """Return how many channel indexes a TCC template expands to.
+
+    Single-die archs use banks_per_die and ignore die_count. Multi-die
+    archs use banks_per_die once per reported die. A non-positive die
+    count is one die. banks_per_die comes from that arch's own L2 banks.
+    """
+    banks = banks_per_die if banks_per_die > 0 else 0
+    if arch in _SINGLE_DIE_ARCHS:
+        return banks
+    dies = die_count if die_count > 0 else 1
+    return banks * dies
+
+
+def tcc_channel_definition(
+    arch: str,
+    counter_name: str,
+    index: int,
+    banks_per_die: int,
+) -> Tuple[str, str]:
+    """Return the description and select() expression for one channel.
+
+    Single-die archs address the channel index directly. Multi-die archs
+    split the index into a die and the channel on that die, using this
+    arch's banks_per_die. The split is the per-die map, not another
+    arch's channel count.
+
+    Returns:
+        Description text, then the select() expression.
+    """
+    if arch in _SINGLE_DIE_ARCHS:
+        description = f"{counter_name} on channel {index}"
+        expression = f"select({counter_name},[DIMENSION_INSTANCE=[{index}]])"
+        return description, expression
+
+    banks = banks_per_die if banks_per_die > 0 else 1
+    die_index = index // banks
+    channel_index = index % banks
+    description = f"{counter_name} on {die_index}th XCC and {channel_index}th channel"
+    expression = (
+        f"select({counter_name},"
+        f"[DIMENSION_XCC=[{die_index}], "
+        f"DIMENSION_INSTANCE=[{channel_index}]])"
+    )
+    return description, expression
 
 
 def adjust_candidate_groups(
