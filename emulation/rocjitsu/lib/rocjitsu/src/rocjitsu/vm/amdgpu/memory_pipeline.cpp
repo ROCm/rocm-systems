@@ -387,6 +387,33 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   return MemoryAccessCompletion::Complete;
 }
 
+VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
+  assert(d.translated.access.has_value());
+  if (!d.translated.atomic_loaded) {
+    const AtomicLoadResult loaded = d.translated.access->atomic_load(d.addr, d.elem_size);
+    if (loaded.outcome != VmAccessOutcome::Complete)
+      return loaded.outcome;
+    d.translated.atomic_loaded_value = loaded.value;
+    d.translated.atomic_loaded = true;
+  }
+
+  // Retain the load across unavailable CAS attempts, as for vector atomics.
+  while (true) {
+    const uint32_t old = static_cast<uint32_t>(d.translated.atomic_loaded_value);
+    const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
+    const AtomicCompareExchangeResult exchanged =
+        d.translated.access->compare_exchange(d.addr, d.elem_size, old, value);
+    if (exchanged.outcome != VmAccessOutcome::Complete)
+      return exchanged.outcome;
+    if (exchanged.exchanged) {
+      d.response_data[0] = old;
+      d.translated.atomic_loaded = false;
+      return VmAccessOutcome::Complete;
+    }
+    d.translated.atomic_loaded_value = exchanged.observed;
+  }
+}
+
 } // namespace
 
 VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
@@ -416,7 +443,7 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     }
     if (!d.translated.access->info().legacy_cache_compatible) {
       if (d.atomic_op != AtomicOp::NONE)
-        return d.translated.access->atomic_modify(d.addr, d.elem_size, atomic_mutation);
+        return execute_translated_scalar_atomic_rmw(d);
       if (d.is_load) {
         if (d.elem_size >= 4 && d.load_dword_mask != 0xffff) {
           while (d.translated.request_index < d.num_dwords) {
