@@ -1083,7 +1083,7 @@ pub(crate) unsafe extern "C" fn create(
                     device.native.register_host_with_peers(
                         peer_devices.as_slice(),
                         address,
-                        false,
+                        memory::HostCachePolicy::Fine,
                         native_length,
                         alignment.max(page),
                         permissions,

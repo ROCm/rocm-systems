@@ -74,7 +74,7 @@ pub(crate) struct KfdKernelQueue {
     process: u32,
     context_id: Option<u32>,
     completion_syncobj: Option<u32>,
-    ip_type: u32,
+    engine: drm::CommandEngine,
     slot: AtomicU64,
     accepted: AtomicU64,
     retired: AtomicU64,
@@ -92,10 +92,25 @@ impl KfdKernelQueue {
     ) -> Result<Owned<Self>, Error> {
         vm.check()?;
         let slot = Owned::<Self>::try_new_uninit(vm.allocator())?;
-        let ip_type = match format {
-            KernelQueueFormat::Pm4 => drm::HW_IP_COMPUTE,
-            KernelQueueFormat::Sdma => drm::HW_IP_DMA,
+        let (ip_type, ring) = match format {
+            KernelQueueFormat::Pm4 => (drm::HW_IP_COMPUTE, 0),
+            KernelQueueFormat::Sdma => (drm::HW_IP_DMA, 0),
+            KernelQueueFormat::SdmaOnRing(ring) => {
+                if ring >= u32::BITS
+                    || drm::sdma_available_rings(vm.render()?)
+                        .map_err(|source| native_error("DRM SDMA ring query", source))?
+                        & (1_u32 << ring)
+                        == 0
+                {
+                    return Err(error(
+                        ErrorKind::InvalidArgument,
+                        "requested SDMA ring is unavailable",
+                    ));
+                }
+                (drm::HW_IP_DMA, ring)
+            }
         };
+        let engine = drm::CommandEngine { ip_type, ring };
         // Publish the owner before the first native acquisition. Rollback and
         // Drop then share exactly the same resumable cleanup state.
         let mut queue = slot.write(Self {
@@ -103,7 +118,7 @@ impl KfdKernelQueue {
             process: std::process::id(),
             context_id: None,
             completion_syncobj: None,
-            ip_type,
+            engine,
             slot: AtomicU64::new(IDLE),
             accepted: AtomicU64::new(0),
             retired: AtomicU64::new(0),
@@ -142,7 +157,7 @@ impl KfdKernelQueue {
         // WAIT_CS creates the per-IP context entity. Sequence zero cannot be a
         // submitted job; observing it now avoids that lazy setup on submit.
         if !matches!(
-            drm::wait_submission(render, context_id, ip_type, 0, Some(0)),
+            drm::wait_submission(render, context_id, engine, 0, Some(0)),
             Ok(true)
         ) {
             let failure = error(
@@ -248,7 +263,7 @@ impl KfdKernelQueue {
         match drm::submit_indirect_buffer(
             render,
             context_id,
-            self.ip_type,
+            self.engine,
             command.device_address,
             byte_length,
             syncobj,
@@ -332,7 +347,7 @@ impl KfdKernelQueue {
         let result = drm::wait_submission(
             self.vm.render()?,
             context_id,
-            self.ip_type,
+            self.engine,
             submission,
             remaining,
         );
@@ -461,6 +476,45 @@ mod tests {
             public_memory_bytes: 0,
         };
         memory::queue_fixture(kfd, File::open("/dev/null").unwrap(), node)
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn targeted_sdma_submission_uses_the_selected_drm_ring() {
+        let vm = scripted_vm();
+        drm::with_script(
+            [
+                drm::TestCall::QuerySdmaRings(Ok(0b11)),
+                drm::TestCall::CreateSyncobj(7),
+                drm::TestCall::CreateContext(5),
+                drm::TestCall::WaitSubmissionOnRing(1, Ok(true)),
+                drm::TestCall::SubmitOnRing(1, Ok(1)),
+                drm::TestCall::WaitSubmissionOnRing(1, Ok(true)),
+                drm::TestCall::DestroyContext,
+                drm::TestCall::DestroySyncobj,
+            ],
+            || {
+                let mut queue =
+                    KfdKernelQueue::create(vm.clone(), KernelQueueFormat::SdmaOnRing(1)).unwrap();
+                let submission = queue
+                    .submit(KernelCommand {
+                        device_address: 0x1000,
+                        byte_length: 4,
+                    })
+                    .unwrap();
+                assert_eq!(
+                    queue.wait(submission, 0, 0).unwrap(),
+                    KernelQueueWait::Retired
+                );
+                queue.destroy().unwrap();
+            },
+        );
+        drm::with_script([drm::TestCall::QuerySdmaRings(Ok(0b01))], || {
+            let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::SdmaOnRing(1))
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), ErrorKind::InvalidArgument);
+        });
     }
 
     #[test]

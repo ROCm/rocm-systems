@@ -8,6 +8,8 @@
 
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd, RawFd};
+use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
 
 use crate::device::Device;
 use crate::driver::ProviderDriver;
@@ -49,6 +51,31 @@ pub fn descriptor_length(descriptor: RawFd) -> io::Result<u64> {
     crate::driver::PlatformDriver::descriptor_length(descriptor)
 }
 
+/// Resolves a reopenable filesystem path for a borrowed Linux descriptor.
+///
+/// The returned path owns its bytes and does not depend on the descriptor
+/// remaining open. An anonymous or unlinked file has no such path. The caller
+/// must keep the descriptor valid during this call.
+///
+/// # Errors
+/// Reports an invalid descriptor or a missing or changed filesystem path.
+pub fn descriptor_path(descriptor: RawFd) -> io::Result<PathBuf> {
+    if descriptor < 0 {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    let link = format!("/proc/self/fd/{descriptor}");
+    let path = std::fs::read_link(&link)?;
+    if !path.is_absolute() {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+    let source = std::fs::metadata(link)?;
+    let target = std::fs::metadata(&path)?;
+    if (source.dev(), source.ino()) != (target.dev(), target.ino()) {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+    Ok(path)
+}
+
 /// Reads an entire fixed range from a borrowed descriptor without changing its
 /// shared file position.
 ///
@@ -76,6 +103,132 @@ pub fn read_descriptor_at(descriptor: RawFd, buffer: &mut [u8], offset: i64) -> 
 /// Preserves the Linux write error, including its errno.
 pub fn write_descriptor_at(descriptor: RawFd, buffer: &[u8], offset: i64) -> io::Result<usize> {
     crate::driver::PlatformDriver::write_descriptor_at(descriptor, buffer, offset)
+}
+
+/// Maximum bytes submitted in one AIS operation, matching Linux `MAX_RW_COUNT`.
+pub const AIS_MAX_TRANSFER_BYTES: u64 = 0x7fff_f000;
+const EIO: i32 = 5;
+const EOVERFLOW: i32 = 75;
+
+/// Direction of a Linux AIS transfer between a file and device VRAM.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AisFileOperation {
+    /// Read file bytes into the allocation.
+    Read,
+    /// Write allocation bytes into the file.
+    Write,
+}
+
+/// AIS transfer result with known copied-byte progress.
+/// A nonzero status is a negative Linux errno.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AisFileResult {
+    /// Bytes reported as copied, bounded by the submitted transfer size.
+    pub size_copied: u64,
+    /// Operation status, zero on success or a negative Linux errno.
+    pub status: i32,
+}
+
+/// CPU-visible storage borrowed for one positioned AIS file transfer.
+pub enum AisHostBuffer<'a> {
+    /// Read file bytes into writable host storage.
+    Read(&'a mut [u8]),
+    /// Write readable host storage into the file.
+    Write(&'a [u8]),
+}
+
+/// Transfers one bounded chunk through positioned host file I/O.
+///
+/// A short read at end of file succeeds. A short write continues from the
+/// reported position; a write with no progress is retried at most three times.
+/// Partial progress and Linux errno remain available on failure. A zero-byte
+/// request still issues one positioned call to validate the descriptor.
+#[must_use]
+pub fn ais_host_transfer(
+    descriptor: RawFd,
+    mut buffer: AisHostBuffer<'_>,
+    file_offset: i64,
+) -> AisFileResult {
+    let size = match &buffer {
+        AisHostBuffer::Read(bytes) => bytes.len(),
+        AisHostBuffer::Write(bytes) => bytes.len(),
+    }
+    .min(usize::try_from(AIS_MAX_TRANSFER_BYTES).unwrap_or(usize::MAX));
+    let mut copied = 0;
+    let mut write_retries = 3;
+    let mut first = true;
+    let status = loop {
+        let remaining = size - copied;
+        if !first && remaining == 0 {
+            break 0;
+        }
+        first = false;
+        let Some(offset) = i64::try_from(copied)
+            .ok()
+            .and_then(|copied| file_offset.checked_add(copied))
+        else {
+            break -EOVERFLOW;
+        };
+        let transferred = match &mut buffer {
+            AisHostBuffer::Read(bytes) => {
+                read_descriptor_at(descriptor, &mut bytes[copied..size], offset)
+            }
+            AisHostBuffer::Write(bytes) => {
+                write_descriptor_at(descriptor, &bytes[copied..size], offset)
+            }
+        };
+        let transferred = match transferred {
+            Ok(transferred) => transferred,
+            Err(error) => break -error.raw_os_error().unwrap_or(EIO),
+        };
+        if transferred == 0 {
+            if matches!(&buffer, AisHostBuffer::Read(_)) || remaining == 0 {
+                break 0;
+            }
+            if write_retries == 0 {
+                break -EIO;
+            }
+            write_retries -= 1;
+            continue;
+        }
+        if transferred > remaining {
+            break -EIO;
+        }
+        copied += transferred;
+    };
+    AisFileResult {
+        size_copied: copied as u64,
+        status,
+    }
+}
+
+/// Transfers between a borrowed file descriptor and live mapped VRAM.
+///
+/// `allocation_offset` is relative to the allocation's logical device address.
+/// One native operation transfers at most Linux's `MAX_RW_COUNT` bytes. The
+/// caller retains the descriptor through this synchronous call; neither its
+/// ownership nor its shared file position changes. If the ioctl fails, the
+/// copied-byte count is unknown and the operation is never replayed here.
+///
+/// # Errors
+/// Rejects invalid ranges, descriptors, offsets, and unsupported backing.
+/// Preserves the native errno if KFD reports an ioctl failure.
+pub fn ais_transfer(
+    allocation: &Allocation,
+    descriptor: RawFd,
+    allocation_offset: u64,
+    size: u64,
+    file_offset: i64,
+    operation: AisFileOperation,
+) -> Result<AisFileResult, Error> {
+    crate::driver::PlatformDriver::ais_transfer(
+        allocation.inner.native(),
+        descriptor,
+        allocation_offset,
+        size,
+        file_offset,
+        operation,
+    )
 }
 
 /// Opaque 256-bit KFD IPC identifier for one shareable allocation.
@@ -454,7 +607,9 @@ pub fn get_kfd_svm_attributes(
 #[allow(clippy::unwrap_used)]
 mod descriptor_tests {
     use super::*;
+    use std::io::{Seek, SeekFrom};
     use std::os::fd::AsRawFd;
+    use std::os::unix::fs::FileExt;
 
     #[test]
     fn duplicate_rejects_closed_descriptors_and_retains_its_own_owner() {
@@ -470,5 +625,66 @@ mod descriptor_tests {
             ErrorKind::InvalidArgument
         );
         assert!(std::fs::File::from(duplicate).metadata().is_ok());
+    }
+
+    #[test]
+    fn descriptor_path_remains_owned_after_the_caller_closes_its_file() {
+        let mut path = std::env::temp_dir();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!("rocddi path #{}-{nonce}", std::process::id()));
+        let file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        assert!(descriptor_path(-1).is_err());
+        let resolved = descriptor_path(file.as_raw_fd()).unwrap();
+        assert_eq!(resolved, path);
+        drop(file);
+        let _other = std::fs::File::open("/dev/null").unwrap();
+        assert_eq!(resolved, path);
+        assert!(std::fs::File::open(&resolved).is_ok());
+        let unlinked = std::fs::File::open(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(descriptor_path(unlinked.as_raw_fd()).is_err());
+    }
+
+    #[test]
+    fn host_ais_reports_partial_progress_without_moving_the_file_position() {
+        let mut path = std::env::temp_dir();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!("rocddi-host-ais-{}-{nonce}", std::process::id()));
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        file.write_all_at(b"abc", 0).unwrap();
+        file.seek(SeekFrom::Start(2)).unwrap();
+
+        let mut bytes = [0xa5_u8; 5];
+        let result = ais_host_transfer(file.as_raw_fd(), AisHostBuffer::Read(&mut bytes), 0);
+        assert_eq!((result.size_copied, result.status), (3, 0));
+        assert_eq!(&bytes, b"abc\xa5\xa5");
+        assert_eq!(file.stream_position().unwrap(), 2);
+
+        let result = ais_host_transfer(file.as_raw_fd(), AisHostBuffer::Write(b"de"), 1);
+        assert_eq!((result.size_copied, result.status), (2, 0));
+        assert_eq!(file.stream_position().unwrap(), 2);
+        let mut updated = [0_u8; 3];
+        file.read_exact_at(&mut updated, 0).unwrap();
+        assert_eq!(&updated, b"ade");
+
+        let result = ais_host_transfer(-1, AisHostBuffer::Write(b"x"), 0);
+        assert_eq!((result.size_copied, result.status), (0, -9));
+        drop(file);
+        std::fs::remove_file(path).unwrap();
     }
 }

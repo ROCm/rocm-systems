@@ -21,6 +21,8 @@ pub struct ClockCounters {
     pub system: u64,
     /// System timestamp frequency in hertz.
     pub system_frequency: u64,
+    /// GPU timestamp frequency in hertz reported by the native device.
+    pub gpu_frequency: u64,
 }
 
 impl GpuDevice<'_> {

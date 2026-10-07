@@ -230,6 +230,7 @@ pub(crate) trait VirtualMemoryDriver:
 }
 
 pub(crate) trait QueueDriver: ProviderTypes + QueueTypes + Send + Sync {
+    fn supports_expert_scheduling(&self, device: &Self::DeviceState) -> Result<bool, Error>;
     fn check_queue(queue: &Self::Queue) -> Result<(), Error>;
     fn queue_progress(queue: &Self::Queue) -> Result<(u64, u64), Error>;
     fn inactivate_queue(queue: &mut Self::Queue) -> Result<(), Error>;
@@ -263,6 +264,7 @@ pub(crate) trait QueueDriver: ProviderTypes + QueueTypes + Send + Sync {
 }
 
 pub(crate) trait KernelQueueDriver: ProviderTypes + KernelQueueTypes + Send + Sync {
+    fn available_sdma_rings(&self, device: &Self::DeviceState) -> Result<u32, Error>;
     fn create_kernel_queue(
         &self,
         device: &Self::DeviceState,
@@ -270,7 +272,9 @@ pub(crate) trait KernelQueueDriver: ProviderTypes + KernelQueueTypes + Send + Sy
     ) -> Result<Owned<Self::KernelQueue>, Error>;
     /// # Safety
     /// The command range remains device-accessible, executable, and unchanged
-    /// until retirement or conclusive native teardown, including ambiguity.
+    /// until retirement or conclusive native teardown. An ambiguous native
+    /// outcome must be returned as an accepted submission; `Err` proves that
+    /// the command was rejected.
     #[allow(unsafe_code)]
     unsafe fn submit_kernel_queue(
         queue: &Self::KernelQueue,
@@ -290,6 +294,11 @@ pub(crate) trait KernelQueueDriver: ProviderTypes + KernelQueueTypes + Send + Sy
 pub(crate) trait DeviceDriver: ProviderTypes + Send + Sync {
     fn check(&self, device: &Self::DeviceState) -> Result<(), Error>;
     fn available_memory(&self, device: &Self::DeviceState) -> Result<u64, Error>;
+    fn set_persisting_l2_cache_size(
+        &self,
+        device: &Self::DeviceState,
+        size_bytes: u32,
+    ) -> Result<(), Error>;
 }
 
 /// GPU-only timing, trap, and stream-monitor services.
@@ -537,6 +546,14 @@ mod backend_contract_tests {
         fn available_memory(&self, device: &FakeDevice) -> Result<u64, Error> {
             self.check(device)?;
             Ok(0)
+        }
+
+        fn set_persisting_l2_cache_size(
+            &self,
+            device: &FakeDevice,
+            _size_bytes: u32,
+        ) -> Result<(), Error> {
+            self.check(device)
         }
     }
 

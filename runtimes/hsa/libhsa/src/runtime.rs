@@ -12,9 +12,11 @@
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ffi::c_void;
 use std::fmt::Arguments;
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
@@ -31,13 +33,16 @@ use crate::ffi::*;
 use crate::loader::{CodeObject, CodeSymbol, Executable, Reader, Symbol};
 use crate::memory::{LockedMemory, Memory, VmemHandle, VmemMapping, VmemReservation};
 use crate::platform::host::{self as platform_host, CpuCacheKind, CpuInfo};
-use crate::queue::{CountedHardwareQueue, CountedQueue, Queue, QueueSharedEvent, SoftQueue};
+use crate::queue::{
+    CountedHardwareQueue, CountedQueue, Queue, QueueSharedEvent, SdmaQueue, SoftQueue,
+};
 use crate::signal::{
     AsyncDispatcher, AsyncSignalRecord, ImportedIpcSignal, OwnedIpcSignal, SignalSlab,
 };
 
 thread_local! {
     static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
+    static IN_LOG_WRITE: Cell<bool> = const { Cell::new(false) };
 }
 
 // KFD retains a primary process VM after its last descriptor closes. Later
@@ -77,9 +82,46 @@ impl Drop for CallbackScope {
     }
 }
 
+/// Prevents C stream callbacks from recursively entering the log writer or
+/// replacing its stream while the borrowed pointer is in use.
+pub(crate) struct LogWriteScope;
+
+impl LogWriteScope {
+    fn enter() -> Option<Self> {
+        if IN_LOG_WRITE.with(|active| active.replace(true)) {
+            return None;
+        }
+        Some(Self)
+    }
+
+    pub(crate) fn active() -> bool {
+        IN_LOG_WRITE.with(Cell::get)
+    }
+}
+
+impl Drop for LogWriteScope {
+    fn drop(&mut self) {
+        IN_LOG_WRITE.with(|active| active.set(false));
+    }
+}
+
 struct LogConfig {
     flags: [u8; 8],
+    stream: Option<BorrowedCStream>,
     stopping: bool,
+}
+
+#[derive(Clone, Copy)]
+struct BorrowedCStream(NonNull<c_void>);
+
+// SAFETY: The C stdio stream is used only while LogOutput holds its config
+// mutex. The HSA caller keeps the stream open while it is configured, and C
+// stdio serializes access from other threads using the same FILE pointer.
+unsafe impl Send for BorrowedCStream {}
+
+unsafe extern "C" {
+    fn fwrite(buffer: *const c_void, size: usize, count: usize, stream: *mut c_void) -> usize;
+    fn fflush(stream: *mut c_void) -> i32;
 }
 
 pub(crate) struct LogOutput {
@@ -93,12 +135,13 @@ impl LogOutput {
             enabled: AtomicU64::new(0),
             config: Mutex::new(LogConfig {
                 flags: [0; 8],
+                stream: None,
                 stopping: false,
             }),
         }
     }
 
-    pub(crate) fn set(&self, flags: [u8; 8]) -> Status {
+    pub(crate) fn set(&self, flags: [u8; 8], stream: *mut c_void) -> Status {
         let Ok(mut config) = self.config.lock() else {
             return ERROR;
         };
@@ -106,6 +149,7 @@ impl LogOutput {
             return INVALID_RUNTIME_STATE;
         }
         config.flags = flags;
+        config.stream = NonNull::new(stream).map(BorrowedCStream);
         self.enabled
             .store(u64::from_le_bytes(flags), Ordering::Release);
         SUCCESS
@@ -118,13 +162,33 @@ impl LogOutput {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         config.stopping = true;
         config.flags = [0; 8];
+        config.stream = None;
         self.enabled.store(0, Ordering::Release);
     }
 
-    fn permits(&self, flag: u32) -> bool {
-        self.config
-            .lock()
-            .is_ok_and(|config| logging_flag_enabled(config.flags, flag))
+    fn write(&self, flag: u32, line: &[u8]) {
+        let Some(_scope) = LogWriteScope::enter() else {
+            return;
+        };
+        let Ok(config) = self.config.lock() else {
+            return;
+        };
+        if config.stopping || !logging_flag_enabled(config.flags, flag) {
+            return;
+        }
+        if let Some(stream) = config.stream {
+            // SAFETY: The public logging contract keeps the borrowed FILE open
+            // while enabled. This mutex prevents replacement or shutdown from
+            // finishing until the C stdio calls finish.
+            unsafe {
+                let _ = fwrite(line.as_ptr().cast(), 1, line.len(), stream.0.as_ptr());
+                let _ = fflush(stream.0.as_ptr());
+            }
+        } else {
+            let mut stream = std::io::stderr().lock();
+            let _ = stream.write_all(line);
+            let _ = stream.flush();
+        }
     }
 }
 
@@ -137,12 +201,7 @@ pub(crate) struct LogWork {
 
 impl LogWork {
     pub(crate) fn write(self) {
-        if !self.output.permits(self.flag) {
-            return;
-        }
-        let mut stream = std::io::stderr().lock();
-        let _ = stream.write_all(self.line.as_bytes());
-        let _ = stream.flush();
+        self.output.write(self.flag, self.line.as_bytes());
     }
 }
 
@@ -221,10 +280,10 @@ fn system_event_worker(device: &Device, stop: &AtomicBool) {
         match poll_memory_fault(gpu_device) {
             Ok(Some(fault)) => {
                 let notification = {
-                    let Ok(guard) = lock() else {
+                    let Ok(mut guard) = lock() else {
                         return;
                     };
-                    let Some(runtime) = guard.as_ref() else {
+                    let Some(runtime) = guard.as_mut() else {
                         return;
                     };
                     let Some(index) = runtime.gpus.iter().position(|gpu| {
@@ -232,15 +291,40 @@ fn system_event_worker(device: &Device, stop: &AtomicBool) {
                     }) else {
                         return;
                     };
-                    (
-                        memory_fault_event(
-                            HsaAgent {
-                                handle: GPU_AGENT_BASE + index as u64,
-                            },
-                            fault,
-                        ),
-                        runtime.system_event_handlers.clone(),
-                    )
+                    let agent = HsaAgent {
+                        handle: GPU_AGENT_BASE + index as u64,
+                    };
+                    let event = memory_fault_event(agent, fault);
+                    let reason = event.payload[2] as u32;
+                    runtime.vm_fault_details = Some((agent, fault.virtual_address, reason));
+                    // KFD reports the process fault and the queue error on
+                    // different workers. Let the queue worker identify the
+                    // faulted queue before delivering the system callback.
+                    let Ok((mut guard, _)) = VM_FAULT_CONDVAR.wait_timeout_while(
+                        guard,
+                        Duration::from_millis(50),
+                        |registry| {
+                            registry.as_ref().is_some_and(|runtime| {
+                                runtime.queues.values().any(|queue| queue.agent == agent)
+                                    && !runtime
+                                        .queues
+                                        .values()
+                                        .any(|queue| queue.agent == agent && queue.vm_faulted)
+                            })
+                        },
+                    ) else {
+                        return;
+                    };
+                    let Some(runtime) = guard.as_mut() else {
+                        return;
+                    };
+                    for queue in runtime.queues.values_mut() {
+                        if queue.agent == agent && queue.vm_faulted {
+                            queue.vm_fault_address = fault.virtual_address;
+                            queue.vm_fault_reason = reason;
+                        }
+                    }
+                    (event, runtime.system_event_handlers.clone())
                 };
                 let handled = notify_system_event(&notification.1, &notification.0, Some(stop));
                 if stop.load(Ordering::Acquire) {
@@ -299,10 +383,12 @@ pub(crate) struct Gpu {
     pub(crate) name: Box<str>,
     pub(crate) product_name: Box<str>,
     pub(crate) asic_family_id: u32,
+    pub(crate) timestamp_frequency_hz: u64,
     pub(crate) hdp_flush: [usize; 2],
     _mmio_remap: Option<Allocation>,
     pub(crate) coherency_type: u32,
     pub(crate) fine_grain_pool: bool,
+    pub(crate) persisting_l2_cache_size: Arc<Mutex<usize>>,
 }
 
 trait RetireSession {
@@ -429,6 +515,13 @@ impl Drop for InFlightToken {
     }
 }
 
+/// Process-wide setting captured by each accepted asynchronous copy.
+#[derive(Clone, Copy)]
+pub(crate) enum AsyncCopyProfiling {
+    Disabled,
+    Enabled,
+}
+
 /// Complete process-global HSA state.
 ///
 /// Every integer handle and public pointer accepted by this frontend must map
@@ -449,6 +542,9 @@ pub(crate) struct Runtime {
     pub(crate) ipc_allocations: HashMap<usize, Memory>,
     pub(crate) interop_allocations: HashMap<usize, Memory>,
     pub(crate) locked_allocations: Vec<LockedMemory>,
+    pub(crate) async_copy_borrows: HashMap<usize, usize>,
+    pub(crate) async_copy_quarantine: Arc<AtomicBool>,
+    pub(crate) async_copy_profiling: AsyncCopyProfiling,
     pub(crate) vmem_reservations: BTreeMap<usize, VmemReservation>,
     pub(crate) vmem_handles: HashMap<u64, VmemHandle>,
     pub(crate) vmem_mappings: BTreeMap<usize, VmemMapping>,
@@ -464,6 +560,8 @@ pub(crate) struct Runtime {
     pub(crate) async_signal_refs: HashMap<usize, AsyncSignalRecord>,
     pub(crate) signal_groups: HashMap<u64, Vec<HsaSignal>>,
     pub(crate) queues: HashMap<usize, Queue>,
+    pub(crate) cooperative_teardown: HashSet<u64>,
+    pub(crate) sdma_queues: HashMap<usize, SdmaQueue>,
     pub(crate) soft_queues: HashMap<usize, SoftQueue>,
     pub(crate) counted_queues: HashMap<usize, CountedQueue>,
     pub(crate) counted_queue_pools: HashMap<(u64, u32), Vec<CountedHardwareQueue>>,
@@ -475,6 +573,7 @@ pub(crate) struct Runtime {
     pub(crate) host_name: Box<str>,
     pub(crate) host_compute_units: u32,
     pub(crate) full_profile: bool,
+    pub(crate) vm_fault_details: Option<(HsaAgent, u64, u32)>,
     pub(crate) system_event_handlers: Vec<(SystemEventHandler, CallbackArg)>,
     pub(crate) system_event_worker_started: bool,
     pub(crate) async_dispatcher: Option<AsyncDispatcher>,
@@ -537,8 +636,6 @@ impl Runtime {
             name: "CPU".to_owned(),
             compute_units: 0,
         });
-        let force_fine_grain_pcie =
-            std::env::var("HSA_FORCE_FINE_GRAIN_PCIE").is_ok_and(|value| value == "1");
         // The HSA lifecycle gate admits one initialization at a time. Passive
         // enumeration may fail before a primary KFD VM is acquired.
         let lifetime = if PRIMARY_CONTEXT_USED.load(Ordering::Acquire) {
@@ -555,7 +652,6 @@ impl Runtime {
             host_page_size,
             host_memory_bytes,
             host,
-            force_fine_grain_pcie,
             lifetime,
         ) {
             Ok(runtime) => Ok(runtime),
@@ -571,7 +667,6 @@ impl Runtime {
         host_page_size: usize,
         host_memory_bytes: usize,
         host: CpuInfo,
-        force_fine_grain_pcie: bool,
         lifetime: SessionLifetime,
     ) -> Result<Self, Status> {
         let session = pending.session.as_ref().ok_or(ERROR)?;
@@ -640,13 +735,14 @@ impl Runtime {
                 .product_name
                 .unwrap_or_else(|| "AMD Radeon Graphics".to_owned());
             let asic_family_id = presentation.asic_family_id;
+            let timestamp_frequency_hz = presentation.gpu_counter_frequency_hz.unwrap_or(0);
             let mmio_remap = device.gpu().and_then(|gpu| gpu.map_mmio_remap()).ok();
             let hdp_flush = hdp_flush_pointers(
                 mmio_remap
                     .as_ref()
                     .and_then(|mapping| mapping.info().host_address),
             );
-            let fine_grain_pool = info.hive_id != 0 || force_fine_grain_pcie;
+            let fine_grain_pool = info.hive_id != 0;
             pending.gpus.push(Gpu {
                 endpoint,
                 info,
@@ -654,10 +750,12 @@ impl Runtime {
                 name: name.into_boxed_str(),
                 product_name: product_name.into_boxed_str(),
                 asic_family_id,
+                timestamp_frequency_hz,
                 hdp_flush,
                 _mmio_remap: mmio_remap,
                 coherency_type: AMD_COHERENCY_TYPE_NONCOHERENT,
                 fine_grain_pool,
+                persisting_l2_cache_size: Arc::new(Mutex::new(0)),
             });
         }
         let gpus = std::mem::take(&mut pending.gpus);
@@ -676,6 +774,9 @@ impl Runtime {
             ipc_allocations: HashMap::new(),
             interop_allocations: HashMap::new(),
             locked_allocations: Vec::new(),
+            async_copy_borrows: HashMap::new(),
+            async_copy_quarantine: Arc::new(AtomicBool::new(false)),
+            async_copy_profiling: AsyncCopyProfiling::Disabled,
             vmem_reservations: BTreeMap::new(),
             vmem_handles: HashMap::new(),
             vmem_mappings: BTreeMap::new(),
@@ -691,17 +792,20 @@ impl Runtime {
             async_signal_refs: HashMap::new(),
             signal_groups: HashMap::new(),
             queues: HashMap::new(),
+            cooperative_teardown: HashSet::new(),
+            sdma_queues: HashMap::new(),
             soft_queues: HashMap::new(),
             counted_queues: HashMap::new(),
             counted_queue_pools: HashMap::new(),
             released_counted_queues: HashSet::new(),
-            counted_queue_limit: environment_u32("GPU_MAX_HW_QUEUES", 4) as usize,
-            counted_queue_size: environment_u32("HSA_COUNTED_QUEUE_SIZE", 16_384),
+            counted_queue_limit: 4,
+            counted_queue_size: 16_384,
             host_memory_bytes,
             host_page_size,
             host_name: host.name.into_boxed_str(),
             host_compute_units: host.compute_units,
             full_profile,
+            vm_fault_details: None,
             system_event_handlers: Vec::new(),
             system_event_worker_started: false,
             async_dispatcher: None,
@@ -828,6 +932,12 @@ impl Runtime {
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
+        if self.async_copy_quarantine.load(Ordering::Acquire) {
+            // A copy with unproved native retirement can still reach runtime
+            // allocations and signals. Keep their entire ownership graph live.
+            std::mem::forget(self);
+            return INVALID_RUNTIME_STATE;
+        }
         self.counted_queues.clear();
         self.counted_queue_pools.clear();
         self.released_counted_queues.clear();
@@ -836,6 +946,13 @@ impl Runtime {
                 // An unresolved native queue can still reference its scratch
                 // and inactive signal. Preserve the complete dependency set
                 // for KFD process teardown instead of freeing reachable pages.
+                std::mem::forget(queue);
+            }
+        }
+        for (_, mut queue) in self.sdma_queues.drain() {
+            if crate::queue::destroy_runtime_sdma_queue(&mut queue).is_err() {
+                // Native teardown may still reach the ring, pointer page, or
+                // doorbell. Keep their owner and the public handle together.
                 std::mem::forget(queue);
             }
         }
@@ -870,12 +987,6 @@ impl Runtime {
     }
 }
 
-fn environment_u32(name: &str, default: u32) -> u32 {
-    std::env::var(name).map_or(default, |value| {
-        value.trim().parse::<i32>().map_or(0, |value| value as u32)
-    })
-}
-
 fn logging_flag_enabled(flags: [u8; 8], flag: u32) -> bool {
     usize::try_from(flag / 8)
         .ok()
@@ -905,12 +1016,15 @@ pub(crate) fn translate_gpu_tick(
     counters: rocddi::gpu::profiling::ClockCounters,
     tick: u64,
 ) -> Result<u64, Status> {
-    if counters.system_frequency == 0 {
+    if counters.system_frequency == 0 || counters.gpu_frequency == 0 {
         return Err(ERROR);
     }
     let scaled = |delta: u64| {
-        u64::try_from(u128::from(delta) * u128::from(counters.system_frequency) / 100_000_000_u128)
-            .unwrap_or(u64::MAX)
+        u64::try_from(
+            u128::from(delta) * u128::from(counters.system_frequency)
+                / u128::from(counters.gpu_frequency),
+        )
+        .unwrap_or(u64::MAX)
     };
     Ok(if tick >= counters.gpu {
         counters.system.wrapping_add(scaled(tick - counters.gpu))
@@ -1084,6 +1198,7 @@ impl Drop for LifecycleTransition {
 }
 
 pub(crate) static RUNTIME: Mutex<RuntimeRegistry> = Mutex::new(RuntimeRegistry::new());
+pub(crate) static VM_FAULT_CONDVAR: Condvar = Condvar::new();
 
 pub(crate) fn lock() -> Result<MutexGuard<'static, RuntimeRegistry>, Status> {
     RUNTIME.lock().map_err(|_| ERROR)
@@ -1437,9 +1552,20 @@ mod tests {
             host: 0,
             system: 1_000,
             system_frequency: 1_000_000_000,
+            gpu_frequency: 100_000_000,
         };
         assert_eq!(translate_gpu_tick(counters, 110), Ok(1_100));
         assert_eq!(translate_gpu_tick(counters, 90), Ok(900));
+        assert_eq!(
+            translate_gpu_tick(
+                ClockCounters {
+                    gpu_frequency: 200_000_000,
+                    ..counters
+                },
+                110,
+            ),
+            Ok(1_050)
+        );
         assert_eq!(
             translate_gpu_tick(
                 ClockCounters {

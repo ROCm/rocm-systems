@@ -39,6 +39,7 @@ pub(super) const FREE_MEMORY: u64 = request(1, 0x17, 8);
 pub(super) const MAP_MEMORY: u64 = request(3, 0x18, 24);
 pub(super) const UNMAP_MEMORY: u64 = request(3, 0x19, 24);
 pub(super) const SET_CU_MASK: u64 = request(1, 0x1a, 16);
+pub(super) const ALLOC_QUEUE_GWS: u64 = request(3, 0x1e, 16);
 pub(super) const GET_DMABUF_INFO: u64 = request(3, 0x1c, 32);
 pub(super) const IMPORT_DMABUF: u64 = request(3, 0x1d, 24);
 pub(super) const EXPORT_DMABUF: u64 = request(3, 0x24, 16);
@@ -46,6 +47,10 @@ pub(super) const SVM: u64 = request(3, 0x20, 24);
 pub(super) const IPC_IMPORT_HANDLE: u64 = request(3, 0x80, 48);
 pub(super) const IPC_EXPORT_HANDLE: u64 = request(3, 0x81, 32);
 pub(super) const SPM: u64 = request(3, 0x84, 32);
+pub(super) const AIS: u64 = request(3, 0x87, 40);
+
+pub(super) const AIS_READ: u32 = 1;
+pub(super) const AIS_WRITE: u32 = 2;
 
 pub(super) const SVM_OP_SET_ATTR: u32 = 0;
 pub(super) const SVM_OP_GET_ATTR: u32 = 1;
@@ -79,6 +84,7 @@ pub(super) const MMIO_REMAP: u32 = 1 << 4;
 pub(super) const CONTIGUOUS: u32 = 1 << 23;
 pub(super) const COHERENT: u32 = 1 << 26;
 pub(super) const UNCACHED: u32 = 1 << 25;
+pub(super) const EXT_COHERENT: u32 = 1 << 24;
 pub(super) const WRITABLE: u32 = 1 << 31;
 pub(super) const EXECUTABLE: u32 = 1 << 30;
 pub(super) const PUBLIC: u32 = 1 << 29;
@@ -131,6 +137,68 @@ pub(super) struct AvailableMemory {
     pub available: u64,
     pub gpu_id: u32,
     pub pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct AllocQueueGws {
+    pub queue_id: u32,
+    pub num_gws: u32,
+    pub first_gws: u32,
+    pub pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct AisInput {
+    pub handle: u64,
+    pub handle_offset: u64,
+    pub file_offset: i64,
+    pub size: u64,
+    pub operation: u32,
+    pub descriptor: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct AisOutput {
+    pub size_copied: u64,
+    pub status: i32,
+    pub pad: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(super) union AisArgs {
+    input: AisInput,
+    output: AisOutput,
+}
+
+impl AisArgs {
+    pub fn new(input: AisInput) -> Self {
+        Self { input }
+    }
+
+    #[cfg(test)]
+    #[allow(unsafe_code)]
+    pub fn requested_input(&self) -> AisInput {
+        // SAFETY: The only constructor initializes the complete union as input.
+        unsafe { self.input }
+    }
+
+    #[cfg(test)]
+    pub fn set_completed_output(&mut self, output: AisOutput) {
+        self.output = output;
+    }
+
+    /// Read output only after a successful ioctl. Before KFD handles the call,
+    /// these bytes still contain the overlapping input fields.
+    #[allow(unsafe_code)]
+    pub fn completed_output(self) -> AisOutput {
+        // SAFETY: The complete 40-byte union was initialized through input.
+        // A successful AIS ioctl overwrites its first 16 bytes with output.
+        unsafe { self.output }
+    }
 }
 
 #[repr(C)]
@@ -409,11 +477,20 @@ const _: () = {
     assert!(offset_of!(UpdateQueue, queue_id) == 8);
     assert!(size_of::<SetCuMask>() == 16);
     assert!(offset_of!(SetCuMask, mask) == 8);
+    assert!(size_of::<AllocQueueGws>() == 16);
+    assert!(offset_of!(AllocQueueGws, first_gws) == 8);
+    assert!(ALLOC_QUEUE_GWS == 0xc010_4b1e);
     assert!(size_of::<Version>() == 8);
     assert!(size_of::<ClockCounters>() == 40);
     assert!(offset_of!(ClockCounters, gpu_id) == 32);
     assert!(size_of::<AvailableMemory>() == 16);
     assert!(offset_of!(AvailableMemory, gpu_id) == 8);
+    assert!(size_of::<AisInput>() == 40);
+    assert!(offset_of!(AisInput, operation) == 32);
+    assert!(offset_of!(AisInput, descriptor) == 36);
+    assert!(size_of::<AisOutput>() == 16);
+    assert!(size_of::<AisArgs>() == 40);
+    assert!(AIS == 0xc028_4b87);
     assert!(size_of::<Aperture>() == 56);
     assert!(offset_of!(Aperture, gpu_id) == 48);
     assert!(size_of::<Apertures>() == 16);

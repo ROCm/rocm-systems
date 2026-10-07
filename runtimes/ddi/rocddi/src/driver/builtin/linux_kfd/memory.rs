@@ -9,7 +9,7 @@ use super::{drm, sys, sysfs, uapi, util};
 use crate::event::GpuMemoryFault;
 use crate::host_storage::{Allocator, Buffer, Owned, Shared};
 use crate::memory::interop::linux::{DmaBuf, DmaBufInfo, KfdIpcMemoryHandle};
-use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
+use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess, HostCachePolicy};
 use crate::{Error, ErrorKind};
 use std::fs::File;
 use std::io;
@@ -39,8 +39,6 @@ const IPC_APERTURE_DGPU: u32 = 1;
 const IPC_APERTURE_DGPU_ALT: u32 = 2;
 const IPC_APERTURE_GPUVM: u32 = 3;
 const IPC_FRAGMENT: u32 = 1 << 31;
-const SCRATCH_BYTES_PER_XCC: u64 = 4 << 30;
-const GFX12_SCRATCH_BYTES_PER_XCC: u64 = 8 << 30;
 
 /// One free or allocated interval in the process scratch aperture.
 #[derive(Clone, Copy)]
@@ -63,11 +61,8 @@ struct ScratchPool {
 
 impl ScratchPool {
     fn new(properties: sysfs::NativeQueueProperties, allocator: Allocator) -> Self {
-        let per_xcc = if properties.gfx_target / 10_000 >= 12 {
-            GFX12_SCRATCH_BYTES_PER_XCC
-        } else {
-            SCRATCH_BYTES_PER_XCC
-        };
+        let per_xcc =
+            crate::topology::GpuInfo::scratch_bytes_per_xcc(properties.gfx_target / 10_000);
         let capacity = per_xcc
             .checked_mul(u64::from(properties.xcc_count))
             .filter(|capacity| *capacity != 0 && usize::try_from(*capacity).is_ok())
@@ -425,6 +420,7 @@ impl VmBindings {
                 limit: aperture.gpuvm_limit,
                 lds_base: aperture.lds_base,
                 scratch_base: aperture.scratch_base,
+                sdma_next_engine: AtomicU32::new(0),
                 scratch: Mutex::new(ScratchPool::new(node.queues, kfd_allocator)),
                 vmem: Mutex::new(super::vmem::VmState::new(kfd_allocator)),
                 version,
@@ -463,6 +459,7 @@ pub(crate) struct DeviceVm {
     limit: u64,
     lds_base: u64,
     scratch_base: u64,
+    sdma_next_engine: AtomicU32,
     scratch: Mutex<ScratchPool>,
     pub(super) vmem: Mutex<super::vmem::VmState>,
     pub(super) version: uapi::Version,
@@ -525,6 +522,11 @@ impl DeviceVm {
 
     pub(super) fn gpu_id(&self) -> u32 {
         self.gpu_id
+    }
+
+    pub(super) fn next_sdma_engine_id(&self, count: u32) -> u32 {
+        debug_assert!(count != 0);
+        self.sdma_next_engine.fetch_add(1, Ordering::Relaxed) % count
     }
 
     pub(super) fn shares_kfd(&self, other: &Self) -> bool {
@@ -777,7 +779,7 @@ struct AccessChange {
 #[derive(Clone, Copy)]
 pub(super) struct BorrowedHostPages {
     address: usize,
-    uncached: bool,
+    cache: HostCachePolicy,
 }
 
 impl BorrowedHostPages {
@@ -785,8 +787,8 @@ impl BorrowedHostPages {
     /// The caller retains the complete page cover and synchronizes CPU and GPU
     /// access until successful allocation cleanup or process teardown.
     #[allow(unsafe_code)]
-    pub(super) unsafe fn new(address: usize, uncached: bool) -> Self {
-        Self { address, uncached }
+    pub(super) unsafe fn new(address: usize, cache: HostCachePolicy) -> Self {
+        Self { address, cache }
     }
 }
 
@@ -804,9 +806,18 @@ pub(super) enum BufferKind {
     Gtt,
     Mmio,
     OwnedUserptr {
-        uncached: bool,
+        cache: HostCachePolicy,
     },
     Userptr(BorrowedHostPages),
+}
+
+fn host_cache_flags(cache: HostCachePolicy) -> u32 {
+    match cache {
+        HostCachePolicy::Coarse => 0,
+        HostCachePolicy::Fine => uapi::COHERENT,
+        HostCachePolicy::Extended => uapi::COHERENT | uapi::EXT_COHERENT,
+        HostCachePolicy::Uncached => uapi::COHERENT | uapi::UNCACHED,
+    }
 }
 
 /// One peer VM retained for the complete lifetime of its native mapping.
@@ -1040,20 +1051,11 @@ impl KfdAllocation {
                         uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE
                     }
                     BufferKind::Mmio => uapi::MMIO_REMAP | uapi::COHERENT,
-                    BufferKind::OwnedUserptr { uncached } => {
-                        uapi::USERPTR
-                            | uapi::COHERENT
-                            | uapi::NO_SUBSTITUTE
-                            | if uncached { uapi::UNCACHED } else { 0 }
+                    BufferKind::OwnedUserptr { cache } => {
+                        uapi::USERPTR | uapi::NO_SUBSTITUTE | host_cache_flags(cache)
                     }
                     BufferKind::Userptr(pages) => {
-                        uapi::USERPTR
-                            | uapi::NO_SUBSTITUTE
-                            | if pages.uncached {
-                                uapi::UNCACHED
-                            } else {
-                                uapi::COHERENT
-                            }
+                        uapi::USERPTR | uapi::NO_SUBSTITUTE | host_cache_flags(pages.cache)
                     }
                 },
             ..uapi::AllocMemory::default()
@@ -2020,6 +2022,84 @@ impl KfdAllocation {
 }
 
 impl KfdAllocation {
+    pub(super) fn ais_transfer(
+        &self,
+        descriptor: i32,
+        offset: u64,
+        size: u64,
+        file_offset: i64,
+        operation: u32,
+    ) -> Result<uapi::AisOutput, Error> {
+        self.check_address()?;
+        if self.native_flags & (uapi::VRAM | uapi::GTT | uapi::USERPTR) != uapi::VRAM {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "AIS requires a mapped VRAM allocation",
+            ));
+        }
+        if operation == uapi::AIS_READ && self.native_flags & uapi::WRITABLE == 0 {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "AIS file read requires writable VRAM",
+            ));
+        }
+        let size = size.min(crate::memory::interop::linux::AIS_MAX_TRANSFER_BYTES);
+        let signed_size = i64::try_from(size).map_err(|_| {
+            error(
+                ErrorKind::InvalidArgument,
+                "AIS transfer exceeds the file offset range",
+            )
+        })?;
+        if descriptor < 0
+            || file_offset < 0
+            || file_offset.checked_add(signed_size).is_none()
+            || size == 0
+            || offset
+                .checked_add(size)
+                .is_none_or(|end| end > self.logical_size)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "invalid AIS descriptor, offset, or logical range",
+            ));
+        }
+        let handle_offset = (self.device_byte_offset as u64)
+            .checked_add(offset)
+            .ok_or_else(|| error(ErrorKind::InvalidArgument, "AIS backing offset overflows"))?;
+        let native_size = self
+            .reservation
+            .as_ref()
+            .ok_or_else(|| error(ErrorKind::Internal, "AIS allocation lost its reservation"))?
+            .usable_size() as u64;
+        if handle_offset
+            .checked_add(size)
+            .is_none_or(|end| end > native_size)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "AIS range exceeds the native backing",
+            ));
+        }
+        let handle = self.handle.ok_or_else(|| {
+            error(
+                ErrorKind::DriverContract,
+                "AIS allocation has no KFD handle",
+            )
+        })?;
+        self.vm
+            .loss
+            .kfd
+            .ais(uapi::AisInput {
+                handle,
+                handle_offset,
+                file_offset,
+                size,
+                operation,
+                descriptor,
+            })
+            .map_err(|source| native_error("AMDKFD_IOC_AIS_OP", source))
+    }
+
     pub(super) fn peer_mapping_source(
         &self,
         device: &Shared<DeviceVm>,
@@ -2328,6 +2408,7 @@ pub(super) fn queue_fixture_with_range(
             limit: bounds.1,
             lds_base: 0x1000_0000_0000,
             scratch_base: 0x2000_0000_0000,
+            sdma_next_engine: AtomicU32::new(0),
             scratch: Mutex::new(ScratchPool::new(
                 sysfs::NativeQueueProperties {
                     gfx_target: 120_001,
