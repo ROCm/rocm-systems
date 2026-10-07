@@ -223,11 +223,13 @@ notice rather than a reason to omit it:
 | Serializer transition with in-flight serialized dispatches | GPU-ordered independently. `profiler_serializer::disable()` records the previous state and pushes an `hsa_barrier` across the queues, and `kernel_completion_signal` reconciles in-flight dispatches against it. |
 | No separate "draining" flag is needed | `context::stop_context` calls the service stop path while the context is still in the active list, so throughout the drain the enter hook still reaches `queue_cb`, whose disabled path returns `serialize=true` and keeps the serialized-to-unserialized transition coordinated. This only works because the drain happens before the slot is cleared. |
 
-The drain is a bound, not a hard barrier: `Queue::sync` waits a single five-second slice
+The per-queue drain is a bound, not a hard barrier: `Queue::sync` waits a single five-second slice
 (`drain_slice` in `hsa/queue.cpp`), warns, and returns false if kernels are still active, and
 `_active_kernels` counts only submissions that went through the interceptor and still have a
-completion handler pending. `hsa::queue_controller_sync()` syncs every queue and reports whether all
-of them drained; `counters::stop_context` logs a timeout and finishes the stop anyway, pinned by
+completion handler pending. `hsa::queue_controller_sync()` first waits, with no time limit, for the
+queue-interposition completion monitor's in-flight batches (`interposition_sync()`), then syncs
+every queue and reports whether all of them drained; `counters::stop_context` logs a timeout and
+finishes the stop anyway, pinned by
 `counters_queue_hooks.stop_context_completes_when_queue_drain_times_out` in
 `counters/tests/queue_hooks_test.cpp`. It is the ordering guarantee for teardown, and provenance
 routing in the exit hook is what makes individual completions correct.

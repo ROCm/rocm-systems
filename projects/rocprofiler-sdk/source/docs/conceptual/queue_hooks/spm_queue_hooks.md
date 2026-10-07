@@ -127,8 +127,10 @@ the slot were cleared first, the enter hook would stop asking for serialization 
 serializer was still enabled. Before the migration the same effect came from the registry entries,
 which `spm::stop_context` removed only after `disable_serialization`.
 
-**Drain.** `hsa::queue_controller_sync()` calls `Queue::sync()` on every queue the controller
-holds, on every agent, not only the context's. `Queue::sync()` waits a single five-second slice
+**Drain.** `hsa::queue_controller_sync()` first waits, with no time limit, for the
+queue-interposition completion monitor's in-flight batches (`interposition_sync()`), then calls
+`Queue::sync()` on every queue the controller holds, on every agent, not only the context's.
+`Queue::sync()` waits a single five-second slice
 (`drain_slice` in `hsa/queue.cpp`) for the queue's in-flight count to reach zero, warns if it does
 not, and returns false. `hsa::queue_controller_sync()` returns true only if every queue drained, and
 `spm::stop_context` does not look at the result. The in-flight count is decremented by
