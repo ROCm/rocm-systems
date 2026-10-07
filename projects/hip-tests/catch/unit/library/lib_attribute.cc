@@ -80,7 +80,7 @@ HIP_TEST_CASE(Unit_hipKernelSetAttribute_Positive_FunctionOverride) {
 
   HIP_CHECK(hipFuncSetAttribute(function, hipFuncAttributeMaxDynamicSharedMemorySize, 0));
   HIP_CHECK(
-      hipKernelSetAttribute(HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, 1024, kernel, 0));
+      hipKernelSetAttribute(HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, 1, kernel, 0));
 
   int function_value = -1;
   int kernel_value = -1;
@@ -89,7 +89,7 @@ HIP_TEST_CASE(Unit_hipKernelSetAttribute_Positive_FunctionOverride) {
   HIP_CHECK(hipKernelGetAttribute(&kernel_value, HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
                                   kernel, 0));
   REQUIRE(function_value == 0);
-  REQUIRE(kernel_value == 1024);
+  REQUIRE(kernel_value == 1);
 
   HIP_CHECK(hipLibraryUnload(library));
 }

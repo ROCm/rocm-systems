@@ -461,11 +461,9 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
     case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
       *pi = wrkGrpInfo.kernelPreferredShmemCarveout_;
       break;
-    case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES: {
-      const int alignmentSize = device.isa().ldsAlignment();
-      *pi = amd::alignDown(wrkGrpInfo.kernelMaxDynamicSharedSizeBytes_, alignmentSize);
+    case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
+      *pi = wrkGrpInfo.kernelMaxDynamicSharedSizeBytes_;
       break;
-    }
     case HIP_FUNC_ATTRIBUTE_CLUSTER_DIM_MUST_BE_SET:
       *pi = wrkGrpInfo.hasClusterAttr_;
       break;
