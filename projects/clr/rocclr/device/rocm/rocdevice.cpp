@@ -1274,12 +1274,15 @@ bool Device::populateOCLDeviceConstants() {
   // The host writes these signals through the BAR. A profiler tool's host atomics on them are not
   // atomic over PCIe, and its reads after destroy hit an unmapped batch arena.
   const bool tool_attached = amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
-  graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && info_.largeBar_ &&
-                          (device_signal_pool_.handle != 0) && !tool_attached;
+  const bool device_signals =
+      info_.largeBar_ && (device_signal_pool_.handle != 0) && !tool_attached;
+  graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && device_signals;
+  queue_device_signals_ = DEBUG_CLR_DEV_SIGNALS && device_signals;
   ClPrint(amd::LOG_INFO, amd::LOG_INIT,
-          "Signal pool: %s. Device memory: graph signals %d, AQL rings %d "
-          "(profiler tool: %d)",
-          signal_pool_name, graph_device_signals_, AqlRingsInDeviceMemory(), tool_attached);
+          "Signal pool: %s. Device memory: graph signals %d, queue signals %d, "
+          "AQL rings %d (profiler tool: %d)",
+          signal_pool_name, graph_device_signals_, queue_device_signals_,
+          AqlRingsInDeviceMemory(), tool_attached);
   // Left true by a runtime without the query, since flushing is always correct
   Hsa::agent_get_info(bkendDevice_,
                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
@@ -4163,8 +4166,13 @@ bool Device::CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uin
   // Device memory is only reachable through a batch
   if (batched || device_memory) {
     std::vector<hsa_signal_value_t> initial_values(count, initial_value);
-    const hsa_amd_memory_pool_t pool =
-        device_memory ? device_signal_pool_ : getHostMemoryPool(kAtomics);
+    // Host signals go to the kernarg pool, which ROCr maps uncached and also uses for
+    // hsa_signal_create. The plain fine-grained pool is mapped cached, where a CP polling the
+    // signal may not see another queue's update.
+    const hsa_amd_memory_pool_t host_pool = (cpu_agent_info_->kern_arg_pool.handle != 0)
+                                                ? cpu_agent_info_->kern_arg_pool
+                                                : getHostMemoryPool(kAtomics);
+    const hsa_amd_memory_pool_t pool = device_memory ? device_signal_pool_ : host_pool;
     hsa_amd_signal_batch_t batch;
     if (HSA_STATUS_SUCCESS == Hsa::signal_batch_create(count, initial_values.data(), 0, nullptr,
                                                        attributes, pool, &batch, signals)) {
