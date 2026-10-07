@@ -33,8 +33,11 @@ columns existed, and the schema and views parsing under sqlite3.
 import os
 import sqlite3
 import argparse
+import json
+import tempfile
 import importlib.util
 import unittest
+from unittest import mock
 
 THIS_DIR = os.path.dirname(os.path.realpath(__file__))
 BENCHMARK_DIR = os.path.dirname(THIS_DIR)
@@ -264,6 +267,90 @@ class TestConfigRows(unittest.TestCase):
                 "(hash_id, benchmark_mode, counter_collection_mode) VALUES (?, ?, ?)",
                 ("deadbeef", "baseline", "replay-ish"),
             )
+
+
+class TestMultipassConfig(unittest.TestCase):
+    """Multi-pass output config files describe one benchmark configuration"""
+
+    def test_pass_counters_are_aggregated_and_recorded(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            output_name = f"out-{os.getpid()}-test-app-1"
+            config_files = []
+            for pass_id, counter in enumerate(("SQ_WAVES", "GRBM_COUNT"), start=1):
+                pass_dir = os.path.join(data_dir, f"pass_{pass_id}")
+                os.makedirs(pass_dir)
+                config_file = os.path.join(pass_dir, f"{output_name}_config.json")
+                config_files.append(config_file)
+                with open(config_file, "w") as ofs:
+                    json.dump(
+                        {
+                            "rocprofiler-sdk-tool": [
+                                {
+                                    "metadata": {
+                                        "config": {
+                                            "benchmark_mode": "tool-runtime-overhead",
+                                            "counter_collection": True,
+                                            "counters": [[counter]],
+                                        },
+                                    }
+                                }
+                            ]
+                        },
+                        ofs,
+                    )
+
+            found_files = benchmark.find_rocprof_config_files(
+                os.path.join(data_dir, f"{output_name}_config.json"),
+                data_dir,
+                output_name,
+            )
+            self.assertEqual(found_files, config_files)
+
+            connection, cursor = create_database()
+            try:
+                perf_file = os.path.join(
+                    data_dir, f"perf-{os.getpid()}-test-app-1.json"
+                )
+                with open(perf_file, "w") as ofs:
+                    json.dump({}, ofs)
+
+                args = argparse.Namespace(
+                    data_dir=data_dir,
+                    rocprofv3="rocprofv3",
+                    timem="timem",
+                    keep_data=True,
+                    db_backend="sqlite3",
+                    db_placeholder="?",
+                )
+                with mock.patch.object(
+                    benchmark.subprocess, "check_call", return_value=0
+                ):
+                    with mock.patch.object(
+                        benchmark, "insert_benchmarked_sdk", return_value=None
+                    ):
+                        with mock.patch.object(
+                            benchmark, "insert_performance_metrics", return_value=1
+                        ):
+                            benchmark.execute_run(
+                                cursor,
+                                "tool-runtime-overhead",
+                                ["--pmc", "SQ_WAVES", "--pmc", "GRBM_COUNT"],
+                                ["test-app"],
+                                1,
+                                1,
+                                args,
+                                env={},
+                            )
+
+                cursor.execute(
+                    "SELECT pmc_counters FROM benchmark_config",
+                )
+                self.assertEqual(
+                    json.loads(cursor.fetchone()[0]),
+                    [["SQ_WAVES"], ["GRBM_COUNT"]],
+                )
+            finally:
+                connection.close()
 
 
 class TestMigration(unittest.TestCase):

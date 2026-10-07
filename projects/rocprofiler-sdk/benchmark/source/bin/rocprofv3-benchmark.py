@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import json
+import glob
 import math
 import yaml
 import random
@@ -794,7 +795,7 @@ def insert_benchmark_config(cursor, sdk_id, config_record, args, rocprofv3_args=
             if citr in config_record and config_record[citr]:
                 val = config_record[citr]
                 if isinstance(val, list):
-                    data[col] = json.dumps(*val)
+                    data[col] = json.dumps(val)
                     labels.append(f"{patch_key(col)}={val}")
                 elif isinstance(val, dict):
                     data[col] = json.dumps(val)
@@ -954,6 +955,37 @@ def insert_performance_metrics(
     return cursor.lastrowid
 
 
+def find_rocprof_config_files(config_file, data_dir, output_name):
+    if os.path.isfile(config_file):
+        return [config_file]
+
+    pass_configs = glob.glob(
+        os.path.join(data_dir, "pass_*", f"{output_name}_config.json")
+    )
+    pass_configs.sort(
+        key=lambda path: int(os.path.basename(os.path.dirname(path))[5:])
+    )
+    return pass_configs or [config_file]
+
+
+def load_rocprof_config(config_files):
+    configs = []
+    for config_file in config_files:
+        with open(config_file, "r") as ifs:
+            configs.append(json.load(ifs))
+
+    merged = configs[0]
+    if len(configs) > 1:
+        metadata = merged["rocprofiler-sdk-tool"][0]["metadata"]
+        merged_counters = []
+        for config in configs:
+            pass_metadata = config["rocprofiler-sdk-tool"][0]["metadata"]
+            merged_counters.extend(pass_metadata["config"].get("counters", []))
+        metadata["config"]["counters"] = merged_counters
+
+    return merged
+
+
 def execute_profile(
     cmd,
     args,
@@ -1031,6 +1063,7 @@ def execute_run(
 
     _timem_file = f"{_data_dir}/perf-{_pid}-{_argt}-{nitr}"
     _config_file = None
+    _config_files = []
 
     if rocprofv3_args:
         _rocprof_out = f"out-{_pid}-{_argt}-{nitr}"
@@ -1064,13 +1097,17 @@ def execute_run(
     if exit_code != 0:
         fatal_error("Application exited with non-zero exit code", exit_code)
 
+    if _config_file is not None:
+        _config_files = find_rocprof_config_files(
+            _config_file, _data_dir, _rocprof_out
+        )
+
     if not is_warmup:
         with open(f"{_timem_file}.json", "r") as ifs:
             _perf = json.load(ifs)
 
         if _config_file is not None:
-            with open(_config_file, "r") as ifs:
-                _cfg = json.load(ifs)
+            _cfg = load_rocprof_config(_config_files)
             _sdk_id = insert_benchmarked_sdk(cursor, _cfg, args)
             _cfg_id = insert_benchmark_config(cursor, _sdk_id, _cfg, args, rocprofv3_args)
         else:
@@ -1091,7 +1128,7 @@ def execute_run(
         _perf_id = None
 
     if not args.keep_data:
-        for fname in [f"{_timem_file}.json", _config_file]:
+        for fname in [f"{_timem_file}.json"] + _config_files:
             if fname is not None and os.path.exists(fname):
                 try:
                     os.remove(fname)
