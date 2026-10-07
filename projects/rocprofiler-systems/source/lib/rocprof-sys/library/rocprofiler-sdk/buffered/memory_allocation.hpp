@@ -53,11 +53,13 @@ on_memory_allocation(typename SdkBackend::memory_allocation_record_t* record,
 
     metadata_registry.add_stream(stream_id);
 
+    const auto name =
+        SdkBackend::get_buffer_tracing_names().at(record->kind, record->operation);
+
     Externals::get_buffer_storage().store(typename Externals::memory_allocation_sample_t{
         record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->agent_id.handle, static_cast<std::int32_t>(record->kind),
-        static_cast<std::int32_t>(record->operation), record->allocation_size,
-        record->correlation_id.internal,
+        record->agent_id.handle, name, static_cast<std::int32_t>(record->operation),
+        record->allocation_size, record->correlation_id.internal,
         SdkBackend::get_parent_stack_id(record->correlation_id),
         SdkBackend::get_memory_allocation_address(*record), stream_id });
 }
