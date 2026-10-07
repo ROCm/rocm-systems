@@ -20,9 +20,12 @@
 #include <shared_mutex>
 #include <chrono>
 #include <unordered_set>
+#include <memory>
 
 #include "hrr/hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 #include "hrr_region_map.h"    // external region annotations (regions/*.hrrr)
+
+namespace hrr { class VaPlacement; }  // hrr_va_placement.h, not installed
 
 // Whether a replayed H2D blob restore must be drained before subsequent
 // replay work. Draining is skipped while a stream graph capture is active,
@@ -51,6 +54,34 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
 // ---------------------------------------------------------------------------
 // PlaybackContext — central replay state
 // ---------------------------------------------------------------------------
+
+// Which recorded streams are inside a stream capture. Keyed by the recorded
+// stream handle, so the hipStreamEndCapture replayed for a stream clears that
+// stream's capture and no other, whichever thread it runs on and however the
+// call ends. Converting to bool asks whether any capture is open: device
+// synchronization, hipMemUnmap and event timing are illegal process-wide while
+// one is (HIP 900/901).
+class StreamCaptureFlag {
+  public:
+    void begin(uint64_t stream) {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (open_.insert(stream).second) ++total_;
+    }
+    // True when the stream had a capture open.
+    bool end(uint64_t stream) {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (!open_.erase(stream)) return false;
+        --total_;
+        return true;
+    }
+    bool any() const { return total_.load(std::memory_order_acquire) > 0; }
+    operator bool() const { return any(); }
+
+  private:
+    mutable std::mutex mu_;
+    std::set<uint64_t> open_;
+    std::atomic<int> total_{0};
+};
 
 // How an alloc_map entry's live_ptr was obtained — determines which API must
 // release it at teardown. Mixing them up (e.g. hipFree on a host pointer)
@@ -163,6 +194,9 @@ struct PlaybackContext {
     // bytes are restored verbatim, so a pointer among them reaches the GPU
     // untranslated no matter how well kernel arguments are handled.
     bool scan_h2d = false;
+    // Payloads the scan found a recorded address in. The first 16 are named
+    // on stderr, the rest only counted unless --verbose.
+    std::atomic<uint64_t> h2d_scan_payloads{0};
     // Report every kernel that takes a pointer into host memory. Replay
     // reallocates those buffers but cannot refill them: the application writes
     // them with ordinary CPU stores, which no HIP call reports. A kernel
@@ -197,11 +231,11 @@ struct PlaybackContext {
     std::unordered_map<std::string, hipFunction_t> replacement_funcs;
     std::vector<hipModule_t> replacement_modules;  // unloaded at teardown
 
-    // Set true between hipStreamBeginCapture and hipStreamEndCapture.
+    // Set between hipStreamBeginCapture and hipStreamEndCapture.
     // HIP event timing must be skipped during graph capture: recording an
     // event on a captured stream inserts it into the graph and invalidates
     // the capture state, causing error 901 on all subsequent operations.
-    bool in_graph_capture  = false;
+    StreamCaptureFlag in_graph_capture;
 
     // Global submission order for MT replay.
     // Each thread spin-waits until next_seq reaches its event's sequence_id,
@@ -274,6 +308,9 @@ struct PlaybackContext {
     std::unordered_map<uint64_t, hipMemGenericAllocationHandle_t> vmm_handle_map;
     struct VmmVA { void* live; size_t size; };
     std::unordered_map<uint64_t, VmmVA> vmm_va_map;
+    // Live address -> size of each mapping a replayed hipMemMap made and no
+    // hipMemUnmap has removed yet. Guarded by map_mutex.
+    std::map<uint64_t, size_t> vmm_mappings;
 
     // Translate a recorded VA (from AddressReserve) to the live replay VA.
     // Returns nullptr if not found or if rec is 0.
@@ -314,10 +351,22 @@ struct PlaybackContext {
     bool warn_untranslated_args = false;
     std::atomic<uint64_t> untranslated_ptr_args{0};
 
+    // ---- Capture-address placement ----
+    // Device allocations land at the address the recording had, so a device
+    // pointer the program stored in memory is still true at replay. Active
+    // once hold() succeeded; --no-placement and --guard-segments leave it off.
+    // See hrr_va_placement.h. Null when the replayer never set it up.
+    std::shared_ptr<hrr::VaPlacement> placement;
+    // The device each recorded memory pool allocates on: hipMemPoolCreate's
+    // location, or the device hipDeviceGetDefaultMemPool/hipDeviceGetMemPool
+    // named. -1 for a pool on the host. Guarded by map_mutex.
+    std::unordered_map<uint64_t, int> pool_device;
+
     // ---- Guard pages ----
-    // Both off by default: they trade the exact memory layout the replay
-    // otherwise reproduces for the ability to make an out-of-bounds access
-    // fault. See the guard section of hip_playback.cpp.
+    // Both off by default. --guard-segments puts a gap after every allocation,
+    // which placement cannot do, so it turns placement off. --guard-blocks
+    // relocates one block per launch and leaves placement alone. See the guard
+    // section of hip_playback.cpp.
     bool   guard_segments = false;  // VMM-back every allocation, guard its tail
     bool   guard_blocks   = false;  // relocate annotated blocks behind a guard
     size_t guard_min_bytes = 0;     // skip blocks smaller than this
@@ -463,18 +512,43 @@ struct PlaybackContext {
     // Recorded allocation ranges, sorted by base, for scans that test many
     // words against them. Testing one word walks every allocation; taking a
     // snapshot once and binary searching turns a scan of a multi-gigabyte
-    // payload from hours into seconds.
-    std::vector<std::pair<uint64_t, uint64_t>> recorded_ranges() const {
-        std::vector<std::pair<uint64_t, uint64_t>> r;
+    // payload from hours into seconds. `moved_only` leaves out the ones that
+    // replay at their recorded address, where a stored pointer is still true.
+    // The snapshot is kept until an allocation or reservation is added or
+    // removed, so a run of copies between two allocations sorts once.
+    using RangeList = std::vector<std::pair<uint64_t, uint64_t>>;
+    std::shared_ptr<const RangeList> recorded_ranges(bool moved_only = false) const {
+        std::lock_guard<std::mutex> cl(ranges_cache_mu_);
+        RangesCache& slot = ranges_cache_[moved_only ? 1 : 0];
+        if (slot.list && slot.gen == ranges_gen.load(std::memory_order_acquire))
+            return slot.list;
+        auto r = std::make_shared<RangeList>();
+        uint64_t gen = 0;
         {
             std::shared_lock lk(map_mutex);
-            r.reserve(alloc_map.size() + vmm_va_map.size());
-            for (auto& [base, e] : alloc_map) r.emplace_back(base, base + e.size);
-            for (auto& [base, va] : vmm_va_map) r.emplace_back(base, base + va.size);
+            gen = ranges_gen.load(std::memory_order_relaxed);
+            r->reserve(alloc_map.size() + vmm_va_map.size());
+            for (auto& [base, e] : alloc_map)
+                if (!moved_only || reinterpret_cast<uint64_t>(e.live_ptr) != base)
+                    r->emplace_back(base, base + e.size);
+            for (auto& [base, va] : vmm_va_map)
+                if (!moved_only || reinterpret_cast<uint64_t>(va.live) != base)
+                    r->emplace_back(base, base + va.size);
         }
-        std::sort(r.begin(), r.end());
+        std::sort(r->begin(), r->end());
+        slot.list = r;
+        slot.gen  = gen;
         return r;
     }
+    // Bumped, under map_mutex held exclusively, by every change to alloc_map
+    // or vmm_va_map; recorded_ranges() rebuilds its snapshot when it moves.
+    std::atomic<uint64_t> ranges_gen{0};
+    struct RangesCache {
+        std::shared_ptr<const RangeList> list;
+        uint64_t gen = 0;
+    };
+    mutable std::mutex ranges_cache_mu_;
+    mutable RangesCache ranges_cache_[2];
 
     static bool range_contains(
         const std::vector<std::pair<uint64_t, uint64_t>>& ranges, uint64_t v,
@@ -646,10 +720,11 @@ struct PlaybackContext {
                       AllocKind kind = AllocKind::Device) {
         std::unique_lock lk(map_mutex);
         alloc_map[rec] = {rec, live, sz, kind};
+        ++ranges_gen;
     }
     void remove_alloc(uint64_t rec) {
         std::unique_lock lk(map_mutex);
-        alloc_map.erase(rec);
+        if (alloc_map.erase(rec)) ++ranges_gen;
     }
     // True if an allocation is already tracked under this recorded address.
     bool has_alloc(uint64_t rec) const {
@@ -766,9 +841,37 @@ hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
 void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 
 // Release a device allocation the replay created, whichever way it was created.
-// Under --guard-segments an allocation is a VMM mapping rather than a hipMalloc
-// and hipFree cannot release it, so every teardown path has to go through here.
+// A placed allocation, and one under --guard-segments, is a VMM mapping rather
+// than a hipMalloc and hipFree cannot release it, so every teardown path has
+// to go through here.
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
+
+// Undo the VMM calls a pass replayed: unmap what replayed hipMemMap calls
+// left mapped, release the handles, and free the reservations. A reservation
+// that sat at its recorded address is held again for placement, so the next
+// pass gets it back. Called between the --kernel-filter warm-up and the timed
+// pass, which replays the same hipMemAddressReserve calls again.
+void hrr_release_vmm_state(PlaybackContext& ctx);
+
+// HIP_HRR_REPLAY_ALLOC_PAD_FACTOR as replay applies it: 1 when unset or invalid.
+size_t hrr_replay_alloc_pad_factor();
+
+// Called by dispatch_event after every event a handler replayed successfully.
+// Placement's bookkeeping that is not any one handler's business: reports a
+// fallback for each allocation API placement does not place, remembers which
+// device each memory pool allocates on, unmaps deferred frees at
+// hipCtxSynchronize and at the end of the last open capture, and under
+// --verbose prints what hipPointerGetAttributes says about the replayed
+// pointer.
+void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
+                               const uint8_t* payload, size_t size);
+
+// A replayed synchronization point (`api` names it): unmap the placed
+// allocations whose free was deferred, and retry earlier unmaps that failed,
+// unless a capture is still open. hipDeviceSynchronize and
+// hipStreamSynchronize are special events that never reach
+// hrr_placement_after_event, so their handlers call this directly.
+void hrr_placement_at_sync(PlaybackContext& ctx, const char* api);
 
 // ---------------------------------------------------------------------------
 // hrr_note_unreplayable — this API cannot be reproduced, and here is why.

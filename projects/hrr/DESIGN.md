@@ -1055,12 +1055,93 @@ loops this can make replay significantly slower than the original.
 
 ### GPU Allocator Address Non-Determinism
 
-Recorded device pointers are the GPU virtual addresses from the original run. At
-replay, `hipMalloc` returns different addresses. Translation is performed via
-`alloc_map`. If the application constructs a device pointer by arithmetic on a
-recorded address that was never passed through a HIP API (e.g. computed from an
-`hipGetDeviceProperties` query or a device-side `malloc`), the capture layer cannot
-know about it and translation will fail.
+Recorded device pointers are the GPU virtual addresses from the original run. Left
+to itself, `hipMalloc` at replay returns different addresses, and translation through
+`alloc_map` fixes up every pointer replay can see: kernel arguments, copy endpoints,
+VMM calls. It cannot see a pointer the application stored in device memory. That
+pointer reaches the GPU inside an H2D payload, restored byte for byte, so it still
+names memory in the capturing process. vLLM's block table is such a case
+([ROCM-31827](https://amd-hub.atlassian.net/browse/ROCM-31827)).
+
+Replay therefore places allocations at their capture-time addresses
+(`playback/hrr_va_placement.h`). Before `hipInit` it reads every successful
+`hipMalloc`, default-flag `hipExtMallocWithFlags`, `hipMallocAsync`,
+`hipMallocFromPoolAsync` and `hipMemAddressReserve` from the archive, plus the
+segments a region sidecar declares. A segment range loses whatever a recorded
+`hipMemAddressReserve` covers, because that reservation is held on its own. Replay
+rounds the ranges to 4 KB, merges them, and holds them with `PROT_NONE`
+placeholders (`MAP_FIXED_NOREPLACE`), reading `/proc/self/maps` once for the whole
+plan. After `hipInit` it swaps each allocation placeholder for a
+`hipMemAddressReserve` at the same address, and checks the returned address,
+because the runtime falls back silently when the address is taken. If that
+reservation fails as a whole, replay holds the range again and reserves it piece by
+piece, one recorded allocation at a time.
+
+Each recorded allocation is then a VMM mapping at exactly its recorded base, so
+translation is the identity. A mapping covers whole units of the placement granule:
+the coarsest minimum VMM granularity of the visible devices, at least 4 KB. Two allocations
+inside one unit cannot both be mapped, so the second falls back. Freeing an
+allocation unmaps it and keeps the reservation. An unmap that fails keeps the
+mapping tracked, logs it, and is tried again later. A recorded
+`hipMemAddressReserve` gives up its placeholder and asks for the address the
+recording got back. When the runtime answers with another address, replay holds
+the recorded range again for a later reservation there.
+
+**Deferred frees.** `hipMemUnmap` waits for every stream, the capturing one
+included, so replay cannot unmap while a capture is open. A free during a capture
+moves the mapping to a deferred list instead. So does every placed
+`hipFreeAsync`: unmapping it on the spot would turn a stream-ordered free into a
+device-wide wait. The list is drained, and unmaps that failed earlier are tried
+again, at a replayed `hipDeviceSynchronize`, `hipStreamSynchronize` or
+`hipCtxSynchronize`, at the end of the last open capture, and when an allocation
+is placed over a deferred one. Nothing drains while any recorded stream is still
+capturing. A replayed `hipStreamEndCapture` closes its stream's capture even when
+replay's call fails. The capture also closes at `hipStreamDestroy`. Failed calls
+are not recorded, so a capture the program's own `hipStreamEndCapture` failed to
+end leaves no end in the archive; destroying its stream is where it ends.
+Until it drains, nothing is mapped over a deferred mapping, because the graph or
+the stream may still use it. The summary counts these frees.
+
+**Several GPUs.** A placed allocation is backed on the device it was made on: the
+current device for `hipMalloc`, the stream's device for `hipMallocAsync`, and the
+pool's location for `hipMallocFromPoolAsync`. A pool on the host or on a device
+replay cannot see falls back, with the reason named. When the archive uses more
+than one device, or enables peer access, every mapping is also made accessible from
+each device that `hipDeviceCanAccessPeer` says can reach it.
+
+An allocation falls back to an ordinary one at a new address when its range could
+not be held, when it shares a granule with an allocation still live, or when it is
+stream-ordered inside a graph capture. It also falls back when the recording
+exports it with `hipIpcGetMemHandle` or `hipMemPoolExportPointer`, because neither
+accepts VMM memory. Every fallback is named on stderr, the first 16 always and the
+rest under `--verbose`. The summary counts placed allocations and fallbacks. Once
+anything has fallen back, `replay_memcpy_impl` scans the payload of each 1-D
+host-to-device `hipMemcpy`, `hipMemcpyAsync`, `hipMemcpyHtoD`, `hipMemcpyHtoDAsync`
+and `hipMemcpyWithStream` for an address of an allocation that moved. 2D, 3D,
+batch, driver-API and graph-node copies are not scanned. The first fallback says
+once that the scan is on and which allocation turned it on. The scan names the
+first 16 payloads that hold such an address, counts the rest, and the summary
+gives the total. The address ranges it matches against are sorted once and cached
+until an allocation or reservation changes them. `HIP_HRR_REPLAY_SCAN_H2D=1` forces
+the scan on from the start.
+
+Placement turns itself off, with one line saying why, under `--no-placement`,
+under `--guard-segments` (whose tail guard needs room the recorded layout does not
+have), when `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` is above 1 (padding pushes an
+allocation past its recorded neighbour), and when a device does not support virtual
+memory management. Under `--kernel-filter`, the warm-up pass replays the whole
+archive first. What it left mapped is released, its `hipMemAddressReserve`
+reservations are unmapped and freed, and the counts start again, so the timed
+pass places its own allocations and reservations.
+
+What placement does not place, each named as a fallback where the archive has it:
+`hipMallocManaged` (no VMM equivalent), `hipExtMallocWithFlags` with a flag
+(fine-grained, uncached, signal or contiguous memory), `hipMallocPitch`,
+`hipMemAllocPitch`, `hipMalloc3D`, `hipMallocArray` and the other array
+allocations, and graph memory-allocation nodes. Placement never sees `__device__`
+globals, which the code object places, a pointer computed by arithmetic from
+something that never crossed a HIP API, such as a device-side `malloc`, or memory
+imported from another process.
 
 ### `hipMemcpyDeviceToDevice` — Not Captured
 
@@ -1082,10 +1163,12 @@ is never captured.
 Device pointers are translated by recorded-VA → live-pointer lookup (not relative to
 device 0), and peer copies and the recorded `hipSetDevice` ordinal *are* honored, so
 multi-GPU workloads partially replay. The residual single-device assumptions are:
-`hipMemCreate` hardcodes `location.id = 0`, there is no per-device capture context, and
-allocations are not tagged with the device they were made on. Multi-GPU workloads that
-depend on specific device placement or peer-to-peer transfers may still replay
-incorrectly.
+there is no per-device capture context, and allocations are not tagged with the device
+they were made on. (`hipMemCreate` replays the recorded allocation property, device
+ordinal included.) A placed allocation is backed on the device it was made on, and
+made accessible from its peers when the archive uses them (see *GPU Allocator
+Address Non-Determinism*). Multi-GPU workloads that depend on the device of an
+allocation that falls back may still replay incorrectly.
 
 `hipSetDevice` ordinal handling: the clamp lives only on the special-event replay path
 (`playback/hrr_playback.cpp`), not the generated handler (which is dead code for this

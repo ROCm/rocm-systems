@@ -289,6 +289,84 @@ class RecordedCaptureTests(unittest.TestCase):
             f"expected the ATen caveat, got {finding.notes}",
         )
 
+    def test_a_placement_fallback_is_a_replay_fidelity_cause(self) -> None:
+        """A D2H mismatch after an allocation moved may be its stale address.
+
+        The verdict stays what the D2H checks say; the note names the
+        allocations that moved and calls the failure a fidelity question.
+        """
+        text = (
+            "[HRR] Placement: hipMalloc 0x7f0000200000 (4096 bytes) not placed at "
+            "its recorded address: its range could not be held. It replays "
+            "elsewhere, so a copy of its address stored in device memory is "
+            "stale\n"
+            "[HRR] Placement: hipMallocManaged 0x7f0000400000 (64 bytes) not "
+            "placed at its recorded address: managed memory has no VMM "
+            "equivalent. It replays elsewhere, so a copy\n"
+            "[HRR]   D2H checks   : 3 pass, 2 fail, 0 skipped\n"
+            "[HRR]   Placement      : 10 placed at capture address, 2 fell back\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        arf.finalize(finding)
+        self.assertEqual(finding.fault_class, "nan_inf_divergence")
+        self.assertEqual(finding.placement_fallbacks, 2)
+        self.assertEqual(
+            finding.placement_named,
+            [
+                "hipMalloc 0x7f0000200000: its range could not be held",
+                "hipMallocManaged 0x7f0000400000: managed memory has no VMM equivalent",
+            ],
+        )
+        notes = [n for n in finding.notes if n.startswith("replay fidelity:")]
+        self.assertEqual(len(notes), 1, finding.notes)
+        self.assertIn("hipMalloc 0x7f0000200000", notes[0])
+
+    def test_a_region_segment_fallback_is_named(self) -> None:
+        """The API in a fallback line can be two words."""
+        text = (
+            "[HRR] Placement: region segment 0x7f0000600000 (8192 bytes) not "
+            "placed at its recorded address: its range could not be held. It "
+            "replays elsewhere, so a copy of its address stored in device memory "
+            "is stale\n"
+            "[HRR]   D2H checks   : 3 pass, 2 fail, 0 skipped\n"
+            "[HRR]   Placement      : 4 placed at capture address, 1 fell back\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        arf.finalize(finding)
+        self.assertEqual(
+            finding.placement_named,
+            ["region segment 0x7f0000600000: its range could not be held"],
+        )
+
+    def test_placement_off_is_reported(self) -> None:
+        """With placement off, every stored pointer may be stale; say so."""
+        text = (
+            "[HRR] Placement : off (--no-placement)\n"
+            "[HRR]   D2H checks   : 3 pass, 2 fail, 0 skipped\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        arf.finalize(finding)
+        self.assertEqual(finding.placement_off, "--no-placement")
+        notes = [n for n in finding.notes if n.startswith("replay fidelity:")]
+        self.assertEqual(len(notes), 1, finding.notes)
+        self.assertIn("placement was off (--no-placement)", notes[0])
+        self.assertIn("- **Placement**: off (--no-placement)", arf.render_markdown(finding))
+
+    def test_a_fully_placed_replay_carries_no_fidelity_note(self) -> None:
+        text = (
+            "[HRR]   D2H checks   : 3 pass, 2 fail, 0 skipped\n"
+            "[HRR]   Placement      : 10 placed at capture address, 0 fell back\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        arf.finalize(finding)
+        self.assertEqual(finding.placement_fallbacks, 0)
+        self.assertFalse(any(n.startswith("replay fidelity:") for n in finding.notes))
+        self.assertIn("- **Placement**: on, 0 fell back", arf.render_markdown(finding))
+
     def test_last_launch_attributes_the_failing_event(self) -> None:
         """Per-event lines are the only record when no Fatal line is written."""
         finding = self._analyze("replay_aten_chevron.log")

@@ -84,7 +84,7 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
   }
 
   // If requested address was not allocated, printf error message.
-  if (addr != nullptr && addr == *ptr) {
+  if (addr != nullptr && addr != *ptr) {
     LogPrintfError("Requested address was not allocated. Allocated address : %p ", *ptr);
   }
 

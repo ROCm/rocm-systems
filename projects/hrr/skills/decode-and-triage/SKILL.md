@@ -219,6 +219,23 @@ signature** before calling it their bug. If their run never faulted here, suspec
 the recording. Faults on `hipModuleLaunchKernel`-launched kernels (hipBLASLt
 GEMMs, custom HIP kernels) do not carry this ambiguity.
 
+### An allocation that was not placed is a replay-fidelity cause
+
+Replay maps each device allocation at its recorded address, so a pointer the
+program stored in device memory (vLLM's block table) stays true. A line
+`[HRR] Placement: <api> <address> (<size> bytes) not placed at its recorded
+address: <reason>` says one allocation replayed elsewhere. Any stored copy of
+its address is then stale, and a kernel reading through it fails a D2H check or
+faults exactly like a workload defect. The `[HRR h2d-scan]` lines that follow
+name the payload that stored it.
+
+So when the summary counts `M fell back` with M above 0 and the replay failed,
+the fault class stays what the evidence says, the finding carries a
+replay-fidelity note naming the allocations, and you confirm against the user's
+original failure signature before calling it their bug.
+`analyze_replay_finding.py` adds that note. `Placement : off (...)` means
+nothing was placed, so every stored pointer is suspect in the same way.
+
 ### Kernel attribution
 
 Replay runs with `--sync-after-launch`, which `triage_archive.sh` adds for you.

@@ -70,6 +70,8 @@ class RegionMap {
     // after warm-up) re-applies the timeline from the start. Does not free
     // materialised buffers; those stay registered in PlaybackContext::alloc_map.
     void rewind();
+    // Whether the segment based at `rec_base` is backed by a materialised buffer.
+    bool holds(uint64_t rec_base) const { return materialized_.count(rec_base) != 0; }
 
     // Back the segment containing `rec_addr`, if one is declared live and has
     // not been backed already, and return the live address for `rec_addr`.
@@ -99,6 +101,15 @@ class RegionMap {
     // whose clock does not match amd::Os::timeNanos (CLOCK_MONOTONIC). Passing
     // an empty span disables the check.
     void check_clock_against(uint64_t first_event_ns, uint64_t last_event_ns);
+
+    // Every segment the producers declared, as recorded. Replay holds these
+    // ranges before hipInit, so a segment HIP never saw can still be
+    // materialised at its recorded address.
+    template <class F> void for_each_declared_segment(F&& f) const {
+        for (const auto& r : records_)
+            if (r.op == HRR_REGION_ADD && r.kind == HRR_REGION_SEGMENT && r.size)
+                f(r.base, r.size);
+    }
 
     // ---- Reporting ----
     size_t blocks_live()   const { return blocks_.size(); }

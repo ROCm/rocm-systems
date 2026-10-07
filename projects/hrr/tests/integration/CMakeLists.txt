@@ -42,6 +42,11 @@
 # headers itself, before and after HIP initialises. It compiles its kernel with
 # hipRTC, so it is a plain C++ translation unit.
 #
+# hrr_va_placement_test.cc covers capture-address placement: a device pointer
+# stored in device memory by an H2D copy is right at replay only when its
+# allocation lands where it was recorded (ROCM-31827). Contains its own hidden
+# [.][hrr-direct] workload.
+#
 # hrr_disk_space_test.cc covers how capture stops before the file system
 # holding the archive fills. The binary defines statvfs, statvfs64 and fsync to
 # fake a small file system under HIP_HRR_CAPTURE_OUTPUT when the test sets
@@ -61,6 +66,7 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_regions_test.cc
   hrr_api_matrix_workload_test.cc
   hrr_kernel_args_test.cc
+  hrr_va_placement_test.cc
   hrr_disk_space_test.cc
 )
 
