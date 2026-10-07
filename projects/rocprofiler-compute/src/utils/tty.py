@@ -17,17 +17,18 @@ from rich.text import Text as RichText
 from tabulate import tabulate
 
 import config
-from membw_analysis.models import MemBwAnalysisResult
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from membw_analysis.summary import (
     ACTIVE_FALLBACK_TEXT,
     has_active_nodes,
     status_text,
 )
-from memory_chart.loader import Layouts, is_memory_chart_panel
-from memory_chart.render import format_mem_chart_heading, plot_mem_chart
+from memory_chart.loader import Layouts
+from memory_chart.mem_chart import format_mem_chart_heading, strip_ansi
+from memory_chart.mem_chart import plot_mem_chart as _plot_mem_chart
 from memory_chart.units import panel_units
 from utils import parser, schema
-from utils.logger import console_log, console_warning
+from utils.logger import console_error, console_log, console_warning
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     ARGS_DISPLAY_MAX_VARIANTS,
@@ -39,7 +40,7 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import convert_filter_blocks_to_panel_ids, strip_ansi
+from utils.utils_common import convert_filter_blocks_to_panel_ids
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
 
@@ -782,6 +783,14 @@ def process_table_data(
     return result_df
 
 
+def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
+    """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
+    sources = panel.get("data source") or []
+    return bool(sources) and all(
+        tcfg.get("cli_style") == "mem_chart" for ds in sources for tcfg in ds.values()
+    )
+
+
 def format_table_output(
     args: argparse.Namespace,
     table_config: dict[str, Any],
@@ -983,7 +992,7 @@ def show_all(
             _ = is_roofline_shown(args, runs, output, panel, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
-        # Metric -> value from every table in this panel, drawn as one chart
+        # Memory chart metrics, merged across the panel's tables
         mem_chart_data: dict[str, Any] = {}
 
         for data_source in panel["data source"]:
@@ -1102,7 +1111,7 @@ def show_all(
         if mem_chart_data:
             heading = format_mem_chart_heading(args.normal_unit, panel_id=panel_id)
             membw_result = getattr(first_run, "membw_result", None)
-            chart_output = plot_mem_chart(
+            chart_output = _plot_mem_chart(
                 mem_chart_data,
                 chart_title=heading,
                 gpu_arch=gpu_arch,
@@ -1124,7 +1133,7 @@ def show_all(
             if not hasattr(output, "isatty") or not output.isatty():
                 panel_content = strip_ansi(panel_content)
             # A panel drawn entirely as the memory chart carries its own heading
-            if mem_chart_data and is_memory_chart_panel(panel):
+            if _panel_is_mem_chart_only(panel) and not _tty_view_is_table(args):
                 print(panel_content, file=output)
             else:
                 print(f"\n{'-' * 80}", file=output)

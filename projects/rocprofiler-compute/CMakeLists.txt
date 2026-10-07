@@ -648,6 +648,13 @@ add_test(
 )
 
 add_test(
+    NAME test_memory_chart_mem_chart
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_mem_chart.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_mem_chart.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_roofline_calc
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_roofline_calc.xml
@@ -1139,6 +1146,7 @@ if(${ENABLE_COVERAGE})
         test_memory_chart_loader
         test_memory_chart_units
         test_memory_chart_render
+        test_memory_chart_mem_chart
         test_membw_engine
         test_membw_summary
         test_membw_guidance

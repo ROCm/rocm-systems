@@ -14,6 +14,7 @@ import pytest
 
 import config
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
+from memory_chart.mem_chart import strip_ansi
 from utils.tty import (
     _render_membw_guidance,
     build_continuation_indent,
@@ -35,7 +36,6 @@ from utils.utils_analysis import (
     KernelStats,
     rollup_node_stats,
 )
-from utils.utils_common import strip_ansi
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
@@ -567,7 +567,7 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
         calls.append((mem_data, chart_title, gpu_arch, units))
         return "rendered gfx1250 memory chart"
 
-    monkeypatch.setattr("utils.tty.plot_mem_chart", chart_stub)
+    monkeypatch.setattr("utils.tty._plot_mem_chart", chart_stub)
     rendered_output = StringIO()
 
     show_all(
@@ -977,7 +977,7 @@ def test_show_all_view_table_replaces_memory_chart_panel(
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
     monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
     monkeypatch.setattr(
-        "utils.tty.plot_mem_chart",
+        "utils.tty._plot_mem_chart",
         lambda *_a, **_k: mem_chart_marker,
     )
     rendered_output = StringIO()

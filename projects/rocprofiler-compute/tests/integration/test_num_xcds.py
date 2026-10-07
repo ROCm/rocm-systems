@@ -8,6 +8,7 @@ import subprocess
 
 import pytest
 
+from memory_chart.mem_chart import strip_ansi
 from utils.specs import (
     generate_machine_specs,
 )
