@@ -32,7 +32,7 @@ or drop it in a discovered location:
 
 ```bash
 mkdir -p build/release/tuner && cp my_tuning.csv build/release/tuner/rccl_tuner_gfx950.csv  # development
-sudo mkdir -p /opt/rocm/share/rccl/tuner && sudo cp my_tuning.csv /opt/rocm/share/rccl/tuner/  # installed
+sudo mkdir -p /opt/rocm/share/rccl/tuner && sudo cp my_tuning.csv /opt/rocm/share/rccl/tuner/rccl_tuner_gfx950.csv  # installed
 ```
 
 ## Auto-Discovery Order

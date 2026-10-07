@@ -797,18 +797,18 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 ## the files being staged on every node. Disk locations remain as overrides.
 set(RCCL_EMBEDDED_TUNER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateEmbeddedTunerConfigs.cmake)
 set(RCCL_EMBEDDED_TUNER_HEADER ${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded_configs.h)
-# CONFIGURE_DEPENDS so adding a CSV re-runs the glob on the next build rather
-# than silently keeping the previously generated header.
-file(GLOB RCCL_TUNER_CSV_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tuner/*.csv)
-add_custom_command(
-  OUTPUT  ${RCCL_EMBEDDED_TUNER_HEADER}
+# Always run, like update_git_version: an OUTPUT/DEPENDS command re-runs only
+# when an input is newer than the output, so deleting a CSV would leave it
+# embedded. The script rewrites the header only when the content changes, so
+# running every build does not churn rebuilds.
+add_custom_target(rccl_embedded_tuner_configs
+  ALL
   COMMAND ${CMAKE_COMMAND} -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tuner
                            -DOUT_FILE=${RCCL_EMBEDDED_TUNER_HEADER}
                            -P ${RCCL_EMBEDDED_TUNER_SCRIPT}
-  DEPENDS ${RCCL_TUNER_CSV_FILES} ${RCCL_EMBEDDED_TUNER_SCRIPT}
+  BYPRODUCTS ${RCCL_EMBEDDED_TUNER_HEADER}
   COMMENT "Generating embedded RCCL tuner configs"
   VERBATIM)
-add_custom_target(rccl_embedded_tuner_configs DEPENDS ${RCCL_EMBEDDED_TUNER_HEADER})
 
 # Example plugins are C sources
 if(BUILD_TESTS AND BUILD_PLUGIN_EXAMPLES)

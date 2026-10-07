@@ -78,9 +78,9 @@ RCCL_PARAM(TunerEmbeddedConfig, "TUNER_EMBEDDED_CONFIG", 1);
 // Global state for config source discovery
 static std::mutex csvTunerMutex;
 static bool csvTunerSourceResolved = false;
-static char csvTunerConfigPath[512] = {0};    // disk path; empty when embedded
-static std::string csvTunerEmbeddedKey;       // embedded map key; empty when disk-backed
-static char csvTunerSourceLabel[600] = {0};   // display name returned for embedded configs
+static char csvTunerConfigPath[512] = {0}; // disk path; empty when embedded
+static std::string csvTunerEmbeddedKey; // embedded map key; empty when disk-backed
+static char csvTunerSourceLabel[600] = {0}; // display name returned for embedded configs
 
 // Forward declaration of tuner symbol (defined at end of file)
 extern ncclTuner_t rcclCsvTuner;
@@ -624,10 +624,12 @@ static ncclResult_t csvTunerInit(void** context, uint64_t commId, size_t nRanks,
 
   // Use the config source that was discovered earlier
   std::string embeddedKey;
+  std::string embeddedLabel;
   const char* configFile = nullptr;
   {
     std::lock_guard<std::mutex> lock(csvTunerMutex);
     embeddedKey = csvTunerEmbeddedKey;
+    embeddedLabel = csvTunerSourceLabel;
     if (csvTunerSourceResolved && csvTunerConfigPath[0]) {
       configFile = csvTunerConfigPath;
     }
@@ -641,9 +643,7 @@ static ncclResult_t csvTunerInit(void** context, uint64_t commId, size_t nRanks,
       free(ctx);
       return ncclInternalError;
     }
-    char label[sizeof(csvTunerSourceLabel)];
-    snprintf(label, sizeof(label), RCCL_CSV_TUNER_EMBEDDED_PREFIX "%s", embeddedKey.c_str());
-    result = loadConfigFromBuffer(ctx, it->second.c_str(), label);
+    result = loadConfigFromBuffer(ctx, it->second.c_str(), embeddedLabel.c_str());
   } else {
     if (!configFile) {
       // Fallback: try environment variable or default

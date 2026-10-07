@@ -14,6 +14,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "comm.h"
@@ -48,6 +50,11 @@ class CsvTunerMicrotest : public ::testing::Test {
   void TearDown() override {
     for (const std::string& path : tempFiles_) unlink(path.c_str());
     tempFiles_.clear();
+    // Deepest first, so nested probe directories come out before their parents.
+    for (std::vector<std::string>::reverse_iterator it = tempDirs_.rbegin(); it != tempDirs_.rend(); ++it) {
+      rmdir(it->c_str());
+    }
+    tempDirs_.clear();
     if (!emptyDir_.empty()) rmdir(emptyDir_.c_str());
     rcclCsvTunerResetConfigPath();
     ResetEnvFakes();
@@ -61,6 +68,30 @@ class CsvTunerMicrotest : public ::testing::Test {
     return dir ? std::string(dir) : std::string();
   }
 
+  // mkdir -p under base, recording each level for teardown.
+  void MakeDirsUnder(const std::string& base, const std::string& relative) {
+    std::string path = base;
+    size_t start = 0;
+    while (start <= relative.size()) {
+      size_t slash = relative.find('/', start);
+      const size_t end = (slash == std::string::npos) ? relative.size() : slash;
+      path += "/" + relative.substr(start, end - start);
+      if (mkdir(path.c_str(), 0755) == 0) tempDirs_.push_back(path);
+      if (slash == std::string::npos) break;
+      start = slash + 1;
+    }
+  }
+
+  std::string WriteCsvAt(const std::string& path, const std::string& contents) {
+    FILE* f = fopen(path.c_str(), "w");
+    EXPECT_NE(nullptr, f) << path;
+    if (!f) return std::string();
+    EXPECT_EQ(contents.size(), fwrite(contents.data(), 1, contents.size(), f));
+    fclose(f);
+    tempFiles_.push_back(path);
+    return path;
+  }
+
   std::string WriteTempCsv(const std::string& contents) {
     char tmpl[] = "/tmp/rccl_csv_tuner_XXXXXX";
     int fd = mkstemp(tmpl);
@@ -70,6 +101,17 @@ class CsvTunerMicrotest : public ::testing::Test {
     close(fd);
     tempFiles_.push_back(tmpl);
     return tmpl;
+  }
+
+  static bool ReadWholeFile(const std::string& path, std::string* out) {
+    FILE* f = fopen(path.c_str(), "r");
+    if (!f) return false;
+    char chunk[4096];
+    size_t n;
+    out->clear();
+    while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0) out->append(chunk, n);
+    fclose(f);
+    return true;
   }
 
   // A context with no logger; the tests assert on parsed state, not log text.
@@ -101,6 +143,7 @@ class CsvTunerMicrotest : public ::testing::Test {
   }
 
   std::vector<std::string> tempFiles_;
+  std::vector<std::string> tempDirs_;
   std::string emptyDir_;
 };
 
@@ -114,6 +157,21 @@ TEST_F(CsvTunerMicrotest, EmbeddedMapIsPopulated) {
     EXPECT_EQ(0u, entry.first.rfind("rccl_tuner", 0)) << entry.first;
     EXPECT_NE(std::string::npos, entry.first.find(".csv")) << entry.first;
     EXPECT_FALSE(entry.second.empty()) << entry.first;
+  }
+}
+
+// The generator must embed each CSV byte for byte. Without this the rest of the
+// suite only proves the parser is self-consistent, not that what shipped in the
+// binary is what is in tuner/.
+TEST_F(CsvTunerMicrotest, EmbeddedBytesMatchSourceCsv) {
+  const std::map<std::string, std::string>& embedded = rcclCsvTunerEmbeddedConfigs();
+  ASSERT_FALSE(embedded.empty());
+
+  for (const auto& entry : embedded) {
+    const std::string path = std::string(RCCL_TUNER_CSV_SOURCE_DIR) + "/" + entry.first;
+    std::string onDisk;
+    ASSERT_TRUE(ReadWholeFile(path, &onDisk)) << "cannot read " << path;
+    EXPECT_EQ(onDisk, entry.second) << entry.first << " was not embedded verbatim";
   }
 }
 
@@ -178,6 +236,33 @@ TEST_F(CsvTunerMicrotest, ConfigFileEnvOverridesEmbedded) {
   EXPECT_STREQ(path.c_str(), source);
 }
 
+// The embedded map is last, not first: a CSV in the installed share directory
+// still wins. Without this only the env-var step, which this PR did not touch,
+// was covered.
+TEST_F(CsvTunerMicrotest, SharePathCsvOverridesEmbedded) {
+  ASSERT_FALSE(emptyDir_.empty());
+  MakeDirsUnder(emptyDir_, "share/rccl/tuner");
+  const std::string path =
+      WriteCsvAt(emptyDir_ + "/share/rccl/tuner/rccl_tuner_gfx950.csv", kTwoConfigCsv);
+  ASSERT_FALSE(path.empty());
+
+  const char* source = rcclCsvTunerFindConfig("gfx950");
+  ASSERT_NE(nullptr, source);
+  EXPECT_STREQ(path.c_str(), source);
+}
+
+// Same directory, generic name, and an arch the embedded map does not carry.
+TEST_F(CsvTunerMicrotest, GenericSharePathCsvOverridesEmbedded) {
+  ASSERT_FALSE(emptyDir_.empty());
+  MakeDirsUnder(emptyDir_, "share/rccl/tuner");
+  const std::string path = WriteCsvAt(emptyDir_ + "/share/rccl/tuner/rccl_tuner.csv", kTwoConfigCsv);
+  ASSERT_FALSE(path.empty());
+
+  const char* source = rcclCsvTunerFindConfig("gfx000");
+  ASSERT_NE(nullptr, source);
+  EXPECT_STREQ(path.c_str(), source);
+}
+
 TEST_F(CsvTunerMicrotest, EmbeddedDisabledByParam) {
   g_loadParam = [](const char* env, int64_t deftVal) -> int64_t {
     if (strcmp(env, "RCCL_TUNER_EMBEDDED_CONFIG") == 0) return 0;
@@ -189,9 +274,9 @@ TEST_F(CsvTunerMicrotest, EmbeddedDisabledByParam) {
 
 TEST_F(CsvTunerMicrotest, SkipsMalformedLines) {
   std::string csv = kTwoConfigCsv;
-  csv += "allreduce,0,1023,,ll,4,1,8\n";       // empty field
-  csv += "allreduce,0,1023,bogus,ll,4,1,8\n";  // unknown algorithm
-  csv += "allreduce,0,1023,tree\n";            // too few fields
+  csv += "allreduce,0,1023,,ll,4,1,8\n"; // empty field
+  csv += "allreduce,0,1023,bogus,ll,4,1,8\n"; // unknown algorithm
+  csv += "allreduce,0,1023,tree\n"; // too few fields
   csv += "garbage\n";
 
   CsvTunerContext ctx = MakeContext();
@@ -202,9 +287,11 @@ TEST_F(CsvTunerMicrotest, SkipsMalformedLines) {
 
 // Buffer-backed parsing truncates over-long lines exactly like the fgets-based
 // file path did, so an embedded config can never parse differently from a file.
+// The tail after the 255-byte cut is a valid row, so discarding the remainder
+// instead of resuming it drops the config and fails the case.
 TEST_F(CsvTunerMicrotest, OverLongLineChunksLikeFgets) {
-  const std::string overLong(RCCL_CSV_TUNER_MAX_LINE_LENGTH + 64, 'x');
-  const std::string csv = overLong + "\nallgather,1024,4095,ring,simple,8,-1,-1\n";
+  const std::string overLong = "#" + std::string(RCCL_CSV_TUNER_MAX_LINE_LENGTH - 2, 'x');
+  const std::string csv = overLong + "allreduce,0,1023,tree,ll,4,1,8,-1,-1\n";
 
   CsvTunerContext fromBuffer = MakeContext();
   ASSERT_EQ(ncclSuccess, loadConfigFromBuffer(&fromBuffer, csv.c_str(), "overlong"));
@@ -215,23 +302,26 @@ TEST_F(CsvTunerMicrotest, OverLongLineChunksLikeFgets) {
   ASSERT_EQ(ncclSuccess, loadConfig(&fromFile, path.c_str()));
 
   ASSERT_EQ(fromBuffer.numConfigs, fromFile.numConfigs);
-  EXPECT_EQ(1, fromBuffer.numConfigs);
+  ASSERT_EQ(1, fromBuffer.numConfigs) << "the resumed remainder was not parsed";
   ExpectSameConfig(fromBuffer.configs[0], fromFile.configs[0], "overlong row 0");
 
   FreeContext(&fromBuffer);
   FreeContext(&fromFile);
 }
 
-// CRLF config text parses the same as LF.
+// CRLF config text parses the same as LF. The row ends on a trailing comma so
+// the stray CR would become its own token: without the strip, numPipeOps parses
+// as atoi("\r") == 0 instead of the -1 that a missing field means.
 TEST_F(CsvTunerMicrotest, ParsesCrlf) {
   CsvTunerContext lf = MakeContext();
-  ASSERT_EQ(ncclSuccess, loadConfigFromBuffer(&lf, "allreduce,0,1023,tree,ll,4,1,8,-1,-1\n", "lf"));
+  ASSERT_EQ(ncclSuccess, loadConfigFromBuffer(&lf, "allreduce,0,1023,tree,ll,4,1,8,\n", "lf"));
 
   CsvTunerContext crlf = MakeContext();
-  ASSERT_EQ(ncclSuccess, loadConfigFromBuffer(&crlf, "allreduce,0,1023,tree,ll,4,1,8,-1,-1\r\n", "crlf"));
+  ASSERT_EQ(ncclSuccess, loadConfigFromBuffer(&crlf, "allreduce,0,1023,tree,ll,4,1,8,\r\n", "crlf"));
 
   ASSERT_EQ(1, lf.numConfigs);
   ASSERT_EQ(1, crlf.numConfigs);
+  EXPECT_EQ(-1, crlf.configs[0].numPipeOps) << "trailing CR leaked into numPipeOps";
   ExpectSameConfig(lf.configs[0], crlf.configs[0], "crlf row 0");
 
   FreeContext(&lf);
