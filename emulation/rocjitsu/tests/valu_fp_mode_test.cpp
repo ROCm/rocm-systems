@@ -1,6 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
@@ -2544,6 +2548,63 @@ std::vector<ArithmeticCase> rounded_result_modifier_cases() {
   return cases;
 }
 
+// gfx1100 (RDNA3, W7900) and gfx1030 (RDNA2, RX 6800 XT) apply OMOD only with
+// MODE.IEEE clear and F16 output denormals flushed (MODE 0x00 and 0x50 here);
+// with IEEE set they ignore it. When OMOD applies, both scale the result after
+// rounding it to half, as gfx1201 does. Each case is a lane of the VALU probe
+// captures (v_mul_f16_e64 and v_add_f16_e64 with div:2); the two GPUs return
+// the same half for all of them. Both keep the 0xa5a5 high half the capture
+// initialized. The RDNA2 cases start from a zero high half because the RDNA2
+// executor clears it, a separate difference from gfx1030 hardware.
+std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
+  static constexpr uint32_t kIeee = 1u << 9;
+  static constexpr uint32_t kFp16Ovfl = 1u << 23;
+  std::vector<ArithmeticCase> cases;
+  struct Target {
+    const char *name;
+    rj_code_arch_t arch;
+    uint32_t high;
+    std::array<uint32_t, 2> mul;
+    std::array<uint32_t, 2> addition;
+  };
+  constexpr uint16_t V0 = 256, V1 = 257;
+  const std::array targets{
+      Target{
+          "Gfx1100", ROCJITSU_CODE_ARCH_RDNA3, 0xa5a50000u,
+          rdna3::build_vop3(rdna3::kVMulF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3}),
+          rdna3::build_vop3(rdna3::kVAddF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3})},
+      Target{
+          "Gfx1030", ROCJITSU_CODE_ARCH_RDNA2, 0u,
+          rdna2::build_vop3(rdna2::kVMulF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3}),
+          rdna2::build_vop3(rdna2::kVAddF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3})},
+  };
+  for (const Target &target : targets) {
+    const std::string name = target.name;
+    const auto add = [&](const std::string &case_name, std::array<uint32_t, 2> words, uint32_t a,
+                         uint32_t b, uint32_t result, uint32_t mode) {
+      cases.push_back({name + case_name,
+                       target.arch,
+                       {words[0], words[1], 0u},
+                       {{0, a}, {1, b}, {6, target.high | (target.high >> 16)}},
+                       {{6, target.high | result}},
+                       mode,
+                       FE_TONEAREST});
+    };
+    // 1.5 * 65504 overflows half before div:2, so the result stays infinite;
+    // under FP16_OVFL it saturates to 65504 and then halves.
+    add("MulF16Div2OverflowFlushOutputs", target.mul, 0x3e00u, 0x7bffu, 0x7c00u, 0x00u);
+    add("MulF16Div2OverflowKeepInputs", target.mul, 0x3e00u, 0x7bffu, 0x7c00u, 0x50u);
+    add("MulF16Div2SaturatedOverflow", target.mul, 0x3e00u, 0x7bffu, 0x77ffu, kFp16Ovfl);
+    add("MulF16Div2IeeeIgnoresOmod", target.mul, 0x3e00u, 0x7bffu, 0x7bffu, kIeee | kFp16Ovfl);
+    // -min_normal + 0 halves below the smallest normal and keeps its sign.
+    add("AddF16Div2NegativeMinNormalFlushOutputs", target.addition, 0x8400u, 0x0000u, 0x8000u,
+        0x00u);
+    add("AddF16Div2NegativeMinNormalKeepInputs", target.addition, 0x8400u, 0x0000u, 0x8000u, 0x50u);
+    add("AddF16Div2IeeeIgnoresOmod", target.addition, 0x8400u, 0x0000u, 0x8400u, kIeee);
+  }
+  return cases;
+}
+
 // CEIL and FLOOR flush a subnormal source to a signed zero when MODE disables
 // input denormals, so ceil(+tiny) = +0 and floor(-tiny) = -0. Results are
 // gfx1201 captures. MODE 0x30 keeps F32 input denormals and flushes F16/F64;
@@ -2744,6 +2805,23 @@ TEST_P(ValuRoundedResultModifierTest, MatchesGfx1201OnScalarAndSimdPaths) {
 
 INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuRoundedResultModifierTest,
                          testing::ValuesIn(rounded_result_modifier_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuLegacyRoundedResultModifierTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuLegacyRoundedResultModifierTest, MatchesCapturesOnScalarAndSimdPaths) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuLegacyRoundedResultModifierTest,
+                         testing::ValuesIn(legacy_rounded_result_modifier_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
