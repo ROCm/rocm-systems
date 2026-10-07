@@ -2599,28 +2599,42 @@ def main(argv=None):
     )
 
     replay_enabled = getattr(cmd_args, "replay_mode", None) == "kernel"
-    if replay_enabled and not getattr(cmd_args, "kernel_replay_beta_enabled", None):
-        fatal_error(
-            "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
-            "feature via --kernel-replay-beta-enabled"
-        )
     if replay_enabled and not (cli_has_pmc or input_has_counters):
         fatal_error(
             "--replay-mode kernel requires counter collection "
             "(--pmc, input-file pmc, or pmc_groups)"
         )
-    # An input file job may be the thing asking for replay, so the acknowledgement is only
-    # unaccompanied when nothing anywhere selected kernel replay.
-    if (
-        getattr(cmd_args, "kernel_replay_beta_enabled", None)
-        and not replay_enabled
-        and not any(getattr(inp, "replay_mode", None) == "kernel" for inp in inp_args)
-    ):
-        fatal_error(
-            "--kernel-replay-beta-enabled acknowledges that kernel replay is a beta feature but "
-            "does not select it. Add --replay-mode kernel to use kernel replay, or drop the "
-            "acknowledgement to use application replay"
-        )
+    # Validate each effective job before starting any application. An input file may contain
+    # both replay and non-replay jobs, so checking whether any one job selects replay can allow
+    # earlier jobs to launch before a later job fails in run().
+    for inp in inp_args:
+        replay_mode = getattr(cmd_args, "replay_mode", None)
+        if replay_mode is None:
+            replay_mode = getattr(inp, "replay_mode", None)
+        job_replay_enabled = replay_mode == "kernel"
+        beta_acknowledged = getattr(cmd_args, "kernel_replay_beta_enabled", None)
+        if beta_acknowledged is None:
+            beta_acknowledged = getattr(inp, "kernel_replay_beta_enabled", None)
+        if job_replay_enabled and not beta_acknowledged:
+            fatal_error(
+                "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
+                "feature via --kernel-replay-beta-enabled"
+            )
+        if job_replay_enabled and not (
+            cli_has_pmc
+            or has_set_attr(inp, "pmc")
+            or has_set_attr(inp, "pmc_groups")
+        ):
+            fatal_error(
+                "--replay-mode kernel requires counter collection "
+                "(--pmc, input-file pmc, or pmc_groups)"
+            )
+        if beta_acknowledged and not job_replay_enabled:
+            fatal_error(
+                "--kernel-replay-beta-enabled acknowledges that kernel replay is a beta feature "
+                "but does not select it. Add --replay-mode kernel to use kernel replay, or "
+                "drop the acknowledgement to use application replay"
+            )
 
     # Kernel replay replays each dispatch once per counter group within one application run, so
     # the groups given on the command line are passes of a single run rather than the per-group

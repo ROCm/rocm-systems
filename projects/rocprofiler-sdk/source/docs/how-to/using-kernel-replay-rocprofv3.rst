@@ -70,8 +70,9 @@ counter groups (one pass per group). There is no separate pass-count flag. ``roc
 callback dispatch counting for counter records; ``replay_pass`` is emitted on that path.
 
 ``--kernel-replay-beta-enabled`` only acknowledges the beta; it does not select kernel replay.
-Passing it without ``--replay-mode kernel`` is rejected rather than ignored, so a command line that
-asks only for the acknowledgement cannot quietly fall back to application replay.
+Passing it without ``--replay-mode kernel`` or an input-file job with ``replay_mode: kernel`` is
+rejected rather than ignored, so a command line that asks only for the acknowledgement cannot
+quietly fall back to application replay.
 
 .. code-block:: bash
 
