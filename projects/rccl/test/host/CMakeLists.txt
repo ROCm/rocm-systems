@@ -58,14 +58,11 @@ endforeach()
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/gdr-probe-test.cc"
   "${_rccl_reg_access_flags}" "the production registration flags")
 unset(_rccl_reg_access_flags)
-# diagnostics-p2p-test.cc copies the AMD path names of graph/topo.cc; both sides must keep this initializer.
-set(_rccl_amd_path_names
-  "{\"LOC\", \"XGMI\", \"NVB\", \"C2C\", \"PIX\", \"PXB\", \"P2C\", \"PXN\", \"PHB\", \"SYS\", \"NET\", \"DIS\"};")
-rccl_assert_source_line("${_rccl_src_root}/graph/topo.cc"
-  "topoPathTypeStr[] = ${_rccl_amd_path_names}" "diagnostics-p2p-test.cc: diagnosticsP2pTestPathNames")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/diagnostics-p2p-test.cc"
-  "${_rccl_amd_path_names}" "the AMD topoPathTypeStr in graph/topo.cc")
-unset(_rccl_amd_path_names)
+# fakes/topo_stubs.cc copies the AMD arm of topoPathTypeStr; pin both copies to one spelling.
+foreach(_path_cc "${_rccl_src_root}/graph/topo.cc" "${CMAKE_CURRENT_LIST_DIR}/fakes/topo_stubs.cc")
+  rccl_assert_source_line("${_path_cc}" "const char* topoPathTypeStr[] = {\"LOC\", \"XGMI\", \"NVB\", \"C2C\", \"PIX\", \
+\"PXB\", \"P2C\", \"PXN\", \"PHB\", \"SYS\", \"NET\", \"DIS\"};" "fakes/topo_stubs.cc: topoPathTypeStr")
+endforeach()
 # DiagnosticsTests.cpp (rccl-UnitTests) finds failed checks by kDiagFailureMarkers; each marker must stay
 # both in that list and in the report line it marks.
 set(_rccl_diag_tests "${CMAKE_CURRENT_LIST_DIR}/../DiagnosticsTests.cpp")
@@ -82,8 +79,8 @@ foreach(_marker IN LISTS _rccl_diag_p2p_markers)
   rccl_assert_source_line("${_rccl_src_root}/diagnostics/p2p.cc"
     "NCCL DIAG [INFO] ${_marker}" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
 endforeach()
-# The local setup line is assembled from NCCL_DIAG_P2P_RUNTIME; kReportCases in
-# diagnostics-p2p-test.cc checks its printed form.
+# The local setup line is assembled from NCCL_DIAG_P2P_RUNTIME; Report_EachReasonHasItsOwnLine in
+# diag-p2p-test.cc checks its printed form.
 rccl_assert_source_line("${_rccl_src_root}/diagnostics/p2p.cc"
   "NCCL DIAG [INFO] p2p: local \" NCCL_DIAG_P2P_RUNTIME" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
 foreach(_marker IN LISTS _rccl_diag_core_markers _rccl_diag_p2p_markers ITEMS "p2p: local HIP setup failed")
@@ -92,11 +89,6 @@ endforeach()
 unset(_rccl_diag_tests)
 unset(_rccl_diag_core_markers)
 unset(_rccl_diag_p2p_markers)
-# fakes/topo_stubs.cc copies the AMD arm of topoPathTypeStr; pin both copies to one spelling.
-foreach(_path_cc "${_rccl_src_root}/graph/topo.cc" "${CMAKE_CURRENT_LIST_DIR}/fakes/topo_stubs.cc")
-  rccl_assert_source_line("${_path_cc}" "const char* topoPathTypeStr[] = {\"LOC\", \"XGMI\", \"NVB\", \"C2C\", \"PIX\", \
-\"PXB\", \"P2C\", \"PXN\", \"PHB\", \"SYS\", \"NET\", \"DIS\"};" "fakes/topo_stubs.cc: topoPathTypeStr")
-endforeach()
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.
@@ -111,7 +103,6 @@ function(rccl_define_micro_source_lists)
     rma-ce-test.cc
     ras-test.cc
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
-    diagnostics-p2p-test.cc              # src/diagnostics/p2p.cc remediation text
     ras-collectives-test.cc              # src/ras/collectives.cc
     ras-diagnostics-test.cc              # src/ras/diagnostics.cc
     tuning-test.cc                       # src/tuning/tuning.cc
@@ -798,8 +789,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
-    # diagnostics/p2p.cc precedes transport/p2p.cc in SRC_FILES, so hipify keeps its name.
-    DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
     # collectives_tmp.cc, not collectives.cc: src/CMakeLists.txt lists src/collectives.cc first,
     # so add_file_unique() renames this one. Re-check after any source-list reorder.
     COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/collectives_tmp.cc"

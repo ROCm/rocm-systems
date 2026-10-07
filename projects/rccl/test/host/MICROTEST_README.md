@@ -91,13 +91,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
     filtering, aligned local-record collection, allocation and callback
     failures, rank ordering and formatting, and reporter output.
-  - `diagnostics/p2p.cc` (`DIAG_P2P_CC_PATH`, from `diagnostics-p2p-test.cc`);
-    suites `DiagnosticsP2pMicrotest.*`, `DiagnosticsP2pReport/*`. Covers the
-    AMD remediation advice for every path and handle type and the free text of
-    every failure report line. Only the advice and report helpers are called;
-    `--gc-sections` drops `ncclDiagP2pRun` and its bootstrap, topology, and HIP
-    dependencies. `graph/topo.cc` is not in this binary, so the test TU
-    supplies `topoPathTypeStr` under a private name.
   - `ras/collectives.cc` (`COLLECTIVES_CC_PATH`, from
     `ras-collectives-test.cc`); suite `RasCollectivesMicrotest.*`. Covers
     request initialization, collective forwarding and responses, completion,
@@ -220,7 +213,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`). Its own binary: it fakes the
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
-  compiles for real. See `test_categories_micro_diagnostics.yaml`.
+  compiles for real. It builds with `__HIP_PLATFORM_AMD__`, so it pins the AMD
+  remediation advice and the HIP wording of the report lines; the NVIDIA arm of
+  `p2p.cc` is not compiled here. See `test_categories_micro_diagnostics.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
