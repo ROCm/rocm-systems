@@ -9,7 +9,7 @@ Coverage for the gfx1250-strict gating of the OCP scaled conversions.
 
 Three preprocessor gates decide, per target, whether an entry point calls a
 hardware builtin or the software fallback. They guard disjoint builtin sets,
-measured on MI450-A0 with __has_builtin:
+measured on gfx1250-strict with __has_builtin:
 
                                        gfx1250  strict  gfx950  gfx942
   HIP_ENABLE_GFX1250_OCP_BUILTINS        40/40   40/40    0/40    0/40
@@ -19,8 +19,8 @@ measured on MI450-A0 with __has_builtin:
 The strict column for pk8 and pk16 is 0 only until the compiler carries
 llvm/llvm-project#227426 and #227475, which move all fifteen cvt_scale_pk8_*
 and cvt_scale_pk16_* opcodes off block16-cvt-scale-insts onto gfx1250-insts.
-LCOMPILER-2841 established that all fifteen execute on A0; what A0 lacks is
-the block16 half of the scale_sel range, not the opcodes.
+LCOMPILER-2841 established that all fifteen execute on gfx1250-strict; what
+it lacks is the block16 half of the scale_sel range, not the opcodes.
 
 A gate that disagrees with the compiler fails one of two ways, and they need
 different checks:
@@ -55,10 +55,10 @@ Two families of entry point are covered, and they reach hipRTC differently:
                      is not set the case reports why instead of passing empty.
 
 scale_sel is deliberately not varied. Every one of the 82 builtin call sites
-in the headers passes a literal 0, which is block32 and valid on A0, and no
-public entry point exposes the selector. The block16 values that A0 aliases
-are therefore unreachable through HIP. If a future header plumbs scale_sel
-through to callers, that is when this file needs a range test.
+in the headers passes a literal 0, which is block32 and valid on gfx1250-strict,
+and no public entry point exposes the selector. The block16 values that
+gfx1250-strict aliases are therefore unreachable through HIP. If a future
+header plumbs scale_sel through to callers, that is when this file needs a range test.
 
 Expected values are derived from the OCP field layout rather than tabulated,
 so the reference is independent of the header. That matters because when a

@@ -35,44 +35,17 @@ static_assert(sizeof(__hip_uint64_t) * CHAR_BIT == 64);
 #else
 #define HIP_ENABLE_GFX1250_OCP_BUILTINS 0
 #endif
-// The pk16 fp6/bf6 unpack converts. LCOMPILER-2841 established that all six
-// execute on MI450-A0; what A0 lacks is the block16 half of the scale_sel
-// range, not the opcodes. llvm/llvm-project#227475 moves them off
-// block16-cvt-scale-insts onto gfx1250-insts, which gfx1250-strict has, and
-// validates scale_sel instead: 0-3 on strict, 0-7 with block16. Every HIP
-// entry point here passes scale_sel 0, so both targets are in range.
-//
-// This requires a compiler carrying that change. Without it, gfx1250-strict
-// fails to compile with "needs target feature block16-cvt-scale-insts" rather
-// than silently taking a slower path, so the dependency is enforced by the
-// build.
-//
-// NOTE: this block is duplicated in amd_hip_mx_common.h, which fp4.h/fp6.h/fp8.h
-// include. The copies cannot be merged: amd_hip_ocp_fp.hpp must stay
-// self-contained because hipRTC compiles it without amd_hip_mx_common.h, which
-// redefines hipRoundMode under RTC. Keep both copies in step.
+// pk16 fp6/bf6 scaled converts; enabled on gfx1250-strict by llvm/llvm-project#227475.
+// NOTE: duplicated in amd_hip_mx_common.h; keep both in step (hipRTC needs
+// this header self-contained).
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
 #define HIP_ENABLE_GFX1250_PK16_SCALE_BUILTINS 1
 #else
 #define HIP_ENABLE_GFX1250_PK16_SCALE_BUILTINS 0
 #endif
-// The pk8 scaled unpack converts (fp4, fp8, bf8) are tracked separately from the
-// pk16 ones (fp6, bf6). LCOMPILER-2841 established that the nine pk8 opcodes do
-// exist on MI450-A0 at identical encodings: only their block16 OP_SEL values
-// (scale_sel 4-7) are B0-only, and every HIP entry point here passes scale_sel 0,
-// which is block32 and valid on A0. llvm/llvm-project#227426 moves them off
-// block16-cvt-scale-insts onto gfx1250-insts, which gfx1250-strict has, so this
-// gate covers both targets.
-//
-// This requires a compiler carrying that change. Without it, gfx1250-strict
-// fails to compile with "needs target feature block16-cvt-scale-insts" rather
-// than silently taking a slower path, so the dependency is enforced by the
-// build. The pk16 gate below covers gfx1250-strict for the same reason:
-// llvm/llvm-project#227475 moves those six opcodes off block16-cvt-scale-insts
-// as well, and validates scale_sel in their place.
-//
-// NOTE: this block is duplicated in amd_hip_mx_common.h, which fp4.h/fp6.h/fp8.h
-// include. Both copies must be kept in step until they are deduplicated.
+// pk8 fp4/fp8/bf8 scaled converts; enabled on gfx1250-strict by llvm/llvm-project#227426.
+// NOTE: duplicated in amd_hip_mx_common.h; keep both in step (hipRTC needs
+// this header self-contained).
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
 #define HIP_ENABLE_GFX1250_PK8_SCALE_BUILTINS 1
 #else
