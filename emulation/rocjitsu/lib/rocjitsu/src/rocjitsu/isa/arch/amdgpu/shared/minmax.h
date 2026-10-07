@@ -22,6 +22,11 @@
 /// the ISA defines them to match their VALU counterparts, and gfx1201 captures
 /// agree.
 ///
+/// Not yet converted, and still using host selection with the earlier NaN,
+/// signed-zero and input-denormal behavior: CDNA5 VOPD3 V_DUAL_MIN_NUM_F64 and
+/// V_DUAL_MAX_NUM_F64, and packed F16, BF16 and F64 min/max
+/// (fp_mode::packed_binary_f16, packed_select_bf16 and binary_f64).
+///
 /// Scalar and SIMD callers use the same implementation on raw encodings in
 /// unsigned lanes, so selection preserves signs and NaN payloads.
 

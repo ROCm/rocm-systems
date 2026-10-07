@@ -2536,10 +2536,10 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
     // giving +infinity when the mode is clear and 65504.0 when it is set.
     // Do this in the low scratch bank before selecting each destination bank.
     //
-    // V_MAXIMUM_F32 and V_MINIMUM_F32 return the canonical quiet NaN, so a NaN
-    // result keeps its NaN class but loses the sign and payload the source
-    // instruction would have produced. IEEE 754 leaves both uninterpreted and
-    // the ISA promises only that a NaN input yields a NaN output.
+    // The emulator's V_MAXIMUM_F32 and V_MINIMUM_F32 return the first NaN
+    // quieted, keeping its sign and payload, so a NaN result keeps its NaN
+    // class. That is the current model, not verified on CDNA5 hardware; the ISA
+    // promises only that a NaN input yields a NaN output.
     append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
     const uint16_t limit = static_cast<uint16_t>(scratch.lease->base + 8u);
     append_words(words, cdna5::build_vop3(cdna5::kVMulLoU32Vop3,

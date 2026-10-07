@@ -40,8 +40,10 @@ template <typename Fmt, typename Op> struct WithModifiers {
   }
 };
 
-// SIMD helpers may accept modifier-enabled instructions when this wrapper
-// supplies the modifier stages. Unwrapped operations keep their existing guards.
+/// @brief Whether `Op` is a WithModifiers wrapper that applies ABS/NEG and OMOD/CLAMP.
+/// @details SIMD helpers may accept modifier-enabled instructions when this
+/// wrapper supplies the modifier stages. Unwrapped operations keep their
+/// existing guards.
 template <typename Op> inline constexpr bool applies_modifiers_v = false;
 template <typename Fmt, typename Op>
 inline constexpr bool applies_modifiers_v<WithModifiers<Fmt, Op>> = true;
