@@ -233,7 +233,7 @@ def test_allocator_integrates_slot_limit_fill(monkeypatch):
     assert work_set == set()
 
 
-def test_split_independent_tcc_ea_req_union_splits_1805_style():
+def test_split_independent_tcc_ea_req_union_keeps_1805_style_one_group():
     group = frozenset({
         "TCC_EA0_RDREQ[0]",
         "TCC_EA0_RDREQ[1]",
@@ -242,12 +242,7 @@ def test_split_independent_tcc_ea_req_union_splits_1805_style():
         "TCC_EA0_ATOMIC[0]",
         "TCC_EA0_ATOMIC[1]",
     })
-    subgroups = _split_independent_tcc_ea_req_union(group)
-    assert len(subgroups) == 3
-    bases = [{ctr.split("[")[0] for ctr in subgroup} for subgroup in subgroups]
-    assert {"TCC_EA0_RDREQ"} in bases
-    assert {"TCC_EA0_WRREQ"} in bases
-    assert {"TCC_EA0_ATOMIC"} in bases
+    assert _split_independent_tcc_ea_req_union(group) == [group]
 
 
 def test_split_keeps_level_req_affinity_pair_intact():
@@ -298,17 +293,36 @@ def test_strip_orphan_tcc_ea_req_duplicates_keeps_level_home():
         },
     )
     assert atomic is not None and latency is not None
-    files = _strip_orphan_tcc_ea_req_duplicates([atomic, latency], cfg)
-    assert _bucket_tcc_channel_bases(files[0]) == {
-        "TCC_EA0_ATOMIC",
-        "TCC_EA0_ATOMIC_LEVEL",
-    }
-    assert _bucket_tcc_channel_bases(files[1]) == {
+    level_home = {
         "TCC_EA0_RDREQ",
         "TCC_EA0_RDREQ_LEVEL",
         "TCC_EA0_WRREQ",
         "TCC_EA0_WRREQ_LEVEL",
     }
+    # The request series stays in the pass that also holds its LEVEL.
+    without_request_row = _strip_orphan_tcc_ea_req_duplicates([atomic, latency], cfg)
+    assert _bucket_tcc_channel_bases(without_request_row[1]) == level_home
+
+    # Panel 1805 stays complete in the pass that already holds the three
+    # request columns, including the extra RDREQ and WRREQ copies.
+    request_row = frozenset({
+        "TCC_EA0_RDREQ[0]",
+        "TCC_EA0_WRREQ[0]",
+        "TCC_EA0_ATOMIC[0]",
+    })
+    files = _strip_orphan_tcc_ea_req_duplicates(
+        [atomic, latency],
+        cfg,
+        [request_row],
+    )
+    assert _bucket_tcc_channel_bases(files[0]) == {
+        "TCC_EA0_ATOMIC",
+        "TCC_EA0_ATOMIC_LEVEL",
+        "TCC_EA0_RDREQ",
+        "TCC_EA0_WRREQ",
+    }
+    assert _bucket_tcc_channel_bases(files[1]) == level_home
+    assert _any_bucket_has_full_group(files, request_row)
 
 
 def test_strip_orphan_noop_without_level_home():
