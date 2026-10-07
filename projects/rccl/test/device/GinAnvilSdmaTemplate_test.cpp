@@ -1071,9 +1071,10 @@ __global__ void kernelPutSdmaThenIpcSignal(TemplateHarness* h, size_t sdmaBytes,
 
 // An earlier SDMA put leaves peer 1 dirty, then a sub-threshold IPC put signals
 // the same peer. The IPC put issues no SDMA, so it does not quiet: the dirty bit
-// is drained by Flush, not by the signal path. This is the weak signal semantic,
-// unchanged from develop. Put #1 carries SIGNAL_TYPE_NONE and so emits no fence
-// of its own; the single fence counted is signalPeer's on put #2.
+// is drained by Flush, not by the signal path. develop quieted that peer for any
+// hasSignal/hasCounter completion; this PR drops that guarantee and quiets only
+// when the call itself issued SDMA. Put #1 carries SIGNAL_TYPE_NONE and so emits
+// no fence of its own; the single fence counted is signalPeer's on put #2.
 TEST_F(GinAnvilSdmaTemplateTest, Put_WindowedIpcPutDoesNotQuietEarlierSdmaToSamePeer) {
   constexpr int kSdma = 512;
   constexpr int kIpc = 64;

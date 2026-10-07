@@ -73,7 +73,7 @@
       "kind": "fixtures",
       "bin": "rccl-UnitTestsFixtures",
       "env": ["NCCL_DEBUG=WARN"],
-      "args": "--gtest_filter=GinRocshmemGdaTemplateTest.*:GinAnvilSdmaTemplateTest.*:*GinAnvilSdmaStandaloneSignalQuietTest.*:GinAnvilIpcDeviceTest.*"
+      "args": "--gtest_filter=GinRocshmemGdaTemplateTest.*:GinAnvilSdmaTemplateTest.*:*GinAnvilSdmaStandaloneSignalQuietTest.*:*GinAnvilSdmaIpcAgentFenceTest.*:GinAnvilIpcDeviceTest.*"
     },
     {
       "_comment": "np 2: the BarrierFence fixtures pair one rank with one peer and assert an exact world size of 2.",
