@@ -62,6 +62,8 @@
 #include <string>
 #include <dlfcn.h>
 #include <cassert>
+#include <endian.h>
+#include <arpa/inet.h>
 
 // Provider headers for types and structures
 #if defined(GDA_IONIC)
@@ -845,10 +847,6 @@ static int gin_modify_qps_rst_to_init(rocshmem_gin_qp_set* set) {
   return 0;
 }
 
-<<<<<<< Updated upstream
-// Mirrors GDABackend::ibv_mtu_to_int() (rocshmem/src/gda/backend_gda.cpp) — duplicated locally
-// since this file is standalone and doesn't take a GDABackend dependency (see file header).
-=======
 // GID Format
 // global:  |              64b  - subnet-prefix                |                 64b - EUI                          |
 // raw   :  | 10b fixed | 22b 0 | 16b FLID | 16b subnet-prefix |                 64b - EUI                          |
@@ -860,7 +858,6 @@ static int ginExtractFlid(union ibv_gid* gid) {
   return ntohs(*((uint16_t*)((uintptr_t)(gid->raw) + 4)));
 }
 
->>>>>>> Stashed changes
 static int ginIbvMtuToInt(enum ibv_mtu mtu) {
   switch (mtu) {
   case IBV_MTU_256: return 256;
@@ -906,8 +903,28 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
       attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
       memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
     } else {
+      // Path-local if same subnet and GRH not required; else global addressing. FLID only when
+      // subnets differ. Mirrors transport/net_ib/connect.cc::ncclIbQpRtr().
+      bool sameSubnet = (ginExtractLocalSubnetPrefix(set->nic.gid.global.subnet_prefix) ==
+                         ginExtractLocalSubnetPrefix(remote_info[i].gid.global.subnet_prefix));
+      bool needGlobal = !sameSubnet || (set->nic.portinfo.flags & IBV_QPF_GRH_REQUIRED);
       attr.ah_attr.is_global = 0;
       attr.ah_attr.dlid = remote_info[i].lid;
+      if (needGlobal) {
+        if (!sameSubnet) {
+          uint16_t flid = ginExtractFlid(&remote_info[i].gid);
+          if (flid != 0) {
+            attr.ah_attr.dlid = flid;
+          } else {
+            LOG_WARN("GIN QP factory: remote FLID is zero even though endpoints are on different "
+                     "subnets, using dlid as fallback");
+          }
+        }
+        attr.ah_attr.is_global = 1;
+        attr.ah_attr.grh.sgid_index = set->nic.gid_index;
+        attr.ah_attr.grh.hop_limit = 255;
+        memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
+      }
     }
     attr.rq_psn = remote_info[i].psn;
     attr.dest_qp_num = remote_info[i].qpn;
