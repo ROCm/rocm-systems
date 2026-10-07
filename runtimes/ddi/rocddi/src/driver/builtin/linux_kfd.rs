@@ -841,12 +841,18 @@ impl AllocationDriver for LinuxKfdDriver {
         } = request;
         let desc = checked_allocation_desc(size, alignment)?;
         if device.lifetime == SessionLifetime::Session {
-            if cache == HostCachePolicy::Extended {
+            if cache == HostCachePolicy::Extended
+                && std::iter::once(device)
+                    .chain(peers.iter().copied())
+                    .any(|peer| peer.native.queues.gfx_target != 120_001)
+            {
                 return Err(error(
                     ErrorKind::Unsupported,
-                    "DRM host registration cannot request extended coherency",
+                    "extended DRM host registration requires GFX1201 mappings",
                 ));
             }
+            // On GFX1201 the KFD extended USERPTR allocation and a DRM
+            // USERPTR object with the default VM page type both map as NC.
             // SAFETY: The driver caller retains the page cover and access
             // synchronization required by this registration contract.
             unsafe {

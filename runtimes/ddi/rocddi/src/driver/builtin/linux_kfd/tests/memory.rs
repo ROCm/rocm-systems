@@ -642,6 +642,62 @@ fn secondary_context_rejects_owned_userptr_before_native_allocation() {
 
 #[test]
 #[allow(unsafe_code)]
+fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
+    let fixture = Fixture::new([]);
+    let make_device = |gfx_target| super::super::DeviceState {
+        vm: fixture.vm.clone(),
+        native: sysfs::NativeNode {
+            queues: sysfs::NativeQueueProperties {
+                gfx_target,
+                ..sysfs::NativeQueueProperties::default()
+            },
+            ..node()
+        },
+        lifetime: crate::session::SessionLifetime::Session,
+        gpu_counter_frequency_hz: 0,
+    };
+    let driver = super::super::LinuxKfdDriver::new(Allocator::default());
+    let gfx1201 = make_device(120_001);
+    let other = make_device(110_000);
+    let request = crate::memory::HostRegistration {
+        address: 0x10000,
+        cache: HostCachePolicy::Extended,
+        size: desc().size,
+        alignment: desc().alignment,
+        permissions: DeviceAccess::READ | DeviceAccess::WRITE,
+    };
+
+    // SAFETY: /dev/null rejects GEM USERPTR before it can retain the
+    // synthetic page cover.
+    let error = unsafe { driver.register_host(&gfx1201, &[], request) }
+        .err()
+        .unwrap();
+    assert!(matches!(
+        error,
+        Error::NativeOperation {
+            operation: "DRM GEM USERPTR registration",
+            ..
+        }
+    ));
+    // SAFETY: The unsupported targets are rejected before native access.
+    let error = unsafe { driver.register_host(&other, &[], request) }
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+    // SAFETY: An unsupported peer is rejected before native access.
+    let error = unsafe { driver.register_host(&gfx1201, &[&other], request) }
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+
+    drop(gfx1201);
+    drop(other);
+    fixture.exhausted();
+    assert_eq!(Shared::strong_count(&fixture.vm), 1);
+}
+
+#[test]
+#[allow(unsafe_code)]
 fn failed_secondary_drm_registration_releases_its_vm_dependency() {
     let fixture = Fixture::new([]);
     // SAFETY: The scripted render endpoint rejects registration before it

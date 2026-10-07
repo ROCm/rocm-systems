@@ -171,8 +171,10 @@ allocations and virtual-memory handles. For CPU pools, it requests coherent,
 uncached rocddi-owned host pages. The primary KFD context maps ordinary CPU
 pool pages with the pool's coarse, fine, or extended coherency policy. CPU
 pool allocations in a secondary KFD context use rocddi system backing, which
-is already uncached. Host locks in that context cannot request extended
-coherency. Pointer info reports effective fine-grained and kernarg
+is already uncached. On GFX1201, host locks in that context use DRM's default
+NC mapping for extended coherency, matching the primary KFD USERPTR page type.
+Other GPU targets reject extended host locks in a secondary context.
+Pointer info reports effective fine-grained and kernarg
 flags for uncached pool allocations and host locks. The AMD PCIe flag requests
 coherent access. Pointer info reports fine-grained global flags for those
 allocations. The owning pool still governs peer access.
