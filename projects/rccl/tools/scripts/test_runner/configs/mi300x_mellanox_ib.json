@@ -341,6 +341,48 @@
         }
       ]
     },
+    "multisegment_cast_rma_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1"
+      },
+      "tests": [
+        {
+          "name": "MultiSegment_CAST_RMA_All_MultiNode",
+          "description": "CAST RMA registration, boundary, signal, flush, and DeepEP-style multi-segment coverage",
+          "test_filter": "RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
+        },
+        {
+          "name": "MultiSegment_CAST_RMA_PostPath",
+          "description": "Post-path fixture under IB-CAST: WR chains, aggregation, rejected-op slot accounting, registration churn and send-queue credits",
+          "test_filter": "RmaMultiSegmentPostMPITest.*"
+        },
+        {
+          "name": "MultiSegment_CAST_RMA_SendQueueOversubscribe",
+          "description": "Twice the RMA send queue's worth of putSignals without test() under IB-CAST: the post path waits for send-queue credits, so no post is rejected or fails, and context 1 still delivers",
+          "test_filter": "RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
+          "env_variables": {
+            "RCCL_MSEG_SQ_STRESS": "1"
+          }
+        }
+      ]
+    },
     "gdr_flush_cumem_multinode": {
       "extends": "default",
       "is_gtest": true,
@@ -4593,6 +4635,12 @@
       "name": "Multi-Segment - Classic NET/IB and GIN (Multi-Node)",
       "description": "All classic and GIN transport tests, including DeepEP and boundary stress",
       "config": "multisegment_transport_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - CAST RMA (Multi-Node)",
+      "description": "CAST RMA registration, boundary, signal, flush, and DeepEP-style multi-segment coverage",
+      "config": "multisegment_cast_rma_multinode",
       "enabled": true
     },
     {

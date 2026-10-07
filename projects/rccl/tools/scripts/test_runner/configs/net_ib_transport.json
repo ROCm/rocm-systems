@@ -1396,6 +1396,18 @@
         }
       ]
     },
+    "cast_rma_multisegment": {
+      "extends": "net_ib_rma_multisegment",
+      "description": "IB-CAST twin of net_ib_rma_multisegment: the same tests and filters through the CAST RMA proxy, so a fix made only in net_ib shows up here as a failure.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2"
+      }
+    },
+
     "net_ib_rma_multisegment_scale_1x2": {
       "extends": "net_ib_base",
       "num_ranks": 2,
@@ -2098,6 +2110,12 @@
       "name": "NET IB - RMA Multi-Segment",
       "description": "AIRUNTIME-2351: per-segment DMA-BUF registration of multi-segment VMM windows, boundary-split iput/iget/iputSignal/iflush, range and segment-cap rejection, and the DeepEP Engram mixed GPU+CPU window",
       "config": "net_ib_rma_multisegment",
+      "enabled": true
+    },
+    {
+      "name": "NET IB-CAST - RMA Multi-Segment DMA-BUF",
+      "description": "IB-CAST twin of the classic RMA multi-segment suite, same filters",
+      "config": "cast_rma_multisegment",
       "enabled": true
     },
     {
