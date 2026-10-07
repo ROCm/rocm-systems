@@ -113,9 +113,9 @@ cases blame gets wrong:
 
 ## Entry Rules
 
-- Follow `CLAUDE.md` rule 7: each logical change gets one entry that describes
-  the user-visible impact as a short bold summary plus one concise bullet, with
-  no function names, signal/abort details, enum constants or file internals.
+- Each logical change gets one user-facing entry: describe the user-visible
+  impact, not internal mechanics, as a short bold summary plus one concise
+  bullet; drop signal/abort details, enum constants and file internals.
 - Breaking changes include migration guidance.
 - JIRA/issue refs only in the PR `JIRA ID` section, never in entry text.
 - Bold headline bullets must end with **two trailing spaces** (`··`) so Sphinx

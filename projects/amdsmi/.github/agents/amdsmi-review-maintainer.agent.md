@@ -356,11 +356,11 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
 
 - **DC1 CHANGELOG** — Quote the entry and check each claim against the diff.
   It describes exactly the shipped behavior (nothing a later push removed),
-  including any signature or behavior change, in user-facing terms per
-  `CLAUDE.md` rule 7: a short bold summary plus one bullet on what changed for
-  users and why it matters, with no function names, enum constants or file
-  internals. Changes users can't observe (tests, CI, sanitizer-only fixes) get
-  no entry.
+  including any signature or behavior change, in user-facing terms: a short
+  bold summary plus one bullet on what changed for users and why it matters,
+  without internal mechanics (signal/abort details, enum constants, file
+  internals). Changes users can't observe (tests, CI, sanitizer-only fixes)
+  get no entry.
 - **DC2 Header precision** — `amdsmi.h` states units, sign convention, required
   permissions, every returned status, ASIC/platform scope and cardinality
   ("exactly one" vs "at most one"), consistently across the header, in its
