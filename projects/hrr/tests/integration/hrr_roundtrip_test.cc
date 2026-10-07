@@ -194,6 +194,120 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
 /**
  * Test Description
  * ----------------
+ *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
+ *     AMD_LOG_LEVEL=0, capturing stdout and stderr. The capture layer must print
+ *     its start notice exactly once, naming the per-process archive directory
+ *     and the base directory that child processes record to.
+ *   - Repeats the capture with only stdout captured: the notice is on stderr,
+ *     so stdout holds none.
+ *   - Spawns the same workload without HIP_HRR_CAPTURE_OUTPUT: no notice.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_notice"};
+  const std::string kNotice =
+      "[HRR capture] Recording this process's HIP calls, with their host buffers, kernel "
+      "arguments and code objects, to ";
+  auto count_notices = [&](const std::string& out) {
+    size_t n = 0;
+    for (size_t at = out.find(kNotice); at != std::string::npos;
+         at = out.find(kNotice, at + kNotice.size()))
+      ++n;
+    return n;
+  };
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess output:\n" << out);
+    REQUIRE(ret == 0);
+    REQUIRE(count_notices(out) == 1);
+
+    const size_t begin = out.find(kNotice);
+    std::string line = out.substr(begin, out.find('\n', begin) - begin);
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    const std::string base = cap.path.string();
+    const std::string pid_dir = hrr_single_process_archive(cap.path).filename().string();
+    // The writer joins the pid-<pid> component with '/' on every platform.
+    const std::string expected = kNotice + base + "/" + pid_dir +
+                                 " (child processes record to their own pid-* directories in " +
+                                 base + ")";
+    CHECK(line == expected);
+  }
+
+  {
+    // Same capture with only stdout captured: the notice goes to stderr, so the
+    // program's own stdout stays exactly what it was without capture.
+    ScopedDir cap_stdout{fs::temp_directory_path() / "hrr_capture_notice_stdout"};
+    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/false);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_stdout.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess stdout:\n" << out);
+    REQUIRE(ret == 0);
+    CHECK(count_notices(out) == 0);
+  }
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    // CLR's flag parser turns HIP_HRR_CAPTURE_OUTPUT= into a single space, which
+    // still enables capture. Unset the variable so an inherited value cannot arm it.
+    proc.unsetEnv("HIP_HRR_CAPTURE_OUTPUT");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Subprocess output without capture:\n" << out);
+    REQUIRE(ret == 0);
+    CHECK(count_notices(out) == 0);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
+ *     AMD_LOG_LEVEL=3, capturing stdout and stderr. The summary that
+ *     hip_capture_shutdown() logs at exit must name the per-process pid-<pid>
+ *     directory the archive was written to, the same one the start notice names,
+ *     not the base directory.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureExitSummary) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_exit_summary"};
+  hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+  proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+  // The summary goes through the CLR log at LOG_INFO with LOG_ALWAYS, which no
+  // mask filters out; AMD_LOG_MASK=0 keeps the per-API traces out of the output.
+  proc.setEnv("AMD_LOG_LEVEL", "3");
+  proc.setEnv("AMD_LOG_MASK", "0");
+  set_proc_search_path(proc);
+  int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+  const std::string out = proc.getOutput();
+  INFO("Capture subprocess output:\n" << out);
+  REQUIRE(ret == 0);
+
+  const std::string kSummary = "[HRR capture] Wrote ";
+  const size_t begin = out.find(kSummary);
+  REQUIRE(begin != std::string::npos);
+  CHECK(out.find(kSummary, begin + kSummary.size()) == std::string::npos);
+  std::string line = out.substr(begin, out.find('\n', begin) - begin);
+  if (!line.empty() && line.back() == '\r') line.pop_back();
+  INFO("Summary line: " << line);
+  const std::string pid_dir = hrr_single_process_archive(cap.path).filename().string();
+  // The writer joins the pid-<pid> component with '/' on every platform.
+  const std::string tail = " blobs to: " + cap.path.string() + "/" + pid_dir;
+  REQUIRE(line.size() >= tail.size());
+  CHECK(line.compare(line.size() - tail.size(), tail.size(), tail) == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - Spawns HrrTest Unit_HRR_AllApis_Direct as a subprocess with
  *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.  Exercises ~55 distinct
  *     HIP APIs covering device queries, streams, events, malloc variants
@@ -1142,6 +1256,54 @@ HRR_TEST_CASE(Unit_HRR_HostRegLaunchRoundtrip) {
 HRR_TEST_CASE(Unit_HRR_ModuleAPIRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_moduleapi"};
   hrr_run_roundtrip("Unit_HRR_ModuleAPI_Direct", cap.path);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ModuleLoadBundle_Direct, which loads one HIPRTC ELF with
+ *     hipModuleLoadData and, wrapped in an offload bundle file, with
+ *     hipModuleLoad, then launches rtc_fill from the bundle's module.
+ *   - REQUIRE that the hipModuleLoad event records the device ELF the runtime
+ *     loaded, not the bundle file: its code object is an ELF and has the same
+ *     hash as the hipModuleLoadData event of the bare ELF.
+ *   - REQUIRE that the launch from that module records the same code object as
+ *     its load event, then replay and validate the D2H.
+ */
+HRR_TEST_CASE(Unit_HRR_ModuleLoadBundleRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_moduleloadbundle"};
+  hrr_run_roundtrip("Unit_HRR_ModuleLoadBundle_Direct", cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  const hrr::Event* load_data = nullptr;
+  const hrr::Event* load_file = nullptr;
+  const hrr::Event* launch    = nullptr;
+  for (const auto& ev : arc.events) {
+    const uint16_t type = ev.header().event_type;
+    if (type == HRR_API_HIPMODULELOADDATA) load_data = &ev;
+    if (type == HRR_API_HIPMODULELOAD) load_file = &ev;
+    if (ev.kernel_launch &&
+        ev.kernel_launch->kernel_name.find("rtc_fill") != std::string::npos)
+      launch = &ev;
+  }
+  REQUIRE(load_data);
+  REQUIRE(load_file);
+  REQUIRE(launch);
+
+  const auto& file_ev = load_file->module_load_ev;
+  INFO("hipModuleLoad code object: " << hrr::hash_hex(file_ev.hash_lo, file_ev.hash_hi));
+  std::vector<uint8_t> file_co;
+  REQUIRE(hrr::read_code_object(arc, file_ev.hash_lo, file_ev.hash_hi, file_co));
+  INFO("hipModuleLoad code object size: " << file_co.size());
+  REQUIRE(file_co.size() >= 4);
+  REQUIRE(std::memcmp(file_co.data(), "\x7f" "ELF", 4) == 0);
+
+  const auto& data_ev = load_data->module_load_ev;
+  CHECK(file_ev.hash_lo == data_ev.hash_lo);
+  CHECK(file_ev.hash_hi == data_ev.hash_hi);
+  CHECK(launch->kernel_launch->co_hash_lo == file_ev.hash_lo);
+  CHECK(launch->kernel_launch->co_hash_hi == file_ev.hash_hi);
 }
 
 HRR_TEST_CASE(Unit_HRR_VMMRoundtrip) {

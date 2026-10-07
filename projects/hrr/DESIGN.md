@@ -131,7 +131,7 @@ precisely the ones left without a trailer and absent from the root index, while
 the parent that exited cleanly needs no repair. Sub-archives that already carry
 a clean trailer are skipped without being read.
 
-### Archive Format (v6)
+### Archive Format (v7)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -242,7 +242,7 @@ projects/hrr/                     — standalone HRR project (portable layer)
                                     Not used by capture — it is the format an
                                     out-of-tree producer writes and playback reads
   playback/
-    hrr_reader.h/.cpp             — archive loader, v6 format; record framing
+    hrr_reader.h/.cpp             — archive loader, v7 format; record framing
                                     (read_raw_record / open_record_stream) shared
                                     with the region sidecars
     hrr_region_map.h/.cpp         — region timeline: merge, cursor, live block set,
@@ -321,13 +321,13 @@ The generator classifies each API:
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 When adding HIP API support, update this script to classify the API in the appropriate capture and playback policy sets. APIs requiring non-trivial serialization or replay belong in `MANUAL_CAPTURE_APIS` and/or `MANUAL_PLAYBACK_APIS`; intentionally unsupported replay APIs belong in `NOOP_PLAYBACK_APIS`.
 
-## Archive Format (v6)
+## Archive Format (v7)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 6
+HRR_VERSION = 7
 ```
 
 Version history, so an archive written by an older runtime can be placed:
@@ -352,12 +352,16 @@ Version history, so an archive written by an older runtime can be placed:
   or a reader that translates the tail. Both cases assume the dispatch tables
   only ever grow at the end; an insertion anywhere else moves the IDs after it.
   A retired dispatch-table slot (nulled `void*`) still occupies an ID.
+- **v7** packs the host blob of every pitched copy and sets
+  `HRR_FILE_FLAG_PACKED_HOST_RECTS` in `hrr_file_header.reserved`. A v6 reader
+  ignores that field and would replay a packed blob with the recorded pitch,
+  reading past its end. See 2D/3D Memcpy and Memset below.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 6)
+                      events.bin HRR_VERSION = 7)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
@@ -371,7 +375,7 @@ Version history, so an archive written by an older runtime can be placed:
 ### `events.bin` Layout
 
 ```
-[0..7]    hrr_file_header  { magic:u32, version:u16, reserved:u16 }
+[0..7]    hrr_file_header  { magic:u32, version:u16, reserved:u16 (HRR_FILE_FLAG_* bits) }
 [8..]     records, back-to-back, no padding:
             hrr_event_header (32 bytes, pack(1)):
               event_type     u16   hrr_api_id_t (0..552)
@@ -660,20 +664,40 @@ with `hipEventRecord` to accumulate elapsed time into `total_graph_ms`.
 ## Init / Shutdown
 
 `hip_capture_init()` is called from `hip_context.cpp` at HIP init (after `amd::Runtime`
-and the live `HipDispatchTable` are ready). If `HIP_HRR_CAPTURE_OUTPUT` is set it
+and the live `HipDispatchTable` are ready). If capture is enabled (see [Enable
+Flag](#enable-flag)) it
 snapshots the runtime dispatch table, installs runtime capture shims, opens the writer,
-recovers pre-init fat binaries (compiler-table shims + retroactive sweep), and
-registers `hip_capture_shutdown` via `atexit`. Runtime shims are **not** installed at
+recovers pre-init fat binaries (compiler-table shims + retroactive sweep),
+registers `hip_capture_shutdown` via `atexit`, and prints the capture notice. Runtime
+shims are **not** installed at
 `libamdhip64` static-init time: that pulled every HIP call through capture from DSO
 load before `hip::init()` completed and disturbed host stacks that load HIP early
 (e.g. Python + `spawn`). Events before `writer::open()` were never persisted anyway.
 Shutdown uninstalls shims and flushes `events.bin` + `manifest.json`.
 
+The capture notice is one line on stderr, printed with `fprintf` rather than through the
+CLR log so that `AMD_LOG_LEVEL` cannot hide it. It names this process's archive
+directory, `<base>/pid-<pid>`, and says that child processes record to their own `pid-*`
+directories in `<base>`. It appears only after the writer has opened the archive, and at
+most once per process, since `hip::init()` runs under `std::call_once`. A child created
+with `fork()` does not run `hip::init()` again, so it records without a line of its own;
+a child started with `exec` initialises HIP again and prints its own.
+
 ## Enable Flag
 
-Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a non-empty directory
-(see [README.md](README.md#capture-environment)). Defined as a `cstring` release flag in
-`rocclr/utils/flags.hpp`.
+Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a directory and the process
+was not started in secure-execution mode (see
+[README.md](README.md#capture-environment)). Defined as a `cstring` release flag in
+`rocclr/utils/flags.hpp`. An empty or blank value leaves capture off: the flag parser
+stores an exported empty variable as a single space, and `hrr_capture_requested()` treats
+a value made only of whitespace as unset.
+
+On Linux the kernel sets `AT_SECURE` in the auxiliary vector for a set-user-ID,
+set-group-ID or file-capability exec, and for an LSM transition. Such a process can hold
+privileges that whoever set its environment does not, so it ignores the variable, as
+`secure_getenv()` would, and `hip_capture_init()` prints one line on stderr saying so.
+The check is `hrr_cap::metadata::secure_exec()` in `hip_capture_metadata.cpp`, and it is
+always false off Linux.
 
 ## Playback Tools
 
@@ -1331,7 +1355,7 @@ The event wire format (finding H5):
   shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
   (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
   normally instead of being dropped at 65535 bytes. This is the change that bumped
-  `HRR_VERSION` to 4; the current version is 6, see Archive Format above. The
+  `HRR_VERSION` to 4; the current version is 7, see Archive Format above. The
   writer's single-record buffer path now writes any oversized record straight through.
 - **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
   a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch
@@ -1352,11 +1376,15 @@ The event wire format (finding H5):
 
 - `hipMemcpy2D` / `hipMemcpy2DAsync` are now blob-captured (finding H3), matching the 1D
   and 3D families. They are `MANUAL_CAPTURE_APIS` / `MANUAL_PLAYBACK_APIS`: H2D snapshots
-  the pitched host `src` region (`spitch*(height-1)+width` bytes) as a blob, and at
+  the copied rows of the pitched host `src` (`width*height` bytes) as a blob, and at
   replay the captured blob is substituted for the untranslatable capture-time host VA
   and copied into the translated device `dst` with the recorded `dpitch`. D2H snapshots
   the host `dst` after the copy and validates the device result against it at replay.
   Row-padded image/tensor buffers are now handled.
+- Every pitched host blob holds only the copied rows, packed end to end: `width*height*depth` bytes, whatever the pitch and offsets. That covers the D2H expected output of `hipMemcpy2D`, the four `hipMemcpy3D` spellings, `hipDrvMemcpy3D` / `hipDrvMemcpy3DAsync` and the three driver 2D spellings, and the H2D source of the same copies. Capture never reads the bytes between rows or before the first one. Unrelated host data cannot reach the archive, an unmapped gap (a guard page between rows) cannot fault the application, and a sparse pitch costs nothing: two rows gigabytes apart record two rows.
+- `events.bin` marks such an archive with `HRR_FILE_FLAG_PACKED_HOST_RECTS` in `hrr_file_header.reserved`, and the layout came with the v7 bump, since a v6 reader ignores the flag. Replay then gives the host side of each pitched copy the dense layout of its blob (pitch equal to width, no offsets) and keeps the device side as recorded, so the copy moves the same bytes. A D2H check re-runs the copy into a scratch buffer of the blob's size and compares the two. Neither side of replay grows with the host pitch.
+- An archive without the flag lays a pitched host blob out from the base pointer with the recorded pitch and offsets, or holds the flat `width*height*depth` bytes (3D and driver D2H, `hipMemcpy3D` H2D). Replay keeps the recorded layout for it and compares only the copied rows. It skips a copy whose blob does not span the recorded rect, such as the flat blob of a rect that is not dense from the base, rather than read past the blob or issue it from the capture-time host address. A recorded rect whose footprint overflows `size_t` is skipped too. An archive whose every D2H check is skipped fails the replay rather than passing as one with no validation blobs.
+- The H2D source of the four `hipMemcpy3D` spellings is recorded only for a copy the runtime accepted.
 - `hipMemset3D` / `hipMemset3DAsync` drop the destination pitched pointer/extent at
   capture (`pitchedDevPtr = 0`) and no-op at replay, so 3D-memset-initialized regions
   are invisible to replay.
@@ -1376,9 +1404,7 @@ dispatch before the create populates the translation map and silently
 
 D2H validation can pass when replay actually diverged:
 
-- **Length clamp.** Comparison uses `min(copy_size, blob_size)`; a truncated or
-  crash-recovered blob validates only a prefix (the corrupted tail is unchecked) and
-  still counts as PASS. A zero-length compare counts as pass.
+- **Length clamp.** Linear copies compare `min(copy_size, blob_size)`; a truncated or crash-recovered blob validates only a prefix (the corrupted tail is unchecked) and still counts as PASS. A zero-length compare counts as pass. The 2D, 3D and driver copies do not clamp: a blob shorter than the host rect replay reads it as is not validated.
 - **Float-dtype guessing.** Blobs carry no dtype. On a byte mismatch the validator
   tries `{fp32, bf16, fp16, fp64}` and passes on the first encoding within tolerance,
   so integer/index/pointer output buffers can silently false-pass; both-NaN counts as

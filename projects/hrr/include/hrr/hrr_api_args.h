@@ -73,17 +73,30 @@
  * v6: pointer arguments whose pointee used to be dropped now carry it inline
  * (DEREF_FIELDS). Event payloads grew for ~50 APIs, so an archive written
  * before v6 cannot be read by a v6 reader: re-capture rather than replay an
- * old recording. */
-#define HRR_VERSION ((uint16_t)6u)
+ * old recording.
+ * v7: the host blobs of the pitched copies are packed, and the writer sets
+ * HRR_FILE_FLAG_PACKED_HOST_RECTS. A v6 reader ignored the flag and replayed
+ * a packed blob with the recorded pitch, reading past its end. */
+#define HRR_VERSION ((uint16_t)7u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
 typedef struct {
     uint32_t magic;    /* HRR_MAGIC                */
     uint16_t version;  /* HRR_VERSION              */
-    uint16_t reserved; /* zero                     */
+    uint16_t reserved; /* HRR_FILE_FLAG_* bits      */
 } hrr_file_header;
 #pragma pack(pop)
+
+/* Bits of hrr_file_header.reserved in events.bin. A reader before v7 ignores
+ * them, which is why the packed layout came with the v7 bump.
+ * HRR_FILE_FLAG_PACKED_HOST_RECTS: the host blobs of the pitched copies
+ * (hipMemcpy2D, the hipMemcpy3D family and the driver 2D/3D copies) hold only
+ * the copied rows, packed end to end: width*height*depth bytes, whatever the
+ * pitch. Without it, a blob spans the host rect from its base pointer through
+ * the last copied byte, or holds the flat width*height*depth bytes from the
+ * base pointer (3D and driver D2H, hipMemcpy3D H2D). */
+#define HRR_FILE_FLAG_PACKED_HOST_RECTS ((uint16_t)0x0001u)
 
 #ifdef __cplusplus
 static_assert(sizeof(hrr_file_header) == 8, "hrr_file_header must be 8 bytes");
