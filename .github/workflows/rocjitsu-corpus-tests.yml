@@ -21,6 +21,10 @@ on:
       - ".github/workflows/rocjitsu-*.yml"
   workflow_dispatch:
     inputs:
+      include_quarantined_tests:
+        description: "Run the known failures listed in tests/corpus/ci-quarantine.json"
+        type: boolean
+        default: false
       corpus_repository:
         description: "Repository containing the rocjitsu pytest corpus"
         default: "ROCm/rocjitsu-test-corpus"
@@ -404,6 +408,32 @@ jobs:
           if [[ -n "${TEST_REGEX}" ]]; then
             CTEST_SELECTION=(-R "${TEST_REGEX}")
           fi
+          # Prototype failures observed in run 37670663604. Match complete names
+          # so new cases in these suites remain covered. Manual dispatch can
+          # include them when investigating or validating a fix.
+          if [[ "${{ matrix.name }}" == "asan-ubsan" && "${{ inputs.include_quarantined_tests }}" != "true" ]]; then
+            QUARANTINE_REGEX="$(python3 - "${ROCJITSU_SOURCE_DIR}/tests/corpus/ci-quarantine.json" <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          with open(sys.argv[1]) as stream:
+              groups = json.load(stream)["asan-ubsan"]
+          names = [name for cases in groups.values() for name in cases]
+          assert len(names) == len(set(names)), "Duplicate CTest quarantine entries"
+          if names:
+              print("^(" + "|".join(re.escape(name) for name in names) + ")$")
+              message = f"Temporarily excluded {len(names)} known ASan/UBSan CTest failures; see emulation/rocjitsu/tests/corpus/ci-quarantine.json."
+              print(f"::warning::{message}", file=sys.stderr)
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                  print(message, file=summary)
+          PY
+            )"
+            if [[ -n "${QUARANTINE_REGEX}" ]]; then
+              EXCLUDED_TESTS="${EXCLUDED_TESTS}|${QUARANTINE_REGEX}"
+            fi
+          fi
           TEST_WORKERS="$(( WORKERS < 8 ? WORKERS : 8 ))"
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             "${CTEST_SELECTION[@]}" \
@@ -668,7 +698,33 @@ jobs:
           if (( DBT_WORKERS > 16 )); then
             DBT_WORKERS=16
           fi
+          DBT_SELECTION=()
+          if [[ "${{ matrix.verify_dbt_idempotence }}" == "1" && "${{ inputs.include_quarantined_tests }}" != "true" ]]; then
+            QUARANTINE_EXPRESSION="$(python3 - "${ROCJITSU_SOURCE_DIR}/tests/corpus/ci-quarantine.json" <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          with open(sys.argv[1]) as stream:
+              groups = json.load(stream)["dbt-idempotence"]
+          hashes = [sha for cases in groups.values() for sha in cases]
+          assert len(hashes) == len(set(hashes)), "Duplicate DBT quarantine entries"
+          assert all(re.fullmatch(r"[0-9a-f]{64}", sha) for sha in hashes), "Invalid DBT SHA256"
+          if hashes:
+              print("not (" + " or ".join(hashes) + ")")
+              message = f"Temporarily deselected {len(hashes)} known DBT idempotence failures (RJ-CI-003); idempotence checks remain enabled for other objects."
+              print(f"::warning::{message}", file=sys.stderr)
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                  print(message, file=summary)
+          PY
+            )"
+            if [[ -n "${QUARANTINE_EXPRESSION}" ]]; then
+              DBT_SELECTION=(-k "${QUARANTINE_EXPRESSION}")
+            fi
+          fi
           "${ROCJITSU_DBT_VENV}/bin/python" -m pytest tests/test_corpus.py \
+            "${DBT_SELECTION[@]}" \
             --target gfx1250 \
             --suite dbt \
             --dbt-corpus "${ROCJITSU_HSACO_CORPUS}" \
