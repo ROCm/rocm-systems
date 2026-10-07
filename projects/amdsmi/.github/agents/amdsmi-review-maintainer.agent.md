@@ -30,9 +30,9 @@ passes:
    finding, so they don't crowd out code findings.
 2. **Code walk** — for every changed function (library and examples), read
    the whole function, including lines the hunk doesn't touch, and check AP3,
-   ST1, ST2, ST4, CL1–CL5, CX1 and CX3–CX6 against it; look up every new
-   helper in the Helper Index.
-3. **Test walk** — for every new or changed test, check TS1–TS8 and CX1.
+   ST1–ST4, CL1–CL5 and CX1–CX7 against it (the gates decide what untouched
+   lines yield); look up every new helper in the Helper Index.
+3. **Test walk** — for every new or changed test, check TS1–TS8, EV5 and CX1.
 
 Show the walk before the findings: a `Walk notes` block with one line per
 changed function and test, listing only what applies:
@@ -59,7 +59,7 @@ Report**.
 ```bash
 gh pr view <N> --repo ROCm/rocm-systems --json title,body,files,commits,reviews,headRefOid
 gh pr diff <N> --repo ROCm/rocm-systems            # PR, or for a local branch:
-git diff origin/develop...HEAD -- projects/amdsmi
+git diff origin/develop...HEAD                     # whole repo, any directory
 ```
 
 **Ownership.** Formatting and generic naming rules belong to style, coverage
@@ -75,7 +75,7 @@ Scan the diff for these signals first; each one makes its items mandatory.
 | Diff signal | Check first |
 |-------------|-------------|
 | Removes or loosens an `assert`, a check or a test expectation; adds a skip, exclude-list or accept-list entry | The change itself, before its implementation: RC3, TS5, TS4, EV3, BR2 |
-| Claims the driver or firmware omits or garbles data, or special-cases an ASIC, firmware or metrics version | RC1, RC2, EV1–EV4, BR1 |
+| Claims the driver or firmware omits or garbles data, or special-cases an ASIC, firmware or metrics version | RC1, RC2, RC4, EV1–EV6, BR1 |
 | New or reshaped parser for sysfs or gpu_metrics data | RC1; TS3 (name each input the tests miss); CX5 (`sscanf`/`stoi` parsing, empty lines); CX4 (an existing parse helper); TS7; ST1 |
 | New function with several parameters or pointer out-parameters | CX1 |
 | New or changed status return path | ST1, ST2, TS1 |
@@ -85,8 +85,8 @@ Scan the diff for these signals first; each one makes its items mandatory.
 | `amdsmi.h`, public enums or structs | AP1, AP2, AP5, AP6, DC2, ST5 |
 | `CHANGELOG.md`, comments or docs | DC1, DC3, DC4 |
 | Files outside `projects/amdsmi`, or generated files | BR3 |
-| Python tests or CLI code | TS5, TS6, PY1–PY3 |
-| Every PR | PR1, PR4, BR4, TS1 |
+| Python tests or CLI code | AP4, TS5, TS6, PY1–PY3 |
+| Every PR | PR1–PR4, BR4; TS1 when library, CLI or Python code changes |
 
 Gates:
 
@@ -168,10 +168,11 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   an rdc config in an amdsmi PR) and drive-by cleanups. Generated files
   (`py-interface/amdsmi_wrapper.py`, the Rust wrapper) are regenerated with
   `tools/update_wrapper.sh` / `tools/update_rust_wrapper.sh`, never hand-edited.
-- **BR4 Overlap and history** — Search open PRs touching the same files or
-  symbols, and develop's history for a fix already merged (`gh pr list --search
-  <file or symbol>`, `git log -S <symbol> origin/develop`). Settle a duplicate,
-  conflicting or superseded PR before review.
+- **BR4 Overlap and history** — Find open PRs that change the same files
+  (match changed files; `gh pr list --search <symbol>` matches PR text only,
+  so it is a supplement) and fixes already merged on develop
+  (`git log -S <symbol> origin/develop`). Settle a duplicate, conflicting or
+  superseded PR before review.
 
 ### ST — Status codes tell the truth
 
@@ -191,10 +192,13 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   version or capability read) on the support check callers use it to diagnose.
 - **ST4 Log every skip** — Skip-and-continue (one bad device in discovery, one
   unreadable file) logs what was skipped and why: index, BDF, status.
-- **ST5 One N/A per field** — "Not available" is all-ones for the field's width
-  (`0xFF` … `UINT64_MAX`), never all-zero (indistinguishable from zeroed
-  memory), and the same field shows the same N/A on every path (C, Python, CLI).
-  Widening a narrower all-ones into a real-looking number is a bug.
+- **ST5 One N/A per field** — In a new field, "not available" is all-ones for
+  the field's width (`0xFF` … `UINT64_MAX`), never all-zero (indistinguishable
+  from zeroed memory); an existing field keeps the N/A its header documents
+  (AP1). The same field shows the same N/A on every path (C, Python, CLI). A
+  narrower all-ones copied into a wider field must stay N/A: a new field maps
+  it to the wider all-ones; an existing one documents it, as the header does
+  for `gfx_activity`'s `0xFFFF`.
 
 ### TS — Tests that fail without the fix
 
@@ -212,15 +216,18 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   (`> INT_MAX`), a duplicated marker, and the driver's `%-Ns` padding (a name
   exactly N wide hides it). For a binary table: the oldest and newest revision
   written as a real blob, truncated, and longer than the struct. Negative
-  oracle: inputs the code must reject (null handles and pointers, invalid enums,
-  unknown IDs) with their exact status, plus non-root and an absent or
-  unreadable sysfs file. Name each uncovered case in the finding.
+  oracle: inputs the code must reject (null handles and required pointers,
+  invalid enums, unknown IDs) with their exact status, plus non-root and an
+  absent or unreadable sysfs file. Name each uncovered case in the finding.
 - **TS4 Falsifiable relaxations** — Accept lists name specific statuses, never a
   catch-all. If a per-item `NOT_SUPPORTED` is now accepted, assert that at least
   one item still works wherever the group claims support.
 - **TS5 Skips last** — A skipped test is unknown behavior; a PR whose purpose is
   to add skips is challenged on that purpose first. Prefer accepting the
-  documented status for unsupported hardware (Python `check_ret` takes a list).
+  documented status for unsupported hardware: new or changed Python tests use
+  `expect_status()` with an exact accept list (`check_ret()` also passes
+  `NOT_SUPPORTED`, `NOT_YET_IMPLEMENTED` and `NO_HSMP_MSG_SUP` whatever the
+  caller expects).
   Never skip silently (`continue`, early `return`): use `GTEST_SKIP()` or
   `skipTest()` with the reason, gated on a capability (APU:
   `asic_info.flags & AMDGPU_IDS_FLAGS_FUSION`), never on a status any ASIC can
@@ -252,12 +259,13 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   sentinel for unused entries, and pointer lifetime (e.g. valid until the next
   call). Populate every declared field, or document it as N/A for that version.
 - **AP3 Validate in the library** — A public `amdsmi_*` entry calls
-  `AMDSMI_CHECK_INIT()` like its siblings, rejects null or out-of-range
-  arguments with `AMDSMI_STATUS_INVAL` before any support probe, and checks
-  every callee's status. Bad input never yields `NOT_SUPPORTED`, even though
-  rocm_smi's `CHK_SUPPORT*` macros treat a null pointer as a support query.
-  Validation is an explicit check, not `assert()`, and not only in the CLI
-  parser.
+  `AMDSMI_CHECK_INIT()` like its siblings, rejects a null required pointer or
+  an out-of-range argument with `AMDSMI_STATUS_INVAL` before any support probe,
+  and checks every callee's status. Pointers the header documents as optional
+  (size queries such as `amdsmi_get_socket_handles(&count, nullptr)`) stay
+  optional. Bad input never yields `NOT_SUPPORTED`, though rocm_smi's
+  `CHK_SUPPORT*` macros treat a null pointer as a support query. Validation is
+  an explicit check, not `assert()`, and not only in the CLI parser.
 - **AP4 Logic in the library** — Hardware and sysfs logic belongs behind a
   library API; the CLI formats. Beyond the cascade architecture checks, confirm
   the Rust binding and the Go shim where they wrap the changed API.
@@ -347,9 +355,11 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
 
 - **DC1 CHANGELOG** — Quote the entry and check each claim against the diff.
   It describes exactly the shipped behavior (nothing a later push removed),
-  including any signature or semantics change, in user-facing terms: what
-  changed for users and why it matters, not internal mechanics. Changes users
-  can't observe (tests, CI, sanitizer-only fixes) get no entry.
+  including any signature or behavior change, in user-facing terms per
+  `CLAUDE.md` rule 7: a short bold summary plus one bullet on what changed for
+  users and why it matters, with no function names, enum constants or file
+  internals. Changes users can't observe (tests, CI, sanitizer-only fixes) get
+  no entry.
 - **DC2 Header precision** — `amdsmi.h` states units, sign convention, required
   permissions, every returned status, ASIC/platform scope and cardinality
   ("exactly one" vs "at most one"), consistently across the header, in its
@@ -397,7 +407,7 @@ Maintainers point authors to these instead of new code (CX4, TS5, AP3).
 | Parse sectioned `key: value` sysfs text (e.g. `pp_od_clk_voltage`) | `TextFileTagContents_t` (`rocm_smi_utils.h`; used in `rocm_smi.cc`) |
 | Root check | `is_sudo_user()` (`rocm_smi_utils.h`) |
 | Environment variable as integer | `GetEnvVarUInteger()` (file-static in `rocm_smi_main.cc`: promote it) |
-| Python expected statuses | `check_ret()` with a list, `expect_status()`, `status_sweep()` (`tests/python/common/common.py`) |
+| Python expected statuses | `expect_status()` (exact accept list), `status_sweep()`; `check_ret()` over-accepts, see TS5 (`tests/python/common/common.py`) |
 | Privileged or destructive test gates | `AMDSMI_NON_PRIVILEGED` (`amdsmitst`), `AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1` (Python) |
 
 ## Proving It
@@ -415,6 +425,21 @@ Prefer running a check to asserting it.
   git worktree add --detach "${TMPDIR:-/tmp}/amdsmi-agent-mutation" <head-sha>
   cd "${TMPDIR:-/tmp}/amdsmi-agent-mutation"
   git diff origin/develop...<head-sha> -- projects/amdsmi ':!projects/amdsmi/tests' | git apply -R
+  ```
+
+- **Overlap (BR4)** — List every open PR that touches `projects/amdsmi` (no
+  label filter: a new PR may not be labeled yet) and intersect its files with
+  this diff's. The listing cuts each PR off at 100 files, so the command also
+  keeps every PR that shows exactly 100; fetch their full lists from the files
+  API (`gh pr diff` refuses large diffs) before ruling them out.
+
+  ```bash
+  gh pr list --repo ROCm/rocm-systems --state open --limit 5000 \
+    --json number,title,files --jq '.[]
+      | select((.files | length) == 100
+               or any(.files[]; .path | startswith("projects/amdsmi/")))
+      | [.number, .title, ([.files[].path] | join(" "))] | @tsv'
+  gh api "repos/ROCm/rocm-systems/pulls/<M>/files?per_page=100" --paginate --jq '.[].filename'
   ```
 
 - **Producer format (RC1)** — Prefer the installed DKMS source
