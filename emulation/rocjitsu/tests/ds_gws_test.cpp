@@ -144,7 +144,7 @@ TEST_P(DsGwsTest, DecodesWithoutGdsBit) {
 }
 
 // ---------------------------------------------------------------------------
-// Stateful GWS (Option B tier B1): co-residency-gated parking. These exercise
+// Stateful GWS: co-residency-gated parking. These exercise
 // the CU-local counter table through execute_instruction(), which runs the
 // generated execute body (decode rid, read count, call the CU hook). Resources
 // are workgroup-private, so a rendezvous only ever blocks co-resident waves.

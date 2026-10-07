@@ -8995,9 +8995,9 @@ class CodeGenerator:
         takes the ordinary completion path rather than the producer-without-op
         diagnostic.
 
-        Stateful "Option B" (tier B1, implemented here): a per-resource GWS
-        counter table lives CU-local and workgroup-private (keyed by the resident
-        workgroup and the 6-bit resource id). The resource id is decoded as
+        Stateful GWS: a per-resource GWS counter table lives CU-local and
+        workgroup-private (keyed by the resident workgroup and the 6-bit resource
+        id). The resource id is decoded as
         M0[21:16] + offset0[5:0] (the hardware convention; it is not spelled out
         in the ISA XML), and the barrier/semaphore count comes from the ADDR
         VGPR's first active lane (init/barrier/sema_br carry one source VGPR;
