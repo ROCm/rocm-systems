@@ -38,6 +38,15 @@ profiling control do not apply to SDMA queues. KFD SDMA queues have no
 wavefront scheduling priority or queue-error callback event source. SDMA
 descriptors requesting either option are rejected.
 
+For compute queues, the doorbell info query returns the rocddi transport's
+host mapping. A queue error event marks a queue that has faulted in virtual
+memory. The process fault event supplies its address and reason, including when
+the queue error arrives later. System event callbacks run after a bounded wait
+for queue identification. Handlers can query per-queue fault status, address,
+and reason; memory faults do not invoke queue error callbacks when a system
+event handler is registered. Without one, the queue error callback receives
+the fault status.
+
 On Linux, the workspace-root shared package builds
 `libhsa-runtime64.so.1` with `ROCR_1` default versions on its public HSA
 symbols and supplies the conventional HSA library alias. Binary
