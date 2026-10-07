@@ -22,11 +22,14 @@
 /// OMOD applies; older targets apply it only under MODE.IEEE=0 with output
 /// denormals flushed. Hardware evidence for the order differs by target:
 /// - gfx1201 (RDNA4): measured, as above.
-/// - gfx1100 (RDNA3): measured with MODE.IEEE=0. Captured F16 MUL/ADD div:2
-///   lanes that overflow before scaling, or keep the sign of a halved
+/// - gfx1100 (RDNA3, W7900): measured with MODE.IEEE=0. Captured F16 MUL/ADD
+///   div:2 lanes that overflow before scaling, or keep the sign of a halved
 ///   negative normal, match gfx1201.
-/// - gfx1010/gfx1030 (RDNA1/2): hardware captures with OMOD applied match
-///   gfx1201 on every non-NaN lane; the emulator cannot yet replay them.
+/// - gfx1030 (RDNA2, RX 6800 XT) and gfx1010 (RDNA1, RX 5700 XT): with
+///   MODE.IEEE=0 and output denormals flushed, captures with OMOD applied
+///   match gfx1201 on every non-NaN lane; gfx1010 matches gfx1030 bit for bit.
+/// legacy_rounded_result_modifier_cases in valu_fp_mode_test.cpp decodes
+/// captured gfx1100 and gfx1030 lanes, including IEEE=1 controls.
 /// - RDNA3.5 and CDNA1-5: no captures. The order is extrapolated from the
 ///   targets above and requires hardware verification.
 ///
