@@ -4,19 +4,16 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MMA_PORTABLE_DENSE_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MMA_PORTABLE_DENSE_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/mma/arguments.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma/common.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma/portable_matmul.h"
 
 namespace rocjitsu::amdgpu::mma_backend {
 
-template <typename ExtractA, typename ExtractB>
-bool try_exec_f32_mixed_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t s2,
-                             uint32_t const_acc, auto &wf, auto &stage_operands, auto &results) {
-  constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
-  constexpr size_t MAX_BSTRIDE = 4096; // max K*stride over all MFMA shapes
-  constexpr size_t MAX_C = 1024;       // max M*stride over all MFMA shapes
-  static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
-                "MFMA staging buffers exceed the 48 KiB stack budget");
+inline bool try_exec_f32_mixed_simd(auto &cu, MatrixShape shape, uint32_t B, uint32_t s2,
+                                    uint32_t const_acc, uint32_t wf, auto &stage_operands,
+                                    auto &results) {
+  const auto [M, N, K] = shape;
 
   // Pad the column (N) leading dimension up to a SIMD-width multiple so
   // every matmul row starts W-aligned: the inner loop then uses aligned
@@ -25,16 +22,17 @@ bool try_exec_f32_mixed_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint3
   // anything larger (or a forced-scalar run) falls back to the scalar path.
   constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
   const uint32_t stride = ((N + W - 1) / W) * W;
-  if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
-      static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
+  if (util::force_scalar() || static_cast<size_t>(M) * K > MFMA_SIMD_MAX_AB ||
+      static_cast<size_t>(K) * stride > MFMA_SIMD_MAX_BSTRIDE ||
+      static_cast<size_t>(M) * stride > MFMA_SIMD_MAX_C) {
     return false;
   } else {
     // Zero-initialized as the uniform staging-buffer convention (see the
     // zero-init policy on wmma_simd_matmul). C is pre-seeded just below, so the
     // init is redundant here, but matching the WMMA paths keeps one rule.
-    alignas(64) float Abuf[MAX_AB] = {};
-    alignas(64) float Bbuf[MAX_BSTRIDE] = {};
-    alignas(64) float Cbuf[MAX_C] = {};
+    alignas(64) float Abuf[MFMA_SIMD_MAX_AB] = {};
+    alignas(64) float Bbuf[MFMA_SIMD_MAX_BSTRIDE] = {};
+    alignas(64) float Cbuf[MFMA_SIMD_MAX_C] = {};
     for (uint32_t b = 0; b < B; ++b) {
       stage_operands(b, stride, Abuf, Bbuf);
       for (uint32_t row = 0; row < M; ++row)
@@ -58,10 +56,11 @@ bool try_exec_f32_mixed_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint3
 }
 
 template <typename ExtractA, typename ExtractB>
-bool try_exec_wmma_f32_mixed_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t a_bits,
-                                  uint32_t b_bits, uint32_t s0, uint32_t s1, uint32_t s2,
-                                  ExtractA ea, ExtractB eb, uint32_t const_acc, uint32_t c_modifier,
-                                  uint32_t wave_size, auto &results) {
+bool try_exec_wmma_f32_mixed_simd(auto &cu, MatrixShape shape, uint32_t a_bits, uint32_t b_bits,
+                                  uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+                                  uint32_t const_acc, uint32_t c_modifier, uint32_t wave_size,
+                                  auto &results) {
+  const auto [M, N, K] = shape;
   constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
   const uint32_t stride = ((N + W - 1) / W) * W;
   if (util::force_scalar() || static_cast<size_t>(M) * K > WMMA_SIMD_MAX_AB ||
@@ -104,14 +103,13 @@ bool try_exec_wmma_f32_mixed_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, 
 }
 
 template <typename ExtractA, typename ExtractB, typename ScaleAWord, typename ScaleBWord>
-bool try_exec_wmma_f32_scaled_mixed_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K,
-                                         uint32_t a_bits, uint32_t b_bits, uint32_t s0, uint32_t s1,
-                                         uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
-                                         ScaleAWord scale_a_word, ScaleBWord scale_b_word,
-                                         uint32_t matrix_a_scale, uint32_t matrix_b_scale,
-                                         uint32_t matrix_a_scale_fmt, uint32_t matrix_b_scale_fmt,
-                                         bool scale16, uint32_t c_modifier, auto &num_scale_blocks,
-                                         auto &scale_for, auto &results) {
+bool try_exec_wmma_f32_scaled_mixed_simd(
+    auto &cu, MatrixShape shape, uint32_t a_bits, uint32_t b_bits, uint32_t s0, uint32_t s1,
+    uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc, ScaleAWord scale_a_word,
+    ScaleBWord scale_b_word, uint32_t matrix_a_scale, uint32_t matrix_b_scale,
+    uint32_t matrix_a_scale_fmt, uint32_t matrix_b_scale_fmt, bool scale16, uint32_t c_modifier,
+    uint32_t num_scale_blocks, auto &scale_for, auto &results) {
+  const auto [M, N, K] = shape;
   constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
   const uint32_t stride = ((N + W - 1) / W) * W;
   if (util::force_scalar() || static_cast<size_t>(M) * K > WMMA_SIMD_MAX_AB ||
@@ -194,10 +192,11 @@ bool try_exec_wmma_f32_scaled_mixed_simd(auto &cu, uint32_t M, uint32_t N, uint3
 }
 
 template <typename ExtractA, typename ExtractB>
-bool try_exec_swmmac_f32_mixed_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t a_bits,
-                                    uint32_t b_bits, uint32_t s0, uint32_t s1, ExtractA ea,
-                                    ExtractB eb, uint32_t wave_size, auto &compressed_k,
-                                    auto &dense_k_for, auto &initial_acc_for, auto &results) {
+bool try_exec_swmmac_f32_mixed_simd(auto &cu, MatrixShape shape, uint32_t a_bits, uint32_t b_bits,
+                                    uint32_t s0, uint32_t s1, ExtractA ea, ExtractB eb,
+                                    uint32_t wave_size, uint32_t compressed_k, auto &dense_k_for,
+                                    auto &initial_acc_for, auto &results) {
+  const auto [M, N, K] = shape;
   constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
   const uint32_t stride = ((N + W - 1) / W) * W;
   if (util::force_scalar() || static_cast<size_t>(compressed_k) > WMMA_SIMD_MAX_AB ||
@@ -234,10 +233,11 @@ bool try_exec_swmmac_f32_mixed_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K
 }
 
 template <typename ExtractA, typename ExtractB, typename ReadAcc, typename PackResult>
-bool try_exec_wmma_packed16_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits,
-                                 uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+bool try_exec_wmma_packed16_simd(auto &cu, MatrixShape shape, uint32_t in_bits, uint32_t s0,
+                                 uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
                                  ReadAcc read_acc, PackResult pack_result, uint32_t const_acc,
                                  uint32_t wave_size, auto &results) {
+  const auto [M, N, K] = shape;
   constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
   const uint32_t stride = ((N + W - 1) / W) * W;
   if (util::force_scalar() || static_cast<size_t>(M) * K > WMMA_SIMD_MAX_AB ||
@@ -273,11 +273,12 @@ bool try_exec_wmma_packed16_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, u
   return true;
 }
 
-template <typename ExtractA, typename ExtractB, typename ReadAcc, typename PackResult>
-bool try_exec_swmmac_packed16_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits,
-                                   uint32_t s0, uint32_t s1, ExtractA ea, ExtractB eb,
-                                   PackResult pack_result, uint32_t wave_size, auto &compressed_k,
-                                   auto &dense_k_for, auto &initial_acc_for, auto &results) {
+template <typename ExtractA, typename ExtractB, typename PackResult>
+bool try_exec_swmmac_packed16_simd(auto &cu, MatrixShape shape, uint32_t in_bits, uint32_t s0,
+                                   uint32_t s1, ExtractA ea, ExtractB eb, PackResult pack_result,
+                                   uint32_t wave_size, uint32_t compressed_k, auto &dense_k_for,
+                                   auto &initial_acc_for, auto &results) {
+  const auto [M, N, K] = shape;
   constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
   const uint32_t stride = ((N + W - 1) / W) * W;
   if (util::force_scalar() || static_cast<size_t>(compressed_k) > WMMA_SIMD_MAX_AB ||
@@ -314,24 +315,21 @@ bool try_exec_swmmac_packed16_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K,
 }
 
 template <typename ExtractA, typename ExtractB, typename ScaleBlock>
-bool try_exec_f32_scaled_impl_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                                   uint32_t a_bits, uint32_t b_bits, uint32_t s0, uint32_t s1,
-                                   uint32_t s2, ExtractA ea, ExtractB eb,
-                                   ScaleBlock scale_block_sum, uint32_t const_acc,
-                                   uint32_t c_modifier, auto &wf, auto &num_blocks, auto &results) {
+bool try_exec_f32_scaled_impl_simd(auto &cu, MatrixShape shape, uint32_t B, uint32_t a_bits,
+                                   uint32_t b_bits, uint32_t s0, uint32_t s1, uint32_t s2,
+                                   ExtractA ea, ExtractB eb, ScaleBlock scale_block_sum,
+                                   uint32_t const_acc, uint32_t c_modifier, uint32_t wf,
+                                   uint32_t num_blocks, auto &results) {
+  const auto [M, N, K] = shape;
   constexpr uint32_t BLOCK_K = 32;
 
   // Column-padded, stack-allocated, aligned B loads. See exec_f32_mixed.
   // Cacc is touched scalar (per-output ldexp) so it keeps an N pitch.
   constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-  constexpr size_t MAX_AB = 2048;
-  constexpr size_t MAX_BSTRIDE = 4096;
-  constexpr size_t MAX_C = 1024;
-  static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
-                "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
   const uint32_t stride = ((N + W - 1) / W) * W;
-  if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
-      static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * N > MAX_C) {
+  if (util::force_scalar() || static_cast<size_t>(M) * K > MFMA_SIMD_MAX_AB ||
+      static_cast<size_t>(K) * stride > MFMA_SIMD_MAX_BSTRIDE ||
+      static_cast<size_t>(M) * N > MFMA_SIMD_MAX_C) {
     return false;
   } else {
     auto reads = read_mixed_matrix_fast_path_regions(
@@ -340,9 +338,9 @@ bool try_exec_f32_scaled_impl_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K,
         /*acc_bits=*/32, const_acc, wf);
     // Zero-initialized staging buffers (uniform convention; see
     // wmma_simd_matmul). Cacc is pre-seeded below.
-    alignas(64) float Abuf[MAX_AB] = {};
-    alignas(64) float Bbuf[MAX_BSTRIDE] = {};
-    alignas(64) float Cacc[MAX_C] = {};
+    alignas(64) float Abuf[MFMA_SIMD_MAX_AB] = {};
+    alignas(64) float Bbuf[MFMA_SIMD_MAX_BSTRIDE] = {};
+    alignas(64) float Cacc[MFMA_SIMD_MAX_C] = {};
     for (uint32_t b = 0; b < B; ++b) {
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t k = 0; k < K; ++k) {
@@ -400,27 +398,23 @@ bool try_exec_f32_scaled_impl_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K,
   return true;
 }
 
-inline bool try_exec_i32_i8_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                                 uint32_t s0, uint32_t s1, uint32_t s2, uint32_t const_acc,
-                                 uint32_t cbsz, uint32_t abid, uint32_t blgp, auto &wf,
-                                 auto &results) {
+inline bool try_exec_i32_i8_simd(auto &cu, MatrixShape shape, uint32_t B, uint32_t s0, uint32_t s1,
+                                 uint32_t s2, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
+                                 uint32_t blgp, uint32_t wf, auto &results) {
+  const auto [M, N, K] = shape;
   // Column-padded, stack-allocated, aligned. See exec_f32_mixed.
   constexpr uint32_t W = static_cast<uint32_t>(util::native<int32_t>::size());
-  constexpr size_t MAX_AB = 2048;
-  constexpr size_t MAX_BSTRIDE = 4096;
-  constexpr size_t MAX_C = 1024;
-  static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(int32_t) <= 48 * 1024,
-                "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
   const uint32_t stride = ((N + W - 1) / W) * W;
-  if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
-      static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
+  if (util::force_scalar() || static_cast<size_t>(M) * K > MFMA_SIMD_MAX_AB ||
+      static_cast<size_t>(K) * stride > MFMA_SIMD_MAX_BSTRIDE ||
+      static_cast<size_t>(M) * stride > MFMA_SIMD_MAX_C) {
     return false;
   } else {
     // Zero-initialized staging buffers (uniform convention; see
     // wmma_simd_matmul). Cbuf is pre-seeded below.
-    alignas(64) int32_t Abuf[MAX_AB] = {};
-    alignas(64) int32_t Bbuf[MAX_BSTRIDE] = {};
-    alignas(64) int32_t Cbuf[MAX_C] = {};
+    alignas(64) int32_t Abuf[MFMA_SIMD_MAX_AB] = {};
+    alignas(64) int32_t Bbuf[MFMA_SIMD_MAX_BSTRIDE] = {};
+    alignas(64) int32_t Cbuf[MFMA_SIMD_MAX_C] = {};
     for (uint32_t b = 0; b < B; ++b) {
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
@@ -476,9 +470,10 @@ inline bool try_exec_i32_i8_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, u
 }
 
 template <typename ExtractA, typename ExtractB>
-bool try_exec_wmma_i32_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits,
-                            uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
-                            bool clamp, uint32_t const_acc, uint32_t wave_size, auto &results) {
+bool try_exec_wmma_i32_simd(auto &cu, MatrixShape shape, uint32_t in_bits, uint32_t s0, uint32_t s1,
+                            uint32_t s2, ExtractA ea, ExtractB eb, bool clamp, uint32_t const_acc,
+                            uint32_t wave_size, auto &results) {
+  const auto [M, N, K] = shape;
   constexpr uint32_t W = static_cast<uint32_t>(util::native<int32_t>::size());
   const uint32_t stride = ((N + W - 1) / W) * W;
   if (util::force_scalar() || static_cast<size_t>(M) * K > WMMA_SIMD_MAX_AB ||
@@ -512,10 +507,11 @@ bool try_exec_wmma_i32_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32
 }
 
 template <typename ExtractA, typename ExtractB>
-bool try_exec_swmmac_i32_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits,
-                              uint32_t s0, uint32_t s1, uint32_t acc_base, ExtractA ea, ExtractB eb,
-                              bool clamp, uint32_t const_acc, uint32_t wave_size,
-                              auto &compressed_k, auto &dense_k_for, auto &results) {
+bool try_exec_swmmac_i32_simd(auto &cu, MatrixShape shape, uint32_t in_bits, uint32_t s0,
+                              uint32_t s1, uint32_t acc_base, ExtractA ea, ExtractB eb, bool clamp,
+                              uint32_t const_acc, uint32_t wave_size, uint32_t compressed_k,
+                              auto &dense_k_for, auto &results) {
+  const auto [M, N, K] = shape;
   constexpr uint32_t W = static_cast<uint32_t>(util::native<int32_t>::size());
   const uint32_t stride = ((N + W - 1) / W) * W;
   if (util::force_scalar() || static_cast<size_t>(compressed_k) > WMMA_SIMD_MAX_AB ||
@@ -552,27 +548,23 @@ bool try_exec_swmmac_i32_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint
   return true;
 }
 
-inline bool try_exec_f64_simd(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t s0,
-                              uint32_t s1, uint32_t s2, uint32_t const_acc, auto &apply_neg,
-                              auto &results) {
-  // Column-padded, stack-allocated, aligned. See exec_f32_mixed. MAX_BSTRIDE
+inline bool try_exec_f64_simd(auto &cu, MatrixShape shape, uint32_t B, uint32_t s0, uint32_t s1,
+                              uint32_t s2, uint32_t const_acc, auto &apply_neg, auto &results) {
+  const auto [M, N, K] = shape;
+  // Column-padded, stack-allocated, aligned. See exec_f32_mixed. MFMA_F64_SIMD_MAX_BSTRIDE
   // is half the f32 cap because native<double> packs half as many lanes.
   constexpr uint32_t W = static_cast<uint32_t>(util::native<double>::size());
-  constexpr size_t MAX_AB = 2048;
-  constexpr size_t MAX_BSTRIDE = 2048;
-  constexpr size_t MAX_C = 1024;
-  static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(double) <= 48 * 1024,
-                "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
   const uint32_t stride = ((N + W - 1) / W) * W;
-  if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
-      static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
+  if (util::force_scalar() || static_cast<size_t>(M) * K > MFMA_SIMD_MAX_AB ||
+      static_cast<size_t>(K) * stride > MFMA_F64_SIMD_MAX_BSTRIDE ||
+      static_cast<size_t>(M) * stride > MFMA_SIMD_MAX_C) {
     return false;
   } else {
     // Zero-initialized staging buffers (uniform convention; see
     // wmma_simd_matmul). Cbuf is pre-seeded below.
-    alignas(64) double Abuf[MAX_AB] = {};
-    alignas(64) double Bbuf[MAX_BSTRIDE] = {};
-    alignas(64) double Cbuf[MAX_C] = {};
+    alignas(64) double Abuf[MFMA_SIMD_MAX_AB] = {};
+    alignas(64) double Bbuf[MFMA_F64_SIMD_MAX_BSTRIDE] = {};
+    alignas(64) double Cbuf[MFMA_SIMD_MAX_C] = {};
     for (uint32_t b = 0; b < B; ++b) {
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {

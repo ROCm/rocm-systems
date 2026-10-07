@@ -51,12 +51,6 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
   std::vector<Result> results;
   results.reserve(M * N * B);
 
-  constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
-  constexpr size_t MAX_BSTRIDE = 4096; // max K*stride over all MFMA shapes
-  constexpr size_t MAX_C = 1024;       // max M*stride over all MFMA shapes
-  static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
-                "MFMA staging buffers exceed the 48 KiB stack budget");
-
   auto stage_operands = [&](uint32_t block, uint32_t b_stride, float *a_values, float *b_values) {
     for (uint32_t row = 0; row < M; ++row) {
       for (uint32_t k = 0; k < K; ++k) {
@@ -83,12 +77,12 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
     const size_t b_count = static_cast<size_t>(K) * N;
     // Real ISA shapes use bounded per-block stack storage. Preserve support
     // for direct callers with larger dimensions through one overflow buffer.
-    alignas(64) float a_stack[MAX_AB];
-    alignas(64) float b_stack[MAX_BSTRIDE];
+    alignas(64) float a_stack[MFMA_SIMD_MAX_AB];
+    alignas(64) float b_stack[MFMA_SIMD_MAX_BSTRIDE];
     std::vector<float> overflow;
     float *a_values = a_stack;
     float *b_values = b_stack;
-    if (a_count > MAX_AB || b_count > MAX_BSTRIDE) {
+    if (a_count > MFMA_SIMD_MAX_AB || b_count > MFMA_SIMD_MAX_BSTRIDE) {
       overflow.resize(a_count + b_count);
       a_values = overflow.data();
       b_values = overflow.data() + a_count;
@@ -122,8 +116,8 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
   // matching the GFX9 MFMA hardware's single-rounding MACs (the scalar path
   // above is non-fused; results agree to a few ULP). N columns that don't
   // fill a full SIMD lane group fall to a scalar (fused) tail.
-  if (!mma_backend::try_exec_f32_mixed_simd<ExtractA, ExtractB>(cu, M, N, K, B, s2, const_acc, wf,
-                                                                stage_operands, results))
+  if (!mma_backend::try_exec_f32_mixed_simd(cu, {M, N, K}, B, s2, const_acc, wf, stage_operands,
+                                            results))
     run_scalar();
 
   bool has_nan = false;
@@ -363,9 +357,8 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
 
   // SIMD fast path: hoist A/B/C into dense f32 buffers, then run the dense
   // MxNxK matmul as native-width FMA rows over the N (column) dimension.
-  if (!mma_backend::try_exec_wmma_f32_mixed_simd<ExtractA, ExtractB>(
-          cu, M, N, K, a_bits, b_bits, s0, s1, s2, ea, eb, const_acc, c_modifier, wave_size,
-          results))
+  if (!mma_backend::try_exec_wmma_f32_mixed_simd(cu, {M, N, K}, a_bits, b_bits, s0, s1, s2, ea, eb,
+                                                 const_acc, c_modifier, wave_size, results))
     run_scalar();
 
   auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wave_size);
@@ -666,8 +659,8 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
     }
   };
 
-  if (!mma_backend::try_exec_wmma_f32_scaled_mixed_simd<ExtractA, ExtractB, ScaleAWord, ScaleBWord>(
-          cu, M, N, K, a_bits, b_bits, s0, s1, s2, ea, eb, const_acc, scale_a_word, scale_b_word,
+  if (!mma_backend::try_exec_wmma_f32_scaled_mixed_simd(
+          cu, {M, N, K}, a_bits, b_bits, s0, s1, s2, ea, eb, const_acc, scale_a_word, scale_b_word,
           matrix_a_scale, matrix_b_scale, matrix_a_scale_fmt, matrix_b_scale_fmt, scale16,
           c_modifier, num_scale_blocks, scale_for, results))
     run_scalar();
@@ -836,9 +829,9 @@ void exec_swmmac_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
   // SIMD fast path: because the B gather is row-dependent, hoist each row's A
   // (compressed_k) and B (compressed_k x col, with dense_k folded in) into dense
   // buffers, then run that single row through the shared matmul core (M=1).
-  if (!mma_backend::try_exec_swmmac_f32_mixed_simd<ExtractA, ExtractB>(
-          cu, M, N, K, a_bits, b_bits, s0, s1, ea, eb, wave_size, compressed_k, dense_k_for,
-          initial_acc_for, results))
+  if (!mma_backend::try_exec_swmmac_f32_mixed_simd(cu, {M, N, K}, a_bits, b_bits, s0, s1, ea, eb,
+                                                   wave_size, compressed_k, dense_k_for,
+                                                   initial_acc_for, results))
     run_scalar();
 
   for (const auto &r : results)
@@ -1011,9 +1004,9 @@ void exec_wmma_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t i
   // SIMD fast path: run the f32 matmul vectorized over N into a dense grid, then
   // pack each result to 16 bits via the caller's pack_result. The masked 2-per-
   // word scatter below is unchanged.
-  if (!mma_backend::try_exec_wmma_packed16_simd<ExtractA, ExtractB, ReadAcc, PackResult>(
-          cu, M, N, K, in_bits, s0, s1, s2, ea, eb, read_acc, pack_result, const_acc, wave_size,
-          results))
+  if (!mma_backend::try_exec_wmma_packed16_simd(cu, {M, N, K}, in_bits, s0, s1, s2, ea, eb,
+                                                read_acc, pack_result, const_acc, wave_size,
+                                                results))
     run_scalar();
 
   uint32_t dst_regs = ((M * N) / wave_size + 1) / 2;
@@ -1167,9 +1160,9 @@ void exec_swmmac_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
 
   // SIMD fast path: per-row gather (dense_k is row-dependent) into dense f32
   // buffers, single row through the matmul core (M=1), pack to 16 bits.
-  if (!mma_backend::try_exec_swmmac_packed16_simd<ExtractA, ExtractB, ReadAcc, PackResult>(
-          cu, M, N, K, in_bits, s0, s1, ea, eb, pack_result, wave_size, compressed_k, dense_k_for,
-          initial_acc_for, results))
+  if (!mma_backend::try_exec_swmmac_packed16_simd(cu, {M, N, K}, in_bits, s0, s1, ea, eb,
+                                                  pack_result, wave_size, compressed_k, dense_k_for,
+                                                  initial_acc_for, results))
     run_scalar();
 
   uint32_t dst_regs = ((M * N) / wave_size + 1) / 2;
@@ -1392,9 +1385,9 @@ void exec_f32_scaled_impl(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
   // native-width FMA rows over the N (column) dimension. The per-output E8M0
   // scale + ldexp accumulation stays scalar (cheap: O(num_blocks) per output
   // vs O(K) MACs). A scalar tail covers trailing N columns.
-  if (!mma_backend::try_exec_f32_scaled_impl_simd<ExtractA, ExtractB, ScaleBlock>(
-          cu, M, N, K, B, a_bits, b_bits, s0, s1, s2, ea, eb, scale_block_sum, const_acc,
-          c_modifier, wf, num_blocks, results))
+  if (!mma_backend::try_exec_f32_scaled_impl_simd(cu, {M, N, K}, B, a_bits, b_bits, s0, s1, s2, ea,
+                                                  eb, scale_block_sum, const_acc, c_modifier, wf,
+                                                  num_blocks, results))
     run_scalar();
 
   auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
@@ -1494,7 +1487,7 @@ inline void exec_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B
   // buffers, then run the matmul as native-width int32 multiply-accumulate
   // over the N dimension. Integer MAC is exact, so the SIMD and scalar paths
   // are bit-identical. A scalar tail handles trailing N columns.
-  if (!mma_backend::try_exec_i32_i8_simd(cu, M, N, K, B, s0, s1, s2, const_acc, cbsz, abid, blgp,
+  if (!mma_backend::try_exec_i32_i8_simd(cu, {M, N, K}, B, s0, s1, s2, const_acc, cbsz, abid, blgp,
                                          wf, results))
     run_scalar();
 
@@ -1537,8 +1530,8 @@ void exec_wmma_i32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bit
   // inputs at K <= 128 (max |sum| ~2M << 2^31). The int32 accumulator is added
   // in 64-bit at pack time so pack_i32_acc saturates exactly like the scalar
   // int64 reference even when C sits near INT32_MAX/INT32_MIN.
-  if (!mma_backend::try_exec_wmma_i32_simd<ExtractA, ExtractB>(
-          cu, M, N, K, in_bits, s0, s1, s2, ea, eb, clamp, const_acc, wave_size, results))
+  if (!mma_backend::try_exec_wmma_i32_simd(cu, {M, N, K}, in_bits, s0, s1, s2, ea, eb, clamp,
+                                           const_acc, wave_size, results))
     run_scalar();
 
   for (const auto &r : results)
@@ -1660,9 +1653,9 @@ void exec_swmmac_i32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_b
   // overflow); the int32 accumulator is added in 64-bit at pack time so
   // pack_i32_acc saturates exactly like the scalar int64 reference even when
   // C sits near INT32_MAX/INT32_MIN.
-  if (!mma_backend::try_exec_swmmac_i32_simd<ExtractA, ExtractB>(
-          cu, M, N, K, in_bits, s0, s1, acc_base, ea, eb, clamp, const_acc, wave_size, compressed_k,
-          dense_k_for, results))
+  if (!mma_backend::try_exec_swmmac_i32_simd(cu, {M, N, K}, in_bits, s0, s1, acc_base, ea, eb,
+                                             clamp, const_acc, wave_size, compressed_k, dense_k_for,
+                                             results))
     run_scalar();
 
   for (const auto &r : results)
@@ -1811,7 +1804,7 @@ inline void exec_f64(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
   // SIMD fast path mirrors exec_f32_mixed with native<double> lanes (8-wide on
   // AVX-512) and fused FMA, matching the GFX9 f64 MFMA single-rounding MACs.
   // A scalar (fused) tail covers the trailing N columns.
-  if (!mma_backend::try_exec_f64_simd(cu, M, N, K, B, s0, s1, s2, const_acc, apply_neg, results))
+  if (!mma_backend::try_exec_f64_simd(cu, {M, N, K}, B, s0, s1, s2, const_acc, apply_neg, results))
     run_scalar();
 
   for (const auto &r : results) {
