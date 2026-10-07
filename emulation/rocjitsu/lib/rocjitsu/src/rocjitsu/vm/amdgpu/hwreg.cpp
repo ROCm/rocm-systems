@@ -29,6 +29,7 @@ enum class HwregState : uint8_t {
   XnackStatePrivGfx1250,
   XnackMaskGfx1250,
   Trapsts,
+  SimdIdCdna2_4,
   GprAllocGfx9_10,
   GprAllocCdna3_4,
   WaveSchedMode,
@@ -79,6 +80,13 @@ uint32_t blocks_minus_one(uint32_t count, uint32_t block_size) {
   if (count == 0)
     return 0;
   return ((count + block_size - 1u) / block_size) - 1u;
+}
+
+uint32_t cdna2_4_hw_id_raw(const Wavefront &wf) {
+  // CDNA2/3/4 define SIMD_ID at HW_ID[5:4]. Assign permanent CU wave slots
+  // cyclically to four logical SIMDs. Slot identity survives reuse and
+  // checkpoint restoration; no timing model is implied.
+  return field_value(wf.wf_id() % 4u, 4, 2);
 }
 
 uint32_t gfx9_10_gpr_alloc_raw(const Wavefront &wf) {
@@ -156,6 +164,9 @@ void set_gfx12_trap_ctrl_raw(Wavefront &wf, uint32_t value) { wf.set_gfx12_trap_
 // UserWritable records ISA privilege, not simulator completeness. If a
 // user-writable register has no HwregState backing yet, writes return
 // Unsupported rather than fabricating hidden state or side effects.
+// CDNA2 backs HW_ID.SIMD_ID. CDNA1's public ISA omits the field layout, so
+// instantiate its otherwise shared register table with HW_ID unsupported.
+template <HwregState HwIdState>
 constexpr HwregDescriptor CDNA1_2_HWREGS[] = {
     // CDNA-family ISA XML uses MODE=1 and STATUS=2. Keep XML-only and
     // unmodeled state explicit but unsupported until the corresponding VM
@@ -163,7 +174,7 @@ constexpr HwregDescriptor CDNA1_2_HWREGS[] = {
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::Status, HwregWritePolicy::Privileged},
     {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
-    {4, "HW_ID", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {4, "HW_ID", HwIdState, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -182,14 +193,13 @@ constexpr HwregDescriptor CDNA1_2_HWREGS[] = {
 };
 
 constexpr HwregDescriptor CDNA3_4_HWREGS[] = {
-    // CDNA3/CDNA4 ISA manuals define the GPR_ALLOC field layout; MODE/STATUS
-    // and GPR_ALLOC have backing wave state, while the other XML HWREG IDs stay
-    // named but unsupported until their VM state and privilege side effects are
-    // represented.
+    // MODE/STATUS, TRAPSTS, GPR_ALLOC and HW_ID.SIMD_ID have backing wave state.
+    // The other XML HWREG IDs stay named but unsupported until their VM state,
+    // field layouts and privilege side effects are represented.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::Status, HwregWritePolicy::Privileged},
     {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
-    {4, "HW_ID", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {4, "HW_ID", HwregState::SimdIdCdna2_4, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocCdna3_4, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -372,8 +382,9 @@ HwregTable table_for_arch(rj_code_arch_t arch) {
    */
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
+    return make_table(CDNA1_2_HWREGS<HwregState::Unsupported>);
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return make_table(CDNA1_2_HWREGS);
+    return make_table(CDNA1_2_HWREGS<HwregState::SimdIdCdna2_4>);
   case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
     return make_table(CDNA3_4_HWREGS);
@@ -456,6 +467,9 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::Trapsts:
     raw_value = wf.trapsts();
     return HwregAccessResult::Success;
+  case HwregState::SimdIdCdna2_4:
+    raw_value = cdna2_4_hw_id_raw(wf);
+    return HwregAccessResult::Success;
   case HwregState::GprAllocGfx9_10:
     raw_value = gfx9_10_gpr_alloc_raw(wf);
     return HwregAccessResult::Success;
@@ -524,6 +538,7 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::XnackMaskGfx1250:
     wf.set_gfx1250_xnack_mask_raw(raw_value);
     return HwregAccessResult::Success;
+  case HwregState::SimdIdCdna2_4:
   case HwregState::GprAllocGfx9_10:
   case HwregState::GprAllocCdna3_4:
   case HwregState::IbStsGfx1250:
@@ -625,30 +640,17 @@ const char *hwreg_access_result_name(HwregAccessResult result) {
 
 HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &value) {
   DecodedHwreg decoded = decode_hwreg(hwreg);
-  const auto arch = wf.cu().arch();
-  const HwregDescriptor *desc = find_descriptor(arch, decoded.id);
+  const HwregDescriptor *desc = find_descriptor(wf.cu().arch(), decoded.id);
   if (!desc) {
     value = 0;
     return HwregAccessResult::Unsupported;
   }
 
-  // The CDNA2/3/4 ISA Hardware ID tables define SIMD_ID at HW_ID[5:4].
-  // CDNA1's public ISA names HW_ID but omits its field layout; leave it
-  // unsupported until the SIMD_ID bits are verified.
-  // RDNA HW_ID1/2 and CDNA5 WAVE_HW_ID1/2 need their own field/placement
-  // mapping, as does RDNA1's legacy HW_ID. On RDNA4/CDNA5, register 4 is
-  // WAVE_STATE_PRIV and must retain its normal register handling.
-  const bool has_cdna_simd_id = arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-                                arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                                arch == ROCJITSU_CODE_ARCH_CDNA4;
-  // Assign permanent CU wave slots cyclically to four logical SIMDs. Slot
-  // identity survives reuse and checkpoint restoration; no timing model is
-  // implied. Only reads wholly within the SIMD_ID field are backed.
-  if (has_cdna_simd_id && decoded.id == 4 && decoded.offset >= 4 &&
-      decoded.offset + decoded.size <= 6) {
-    const uint32_t simd_id = wf.wf_id() % 4u;
-    value = (simd_id >> (decoded.offset - 4)) & decoded.mask;
-    return HwregAccessResult::Success;
+  // Only SIMD_ID[5:4] has backing state; do not fabricate the other HW_ID fields.
+  if (desc->state == HwregState::SimdIdCdna2_4 &&
+      (decoded.offset < 4 || decoded.offset + decoded.size > 6)) {
+    value = 0;
+    return HwregAccessResult::Unsupported;
   }
 
   if (desc->state == HwregState::GprAllocCdna3_4 && field_intersects(decoded, 12, 6)) {
