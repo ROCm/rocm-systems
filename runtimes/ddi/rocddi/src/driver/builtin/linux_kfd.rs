@@ -1041,6 +1041,21 @@ impl QueueDriver for LinuxKfdDriver {
 }
 
 impl KernelQueueDriver for LinuxKfdDriver {
+    fn available_sdma_rings(&self, device: &DeviceState) -> Result<u32, Error> {
+        self.ensure_open()?;
+        if !cfg!(target_arch = "x86_64")
+            || device.native.queues.gfx_target != 120_001
+            || !device.native.queues.sdma_qualified
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "SDMA kernel queue is unqualified for this GPU target",
+            ));
+        }
+        drm::sdma_available_rings(device.vm.render()?)
+            .map_err(|source| native_error("DRM SDMA ring query", source))
+    }
+
     fn create_kernel_queue(
         &self,
         device: &DeviceState,
@@ -1060,7 +1075,9 @@ impl KernelQueueDriver for LinuxKfdDriver {
                     "PM4 kernel queue is unavailable",
                 ));
             }
-            KernelQueueFormat::Sdma if !device.native.queues.sdma_qualified => {
+            KernelQueueFormat::Sdma | KernelQueueFormat::SdmaOnRing(_)
+                if !device.native.queues.sdma_qualified =>
+            {
                 return Err(error(
                     ErrorKind::Unsupported,
                     "SDMA kernel queue is unavailable",

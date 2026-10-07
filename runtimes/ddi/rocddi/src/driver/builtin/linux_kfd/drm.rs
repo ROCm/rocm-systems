@@ -51,6 +51,7 @@ const AMDGPU_GEM_USERPTR_VALIDATE: u32 = 1 << 2;
 const AMDGPU_GEM_USERPTR_REGISTER: u32 = 1 << 3;
 const AMDGPU_GEM_OP_GET_GEM_CREATE_INFO: u32 = 0;
 const AMDGPU_INFO_DEV_INFO: u32 = 0x16;
+const AMDGPU_INFO_HW_IP_INFO: u32 = 0x02;
 const AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE: u32 = 3;
 pub(super) const GEM_DOMAIN_GTT: u64 = 1 << 1;
 pub(super) const GEM_CREATE_NO_CPU_ACCESS: u64 = 1 << 1;
@@ -74,6 +75,13 @@ const CHUNK_SYNCOBJ_TIMELINE_SIGNAL: u32 = 9;
 pub(super) const HW_IP_COMPUTE: u32 = 1;
 /// DRM hardware IP selected for one opaque SDMA command stream.
 pub(super) const HW_IP_DMA: u32 = 2;
+
+/// One DRM command submission target. Ring indices are scoped to an IP type.
+#[derive(Clone, Copy)]
+pub(super) struct CommandEngine {
+    pub(super) ip_type: u32,
+    pub(super) ring: u32,
+}
 
 #[repr(C)]
 struct Timespec {
@@ -132,6 +140,34 @@ struct AmdgpuInfoQuery {
     return_size: u32,
     query: u32,
     payload: [u32; 4],
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct HwIpInfo {
+    version_major: u32,
+    version_minor: u32,
+    capabilities: u64,
+    ib_start_alignment: u32,
+    ib_size_alignment: u32,
+    available_rings: u32,
+    discovery_version: u32,
+    userq_slots: u32,
+}
+
+/// Returns the DRM ring bitmask for DMA IP instance zero. This is the ring
+/// namespace used by `AMDGPU_CS` and `AMDGPU_WAIT_CS`.
+pub(super) fn sdma_available_rings(file: &File) -> io::Result<u32> {
+    let mut info = HwIpInfo::default();
+    let mut query = AmdgpuInfoQuery {
+        return_pointer: (&raw mut info) as u64,
+        return_size: u32::try_from(std::mem::size_of::<HwIpInfo>())
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?,
+        query: AMDGPU_INFO_HW_IP_INFO,
+        payload: [HW_IP_DMA, 0, 0, 0],
+    };
+    call(file, AMDGPU_INFO, &mut query)?;
+    Ok(info.available_rings)
 }
 
 /// Stable prefix of `drm_amdgpu_info_device` from the DRM UAPI.
@@ -330,6 +366,7 @@ union CommandWait {
 #[cfg(test)]
 #[derive(Debug)]
 pub(super) enum TestCall {
+    QuerySdmaRings(Result<u32, i32>),
     SetPersistingL2CacheSize(u32, Result<(), i32>),
     CreateSyncobj(u32),
     DestroySyncobj,
@@ -339,7 +376,9 @@ pub(super) enum TestCall {
     DestroyContext,
     FailDestroyContext(i32),
     Submit(Result<u64, i32>),
+    SubmitOnRing(u32, Result<u64, i32>),
     WaitSubmission(Result<bool, i32>),
+    WaitSubmissionOnRing(u32, Result<bool, i32>),
     WaitTimeline(Result<bool, i32>),
     ImportGem(u32),
     CloseGem(Result<(), i32>),
@@ -409,8 +448,30 @@ fn scripted_vm_control(
 
 #[cfg(test)]
 #[allow(
+    unsafe_code,
+    clippy::expect_used,
+    reason = "the scripted ioctl inspects live request buffers owned by its caller"
+)]
+fn scripted_submission_ring(body: &mut dyn std::any::Any, ring: u32) {
+    let record = body
+        .downcast_ref::<CommandStream>()
+        .expect("DRM command submission body");
+    // SAFETY: submit_indirect_buffer owns the live chunk array and IB record
+    // throughout this synchronous scripted ioctl call.
+    let input = unsafe { record.input };
+    assert_eq!(input.chunk_count, 2);
+    let chunk_address = unsafe { *(input.chunks as *const u64) };
+    let chunk = unsafe { &*(chunk_address as *const CommandChunk) };
+    assert_eq!(chunk.kind, CHUNK_IB);
+    let ib = unsafe { &*(chunk.data as *const IndirectBuffer) };
+    assert_eq!(ib.ring, ring);
+}
+
+#[cfg(test)]
+#[allow(
     clippy::panic,
     clippy::expect_used,
+    clippy::too_many_lines,
     reason = "a mismatched test ioctl is a test failure"
 )]
 fn scripted_call<T: 'static>(request: u64, body: &mut T) -> Option<io::Result<()>> {
@@ -423,6 +484,24 @@ fn scripted_call<T: 'static>(request: u64, body: &mut T) -> Option<io::Result<()
             .expect("unexpected DRM ioctl after script");
         let body = body as &mut dyn Any;
         let reply = match (request, step) {
+            (AMDGPU_INFO, TestCall::QuerySdmaRings(reply)) => {
+                let query = body
+                    .downcast_ref::<AmdgpuInfoQuery>()
+                    .expect("DRM info query body");
+                assert_eq!(query.query, AMDGPU_INFO_HW_IP_INFO);
+                assert_eq!(query.payload[..2], [HW_IP_DMA, 0]);
+                assert_eq!(query.return_size as usize, std::mem::size_of::<HwIpInfo>());
+                match reply {
+                    Ok(mask) => {
+                        // SAFETY: sdma_available_rings owns this output record
+                        // throughout the synchronous scripted ioctl call.
+                        let info = unsafe { &mut *(query.return_pointer as *mut HwIpInfo) };
+                        info.available_rings = mask;
+                        Ok(())
+                    }
+                    Err(errno) => Err(io::Error::from_raw_os_error(errno)),
+                }
+            }
             (AMDGPU_VM, TestCall::SetPersistingL2CacheSize(expected, reply)) => {
                 scripted_vm_control(body, expected, reply)
             }
@@ -476,6 +555,18 @@ fn scripted_call<T: 'static>(request: u64, body: &mut T) -> Option<io::Result<()
                 }
                 Err(errno) => Err(io::Error::from_raw_os_error(errno)),
             },
+            (AMDGPU_CS, TestCall::SubmitOnRing(ring, reply)) => {
+                scripted_submission_ring(body, ring);
+                match reply {
+                    Ok(sequence) => {
+                        body.downcast_mut::<CommandStream>()
+                            .expect("DRM command submission body")
+                            .sequence = sequence;
+                        Ok(())
+                    }
+                    Err(errno) => Err(io::Error::from_raw_os_error(errno)),
+                }
+            }
             (AMDGPU_WAIT_CS, TestCall::WaitSubmission(reply)) => match reply {
                 Ok(retired) => {
                     body.downcast_mut::<CommandWait>()
@@ -485,6 +576,23 @@ fn scripted_call<T: 'static>(request: u64, body: &mut T) -> Option<io::Result<()
                 }
                 Err(errno) => Err(io::Error::from_raw_os_error(errno)),
             },
+            (AMDGPU_WAIT_CS, TestCall::WaitSubmissionOnRing(ring, reply)) => {
+                let record = body
+                    .downcast_ref::<CommandWait>()
+                    .expect("DRM command wait body");
+                // SAFETY: wait_submission initialized the input arm before
+                // this synchronous scripted ioctl call.
+                assert_eq!(unsafe { record.input.ring }, ring);
+                match reply {
+                    Ok(retired) => {
+                        body.downcast_mut::<CommandWait>()
+                            .expect("DRM command wait body")
+                            .busy = u64::from(!retired);
+                        Ok(())
+                    }
+                    Err(errno) => Err(io::Error::from_raw_os_error(errno)),
+                }
+            }
             (SYNCOBJ_TIMELINE_WAIT, TestCall::WaitTimeline(reply)) => {
                 reply.map(|_| ()).map_err(io::Error::from_raw_os_error)
             }
@@ -577,7 +685,7 @@ pub(super) fn destroy_context(file: &File, context_id: u32) -> io::Result<()> {
 pub(super) fn submit_indirect_buffer(
     file: &File,
     context_id: u32,
-    ip_type: u32,
+    engine: CommandEngine,
     address: u64,
     byte_length: u32,
     completion_syncobj: u32,
@@ -588,9 +696,9 @@ pub(super) fn submit_indirect_buffer(
         flags: 0,
         address,
         byte_length,
-        ip_type,
+        ip_type: engine.ip_type,
         ip_instance: 0,
-        ring: 0,
+        ring: engine.ring,
     };
     let completion = TimelineSignal {
         handle: completion_syncobj,
@@ -630,7 +738,7 @@ pub(super) fn submit_indirect_buffer(
 pub(super) fn wait_submission(
     file: &File,
     context_id: u32,
-    ip_type: u32,
+    engine: CommandEngine,
     sequence: u64,
     timeout_nanoseconds: Option<u64>,
 ) -> io::Result<bool> {
@@ -656,7 +764,8 @@ pub(super) fn wait_submission(
         input: CommandWaitInput {
             sequence,
             absolute_deadline_nanoseconds: deadline,
-            ip_type,
+            ip_type: engine.ip_type,
+            ring: engine.ring,
             context_id,
             ..CommandWaitInput::default()
         },
@@ -955,6 +1064,8 @@ pub(super) fn wait(file: &File, handle: u32, point: u64) -> io::Result<()> {
 const _: () = {
     assert!(std::mem::size_of::<DeviceInfoPrefix>() == 32);
     assert!(std::mem::offset_of!(DeviceInfoPrefix, gpu_counter_frequency_khz) == 28);
+    assert!(std::mem::size_of::<HwIpInfo>() == 40);
+    assert!(std::mem::offset_of!(HwIpInfo, available_rings) == 24);
     assert!(std::mem::size_of::<VmControl>() == 8);
     assert!(std::mem::size_of::<GemClose>() == 8);
     assert!(std::mem::size_of::<PrimeHandle>() == 12);

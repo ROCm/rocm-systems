@@ -264,6 +264,7 @@ pub(crate) trait QueueDriver: ProviderTypes + QueueTypes + Send + Sync {
 }
 
 pub(crate) trait KernelQueueDriver: ProviderTypes + KernelQueueTypes + Send + Sync {
+    fn available_sdma_rings(&self, device: &Self::DeviceState) -> Result<u32, Error>;
     fn create_kernel_queue(
         &self,
         device: &Self::DeviceState,
