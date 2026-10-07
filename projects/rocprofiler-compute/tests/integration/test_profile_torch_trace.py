@@ -19,6 +19,7 @@ from tests.integration.common import (
     require_torch,
 )
 from utils import csv_compression
+from utils.inject_roctx._backends import torch_trace_collector
 
 MARKER_API_COLUMNS = {
     "Domain",
@@ -52,6 +53,53 @@ ADDMM_FALLBACK = re.compile(r"torch\.ops\.aten\.addmm(?![A-Za-z0-9_])")
 def find_addmm_marker(text: str):
     """Return an addmm marker in either the native or Python-tier spelling."""
     return ADDMM_NATIVE.search(text) or ADDMM_FALLBACK.search(text)
+
+
+def check_torch_trace_markers(marker_rows, torch_version):
+    """Check simple_net metadata and native tracing on supported Torch versions."""
+    backward_launchers = set()
+    native_markers = []
+    for row in marker_rows:
+        function = row["Function"]
+        if not function.endswith("|torch"):
+            continue
+        if function.startswith("torch.Tensor.backward:"):
+            backward_launchers.add((row["Process_Id"], int(row["Thread_Id"])))
+        name, *fields, _backend = function.split("|")
+        if name.endswith(":n/a"):
+            native_markers.append((
+                name[:-4],
+                row,
+                dict(field.split("=", 1) for field in fields),
+            ))
+
+    assert backward_launchers, "Missing torch.Tensor.backward wrapper markers"
+    if torch_version not in torch_trace_collector._SUPPORTED_TORCH_VERSIONS:
+        return
+
+    relu_markers = [
+        fields for name, _, fields in native_markers if name == "aten::relu"
+    ]
+    assert relu_markers, f"Native Torch markers expected for PyTorch {torch_version}"
+    for fields in relu_markers:
+        assert fields.get("scope") == "FUNCTION", "Incorrect aten::relu scope"
+        assert fields.get("args") == "(self=float32[5x20])", (
+            f"Incorrect aten::relu tensor metadata: {fields.get('args')}"
+        )
+
+    backward_markers = [
+        (row, fields)
+        for _, row, fields in native_markers
+        if fields.get("scope") == "BACKWARD_FUNCTION"
+    ]
+    assert backward_markers, "Missing native BACKWARD_FUNCTION markers"
+    for row, fields in backward_markers:
+        launcher_tid = fields.get("ltid", "")
+        assert launcher_tid.isdecimal(), f"Invalid backward launcher ID: {launcher_tid}"
+        assert (row["Process_Id"], int(launcher_tid)) in backward_launchers, (
+            f"Backward launcher ID {launcher_tid} does not match a Python backward "
+            f"thread in process {row['Process_Id']}"
+        )
 
 
 def percent_overhead(with_flag, baseline, label):
@@ -116,6 +164,7 @@ def torch_trace_profiled_workload(
     if not torch_trace_workload_state["profiled"]:
         workload_dir = common.get_output_dir(param_id="torch_trace")
         torch_trace_workload_state["dir"] = workload_dir
+        # Use the interpreter whose Torch version the marker assertions check.
         profile_config = dict(config)
         profile_config["torch_test_app"] = [
             sys.executable,
@@ -138,8 +187,9 @@ def torch_trace_profiled_workload(
 
 
 def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
-    """Assert PMC, marker, and counter CSVs from a --torch-trace profile."""
+    """Check profile CSVs and Torch argument, scope, and launcher metadata."""
     workload_dir = torch_trace_profiled_workload
+    torch_version = torch_trace_collector._workload_torch_version()
     integration_common.check_csv_files(workload_dir, config.get("num_devices", 1), 1)
 
     marker_api_trace_files = list(
@@ -161,16 +211,15 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
                 assert column in fieldnames, (
                     f"Column '{column}' missing in {marker_file}"
                 )
-            found_row = False
+            marker_rows = list(reader)
+            assert marker_rows, f"{marker_file} is empty"
             functions = []
-            for row in reader:
-                found_row = True
+            for row in marker_rows:
                 functions.append(row["Function"])
                 assert row["Function"], f"Empty Function in {marker_file}"
                 assert row["Correlation_Id"], f"Empty Correlation ID in {marker_file}"
                 assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
                 assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
-            assert found_row, f"{marker_file} is empty"
             assert any("nn.Module.Linear.forward" in fn for fn in functions)
             assert any(find_addmm_marker(fn) for fn in functions)
             assert any("|seqNr=" in fn for fn in functions)
@@ -180,6 +229,7 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
             assert any("|scope=" in fn for fn in functions)
             assert any("|args=" in fn for fn in functions)
             assert any(fn.endswith("|torch") for fn in functions)
+        check_torch_trace_markers(marker_rows, torch_version)
         with csv_compression.open_gzip_csv_read(corresponding_counter_file) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
