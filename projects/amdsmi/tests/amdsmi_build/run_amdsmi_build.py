@@ -820,20 +820,6 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
             log_dir=cfg.log_dir,
         )
     elif cfg.package_manager == "dnf":
-        run_command(
-            [
-                "dnf",
-                "install",
-                "python3-pip",
-                "python3-setuptools",
-                "python3-wheel",
-                "-y",
-                "--setopt=skip_if_unavailable=True",
-            ],
-            name="dnf-prep",
-            retries=cfg.retries,
-            log_dir=cfg.log_dir,
-        )
         # Install main package; if a tests package exists, install it too.
         tests_pkg = package_path.parent / package_path.name.replace(
             "amd-smi-lib-", "amd-smi-lib-tests-", 1

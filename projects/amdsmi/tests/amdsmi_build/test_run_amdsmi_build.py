@@ -16,8 +16,10 @@ import importlib.util
 import sys
 import tempfile
 import textwrap
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 def _load_module():
@@ -173,6 +175,29 @@ class LocatePackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             with self.assertRaises(FileNotFoundError):
                 rab.locate_package(Path(td), "deb")
+
+
+class _StopAfterInstall(Exception):
+    pass
+
+
+class InstallPackageTests(unittest.TestCase):
+    def test_dnf_install_does_not_query_repos(self):
+        calls = []
+
+        def fake_run(cmd, *, name, **_kwargs):
+            calls.append(list(cmd))
+            if name == "dnf-install":
+                # Stop before the post-install steps, which touch /opt/rocm and /usr/local/bin.
+                raise _StopAfterInstall
+
+        cfg = types.SimpleNamespace(package_manager="dnf", retries=1, log_dir=Path("."))
+        with mock.patch.object(rab, "run_command", side_effect=fake_run):
+            with self.assertRaises(_StopAfterInstall):
+                rab.install_package(cfg, Path("amd-smi-lib-1.0.99999-local.el10.x86_64.rpm"))
+        self.assertTrue(calls)
+        for cmd in calls:
+            self.assertIn("--disablerepo=*", cmd)
 
 
 class SummarizeTests(unittest.TestCase):
