@@ -112,6 +112,9 @@ static inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* manager
 #undef ncclDevrCheckRegistrationSupport
 #undef ncclDevrValidateHandleLocationType
 
+// The non-sym host VMM probe moved to rccl_dev_runtime.cc; same TU so its seams match.
+#include RCCL_DEV_RUNTIME_CC_PATH
+
 #include <gtest/gtest.h>
 
 #include "ScopedHook.h"
