@@ -797,7 +797,9 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 ## the files being staged on every node. Disk locations remain as overrides.
 set(RCCL_EMBEDDED_TUNER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateEmbeddedTunerConfigs.cmake)
 set(RCCL_EMBEDDED_TUNER_HEADER ${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded_configs.h)
-file(GLOB RCCL_TUNER_CSV_FILES ${CMAKE_CURRENT_SOURCE_DIR}/tuner/*.csv)
+# CONFIGURE_DEPENDS so adding a CSV re-runs the glob on the next build rather
+# than silently keeping the previously generated header.
+file(GLOB RCCL_TUNER_CSV_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tuner/*.csv)
 add_custom_command(
   OUTPUT  ${RCCL_EMBEDDED_TUNER_HEADER}
   COMMAND ${CMAKE_COMMAND} -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tuner

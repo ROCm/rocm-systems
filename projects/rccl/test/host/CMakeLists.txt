@@ -328,6 +328,12 @@ function(rccl_add_micro_binary _name)
     rccl_apply_hip_compile_only(${_name})
     target_link_libraries(${_name} PRIVATE ${MICRO_TEST_LINK_LIBS})
     add_dependencies(${_name} hipify_all copy_nccl_device_headers)
+    # csv-tuner-test.cc includes csv_tuner.cc, which includes the generated
+    # embedded-tuner header. These targets do not link rccl, so without this the
+    # header may not exist yet in a clean parallel build.
+    if(TARGET rccl_embedded_tuner_configs)
+      add_dependencies(${_name} rccl_embedded_tuner_configs)
+    endif()
     rccl_apply_host_only_flags(${_name})
     rocm_install(TARGETS ${_name} COMPONENT tests)
     if(_ramb_CATEGORIES_YAML)

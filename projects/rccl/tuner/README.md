@@ -51,8 +51,8 @@ The built-in CSV tuner resolves its config in this order:
 Steps 1-7 are overrides; step 8 is what ships in the binary.
 
 At each disk location, if GPU architecture is unknown, the directory is scanned for any `rccl_tuner*.csv`
-file. When the architecture *is* known and no entry matches it, the tuner stays inactive rather than
-applying another architecture's tuning.
+file. When the architecture *is* known, only an arch-specific or generic config is considered — another
+architecture's file is never picked up. If neither exists, the tuner stays inactive.
 
 ## CSV Format
 

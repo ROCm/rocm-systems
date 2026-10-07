@@ -292,6 +292,19 @@ collected in the following table.
         | Default: ``16``
         | ``0``: No lower bound.
 
+    * - | ``RCCL_TUNER_EMBEDDED_CONFIG``
+        | Controls whether the built-in CSV tuner uses the tuning configurations
+          compiled into ``librccl.so`` from the source tree's ``tuner/*.csv``.
+          These are the stock defaults, so no file has to be staged on each node.
+          ``NCCL_TUNER_CONFIG_FILE`` and a CSV in ``<librccl.so dir>/tuner/`` or
+          ``${ROCM_PATH}/share/rccl/tuner/`` take precedence over them. Only an
+          architecture-specific (``rccl_tuner_<arch>.csv``) or generic
+          (``rccl_tuner.csv``) configuration is used; another architecture's
+          configuration is never applied. To disable the tuner entirely, embedded
+          or not, use ``NCCL_TUNER_PLUGIN=none``.
+      - | ``1``: Use the embedded configurations when no file is found (default).
+        | ``0``: Ignore the embedded configurations. File-based tuning is unaffected.
+
 Network and topology
 ====================
 
