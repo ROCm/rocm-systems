@@ -80,13 +80,12 @@ TEST_F(UBR_MultiSegment, Generic)
 
     ncclResult_t result = ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream());
     ASSERT_MPI_EQ(ncclSuccess, result);
-    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-
-    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    ASSERT_MPI_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
 
     struct ncclReg* reg = nullptr;
     ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize, &reg);
-    ASSERT_NE(reg, nullptr) << "ncclCommRegister did not publish a cache entry for the multi-segment buffer";
+    ASSERT_MPI_NE(reg, nullptr);
     if (MPITestConstants::detectNodeCount() == 1) {
         ASSERT_NE(reg->state & IPC_REG_COMPLETE, 0u)
             << "Single-node AllReduce did not complete IPC registration";

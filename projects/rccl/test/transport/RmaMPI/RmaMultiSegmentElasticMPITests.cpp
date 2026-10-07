@@ -40,7 +40,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_EngramMixedWindowIGet)
         FillSentinel(window->ptr, kGpuBytes, kSentinel);
 
     void *mh = nullptr, *gh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(RegMr(window->ptr, window->totalSize, &mh, &gh) == ncclSuccess));
     if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
 
@@ -87,7 +87,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
         GTEST_SKIP() << "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime";
 
     void *mh = nullptr, *gh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(RegMr(window->ptr, window->totalSize, &mh, &gh) == ncclSuccess));
     if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
 
@@ -156,7 +156,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
     FillSentinel(window->ptr, kGpuBytes, kSentinel);
 
     void *mh = nullptr, *gh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(RegMr(window->ptr, window->totalSize, &mh, &gh) == ncclSuccess));
     if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
 
@@ -197,7 +197,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
             kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason), reason);
 
     void *mh = nullptr, *gh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(RegMr(window->ptr, window->totalSize, &mh, &gh) == ncclSuccess));
     if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
 
@@ -255,7 +255,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
             kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason), reason);
 
     void *mh = nullptr, *gh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(RegMr(window->ptr, window->totalSize, &mh, &gh) == ncclSuccess));
     FillSentinel(window->ptr, kGpuBytes, kSentinel);
     Barrier();
 
