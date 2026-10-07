@@ -25,10 +25,10 @@ it('keeps branch navigation available but gates its contents on the validated sn
   expect(html).toContain('dashboard-data-loading');
   expect(html).not.toContain('branch-surface-without-published-data');
 });
-it('retains the requested three-line footer while the snapshot loads', () => {
+it('shows copyright and license without unrelated framework attribution while loading', () => {
   vi.stubGlobal('window', { location: { href: 'https://example.test/' }, localStorage: { getItem: () => null }, matchMedia: () => ({ matches: false }) });
   const html = renderToStaticMarkup(createElement(App));
   expect(html.includes('Copyright © 2025–2026 Advanced Micro Devices, Inc.')).toBe(true);
   expect(html.includes('MIT License')).toBe(true);
-  expect(html.includes('Made with Material for MkDocs')).toBe(true);
+  expect(html).not.toContain('Made with Material for MkDocs');
 });

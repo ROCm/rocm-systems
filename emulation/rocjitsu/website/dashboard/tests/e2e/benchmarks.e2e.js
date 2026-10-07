@@ -126,7 +126,7 @@ test('grid point selection survives timeframe and scope changes without legacy m
     const option = instance.getOption();
     return { zoom: option.dataZoom ?? [], lines: option.series.filter((series) => series.type === 'line').map((series) => series.name) };
   });
-  expect(series).toEqual({ zoom: [], lines: ['gfx1250 ST'] });
+  expect(series).toEqual({ zoom: [], lines: ['gfx1250 ST', 'gfx950 ST'] });
   // Re-open after an explicit clear: clicking an already-selected run toggles
   // that run off; detail inspection itself is not a promise to keep it selected.
   await page.getByRole('button', { name: 'Clear selected runs (1)', exact: true }).click();

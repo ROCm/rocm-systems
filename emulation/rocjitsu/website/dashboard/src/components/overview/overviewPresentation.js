@@ -21,8 +21,8 @@ export function shouldHideTrendPointer(source) {
   return source === 'mouse' || source === 'pen';
 }
 
-export function recentVisibleRange(rowCount, scrollTop = 0) {
-  if (!rowCount) return { start: 0, end: 0 };
-  const first = Math.min(Math.max(0, rowCount - 5), Math.max(0, Math.floor(scrollTop / 60)));
-  return { start: first + 1, end: Math.min(rowCount, first + 5) };
+export function recentRunsPage(rowCount, requestedPage) {
+  const page = Math.max(0, Math.min(requestedPage, Math.ceil(rowCount / 20) - 1));
+  const start = page * 20;
+  return { page, start, end: Math.min(rowCount, start + 20) };
 }

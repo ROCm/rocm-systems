@@ -121,10 +121,9 @@ function readInitialState() {
 }
 
 function selectFilters(data, preferences) {
-  const defaultTarget = data.targets.includes('gfx1250') ? 'gfx1250' : data.targets[0];
   const modes = data.modes ?? [];
   return {
-    targets: preferences.targets === null ? (defaultTarget ? [defaultTarget] : []) : preferences.targets.filter((target) => data.targets.includes(target)),
+    targets: preferences.targets === null ? data.targets : preferences.targets.filter((target) => data.targets.includes(target)),
     suites: preferences.suites === null ? data.suites : preferences.suites.filter((suite) => data.suites.includes(suite)),
     modes: preferences.modes === null ? modes : preferences.modes.filter((mode) => modes.includes(mode)),
   };

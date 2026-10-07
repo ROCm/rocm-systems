@@ -189,7 +189,7 @@ it('changes a comparison pair atomically without navigating away from the curren
 it('clears a malformed route error without resetting its empty scope or chosen missing identity', () => {
   const probe = mountState({ href: 'https://example.test/app/?campaign=keep&view=branch&run=missing&modes=invalid&suites=#anchor', saved: { modes: ['ST'], suites: ['gemm'] } });
   expect(probe.state.routeError).toContain('modes');
-  expect(probe.state.filters).toEqual({ targets: ['gfx1250'], suites: [], modes: [] });
+  expect(probe.state.filters).toEqual({ targets: data.targets, suites: [], modes: [] });
   expect(probe.browser.history.replaceState).not.toHaveBeenCalled();
   probe.update((state) => state.clearRouteError());
   expect(probe.state.routeError).toBe('');
@@ -207,8 +207,10 @@ it('waits for declared data options without locking bootstrap emptiness in as pr
   const bootstrap = { targets: [], suites: [] };
   const probe = mountState({ dataset: bootstrap, href: 'https://example.test/?view=branch&run=missing&reference=gone' });
   expect(probe.state.filters).toEqual({ targets: [], suites: [], modes: [] });
+  expect(JSON.parse(probe.browser.localStorage.getItem('rocjitsu-dashboard-filters'))).toEqual({ targets: null, suites: null, modes: null });
   probe.rerender(data);
-  expect(probe.state.filters).toEqual({ targets: ['gfx1250'], suites: data.suites, modes: data.modes });
+  expect(probe.state.filters).toEqual(data);
+  expect(probe.state.targets.flatMap((target) => probe.state.modes.map((mode) => `${target}:${mode}`))).toEqual(['gfx950:ST', 'gfx950:MT', 'gfx1250:ST', 'gfx1250:MT']);
   probe.update((state) => { state.setTargets([]); state.setSuites([]); state.setModes([]); });
   probe.rerender(bootstrap);
   probe.rerender(data);
@@ -217,14 +219,14 @@ it('waits for declared data options without locking bootstrap emptiness in as pr
   expect(probe.browser.history.pushState).not.toHaveBeenCalled();
 });
 
-it('uses only declared available modes and falls back to the first target when gfx1250 is absent', () => {
+it('defaults to all and only declared available options', () => {
   const available = { targets: ['gfx950'], suites: ['memory'], modes: ['MT'] };
   expect(readState(available).filters).toEqual({ targets: ['gfx950'], suites: ['memory'], modes: ['MT'] });
 });
 
 it('keeps navigation and filters usable when the storage getter is denied', () => {
   const probe = mountState({ blockedStorage: true });
-  expect(probe.state.filters).toEqual({ targets: ['gfx1250'], suites: data.suites, modes: data.modes });
+  expect(probe.state.filters).toEqual({ targets: data.targets, suites: data.suites, modes: data.modes });
   probe.update((state) => { state.setModes([]); state.setTab('branch'); });
   expect(probe.state.modes).toEqual([]);
   expect(probe.state.tab).toBe('branch');
@@ -265,7 +267,7 @@ it('restores explicitly empty filters rather than defaults', () => {
 });
 it('defaults only absent or malformed preferences from available canonical data', () => {
   vi.stubGlobal('window', { localStorage: { getItem: () => '{broken' } });
-  expect(readState().filters).toEqual({ targets: ['gfx1250'], suites: data.suites, modes: data.modes });
+  expect(readState().filters).toEqual({ targets: data.targets, suites: data.suites, modes: data.modes });
 });
 it('ignores stale choices without replacing a deliberate empty scope', () => {
   vi.stubGlobal('window', { localStorage: { getItem: () => JSON.stringify({ targets: ['old'], suites: ['memory'] }) } });

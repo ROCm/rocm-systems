@@ -610,7 +610,7 @@ position in history.
 | Consumer | Population and order |
 | --- | --- |
 | Overview and long-term benchmark history | `data.runs`: develop Vanilla only; commit chronology |
-| Recent Runs | Latest 20 canonical develop Vanilla attempts by completion, newest first |
+| Recent Runs | All canonical develop Vanilla attempts by completion, newest first, paginated in groups of 20 with numbered pages and icon-only first/previous/next/last controls; selected target/suite/mode filters affect coverage, not the run population |
 | Benchmark records | Canonical attempts newest by completion; default record page size 25 |
 | General Run Comparison | Selected Vanilla attempts may come from `data.allRuns`, including branches |
 | Branch Runs | Published non-develop Vanilla attempts, grouped by source branch |

@@ -202,6 +202,16 @@ export function selectAggregateRunSeries(data, filters) {
     }), catalogBreaks: runs.flatMap((run, index) => index > 0 && run.catalogId !== runs[index - 1].catalogId ? [index] : []) })) };
 }
 
+// Canonical attempts are already scoped by the loader; sorting needs no test results.
+export function selectRecentRunAttempts(data) {
+  return [...data.runs].sort(compareRunExecution).reverse();
+}
+
+// The table needs coverage and duration, not historical baseline comparisons.
+export function selectRecentRunSummaries(runs, filters) {
+  return runs.map((run) => ({ run, ...runSummary(run, filters) }));
+}
+
 export function selectRecentRuns(data, filters, limit = 20) {
   return [...data.runs].sort(compareRunExecution).slice(-limit).reverse().map((run, index) => {
     const summary = runSummary(run, filters); const baseline = previousCompletedRunForFilters(data.runs, run, filters);

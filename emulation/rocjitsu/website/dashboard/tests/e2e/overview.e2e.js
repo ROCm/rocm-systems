@@ -40,8 +40,8 @@ test('all-page shell, theme and overview controls retain develop-only selected-s
   // One line is a selected-scope sum, not one line per target or synthetic MT.
   await page.getByRole('checkbox', { name: 'MT', exact: true }).uncheck();
   const latest = createSchema2Publication().runs.find((run) => run.id === 'fictional-develop-23');
-  const sum = latest.configurations.find((config) => config.target === 'gfx1250' && config.mode === 'ST')
-    .results.reduce((total, result) => total + result.durationSeconds, 0);
+  const sum = latest.configurations.filter((config) => config.mode === 'ST')
+    .flatMap((config) => config.results).reduce((total, result) => total + result.durationSeconds, 0);
   await expect(page.getByTestId('metric-card-total-duration')).toContainText(formatDuration(sum));
   const trend = page.getByTestId('performance-trend');
   const plotted = await readChart(trend.getByRole('img'), (instance) => {
@@ -132,7 +132,7 @@ test('explicit empty target, suite and mode scopes never refill across page or d
   expect(new URL(page.url()).searchParams.get('campaign')).toBe('kept');
   expect(new URL(page.url()).hash).toBe('#scope');
   await page.getByRole('checkbox', { name: 'ST', exact: true }).check();
-  await page.getByRole('checkbox', { name: 'gfx1250', exact: true }).uncheck();
+  for (const target of ['gfx1250', 'gfx950']) await page.getByRole('checkbox', { name: target, exact: true }).uncheck();
   await expect(page.getByRole('img')).toHaveCount(0);
   await page.getByRole('checkbox', { name: 'gfx1250', exact: true }).check();
   for (const suite of ['Triton', 'Llama']) await page.getByRole('checkbox', { name: suite, exact: true }).uncheck();

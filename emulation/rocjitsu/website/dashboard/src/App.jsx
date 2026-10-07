@@ -362,7 +362,6 @@ export default function App() {
       <Box component="footer" sx={{ borderTop: 1, borderColor: 'divider', mx: { xs: 2, md: 3 }, py: 2, color: 'text.secondary' }}>
         <Typography variant="caption" component="p">Copyright © 2025–2026 Advanced Micro Devices, Inc.</Typography>
         <Typography variant="caption" component="p">MIT License</Typography>
-        <Typography variant="caption" component="p">Made with Material for MkDocs</Typography>
       </Box>
       </DashboardShell>
     </ThemeProvider>

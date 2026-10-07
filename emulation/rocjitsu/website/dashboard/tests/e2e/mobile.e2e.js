@@ -23,7 +23,7 @@ test('phone filters, all-page navigation, trend tap and result details stay usab
   const recent = page.getByRole('region', { name: 'Recent runs scroll area' });
   await expectLocalScroll(recent, { horizontal: true });
   await expectLocalScroll(recent);
-  await expect(page.getByTestId('recent-runs').getByRole('status')).toContainText('of 20 runs');
+  await expect(page.getByTestId('recent-runs').getByRole('status')).toHaveText('Showing 1–20 of 24 runs');
 
   // Tap with the phone's touch input, then explicitly leave: touch inspection must
   // not be cleared like mouse hover when the finger lifts.

@@ -14,6 +14,16 @@ If Chromium's system libraries already exist, `npx playwright install chromium`
 installs only the browser. Network access is needed for installation, not for the
 maintained browser tests.
 
+## Default scope
+
+Uninitialized dashboard filters select every available target, suite and declared
+execution mode. When both gfx1250 and gfx950 publish ST and MT, all four
+configurations are included. Saved or URL selections, including explicit empty
+selections, take precedence; empty bootstrap data never becomes a user choice.
+Recent Runs uses numbered pages with first/last (`|<` / `>|`) and previous/next
+arrow icons. First/last jump to the endpoints, not adjacent pages; accessible
+labels and native hover titles describe each action.
+
 ## Data and test boundaries
 
 Published data must satisfy the [data contract](website-data-contract.md),
@@ -74,7 +84,9 @@ responsive/touch concerns. Pure contract permutations remain in Vitest.
 
 | Spec | Maintained semantic coverage |
 | --- | --- |
-| `overview.e2e.js` | Four-page navigation, themes, selected-scope sum, history ranges and keyboard/anchor inspection, develop-only latest-20 chronology, explicit empty target/suite/mode scopes and persistence |
+| `dashboard-scope-defaults.e2e.js` | All published targets/suites/ST+MT selected on fresh load and reload; stored narrow choices and explicit empty URL overrides |
+| `overview.e2e.js` | Four-page navigation, themes, selected-scope sum, history ranges and keyboard/anchor inspection, develop-only execution chronology, explicit empty target/suite/mode scopes and persistence |
+| `recent-runs-pagination.e2e.js` | Validated fixture-derived histories of 65 and 205 attempts; 20-run pages, numbered jumps and ellipses, icon-only first/previous/next/last navigation with boundary disabling, partial/short/empty pages, refresh shrinkage, and desktop/mobile layout |
 | `branch-runs.e2e.js` | Branch/PR/SHA search, empty matches, exact/fallback/manual reference, local configuration matrix, unpublished/failure exclusions, benchmark search/suites/sorting, scoped full comparison, missing identities, history, normal 1280px and 1440px **CSS zoom 2** overflow regression |
 | `comparisons.e2e.js` | Searchable exact attempts, one atomic swap/history entry, swapped totals/bars/exclusions, measured-zero percentage unavailability, generic metadata differences, escaped tooltip text |
 | `benchmarks.e2e.js` | Draft/apply/cancel grid picker, bounded search/eight slots, pointer removal/re-add/empty recovery, point selection across timeframe/scope changes, keyboard result inspection and complete/zero/failed/timeout/unpublished distinctions |

@@ -22,7 +22,11 @@ test.each(['light', 'dark'])('main sidebar has explicit subtle vertical border a
 });
 import { createDashboardTheme } from '../../src/theme/theme.js';
 const recent = vi.hoisted(() => ({ rows: [] }));
-vi.mock('../../src/data/selectors.js', async (importOriginal) => ({ ...await importOriginal(), selectRecentRuns: () => recent.rows }));
+vi.mock('../../src/data/selectors.js', async (importOriginal) => ({
+  ...await importOriginal(),
+  selectRecentRunAttempts: () => recent.rows.map(({ run }) => run),
+  selectRecentRunSummaries: (runs) => runs.map((run) => recent.rows.find((row) => row.run === run)),
+}));
 const sha = 'AbCdEf0123456789'.padEnd(40, '0');
 function renderRecent(source, repository, mode = 'light') {
   recent.rows = [{ run: { runId: 'attempt', source, provenance: { rocjitsuCommitSha: sha } }, total: 1, completed: 1 }];
