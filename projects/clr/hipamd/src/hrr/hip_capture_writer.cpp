@@ -188,7 +188,10 @@ static size_t       g_metadata_json_len = 0;
 static uint8_t  g_buf[kBufCap];
 static size_t   g_buf_len            = 0;
 static uint64_t g_events_since_ckpt  = 0;
-static bool     g_trailer_written    = false;
+// Set once events.bin is finalized, with or without the trailer. No record is
+// appended after it: the trailer must stay the last record, and the manifest
+// already holds the event count.
+static bool     g_events_finalized   = false;
 
 // Set when an event could not be serialized losslessly and had to be dropped
 // (e.g. an oversized kernel launch). A capture with this flag set is finalized
@@ -535,7 +538,7 @@ static void atfork_child() {
   }
   g_buf_len = 0;
   g_events_since_ckpt = 0;
-  g_trailer_written = false;
+  g_events_finalized = false;
   g_output_dir.clear();
   g_manifest_path[0] = '\0';
   // The child's archive is a new one: an event the parent dropped is not
@@ -988,7 +991,7 @@ bool open(const char* output_dir) {
     // process's pid-<pid> sub-archive.
     g_buf_len           = 0;
     g_events_since_ckpt = 0;
-    g_trailer_written   = false;
+    g_events_finalized  = false;
     g_seq_id.store(next_seq, std::memory_order_relaxed);
     g_event_count.store(ev_count, std::memory_order_relaxed);
     if (!exists)
@@ -1079,7 +1082,7 @@ void flush(const char* /*output_dir*/) {
     out_dir = g_output_dir;
     // Skip the clean-shutdown trailer when the capture is known incomplete: its
     // absence is exactly how the reader detects a non-faithful archive.
-    if (g_events_fd >= 0 && !g_trailer_written && !incomplete) {
+    if (g_events_fd >= 0 && !g_events_finalized && !incomplete) {
       hrr_eof_record rec = hrr_make_eof_record(
           g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
       rec.hdr.timestamp_ns = amd::Os::timeNanos();
@@ -1087,12 +1090,15 @@ void flush(const char* /*output_dir*/) {
       buffer_append_locked(&rec, sizeof(rec));
       flush_buffer_locked();
       HRR_FSYNC(g_events_fd);
-      g_trailer_written = true;
     } else if (g_events_fd >= 0 && incomplete) {
       // Still flush buffered events so nothing is lost, just no trailer.
       flush_buffer_locked();
       HRR_FSYNC(g_events_fd);
     }
+    // close() runs later and the fd stays open until then. A thread can still
+    // record in between: a forked child's first record finishes opening the
+    // archive just before this, and takes the lock after it.
+    g_events_finalized = true;
   }
 
   if (out_dir.empty()) return;
@@ -1154,11 +1160,11 @@ void emergency_finalize(bool clean_shutdown) {
     // Clean shutdowns append the fixed-size trailer so the reader does not treat
     // the archive as crash-truncated. The CLR crash callback passes
     // clean_shutdown=false; normal shutdown uses flush().
-    if (clean_shutdown && !g_trailer_written) {
+    if (clean_shutdown && !g_events_finalized) {
       hrr_eof_record rec = hrr_make_eof_record(
           g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
       write_all_fd(g_events_fd, &rec, sizeof(rec));
-      g_trailer_written = true;
+      g_events_finalized = true;
     }
     g_buf_busy.clear(std::memory_order_release);
   }
@@ -1221,7 +1227,8 @@ void emergency_finalize(bool clean_shutdown) {
 // events that are actually written. A full record is always appended under the
 // lock, so the buffer never holds a torn record — which is what makes the
 // crash-callback flush in emergency_finalize() safe. Caller holds BufWriteGuard and
-// has seen g_events_fd open.
+// has seen g_events_fd open. A record that comes after flush() is dropped, as
+// one after close() is.
 //
 // The checkpoint flush+fsync happens inside the same lock scope. An earlier
 // version released the lock and re-acquired it for the fsync, which let two
@@ -1230,6 +1237,7 @@ void emergency_finalize(bool clean_shutdown) {
 // fsync under the lock blocks other writers for the duration of the syscall,
 // but guarantees exactly one fsync per checkpoint and removes the race.
 static void append_event_locked(hrr_event_header* hdr, uint32_t payload_len) {
+  if (g_events_finalized) return;
   hdr->sequence_id = g_seq_id.fetch_add(1, std::memory_order_relaxed);
   buffer_append_locked(hdr, payload_len);
   g_event_count.fetch_add(1, std::memory_order_relaxed);

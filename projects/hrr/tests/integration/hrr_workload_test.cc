@@ -22,6 +22,7 @@
  */
 
 #include "hrr_test_common.hh"
+#include "hrr_clock_hook.hh"
 #include <hip/hiprtc.h>
 #include <hip/hip_ext.h>  // hipExtModuleLaunchKernel
 
@@ -4130,6 +4131,73 @@ TEST_CASE("Unit_HRR_ShutdownWhileChildOpensArchive_Direct", "[.][hrr-direct]") {
   REQUIRE(status != -1);
   REQUIRE(WIFEXITED(status));
   REQUIRE(WEXITSTATUS(status) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// rename() for this test binary, for the same reason as fsync() above: CLR
+// resolves it here first. The capture shutdown calls it to publish the root
+// manifest, after it has written the trailer and before it closes events.bin.
+// With no hook set it is a plain rename.
+// ---------------------------------------------------------------------------
+static std::atomic<void (*)(const char*)> g_hrr_rename_hook{nullptr};
+
+extern "C" int rename(const char* oldpath, const char* newpath) noexcept {
+  if (auto hook = g_hrr_rename_hook.load(std::memory_order_acquire)) hook(newpath);
+  return static_cast<int>(syscall(SYS_renameat2, AT_FDCWD, oldpath, AT_FDCWD, newpath, 0));
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_RecordAfterCaptureShutdown_Direct
+//
+// The capture shutdown writes the trailer and the manifests, then closes
+// events.bin. A thread already inside a recorded call can reach the buffer in
+// between, and must not land a record after the trailer. Here a second thread
+// is held inside hipGetLastError() until the shutdown reaches its first
+// manifest, and the shutdown is held there until that call returns. The
+// process exits 4 if the call never returned. Unit_HRR_RecordAfterCaptureShutdown
+// checks that events.bin still ends in the trailer.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_late_in_call{false};
+std::atomic<bool> g_shutdown_held{false};
+std::atomic<bool> g_late_recorded{false};
+
+// The late thread's first clock read inside hipGetLastError(), at the latest
+// the one that timestamps its record.
+void late_record_clock_hook() {
+  t_hrr_clock_hook = nullptr;
+  g_late_in_call = true;
+  for (int ms = 0; ms < 10000 && !g_shutdown_held.load(); ++ms) hrr_sleep_1ms();
+}
+
+void shutdown_rename_hook(const char* path) {
+  static constexpr char kSuffix[] = "/manifest.json";
+  constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
+  const size_t len = strlen(path);
+  if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
+  if (g_shutdown_held.exchange(true)) return;
+  for (int ms = 0; ms < 10000 && !g_late_recorded.load(); ++ms) hrr_sleep_1ms();
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_RecordAfterCaptureShutdown_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+
+  g_hrr_after_capture_shutdown = [] {
+    g_hrr_rename_hook = nullptr;
+    if (!g_late_recorded.load()) _exit(4);
+  };
+  g_hrr_rename_hook = shutdown_rename_hook;
+  std::thread([] {
+    t_hrr_clock_hook = late_record_clock_hook;
+    (void)hipGetLastError();
+    g_late_recorded = true;
+  }).detach();
+  // The capture shutdown runs once this returns.
+  for (int ms = 0; ms < 10000 && !g_late_in_call.load(); ++ms) hrr_sleep_1ms();
 }
 #endif  // !_WIN32
 

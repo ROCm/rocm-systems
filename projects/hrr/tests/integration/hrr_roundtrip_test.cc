@@ -40,6 +40,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -1834,13 +1835,27 @@ HRR_TEST_CASE(Unit_HRR_ForkAfterCaptureShutdown) {
   CHECK(hrr_process_archives(cap.path).size() == 1);
 }
 
+// The archive's events.bin ends in the clean-shutdown trailer, and the trailer
+// counts every event before it. load_archive() sets `complete` for a trailer
+// anywhere in the file, and goes on reading past it.
+static void check_ends_in_trailer(const fs::path& archive, const hrr::Archive& arc) {
+  const std::string bytes = read_text_file(archive / "events.bin");
+  REQUIRE(bytes.size() >= sizeof(hrr_file_header) + sizeof(hrr_eof_record));
+  hrr_eof_record eof;
+  memcpy(&eof, bytes.data() + bytes.size() - sizeof(eof), sizeof(eof));
+  CHECK(eof.hdr.event_type == HRR_EOF_MARKER);
+  CHECK(eof.hdr.payload_length == sizeof(hrr_eof_record));
+  CHECK(eof.eof_magic == HRR_EOF_MAGIC);
+  CHECK(eof.total_events == arc.events.size());
+}
+
 /**
  * Unit_HRR_ShutdownWhileChildOpensArchive
  * ---------------------------------------
  *   - A forked child's capture shutdown waits while another of its threads
  *     opens the child's archive, and then finalizes that archive. Both
  *     processes leave a manifest marked "complete": true and an events.bin
- *     that ends in the clean-shutdown trailer.
+ *     that ends in the clean-shutdown trailer, with no record after it.
  */
 HRR_TEST_CASE(Unit_HRR_ShutdownWhileChildOpensArchive) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_shutdown_while_child_opens_archive"};
@@ -1865,7 +1880,37 @@ HRR_TEST_CASE(Unit_HRR_ShutdownWhileChildOpensArchive) {
     hrr::Archive arc;
     REQUIRE(hrr::load_archive(archive.string(), arc));
     CHECK(arc.complete);
+    check_ends_in_trailer(archive, arc);
   }
+}
+
+/**
+ * Unit_HRR_RecordAfterCaptureShutdown
+ * -----------------------------------
+ *   - A record made after the capture shutdown has written the trailer, and
+ *     before it closes events.bin, is dropped. The file still ends in the
+ *     trailer, which counts every event in it.
+ */
+HRR_TEST_CASE(Unit_HRR_RecordAfterCaptureShutdown) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_record_after_capture_shutdown"};
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_RecordAfterCaptureShutdown_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  const std::string manifest = read_text_file(archive / "manifest.json");
+  INFO("Process manifest:\n" << manifest);
+  CHECK(manifest.find("\"complete\": true") != std::string::npos);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  CHECK(arc.complete);
+  check_ends_in_trailer(archive, arc);
 }
 #endif  // !_WIN32
 
