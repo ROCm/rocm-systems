@@ -476,7 +476,7 @@ typedef enum hipMemcpyFlags {
  * Numbered to match the underlying HSA wait function.
  */
 typedef enum hipExtMemcpyWaitOp {
-  hipExtMemcpyWaitAlways = 0,  ///< No wait; addr must be NULL
+  hipExtMemcpyWaitNone   = 0,  ///< No wait; addr must be NULL
   hipExtMemcpyWaitLt     = 1,  ///< *addr <  value
   hipExtMemcpyWaitLe     = 2,  ///< *addr <= value
   hipExtMemcpyWaitEq     = 3,  ///< *addr == value
