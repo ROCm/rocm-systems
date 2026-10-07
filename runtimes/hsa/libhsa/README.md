@@ -88,20 +88,25 @@ Linux host facts, driver identities, descriptors, IPC, SVM, and event imports
 enter through this frontend's `platform/` adapter. Only a Linux adapter is
 implemented.
 
-Linear asynchronous copy and explicit engine-0 copy use rocddi's bounded SDMA
-submission path on GFX1201. Pitched rectangular copy uses the same native
-path, submitting its rows through one queue. Linear and broadcast batch
-operations reuse one queue for their device and staged host entries, in
-descriptor order. The frontend waits for dependency signals, retains signal
-storage and runtime-owned memory until native retirement, and decrements the
-completion signal once after a successful copy. Each batch operation may use
-its own completion signal or share one with other operations. Each operation
-releases its memory borrow and decrements its signal when it retires. The
-frontend sets the completion signal negative after an asynchronous failure.
+Linear asynchronous copy and explicit copy-engine selection use rocddi's
+bounded SDMA submission path on GFX1201. The engine mask reports DRM DMA
+rings within the GPU's advertised SDMA engine count and the 16 public engine
+IDs; an explicit one-hot choice selects that ring. The preferred engine query
+returns the lowest available ring. For a GPU pair, the source GPU owns the
+copy and both ranges must be accessible to it. The force-SDMA argument does
+not change this path because its native copies use SDMA. Pitched rectangular
+copy uses the same native path, submitting its rows through one queue. Linear
+and broadcast batch operations reuse one queue for their device and staged
+host entries in descriptor order. The frontend waits for dependency signals,
+retains signal storage and runtime-owned memory until native retirement, and
+decrements the completion signal once after a successful copy. Each batch
+operation may use its own completion signal or share one with other operations.
+Each operation releases its memory borrow and decrements its signal when it
+retires. An asynchronous failure sets the completion signal negative.
 Uncertain native retirement retains the command buffer and all runtime-owned
-operands for process teardown. Engine queries advertise only engine 0 when
-this path is available. Native swap is unavailable on GFX1201. Indirect copies,
-raw wait and signal operations, and asynchronous copy profiling are unsupported.
+operands for process teardown. Native swap is unavailable on GFX1201. Indirect
+copies, raw wait and signal operations, and asynchronous copy profiling are
+unsupported.
 Zero-byte single copies and rectangles with a zero dimension return success
 without changing the completion signal.
 External semaphore imports and queue operations return unsupported on Linux,

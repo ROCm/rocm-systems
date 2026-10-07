@@ -4536,25 +4536,10 @@ enum AsyncCopyRoute {
         source: HostCopySource,
         size: usize,
     },
-    GpuLinear {
+    Gpu {
         device: Box<Device>,
         index: usize,
-        destination: u64,
-        source: u64,
-        size: u64,
-    },
-    GpuFromHost {
-        device: Box<Device>,
-        index: usize,
-        destination: u64,
-        source: HostCopySource,
-    },
-    GpuToHost {
-        device: Box<Device>,
-        index: usize,
-        destination: HostCopyDestination,
-        source: u64,
-        size: usize,
+        entry: GpuCopyEntry,
     },
     GpuRect {
         device: Box<Device>,
@@ -4562,11 +4547,11 @@ enum AsyncCopyRoute {
     },
     GpuBatch {
         device: Box<Device>,
-        entries: Vec<GpuBatchEntry>,
+        entries: Vec<GpuCopyEntry>,
     },
 }
 
-enum GpuBatchEntry {
+enum GpuCopyEntry {
     Linear {
         destination: u64,
         source: u64,
@@ -4822,7 +4807,7 @@ fn resolve_async_copy(
     let src_agent = copy_agent(runtime, src_agent, src_description.as_ref())?;
     let dst_gpu = runtime.gpu_index(dst_agent);
     let src_gpu = runtime.gpu_index(src_agent);
-    if let Some(index) = dst_gpu.or(src_gpu) {
+    if let Some(index) = src_gpu.or(dst_gpu) {
         if !runtime.gpus[index]
             .device
             .gpu()
@@ -4852,12 +4837,14 @@ fn resolve_async_copy(
         let device = Box::new(runtime.gpus[index].device.clone());
         return match (gpu_destination, gpu_source) {
             (Ok((destination, dst_base)), Ok((source, src_base))) => Ok(ResolvedAsyncCopy {
-                route: AsyncCopyRoute::GpuLinear {
+                route: AsyncCopyRoute::Gpu {
                     device,
                     index,
-                    destination,
-                    source,
-                    size: u64::try_from(size).map_err(|_| INVALID_ARGUMENT)?,
+                    entry: GpuCopyEntry::Linear {
+                        destination,
+                        source,
+                        size: u64::try_from(size).map_err(|_| INVALID_ARGUMENT)?,
+                    },
                 },
                 borrowed_memory: [Some(dst_base), Some(src_base)],
             }),
@@ -4872,11 +4859,13 @@ fn resolve_async_copy(
                     HostSourceTiming::AfterDependencies,
                 )?;
                 Ok(ResolvedAsyncCopy {
-                    route: AsyncCopyRoute::GpuFromHost {
+                    route: AsyncCopyRoute::Gpu {
                         device,
                         index,
-                        destination,
-                        source,
+                        entry: GpuCopyEntry::FromHost {
+                            destination,
+                            source,
+                        },
                     },
                     borrowed_memory: [
                         Some(dst_base),
@@ -4894,12 +4883,14 @@ fn resolve_async_copy(
                     size,
                 )?;
                 Ok(ResolvedAsyncCopy {
-                    route: AsyncCopyRoute::GpuToHost {
+                    route: AsyncCopyRoute::Gpu {
                         device,
                         index,
-                        destination,
-                        source,
-                        size,
+                        entry: GpuCopyEntry::ToHost {
+                            destination,
+                            source,
+                            size,
+                        },
                     },
                     borrowed_memory: [
                         dst_description.map(|description| description.agent_base),
@@ -5024,11 +5015,14 @@ fn resolve_sync_gpu_copy(
                 HsaAgent { handle: 0 },
                 size,
             )?;
-            let AsyncCopyRoute::GpuLinear {
+            let AsyncCopyRoute::Gpu {
                 device,
-                destination,
-                source,
-                size,
+                entry:
+                    GpuCopyEntry::Linear {
+                        destination,
+                        source,
+                        size,
+                    },
                 ..
             } = resolved.route
             else {
@@ -5203,27 +5197,32 @@ fn write_loaded_copy_destination(address: usize, bytes: &[u8]) -> Status {
     SUCCESS
 }
 
-fn execute_gpu_batch(
+fn execute_gpu_entries(
     device: &Device,
-    entries: Vec<GpuBatchEntry>,
+    entries: impl IntoIterator<Item = GpuCopyEntry>,
+    sdma_ring: Option<u32>,
     stop: &AtomicBool,
 ) -> Result<(), CopyRouteFailure> {
     let gpu = copy_gpu(device)?;
-    let mut sequence = GpuCopySequence::begin(gpu, stop).map_err(CopyRouteFailure::from)?;
+    let mut sequence = match sdma_ring {
+        Some(ring) => GpuCopySequence::begin_on_sdma_ring(gpu, stop, ring),
+        None => GpuCopySequence::begin(gpu, stop),
+    }
+    .map_err(CopyRouteFailure::from)?;
     for entry in entries {
         let outcome = match entry {
-            GpuBatchEntry::Linear {
+            GpuCopyEntry::Linear {
                 destination,
                 source,
                 size,
             } => {
-                // SAFETY: Batch preparation checked both mapped GPU ranges and
+                // SAFETY: Copy preparation checked both mapped GPU ranges and
                 // retains their owners until native retirement is proved.
                 unsafe { sequence.copy_linear(destination, source, size) }
                     .map(|()| SyncGpuCopyOutcome::Done)
                     .map_err(CopyRouteFailure::from)
             }
-            GpuBatchEntry::FromHost {
+            GpuCopyEntry::FromHost {
                 destination,
                 source,
             } => with_host_copy_source(&source, |host| {
@@ -5233,7 +5232,7 @@ fn execute_gpu_batch(
                     .map_err(CopyRouteFailure::from)
             })
             .map(|()| SyncGpuCopyOutcome::Done),
-            GpuBatchEntry::ToHost {
+            GpuCopyEntry::ToHost {
                 destination,
                 source,
                 size,
@@ -5253,7 +5252,11 @@ fn execute_gpu_batch(
     Ok(())
 }
 
-fn execute_copy_route(route: AsyncCopyRoute, stop: &AtomicBool) -> (bool, bool) {
+fn execute_copy_route(
+    route: AsyncCopyRoute,
+    sdma_ring: Option<u32>,
+    stop: &AtomicBool,
+) -> (bool, bool) {
     match route {
         AsyncCopyRoute::Noop => (true, false),
         AsyncCopyRoute::Host {
@@ -5309,46 +5312,18 @@ fn execute_copy_route(route: AsyncCopyRoute, stop: &AtomicBool) -> (bool, bool) 
             fence(Ordering::SeqCst);
             (true, false)
         }
-        AsyncCopyRoute::GpuLinear {
-            device,
-            index: _,
-            destination,
-            source,
-            size,
-        } => {
-            let Ok(gpu) = device.gpu() else {
-                return (false, false);
-            };
-            // SAFETY: The HSA submission validated mapped ranges and retains
-            // their public owners until native retirement is proved.
-            match unsafe { gpu.copy_linear(destination, source, size, stop) } {
+        AsyncCopyRoute::Gpu { device, entry, .. } => {
+            match execute_gpu_entries(&device, std::iter::once(entry), sdma_ring, stop) {
                 Ok(()) => (true, false),
                 Err(failure) => (false, failure.operands_may_be_live),
             }
         }
-        AsyncCopyRoute::GpuFromHost {
-            device,
-            index: _,
-            destination,
-            source,
-        } => match copy_from_host_route(&device, destination, &source, stop) {
-            Ok(()) => (true, false),
-            Err(failure) => (false, failure.operands_may_be_live),
-        },
-        AsyncCopyRoute::GpuToHost {
-            device,
-            index: _,
-            destination,
-            source,
-            size,
-        } => match copy_to_host_route(&device, &destination, source, size, stop) {
-            Ok(SyncGpuCopyOutcome::Done) => (true, false),
-            Ok(SyncGpuCopyOutcome::LoadedDestination { address, bytes }) => (
-                write_loaded_copy_destination(address, &bytes) == SUCCESS,
-                false,
-            ),
-            Err(failure) => (false, failure.operands_may_be_live),
-        },
+        AsyncCopyRoute::GpuBatch { device, entries } => {
+            match execute_gpu_entries(&device, entries, None, stop) {
+                Ok(()) => (true, false),
+                Err(failure) => (false, failure.operands_may_be_live),
+            }
+        }
         AsyncCopyRoute::GpuRect { device, rect } => {
             let Ok(gpu) = device.gpu() else {
                 return (false, false);
@@ -5360,17 +5335,12 @@ fn execute_copy_route(route: AsyncCopyRoute, stop: &AtomicBool) -> (bool, bool) 
                 Err(failure) => (false, failure.operands_may_be_live),
             }
         }
-        AsyncCopyRoute::GpuBatch { device, entries } => {
-            match execute_gpu_batch(&device, entries, stop) {
-                Ok(()) => (true, false),
-                Err(failure) => (false, failure.operands_may_be_live),
-            }
-        }
     }
 }
 
 struct AsyncCopyTask {
     route: AsyncCopyRoute,
+    sdma_ring: Option<u32>,
     borrowed_memory: Vec<Option<usize>>,
     completion: HsaSignal,
 }
@@ -5416,7 +5386,7 @@ fn enqueue_copy_job(
             for task in tasks {
                 let (success, may_be_live) = if execute {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        execute_copy_route(task.route, &stop)
+                        execute_copy_route(task.route, task.sdma_ring, &stop)
                     }))
                     .unwrap_or((false, true))
                 } else {
@@ -5446,11 +5416,13 @@ fn enqueue_async_copy(
     resolved: ResolvedAsyncCopy,
     dependency_slice: &[HsaSignal],
     completion: HsaSignal,
+    sdma_ring: Option<u32>,
 ) -> Status {
     enqueue_copy_job(
         runtime,
         vec![AsyncCopyTask {
             route: resolved.route,
+            sdma_ring,
             borrowed_memory: resolved.borrowed_memory.to_vec(),
             completion,
         }],
@@ -5491,7 +5463,7 @@ unsafe fn submit_async_copy(
         if !runtime.owns_signal(completion) {
             return INVALID_SIGNAL;
         }
-        if engine.is_some_and(|engine| engine != 1) {
+        if engine.is_some_and(|engine| engine.count_ones() != 1 || engine > u16::MAX.into()) {
             return INVALID_ARGUMENT;
         }
         let dependency_slice = if dependency_count == 0 {
@@ -5507,11 +5479,17 @@ unsafe fn submit_async_copy(
             return INVALID_SIGNAL;
         }
         if size == 0 {
-            return if runtime.is_agent(dst_agent) && runtime.is_agent(src_agent) {
-                SUCCESS
-            } else {
-                INVALID_AGENT
-            };
+            if !runtime.is_agent(dst_agent) || !runtime.is_agent(src_agent) {
+                return INVALID_AGENT;
+            }
+            if let Some(mask) = engine {
+                match copy_engine_mask(runtime, dst_agent, src_agent) {
+                    Ok(available) if available & mask != 0 => {}
+                    Ok(_) => return INVALID_ARGUMENT,
+                    Err(status) => return status,
+                }
+            }
+            return SUCCESS;
         }
         let resolved = match resolve_async_copy(
             runtime,
@@ -5524,18 +5502,21 @@ unsafe fn submit_async_copy(
             Ok(resolved) => resolved,
             Err(status) => return status,
         };
-        if engine.is_some()
-            && !matches!(
-                &resolved.route,
-                AsyncCopyRoute::GpuLinear { .. }
-                    | AsyncCopyRoute::GpuFromHost { .. }
-                    | AsyncCopyRoute::GpuToHost { .. }
-                    | AsyncCopyRoute::Noop
-            )
-        {
-            return NOT_SUPPORTED;
-        }
-        enqueue_async_copy(runtime, resolved, dependency_slice, completion)
+        let sdma_ring = match (engine, &resolved.route) {
+            (Some(mask), AsyncCopyRoute::Gpu { index, .. }) => {
+                let available = match copy_engine_mask_for_gpu(runtime, *index) {
+                    Ok(available) => available,
+                    Err(status) => return status,
+                };
+                if available & mask == 0 {
+                    return INVALID_ARGUMENT;
+                }
+                Some(mask.trailing_zeros())
+            }
+            (Some(_), _) => return NOT_SUPPORTED,
+            (None, _) => None,
+        };
+        enqueue_async_copy(runtime, resolved, dependency_slice, completion, sdma_ring)
     })
 }
 
@@ -5718,49 +5699,11 @@ fn resolve_batch_copy_entries(
             entry.size,
         )?;
         let (device, index, prepared) = match resolved.route {
-            AsyncCopyRoute::GpuLinear {
+            AsyncCopyRoute::Gpu {
                 device,
                 index,
-                destination,
-                source,
-                size,
-            } => (
-                device,
-                index,
-                GpuBatchEntry::Linear {
-                    destination,
-                    source,
-                    size,
-                },
-            ),
-            AsyncCopyRoute::GpuFromHost {
-                device,
-                index,
-                destination,
-                source,
-            } => (
-                device,
-                index,
-                GpuBatchEntry::FromHost {
-                    destination,
-                    source,
-                },
-            ),
-            AsyncCopyRoute::GpuToHost {
-                device,
-                index,
-                destination,
-                source,
-                size,
-            } => (
-                device,
-                index,
-                GpuBatchEntry::ToHost {
-                    destination,
-                    source,
-                    size,
-                },
-            ),
+                entry,
+            } => (device, index, entry),
             AsyncCopyRoute::Noop if entries.len() == 1 => {
                 return Ok((AsyncCopyRoute::Noop, borrowed_memory));
             }
@@ -5844,6 +5787,7 @@ unsafe fn prepare_batch_copy(
         let (route, bases) = resolve_batch_copy_entries(runtime, &entries)?;
         tasks.push(AsyncCopyTask {
             route,
+            sdma_ring: None,
             borrowed_memory: bases,
             completion: op.completion_signal,
         });
@@ -6029,6 +5973,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
             },
             dependency_slice,
             completion,
+            None,
         )
     })
 }
@@ -6059,21 +6004,21 @@ fn pitched_copy_range(
     Some((address, extent))
 }
 
-fn copy_engine_mask(runtime: &Runtime, dst: HsaAgent, src: HsaAgent) -> u32 {
-    let dst_gpu = runtime.gpu_index(dst);
-    let src_gpu = runtime.gpu_index(src);
-    if dst_gpu.is_some() && src_gpu.is_some() && dst_gpu != src_gpu {
-        return 0;
+fn copy_engine_mask_for_gpu(runtime: &Runtime, index: usize) -> Result<u32, Status> {
+    let gpu = runtime.gpus[index].device.gpu().map_err(map_error)?;
+    if !gpu.supports_linear_copy() {
+        return Ok(0);
     }
-    let Some(index) = dst_gpu.or(src_gpu) else {
-        return 0;
+    let count = gpu.info().queues.sdma_engine_count.min(16);
+    let valid_ids = (1_u32 << count) - 1;
+    Ok(gpu.available_sdma_rings().map_err(map_error)? & valid_ids)
+}
+
+fn copy_engine_mask(runtime: &Runtime, dst: HsaAgent, src: HsaAgent) -> Result<u32, Status> {
+    let Some(index) = runtime.gpu_index(src).or_else(|| runtime.gpu_index(dst)) else {
+        return Ok(0);
     };
-    u32::from(
-        runtime.gpus[index]
-            .device
-            .gpu()
-            .is_ok_and(|gpu| gpu.supports_linear_copy()),
-    )
+    copy_engine_mask_for_gpu(runtime, index)
 }
 
 #[unsafe(no_mangle)]
@@ -6097,7 +6042,10 @@ pub unsafe extern "C" fn hsa_amd_memory_copy_engine_status(
         if !runtime.is_agent(dst) || !runtime.is_agent(src) {
             return INVALID_AGENT;
         }
-        let available = copy_engine_mask(runtime, dst, src);
+        let available = match copy_engine_mask(runtime, dst, src) {
+            Ok(available) => available,
+            Err(status) => return status,
+        };
         // SAFETY: The caller supplied writable output storage.
         unsafe { mask.write(available) };
         if available == 0 {
@@ -6129,8 +6077,12 @@ pub unsafe extern "C" fn hsa_amd_memory_get_preferred_copy_engine(
         if !runtime.is_agent(dst) || !runtime.is_agent(src) {
             return INVALID_AGENT;
         }
+        let available = match copy_engine_mask(runtime, dst, src) {
+            Ok(available) => available,
+            Err(status) => return status,
+        };
         // SAFETY: The caller supplied writable output storage.
-        unsafe { mask.write(copy_engine_mask(runtime, dst, src)) };
+        unsafe { mask.write(available & available.wrapping_neg()) };
         SUCCESS
     })
 }
