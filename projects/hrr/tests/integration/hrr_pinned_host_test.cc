@@ -1080,7 +1080,7 @@ constexpr int kCaptureTimeoutSec = 120;
 
 void capture_case(const char* direct_case, const fs::path& cap,
                   const std::vector<std::pair<std::string, std::string>>& env = {}) {
-  hrr::test::SpawnProc proc(HRR_TEST_EXE);
+  hrr::test::SpawnProc proc(hrr_test_exe());
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
   for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
   set_proc_search_path(proc);
