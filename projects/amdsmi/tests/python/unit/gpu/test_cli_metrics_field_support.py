@@ -532,6 +532,33 @@ class TestVersionTableMatchesCppSource(unittest.TestCase):
             self.support.populatable_fields(1, self.support._DYNAMIC_MIN_CONTENT_REVISION),
         )
 
+    def test_apu_prefix_revisions_track_the_v24_layout(self):
+        """v2.1-v2.3 read the v2.4 layout, so they carry its members minus what
+        their shorter table stops before.
+
+        The reader clamps to the declared table size, so a revision only carries
+        a member whose source bytes fall inside it. v2.1 ends where
+        indep_throttle_status begins; v2.2 onwards reach it. The C++ side of this
+        is pinned by GpuUnit.APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable.
+        """
+        v24 = self.support.populatable_fields(2, 4)
+        self.assertEqual(
+            self.support.populatable_fields(2, 1),
+            v24 - {"indep_throttle_status"},
+            "v2.1's table stops at indep_throttle_status, so it cannot carry it",
+        )
+        for content_revision in (2, 3):
+            with self.subTest(version=(2, content_revision)):
+                self.assertEqual(self.support.populatable_fields(2, content_revision), v24)
+
+    def test_apu_v20_stays_unmapped(self):
+        """v2.0 orders its fields differently, so the reader rejects it outright.
+
+        Leaving it unmapped keeps the filter from describing a version no device
+        can reach through this table.
+        """
+        self.assertIsNone(self.support.populatable_fields(2, 0))
+
     def test_apu_versions_match_their_branches(self):
         branches = self._apu_branch_fields()
         self.assertIsNotNone(
