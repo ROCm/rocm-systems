@@ -222,8 +222,13 @@ protected:
         if(!validateTestPrerequisites(kMinProcessesForMPI))
             GTEST_SKIP() << "Need at least 2 MPI ranks";
 
-        //if(!isGfx1250Device())
-        //    GTEST_SKIP() << "DDA fabric LL requires gfx1250";
+        // Every rank must skip together, or the ones that did not would block in the next collective.
+        const std::string archSkip
+            = mpiCoordinatedSkipReason(!isGfx1250Device(), "DDA fabric LL requires gfx1250");
+        if(!archSkip.empty())
+        {
+            GTEST_SKIP() << archSkip;
+        }
 
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
 
@@ -240,6 +245,22 @@ protected:
         void* recvBuf = nullptr;
         ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
         DeviceBufferAutoGuard recvGuard(recvBuf);
+
+        // Without MNNVL, or on a comm spanning several cliques, RCCL never offers the fabric LL tiers, so there is no path to assert.
+        int                algo = -1, protocol = -1, maxChannels = -1;
+        const ncclResult_t query
+            = rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, count, ncclFloat32,
+                                  ncclSum, sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &protocol,
+                                  &maxChannels);
+        EXPECT_EQ(ncclSuccess, query) << "Rank " << rank << ": rcclGetCollImplInfo failed";
+        const bool fabricLL
+            = query == ncclSuccess && (algo == RCCL_DDA_FABRIC_LL || algo == RCCL_DDA_FABRIC_LL128);
+        const std::string pathSkip
+            = mpiCoordinatedSkipReason(!fabricLL, "RCCL does not select DDA fabric LL/LL128 for this comm");
+        if(!pathSkip.empty())
+        {
+            GTEST_SKIP() << pathSkip;
+        }
 
         fillRankScalar(sendBuf, count, rank);
         ASSERT_EQ(hipSuccess, hipMemset(recvBuf, 0, bytes));
