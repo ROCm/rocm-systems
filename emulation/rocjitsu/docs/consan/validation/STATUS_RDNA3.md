@@ -14,6 +14,10 @@ LDS-completion and global-store-completion waits before the selected
 publication atomic. The atomic operation and acquire synchronization remain
 intact. Patched ISA confirms removal of both waits.
 
+The `streamk-arrival` and `tree-atomic-or` clean and fault results use
+[`948d37f2c2ca89bfb0e149906488f0600ec34482`](https://github.com/ROCm/rocm-systems/commit/948d37f2c2ca89bfb0e149906488f0600ec34482)
+plus the changes in [PR #12858](https://github.com/ROCm/rocm-systems/pull/12858).
+
 Reproduce these rows with the maintained
 [validation runner](../../../tests/dbi/consan/consan_validation.py), the
 [reviewed `gfx1100` fault specification](../../../tests/dbi/consan/consan_validation_faults_gfx1100.json),
