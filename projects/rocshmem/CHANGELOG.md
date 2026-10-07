@@ -27,6 +27,11 @@
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
   Use `rocshmem_signal_fetch` instead.
 
+### Resolved Issues
+* Fixed GDA mlx5 and bnxt fetching atomics returning duplicated values when more than 1024 were in flight
+  on one queue pair, for example a default-context `rocshmem_uint64_atomic_fetch_add` from several
+  1024-thread workgroups.
+
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
 ### Added
