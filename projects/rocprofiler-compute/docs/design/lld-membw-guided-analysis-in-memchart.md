@@ -549,7 +549,7 @@ def extract_membw_metrics(
 
 > **Dependency:** This section assumes the completion of [PR #8648: redesign gfx9 mem chart with rich layout](https://github.com/ROCm/rocm-systems/pull/8648).
 
-The gfx9 memory chart renderer uses Rich composable panels and grids (10-column `Table.grid` layout) with shared builders from `mem_chart_common.py`.
+The gfx9 memory chart renderer uses Rich composable panels and grids (10-column `Table.grid` layout) with shared builders from `mem_chart_common.py` (since replaced by the layout-driven `src/memory_chart/mem_chart.py`).
 
 ### Integration points for bottleneck annotations
 
@@ -816,8 +816,7 @@ Primary: `sample/membw_analysis_test_suite/` -- existing HIP microbenchmarks tar
 ## References
 
 - `src/rocprof_compute_soc/analysis_configs/gfx950/3000_mem_bw.yaml` -- metric definitions and formulas (tables 3001, 3012, 3018 are primary)
-- `src/utils/mem_chart_gfx9.py` -- memory chart renderer (Rich-based, post-refactor PR #8648)
-- `src/utils/mem_chart_common.py` -- shared chart builders (`build_cache_panel`, `build_bw_edge_column`, etc.)
+- `src/memory_chart/mem_chart.py` -- memory chart renderer, drawing the layouts in `src/memory_chart/layouts/` (replaced `src/utils/mem_chart_gfx9.py` and `mem_chart_common.py`)
 - `src/utils/tty.py` -- analyze output orchestration (memory chart branch)
 - `src/utils/parser.py` -- `build_dfs` (target for flag check cleanup)
 - `src/argparser.py` -- `ExperimentalAction` and `--membw-analysis` flag definitions
