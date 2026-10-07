@@ -226,4 +226,3 @@ Flat support is in scope because compiled HIP helper code can access LDS through
 -   `Private`, `MaybePrivate`, `Global`, `Unknown`.
 
 `RJ_CONSAN_FLAT_PROVENANCE=likely` (the default) admits both `Group` and `MaybeGroup`. `strict` admits only `Group`.
-
