@@ -594,6 +594,7 @@
     "cast_base": {
       "extends": "net_ib_base",
       "env_variables": {
+        "NCCL_NET":                         "IB-CAST",
         "RCCL_IB_QP_SCHED_ENABLE":          "1",
         "RCCL_IB_QP_SCHED_WRR_ENABLE":      "1",
         "RCCL_IB_QP_SCHED_WEIGHT":          "0",
@@ -601,6 +602,75 @@
         "RCCL_IB_QP_SCHED_RESET_INTERVAL":  "60000",
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN":  "65536"
       }
+    },
+
+    "cast_multisegment_opt_recv": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "description": "CAST multi-segment suite with optional receive completion negotiated on, so hinted 1-recvs take the segmented RDMA-write path. Extends net_ib_base because cast_base turns QP scheduling on, which disables optRecvCompletion.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0",
+        "NCCL_IB_QPS_PER_CONNECTION": "1",
+        "NCCL_GDR_FLUSH_DISABLE": "0",
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiSegment_OptRecv_All",
+          "description": "Every CAST multi-segment test, including the hinted segmented-write and invalid-range checks, with optRecvCompletion on",
+          "test_filter": "NetIbMultiSegmentMPITest.*"
+        }
+      ]
+    },
+
+    "cast_multisegment_opt_recv_2qp": {
+      "extends": "cast_multisegment_opt_recv",
+      "description": "cast_multisegment_opt_recv with data split over 2 QPs per connection.",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      }
+    },
+
+    "cast_multisegment": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0",
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_GDR_FLUSH_DISABLE": "0",
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiSegment_All",
+          "description": "CAST registration, asymmetric/cross-boundary transfer, multi-receive, flush, limits, and single-segment regressions",
+          "test_filter": "NetIbMultiSegmentMPITest.*"
+        },
+        {
+          "name": "UBR_MultiSegment_Generic",
+          "description": "Out-of-place AllReduce on an 8-segment VMM buffer through the CAST netIbCast registration arm",
+          "test_filter": "UBR_MultiSegment.Generic",
+          "env_variables": {
+            "NCCL_LOCAL_REGISTER": "1",
+            "NCCL_DEBUG_SUBSYS": "REG",
+            "RCCL_MPI_LOG_ALL_RANKS": "1"
+          }
+        }
+      ]
     },
 
     "cast_wrr_split": {
@@ -768,70 +838,70 @@
     "net_ib_initialization_cast": {
       "extends": "net_ib_initialization",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_properties_cast": {
       "extends": "net_ib_properties",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_connection_cast": {
       "extends": "net_ib_connection",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_memory_cast": {
       "extends": "net_ib_memory",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_transfer_cast": {
       "extends": "net_ib_transfer",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_flush_cast": {
       "extends": "net_ib_flush",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_vdevice_cast": {
       "extends": "net_ib_vdevice",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_vnic_functional_cast": {
       "extends": "net_ib_vnic_functional",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_vnic_edge_cast": {
       "extends": "net_ib_vnic_edge",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
     "net_ib_vnic_stress_cast": {
       "extends": "net_ib_vnic_stress",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
 
@@ -1140,13 +1210,13 @@
     "net_ib_cast_gin_peermem": {
       "extends": "net_ib_gin_peermem",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_cast_gin_dmabuf": {
       "extends": "net_ib_gin_dmabuf",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_rma_multisegment": {
@@ -2118,6 +2188,24 @@
       "name": "NET IB - CAST WRR only, long update interval",
       "description": "Scheduler toggle tests that need RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= 10 s; they skip in every other config",
       "config": "cast_wrr_no_split_long_interval",
+      "enabled": true
+    },
+    {
+      "name": "NET IB-CAST - Multi-Segment P2P",
+      "description": "Two-node CAST multi-segment registration, transfer, completion-size, and flush coverage",
+      "config": "cast_multisegment",
+      "enabled": true
+    },
+    {
+      "name": "NET IB-CAST - Multi-Segment Optional Recv Completion (1 QP)",
+      "description": "CAST multi-segment suite with optRecvCompletion negotiated on",
+      "config": "cast_multisegment_opt_recv",
+      "enabled": true
+    },
+    {
+      "name": "NET IB-CAST - Multi-Segment Optional Recv Completion (2 QPs)",
+      "description": "CAST multi-segment suite with optRecvCompletion on and data split over 2 QPs",
+      "config": "cast_multisegment_opt_recv_2qp",
       "enabled": true
     }
   ]

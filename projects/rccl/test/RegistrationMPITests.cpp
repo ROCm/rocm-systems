@@ -62,6 +62,17 @@ static bool envCtaPolicyIsZero()
     return policy != NCCL_CONFIG_UNDEF_INT && (policy & NCCL_CTA_POLICY_ZERO) != 0;
 }
 
+// CAST jobs set NCCL_NET=IB-CAST (or ib-cast). Classic IB must not take this arm.
+static bool envNetIsIbCast()
+{
+    const char* net = std::getenv("NCCL_NET");
+    if (net == nullptr || net[0] == '\0') return false;
+    std::string s(net);
+    for (char& c : s)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s == "IB-CAST";
+}
+
 // Env / driver gates are process-wide, so a rank-local skip is safe. Alloc
 // failure is not: that skip must run in the TEST body after allRanksTrue.
 static const char* ceRecvOffsetEnvSkipReason()
@@ -1341,8 +1352,10 @@ protected:
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
  * The collective operates on four segments per half, while ncclCommRegister
- * covers the complete eight-segment allocation. Skip unless some rank set
- * NET_REG_COMPLETE. The all-peer flag and the count of 8 are cache writes
+ * covers the complete eight-segment allocation. Under NCCL_NET=IB-CAST the
+ * CAST register arm must set NET_REG_COMPLETE; skip would stay green if
+ * IbCastRegMrDmaBufMultiSeg were reverted. Classic IB skips unless some rank
+ * set NET_REG_COMPLETE. The all-peer flag and the count of 8 are cache writes
  * asserted after that gate, so a missing write fails instead of skipping.
  */
 TEST_F(UBR_MultiSegment, Generic)
@@ -1411,7 +1424,10 @@ TEST_F(UBR_MultiSegment, Generic)
     // Gate on NET_REG_COMPLETE, not allPeers: the commit writes allPeers, so a
     // dropped commit must fail here instead of skipping.
     const bool netRegistered = (reg->state & NET_REG_COMPLETE) != 0;
-    {
+    if (envNetIsIbCast()) {
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(netRegistered))
+            << "CAST netIbCast register arm did not set NET_REG_COMPLETE";
+    } else {
         const std::string why = mpiCoordinatedSkipReason(
             !MPIHelpers::anyRankTrue(netRegistered),
             "NET registration did not happen on any rank");
