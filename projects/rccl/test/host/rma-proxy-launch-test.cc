@@ -2324,19 +2324,33 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
   bool resumeObserved = false;
   std::mutex coordinationMutex;
   std::condition_variable coordinationCondition;
+  // Set under coordinationMutex: an unlocked store+notify can land after a waiter's predicate check.
+  auto publish = [&](std::atomic<bool>& flag) {
+    {
+      std::lock_guard<std::mutex> lock(coordinationMutex);
+      flag.store(true, std::memory_order_release);
+    }
+    coordinationCondition.notify_all();
+  };
+  // The proxy loop also reads reclaimFinished under state->mutex, so cycle that lock before notifying state->cond.
+  auto publishToProxy = [&](std::atomic<bool>& flag) {
+    publish(flag);
+    {
+      std::lock_guard<std::mutex> lock(state->mutex);
+    }
+    state->cond.notify_all();
+  };
 
   ScopedHook freeObserver(g_rmaProxyFreeObserver, [&](void* allocation) {
     if (allocation != reclaimed) return;
     if (!pauseAcknowledged.load(std::memory_order_acquire)) {
-      freedBeforePauseAcknowledgment.store(true, std::memory_order_release);
+      publish(freedBeforePauseAcknowledgment);
     }
-    coordinationCondition.notify_one();
   });
 
   std::thread proxy([&] {
     std::unique_lock<std::mutex> lock(state->mutex);
-    proxyReady.store(true, std::memory_order_release);
-    coordinationCondition.notify_one();
+    publish(proxyReady);
     while (state->rmaProgress != 2 &&
            !reclaimFinished.load(std::memory_order_acquire)) {
       if (state->cond.wait_for(lock, kCoordinationTimeout) ==
@@ -2351,8 +2365,7 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
     }
     if (state->rmaProgress != 2) return;
 
-    pauseObserved.store(true, std::memory_order_release);
-    coordinationCondition.notify_one();
+    publish(pauseObserved);
     {
       std::unique_lock<std::mutex> coordinationLock(coordinationMutex);
       acknowledgmentWaitTimedOut = !coordinationCondition.wait_for(
@@ -2384,11 +2397,9 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
     });
   }
   if (!proxyStarted) {
-    abortCoordination.store(true, std::memory_order_release);
-    reclaimFinished.store(true, std::memory_order_release);
-    allowPauseAcknowledgment.store(true, std::memory_order_release);
-    coordinationCondition.notify_one();
-    state->cond.notify_one();
+    publish(abortCoordination);
+    publish(allowPauseAcknowledgment);
+    publishToProxy(reclaimFinished);
     proxy.join();
     FAIL() << "proxy helper did not start before the coordination deadline";
   }
@@ -2398,7 +2409,7 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
     {
       std::unique_lock<std::mutex> lock(coordinationMutex);
       reclaimWorkerReady.store(true, std::memory_order_release);
-      coordinationCondition.notify_one();
+      coordinationCondition.notify_all();
       reclaimStartWaitTimedOut = !coordinationCondition.wait_for(
           lock, kCoordinationTimeout, [&] {
             return startReclaim.load(std::memory_order_acquire) ||
@@ -2407,14 +2418,11 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
     }
     if (reclaimStartWaitTimedOut ||
         abortCoordination.load(std::memory_order_acquire)) {
-      reclaimFinished.store(true, std::memory_order_release);
-      coordinationCondition.notify_one();
-      state->cond.notify_one();
+      publishToProxy(reclaimFinished);
       return;
     }
     result = ncclRmaProxyReclaimPlanUut(comm_.get(), targetPlan_.get());
-    reclaimFinished.store(true, std::memory_order_release);
-    coordinationCondition.notify_one();
+    publishToProxy(reclaimFinished);
   });
 
   bool reclaimWorkerStarted = false;
@@ -2426,11 +2434,10 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
         });
     startReclaim.store(true, std::memory_order_release);
   }
-  coordinationCondition.notify_one();
+  coordinationCondition.notify_all();
   if (!reclaimWorkerStarted) {
-    abortCoordination.store(true, std::memory_order_release);
-    allowPauseAcknowledgment.store(true, std::memory_order_release);
-    coordinationCondition.notify_all();
+    publish(abortCoordination);
+    publish(allowPauseAcknowledgment);
     state->cond.notify_one();
     reclaim.join();
     proxy.join();
@@ -2456,14 +2463,14 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
     }
     allowPauseAcknowledgment.store(true, std::memory_order_release);
   }
-  coordinationCondition.notify_one();
+  coordinationCondition.notify_all();
   if (!coordinationSettled) {
-    abortCoordination.store(true, std::memory_order_release);
+    publish(abortCoordination);
     {
       std::lock_guard<std::mutex> lock(state->mutex);
       state->rmaProgress = 0;
     }
-    state->cond.notify_one();
+    state->cond.notify_all();
   }
 
   reclaim.join();
