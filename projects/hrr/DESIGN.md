@@ -1161,6 +1161,9 @@ differ.
 Events are written to `events.bin` as they are captured (streaming, not buffered in memory).
 Blobs are written atomically via temp-file + rename on first occurrence; subsequent
 captures of the same content hash are skipped via an in-memory `g_written_blobs` set.
+A thread that meets a hash another thread is still writing waits for that write, so the
+free-space reserve is charged once per blob. The waiting thread gets the hash only once
+the file is on disk.
 The only unbounded in-memory state is `g_written_blobs` (one string entry per unique blob)
 and the per-event `hrr_args_*` struct (freed after `fwrite`). There is no windowed or
 ring-buffer capture mode that would limit archive size to a fixed window of events.

@@ -41,6 +41,7 @@
 #include "utils/debug.hpp"     // LogPrintfError, LogPrintfWarning, LogPrintfInfo
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -264,6 +265,10 @@ static std::unordered_set<std::string> g_written_blobs;
 // Atomic because write_blob runs on many threads without a lock held.
 static std::atomic<bool> g_blob_prefix_claimed[256];
 #endif
+// Keys a thread is reserving space for or writing, also under g_blob_mu. Another
+// caller with the same bytes waits for the claim to end, so the reserve is
+// charged once per file, not once per caller.
+static std::unordered_set<std::string> g_blob_claims;
 
 // APIs recorded in this archive that replay cannot reproduce (note_unreplayable).
 // Listed in manifest.json so the gap is a property of the archive rather than
@@ -682,6 +687,7 @@ static bool resumed_file_is_ours(const fs::path& p) {
 static void index_existing_blobs_locked(const std::string& output_dir) {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   g_written_blobs.clear();
+  g_blob_claims.clear();  // as in the fresh-archive path of open()
 
   // error_code overloads throughout: a missing or unreadable directory only
   // means fewer blobs are known to exist, and a blob written twice is harmless.
@@ -1362,6 +1368,9 @@ bool open(const char* output_dir) {
     }
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.clear();
+    // A forked child drops the claims of the parent's writers here, not in
+    // atfork_child, which does only async-signal-safe work.
+    g_blob_claims.clear();
   }
 
   // The last step before the archive is published, on resume and on a fresh one.
@@ -1733,7 +1742,7 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
 // ---------------------------------------------------------------------------
 // Atomic file write: write to a temp file then rename into place.
 //
-// g_written_blobs ensures only one thread ever reaches here for a given path,
+// g_blob_claims ensures only one thread ever reaches here for a given path,
 // so there is no concurrent write to the same temp file. The rename makes the
 // blob visible to readers only when fully written: a process crash mid-write
 // leaves only the temp file, not a partial final blob.
@@ -1773,9 +1782,8 @@ static bool atomic_write_file(const std::string& path,
 }
 
 // Ends a write claimed in write_blob() or write_code_object(). A failed one is
-// unclaimed so a later call can retry, and marks the capture incomplete: the
-// caller, and any caller that found the key claimed meanwhile, already holds the
-// hash of a file that is not there.
+// unpublished so a later call can retry, and marks the capture incomplete: the
+// caller already holds the hash of a file that is not there.
 static void finish_claimed_write(const std::string& key, bool ok) {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   if (!ok) {
@@ -1803,6 +1811,40 @@ class ClaimedWrite {
   bool ok_ = false;
 };
 
+// Claim `key` for reserving and writing, waiting while another thread holds it.
+// False when the key is written, before the call or by the thread it waited for.
+// Polls rather than waiting on a condition variable: one with waiters at fork()
+// cannot be used safely in the child, and callers racing on the same bytes are
+// rare. Waits holding no lock, so flush() can still take g_blob_mu meanwhile.
+static bool claim_blob(const std::string& key) {
+  std::unique_lock<std::mutex> lk(g_blob_mu);
+  while (g_blob_claims.count(key) != 0) {
+    lk.unlock();
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
+    lk.lock();
+  }
+  if (g_written_blobs.count(key) != 0) return false;
+  g_blob_claims.insert(key);
+  return true;
+}
+
+// Holds a claim from claim_blob() to the end of the writer, whichever way it
+// returns. A caller that waited then finds the key written, or claims it itself
+// when this one gave up or its write failed.
+class BlobClaim {
+ public:
+  explicit BlobClaim(const std::string& key) : key_(key) {}
+  ~BlobClaim() {
+    std::lock_guard<std::mutex> lk(g_blob_mu);
+    g_blob_claims.erase(key_);
+  }
+  BlobClaim(const BlobClaim&) = delete;
+  BlobClaim& operator=(const BlobClaim&) = delete;
+
+ private:
+  const std::string& key_;
+};
+
 // ---------------------------------------------------------------------------
 // write_blob
 // ---------------------------------------------------------------------------
@@ -1820,13 +1862,11 @@ Hash128 write_blob(const void* data, size_t len) {
   hash_hex(h, hex);
   std::string key(hex);  // no prefix — plain blobs
 
-  {
-    std::lock_guard<std::mutex> lk(g_blob_mu);
-    if (g_written_blobs.count(key) != 0) return h;  // already written
-  }
-  // Publish the key only after the space is reserved: a caller that finds it returns
-  // the hash at once, so the blob must not be abandoned after that. The space is
-  // reserved before the claim, so flush() never waits on a claim that takes g_file_mu.
+  // A caller with the same bytes waits here until this one is done, so the space
+  // is reserved once. The write counts in flight only once the space is reserved,
+  // so flush() never waits on a claim that takes g_file_mu.
+  if (!claim_blob(key)) return h;  // already written
+  const BlobClaim blob_claim(key);
   if (!reserve_space(len)) return {};
   const SpaceReservation reservation{len};
   {
@@ -1834,7 +1874,7 @@ Hash128 write_blob(const void* data, size_t len) {
     // The check at entry ran before hashing and reserving; flush() sets the flag
     // under this lock.
     if (g_events_finalized) return {};
-    if (!g_written_blobs.insert(key).second) return h;  // written meanwhile
+    g_written_blobs.insert(key);  // the claim keeps other callers out
     g_blob_count.fetch_add(1, std::memory_order_relaxed);
     ++g_blob_writes_in_flight;
   }
@@ -1887,17 +1927,15 @@ Hash128 write_code_object(const void* image, size_t image_size) {
   hash_hex(h, hex);
   std::string key = std::string("co:") + hex;  // namespace to match playback load_code_object key
 
-  {
-    std::lock_guard<std::mutex> lk(g_blob_mu);
-    if (g_written_blobs.count(key) != 0) return h;  // already written
-  }
-  // As in write_blob(), the key is published only after the space is reserved.
+  // As in write_blob(), the key is claimed before the space is reserved.
+  if (!claim_blob(key)) return h;  // already written
+  const BlobClaim blob_claim(key);
   if (!reserve_space(image_size)) return {};
   const SpaceReservation reservation{image_size};
   {
     std::lock_guard<std::mutex> lk(g_blob_mu);
     if (g_events_finalized) return {};  // as in write_blob()
-    if (!g_written_blobs.insert(key).second) return h;  // written meanwhile
+    g_written_blobs.insert(key);  // the claim keeps other callers out
     g_blob_count.fetch_add(1, std::memory_order_relaxed);
     ++g_blob_writes_in_flight;
   }
