@@ -1759,9 +1759,11 @@ Enable/disable support for multiple outstanding NCCL calls from parallel CUDA gr
 
 The ability to disable support is motivated by observed hangs in the CUDA launches when support is enabled and multiple ranks have work launched via cudaGraphLaunch from the same thread.
 
+When set, this variable overrides the communicator's ``graphUsageMode`` (see :ref:`ncclconfig`): ``1`` sets it to ``2`` and ``0`` sets it to ``0``.
+
 Value accepted
 ^^^^^^^^^^^^^^
-0 or 1. Default is 1 (enabled).
+0 or 1. Unset by default, in which case the communicator's ``graphUsageMode`` applies. In RCCL that defaults to ``0``, so graph mixing support is **disabled** by default (upstream NCCL enables it).
 
 .. _NCCL_GRAPH_STREAM_ORDERING:
 
