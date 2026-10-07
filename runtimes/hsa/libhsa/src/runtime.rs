@@ -280,10 +280,10 @@ fn system_event_worker(device: &Device, stop: &AtomicBool) {
         match poll_memory_fault(gpu_device) {
             Ok(Some(fault)) => {
                 let notification = {
-                    let Ok(guard) = lock() else {
+                    let Ok(mut guard) = lock() else {
                         return;
                     };
-                    let Some(runtime) = guard.as_ref() else {
+                    let Some(runtime) = guard.as_mut() else {
                         return;
                     };
                     let Some(index) = runtime.gpus.iter().position(|gpu| {
@@ -291,15 +291,40 @@ fn system_event_worker(device: &Device, stop: &AtomicBool) {
                     }) else {
                         return;
                     };
-                    (
-                        memory_fault_event(
-                            HsaAgent {
-                                handle: GPU_AGENT_BASE + index as u64,
-                            },
-                            fault,
-                        ),
-                        runtime.system_event_handlers.clone(),
-                    )
+                    let agent = HsaAgent {
+                        handle: GPU_AGENT_BASE + index as u64,
+                    };
+                    let event = memory_fault_event(agent, fault);
+                    let reason = event.payload[2] as u32;
+                    runtime.vm_fault_details = Some((agent, fault.virtual_address, reason));
+                    // KFD reports the process fault and the queue error on
+                    // different workers. Let the queue worker identify the
+                    // faulted queue before delivering the system callback.
+                    let Ok((mut guard, _)) = VM_FAULT_CONDVAR.wait_timeout_while(
+                        guard,
+                        Duration::from_millis(50),
+                        |registry| {
+                            registry.as_ref().is_some_and(|runtime| {
+                                runtime.queues.values().any(|queue| queue.agent == agent)
+                                    && !runtime
+                                        .queues
+                                        .values()
+                                        .any(|queue| queue.agent == agent && queue.vm_faulted)
+                            })
+                        },
+                    ) else {
+                        return;
+                    };
+                    let Some(runtime) = guard.as_mut() else {
+                        return;
+                    };
+                    for queue in runtime.queues.values_mut() {
+                        if queue.agent == agent && queue.vm_faulted {
+                            queue.vm_fault_address = fault.virtual_address;
+                            queue.vm_fault_reason = reason;
+                        }
+                    }
+                    (event, runtime.system_event_handlers.clone())
                 };
                 let handled = notify_system_event(&notification.1, &notification.0, Some(stop));
                 if stop.load(Ordering::Acquire) {
@@ -547,6 +572,7 @@ pub(crate) struct Runtime {
     pub(crate) host_name: Box<str>,
     pub(crate) host_compute_units: u32,
     pub(crate) full_profile: bool,
+    pub(crate) vm_fault_details: Option<(HsaAgent, u64, u32)>,
     pub(crate) system_event_handlers: Vec<(SystemEventHandler, CallbackArg)>,
     pub(crate) system_event_worker_started: bool,
     pub(crate) async_dispatcher: Option<AsyncDispatcher>,
@@ -777,6 +803,7 @@ impl Runtime {
             host_name: host.name.into_boxed_str(),
             host_compute_units: host.compute_units,
             full_profile,
+            vm_fault_details: None,
             system_event_handlers: Vec::new(),
             system_event_worker_started: false,
             async_dispatcher: None,
@@ -1169,6 +1196,7 @@ impl Drop for LifecycleTransition {
 }
 
 pub(crate) static RUNTIME: Mutex<RuntimeRegistry> = Mutex::new(RuntimeRegistry::new());
+pub(crate) static VM_FAULT_CONDVAR: Condvar = Condvar::new();
 
 pub(crate) fn lock() -> Result<MutexGuard<'static, RuntimeRegistry>, Status> {
     RUNTIME.lock().map_err(|_| ERROR)

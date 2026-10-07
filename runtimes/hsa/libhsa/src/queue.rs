@@ -32,7 +32,7 @@ use rocddi::topology::GpuInfo;
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
-use crate::runtime::{CallbackScope, boundary, initialized_mut, lock, map_error};
+use crate::runtime::{CallbackScope, VM_FAULT_CONDVAR, boundary, initialized_mut, lock, map_error};
 use crate::signal::{AmdSignal, AsyncCopyClock};
 
 const WRITE_INDEX_OFFSET: usize = 56;
@@ -166,12 +166,15 @@ pub(crate) struct Queue {
     // A failed control update may have published the candidate address.
     // Retain it through native destruction even if a later update succeeds.
     uncertain_scratch: Vec<Allocation>,
-    agent: HsaAgent,
+    pub(crate) agent: HsaAgent,
     hardware_id: u32,
     counted_pool_key: Option<(u64, u32)>,
     cu_mask: Vec<u32>,
     callback: QueueErrorCallback,
     callback_data: CallbackArg,
+    pub(crate) vm_faulted: bool,
+    pub(crate) vm_fault_address: u64,
+    pub(crate) vm_fault_reason: u32,
     teardown_started: bool,
 }
 
@@ -521,6 +524,31 @@ fn pending_callback(
     })
 }
 
+fn pending_error_callback(
+    runtime: &mut crate::runtime::Runtime,
+    key: usize,
+    status: Status,
+) -> Option<PendingCallback> {
+    if status == MEMORY_FAULT {
+        // Publish the affected queue so a running system event worker can
+        // attach the process fault's address and reason.
+        let details = runtime.vm_fault_details;
+        let queue = runtime.queues.get_mut(&key)?;
+        queue.vm_faulted = true;
+        if let Some((_, address, reason)) = details.filter(|(agent, _, _)| *agent == queue.agent) {
+            queue.vm_fault_address = address;
+            queue.vm_fault_reason = reason;
+        }
+        if runtime.system_event_worker_started {
+            VM_FAULT_CONDVAR.notify_all();
+            return None;
+        }
+        // Without a system event handler, the queue callback is the only
+        // fault notification available to the application.
+    }
+    pending_callback(runtime, key, status)
+}
+
 /// Publishes a new owner only after the control update completes. The
 /// candidate is retained before the control update, so failure or
 /// unwind cannot release backing that firmware may have observed.
@@ -545,7 +573,7 @@ fn handle_queue_event(
     let error = observed as u64;
     if error & 0x401 == 0 {
         return Some(QueueEventOutcome {
-            callback: pending_callback(runtime, key, queue_error_status(error)),
+            callback: pending_error_callback(runtime, key, queue_error_status(error)),
             rearm: false,
         });
     }
@@ -617,7 +645,7 @@ fn queue_event_worker(
             if !runtime.queues.contains_key(&key) {
                 return;
             }
-            let callback = pending_callback(runtime, key, queue_error_status(error as u64));
+            let callback = pending_error_callback(runtime, key, queue_error_status(error as u64));
             signal.release_error();
             callback
         } else {
@@ -863,6 +891,9 @@ unsafe fn create_hardware_queue(
             cu_mask: saved_cu_mask,
             callback,
             callback_data: data,
+            vm_faulted: false,
+            vm_fault_address: 0,
+            vm_fault_reason: 0,
             teardown_started: false,
         },
     );
@@ -1788,6 +1819,10 @@ pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
     boundary(|| {
+        #[allow(
+            clippy::large_enum_variant,
+            reason = "queue teardown transfers owners on the stack without allocating"
+        )]
         enum RemovedQueue {
             Aql(Queue),
             Sdma(SdmaQueue),
@@ -2247,6 +2282,11 @@ pub unsafe extern "C" fn hsa_amd_queue_get_info(
                 | AMD_QUEUE_INFO_PREFETCH_BARRIER_MINOR => value.cast::<u8>().write(u8::MAX),
                 AMD_QUEUE_INFO_PREFETCH_RING_BUFFER => value.cast::<u64>().write(0),
                 AMD_QUEUE_INFO_PROPERTIES => value.cast::<[u8; 8]>().write([0; 8]),
+                AMD_QUEUE_INFO_VM_FAULT_STATUS => value.cast::<bool>().write(record.vm_faulted),
+                AMD_QUEUE_INFO_VM_FAULT_ADDRESS => {
+                    value.cast::<u64>().write(record.vm_fault_address)
+                }
+                AMD_QUEUE_INFO_VM_FAULT_REASON => value.cast::<u32>().write(record.vm_fault_reason),
                 AMD_QUEUE_INFO_ENGINE_TYPE => value
                     .cast::<u32>()
                     .write(u32::from(AMD_QUEUE_ENGINE_COMPUTE)),
