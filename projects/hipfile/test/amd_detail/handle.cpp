@@ -846,4 +846,87 @@ TEST_F(HipFileHandle, OnXfsReturnsFalseForOtherFileSystem)
     EXPECT_FALSE(file->onXfs());
 }
 
+TEST_F(HipFileHandle, OnNfsRdmaReturnsTrueForNfsRdma)
+{
+    int client_fd{0xBADF00D};
+    int open_fd{eventfd(0, 0)};
+    ASSERT_NE(open_fd, -1);
+
+    MountInfo mountinfo{};
+    mountinfo.type        = FilesystemType::nfs;
+    mountinfo.options.nfs = {NfsProto::rdma};
+
+    ExpectUnregisteredFileBuilder(msys, mlibmounthelper)
+        .fd_flags(O_DIRECT)
+        .mountinfo(mountinfo)
+        .open_fd(open_fd)
+        .build();
+    auto file_handle{Context<DriverState>::get()->registerFile(client_fd)};
+    auto file{Context<DriverState>::get()->getFile(file_handle)};
+
+    EXPECT_TRUE(file->onNfsRdma());
+}
+
+TEST_F(HipFileHandle, OnNfsRdmaReturnsTrueForNfsRdma6)
+{
+    int client_fd{0xBADF00D};
+    int open_fd{eventfd(0, 0)};
+    ASSERT_NE(open_fd, -1);
+
+    MountInfo mountinfo{};
+    mountinfo.type        = FilesystemType::nfs;
+    mountinfo.options.nfs = {NfsProto::rdma6};
+
+    ExpectUnregisteredFileBuilder(msys, mlibmounthelper)
+        .fd_flags(O_DIRECT)
+        .mountinfo(mountinfo)
+        .open_fd(open_fd)
+        .build();
+    auto file_handle{Context<DriverState>::get()->registerFile(client_fd)};
+    auto file{Context<DriverState>::get()->getFile(file_handle)};
+
+    EXPECT_TRUE(file->onNfsRdma());
+}
+
+TEST_F(HipFileHandle, OnNfsRdmaReturnsFalseForNfsWithoutRdma)
+{
+    int client_fd{0xBADF00D};
+    int open_fd{eventfd(0, 0)};
+    ASSERT_NE(open_fd, -1);
+
+    MountInfo mountinfo{};
+    mountinfo.type        = FilesystemType::nfs;
+    mountinfo.options.nfs = {NfsProto::tcp};
+
+    ExpectUnregisteredFileBuilder(msys, mlibmounthelper)
+        .fd_flags(O_DIRECT)
+        .mountinfo(mountinfo)
+        .open_fd(open_fd)
+        .build();
+    auto file_handle{Context<DriverState>::get()->registerFile(client_fd)};
+    auto file{Context<DriverState>::get()->getFile(file_handle)};
+
+    EXPECT_FALSE(file->onNfsRdma());
+}
+
+TEST_F(HipFileHandle, OnNfsRdmaReturnsFalseForOtherFileSystem)
+{
+    int client_fd{0xBADF00D};
+    int open_fd{eventfd(0, 0)};
+    ASSERT_NE(open_fd, -1);
+
+    MountInfo mountinfo{};
+    mountinfo.type = FilesystemType::other;
+
+    ExpectUnregisteredFileBuilder(msys, mlibmounthelper)
+        .fd_flags(O_DIRECT)
+        .mountinfo(mountinfo)
+        .open_fd(open_fd)
+        .build();
+    auto file_handle{Context<DriverState>::get()->registerFile(client_fd)};
+    auto file{Context<DriverState>::get()->getFile(file_handle)};
+
+    EXPECT_FALSE(file->onNfsRdma());
+}
+
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
