@@ -149,7 +149,7 @@ const PlaceCapture& hrr_place_capture() {
   if (!pc.archive.empty()) return pc;
 
   std::string out;
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+  { hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_VaPlacement_Direct\"");
@@ -560,7 +560,7 @@ const ApisCapture& hrr_apis_capture() {
   if (!c.archive.empty()) return c;
 
   std::string out;
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+  { hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_VaPlacement_Apis_Direct\"");
@@ -650,7 +650,7 @@ enum class HintLog { Fixed, Unfixed, Unknown };
 
 HintLog hrr_hint_log() {
   static const HintLog verdict = [] {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
     proc.setEnv("AMD_LOG_LEVEL", "1");
     set_proc_search_path(proc);
     if (proc.run("\"Unit_HRR_VaPlacement_LogProbe_Direct\"") != 0) return HintLog::Unknown;
@@ -855,7 +855,7 @@ const LifeCapture& hrr_life_capture() {
   if (!c.archive.empty()) return c;
 
   std::string out;
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+  { hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_VaPlacement_Lifetimes_Direct\"");
@@ -1024,7 +1024,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_MultiGpu) {
 
   ScopedDir cap(fs::temp_directory_path() / "hrr_va_placement_multigpu.hrr");
   std::string cout_;
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+  { hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_VaPlacement_MultiGpu_Direct\"");
