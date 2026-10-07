@@ -17,7 +17,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Changed
 
-* Stream priority is now disabled by default to avoid known queue-priority-related issues.
+* Stream priority is now disabled by default to avoid known queue-priority-related issues. Priority streams are currently not supported.
 
 ## HIP 10.1.0 for ROCm 10.1.0
 
