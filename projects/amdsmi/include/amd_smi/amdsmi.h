@@ -1323,9 +1323,17 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  */
 typedef struct {
-  char driver_version[AMDSMI_MAX_STRING_LENGTH];
-  char driver_date[AMDSMI_MAX_STRING_LENGTH];
-  char driver_name[AMDSMI_MAX_STRING_LENGTH];
+  char driver_version[AMDSMI_MAX_STRING_LENGTH];         //!< Driver version, such as
+                                                         //!< 6.19.14.31400000
+  char driver_date[AMDSMI_MAX_STRING_LENGTH];            //!< Driver release date
+  char driver_name[AMDSMI_MAX_STRING_LENGTH];            //!< Driver name
+  char driver_kernel_version[AMDSMI_MAX_STRING_LENGTH];  //!< amdgpu kernel source version,
+                                                         //!< such as 6.19.14
+  char amdgpu_driver_version[AMDSMI_MAX_STRING_LENGTH];  //!< amdgpu module version, such
+                                                         //!< as 31400000
+  char driver_build_version[AMDSMI_MAX_STRING_LENGTH];   //!< DKMS build, such as 2370381
+  char driver_full_version[AMDSMI_MAX_STRING_LENGTH];    //!< Full version, such
+                                                         //!< as 6.19.14.31400000-2370381
 } amdsmi_driver_info_t;
 
 /**
@@ -7528,6 +7536,14 @@ amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle proce
  *
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
  *  @platform{guest_windows}
+ *
+ *  @details On Linux, driver_version is /sys/module/amdgpu/version, such as
+ *           6.19.14.31400000, or N/A. driver_kernel_version (6.19.14) and
+ *           amdgpu_driver_version (31400000) are its parts,
+ *           driver_build_version is the active DKMS build, and
+ *           driver_full_version is driver_version-build, or driver_version
+ *           when there is no build. The other fields are empty when
+ *           unavailable.
  *
  *  @param[in] processor_handle Device which to query
  *
