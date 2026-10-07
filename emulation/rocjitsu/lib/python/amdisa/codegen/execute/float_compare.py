@@ -9,6 +9,8 @@ MODE input flushing use shared/source_modifier.h and shared/input_denormal.h;
 comparison.h owns the relation and NaN ordering.
 """
 
+from amdisa.codegen.execute import input_policy
+from amdisa.codegen.execute.input_policy import FORMATS, NAME as POLICY
 from amdisa.semantics import FLOAT_COMPARE_RELATIONS, is_float_relation
 
 __all__ = ['is_float_relation']
@@ -36,24 +38,10 @@ RELATIONS: dict[str, str] = {
 
 assert RELATIONS.keys() == FLOAT_COMPARE_RELATIONS
 
-FORMATS: dict[str, str] = {'f16': 'F16', 'f32': 'F32', 'f64': 'F64'}
-
-# Name of the per-instruction policy the scalar bodies declare before the lane loop.
-POLICY = 'compare_policy'
-
 
 def lane_type(dtype: str) -> str:
     """Raw-encoding lane type: F16 occupies the low half of a 32-bit lane."""
     return 'uint64_t' if dtype == 'f64' else 'uint32_t'
-
-
-def policy_expr(dtype: str) -> str:
-    mode = 'f32' if dtype == 'f32' else 'f16_f64'
-    return f'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_{mode}())'
-
-
-def policy_decl(dtype: str, indent: str = '  ') -> str:
-    return f'{indent}const auto {POLICY} = {policy_expr(dtype)};'
 
 
 def evaluate_expr(
@@ -78,7 +66,7 @@ def evaluate_expr(
 
 def simd_functor(dtype: str, op: str, modifiers: tuple[str, str] | None = None) -> str:
     """Return a SIMD compare functor; the policy and modifiers are captured once."""
-    captures = [f'{POLICY} = {policy_expr(dtype)}']
+    captures = [f'{POLICY} = {input_policy.policy_expr(dtype)}']
     if modifiers is not None:
         captures += [f'abs_mods = {modifiers[0]}', f'neg_mods = {modifiers[1]}']
     call = evaluate_expr(

@@ -6552,7 +6552,7 @@ class CodeGenerator:
                 )
                 is_true16_vop3 = true16_vop3_info.enabled
                 if is_true16_vop3:
-                    lctx.vector_preamble.append(
+                    lctx.body_preamble.append(
                         '  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);'
                     )
                     vop3_opsel = 'opsel'

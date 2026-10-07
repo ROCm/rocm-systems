@@ -681,14 +681,17 @@ template <typename Fmt>
 inline output_modifier::Policy output_modifier_policy(const Wavefront &wf, uint32_t omod,
                                                       uint32_t clamp) {
   output_modifier::Policy policy;
+  static_assert(std::is_same_v<Fmt, fp_format::F16> || std::is_same_v<Fmt, fp_format::F32> ||
+                    std::is_same_v<Fmt, fp_format::F64>,
+                "output modifiers are defined for F16, F32 and F64 results");
   if constexpr (std::is_same_v<Fmt, fp_format::F32>) {
     policy.omod = effective_vop3_omod_f32(wf, omod);
     policy.round_mode = wf.fp_round_mode_f32();
+  } else if constexpr (std::is_same_v<Fmt, fp_format::F16>) {
+    policy.omod = effective_vop3_omod_f16(wf, omod);
+    policy.round_mode = wf.fp_round_mode_f16_f64();
   } else {
-    if constexpr (std::is_same_v<Fmt, fp_format::F16>)
-      policy.omod = effective_vop3_omod_f16(wf, omod);
-    else
-      policy.omod = effective_vop3_omod_f64(wf, omod);
+    policy.omod = effective_vop3_omod_f64(wf, omod);
     policy.round_mode = wf.fp_round_mode_f16_f64();
   }
   policy.clamp = clamp != 0;

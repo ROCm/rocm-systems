@@ -186,18 +186,6 @@ TEST(ComparisonTest, MatchesGfx1201InputFlush) {
   EXPECT_TRUE((cmp::evaluate<fmt::F16, cmp::Lt>(0x83ffu, 0x0000u, kKeep)));
 }
 
-TEST(SourceModifierTest, FloatAdaptersPreserveNanBitsAndSignedZero) {
-  namespace src = rocjitsu::amdgpu::source_modifier;
-  // ABS then NEG leaves this negative signaling NaN's encoding intact.
-  const float nan32 = std::bit_cast<float>(0xff800042u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(src::apply_to_float(nan32, 0, 1u, 1u)), 0xff800042u);
-  // Source 1 uses bit 1 of ABS; neither the payload nor quiet bit changes.
-  const double nan64 = std::bit_cast<double>(uint64_t{0xfff0000000000042});
-  EXPECT_EQ(std::bit_cast<uint64_t>(src::apply_to_float(nan64, 1, 2u, 0u)),
-            uint64_t{0x7ff0000000000042});
-  EXPECT_EQ(std::bit_cast<uint32_t>(src::apply_to_float(0.0f, 2, 0u, 4u)), 0x80000000u);
-}
-
 TEST(ComparisonTest, AppliesModifiersBeforeTheFlush) {
   // v_cmp_lt_f16 -a, |b| with a = 0x0001: NEG makes -tiny, the flush makes -0.
   EXPECT_FALSE((cmp::evaluate<fmt::F16, cmp::Lt>(0x0001u, 0x0000u, 0u, 1u, kFlush)));

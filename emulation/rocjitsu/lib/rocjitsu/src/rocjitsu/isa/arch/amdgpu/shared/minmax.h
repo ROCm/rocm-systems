@@ -31,7 +31,9 @@
 /// unsigned lanes, so selection preserves signs and NaN payloads.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/lane_select.h"
 
 #include <cstdint>
 #include <functional>
@@ -86,7 +88,7 @@ using MaxMinNum = Nested<MaxNum, MinNum>;
 
 namespace detail {
 
-using comparison::detail::choose;
+using lane::choose;
 
 /// @brief Recover the source encoding from comparison::total_order_key.
 template <typename Fmt, typename V> constexpr V from_total_order_key(V key) {

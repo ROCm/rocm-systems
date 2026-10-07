@@ -14,7 +14,12 @@ from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
-from amdisa.codegen.execute import float_compare, float_minmax, vop3_modifiers
+from amdisa.codegen.execute import (
+    float_compare,
+    float_minmax,
+    input_policy,
+    vop3_modifiers,
+)
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.sema_derive import FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
@@ -118,7 +123,9 @@ class LoweringContext:
     operand_map: OperandMap | None = None
     indent: int = 1
     declared: set[str] = field(default_factory=set)
-    vector_preamble: list[str] = field(default_factory=list)
+    # Per-instruction declarations, emitted once before the body (before the
+    # lane loop for vector blocks).
+    body_preamble: list[str] = field(default_factory=list)
     is_lhs: bool = False
     vcc_var: str = 'vcc'
     vcc_read: str | None = None
@@ -222,7 +229,7 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
         writes_vcc = _writes_vcc(block.body)
         wrapped = []
         wrapped.append('  uint64_t exec = wf.exec();')
-        wrapped.extend(ctx.vector_preamble)
+        wrapped.extend(ctx.body_preamble)
         if writes_vcc:
             vcc_init = _vcc_init_expr(ctx)
             wrapped.append(f'  uint64_t vcc = {vcc_init};')
@@ -246,7 +253,7 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
         return '\n'.join(wrapped)
 
     # Scalar blocks have no lane loop; per-instruction policies precede the body.
-    return '\n'.join([*ctx.vector_preamble, *body_lines])
+    return '\n'.join([*ctx.body_preamble, *body_lines])
 
 
 _VCC_WRITING_CALLS = frozenset(
@@ -1130,8 +1137,8 @@ def _lower_dst_write(
         # to those bits using GPU MODE, independently of the host rounding mode.
         dtype = f'f{selection_node.ty.size}'
         declaration = vop3_modifiers.output_policy_decl(dtype, output_fields)
-        if declaration not in ctx.vector_preamble:
-            ctx.vector_preamble.append(declaration)
+        if declaration not in ctx.body_preamble:
+            ctx.body_preamble.append(declaration)
         rounded = _lower_expr(selection_node, ctx)
         bits = f'std::bit_cast<uint{selection_node.ty.size}_t>({rounded})'
         rhs = vop3_modifiers.apply_output(dtype, bits)
@@ -2083,9 +2090,9 @@ def _raw_float_sources(
             raise ValueError(f'unexpected {node.call_name} source: {src}')
         # Register reads already have the unsigned type the C++ helper requires.
         reads.append(_lower_expr(src, ctx))
-    declaration = float_compare.policy_decl(dtype)
-    if declaration not in ctx.vector_preamble:
-        ctx.vector_preamble.append(declaration)
+    declaration = input_policy.policy_decl(dtype)
+    if declaration not in ctx.body_preamble:
+        ctx.body_preamble.append(declaration)
     modifiers = None
     if has_abs or has_neg:
         modifiers = ('inst_.abs' if has_abs else '0u', 'inst_.neg' if has_neg else '0u')
@@ -2144,8 +2151,8 @@ def _float_minmax_selection(
     output_policy = None
     if output_fields is not None:
         declaration = vop3_modifiers.output_policy_decl(dtype, output_fields)
-        if declaration not in ctx.vector_preamble:
-            ctx.vector_preamble.append(declaration)
+        if declaration not in ctx.body_preamble:
+            ctx.body_preamble.append(declaration)
         output_policy = vop3_modifiers.OUTPUT_POLICY
     return dtype, float_minmax.minmax_expr(
         dtype, form, reads, modifiers=modifiers, output_policy=output_policy

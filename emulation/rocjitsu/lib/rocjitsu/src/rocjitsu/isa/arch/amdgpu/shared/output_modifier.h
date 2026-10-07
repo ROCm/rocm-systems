@@ -23,7 +23,8 @@
 /// Scalar and SIMD callers use the same implementation on unsigned encodings.
 /// F16 occupies the low half of a 32-bit lane; F32 and F64 use 32 and 64 bits.
 
-#include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/lane_select.h"
 
 #include <cstdint>
 
@@ -45,7 +46,7 @@ struct Policy {
 
 namespace detail {
 
-using comparison::detail::choose;
+using lane::choose;
 
 /// @brief The encoding of 1.0: a biased exponent and zero fraction bits.
 template <typename Fmt>

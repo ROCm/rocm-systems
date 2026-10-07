@@ -4,14 +4,14 @@
 """Emit shared/minmax.h calls for IEEE 754-2019 min/max instructions.
 
 Scalar bodies and SIMD functors use the same helpers on raw encodings and share
-the input-flush policy with floating-point comparisons. VOP3 forms use
+the input-flush policy (input_policy.py) with floating-point comparisons. VOP3 forms use
 shared/floating_operation.h to apply ABS/NEG before the operation and
 OMOD/CLAMP afterward.
 """
 
 import re
 
-from amdisa.codegen.execute import float_compare
+from amdisa.codegen.execute import input_policy
 
 _NS = 'amdgpu::minmax'
 
@@ -33,11 +33,7 @@ FORMS: dict[str, tuple[str, int]] = {
 }
 
 # Source and result format seen by the helpers.
-FORMATS: dict[str, str] = {
-    'f16': 'F16',
-    'f32': 'F32',
-    'f64': 'F64',
-}
+FORMATS = input_policy.FORMATS
 
 _TEMPLATE = re.compile(
     r'v_(?P<form>\w+)_(?P<dtype>f16|f32|f64)_(?P<encoding>vop2|vop3)'
@@ -76,9 +72,9 @@ def minmax_expr(
 ) -> str:
     """Emit raw-bit selection, using the common wrapper when modifiers are present."""
     if modifiers is None and output_policy is None:
-        return _call(dtype, form, reads, float_compare.POLICY)
+        return _call(dtype, form, reads, input_policy.NAME)
     source_fields = ', '.join(modifiers or ('0u', '0u'))
-    operation = operation_expr(dtype, form, float_compare.POLICY)
+    operation = operation_expr(dtype, form, input_policy.NAME)
     args = [
         f'amdgpu::floating_operation::SourceModifiers{{{source_fields}}}',
         output_policy or 'amdgpu::output_modifier::Policy{}',
@@ -91,8 +87,8 @@ def minmax_expr(
 def simd_functor(dtype: str, form: str) -> str:
     """Emit VOP2 input flushing and selection on raw lanes."""
     params = ['a', 'b', 'c'][: FORMS[form][1]]
-    captures = [f'{float_compare.POLICY} = {float_compare.policy_expr(dtype)}']
-    call = _call(dtype, form, params, float_compare.POLICY)
+    captures = [f'{input_policy.NAME} = {input_policy.policy_expr(dtype)}']
+    call = _call(dtype, form, params, input_policy.NAME)
     args = ', '.join(f'auto {p}' for p in params)
     return f'[{", ".join(captures)}]({args}) {{ return {call}; }}'
 
@@ -128,5 +124,5 @@ def simd_probe(template_name: str, true16_vop3: bool = False) -> str | None:
         # Without true16 half selection, ternary F16 uses the same unsigned
         # 32-bit loads/stores as F32; the functor interprets the low 16 bits.
         macro = f'VOP3_{shape}_RAW_FP'
-    operation = operation_expr(dtype, form, float_compare.policy_expr(dtype))
+    operation = operation_expr(dtype, form, input_policy.policy_expr(dtype))
     return f'  ROCJITSU_TRY_SIMD_{macro}({_format(dtype)}, {operation});'
