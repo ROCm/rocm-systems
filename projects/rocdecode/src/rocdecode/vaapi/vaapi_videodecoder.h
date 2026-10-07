@@ -91,26 +91,34 @@ typedef enum {
 } ComputePartition;
 #endif
 
-#ifdef _WIN32
 /**
- * @brief Capabilities probed for a single VLD-capable VA profile.
+ * @brief Capabilities of a single VLD-capable VA profile.
  *
- * On Windows the probe VADisplay is terminated as soon as GetVaContext() has finished
- * enumerating profiles, so every later capability query is answered from this cached
- * record rather than from the VA driver. See VaContext::ProbeAllProfileCaps().
+ * Filled by DecodeSurfaceAttribs() from the VASurfaceAttrib list of a VLD config, so that
+ * both platforms share one VA_FOURCC_* -> rocDecVideoSurfaceFormat mapping. On Linux the
+ * record is transient, probed on demand by CheckDecCapForCodecType(). On Windows the probe
+ * VADisplay is terminated as soon as GetVaContext() has finished enumerating profiles, so
+ * the record is cached and every later capability query is answered from it rather than
+ * from the VA driver. See VaContext::ProbeAllProfileCaps().
  */
 typedef struct {
     uint32_t rt_format_attrib;
-    // VA_FOURCC_* values reported by VASurfaceAttribPixelFormat, as given by the driver.
-    std::vector<int> va_fourcc_list;
-    // rocDecVideoSurfaceFormat bitmask derived from va_fourcc_list.
+    // rocDecVideoSurfaceFormat bitmask derived from the VA_FOURCC_* values reported by
+    // VASurfaceAttribPixelFormat.
     uint32_t output_format_mask;
     uint32_t max_width;
     uint32_t max_height;
     uint32_t min_width;
     uint32_t min_height;
 } VaProfileCaps;
-#endif
+
+/**
+ * @brief Decodes the VASurfaceAttrib list of a VLD config into a VaProfileCaps record.
+ *
+ * Fields with no matching attribute in the list are left untouched, so pass a value-
+ * initialized record to get zeros for anything the driver does not report.
+ */
+void DecodeSurfaceAttribs(const VASurfaceAttrib *attr_list, unsigned int attr_count, VaProfileCaps &caps);
 
 typedef struct {
     int device_id;

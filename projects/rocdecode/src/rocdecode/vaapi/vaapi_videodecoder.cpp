@@ -1050,6 +1050,42 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
     }
 }
 
+void DecodeSurfaceAttribs(const VASurfaceAttrib *attr_list, unsigned int attr_count, VaProfileCaps &caps) {
+    for (unsigned int k = 0; k < attr_count; k++) {
+        switch (attr_list[k].type) {
+            case VASurfaceAttribPixelFormat: {
+                switch (attr_list[k].value.value.i) {
+                    case VA_FOURCC_NV12:
+                        caps.output_format_mask |= 1 << rocDecVideoSurfaceFormat_NV12;
+                        break;
+                    case VA_FOURCC_P016:
+                    case VA_FOURCC_P012:
+                    case VA_FOURCC_P010:
+                        caps.output_format_mask |= 1 << rocDecVideoSurfaceFormat_P016;
+                        break;
+                    default:
+                        break;
+                }
+                break;
+            }
+            case VASurfaceAttribMinWidth:
+                caps.min_width = attr_list[k].value.value.i;
+                break;
+            case VASurfaceAttribMinHeight:
+                caps.min_height = attr_list[k].value.value.i;
+                break;
+            case VASurfaceAttribMaxWidth:
+                caps.max_width = attr_list[k].value.value.i;
+                break;
+            case VASurfaceAttribMaxHeight:
+                caps.max_height = attr_list[k].value.value.i;
+                break;
+            default:
+                break;
+        }
+    }
+}
+
 #ifdef _WIN32
 rocDecStatus VaContext::GetAdapterLuid(int device_id, LUID *adapter_luid) {
     FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(device_id));
@@ -1073,6 +1109,7 @@ rocDecStatus VaContext::GetAdapterLuid(int device_id, LUID *adapter_luid) {
 void VaContext::ProbeAllProfileCaps(uint32_t va_ctx_idx) {
     auto& ctx = va_contexts_[va_ctx_idx];
     int max_entrypoints = vaMaxNumEntrypoints(ctx.va_display);
+    if (max_entrypoints <= 0) return;
     std::vector<VAEntrypoint> entrypoints(max_entrypoints);
 
     for (int i = 0; i < ctx.num_va_profiles; i++) {
@@ -1083,6 +1120,7 @@ void VaContext::ProbeAllProfileCaps(uint32_t va_ctx_idx) {
         int num_ep = 0;
         VAStatus st = vaQueryConfigEntrypoints(ctx.va_display, profile, entrypoints.data(), &num_ep);
         if (st != VA_STATUS_SUCCESS) continue;
+        if (num_ep > max_entrypoints) num_ep = max_entrypoints;
         bool has_vld = false;
         for (int e = 0; e < num_ep; e++) {
             if (entrypoints[e] == VAEntrypointVLD) { has_vld = true; break; }
@@ -1110,42 +1148,8 @@ void VaContext::ProbeAllProfileCaps(uint32_t va_ctx_idx) {
 
         VaProfileCaps caps = {};
         caps.rt_format_attrib = va_config_attrib.value;
-        for (unsigned int k = 0; k < attr_count; k++) {
-            switch (attr_list[k].type) {
-                case VASurfaceAttribPixelFormat: {
-                    int fourcc = attr_list[k].value.value.i;
-                    caps.va_fourcc_list.push_back(fourcc);
-                    switch (fourcc) {
-                        case VA_FOURCC_NV12:
-                            caps.output_format_mask |= 1 << rocDecVideoSurfaceFormat_NV12;
-                            break;
-                        case VA_FOURCC_P016:
-                        case VA_FOURCC_P012:
-                        case VA_FOURCC_P010:
-                            caps.output_format_mask |= 1 << rocDecVideoSurfaceFormat_P016;
-                            break;
-                        default:
-                            break;
-                    }
-                    break;
-                }
-                case VASurfaceAttribMinWidth:
-                    caps.min_width = attr_list[k].value.value.i;
-                    break;
-                case VASurfaceAttribMinHeight:
-                    caps.min_height = attr_list[k].value.value.i;
-                    break;
-                case VASurfaceAttribMaxWidth:
-                    caps.max_width = attr_list[k].value.value.i;
-                    break;
-                case VASurfaceAttribMaxHeight:
-                    caps.max_height = attr_list[k].value.value.i;
-                    break;
-                default:
-                    break;
-            }
-        }
-        ctx.profile_caps[profile] = std::move(caps);
+        DecodeSurfaceAttribs(attr_list.data(), attr_count, caps);
+        ctx.profile_caps[profile] = caps;
     }
 }
 #endif
@@ -1255,41 +1259,17 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
         CHECK_VAAPI(vaQuerySurfaceAttributes(va_contexts_[va_ctx_id].va_display, va_contexts_[va_ctx_id].va_config_id, 0, &attr_count));
         attr_list.resize(attr_count);
         CHECK_VAAPI(vaQuerySurfaceAttributes(va_contexts_[va_ctx_id].va_display, va_contexts_[va_ctx_id].va_config_id, attr_list.data(), &attr_count));
-        va_contexts_[va_ctx_id].output_format_mask = 0;
         CHECK_VAAPI(vaDestroyConfig(va_contexts_[va_ctx_id].va_display, va_contexts_[va_ctx_id].va_config_id));
-        for (unsigned int k = 0; k < attr_count; k++) {
-            switch (attr_list[k].type) {
-            case VASurfaceAttribPixelFormat: {
-                switch (attr_list[k].value.value.i) {
-                    case VA_FOURCC_NV12:
-                        va_contexts_[va_ctx_id].output_format_mask |= 1 << rocDecVideoSurfaceFormat_NV12;
-                        break;
-                    case VA_FOURCC_P016:
-                    case VA_FOURCC_P012:
-                    case VA_FOURCC_P010:
-                        va_contexts_[va_ctx_id].output_format_mask |= 1 << rocDecVideoSurfaceFormat_P016;
-                        break;
-                    default:
-                        break;
-                }
-            }
-                break;
-            case VASurfaceAttribMinWidth:
-                va_contexts_[va_ctx_id].min_width = attr_list[k].value.value.i;
-                break;
-            case VASurfaceAttribMinHeight:
-                va_contexts_[va_ctx_id].min_height = attr_list[k].value.value.i;
-                break;
-            case VASurfaceAttribMaxWidth:
-                va_contexts_[va_ctx_id].max_width = attr_list[k].value.value.i;
-                break;
-            case VASurfaceAttribMaxHeight:
-                va_contexts_[va_ctx_id].max_height = attr_list[k].value.value.i;
-                break;
-            default:
-                break;
-            }
-        }
+
+        // Start from a zeroed record so that an attribute the driver omits for this profile
+        // reports 0 rather than the value left behind by the previously probed profile.
+        VaProfileCaps caps = {};
+        DecodeSurfaceAttribs(attr_list.data(), attr_count, caps);
+        va_contexts_[va_ctx_id].output_format_mask = caps.output_format_mask;
+        va_contexts_[va_ctx_id].min_width = caps.min_width;
+        va_contexts_[va_ctx_id].min_height = caps.min_height;
+        va_contexts_[va_ctx_id].max_width = caps.max_width;
+        va_contexts_[va_ctx_id].max_height = caps.max_height;
         va_contexts_[va_ctx_id].config_attributes_probed = true;
     }
 #else
