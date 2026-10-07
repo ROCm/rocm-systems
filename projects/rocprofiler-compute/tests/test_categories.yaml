@@ -50,6 +50,7 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_conftest
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
@@ -83,6 +84,7 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_bench
@@ -139,6 +141,7 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
@@ -174,6 +177,7 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_extra_options
@@ -231,6 +235,7 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
@@ -266,6 +271,7 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_extra_options
@@ -323,6 +329,7 @@ test_categories:
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
+      - test_mem_chart_common
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
       - test_mem_chart_gfx1250
