@@ -636,4 +636,21 @@ TEST(SymmetricMemP2pLevelTests, P2pDisable_HonoredOnIntelHost)
         {{"NCCL_P2P_DISABLE", "1"}});
 }
 
+// Same host default and the same contract on Zhaoxin, the other x86 vendor with
+// a lowered default level.
+TEST(SymmetricMemP2pLevelTests, P2pDisable_HonoredOnZhaoxinHost)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "P2pDisable_HonoredOnZhaoxinHost",
+        []()
+        {
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p, NCCL_TOPO_CPU_VENDOR_ZHAOXIN);
+            EXPECT_EQ(p2p, 0) << "NCCL_P2P_DISABLE=1 must engage the distance gate on a Zhaoxin host";
+            EXPECT_EQ(cudaP2p, 1)
+                << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
+        },
+        {{"NCCL_P2P_DISABLE", "1"}});
+}
+
 }  // namespace RcclUnitTesting
