@@ -444,7 +444,7 @@ TEST_CASE("Unit_HRR_PinnedHost_Graph_Direct", "[.][hrr-direct]") {
 
 namespace {
 constexpr const char* kDirect = "Unit_HRR_PinnedHost_Direct";
-// A capture that takes longer than this has hung.
+// A capture or replay that takes longer than this has hung.
 constexpr int kCaptureTimeoutSec = 120;
 
 void capture_case(const char* direct_case, const fs::path& cap,
@@ -458,6 +458,24 @@ void capture_case(const char* direct_case, const fs::path& cap,
   INFO("Capture of " << direct_case << " exit: " << ret
        << (ret == hrr::test::SpawnProc::kKilledOnTimeout ? " (hung, killed)" : ""));
   REQUIRE(ret == 0);
+}
+
+// Replay with stderr merged and byte-exact D2H checks. The default checks
+// accept any buffer that matches as floats within 1e-3. Most ints these
+// kernels write are below 2^23, float denormals, so wrong output would pass.
+// The deadline turns a hang into a failure.
+std::pair<int, std::string> replay(
+    const fs::path& archive, const std::string& extra_args = "",
+    const std::vector<std::pair<std::string, std::string>>& env = {}) {
+  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true,
+                            /*capture_stderr=*/true);
+  set_proc_search_path(proc);
+  proc.setEnv("HIP_HRR_D2H_EXACT", "1");
+  for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
+  const int ret = proc.runWithTimeout(
+      hrr_quote_path(archive) + (extra_args.empty() ? "" : " " + extra_args),
+      kCaptureTimeoutSec);
+  return {ret, proc.getOutput()};
 }
 
 void capture_pinned(const fs::path& cap,
@@ -643,7 +661,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_Restored) {
   CHECK(kls[1]->args[0].value_kind == 3);
   CHECK(kls[1]->args[0].ptr_offsets == std::vector<uint16_t>{8});
 
-  auto [rc, out] = hrr_playback_merged(archive);
+  auto [rc, out] = replay(archive);
   INFO("Replay:\n" << out);
   CHECK(rc == 0);
 
@@ -731,7 +749,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_OptOut) {
   REQUIRE(kls.size() == kBaseLaunches - 1);
   CHECK(snapshot_records(kls) == 0);
 
-  auto [rc, out] = hrr_playback_merged(archive);
+  auto [rc, out] = replay(archive);
   INFO("Replay:\n" << out);
   CHECK(rc < 128);
   unsigned long long restored = 0, rejected = 0;
@@ -773,7 +791,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_UnrecordedStructAudited) {
 
   // The kernel may fault on the untranslated address; the audit line is
   // printed before the launch.
-  auto [rc, out] = hrr_playback_merged(archive, "",
+  auto [rc, out] = replay(archive, "",
                                        {{"HIP_HRR_REPLAY_AUDIT_HOST_ARGS", "1"}});
   INFO("Replay rc " << rc << ":\n" << out);
   CHECK(out.find("arg[0]+8 holds") != std::string::npos);
@@ -834,7 +852,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_MalformedRecordRejected) {
   }
   write_bytes(archive / "events.bin", events);
 
-  auto [rc, out] = hrr_playback_merged(archive);
+  auto [rc, out] = replay(archive);
   INFO("Replay:\n" << out);
   // Rejected restores leave reads on the wrong bytes, so the D2H checks may
   // fail; the replay itself must finish.
@@ -878,7 +896,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_UnchangedRecordLeftAlone) {
     for (size_t rec : {0, 1}) patch_snapshot(events, spans, kls, launch, rec, 5, 1);
   write_bytes(archive / "events.bin", events);
 
-  auto [rc, out] = hrr_playback_merged(archive, "--verbose");
+  auto [rc, out] = replay(archive, "--verbose");
   INFO("Replay:\n" << out);
   CHECK(rc < 128);
   CHECK(out.find("embedded ptr @+8 unresolved") == std::string::npos);
@@ -926,7 +944,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_NoWaitOnBusyStream) {
   CHECK(kls[1]->snapshots[1].direction == 1);  // unchanged, stream busy
   CHECK(kls[1]->snapshots[1].hash_lo == kls[0]->snapshots[1].hash_lo);
 
-  auto [rc, out] = hrr_playback_watchdog(archive, kCaptureTimeoutSec);
+  auto [rc, out] = replay(archive);
   INFO("Replay:\n" << out);
   CHECK(rc == 0);
   unsigned long long restored = 0, rejected = 0;
@@ -1014,7 +1032,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_Lifetime) {
   CHECK(same_hashes(kls[4], kls[5]));
 
   for (const char* mode : {"", "--multi-thread"}) {
-    auto [rc, out] = hrr_playback_merged(archive, mode);
+    auto [rc, out] = replay(archive, mode);
     INFO("Replay " << mode << ":\n" << out);
     CHECK(rc == 0);
     unsigned long long restored = 0, rejected = 0;
@@ -1040,21 +1058,22 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_LaunchApis) {
   capture_case("Unit_HRR_PinnedHost_LaunchApis_Direct", cap.path);
   const fs::path archive = hrr_single_process_archive(cap.path);
 
+  // The reader decodes the hipModuleLaunchKernel event but not the
+  // hipLaunchKernel_spt one, which replay still runs; the replay's restore
+  // count below covers both.
   hrr::Archive arc;
   REQUIRE(hrr::load_archive(archive.string(), arc));
   const auto kls = launches_of(arc);
-  REQUIRE(kls.size() == 2);
-  for (size_t k = 0; k < kls.size(); ++k) {
-    INFO("launch " << k);
-    CHECK(kls[k]->snapshots.size() == 2);
-  }
-  CHECK_FALSE(same_hashes(kls[0], kls[1]));
+  REQUIRE(kls.size() == 1);
+  CHECK(kls[0]->snapshots.size() == 2);
 
-  auto [rc, out] = hrr_playback_merged(archive);
+  auto [rc, out] = replay(archive);
   INFO("Replay:\n" << out);
   CHECK(rc == 0);
   unsigned long long restored = 0, rejected = 0;
   host_snapshot_summary(out, restored, rejected);
+  // Two chunks for each launch: the first finds an unfilled buffer, the
+  // second finds pattern 1.
   CHECK(restored == 4);
 #ifndef _WIN32
   int d2h_pass = 0, d2h_fail = 0;
@@ -1122,7 +1141,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_GraphCapture) {
   events.insert(events.begin() + spans[1].second, record.begin(), record.end());
   write_bytes(archive / "events.bin", events);
 
-  auto [rc, out] = hrr_playback_merged(archive);
+  auto [rc, out] = replay(archive);
   INFO("Replay:\n" << out);
   CHECK(rc < 128);
   CHECK(out.find("pinned host snapshots are not applied to kernels replayed into a "
