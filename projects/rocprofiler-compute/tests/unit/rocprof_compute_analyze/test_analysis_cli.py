@@ -78,6 +78,7 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
 
     assert len(membw_calls) == (1 if expect_called else 0)
 
+
 @pytest.mark.torch_ops
 def test_warn_ml_api_trace_errors_lists_all(monkeypatch):
     """Accumulated ML API errors are printed after the call tree."""
