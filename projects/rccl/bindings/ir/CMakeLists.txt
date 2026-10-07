@@ -71,6 +71,12 @@ message(STATUS "RCCL IR: llvm-dis  = ${LLVM_DIS_EXECUTABLE}")
 message(STATUS "RCCL IR: llvm-as   = ${LLVM_AS_EXECUTABLE}")
 message(STATUS "RCCL IR: target    = ${BITCODE_LIB_ARCH} (${BITCODE_CXX_STD})")
 
+##### Device API defines #####
+# Enable all ReduceCopy type and block-size combinations in generated IR.
+set(NCCL_DEVICE_DEFINES
+  -DNCCL_DEVICE_PERMIT_EXPERIMENTAL_CODE=1
+)
+
 ##### Include paths #####
 # Point at the hipify staging directory so this build sees exactly the
 # same headers librccl.so is compiled from. HIPIFY_DIR is defined in
@@ -94,6 +100,8 @@ set(ROCM_INCLUDES
 ##### Compiler flags #####
 # HIP device-only compilation. --offload-device-only is the modern,
 # target-agnostic spelling of NCCL's --cuda-device-only.
+# Clang supports extended device lambdas but does not define nvcc's feature
+# macro; the ReduceCopy device APIs require it.
 set(COMMON_CLANG_FLAGS
   -std=${BITCODE_CXX_STD}
   -x hip
@@ -103,6 +111,8 @@ set(COMMON_CLANG_FLAGS
   ${RCCL_INCLUDES}
   ${ROCM_INCLUDES}
   -D__clang_llvm_bitcode_lib__
+  -D__CUDACC_EXTENDED_LAMBDA__
+  ${NCCL_DEVICE_DEFINES}
   -D__HIP_PLATFORM_AMD__=1
 )
 
@@ -128,9 +138,10 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E make_directory ${OBJDIR}
   COMMAND ${CLANG_EXECUTABLE} ${CLANG_FLAGS} ${LLVM_SRC} -o ${UNOPTIMIZED_BC}
   # Track both the impl TU (clang's direct input) and the staged wrapper
-  # header it transitively includes. Without the WRAPPER_HEADER dep,
-  # editing nccl_device_wrapper.h would not retrigger this command.
-  DEPENDS ${LLVM_SRC} ${WRAPPER_HEADER}
+  # header it transitively includes (plus util.h's type lists). Without
+  # the WRAPPER_HEADER dep, editing nccl_device_wrapper.h would not
+  # retrigger this command.
+  DEPENDS ${LLVM_SRC} ${WRAPPER_HEADER} ${CMAKE_CURRENT_SOURCE_DIR}/util.h
   COMMENT "Generating unoptimized LLVM bitcode for ${BITCODE_LIB_ARCH}..."
   VERBATIM
 )
@@ -166,6 +177,20 @@ set(RCCL_DEVICE_BC_PUBLIC_API
     ncclBarrierSessionInit
     ncclBarrierSessionSync
 )
+# [D] ReduceCopy: one thunk per op and type, matching NCCL_IR_TYPES /
+# NCCL_IR_MULTIMEM_TYPES in util.h.
+set(RCCL_IR_ALL_TYPES      I8 U8 I32 U32 I64 U64 F16 F32 F64 BF16)
+set(RCCL_IR_MULTIMEM_TYPES I32 U32 I64 U64 F16 F32 F64 BF16)
+foreach(_op ncclLsaReduceSum ncclLsaCopy ncclLsaReduceSumCopy ncclLocalReduceSumCopy)
+  foreach(_ty ${RCCL_IR_ALL_TYPES})
+    list(APPEND RCCL_DEVICE_BC_PUBLIC_API ${_op}_${_ty})
+  endforeach()
+endforeach()
+foreach(_op ncclMultimemReduceSum ncclMultimemCopy ncclMultimemReduceSumCopy)
+  foreach(_ty ${RCCL_IR_MULTIMEM_TYPES})
+    list(APPEND RCCL_DEVICE_BC_PUBLIC_API ${_op}_${_ty})
+  endforeach()
+endforeach()
 string(REPLACE ";" "," RCCL_DEVICE_BC_PUBLIC_API_CSV "${RCCL_DEVICE_BC_PUBLIC_API}")
 
 add_custom_command(

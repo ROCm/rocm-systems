@@ -93,7 +93,7 @@ TEST_F(NicPerfettoPolicyTest, DefaultTracks_HaveExpectedLabelsAndUnits)
     for(const auto& [bit_value, description] : tracks)
     {
         SCOPED_TRACE(description.track_name);
-        auto it = expected.find(bit_value);
+        auto const it = expected.find(bit_value);
         ASSERT_NE(it, expected.end());
         EXPECT_EQ(std::string{ description.track_name }, it->second.first);
         EXPECT_EQ(std::string{ description.units }, it->second.second);
@@ -301,7 +301,7 @@ TEST_F(NicPerfettoPolicyTest, SetupTracks_AssignsDistinctIndices)
     EXPECT_EQ(counter_track::size(SETUP_DISTINCT_IDX_DEVICE), before + NIC_METRICS_COUNT);
 
     // Every stored index must address a real counter track.
-    for(auto idx : indices)
+    for(auto const idx : indices)
     {
         EXPECT_TRUE(counter_track::exists(SETUP_DISTINCT_IDX_DEVICE,
                                           static_cast<std::int64_t>(idx)));

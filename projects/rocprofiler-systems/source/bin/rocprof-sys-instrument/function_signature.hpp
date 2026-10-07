@@ -39,17 +39,17 @@ struct function_signature
     std::string        get(bool _all = false, bool _save = true) const;
     std::string        get_coverage(bool _is_basic_block) const;
 
-    bool                m_loop      = false;
-    bool                m_info_beg  = false;
-    bool                m_info_end  = false;
-    std::uint32_t       m_loop_num  = std::numeric_limits<std::uint32_t>::max();
-    location_t          m_row       = { 0, 0 };
-    location_t          m_col       = { 0, 0 };
-    std::string         m_return    = {};
-    std::string         m_name      = {};
-    std::string         m_params    = "()";
-    std::string         m_file      = {};
-    mutable std::string m_signature = {};
+    bool                m_loop     = false;
+    bool                m_info_beg = false;
+    bool                m_info_end = false;
+    std::uint32_t       m_loop_num = std::numeric_limits<std::uint32_t>::max();
+    location_t          m_row      = { 0, 0 };
+    location_t          m_col      = { 0, 0 };
+    std::string         m_return;
+    std::string         m_name;
+    std::string         m_params = "()";
+    std::string         m_file;
+    mutable std::string m_signature;
 
     friend bool operator==(const function_signature& lhs, const function_signature& rhs)
     {

@@ -95,6 +95,8 @@ set(SRC_FILES
   diagnostics/device/p2p.cu
   diagnostics/p2p.cc
   diagnostics/p2p.h
+  diagnostics/ib_write_bw.cc
+  diagnostics/ib_write_bw.h
   enqueue/enqueue.cc
   enqueue/mgmt_task_enq.cc
   enqueue/task_prep/task_classify.cc
@@ -117,6 +119,8 @@ set(SRC_FILES
   gin/proxy_gpucontext/gpucontext.h
   gin/proxy_gpucontext/gpucontext_v1.cc
   gin/proxy_gpucontext/gpucontext_v1.h
+  gin/proxy_gpucontext/gpucontext_v2.cc
+  gin/proxy_gpucontext/gpucontext_v2.h
   graph/connect.cc
   graph/rccl_graph_gen.cc
   graph/paths.cc
@@ -184,6 +188,7 @@ set(SRC_FILES
   include/config/collconfig.h
   include/core.h
   include/cpuset.h
+  include/crypt.h
   include/cudawrap.h
   algorithms/dda/all_gather/dda_all_gather.h
   algorithms/dda/all_reduce/dda_all_reduce.h
@@ -240,11 +245,13 @@ set(SRC_FILES
   include/latency_profiler/CollTraceFunc.h
   include/latency_profiler/CollTraceUtils.h
   include/latency_profiler/EventQueue.h
+  include/mc_arena.h
   include/mem_manager.h
   include/mlx5/mlx5dvcore.h
   include/mlx5/mlx5dvsymbols.h
   include/mlx5/mlx5dvwrap.h
   include/mnnvl.h
+  include/multicast.h
   include/nccl_common.h
   include/nccl_device.h
   include/nccl_device/barrier.h
@@ -270,6 +277,7 @@ set(SRC_FILES
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
   include/nccl_device/gin_barrier.h
+  include/nccl_device/host.h
   include/nccl_device/impl/barrier__funcs.h
   include/nccl_device/impl/barrier__types.h
   include/nccl_device/impl/cft__funcs.h
@@ -343,6 +351,7 @@ set(SRC_FILES
   include/nvtx3/nvtxDetail/nvtxTypes.h
   include/nvtx_payload_schemas.h
   include/nvtx_stub.h
+  include/nvls_ub.h
   include/os.h
   include/os/linux.h
   include/os/windows.h
@@ -391,12 +400,14 @@ set(SRC_FILES
   include/plugin/rma/rma_v13.h
   include/plugin/rma/rma_v14.h
   include/plugin/rma/rma_v15.h
+  include/plugin/rma/rma_v16.h
   include/plugin/tuner/tuner_v2.h
   include/plugin/tuner/tuner_v3.h
   include/plugin/tuner/tuner_v4.h
   include/plugin/tuner/tuner_v5.h
   include/plugin/tuner/tuner_v6.h
   include/profiler.h
+  include/progress_monitor.h
   include/proxy.h
   include/proxy_diag_counters.h
   include/ras.h
@@ -440,6 +451,7 @@ set(SRC_FILES
   misc/api_trace.cc
   misc/archinfo.cc
   misc/argcheck.cc
+  misc/crypt.cc
   misc/gdr_peermem.cc
   misc/gdr_probe.cc
   misc/ibvsymbols.cc
@@ -504,6 +516,7 @@ set(SRC_FILES
   plugin/rma/rma_v13.cc
   plugin/rma/rma_v14.cc
   plugin/rma/rma_v15.cc
+  plugin/rma/rma_v16.cc
   plugin/tuner.cc
   plugin/tuner/csv_tuner.cc
   plugin/tuner/tuner_v2.cc
@@ -522,7 +535,11 @@ set(SRC_FILES
   ras/diagnostics_checks_common.h
   ras/diagnostics_env.cc
   ras/diagnostics_gpu.cc
+  ras/diagnostics_paths.cc
+  ras/diagnostics_pci.cc
+  ras/diagnostics_xid.cc
   ras/peers.cc
+  ras/progress_monitor.cc
   ras/ras.cc
   ras/ras_internal.h
   ras/ras_param.cc
@@ -544,6 +561,8 @@ set(SRC_FILES
   transport.cc
   transport/coll_net.cc
   transport/generic.cc
+  transport/mc_arena.cc
+  transport/multicast.cc
   transport/net.cc
   transport/net_telemetry.cc
   transport/net_ib/common.cc
@@ -555,6 +574,7 @@ set(SRC_FILES
   transport/net_ib/gin.cc
   transport/net_ib/gin.h
   transport/net_ib/init.cc
+  transport/net_ib/net_ib_gid_inspect.cc
   transport/net_ib/p2p.cc
   transport/net_ib/p2p.h
   transport/net_ib/p2p_resiliency.cc
@@ -566,10 +586,19 @@ set(SRC_FILES
   transport/net_ib/wqe_lat_mon.h
   transport/net_ib_cast/net_ib_cast_inspect.h
   transport/net_ib_cast/net_ib_fault_inject.h
+  transport/net_ib_gid_inspect.h
   transport/net_ib_limits.h
   transport/net_socket.cc
+  transport/net_socket/common.cc
+  transport/net_socket/common.h
   transport/nvls.cc
+  transport/nvls_ub.cc
   transport/p2p.cc
+  transport/rma_socket.cc
+  transport/rma_socket.h
+  transport/rma_socket_mem.cc
+  transport/rma_socket_progress_recver.cc
+  transport/rma_socket_setup.cc
   transport/shm.cc
   tuning/ce_model.cc
   tuning/collnet.cc
@@ -579,6 +608,12 @@ set(SRC_FILES
   tuning/pat.cc
   tuning/ring.cc
   tuning/sym_model.cc
+  tuning/sym_model/gin.cc
+  tuning/sym_model/lsa.cc
+  tuning/sym_model/lsa_a2a.cc
+  tuning/sym_model/lsa_a2a.h
+  tuning/sym_model/lsa_base.cc
+  tuning/sym_model/model.h
   tuning/tree.cc
   tuning/tuning.cc
   tuning/tuning_general.cc
@@ -817,8 +852,10 @@ add_dependencies(hipify_all nccl_device_header_symlinks)
 # param/common.h vs device/common.h, net_ib/p2p.h vs p2p.h). add_file_unique() gives
 # the later-listed one the _tmp name, but consumers such as alloc.h still
 # #include "utils.h", so symlink the un-suffixed names back, same as above.
+# NCCL 2.32 added transport/net_socket/common.h (included by net_socket/common.cc and rma_socket.cc).
 set(COLLIDING_HEADER_SYMLINKS "")
-foreach(_hdr include/utils include/p2p include/param/common include/param/param ras/diagnostics)
+foreach(_hdr include/utils include/p2p include/param/common include/param/param ras/diagnostics
+        transport/net_socket/common)
   get_filename_component(_dir "${HIPIFY_DIR}/src/${_hdr}" DIRECTORY)
   get_filename_component(_name "${_hdr}" NAME)
   add_custom_command(
@@ -1365,28 +1402,63 @@ if(ENABLE_CODE_COVERAGE)
 
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
+  # Host-only and host+device coverage instrument with the same two flags and
+  # differ only in whether the instrumentation is restricted to host code.
+  # Device coverage (ROCm 7.15+) drops -Xarch_host so the flags also reach the
+  # device compilation; host-only keeps -Xarch_host so device code is untouched.
+  if(ENABLE_FULL_COVERAGE)
+    message(STATUS "Device-side coverage is enabled (host + device instrumented).")
+    set(_coverage_instr_flags
+      -fprofile-instr-generate
+      -fcoverage-mapping)
+  else()
+    set(_coverage_instr_flags
+      "SHELL:-Xarch_host -fprofile-instr-generate"
+      "SHELL:-Xarch_host -fcoverage-mapping")
+  endif()
   target_compile_options(rccl PRIVATE
     -fvisibility=default
-    "SHELL:-Xarch_host -fprofile-instr-generate"
-    "SHELL:-Xarch_host -fcoverage-mapping")
+    ${_coverage_instr_flags})
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate
     -Wl,--enable-new-dtags,--build-id=sha1,--rpath,$ORIGIN
   )
 
-  set(COVERAGE_EXE_LINKER_FLAGS
-    -fprofile-generate
-    -Wl,--enable-new-dtags,--build-id=sha1,--rpath,$ORIGIN/../lib
-  )
-
   target_link_options(rccl PRIVATE ${COVERAGE_SHARED_LINKER_FLAGS})
-  target_link_options(rccl PRIVATE ${COVERAGE_EXE_LINKER_FLAGS})
 
   # Expose explicit profile-flush wrappers so test harnesses that bypass
   # atexit() handlers (e.g. ProcessIsolatedTestRunner using _exit()) can
   # still flush librccl's private LLVM profile runtime instance.
   target_sources(rccl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/misc/coverage_flush.cc)
+
+  # Force-link the HIP device-data drain symbol so the host profile RT's
+  # InstrProfilingPlatformROCm.cpp.o gets pulled in (it's only included on
+  # demand). That .o registers the atexit hook which walks loaded HSA code
+  # objects, reads each device.elf's __llvm_prf_cnts via HSA introspection,
+  # and merges device counters into the same .profraw the host writes.
+  # Without this, .profraw contains host counters only and llvm-cov reports
+  # 0% on every device kernel.
+  #
+  # We add it on librccl's link rather than relying on the clang driver
+  # heuristic (the driver only force-links it for explicit `-x hip` link
+  # invocations; .o-only links from rccl-tests and friends don't qualify).
+  # One reference anywhere in the process is sufficient — once librccl is
+  # loaded, the atexit handler is registered for the whole process.
+  if(ENABLE_FULL_COVERAGE)
+    # Newer compiler-rt packages keep the ROCm collector and its interception
+    # dependencies in a self-contained companion archive. Explicitly link it
+    # for this object-only host link; older packages leave this path empty and
+    # continue to use the generic profile runtime.
+    if(RCCL_HOST_ROCM_PROFILE_RT)
+      message(STATUS "Host ROCm profile runtime: ${RCCL_HOST_ROCM_PROFILE_RT}")
+      target_link_libraries(rccl PRIVATE "${RCCL_HOST_ROCM_PROFILE_RT}")
+    else()
+      message(STATUS "Host ROCm profile runtime: none found, using the generic profile runtime")
+    endif()
+    target_link_options(rccl PRIVATE
+      "LINKER:-u,__llvm_profile_hip_collect_device_data")
+  endif()
 elseif(BUILD_TESTS) # Enable default/hidden visibility based on build type and ROCM_VERSION
   # MPI tests include internal headers (comm.h, ce_coll, mem_manager, transports)
   # and link those symbols. Debug already exports them; Release must too when
@@ -1469,6 +1541,26 @@ if(RCCL_ROCPROFILER_REGISTER)
   target_link_libraries(
       rccl PRIVATE rocprofiler-register::rocprofiler-register)
 endif()
+
+# Poison the __hip_atomic_* builtins
+#==================================================================================================
+# RCCL spells device atomics with the Clang scoped-atomic builtins so that memory
+# scope is explicit at every call site. Force-include (rather than #include) the
+# poison header so it also covers hipified and generated sources, and set it here,
+# before DeviceLinker.cmake snapshots COMPILE_OPTIONS, so the per-kernel device
+# compiles inherit it too. See src/include/poison_hip_atomics.h for the coverage
+# this does and does not give.
+if(RCCL_POISON_HIP_ATOMICS)
+  # Joined --include=<file> rather than separate-argument -include <file>: as a
+  # single token it needs no cooperation from anything that forwards flags one
+  # at a time, so it survives rccl-device-compile's catch-all for unrecognized
+  # `-*` tokens as-is. That script also parses the separate-argument spelling
+  # (see the -include/-imacros branch in parse_compiler_flags), so either form
+  # works today; the joined one is used because it does not depend on that.
+  target_compile_options(rccl PRIVATE --include=${RCCL_SOURCE_DIR}/src/include/poison_hip_atomics.h)
+  message(STATUS "RCCL_POISON_HIP_ATOMICS enabled - __hip_atomic_* builtins rejected in RCCL sources")
+endif()
+
 # Device Linker: include pipeline and wire up dependencies
 # (placed after all target_compile_definitions so DeviceLinker.cmake
 #  can read the rccl target's definitions directly)

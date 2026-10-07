@@ -29,6 +29,8 @@
 #include "strongstream.h"
 #include "mem_manager.h"
 
+#include <hip/hip_ext.h>
+
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
@@ -417,8 +419,10 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   // Step 3: Shuffle tempBuffer (local-rank-major) -> recvbuff (node-major).
   size_t totalAGBytes = (size_t)nNodes * localRanks * rankOffset;
   int numBlocks = hierarchicalShuffleNumBlocks(totalAGBytes);
-  hierarchicalShuffle<<<numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream>>>((const char*)tempBuffer, (char*)recvbuff,
-                                                                              rankOffset, nNodes, localRanks);
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  hipExtLaunchKernelGGL(hierarchicalShuffle, numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream, /*startEvent=*/nullptr,
+                        stopEvent, /*flags=*/0, (const char*)tempBuffer, (char*)recvbuff, rankOffset, nNodes,
+                        localRanks);
   CUDACHECK(hipGetLastError());
 
   return ncclSuccess;
@@ -472,24 +476,30 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     INFO(NCCL_COLL,
          "AllGather: taking DDA fabric LL path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
          comm->nRanks, comm->nNodes, sendcount, (int)datatype, msgSize);
-    NCCLCHECK(ncclAllGatherDdaFabricLL(sendbuff, recvbuff, sendcount, datatype, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllGatherDdaFabricLL(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+    });
   case RCCL_DDA_FABRIC_LL128:
     INFO(NCCL_COLL,
          "AllGather: taking DDA fabric LL128 path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
          comm->nRanks, comm->nNodes, sendcount, (int)datatype, msgSize);
-    NCCLCHECK(ncclAllGatherDdaFabricLL128(sendbuff, recvbuff, sendcount, datatype, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllGatherDdaFabricLL128(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+    });
   case RCCL_DDA_FABRIC_VMM:
     INFO(NCCL_COLL, "AllGather: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, sendcount, (int)datatype, sendcount * ncclTypeSize(datatype));
-    NCCLCHECK(ncclAllGatherDdaFabric(sendbuff, recvbuff, sendcount, datatype, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllGatherDdaFabric(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+    });
   case RCCL_DDA_IPC:
-    NCCLCHECK(ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, datatype, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+    });
   case RCCL_HIERARCHICAL_ALLGATHER:
-    return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+    });
   case RCCL_DIRECT_ALLGATHER:
     INFO(NCCL_TUNING,
          "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff "
@@ -563,17 +573,26 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     case RCCL_A2A_GIN_SDMA:
       INFO(NCCL_COLL, "AllToAll: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d bytes=%zu inPlace=%d",
            comm->nRanks, count, (int)datatype, count * ncclTypeSize(datatype), sendbuff == recvbuff ? 1 : 0);
-      NCCLCHECK(ncclAllToAllGinSdma(sendbuff, recvbuff, count, datatype, comm, stream));
-      return ncclSuccess;
+      return rcclAddonLaunch(comm, stream, [&] {
+        return ncclAllToAllGinSdma(sendbuff, recvbuff, count, datatype, comm, stream);
+      });
 #endif
     case RCCL_DDA_FABRIC_LL:
-      return ncclAllToAllDdaFabricLL(sendbuff, recvbuff, count, datatype, comm, stream);
+      return rcclAddonLaunch(comm, stream, [&] {
+        return ncclAllToAllDdaFabricLL(sendbuff, recvbuff, count, datatype, comm, stream);
+      });
     case RCCL_DDA_FABRIC_LL128:
-      return ncclAllToAllDdaFabricLL128(sendbuff, recvbuff, count, datatype, comm, stream);
+      return rcclAddonLaunch(comm, stream, [&] {
+        return ncclAllToAllDdaFabricLL128(sendbuff, recvbuff, count, datatype, comm, stream);
+      });
     case RCCL_DDA_FABRIC_VMM:
-      return ncclAllToAllDdaFabric(sendbuff, recvbuff, count, datatype, comm, stream);
+      return rcclAddonLaunch(comm, stream, [&] {
+        return ncclAllToAllDdaFabric(sendbuff, recvbuff, count, datatype, comm, stream);
+      });
     case RCCL_DDA_IPC:
-      return ncclAllToAllDdaIpc(sendbuff, recvbuff, count, datatype, comm, stream);
+      return rcclAddonLaunch(comm, stream, [&] {
+        return ncclAllToAllDdaIpc(sendbuff, recvbuff, count, datatype, comm, stream);
+      });
     case RCCL_CE_REGISTERED:
     case RCCL_CE_SCRATCH:
     case RCCL_DIRECT_ALLTOALL:
@@ -783,8 +802,9 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   case RCCL_GIN_SDMA:
     INFO(NCCL_COLL, "AllReduce: taking GIN SDMA path: nRanks=%d count=%zu bytes=%zu", comm->nRanks, count,
          count * ncclTypeSize(datatype));
-    NCCLCHECK(ncclAllReduceGinSdma(sendbuff, recvbuff, count, datatype, op, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllReduceGinSdma(sendbuff, recvbuff, count, datatype, op, comm, stream);
+    });
 #endif
   case RCCL_CE_2SHOT: {
     if (count == 0) return ncclSuccess;
@@ -802,28 +822,34 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     // No CollApi parent: this path returns before ncclEnqueueCheck, so the
     // thread-local handle still names a previous collective.
     NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, stream));
-    ncclResult_t ceRet = ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, nullptr, &ceArgs);
+    ncclResult_t ceRet = rcclAddonLaunch(comm, stream, [&] {
+      return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, nullptr, &ceArgs);
+    });
     ncclProfilerStopCeCollEvent(comm, &ceArgs, stream);
     return ceRet;
   }
   case RCCL_DDA_FABRIC_LL:
     INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-    NCCLCHECK(ncclAllReduceDdaFabricLL(sendbuff, recvbuff, count, datatype, op, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllReduceDdaFabricLL(sendbuff, recvbuff, count, datatype, op, comm, stream);
+    });
   case RCCL_DDA_FABRIC_LL128:
     INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-    NCCLCHECK(ncclAllReduceDdaFabricLL128(sendbuff, recvbuff, count, datatype, op, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllReduceDdaFabricLL128(sendbuff, recvbuff, count, datatype, op, comm, stream);
+    });
   case RCCL_DDA_FABRIC_VMM:
     INFO(NCCL_COLL, "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-    NCCLCHECK(ncclAllReduceDdaFabric(sendbuff, recvbuff, count, datatype, op, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllReduceDdaFabric(sendbuff, recvbuff, count, datatype, op, comm, stream);
+    });
   case RCCL_DDA_IPC:
-    NCCLCHECK(ncclAllReduceDdaIpc(sendbuff, recvbuff, count, datatype, op, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclAllReduceDdaIpc(sendbuff, recvbuff, count, datatype, op, comm, stream);
+    });
   default:
     // RCCL_SYMMETRIC / RCCL_CE_REGISTERED / native kernel algorithms all go
     // through the standard enqueue path; taskAppend() honors info->decision.
@@ -1191,25 +1217,31 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   case RCCL_DDA_FABRIC_LL:
     INFO(NCCL_COLL, "ReduceScatter: taking DDA fabric LL path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
-    NCCLCHECK(ncclReduceScatterDdaFabricLL(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclReduceScatterDdaFabricLL(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+    });
   case RCCL_DDA_FABRIC_LL128:
     INFO(NCCL_COLL,
          "ReduceScatter: taking DDA fabric LL128 path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
-    NCCLCHECK(ncclReduceScatterDdaFabricLL128(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclReduceScatterDdaFabricLL128(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+    });
   case RCCL_DDA_FABRIC_VMM:
     INFO(NCCL_COLL,
          "ReduceScatter: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
-    NCCLCHECK(ncclReduceScatterDdaFabric(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclReduceScatterDdaFabric(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+    });
   case RCCL_DDA_IPC:
-    NCCLCHECK(ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
-    return ncclSuccess;
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+    });
   case RCCL_HIERARCHICAL_REDUCESCATTER:
-    return ncclHierarchicalReduceScatter_Impl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclHierarchicalReduceScatter_Impl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+    });
   case RCCL_DIRECT_REDUCESCATTER:
     INFO(NCCL_TUNING,
          "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p "

@@ -15,6 +15,7 @@
 #include <vector>
 
 #if defined(_WIN32)
+#include <algorithm>
 #include <windows.h>
 #else
 #include <csignal>
@@ -64,6 +65,11 @@ class SpawnProc {
   void setEnv(const std::string& key, const std::string& value) {
     env_.push_back({key, value});
   }
+
+  // Remove a variable from the child's environment (after fork, before exec).
+  // Prefer this over setEnv(key, ""): CLR's flag parser turns an empty
+  // HIP_HRR_CAPTURE_OUTPUT into a single space, which still enables capture.
+  void unsetEnv(const std::string& key) { unset_env_.push_back(key); }
 
   // Exit code reported when the deadline fired and the child had to be killed.
   // 128 + SIGKILL matches the encoding run() already uses for a signalled
@@ -140,6 +146,9 @@ class SpawnProc {
     if (pid == 0) {
       // Child: apply environment overrides (affects this process only), wire up
       // stdout capture if requested, then exec. On failure exit with 127.
+      for (const auto& key : unset_env_) {
+        ::unsetenv(key.c_str());
+      }
       for (const auto& kv : env_) {
         ::setenv(kv.first.c_str(), kv.second.c_str(), 1);
       }
@@ -314,6 +323,11 @@ class SpawnProc {
     auto ieq = [](const std::string& a, const std::string& b) {
       return a.size() == b.size() && _stricmp(a.c_str(), b.c_str()) == 0;
     };
+    for (const auto& key : unset_env_) {
+      vars.erase(std::remove_if(vars.begin(), vars.end(),
+                                [&](const auto& v) { return ieq(v.first, key); }),
+                 vars.end());
+    }
     for (const auto& kv : env_) {
       bool replaced = false;
       for (auto& v : vars) {
@@ -343,6 +357,7 @@ class SpawnProc {
   bool capture_stderr_ = false;
   std::string output_;
   std::vector<std::pair<std::string, std::string>> env_;
+  std::vector<std::string> unset_env_;
 };
 
 }  // namespace hrr::test

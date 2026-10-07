@@ -16,6 +16,7 @@
 #include "algorithms/dda/ipc/ipc_init.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdlib>
@@ -67,9 +68,10 @@ static ncclResult_t ncclReduceScatterDdaIpcLaunch(const void* sendbuff, void* re
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-  dda::common::ddaReduceScatterIpc<T, NRANKS, false><<<grid, block, 0, stream>>>(
-    d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff), comm->rank, comm->nRanks,
-    barrierHost);
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, NRANKS, false>), grid, block, 0, stream,
+                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                        recvcount, static_cast<const T*>(sendbuff), comm->rank, comm->nRanks, barrierHost);
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
