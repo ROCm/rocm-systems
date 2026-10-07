@@ -124,18 +124,21 @@ enter through this frontend's `platform/` adapter. Only a Linux adapter is
 implemented.
 
 Linear asynchronous copy and explicit copy-engine selection use rocddi's
-bounded SDMA submission path on GFX1201. The engine mask reports DRM DMA
+bounded SDMA submission path on GFX1201. `hsa_amd_agent_preload` prepares
+rocddi's idle default and advertised ring copy contexts unless the caller
+skips blit preloading. Clock conversion takes live correlated counter samples
+and needs no separate agent clock resource. The engine mask reports DRM DMA
 rings within the GPU's advertised SDMA engine count and the 16 public engine
-IDs; an explicit one-hot choice selects that ring. The preferred engine query
+IDs. An explicit one-hot choice selects that ring. The preferred engine query
 returns the lowest available ring. For a GPU pair, the source GPU owns the
-copy and both ranges must be accessible to it. The force-SDMA argument does
+copy, and both ranges must be accessible to it. The force-SDMA argument does
 not change this path because its native copies use SDMA. Pitched rectangular
-copy uses the same native path, submitting its rows through one queue. Linear
-and broadcast batch operations reuse one queue for their device and staged
-host entries in descriptor order. The frontend waits for dependency signals,
-retains signal storage and runtime-owned memory until native retirement, and
-decrements the completion signal once after a successful copy. Each batch
-operation may use its own completion signal or share one with other operations.
+copy submits its rows through one native queue. Linear and broadcast batch
+operations reuse one queue for their device and staged host entries in
+descriptor order. The frontend waits for dependency signals, retains signal
+storage and runtime-owned memory until native retirement, and decrements the
+completion signal after each successful copy. Each batch operation may use
+its own completion signal or share one with other operations.
 Each operation releases its memory borrow and decrements its signal when it
 retires. An asynchronous failure sets the completion signal negative.
 Uncertain native retirement retains the command buffer and all runtime-owned
