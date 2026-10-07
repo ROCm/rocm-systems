@@ -50,7 +50,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    1ULL*1024*1024,      // [8] AlltoAll
+    0,                   // [8] AlltoAll        -- not used
   },
   // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
   // Messages above this fall to Ring/CE (or sym kernel for R2).
@@ -785,7 +785,3 @@ const rcclArchThresholds* rcclGetArchThresholds(const char* gcn, rcclTuningParti
   if (IsArchMatch(gcn, "gfx942")) return &rcclArchThresholds_gfx942;
   return nullptr;
 }
-<<<<<<< HEAD
-
-=======
->>>>>>> ae4b0df0b03 (reformat threshold arrays so it is easier to match entry to collective, change CE reg max from 0 to unlimited for AG/A2a on gfx950 and gfx942 to adjsut for gating CE change)
