@@ -28,7 +28,7 @@ class RocprofTUIApp(App):
 
     VERSION = get_version(config.rocprof_compute_home)["version"]
     TITLE = f"{APP_TITLE} v{VERSION}"
-    SUB_TITLE = "Workload Analysis Tool"
+    SUB_TITLE = "Workload Analysis Tool (DEPRECATED)"
 
     CSS_PATH = str(Path(__file__).parent / "assets" / "style.css")
     BINDINGS = [

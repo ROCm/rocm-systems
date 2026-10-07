@@ -103,6 +103,12 @@ enum ncclIbProvider {
   IB_PROVIDER_MAX = 2,
 };
 
+struct ncclIbGidInfo {
+  uint8_t link_layer;
+  union ibv_gid localGid;
+  int32_t localGidIndex;
+};
+
 extern int IbCastNDevs;
 struct alignas(64) ncclIbDev {
   std::mutex mutex;
@@ -127,6 +133,8 @@ struct alignas(64) ncclIbDev {
   struct ibv_port_attr portAttr;
   struct ncclIbStats stats;
   int dmaBufSupported;
+  int8_t udSupported;  // -1 not probed yet, 0 no, 1 yes
+  int8_t rdmaReadSupported;  // -1 not probed yet, 0 no, 1 yes
   int16_t railId;
   int16_t planeId;
   int16_t planeIdx;
@@ -136,6 +144,7 @@ struct alignas(64) ncclIbDev {
       int dataDirect;
     } mlx5;
   } capsProvider;
+  struct ncclIbGidInfo gidInfo;
 };
 
 #define MAX_IB_DEVS 32
@@ -238,13 +247,6 @@ struct ncclIbDevInfo {
   // remote dev info
   union ibv_gid remoteGid;
   int ibv_dev_index;
-};
-
-// Retain local RoCE address for error logging
-struct ncclIbGidInfo {
-  uint8_t link_layer;
-  union ibv_gid localGid;
-  int32_t localGidIndex;
 };
 
 #define MAX_QPS_PER_REQ 8
@@ -414,6 +416,12 @@ struct ncclIbNetCommDevBase {
   struct ncclIbGidInfo gidInfo;
 };
 
+// Snapshot the device-wide GID info into a comm's per-device base under a mutex.
+static inline void IbCastGidInfoSnapshot(struct ncclIbNetCommDevBase* base, struct ncclIbDev* ibDev) {
+  std::lock_guard<std::mutex> lock(ibDev->mutex);
+  base->gidInfo = ibDev->gidInfo;
+}
+
 struct alignas(64) ncclIbSendFifo {
   uint64_t addr;
   uint64_t size;
@@ -575,6 +583,7 @@ struct alignas(32) ncclIbNetCommBase {
   int nRemDevs;
   bool remOooRq;
   bool localOooRq;
+  bool optRecvCompletion;
   int recvMatchingScheme;
   int nDataQps;
   struct ncclIbDevInfo remDevs[NCCL_IB_MAX_DEVS_PER_NIC];
@@ -789,6 +798,7 @@ static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0,
               "ncclIbRecvComm ctsFifo must be 32-byte aligned");
 
 ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend);
+void IbCastInitOptRecvCompletion(struct ncclIbNetCommBase* baseComm, bool useCtsOffload);
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm);
 ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm);
 
@@ -831,6 +841,8 @@ void IbCastAddEvent(struct ncclIbRequest* req, int devIndex);
 void IbCastAddEventCTS(struct ncclIbRequest* req, int devIndex);
 ncclResult_t IbCastGetGidIndex(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
                                int* gidIndex);
+ncclResult_t IbCastGidInfoQuery(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                                struct ncclIbGidInfo* gidInfo);
 ncclResult_t IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req);
 ncclResult_t IbCastFreeRequest(struct ncclIbRequest* r);
 
