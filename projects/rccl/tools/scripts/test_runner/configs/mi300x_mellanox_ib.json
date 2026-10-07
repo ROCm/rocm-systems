@@ -3040,8 +3040,12 @@
         },
         {
           "name": "HostApi_DenseAllToAllPutSignal_8Ranks",
-          "description": "Dense all-to-all put/signal over the copy engine; with 8 ranks the uneven profile splits batches into chunks, which the 2-rank Host API suites never reach",
-          "test_filter": "HostApiTest.DenseAllToAllPutSignal"
+          "description": "Dense all-to-all put/signal over the copy engine on 8 ranks; the uneven profile can split batches into chunks, which the 2-rank Host API suites never reach",
+          "test_filter": "HostApiTest.DenseAllToAllPutSignal",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1",
+            "RCCL_CE_BATCH_ASYNC_ENABLE": "1"
+          }
         }
       ]
     },

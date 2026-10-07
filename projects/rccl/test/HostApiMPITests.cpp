@@ -21,11 +21,11 @@
  *   E2  - PutSignalNullWindow:     null peerWin  → error
  *   E3  - PutSignalOffsetOutOfBounds: offset past end → error (or skip)
  *   E4  - PutSignalInvalidSigIdx:  sigIdx=1      → error (or skip)
+ *   P7  - DenseAllToAllPutSignal: every rank puts to every peer in one group,
+ *                                 uniform and uneven sizes
  *   M1  - TwoCommunicatorsIndependentWindows: two comms, independent windows
  *   M2  - StressManySmallPuts:     100×64-byte PUTs, opCnt=100 wait
  *   P6  - PutToSelf:              PUT to own window (peer=self loopback)
- *   P7  - DenseAllToAllPutSignal: every rank puts to every peer in one group,
- *                                 uniform and uneven sizes
  *   W3  - DoubleDeregister:       ncclCommWindowDeregister twice on same handle
  *   W4  - DestroyCommWithoutDeregister: window auto-freed during commFree
  *   R1  - RmaDisableIntraNodePutUsesCe: NCCL_RMA_DISABLE=1 leaves LSA puts working
@@ -71,6 +71,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <chrono>
+#include <iterator>
 #include <vector>
 
 using namespace MPITestConstants;
@@ -1445,11 +1446,23 @@ constexpr size_t  kA2aUniformBytes = 4u << 20;
 // Around the default NCCL_CE_CHUNK_SIZE (8 MiB), none a multiple of it.
 constexpr size_t  kA2aUnevenBytes[] = {(3u << 20) + 4096, (9u << 20) + 12288, (12u << 20) + 262144};
 constexpr size_t  kA2aSlot          = 13u << 20;
-static_assert(kA2aUnevenBytes[2] + kA2aGuard <= kA2aSlot, "a slot must hold the largest put plus its guard");
+
+constexpr bool a2aPutFitsSlot(size_t bytes)
+{
+    return bytes % sizeof(uint64_t) == 0 && bytes + kA2aGuard <= kA2aSlot;
+}
+
+constexpr bool a2aAllPutsFitSlot()
+{
+    for(size_t bytes : kA2aUnevenBytes)
+        if(!a2aPutFitsSlot(bytes)) return false;
+    return a2aPutFitsSlot(kA2aUniformBytes);
+}
+static_assert(a2aAllPutsFitSlot(), "every put must be whole 64-bit words and fit its slot with the guard");
 
 size_t a2aPutBytes(bool uneven, int src, int dst, int k)
 {
-    return uneven ? kA2aUnevenBytes[(src + dst + k) % 3] : kA2aUniformBytes;
+    return uneven ? kA2aUnevenBytes[(src + dst + k) % std::size(kA2aUnevenBytes)] : kA2aUniformBytes;
 }
 
 // The first nRanks * kA2aPutsPerPeer slots hold what this rank sends, the rest what it receives.
@@ -1501,7 +1514,8 @@ bool a2aVerify(const void* buf, size_t bytes, int nRanks, int src, int dst, int 
 /**
  * @test HostApiTest.DenseAllToAllPutSignal
  * @brief Every rank puts twice to every other rank in one group, then waits for
- *        all of them (AICOMRCCL-1964).
+ *        all of them (AICOMRCCL-1964). P5 covers the ring-neighbour case; this
+ *        is the dense N-to-N one.
  *
  * Runs once with uniform sizes and once with uneven sizes around the copy-engine
  * chunk size; with 3+ ranks on one node the uneven profile is what makes the
@@ -1514,7 +1528,7 @@ bool a2aVerify(const void* buf, size_t bytes, int nRanks, int src, int dst, int 
  */
 TEST_F(HostApiTest, DenseAllToAllPutSignal)
 {
-    if(!validateTestPrerequisites(/*min=*/2, /*max=*/0, kNoPowerOfTwoRequired,
+    if(!validateTestPrerequisites(/*min=*/2, kNoProcessLimit, kNoPowerOfTwoRequired,
                                   /*min_nodes=*/1, kRequireSingleNode))
     {
         GTEST_SKIP() << "Need at least 2 MPI processes on a single node";
@@ -1546,6 +1560,7 @@ TEST_F(HostApiTest, DenseAllToAllPutSignal)
 
     for(bool uneven : {false, true})
     {
+        SCOPED_TRACE(uneven ? "uneven sizes" : "uniform sizes");
         FillSentinel(base, winSize, kA2aSentinel);
         for(int peer = 0; peer < nRanks_; ++peer)
         {
@@ -1578,11 +1593,16 @@ TEST_F(HostApiTest, DenseAllToAllPutSignal)
         bool ok = true;
         for(int src = 0; src < nRanks_ && ok; ++src)
         {
-            if(src == myRank) continue;
             for(int k = 0; k < kA2aPutsPerPeer && ok; ++k)
             {
-                const size_t   bytes = a2aPutBytes(uneven, src, myRank, k);
-                const uint8_t* slot  = base + a2aRecvOffset(nRanks_, src, k);
+                const uint8_t* slot = base + a2aRecvOffset(nRanks_, src, k);
+                if(src == myRank)
+                {
+                    // No put targets this rank's own receive slots.
+                    ok = AllSentinel(slot, kA2aSlot, kA2aSentinel);
+                    continue;
+                }
+                const size_t bytes = a2aPutBytes(uneven, src, myRank, k);
                 ok = a2aVerify(slot, bytes, nRanks_, src, myRank, k) &&
                      AllSentinel(slot + bytes, kA2aGuard, kA2aSentinel);
             }
