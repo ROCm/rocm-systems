@@ -482,11 +482,12 @@ static void index_existing_blobs_locked() {
 }
 
 #ifndef _WIN32
-// Both writer locks are held across fork(), in the usual order, so the child
+// The writer locks are held across fork(), in the usual order, so the child
 // never inherits one taken by a thread that does not exist in it.
 static void atfork_prepare() {
   g_file_mu.lock();
   g_blob_mu.lock();
+  g_unreplayable_mu.lock();
   g_buf_busy.test_and_set(std::memory_order_acquire);
   if (g_events_fd >= 0)
     flush_buffer_locked();
@@ -494,11 +495,18 @@ static void atfork_prepare() {
 }
 
 static void atfork_parent() {
+  g_unreplayable_mu.unlock();
   g_blob_mu.unlock();
   g_file_mu.unlock();
 }
 
 static void atfork_child() {
+  {
+    // Like incomplete below, the list belongs to an archive: an API only the
+    // parent recorded has no event in the child's.
+    std::lock_guard<std::mutex> lk(g_unreplayable_mu, std::adopt_lock);
+    g_unreplayable_apis.clear();
+  }
   {
     std::lock_guard<std::mutex> lk(g_blob_mu, std::adopt_lock);
     // The parent's blob writers are not in the child to finish their claims.
@@ -969,7 +977,12 @@ bool open(const char* output_dir) {
   // Fresh per-process archive. Incomplete belongs to the archive, as in
   // atfork_child: a failure recorded against one closed earlier in this
   // process must not cost this one its trailer. A resumed archive keeps it.
+  // So does the unreplayable list.
   g_capture_incomplete.store(false, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> lk(g_unreplayable_mu);
+    g_unreplayable_apis.clear();
+  }
   g_seq_id.store(0, std::memory_order_relaxed);
   g_event_count.store(0, std::memory_order_relaxed);
   g_blob_count.store(0, std::memory_order_relaxed);

@@ -311,6 +311,14 @@ void fork_late_hook() {
   if (getpid() != g_fork_parent) _exit(0);
 }
 
+// One more dependency than an event records, so the call is noted as unreplayable.
+constexpr size_t kTooManyDeps = 17;
+
+hipError_t add_node_with_too_many_deps(hipGraph_t graph, const hipGraphNode_t* deps) {
+  hipGraphNode_t node = nullptr;
+  return hipGraphAddEmptyNode(&node, graph, deps, kTooManyDeps);
+}
+
 TEST_CASE("Unit_HRR_Fork_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   INFO("rocprofiler-register did not pass the HIP table to " HRR_DISPATCH_TOOL);
@@ -320,12 +328,25 @@ TEST_CASE("Unit_HRR_Fork_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&dev, kBigBlob));
   HRR_HIP_CHECK(memcpy_with_failing_blob(dev));
 
+  // Unreplayable in the parent's archive only.
+  HRR_HIP_CHECK(hipLaunchHostFunc(nullptr, noop_host_fn, nullptr));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  // Truncated in both archives: the child makes the same call.
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t deps[kTooManyDeps] = {};
+  for (auto& dep : deps) HRR_HIP_CHECK(hipGraphAddEmptyNode(&dep, graph, nullptr, 0));
+  HRR_HIP_CHECK(add_node_with_too_many_deps(graph, deps));
+
   g_fork_parent = getpid();
   REQUIRE(tool_set_late_hook(fork_late_hook));
   fflush(stdout);
   fflush(stderr);
   const pid_t child = fork();
-  if (child == 0) std::exit(0);
+  if (child == 0) {
+    if (add_node_with_too_many_deps(graph, deps) != hipSuccess) _exit(3);
+    std::exit(0);
+  }
   REQUIRE(child > 0);
   printf(HRR_FORK_MARKER " %d\n", static_cast<int>(child));
   fflush(stdout);
@@ -349,6 +370,7 @@ TEST_CASE("Unit_HRR_Fork_Direct", "[.][hrr-direct]") {
   // fork() must hand the parent back both writer locks: this call takes them.
   unsigned char buf[64] = {0x3c};
   HRR_HIP_CHECK(hipMemcpy(dev, buf, sizeof(buf), hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipGraphDestroy(graph));
   HRR_HIP_CHECK(hipFree(dev));
 }
 
@@ -585,6 +607,46 @@ HRR_TEST_CASE(Unit_HRR_Fork_ChildArchiveCompleteAfterParentFailure) {
   REQUIRE(hrr::load_archive(child_dir.string(), child_ar));
   CHECK(child_ar.complete);
   CHECK(manifest_value(child_dir, "complete") == "true");
+}
+
+// Before, the child listed the parent's unreplayable APIs, and a truncation the
+// parent had already warned about was not listed for the child's own event.
+HRR_TEST_CASE(Unit_HRR_Fork_ChildListsOnlyItsOwnUnreplayableApis) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_fork_unreplayable.hrr");
+  const std::string out = capture_workload(cap.path, "Unit_HRR_Fork_Direct", true);
+  INFO("Workload output:\n" << out);
+
+  const size_t at = out.find(HRR_FORK_MARKER " ");
+  REQUIRE(at != std::string::npos);
+  int child = 0;
+  REQUIRE(sscanf(out.c_str() + at, HRR_FORK_MARKER " %d", &child) == 1);
+
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 2);
+  const fs::path child_dir = cap.path / ("pid-" + std::to_string(child));
+  const fs::path parent_dir = archives[0] == child_dir ? archives[1] : archives[0];
+
+  const std::string parent = read_text_file(parent_dir / "manifest.json");
+  {
+    INFO("parent manifest.json:\n" << parent);
+    REQUIRE(parent.find("\"hipLaunchHostFunc\"") != std::string::npos);
+    REQUIRE(parent.find("\"hipGraphAddEmptyNode\"") != std::string::npos);
+  }
+
+  hrr::Archive child_ar;
+  REQUIRE(hrr::load_archive(child_dir.string(), child_ar));
+  size_t host_funcs = 0, empty_nodes = 0;
+  for (const auto& ev : child_ar.events) {
+    if (ev.header().event_type == HRR_API_HIPLAUNCHHOSTFUNC) ++host_funcs;
+    if (ev.header().event_type == HRR_API_HIPGRAPHADDEMPTYNODE) ++empty_nodes;
+  }
+  REQUIRE(host_funcs == 0);
+  REQUIRE(empty_nodes == 1);
+
+  const std::string manifest = read_text_file(child_dir / "manifest.json");
+  INFO("child manifest.json:\n" << manifest);
+  CHECK(manifest.find("\"hipLaunchHostFunc\"") == std::string::npos);
+  CHECK(manifest.find("\"hipGraphAddEmptyNode\"") != std::string::npos);
 }
 
 #endif  // !_WIN32 && HRR_TEST_EXE && HRR_DISPATCH_TOOL
