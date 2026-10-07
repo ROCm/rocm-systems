@@ -86,14 +86,20 @@ on_rccl_configure()
 
     auto& metadata_registry = Externals::get_metadata_registry();
     metadata_registry.add_string(Externals::comm_data_name);
-    metadata_registry.add_track(typename Externals::track_t{
-        .track_name = std::string{ Externals::rccl_send_track_name },
-        .thread_id  = k_no_thread_id,
-        .extdata    = k_empty_json });
-    metadata_registry.add_track(typename Externals::track_t{
-        .track_name = std::string{ Externals::rccl_recv_track_name },
-        .thread_id  = k_no_thread_id,
-        .extdata    = k_empty_json });
+    metadata_registry.ensure_track(Externals::rccl_send_track_name, [&] {
+        return typename Externals::track_t{
+            .track_name = std::string{ Externals::rccl_send_track_name },
+            .thread_id  = k_no_thread_id,
+            .extdata    = k_empty_json
+        };
+    });
+    metadata_registry.ensure_track(Externals::rccl_recv_track_name, [&] {
+        return typename Externals::track_t{
+            .track_name = std::string{ Externals::rccl_recv_track_name },
+            .thread_id  = k_no_thread_id,
+            .extdata    = k_empty_json
+        };
+    });
 
     rccl::device_resolver<SdkBackend>::template configure_comm_cu_device_function<
         Externals>();

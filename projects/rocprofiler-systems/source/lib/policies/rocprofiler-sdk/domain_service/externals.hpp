@@ -198,9 +198,7 @@ concept externals =
                                                std::uint64_t{}, std::uint32_t{},
                                                std::uint32_t{}, std::string{} }
         };
-        {
-            typename Externals::track_t{ std::string{}, std::uint64_t{}, std::string{} }
-        };
+        { typename Externals::track_t{ std::string{}, std::uint64_t{}, std::string{} } };
         {
             typename Externals::kfd_sample_t{ std::uint64_t{},
                                               std::string{},
@@ -307,7 +305,8 @@ concept externals =
     // callbacks make through them.
     && requires(const char* text, std::string_view name, std::uint64_t value,
                 Externals::rocm_marker_api_category marker_category,
-                Externals::string_id_t              string_id) {
+                Externals::string_id_t              string_id,
+                const char*                         symbol_name) {
            { Externals::is_roctx_enabled() } -> std::convertible_to<bool>;
            { Externals::get_roctx_pause_resume_enabled() } -> std::convertible_to<bool>;
            {
@@ -324,6 +323,12 @@ concept externals =
            { Externals::lookup_string(string_id) } -> std::convertible_to<const char*>;
            { Externals::tracing_push_timemory(marker_category, name) };
            { Externals::tracing_pop_timemory(marker_category, name) };
+           {
+               Externals::get_buffer_storage()
+           } -> std::convertible_to<typename Externals::buffer_storage_t&>;
+           { Externals::dlsym(symbol_name) } -> std::convertible_to<void*>;
+           { Externals::dlerror() } -> std::convertible_to<const char*>;
+           { Externals::state_thread::scoped(Externals::state_thread::Internal) };
        };
 
 }  // namespace rocprofsys::policies::domain_service
