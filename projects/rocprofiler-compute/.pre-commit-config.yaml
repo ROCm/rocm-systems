@@ -93,6 +93,17 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+  # Local hook: memory chart layout formatting (layout checks run as unit tests)
+  - repo: local
+    hooks:
+      - id: memory-chart-layout-format
+        name: Memory chart layout formatting
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/memory_chart_layout_format.py'
+        language: system
+        files: ^projects/rocprofiler-compute/src/memory_chart/layouts/.*\.json$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # Local hook: YAML and metric equation formatting
   - repo: local
     hooks:
