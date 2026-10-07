@@ -8,17 +8,13 @@ SPU) has some perfmon bucket containing its full PMC set. The allocator
 minimizes the number of passes under that hard constraint. Counters not
 required by any packable union use ordinary first-fit. Remaining SPU PMCs
 are placed into existing buckets when possible, and new passes are opened
-only if needed. TCC series affinity keeps each LEVEL with its matching
-request series in the same pass and covers every selected series. An
-independent multi-column EA request row (panel 1805: read, write, and
-atomic, with no LEVEL) stays one packing group, so that pass may keep
-extra request copies whose LEVEL counters live in another pass.
+only if needed. Short-term TCC channel rules live in counter_grouping_tcc:
+affinity pairs, the multi-column request row, and which extra copies to keep.
 
 Overlapping packable sets that cannot share one bucket are handled by
 duplicating counters into an additional bucket (additive passes). That
 differs from the legacy heuristic, which places each counter in at most one
-bucket. Latency rows still use the pass that holds each LEVEL together with
-its request series.
+bucket.
 
 Disable with ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1 (or
 ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0) to restore the priority
@@ -48,19 +44,13 @@ from .counter_grouping_buckets import (
     iter_metric_groups,
     rebuild_counter_file,
 )
+from .counter_grouping_tcc import (
+    adjust_candidate_groups,
+    keep_copies_groups_still_need,
+)
 
 if TYPE_CHECKING:
     from .soc_base import OmniSoC_Base
-
-# LEVEL base -> matching REQ/ATOMIC denominator base (hard co-residence).
-_TCC_EA_LEVEL_TO_REQ: Dict[str, str] = {
-    "TCC_EA0_RDREQ_LEVEL": "TCC_EA0_RDREQ",
-    "TCC_EA0_WRREQ_LEVEL": "TCC_EA0_WRREQ",
-    "TCC_EA0_ATOMIC_LEVEL": "TCC_EA0_ATOMIC",
-}
-_TCC_EA_REQ_TO_LEVEL: Dict[str, str] = {
-    req: level for level, req in _TCC_EA_LEVEL_TO_REQ.items()
-}
 
 
 def try_allocate_single_pass_packable(
@@ -95,7 +85,7 @@ def try_allocate_single_pass_packable(
 
     files, file_count = _first_fit_unplaced(files, work_set, perfmon_config, file_count)
     files, merges = _reduce_passes(files, unions, perfmon_config)
-    files = _strip_orphan_tcc_ea_req_duplicates(files, perfmon_config, unions)
+    files = keep_copies_groups_still_need(files, perfmon_config, unions)
 
     packable_multi = _count_packable_multi(files, unions)
     if packable_multi > 0:
@@ -117,7 +107,7 @@ def try_allocate_single_pass_packable(
         slot_limit_metric_count=spu_metric_count,
         file_count_start=file_count,
     )
-    files = _strip_orphan_tcc_ea_req_duplicates(files, perfmon_config, unions)
+    files = keep_copies_groups_still_need(files, perfmon_config, unions)
     packable_multi = _count_packable_multi(files, unions)
     if packable_multi > 0:
         console_warning(
@@ -186,8 +176,7 @@ def collect_unique_packable_unions(
 ) -> Tuple[List[FrozenSet[str]], int]:
     """Unique PMC sets for metrics that fit one hardware bucket.
 
-    An independent multi-column EA request row (panel 1805) stays one
-    packing group so those columns share one pass.
+    Each set is adjusted by the short-term TCC rules before it is stored.
 
     Returns:
         Groups sorted largest-first, and the packable metric count.
@@ -199,16 +188,13 @@ def collect_unique_packable_unions(
         if not counters_fit_one_bucket(group, perfmon_config):
             continue
         packable_metric_count += 1
-        for subgroup in _split_independent_tcc_ea_req_union(group):
-            affinity_group = _expand_tcc_ea_affinity_partners(
-                subgroup, profile_counters
-            )
-            if not counters_fit_one_bucket(affinity_group, perfmon_config):
-                affinity_group = subgroup
-            if affinity_group in seen:
+        for candidate in adjust_candidate_groups(group, profile_counters):
+            if not counters_fit_one_bucket(candidate, perfmon_config):
+                candidate = group
+            if candidate in seen:
                 continue
-            seen.add(affinity_group)
-            unions.append(affinity_group)
+            seen.add(candidate)
+            unions.append(candidate)
     unions.sort(key=lambda g: (-len(g), sorted(g)))
     return unions, packable_metric_count
 
@@ -308,16 +294,9 @@ def fill_slot_limit_into_existing_passes(
     return files, file_count, stats
 
 
-def _tcc_channel_base(counter: str) -> str:
+def _channel_instance_base(counter: str) -> str:
+    """Base name of a counter that carries an instance suffix."""
     return counter.split("[")[0]
-
-
-def _bucket_tcc_channel_bases(bucket: CounterFile) -> Set[str]:
-    return {
-        _tcc_channel_base(ctr)
-        for ctr in flat_counters_in_perfmon_file(bucket)
-        if is_tcc_channel_counter(ctr)
-    }
 
 
 def _counters_in_any_bucket(files: List[CounterFile]) -> Set[str]:
@@ -333,36 +312,6 @@ def _next_bucket_number(files: List[CounterFile], floor: int) -> int:
     return max(floor, highest_next)
 
 
-def _split_independent_tcc_ea_req_union(
-    group: FrozenSet[str],
-) -> List[FrozenSet[str]]:
-    """Keep an independent multi-column EA request row as one packing group.
-
-    Two or more of RDREQ, WRREQ, and ATOMIC, with no LEVEL, stay one group
-    so those columns share one perfmon pass (panel 1805). A LEVEL and its
-    request series also stay in the group they arrived in.
-    """
-    return [group]
-
-
-def _expand_tcc_ea_affinity_partners(
-    group: FrozenSet[str],
-    profile_counters: Set[str],
-) -> FrozenSet[str]:
-    """Ensure LEVEL bases keep matching REQ/ATOMIC channels from the profile."""
-    bases = {_tcc_channel_base(ctr) for ctr in group if is_tcc_channel_counter(ctr)}
-    expanded = set(group)
-    for level_base, req_base in _TCC_EA_LEVEL_TO_REQ.items():
-        if level_base not in bases:
-            continue
-        for ctr in profile_counters:
-            if not is_tcc_channel_counter(ctr):
-                continue
-            if _tcc_channel_base(ctr) == req_base:
-                expanded.add(ctr)
-    return frozenset(expanded)
-
-
 def _largest_subset_fitting_bucket(
     bucket: CounterFile,
     remaining: Set[str],
@@ -373,7 +322,11 @@ def _largest_subset_fitting_bucket(
     current = bucket_counter_set(bucket)
     units: Dict[str, Set[str]] = {}
     for counter in remaining:
-        key = _tcc_channel_base(counter) if is_tcc_channel_counter(counter) else counter
+        key = (
+            _channel_instance_base(counter)
+            if is_tcc_channel_counter(counter)
+            else counter
+        )
         units.setdefault(key, set()).add(counter)
     for key in sorted(units):
         unit = units[key]
@@ -486,7 +439,7 @@ def _add_to_first_bucket_that_fits(
         if not bucket.add(counter):
             continue
         if is_tcc_channel_counter(counter):
-            tcc_map[_tcc_channel_base(counter)] = bucket
+            tcc_map[_channel_instance_base(counter)] = bucket
         return True
     return False
 
@@ -505,11 +458,11 @@ def _first_fit_unplaced(
     for bucket in files:
         for ctr in flat_counters_in_perfmon_file(bucket):
             if is_tcc_channel_counter(ctr):
-                tcc_map[_tcc_channel_base(ctr)] = bucket
+                tcc_map[_channel_instance_base(ctr)] = bucket
 
     for ctr in leftovers:
         if is_tcc_channel_counter(ctr):
-            existing = tcc_map.get(_tcc_channel_base(ctr))
+            existing = tcc_map.get(_channel_instance_base(ctr))
             if existing is not None and existing.add(ctr):
                 continue
 
@@ -526,7 +479,7 @@ def _first_fit_unplaced(
             continue
         files.append(bucket)
         if is_tcc_channel_counter(ctr):
-            tcc_map[_tcc_channel_base(ctr)] = bucket
+            tcc_map[_channel_instance_base(ctr)] = bucket
     return files, file_count
 
 
@@ -536,91 +489,6 @@ def _count_packable_multi(
 ) -> int:
     """Count packable unions with no bucket containing the full PMC set."""
     return sum(1 for group in unions if not _any_bucket_has_full_group(files, group))
-
-
-def _strip_orphan_tcc_ea_req_duplicates(
-    files: List[CounterFile],
-    perfmon_config: Dict[str, int],
-    required_unions: Optional[List[FrozenSet[str]]] = None,
-) -> List[CounterFile]:
-    """Drop an EA request series from a pass that lacks its LEVEL.
-
-    Leave the series in the pass that also holds the matching LEVEL. Keep
-    extra request copies when a multi-column request row needs them to stay
-    complete in one pass. Same-pass bind still selects the pass that holds
-    the whole expression, so a latency row does not read a copy that lacks
-    its LEVEL. Per-channel series only; sum aggregates are left alone.
-    """
-    if not files:
-        return files
-
-    home_bases: Set[str] = set()
-    for bucket in files:
-        bases = _bucket_tcc_channel_bases(bucket)
-        for req_base, level_base in _TCC_EA_REQ_TO_LEVEL.items():
-            if req_base in bases and level_base in bases:
-                home_bases.add(req_base)
-
-    if not home_bases:
-        return files
-
-    updated = list(files)
-    changed = False
-    for index, bucket in enumerate(files):
-        bases = _bucket_tcc_channel_bases(bucket)
-        drop_bases = {
-            req_base
-            for req_base in home_bases
-            if req_base in bases and _TCC_EA_REQ_TO_LEVEL[req_base] not in bases
-        }
-        if not drop_bases:
-            continue
-        kept = {
-            ctr
-            for ctr in flat_counters_in_perfmon_file(bucket)
-            if not (
-                is_tcc_channel_counter(ctr) and _tcc_channel_base(ctr) in drop_bases
-            )
-        }
-        rebuilt = rebuild_counter_file(bucket.name, perfmon_config, kept)
-        if rebuilt is None:
-            console_warning(
-                "profiling",
-                "single-pass-packable: orphan TCC EA REQ strip rebuild failed "
-                f"for bucket {bucket.name!r}; leaving bucket unchanged.",
-            )
-            continue
-        trial = list(updated)
-        if kept:
-            trial[index] = rebuilt
-        else:
-            trial.pop(index)
-        if required_unions and _count_packable_multi(trial, required_unions) > 0:
-            console_debug(
-                "profiling",
-                "single-pass-packable: kept EA request copies so a "
-                "multi-column request row stays complete in one pass.",
-            )
-            continue
-        updated = trial
-        changed = True
-        if not kept:
-            # Replacements keep updated aligned with files. A pop is followed
-            # immediately by recursion so subsequent indices cannot refer to
-            # the shortened list.
-            return _strip_orphan_tcc_ea_req_duplicates(
-                updated,
-                perfmon_config,
-                required_unions,
-            )
-
-    if changed:
-        console_debug(
-            "profiling",
-            "single-pass-packable: stripped orphan TCC EA REQ series from "
-            f"non-home passes ({sorted(home_bases)}).",
-        )
-    return updated
 
 
 def _try_merge_bucket_indices(
