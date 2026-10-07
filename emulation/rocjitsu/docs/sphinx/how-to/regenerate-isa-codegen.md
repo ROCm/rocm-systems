@@ -36,6 +36,13 @@ pulling updated MR ISA XML files.
 | Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen.py` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
 | Encoding decode/encode functions | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `encoding_translator_codegen.py` |
+| Matrix lane-conversion catalog (`matrix_conversions.h`) | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `codegen/dbt/rule_gen.py` |
+
+The matrix header is regenerated during DBT generation from the explicit
+`_MATRIX_CONVERSION_PAIRS` inventory in `rule_gen.py` and the lane-layout formulas
+in `layout_catalog.py`. This catalog describes layout permutations; adding an
+entry does not implement a new instruction translation or establish its ISA
+availability.
 
 Hand-written files (`isa.h`, `insts.h`, `mma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
