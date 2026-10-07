@@ -73,9 +73,9 @@ after its context has stopped still finds its session.
 
 ## 4. Start and stop
 
-**Start.** `pc_sampling::start_service()` is the last thing `context::start_context` does, after the
-start-in-progress marker has been released (section 4 of the queue callback registry removal page).
-It compare-exchanges the service's `enabled` flag from false to true and returns
+**Start.** `context::start_context` calls `pc_sampling::start_service()` after the queue-interposed
+services and before it releases the start-in-progress marker (section 4 of the queue callback
+registry removal page), so a concurrent stop waits until sampling has started. It compare-exchanges the service's `enabled` flag from false to true and returns
 `ROCPROFILER_STATUS_ERROR` if the flag was already set; `context::start_context` returns that
 status. If `is_hsa_initialized()` is set it starts sampling on each of the service's agent sessions;
 otherwise `post_hsa_init_start_active_service()` starts every enabled service at HSA initialization.
@@ -108,6 +108,14 @@ the gate only calls `find()`.
 and `pc_sampling.local_context_override_restart_does_not_toggle_enabled` pin that a kernel-replay
 local stop or start is recorded but leaves the service's `enabled` flag alone.
 
+`pc_sampling/tests/start_stop_race.cpp`: `pc_sampling.concurrent_start_stop_does_not_leave_sampling_enabled`
+starts and stops one PC sampling context from two threads, 20,000 times each. Every start must
+succeed and every stop must return success or `ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND`, and
+afterwards the context is inactive with `enabled` clear. A start that finds sampling still enabled on
+an inactive context, which is what a stop winning the window before sampling started used to leave
+behind, fails with `ROCPROFILER_STATUS_ERROR`. It needs an agent with PC sampling and logs "PC
+sampling unavailable" otherwise.
+
 ## 6. Known gaps
 
 1. **No test checks completion delivery through the configured path.** The unit tests cover only
@@ -115,21 +123,11 @@ local stop or start is recorded but leaves the service's `enabled` flag alone.
    (`projects/rocprofiler-sdk/tests/pc_sampling`) runs kernels with PC sampling configured on a real
    agent and traces correlation-id retirement, but it only prints the retired ids, so nothing
    asserts that the CID manager saw each completion.
-2. **Start after the marker.** `pc_sampling::start_service()` runs after the start-in-progress
-   marker is released, so a concurrent `rocprofiler_stop_context` can claim the context before PC
-   sampling has started. Its `stop_service()` call then finds `enabled` clear and returns
-   `ROCPROFILER_STATUS_ERROR`, which is ignored, and the start's own `start_service()` call then
-   enables sampling on a context that is no longer active. Sampling stays on:
-   `rocprofiler_stop_context` returns `ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND` for the inactive
-   context, and the next `rocprofiler_start_context` activates it but returns
-   `ROCPROFILER_STATUS_ERROR` because `enabled` is still set. Only a stop after that turns sampling
-   off. Device counter collection, which also starts after the marker is released, has the same
-   window.
-3. **Configured, not started, still intercepts.** Because the gate keys off configuration, and
+2. **Configured, not started, still intercepts.** Because the gate keys off configuration, and
    sessions are never removed from the global map, an agent with a configured session keeps paying
    the interception cost for the rest of the process, whether or not the service is started. That is
    narrower than before the migration, when the registered callback made every agent pay it.
-4. **Kernel replay passes cannot turn PC sampling off.** PC sampling does not read
+3. **Kernel replay passes cannot turn PC sampling off.** PC sampling does not read
    `kernel_replay::local_context_override()`, so it runs on every pass, including passes meant only
    for counter collection. The kernel-replay samples that use PC sampling are therefore disabled in
    ctest (`KR_PC_SAMPLING_PASS_PARTITION_UNSUPPORTED` in

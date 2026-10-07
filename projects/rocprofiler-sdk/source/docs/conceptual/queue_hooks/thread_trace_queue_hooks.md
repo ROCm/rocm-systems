@@ -1,7 +1,3 @@
----
-orphan: true
----
-
 # Thread Trace Queue Hooks
 
 Dispatch thread trace does not register with the per-queue callback registry
@@ -162,9 +158,9 @@ setting, as it does during a stop.
 
 The context stays in the in-progress set until those four services have started, so a concurrent
 stop, deactivate, deregister or start waits until the tracer has acquired serialization and set
-`enabled`. The context leaves the set before device counter collection starts
-(`counters::start_agent_ctx()`, which calls the tool's profile callback synchronously) and before
-PC sampling starts. No thread trace test drives a concurrent start and stop.
+`enabled`. PC sampling also starts before the context leaves the set; device counter collection
+starts after it (`counters::start_agent_ctx()`, which calls the tool's profile callback
+synchronously). No thread trace test drives a concurrent start and stop.
 `spm_core.concurrent_context_start_stop_does_not_pin_serialization` and
 `spm_core.concurrent_overlapping_context_starts_admit_exactly_one` in `spm/tests/core.cpp` exercise
 the same `context::start_context` path with SPM contexts.

@@ -7,11 +7,11 @@ sets, and why counter collection's `stop_context` drains the GPU.
 Paths are relative to `projects/rocprofiler-sdk/source/lib/rocprofiler-sdk/`. Symbols are named
 rather than cited by line number, since line numbers rot faster than the code they point at.
 
-Counter collection, SPM and PC sampling are called through explicit hooks. Thread trace still
-registers through `QueueController::add_callback`; it moves to hooks in #11967. This document
-describes the mechanism as a whole, using counter collection as the worked example. Section 2.1
-lists where the other services depart from it, and SPM and PC sampling each have a page beneath
-this one.
+Counter collection, SPM, thread trace and PC sampling are all called through explicit hooks, and
+nothing registers through `QueueController::add_callback` any more. This document describes the
+mechanism as a whole, using counter collection as the worked example. Section 2.1 lists where the
+other services depart from it, and SPM, thread trace and PC sampling each have a page beneath this
+one.
 
 ## 1. Diagram
 
@@ -106,9 +106,10 @@ For counter collection:
 
 The hook names describe the dispatch phase they run in: the enter hook runs when a dispatch is being
 submitted, the exit hook when its completion signal fires. The activity predicates are neither
-phase, so they keep plain names. SPM defines the same four functions in `spm/queue_hooks.{hpp,cpp}`;
-PC sampling defines only an exit hook and a configuration predicate in
-`pc_sampling/queue_hooks.{hpp,cpp}`. Section 2.1 lists the differences.
+phase, so they keep plain names. SPM and thread trace define the same four functions in
+`spm/queue_hooks.{hpp,cpp}` and `thread_trace/queue_hooks.{hpp,cpp}`; PC sampling defines only an
+exit hook and a configuration predicate in `pc_sampling/queue_hooks.{hpp,cpp}`. Section 2.1 lists
+the differences.
 
 `is_active_on_agent()` is the form the per-queue gate uses, and it exists because
 `kernel_dispatch_phase_enter_hook()` already skips contexts that do not collect on the dispatch's
@@ -120,33 +121,30 @@ is in use at all; only tests call it.
 `client_ids.hpp` replaces the registry's auto-incrementing `ClientID` with fixed producer tags, so
 the id attached to an instrumentation packet no longer depends on the order in which services
 register. The tags are negative, keeping them disjoint from the positive ClientIDs that the
-registry still hands out to thread trace. Counter collection and SPM tag every `inst_pkt` entry
-they add, and each of their exit hooks returns at once unless some entry carries its tag; which
-callback owns a packet is then decided by its address (section 3). PC sampling adds no `inst_pkt`
-entry, so no service tags a packet with `PC_SAMPLING_CLIENT_ID`; none tags one with
-`THREAD_TRACE_CLIENT_ID` until thread trace migrates. Any tag added here must remain negative and
-unique.
+registry hands out. Counter collection, SPM and thread trace tag every `inst_pkt` entry they add,
+and each of their exit hooks returns at once unless some entry carries its tag. Which context owns a
+packet is then decided by its address for counter collection and SPM (section 3), and by the tracer
+id stamped on the packet for thread trace. PC sampling adds no `inst_pkt` entry, so no service tags
+a packet with `PC_SAMPLING_CLIENT_ID`. Any tag added here must remain negative and unique.
 
 ### 2.1 How the other services differ
 
-The table compares the four services. The thread trace column describes the registry path that
-thread trace still uses.
+The table compares the four services.
 
 | | Counter collection | SPM | Thread trace | PC sampling |
 |---|---|---|---|---|
-| Hooks | enter and exit hooks, `is_any_active`, `is_active_on_agent` | same four | none; one registry entry for every queue (`add_callback(std::nullopt, ...)`), added at the first start and removed by `thread_trace::finalize()` | exit hook and `is_configured_on_agent` only; the marker packet is still added inline by the write interceptor |
-| Interceptor gate in `no_real_consumers` | an active context collects on the queue's agent | same | `get_notifiers()` is non-zero on every queue while the entry is registered | a session is configured on the queue's agent, started or not |
-| Packet batching | off on the agent while a context is active | same | off on every queue while the entry is registered | unaffected, as before |
-| Exit hook iterates | registered contexts | registered contexts | no hook; the registry's `signal_completion` loop calls the tracer's `post_kernel_call` | no contexts; looks up the agent's `PCSAgentSession` |
-| Completion finds its owner by | packet address in each callback's `packet_return_map` | same, in SPM's own `packet_return_map` | packet type (`TraceControlAQLPacket`), then the packet's agent | the agent's session, then the dispatch's correlation id |
+| Hooks | enter and exit hooks, `is_any_active`, `is_active_on_agent` | same four | same four | exit hook and `is_configured_on_agent` only; the marker packet is still added inline by the write interceptor |
+| Interceptor gate in `no_real_consumers` | an active context collects on the queue's agent | same | same | a session is configured on the queue's agent, started or not |
+| Packet batching | off on the agent while a context is active | same | same | unaffected, as before |
+| Exit hook iterates | registered contexts | registered contexts | registered contexts | no contexts; looks up the agent's `PCSAgentSession` |
+| Completion finds its owner by | packet address in each callback's `packet_return_map` | same, in SPM's own `packet_return_map` | the tracer id stamped on the packet, then the packet's agent in the tracer's agent map | the agent's session, then the dispatch's correlation id |
 | Drain in the service stop | `queue_controller_sync()`; a timeout is logged | `queue_controller_sync()`; result discarded | none | none; `stop_service` stops sampling and flushes |
-| Serialization reference | taken and dropped only on an `enabled` transition | taken on every start, dropped only on the `enabled` transition | unscoped; taken on every start, dropped on the `enabled` transition | none |
-| Start marker in `context::start_context` | yes | yes | yes | no; `start_service` runs after the marker is released |
-| Two contexts of this service | conflict at start if their agent sets intersect | same | no conflict rule | a second configuration on the same agent fails with `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`, as before |
+| Serialization reference | taken and dropped only on an `enabled` transition | taken on every start, dropped only on the `enabled` transition | same as SPM, for the context's configured agents | none |
+| Start marker in `context::start_context` | yes | yes | yes | yes; `start_service` runs before the marker is released |
+| Two contexts of this service | conflict at start if their agent sets intersect | same | same | a second configuration on the same agent fails with `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`, as before |
 
 The drain and serialization-reference rows are where SPM and thread trace are weaker than counter
-collection, and the start-marker row is where PC sampling is. The SPM and PC sampling pages list
-what that leaves open.
+collection. The SPM, thread trace and PC sampling pages list what that leaves open.
 
 ## 3. Enqueue and completion use different context sets
 
@@ -192,12 +190,14 @@ they wait on the GPU. Instead the context's id stays in the registry's stopping 
 counter collection and PC sampling are stopped after the slot is cleared.
 
 `context::start_context` uses the same set as a start-in-progress marker. It adds the context's id
-when it reserves a slot and removes it once dispatch counter collection, SPM and both thread trace
-services have started, so no stop, second start or agent-set change can run in between. The marker
-is released before device counter collection and PC sampling start, because
+when it reserves a slot and removes it once dispatch counter collection, SPM, both thread trace
+services and PC sampling have started, so no stop, second start or agent-set change can run in
+between. The marker is released before device counter collection starts, because
 `counters::start_agent_ctx()` calls the tool's profile callback synchronously and a tool that called
-back into the lifecycle API from there would wait on the marker forever. Section 6 lists what that
-leaves open.
+back into the lifecycle API from there would wait on the marker forever. PC sampling starts ahead
+of the release: `pc_sampling::start_service()` calls no tool callback, and PC sampling never shares
+a context with counter collection, so the two cannot observe their order. Section 6 lists what the
+release leaves open.
 
 **`counters::stop_context` drains the GPU before disabling serialization.** When it is the call that
 clears the service's `enabled` flag, it then runs `hsa::queue_controller_sync()`,
@@ -243,8 +243,8 @@ Kernel replay does not depend on callback removal. A replay pass turns a context
 without touching global context state: each service's per-dispatch handler folds
 `kernel_replay::local_context_override()` into its enabled check (`queue_cb` in
 `counters/dispatch_handlers.cpp`, `pre_kernel_call` in `spm/dispatch_handlers.cpp` and in
-`thread_trace/core.cpp`), which works the same whether the handler is reached through a hook or
-through the registry. PC sampling does not read the override.
+`thread_trace/core.cpp`), which worked the same when the handlers were reached through the registry.
+PC sampling does not read the override.
 
 The routing rule in section 3 applies to every pass. Replay reuses `process_packet_batch` for each
 pass, so every pass creates its own instrumentation packet and its own `packet_return_map` entry,
@@ -255,10 +255,10 @@ handler that never finishes ends the run instead of hanging it.
 
 ## 6. Known gaps
 
-1. Thread trace still registers through `QueueController::add_callback` until #11967 moves it to
-   hooks, so `Queue::_callbacks`, `Queue::get_notifiers()` and `add_callback` itself cannot be
-   deleted yet. Device counter collection never used the registry. Once thread trace has migrated,
-   nothing calls `add_callback` and the registry can be removed as a follow-up.
+1. Nothing calls `QueueController::add_callback` any more, so `add_callback`, `Queue::_callbacks`,
+   `Queue::get_notifiers()` and the three `signal_callback` loops in `hsa/queue.cpp` (enqueue,
+   batching and completion) only ever see an empty registry. They can be removed as a follow-up.
+   Device counter collection never used the registry.
 2. Each migrated service adds its own term to `no_real_consumers` and to the `should_batch_packets`
    override in `hsa/queue.cpp`, so every migration edits the same expressions. Consolidating the
    predicate into one `needs_interception(queue)` helper would stop them growing per service.
@@ -270,11 +270,12 @@ handler that never finishes ends the run instead of hanging it.
 4. `hsa::queue_controller_sync()` reports whether every queue drained, but only counter collection
    acts on the result. `spm::stop_context` discards it, so an SPM stop whose drain timed out
    releases serialization and returns with no warning beyond the one `Queue::sync()` logs.
-5. The start-side marker does not cover device counter collection or PC sampling (section 4). A
-   concurrent `rocprofiler_stop_context` can claim the context after the marker is released and run
-   its last-phase stops before those services have started. Both stops then do nothing:
-   `counters::stop_agent_ctx()` returns early, and `pc_sampling::stop_service()` returns
-   `ROCPROFILER_STATUS_ERROR`, which `context::stop_context` ignores. The start then enables the
-   service on a context that is no longer active. The next `rocprofiler_start_context` for that
-   context activates it again but returns `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED` for
-   device counter collection or `ROCPROFILER_STATUS_ERROR` for PC sampling.
+5. The start-side marker does not cover device counter collection (section 4). A concurrent
+   `rocprofiler_stop_context` can claim the context after the marker is released and run its
+   last-phase stops before device counter collection has started. That stop does nothing, because
+   `counters::stop_agent_ctx()` returns early, and the start then enables device counting on a
+   context that is no longer active. The next `rocprofiler_start_context` for that context
+   activates it again but returns `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`. PC sampling
+   had the same window until it moved under the marker;
+   `pc_sampling.concurrent_start_stop_does_not_leave_sampling_enabled` races its start against a
+   stop.

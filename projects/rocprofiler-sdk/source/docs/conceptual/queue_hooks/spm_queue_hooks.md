@@ -101,9 +101,10 @@ doubles as a start-in-progress marker. It then drops the mutex, publishes the co
 with a compare-exchange, and starts the services. `spm::start_context` calls
 `enable_serialization(agents)` and then sets `enabled`. Serialization is acquired first, so the
 first dispatch that sees `enabled` is already serialized. The acquire is unconditional (section 7).
-The marker is held until dispatch counter collection, SPM and both thread trace services have
-started, so a stop, another start, `deactivate_client_contexts`, `deregister_client_contexts` or
-`spm::set_dispatch_agents` that arrives in the meantime waits until those services have started.
+The marker is held until dispatch counter collection, SPM, both thread trace services and PC
+sampling have started, so a stop, another start, `deactivate_client_contexts`,
+`deregister_client_contexts` or `spm::set_dispatch_agents` that arrives in the meantime waits until
+those services have started.
 
 **Stop.** `context::stop_context` runs in four phases:
 
@@ -214,10 +215,12 @@ queue or session, and the hooks return before touching it.
 | `spm_core.disjoint_contexts_no_conflict` | a second context on the same agent gets `ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT`; contexts on two disjoint agents both start |
 | `spm_core.concurrent_context_start_stop_does_not_pin_serialization` | two threads each start and stop one context, restricted to one agent, 1000 times; every start succeeds, every stop returns success or `ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND`, and afterwards the agent is not serialized, no SPM context is active and `enabled` is clear |
 | `spm_core.concurrent_overlapping_context_starts_admit_exactly_one` | in each of 1000 iterations, two contexts restricted to the same agent are started from two threads; exactly one start succeeds and the other returns `ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT`, and once the winner is stopped the agent is not serialized and no SPM context is active |
+| `spm_core.set_agents_does_not_race_context_start` | one context holds agent 0 while a thread keeps moving a second context between agents 0 and 1 with `set_agents`, which returns success or `ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED`; each of 1000 starts of the second context succeeds or returns `ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT`, and a start that succeeds never collects on agent 0; afterwards no agent is serialized and no SPM context is active |
 
 `stop_context_in_flight_completion_routes_via_hook_path`, `set_agents_restricts_collection`,
-`disjoint_contexts_no_conflict` and the two concurrency tests log "SPM unavailable" when there is no
-SPM-capable agent, so ctest reports them as skipped. `disjoint_contexts_no_conflict` runs its
+`disjoint_contexts_no_conflict` and the first two concurrency tests log "SPM unavailable" when there
+is no SPM-capable agent, so ctest reports them as skipped; `set_agents_does_not_race_context_start`
+logs "SPM unavailable on two agents" with fewer than two. `disjoint_contexts_no_conflict` runs its
 disjoint half only with two SPM-capable agents. With one agent it passes on the same-agent half
 alone.
 
