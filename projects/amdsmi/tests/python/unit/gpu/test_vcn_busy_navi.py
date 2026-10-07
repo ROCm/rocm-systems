@@ -91,6 +91,9 @@ def _build_fake_amdsmi():
         "jpeg_activity": "N/A",
     }
     interface._NA_amdsmi_get_gpu_metrics_info = lambda: {}
+    # An unmapped version, so unsupported-field filtering suppresses nothing and
+    # these tests see the vcn_busy behavior alone.
+    interface.amdsmi_get_gpu_metrics_header_info = lambda _h: {}
     interface.amdsmi_get_gpu_partition_metrics_info = lambda _h: None
     interface.amdsmi_get_gpu_activity = lambda _h: {"gfx_activity": 30}
     interface.amdsmi_get_vcn_busy_percent = lambda _h: 42
@@ -108,7 +111,7 @@ def _build_fake_amdsmi():
 
 
 def _load_metric_module():
-    return load_cli_module("metric_under_test_vcn", METRIC_PATH)
+    return load_cli_module("metric_under_test_vcn", METRIC_PATH, sys_path_dir=_CLI_DIR)
 
 
 class _FakeLogger:

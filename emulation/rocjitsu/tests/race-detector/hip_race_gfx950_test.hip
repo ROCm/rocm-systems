@@ -87,12 +87,12 @@ TEST_F(Gfx950RaceTest, vgpr_waitcnt_race) {
   ExpectRace(kVgprWaitcntRaceExpectation);
 }
 
-// --- Generic FLAT dual-counter waits ---
+// --- Generic FLAT result waits ---
 
-// Generic FLAT carries simultaneous VMCNT and LGKMCNT obligations, regardless
-// of whether the uniformly resolved address uses the global or LDS route. The
-// all-ones operands below leave one counter unchanged so each negative test
-// demonstrates that draining only the other counter is insufficient.
+// Generic FLAT uses the counters for its resolved memory domains: VMCNT for
+// global/scratch requests and LGKMCNT for LDS requests. An unused domain must
+// neither delay the result nor advance older requests through counter pressure.
+// https://github.com/ROCm/rocm-systems/issues/12237
 static constexpr int kFlatVmcntNoWait = 63;
 static constexpr int kFlatLgkmcntNoWait = 15;
 
@@ -139,11 +139,11 @@ TEST_F(Gfx950RaceTest, flat_global_wait_both) {
   ExpectNoRace();
 }
 
-TEST_F(Gfx950RaceTest, flat_global_vmcnt_only_race) {
+TEST_F(Gfx950RaceTest, flat_global_vmcnt_only) {
   auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
   flat_global_wait_kernel<0, kFlatLgkmcntNoWait><<<1, 64>>>(src, dst);
   sync();
-  ExpectRace(kFlatPartialWaitRaceExpectation);
+  ExpectNoRace();
 }
 
 TEST_F(Gfx950RaceTest, flat_global_lgkmcnt_only_race) {
@@ -165,11 +165,58 @@ TEST_F(Gfx950RaceTest, flat_lds_vmcnt_only_race) {
   ExpectRace(kFlatPartialWaitRaceExpectation);
 }
 
-TEST_F(Gfx950RaceTest, flat_lds_lgkmcnt_only_race) {
+TEST_F(Gfx950RaceTest, flat_lds_lgkmcnt_only) {
   flat_lds_wait_kernel<kFlatVmcntNoWait, 0><<<1, 64>>>(alloc<int>(64));
   sync();
-  ExpectRace(kFlatPartialWaitRaceExpectation);
+  ExpectNoRace();
 }
+
+// Match the runtime copy sequence: both the load and its consumer are FLAT.
+// Keep the consumer inside the assembly so compiler-inserted waits cannot hide
+// the missing-wait control. The final wait is after the hazardous consumption.
+template <int Vmcnt>
+__global__ void flat_global_copy_kernel(const int *src, int *dst) {
+  const int tid = static_cast<int>(threadIdx.x);
+  int value;
+  asm volatile("flat_load_dword %[value], %[src]\n"
+               "s_waitcnt vmcnt(%c[vmcnt])\n"
+               "flat_store_dword %[dst], %[value]\n"
+               "s_waitcnt vmcnt(0) lgkmcnt(0)\n"
+               : [value] "=&v"(value)
+               : [src] "v"(&src[tid]), [dst] "v"(&dst[tid]), [vmcnt] "n"(Vmcnt)
+               : "memory");
+}
+
+TEST_F(Gfx950RaceTest, flat_global_copy_vmcnt) {
+  auto *src = allocWithData<int>(64), *dst = alloc<int>(64);
+  flat_global_copy_kernel<0><<<1, 64>>>(src, dst);
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  ExpectNoRace();
+
+  std::vector<int> result(64);
+  ASSERT_EQ(hipMemcpy(result.data(), dst, result.size() * sizeof(int), hipMemcpyDeviceToHost),
+            hipSuccess);
+  for (int lane = 0; lane < 64; ++lane)
+    EXPECT_EQ(result[lane], lane) << "lane " << lane;
+}
+
+TEST_F(Gfx950RaceTest, flat_global_copy_missing_vmcnt_race) {
+  auto *src = allocWithData<int>(64), *dst = alloc<int>(64);
+  flat_global_copy_kernel<kFlatVmcntNoWait><<<1, 64>>>(src, dst);
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  ExpectRace({.findings = FindingCount::OneOrMore,
+              .kernel = "flat_global_copy_kernel",
+              .type = "VGPR",
+              .access = "read",
+              .producer = "flat_load_dword",
+              .consumer = "flat_store_dword"});
+}
+
+// TODO(newling): Add mixed LDS/global HIP cases once functional routing is fixed
+// (https://github.com/ROCm/rocm-systems/issues/11456). The active C++ regression
+// FlatLoadReadyLanesKnownFalsePositives records the remaining ready-lane false
+// reports in https://github.com/ROCm/rocm-systems/issues/12237 without relying on
+// the broken mixed-space transfers.
 
 // --- All-ones wait operands ---
 
@@ -304,6 +351,106 @@ TEST_F(Gfx950RaceTest, vmcnt_below_capacity_race) {
   vmcnt_capacity_kernel<kCdnaVmcntCapacity - 1><<<1, 64>>>(src, dst);
   sync();
   ExpectRace(kVmcntBelowCapacityRaceExpectation);
+}
+
+// --- FLAT participation under counter pressure (#12237) ---
+
+// Fill one counter exactly, then issue a FLAT load. Only a FLAT using that
+// domain needs a free slot and therefore proves the oldest result complete.
+// A FLAT in the other domain must leave the missing-wait race detectable.
+// Explicit-wait controls use the same addresses and instruction sequence.
+template <bool FlatIsLds, bool WaitForLds>
+__global__ void flat_after_full_lgkmcnt_kernel(const int *src, int *dst) {
+  __shared__ int lds[64];
+  const int tid = static_cast<int>(threadIdx.x);
+  lds[tid] = tid + 1;
+  __syncthreads();
+  const uint64_t flat_address = FlatIsLds ? reinterpret_cast<uint64_t>(&lds[tid])
+                                        : reinterpret_cast<uint64_t>(&src[tid]);
+  // Reserve a different VGPR for each filler to avoid unrelated LDS WAW hazards.
+  int producer, flat_result, result;
+  asm volatile("s_waitcnt vmcnt(0) lgkmcnt(0)\n"
+               "ds_read_b32 %[producer], %[lds_address]\n"
+               ".set .Lflat_lds_filler%=, 16\n"
+               ".rept %c[younger_reads]\n"
+               "ds_read_b32 v[.Lflat_lds_filler%=], %[lds_address]\n"
+               ".set .Lflat_lds_filler%=, .Lflat_lds_filler%= + 1\n"
+               ".endr\n"
+               "flat_load_dword %[flat_result], %[flat_address]\n"
+               "s_waitcnt lgkmcnt(%c[lgkmcnt])\n"
+               "v_mov_b32 %[result], %[producer]\n"
+               "s_waitcnt vmcnt(0) lgkmcnt(0)\n"
+               : [producer] "=&v"(producer), [flat_result] "=&v"(flat_result),
+                 [result] "=&v"(result)
+               : [lds_address] "v"(tid * 4), [flat_address] "v"(flat_address),
+                 [younger_reads] "n"(kCdnaLgkmcntCapacity - 1),
+                 [lgkmcnt] "n"(WaitForLds ? 0 : kFlatLgkmcntNoWait)
+               : "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23", "v24", "v25",
+                 "v26", "v27", "v28", "v29", "memory");
+  dst[tid] = result;
+}
+
+template <bool FlatIsLds, bool WaitForVmem>
+__global__ void flat_after_full_vmcnt_kernel(const int *src, int *dst) {
+  __shared__ int lds[64];
+  const int tid = static_cast<int>(threadIdx.x);
+  lds[tid] = tid + 1;
+  __syncthreads();
+  const uint64_t flat_address = FlatIsLds ? reinterpret_cast<uint64_t>(&lds[tid])
+                                        : reinterpret_cast<uint64_t>(&src[tid]);
+  int producer, younger, flat_result, result;
+  asm volatile("s_waitcnt vmcnt(0) lgkmcnt(0)\n"
+               "global_load_dword %[producer], %[global_address], off\n"
+               ".rept %c[younger_loads]\n"
+               "global_load_dword %[younger], %[global_address], off\n"
+               ".endr\n"
+               "flat_load_dword %[flat_result], %[flat_address]\n"
+               "s_waitcnt vmcnt(%c[vmcnt])\n"
+               "v_mov_b32 %[result], %[producer]\n"
+               "s_waitcnt vmcnt(0) lgkmcnt(0)\n"
+               : [producer] "=&v"(producer), [younger] "=&v"(younger),
+                 [flat_result] "=&v"(flat_result), [result] "=&v"(result)
+               : [global_address] "v"(&src[tid]), [flat_address] "v"(flat_address),
+                 [younger_loads] "n"(kCdnaVmcntCapacity - 1),
+                 [vmcnt] "n"(WaitForVmem ? 0 : kFlatVmcntNoWait)
+               : "memory");
+  dst[tid] = result;
+}
+
+TEST_F(Gfx950RaceTest, flat_global_does_not_advance_lgkmcnt_race) {
+  flat_after_full_lgkmcnt_kernel<false, false><<<1, 64>>>(allocWithData<int>(64), alloc<int>(64));
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  ExpectRace(kLgkmcntBelowCapacityRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, flat_global_full_lgkmcnt_waited) {
+  flat_after_full_lgkmcnt_kernel<false, true><<<1, 64>>>(allocWithData<int>(64), alloc<int>(64));
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, flat_lds_advances_lgkmcnt_at_capacity) {
+  flat_after_full_lgkmcnt_kernel<true, false><<<1, 64>>>(allocWithData<int>(64), alloc<int>(64));
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, flat_lds_does_not_advance_vmcnt_race) {
+  flat_after_full_vmcnt_kernel<true, false><<<1, 64>>>(allocWithData<int>(64), alloc<int>(64));
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  ExpectRace(kVmcntBelowCapacityRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, flat_lds_full_vmcnt_waited) {
+  flat_after_full_vmcnt_kernel<true, true><<<1, 64>>>(allocWithData<int>(64), alloc<int>(64));
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, flat_global_advances_vmcnt_at_capacity) {
+  flat_after_full_vmcnt_kernel<false, false><<<1, 64>>>(allocWithData<int>(64), alloc<int>(64));
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  ExpectNoRace();
 }
 
 // --- SGPR waitcnt ---

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Bounded, kernel-mediated GPU command submission.
 //!
 //! Command bytes remain in caller-owned device memory. This owner carries only
@@ -67,8 +69,19 @@ impl KernelQueue {
     ///
     /// # Errors
     /// Reports a proved rejection, unavailable slot, or lost device.
-    pub fn submit(&self, command: KernelCommand) -> Result<u64, Error> {
-        driver::PlatformDriver::submit_kernel_queue(&self.inner, command)
+    ///
+    /// # Safety
+    /// The command range must remain device accessible, executable, and
+    /// unchanged until [`Self::status`] or [`Self::wait`] proves its submission
+    /// retired. It must contain valid packets for this queue's format, and the
+    /// caller must synchronize writes before submission. An ambiguous native
+    /// outcome can mean the command was accepted even when this call reports
+    /// failure; retain the range until retirement or conclusive teardown.
+    #[allow(unsafe_code)]
+    pub unsafe fn submit(&self, command: KernelCommand) -> Result<u64, Error> {
+        // SAFETY: The public caller retains and synchronizes the command range
+        // until the native retirement frontier advances.
+        unsafe { driver::PlatformDriver::submit_kernel_queue(&self.inner, command) }
     }
 
     /// Reads cached retirement and terminal state without entering the driver.
