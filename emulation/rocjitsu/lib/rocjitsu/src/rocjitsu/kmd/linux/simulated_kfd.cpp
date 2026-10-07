@@ -2458,16 +2458,14 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
 
   bool user_provided_va = (args->va_addr != 0);
   uint64_t va = args->va_addr;
-  if (va == 0) {
+  if (va == 0)
     va = proc.next_gpu_va_;
-    proc.next_gpu_va_ += allocation_size;
-  }
 
   KfdProcess::GpuAllocation alloc{};
   alloc.gpu_va = va;
   alloc.size = allocation_size;
   alloc.flags = args->flags;
-  alloc.handle = proc.next_handle_++;
+  alloc.handle = proc.next_handle_;
   alloc.host_ptr = nullptr;
   alloc.gpu_id = args->gpu_id;
   alloc.user_va = user_provided_va;
@@ -2481,44 +2479,40 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
     map_to_gpu(proc, va, reinterpret_cast<void *>(va), alloc.size, alloc_mtype);
   } else if (daemon_mode_ || !user_provided_va || is_vram || is_gtt) {
-    auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-    if (raw_fd >= 0) {
-      alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
-      if (alloc.memfd < 0)
-        alloc.memfd = raw_fd;
-      else
-        libc_passthrough().close(raw_fd);
-      {
-        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        owned_fds_.insert(alloc.memfd);
-      }
-      if (alloc.memfd >= 0) {
-        [[maybe_unused]] auto ft_rc = ftruncate(alloc.memfd, static_cast<off_t>(alloc.size));
-        fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
-        safe_fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
+    UniqueDriverFd backing(memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+    if (!backing)
+      return -errno;
+    const int relocated = safe_fcntl(backing.get(), F_DUPFD_CLOEXEC, kBackingFdMin);
+    if (relocated >= 0)
+      backing.reset(relocated);
+    if (ftruncate(backing.get(), static_cast<off_t>(alloc.size)) != 0 ||
+        fallocate(backing.get(), 0, 0, static_cast<off_t>(alloc.size)) != 0 ||
+        safe_fcntl(backing.get(), F_ADD_SEALS, F_SEAL_SHRINK) != 0)
+      return -errno;
 
-        // amdgpu_amdkfd_gpuvm_alloc_memory_of_gpu allocates GTT/VRAM BOs
-        // independently of CPU mappings, including VRAM without PUBLIC access.
-        // GTT BOs also need shareable backing for kfd_mem_export_dmabuf;
-        // a supplied GPU VA is not host backing.
-        // https://github.com/torvalds/linux/blob/d24e8ac715de2e16a53c144005b1863660a5fbea/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
-        if ((daemon_mode_ || is_vram || is_gtt) && !is_doorbell) {
-          auto *mapped =
-              safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
-          if (mapped != MAP_FAILED) {
-            alloc.host_ptr = mapped;
-            alloc.host_ptr_owned = true;
-            // Driver-owned: this is our memfd, mapped read-write here and held
-            // open, so nothing outside can change its protection or unmap it.
-            map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype,
-                       KfdProcess::HostExtentOwner::Driver);
-          }
-        }
-      }
+    // GTT/VRAM BOs own backing independently of client CPU mappings, including
+    // VRAM without PUBLIC access. Publish no handle until that backing exists.
+    if ((daemon_mode_ || is_vram || is_gtt) && !is_doorbell) {
+      void *mapped =
+          safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, backing.get(), 0);
+      if (mapped == MAP_FAILED)
+        return -errno;
+      alloc.host_ptr = mapped;
+      alloc.host_ptr_owned = true;
+      map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype,
+                 KfdProcess::HostExtentOwner::Driver);
     }
+    {
+      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+      owned_fds_.insert(backing.get());
+    }
+    alloc.memfd = backing.release();
   }
 
   proc.allocations_[alloc.handle] = alloc;
+  ++proc.next_handle_;
+  if (!user_provided_va)
+    proc.next_gpu_va_ += allocation_size;
 
   args->handle = alloc.handle;
   args->va_addr = va;
@@ -2769,6 +2763,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                                    (args->metadata_ring_size & (args->metadata_ring_size - 1))))
     return -EINVAL;
 
+  const uint64_t mapped_ring_size = uint64_t{args->ring_size} + args->metadata_ring_size;
+  if (args->ring_base_address > UINT64_MAX - mapped_ring_size)
+    return -EINVAL;
+
   // Queue IDs are process-local and start at one. Equivalent runtime queues in
   // different processes therefore share XCD resources while each process still
   // distributes additional queues across the device.
@@ -2802,7 +2800,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
 
     if (!daemon_mode_) {
       map_to_gpu(proc, args->ring_base_address, reinterpret_cast<void *>(args->ring_base_address),
-                 uint64_t{args->ring_size} + args->metadata_ring_size, amdgpu::Mtype::UC);
+                 mapped_ring_size, amdgpu::Mtype::UC);
       map_to_gpu(proc, args->read_pointer_address,
                  reinterpret_cast<void *>(args->read_pointer_address), sizeof(uint64_t),
                  amdgpu::Mtype::UC);
