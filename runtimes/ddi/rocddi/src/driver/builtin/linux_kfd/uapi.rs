@@ -84,6 +84,7 @@ pub(super) const MMIO_REMAP: u32 = 1 << 4;
 pub(super) const CONTIGUOUS: u32 = 1 << 23;
 pub(super) const COHERENT: u32 = 1 << 26;
 pub(super) const UNCACHED: u32 = 1 << 25;
+pub(super) const EXT_COHERENT: u32 = 1 << 24;
 pub(super) const WRITABLE: u32 = 1 << 31;
 pub(super) const EXECUTABLE: u32 = 1 << 30;
 pub(super) const PUBLIC: u32 = 1 << 29;

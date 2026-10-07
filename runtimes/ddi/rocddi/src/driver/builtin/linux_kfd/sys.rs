@@ -514,6 +514,7 @@ impl Kfd {
             | uapi::NO_SUBSTITUTE
             | uapi::COHERENT
             | uapi::UNCACHED
+            | uapi::EXT_COHERENT
             | uapi::CONTIGUOUS;
         let kind = args.flags & (uapi::VRAM | uapi::GTT | uapi::USERPTR);
         if args.flags & !permitted != 0 || !matches!(kind, uapi::VRAM | uapi::GTT | uapi::USERPTR) {

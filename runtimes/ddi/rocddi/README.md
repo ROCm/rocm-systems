@@ -72,12 +72,15 @@ The core source is organized by ownership domain:
 
 The [safety boundary and resource state guide](docs/safety.md) records the
 native reachability rules shared by the core and both adapters.
-Caller-owned host registration uses coherent KFD USERPTR mappings. Requesting
-uncached registration adds the native uncached flag while retaining coherent
-GPU access. The caller keeps the complete host page cover mapped until native
-teardown succeeds or process teardown resolves uncertain ownership.
-rocddi-owned host pages use the same coherent USERPTR mapping and carry an
-optional uncached placement request through their allocation kind.
+Owned and caller-owned host pages use `HostCachePolicy` to select the GPU
+mapping. In the primary KFD context, coarse USERPTR omits the coherent flag;
+fine adds it, extended also adds extended coherency, and uncached adds the
+uncached flag while retaining coherent access. The caller keeps registered
+pages mapped until native teardown succeeds or process teardown resolves
+uncertain ownership. In a secondary KFD context, borrowed pages use DRM GEM
+USERPTR. Coarse and fine use its default mapping; uncached selects an
+uncached VM mapping. Extended coherency is unavailable there, and owned host
+pages use `System` backing.
 
 A topology endpoint is passive metadata. It is not an activated `Device` and
 does not authorize native execution or memory operations. The current backend

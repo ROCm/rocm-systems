@@ -168,12 +168,14 @@ agent access to that pool is unavailable. When the full local memory is
 CPU-visible, pool allocations retain a host mapping. The AMD uncached pool
 flag requests coherent and uncached native VRAM placement for pool
 allocations and virtual-memory handles. For CPU pools, it requests coherent,
-uncached rocddi-owned host pages. CPU pool allocations in a secondary KFD
-context use rocddi system backing, which is already uncached. Pointer info
-reports the effective fine-grained and kernarg flags for uncached pool
-allocations and host locks. The AMD PCIe flag requests coherent access, and
-pointer info reports fine-grained global flags for those allocations. Peer
-access remains governed by the owning pool.
+uncached rocddi-owned host pages. The primary KFD context maps ordinary CPU
+pool pages with the pool's coarse, fine, or extended coherency policy. CPU
+pool allocations in a secondary KFD context use rocddi system backing, which
+is already uncached. Host locks in that context cannot request extended
+coherency. Pointer info reports effective fine-grained and kernarg
+flags for uncached pool allocations and host locks. The AMD PCIe flag requests
+coherent access. Pointer info reports fine-grained global flags for those
+allocations. The owning pool still governs peer access.
 For linear asynchronous CPU-to-GPU and GPU-to-CPU copies, rocddi stages a
 CPU-accessible operand that is not mapped to that GPU. The HSA worker reads
 the source after dependency signals complete, copies a staged destination

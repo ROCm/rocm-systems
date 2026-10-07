@@ -9,7 +9,7 @@
 use super::*;
 use crate::driver::AllocationDriver;
 use crate::host_storage::Allocator;
-use crate::memory::MemoryKind;
+use crate::memory::{HostCachePolicy, MemoryKind};
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::fs::FileExt;
 use std::sync::Arc;
@@ -394,11 +394,11 @@ impl Fixture {
     ) -> Result<Owned<KfdAllocation>, Error> {
         let kind = match kind {
             MemoryKind::System => BufferKind::Gtt,
-            MemoryKind::OwnedHost { uncached } => BufferKind::OwnedUserptr { uncached },
-            MemoryKind::RegisteredHost { address, uncached } => {
+            MemoryKind::OwnedHost { cache } => BufferKind::OwnedUserptr { cache },
+            MemoryKind::RegisteredHost { address, cache } => {
                 // SAFETY: Scripted KFD replies cannot access this synthetic
                 // address; the fixture tests metadata and rollback only.
-                BufferKind::Userptr(unsafe { BorrowedHostPages::new(address, uncached) })
+                BufferKind::Userptr(unsafe { BorrowedHostPages::new(address, cache) })
             }
             MemoryKind::DeviceLocal {
                 host_visible,
@@ -627,7 +627,9 @@ fn secondary_context_rejects_owned_userptr_before_native_allocation() {
         fixture
             .allocate_with_lifetime(
                 crate::session::SessionLifetime::Session,
-                MemoryKind::OwnedHost { uncached: false },
+                MemoryKind::OwnedHost {
+                    cache: HostCachePolicy::Fine,
+                },
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
             .err()
@@ -1335,11 +1337,27 @@ fn allocation_permissions_reach_kfd_without_widening_access() {
                 uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE,
             ),
             (
-                MemoryKind::OwnedHost { uncached: false },
+                MemoryKind::OwnedHost {
+                    cache: HostCachePolicy::Coarse,
+                },
+                uapi::USERPTR | uapi::NO_SUBSTITUTE,
+            ),
+            (
+                MemoryKind::OwnedHost {
+                    cache: HostCachePolicy::Fine,
+                },
                 uapi::USERPTR | uapi::COHERENT | uapi::NO_SUBSTITUTE,
             ),
             (
-                MemoryKind::OwnedHost { uncached: true },
+                MemoryKind::OwnedHost {
+                    cache: HostCachePolicy::Extended,
+                },
+                uapi::USERPTR | uapi::COHERENT | uapi::EXT_COHERENT | uapi::NO_SUBSTITUTE,
+            ),
+            (
+                MemoryKind::OwnedHost {
+                    cache: HostCachePolicy::Uncached,
+                },
                 uapi::USERPTR | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE,
             ),
             (
@@ -1623,7 +1641,7 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
         .allocate(
             MemoryKind::RegisteredHost {
                 address: 0x12345,
-                uncached: false,
+                cache: HostCachePolicy::Fine,
             },
             DeviceAccess::READ | DeviceAccess::WRITE,
         )
@@ -1654,28 +1672,38 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
 }
 
 #[test]
-fn registered_uncached_host_pages_keep_coherent_gpu_access() {
-    let fixture = Fixture::with_flags(
-        [
-            Reply::Allocate(17, None),
-            Reply::Map(0, 1, None),
-            Reply::Unmap(0, 1, None),
-            Reply::Free(None),
-        ],
-        uapi::USERPTR | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
-    );
-    let mut allocation = fixture
-        .allocate(
-            MemoryKind::RegisteredHost {
-                address: 0x12345,
-                uncached: true,
-            },
-            DeviceAccess::READ | DeviceAccess::WRITE,
-        )
-        .unwrap();
-    allocation.free().unwrap();
-    drop(allocation);
-    fixture.exhausted();
+fn registered_host_cache_policies_reach_kfd() {
+    for (cache, flags) in [
+        (HostCachePolicy::Coarse, 0),
+        (HostCachePolicy::Fine, uapi::COHERENT),
+        (
+            HostCachePolicy::Extended,
+            uapi::COHERENT | uapi::EXT_COHERENT,
+        ),
+        (HostCachePolicy::Uncached, uapi::COHERENT | uapi::UNCACHED),
+    ] {
+        let fixture = Fixture::with_flags(
+            [
+                Reply::Allocate(17, None),
+                Reply::Map(0, 1, None),
+                Reply::Unmap(0, 1, None),
+                Reply::Free(None),
+            ],
+            uapi::USERPTR | flags | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        );
+        let mut allocation = fixture
+            .allocate(
+                MemoryKind::RegisteredHost {
+                    address: 0x12345,
+                    cache,
+                },
+                DeviceAccess::READ | DeviceAccess::WRITE,
+            )
+            .unwrap();
+        allocation.free().unwrap();
+        drop(allocation);
+        fixture.exhausted();
+    }
 }
 
 #[test]
@@ -1691,7 +1719,9 @@ fn owned_system_pages_use_one_cpu_and_gpu_address() {
     );
     let mut allocation = fixture
         .allocate(
-            MemoryKind::OwnedHost { uncached: false },
+            MemoryKind::OwnedHost {
+                cache: HostCachePolicy::Fine,
+            },
             DeviceAccess::READ | DeviceAccess::WRITE,
         )
         .unwrap();
@@ -1717,7 +1747,7 @@ fn invalid_registered_host_address_fails_before_native_observation() {
             .allocate(
                 MemoryKind::RegisteredHost {
                     address: 0,
-                    uncached: false,
+                    cache: HostCachePolicy::Fine,
                 },
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )

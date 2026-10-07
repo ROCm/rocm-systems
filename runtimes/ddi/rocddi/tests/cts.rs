@@ -22,7 +22,7 @@ use rocddi::gpu::queue::{
 };
 use rocddi::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::interop::linux::{AisFileOperation, ais_transfer};
-use rocddi::memory::{DeviceAccess, MemoryKind};
+use rocddi::memory::{DeviceAccess, HostCachePolicy, MemoryKind};
 use rocddi::session::{Session, SessionLifetime};
 
 #[test]
@@ -640,8 +640,14 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     uncached_memory.free()?;
     uncached_reservation.free()?;
 
-    let mut uncached_host =
-        device.allocate(MemoryKind::OwnedHost { uncached: true }, 4096, 4096, access)?;
+    let mut uncached_host = device.allocate(
+        MemoryKind::OwnedHost {
+            cache: HostCachePolicy::Uncached,
+        },
+        4096,
+        4096,
+        access,
+    )?;
     let uncached_host_info = uncached_host.info();
     let host_address = uncached_host_info
         .host_address
@@ -681,6 +687,17 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     assert!(read_matches);
     assert!(write_matches);
 
+    for cache in [
+        HostCachePolicy::Coarse,
+        HostCachePolicy::Fine,
+        HostCachePolicy::Extended,
+    ] {
+        let mut host = device.allocate(MemoryKind::OwnedHost { cache }, 4096, 4096, access)?;
+        let info = host.info();
+        assert_eq!(info.host_address, Some(info.device_address as usize));
+        host.free()?;
+    }
+
     let mut host_pages = Box::new([0_u8; 8192]);
     let host_base = host_pages.as_mut_ptr() as usize;
     let host_address = (host_base + 4095) & !4095;
@@ -688,19 +705,20 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     host_pages[host_offset..host_offset + 4096].fill(0x3c);
     // SAFETY: The aligned 4096-byte page lies inside the boxed 8192-byte
     // extent. The box stays mapped until native deregistration succeeds.
-    let mut registered =
-        match unsafe { device.register_host(host_address, true, 4096, 4096, access) } {
-            Ok(registered) => registered,
-            Err(error) => {
-                // Native acquisition may have retained the caller's page cover.
-                std::mem::forget(host_pages);
-                std::mem::forget(source);
-                std::mem::forget(destination);
-                std::mem::forget(device);
-                std::mem::forget(session);
-                return Err(Box::new(error));
-            }
-        };
+    let mut registered = match unsafe {
+        device.register_host(host_address, HostCachePolicy::Uncached, 4096, 4096, access)
+    } {
+        Ok(registered) => registered,
+        Err(error) => {
+            // Native acquisition may have retained the caller's page cover.
+            std::mem::forget(host_pages);
+            std::mem::forget(source);
+            std::mem::forget(destination);
+            std::mem::forget(device);
+            std::mem::forget(session);
+            return Err(Box::new(error));
+        }
+    };
     let registered_info = registered.info();
     destination_bytes.fill(0xa5);
     // SAFETY: The registered page, source, and destination stay mapped until
@@ -744,6 +762,37 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     assert_eq!(registered_info.host_address, Some(host_address));
     assert!(read_matches);
     assert!(write_matches);
+
+    for cache in [
+        HostCachePolicy::Coarse,
+        HostCachePolicy::Fine,
+        HostCachePolicy::Extended,
+    ] {
+        // SAFETY: The boxed page cover remains live through successful
+        // deregistration or is retained on uncertain native cleanup.
+        let mut registration =
+            match unsafe { device.register_host(host_address, cache, 4096, 4096, access) } {
+                Ok(registration) => registration,
+                Err(error) => {
+                    std::mem::forget(host_pages);
+                    std::mem::forget(source);
+                    std::mem::forget(destination);
+                    std::mem::forget(device);
+                    std::mem::forget(session);
+                    return Err(Box::new(error));
+                }
+            };
+        assert_eq!(registration.info().host_address, Some(host_address));
+        if let Err(error) = registration.free() {
+            std::mem::forget(registration);
+            std::mem::forget(host_pages);
+            std::mem::forget(source);
+            std::mem::forget(destination);
+            std::mem::forget(device);
+            std::mem::forget(session);
+            return Err(Box::new(error));
+        }
+    }
 
     source.free()?;
     destination.free()?;
