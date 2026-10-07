@@ -409,7 +409,7 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
 # device symbol the archive has no name for, a union whose active member is not
 # recoverable. Unlike the generic NOOP handlers (which emit a vague
 # once-per-process message), these emit a loud, attributable warning naming the
-# specific API (finding H1), so when replay later fails the cause is traceable.
+# specific API, so when replay later fails the cause is traceable.
 #
 # These are intentionally NON-FATAL (they return hipSuccess) but they poison the
 # graph: ctx.mark_graph_incomplete records that the graph is now short a node,
@@ -1045,9 +1045,9 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
 #
 # normalise_field_type() lowers every pointer to a uint64_t holding the
 # capture-time address, so by default the pointee never reaches the archive.
-# For an input struct that is silent data loss (section 8.3): replay is handed
-# an address from a process that no longer exists. A Deref entry tells the
-# generator to carry the pointee itself.
+# For an input struct that is silent data loss: replay is handed an address
+# from a process that no longer exists. A Deref entry tells the generator to
+# carry the pointee itself.
 #
 # Capture: the generated shim memcpy's `size` bytes (or `count` elements) out of
 # the pointer into the event, and sets <param>_present.
@@ -1961,7 +1961,7 @@ _HEADER_PREAMBLE = """\
  *   - uint8_t  <param>_present    1 when the argument was non-null
  *   - uint32_t <param>_n          element count, for array arguments only
  * Without them a pointer argument reaches the archive as a capture-time host
- * address and nothing else, which is the payload-loss class of section 8.3.
+ * address and nothing else, which is the payload-loss class.
  *
  * The structs use #pragma pack(1) so layout is identical on all platforms.
  * ============================================================================
@@ -3277,12 +3277,16 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
     return f"({t})a->{name}"
 
 
-def _playback_needs_handwritten(entry: ApiEntry) -> bool:
-    """True when a generated call would pass an untranslated opaque value."""
-    return any(
-        _get_base_type(p.raw_type) in _UNTRANSLATED_PLAYBACK_TYPES
-        for p in entry.params
-    )
+def playback_defaults_to_noop(entry: ApiEntry) -> bool:
+    """True when a generated call would pass an untranslated opaque value.
+
+    DIRECT_PLAYBACK_APIS keeps the generated call for APIs that already had
+    one. The API matrix (tools/api-matrix/derive_manifest.py) calls this too,
+    so its expected replay class cannot drift from what the shim emits.
+    """
+    return (entry.name not in DIRECT_PLAYBACK_APIS
+            and any(_get_base_type(p.raw_type) in _UNTRANSLATED_PLAYBACK_TYPES
+                    for p in entry.params))
 
 
 def _noop_playback_shim(api: str) -> str:
@@ -3393,8 +3397,7 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     # capturing process, so that API replays as a no-op until a reviewed
     # handler is added. DIRECT_PLAYBACK_APIS keeps the generated call for
     # APIs that already had one. Editing hip_playback_generated.cpp does not.
-    if (entry.name not in DIRECT_PLAYBACK_APIS
-            and _playback_needs_handwritten(entry)):
+    if playback_defaults_to_noop(entry):
         return _noop_playback_shim(entry.name)
 
     # payload points to the full hrr_args_* struct (header + fields).

@@ -38,7 +38,7 @@
  *
  * Coverage, not exhaustiveness
  * ----------------------------
- * Reaching all 551 APIs from a test binary is not achievable — some need a
+ * Reaching every API from a test binary is not achievable — some need a
  * second process, some need hardware this host does not have, some would tear
  * down the context the rest of the capture depends on. So an API a tier did
  * not reach is reported as not-exercised rather than failed, and each tier
@@ -46,8 +46,9 @@
  * line then fails loudly, instead of reporting a clean sweep of nothing.
  *
  * Set HRR_MATRIX_RESULTS_DIR to have each tier write its observations as JSON
- * for aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py to turn into a
- * coverage report.
+ * for projects/hrr/tools/api-matrix/check_matrix.py --results to turn into a
+ * coverage report. The tooling and the way to run it are described in that
+ * directory's README.md.
  */
 
 #include "hrr_test_process.hh"
@@ -65,10 +66,10 @@
 namespace {
 
 // A replay of a NOOP-heavy tier can take a while on a busy machine, but it
-// should never take minutes. hipStreamWriteValue64's no-op means a workload
-// that waits on the value it should have written waits forever (section 7,
-// hazard H2 of HRR-Use-Case-Priorities.md), so every replay here runs under a
-// deadline and a hang becomes an assertable outcome rather than a stuck job.
+// should never take minutes. A no-op hipStreamWriteValue64 would leave a
+// workload waiting forever on the value it should have written, so every
+// replay here runs under a deadline and a hang becomes an assertable outcome
+// rather than a stuck job.
 constexpr int kReplayTimeoutSeconds = 300;
 
 HrrReplayClass expect_code_to_class(int code) {
@@ -229,8 +230,9 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
   auto [replay_rc, merged] = hrr_playback_watchdog(
       cap.path, kReplayTimeoutSeconds, "--continue-on-error --verbose");
   INFO("Replay of " << direct_case << " exited " << replay_rc);
-  // A hang is the one replay outcome that is never acceptable: it is the H2
-  // symptom, and it is also what would wedge CI.
+  // A hang is the one replay outcome that is never acceptable: it is what a
+  // no-op stream value write looks like to a waiter, and it is also what
+  // would wedge CI.
   if (replay_rc == kHrrWatchdogKilled) {
     FAIL_CHECK("replay of " << direct_case << " did not finish within "
                       << kReplayTimeoutSeconds << "s (watchdog killed it)");
@@ -290,8 +292,9 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
       // REAL versus HANDLER_ERROR or CRASH is the same real handler
       // succeeding on one archive's arguments and failing on another's —
       // hipGraphInstantiate replays fine for a stream-captured graph and
-      // fails for one built out of ERROR_STUB node-adds. Keep the failure:
-      // it is the finding, and api_matrix.yaml is where it gets declared.
+      // is refused for one holding an unreplayable host-function node. Keep
+      // the failure: it is the finding, and api_matrix.yaml is where it gets
+      // declared.
       //
       // Anything else — NOOP against REAL, ERROR_STUB against NOOP — is the
       // API having been reclassified, which is what this matrix exists to
@@ -377,11 +380,12 @@ void run_tier(const std::string& tier) {
     // A payload-loss API is still expected to run a real handler — that is
     // precisely what hides the loss. The class is what this test asserts; the
     // loss itself is what check_matrix.py records as XFAIL.
-    INFO("Known payload loss (section 8.3): " << (e.payload_loss ? "yes" : "no"));
+    INFO("Known payload loss: " << (e.payload_loss ? "yes" : "no"));
     // A handler declared as failing on this tier's arguments may come back
     // either way: hipGraphInstantiate replays fine for the stream-captured
-    // graphs and fails for the one built out of ERROR_STUB node-adds, and
-    // which of those a run lands on depends on which workloads ran.
+    // graphs and fails for the T4 graph that holds an unreplayable
+    // host-function node, and which of those a run lands on depends on which
+    // workloads ran.
     if (e.handler_error_ok && expected == HrrReplayClass::kReal &&
         observed == HrrReplayClass::kHandlerError) {
       INFO("Declared in api_matrix.yaml as failing for this tier's arguments");
@@ -408,9 +412,9 @@ void run_tier(const std::string& tier) {
   // "APIs with positive evidence".
   //
   // This keeps the same effective threshold as before rather than raising
-  // it: min_covered is generated counting these rows (T1 is 10 of 14, T0 6
-  // of 67 against a floor of 65), so tightening the floor as well needs
-  // check_matrix.py to re-emit min_covered over assertable rows only.
+  // it: min_covered is generated counting these rows, so tightening the floor
+  // as well needs check_matrix.py to re-emit min_covered over assertable rows
+  // only.
   const int evidence_floor = floor.min_covered - absent_asserted;
   INFO("Tier " << tier << ": " << covered << " covered with evidence, "
                << absent_asserted << " absence-asserted, " << not_exercised
@@ -428,8 +432,8 @@ void run_tier(const std::string& tier) {
 /**
  * Test Description
  * ----------------
- *   - T0, the UC1 dense LLM inference and serving substrate: the rank-1
- *     use-case from section 2 of HRR-Use-Case-Priorities.md.
+ *   - T0, the dense LLM inference and serving substrate: the highest-priority
+ *     use case.
  *   - Captures Unit_HRR_ApiMatrix_UC1Dense_Direct, which exercises the
  *     PyTorch + hipBLASLt surface and, in particular, the launch and module
  *     holes no other workload reaches: hipDrvLaunchKernelEx (Triton's default
@@ -447,16 +451,16 @@ TEST_CASE("Unit_HRR_ApiMatrix_T0_Roundtrip", "[.][hrr][api-matrix]") {
 /**
  * Test Description
  * ----------------
- *   - T1, the payload-loss class from section 8.3 (priorities P1 and P2).
- *   - Every API here has a real playback handler and is counted in the "273
- *     faithfully replayed" figure, yet cannot be replayed: the generator
- *     lowers a const-struct pointer to a bare capture-time address, or a
- *     >8-byte by-value struct to a single 8-byte field. hipIpcOpenMemHandle is
- *     the sharpest case — 56 of the handle's 64 bytes are discarded.
+ *   - T1, the payload-loss class.
+ *   - Every API here has a real playback handler and counts as faithfully
+ *     replayed, yet could not be replayed faithfully: the generator lowered a
+ *     const-struct pointer to a bare capture-time address, or a >8-byte
+ *     by-value struct to a single 8-byte field. hipIpcOpenMemHandle was the
+ *     sharpest case — 56 of the handle's 64 bytes were discarded.
  *   - The assertion is deliberately that the handler still runs. That is what
- *     makes the loss invisible today, and it is why these are XFAIL in the
- *     report rather than PASS: they turn into XPASS the day P2 lands, which is
- *     the signal to update api_matrix.yaml.
+ *     makes a loss invisible, and it is why an API still declared with
+ *     payload_loss is XFAIL in the report rather than PASS. Nothing flips it
+ *     by itself once the payload is recorded, so update api_matrix.yaml then.
  */
 TEST_CASE("Unit_HRR_ApiMatrix_T1_Roundtrip", "[.][hrr][api-matrix]") {
   run_tier("T1");
@@ -465,17 +469,17 @@ TEST_CASE("Unit_HRR_ApiMatrix_T1_Roundtrip", "[.][hrr][api-matrix]") {
 /**
  * Test Description
  * ----------------
- *   - T2, the silent failures. Section 9 ranks these above breadth: a replay
- *     that reports success while producing wrong numbers is worse than one
- *     that refuses to run.
- *   - Covers the graph-mutation family that makes ggml/llama.cpp replay every
- *     token with the first token's parameters (section 8.4a), the stream value
- *     operations whose no-op makes XLA's VMM allocator hang rather than fail
- *     (hazard H2), hipHostAlloc allocating nothing (section 8.6), the
- *     __device__ symbol path MoRI's globalGpuStates arrives through, and
+ *   - T2, the silent failures. These rank above breadth: a replay that
+ *     reports success while producing wrong numbers is worse than one that
+ *     refuses to run.
+ *   - Covers the graph-mutation family, where a no-op replay (as for
+ *     hipGraphExecUpdate) makes ggml/llama.cpp replay every token with the
+ *     first token's parameters, the stream value operations whose no-op would
+ *     make XLA's VMM allocator hang rather than fail, hipHostAlloc allocating nothing, the __device__
+ *     symbol path MoRI's globalGpuStates arrives through, and
  *     hipModuleLaunchCooperativeKernel, live on Instinct via MIOpen's Winograd
  *     Fury solver.
- *   - Runs under the replay watchdog, so the H2 hang fails the test in bounded
+ *   - Runs under the replay watchdog, so a hang fails the test in bounded
  *     time instead of wedging the job.
  */
 TEST_CASE("Unit_HRR_ApiMatrix_T2_Roundtrip", "[.][hrr][api-matrix]") {
@@ -485,13 +489,13 @@ TEST_CASE("Unit_HRR_ApiMatrix_T2_Roundtrip", "[.][hrr][api-matrix]") {
 /**
  * Test Description
  * ----------------
- *   - T3, multi-GPU: device identity, peer access, IPC and VMM (P3, P4, P7).
- *   - Section 5 puts the multi-GPU delta at 42 APIs and roughly 31% faithful,
- *     and the problem is structural rather than per-API: events carry no
- *     device ID and alloc_map has no device field, so replay cannot know which
- *     GPU an allocation belonged to.
- *   - Requires two visible devices; run-api-matrix.sh supplies them with
- *     HIP_VISIBLE_DEVICES=6,7. Skips cleanly on a single-GPU host rather than
+ *   - T3, multi-GPU: device identity, peer access, IPC and VMM.
+ *   - The multi-GPU APIs are the least faithfully replayed group, and the
+ *     problem is structural rather than per-API: events carry no device ID
+ *     and alloc_map has no device field, so replay cannot know which GPU an
+ *     allocation belonged to.
+ *   - Requires two visible devices (restrict them with HIP_VISIBLE_DEVICES if
+ *     the host has more). Skips cleanly on a single-GPU host rather than
  *     failing, so the rest of the matrix stays runnable anywhere.
  */
 TEST_CASE("Unit_HRR_ApiMatrix_T3_Roundtrip", "[.][hrr][api-matrix]") {
@@ -506,7 +510,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T3_Roundtrip", "[.][hrr][api-matrix]") {
  *     with the suite's existing device, stream, memcpy, memset, mempool,
  *     module, occupancy and graph workloads, rather than writing a second copy
  *     of coverage that already exists.
- *   - The 254 NOOP APIs mostly land here. Asserting they are still NOOP is the
+ *   - Most NOOP APIs land here. Asserting they are still NOOP is the
  *     point: a NOOP that quietly became a real handler, or the reverse,
  *     changes what every existing recording means.
  */
@@ -520,15 +524,16 @@ TEST_CASE("Unit_HRR_ApiMatrix_T4_Roundtrip", "[.][hrr][api-matrix]") {
  *   - T5, the deprioritised families: textures, hipArray, surfaces, mipmaps,
  *     managed memory and the cooperative/extended launch spellings with no
  *     library caller.
- *   - Section 10 records verified-negative evidence for all of it: MIOpen has
- *     zero texture occurrences across its whole repository, shipped
+ *   - There is verified-negative evidence for all of it: MIOpen has zero
+ *     texture occurrences across its whole repository, shipped
  *     rocFFT/rocSPARSE/rocRAND import zero texture symbols, and the
  *     managed-memory caller that does exist belongs to a recommender workload
  *     absent from Instinct MLPerf submissions.
- *   - Hidden ([.]) so it does not run by default. run-api-matrix.sh
- *     --include-deprioritised runs it by name.
+ *   - Hidden ([.]) like every tier. T0 to T4 are also tagged [hrr], so CI's
+ *     "[hrr]~[direct]" selects them; T5 is tagged [T5] instead and has no
+ *     [hrr], so it runs only when named or selected by that tag.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T5_Roundtrip", "[.][hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T5_Roundtrip", "[.][api-matrix][T5]") {
   run_tier("T5");
 }
 
@@ -536,13 +541,14 @@ TEST_CASE("Unit_HRR_ApiMatrix_T5_Roundtrip", "[.][hrr][api-matrix]") {
  * Test Description
  * ----------------
  *   - CPU-only structural check on the generated expectations header: the
- *     matrix must name every API exactly once, every entry must belong to a
- *     declared tier, and the expectation codes must be in range.
+ *     matrix must name every API in hrr_api_names exactly once and nothing
+ *     else, every entry must belong to a declared tier, and the expectation
+ *     codes must be in range.
  *   - This is what catches a bad regeneration before a GPU run wastes time on
  *     it, and it is why the header is generated rather than hand-written.
  */
 TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[.][hrr][api-matrix][cpu]") {
-  REQUIRE(kHrrApiMatrixCount > 500);
+  REQUIRE(kHrrApiMatrixCount == static_cast<size_t>(HRR_API_COUNT));
   REQUIRE(kHrrTierFloorCount >= 1);
 
   std::set<std::string> tiers;
@@ -569,6 +575,22 @@ TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[.][hrr][api-matrix][cpu]") 
     CHECK(seen.insert(e.api).second);
   }
   CHECK(seen.size() == kHrrApiMatrixCount);
+
+  // The matrix must name exactly the APIs HRR can record: no API missing
+  // from it, and no name in it that HRR does not have. A stale header after
+  // the API table changes would otherwise pass every check above.
+  std::set<std::string> known;
+  for (int i = 0; i < HRR_API_COUNT; ++i) known.insert(hrr_api_names[i]);
+  CHECK(known.size() == static_cast<size_t>(HRR_API_COUNT));
+  std::string absent, unknown;
+  for (const auto& name : known)
+    if (!seen.count(name)) absent += (absent.empty() ? "" : ", ") + name;
+  for (const auto& name : seen)
+    if (!known.count(name)) unknown += (unknown.empty() ? "" : ", ") + name;
+  INFO("APIs missing from the matrix: " << absent);
+  INFO("matrix APIs unknown to hrr_api_names: " << unknown);
+  CHECK(absent.empty());
+  CHECK(unknown.empty());
 }
 
 /**
@@ -722,8 +744,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[.][hrr][api-matrix][cpu]") 
  *     "Event Type Breakdown" parser that decides whether an API was captured.
  *   - Pinned here because a parser that silently returns nothing is
  *     indistinguishable from a workload that captured nothing, and the matrix
- *     would then report a confident sweep of not-exercised across all 551
- *     APIs. The sample below is a verbatim `hrr-playback --info` report,
+ *     would then report a confident sweep of not-exercised across every
+ *     API. The sample below is a verbatim `hrr-playback --info` report,
  *     including the surrounding sections the parser has to stop at.
  */
 TEST_CASE("Unit_HRR_ApiMatrix_InfoBreakdownParse", "[.][hrr][api-matrix][cpu]") {

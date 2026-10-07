@@ -385,9 +385,9 @@ inline constexpr int kHrrWatchdogKilled = hrr::test::SpawnProc::kKilledOnTimeout
 // ---------------------------------------------------------------------------
 // hrr_playback_watchdog — replay under a deadline.
 //
-// Some replays do not fail, they hang: hipStreamWriteValue64 is a no-op at
-// replay, so a program that waits on the value it was supposed to write waits
-// forever (section 7 hazard H2 of HRR-Use-Case-Priorities.md). Without a
+// Some replays do not fail, they hang: were hipStreamWriteValue64 a no-op at
+// replay, a program that waits on the value it was supposed to write would
+// wait forever. Without a
 // deadline that turns into a CI job that runs until the harness kills it,
 // which is both slower to diagnose and easy to misread as infrastructure
 // flake. Killing the child ourselves turns the hang into an assertable
@@ -548,8 +548,8 @@ inline HrrReplayClass hrr_observed_replay_class(const std::string& merged_output
 //     hipMalloc                  4
 //     ...
 //
-// Parsing mirrors parse_sections() in scenarios/prep/lib/hrr_info.py so the
-// C++ tests and the Python reporter agree on what "captured" means.
+// check_matrix.py (projects/hrr/tools/api-matrix) reads the observations this
+// parser feeds, so "captured" here is what its report counts as captured.
 inline void hrr_parse_info_breakdown(const std::string& info,
                                      std::map<std::string, long long>& counts) {
   bool in_table = false;

@@ -44,7 +44,7 @@
  *   - uint8_t  <param>_present    1 when the argument was non-null
  *   - uint32_t <param>_n          element count, for array arguments only
  * Without them a pointer argument reaches the archive as a capture-time host
- * address and nothing else, which is the payload-loss class of section 8.3.
+ * address and nothing else, which is the payload-loss class.
  *
  * The structs use #pragma pack(1) so layout is identical on all platforms.
  * ============================================================================

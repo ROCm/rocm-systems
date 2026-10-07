@@ -7,6 +7,12 @@
 #   unit/        CPU-focused format, recovery, and playback-invariant tests.
 #   integration/ GPU capture/replay round-trip tests (require an AMD GPU and a
 #                capture-enabled HIP runtime).
+#   include/     The Catch2 harness headers both suites include.
+#   scripts/     CI helpers that run a suite and report on it, and the unittest
+#                suites for those helpers and for ../tools (not built).
+#
+# unit/ and integration/ each keep expected_cases.txt, the list of test cases
+# their binary must contain; scripts/check_expected_cases.py enforces it.
 #
 # The HRR tests use a small local harness (hrr_test_common.hh / hrr_test_process.hh)
 # instead of the hip-tests Catch2 infrastructure.

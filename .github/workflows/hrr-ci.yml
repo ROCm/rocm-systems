@@ -127,6 +127,10 @@ jobs:
         with:
           python-version: "3.12"
 
+      # api_matrix.yaml is read with PyYAML by the matrix scripts below.
+      - name: Install PyYAML
+        run: python3 -m pip install --no-cache-dir PyYAML==6.0.1
+
       - name: Generate and compare
         run: |
           mkdir -p build/hrr-codegen/include/hrr
@@ -164,6 +168,28 @@ jobs:
           python3 projects/hrr/tools/check_hrr_api_compat.py \
             --base-header build/hrr-codegen/base_hrr_api_args.h \
             --current-header build/hrr-codegen/include/hrr/hrr_api_args.h
+
+      # Everything is written under build/hrr-codegen: the derived manifest and
+      # the regenerated header are compared with the checked-in header, never
+      # written over it.
+      - name: Check API matrix
+        run: |
+          tools=projects/hrr/tools/api-matrix
+          out=build/hrr-codegen/api-matrix
+          tracked=projects/hrr/tests/integration/hrr_api_matrix_expectations.h
+          mkdir -p "${out}"
+
+          python3 "${tools}/derive_manifest.py" --quiet \
+            --output "${out}/api_classes.json"
+          python3 "${tools}/check_matrix.py" --check-workloads
+          python3 "${tools}/check_matrix.py" \
+            --manifest "${out}/api_classes.json" \
+            --emit-cxx "${out}/hrr_api_matrix_expectations.h"
+
+          if ! diff -u "${tracked}" "${out}/hrr_api_matrix_expectations.h"; then
+            echo "::error::${tracked} is stale; run derive_manifest.py, then check_matrix.py --emit-cxx, in projects/hrr/tools/api-matrix"
+            exit 1
+          fi
 
   # ---------------------------------------------------------------------------
   # Host-only unit suite. These 23 cases link nothing but libstdc++/libc: they
@@ -244,9 +270,9 @@ jobs:
             echo "::error::no unit binary under build/tests/unit"
             exit 1
           fi
-          python3 projects/hrr/tests/check_expected_cases.py \
+          python3 projects/hrr/tests/scripts/check_expected_cases.py \
             --binary "${bin[0]}" \
-            --manifest projects/hrr/tests/expected_cases_unit.txt
+            --manifest projects/hrr/tests/unit/expected_cases.txt
 
       - name: Run unit suite
         shell: bash
@@ -268,15 +294,18 @@ jobs:
             exit 1
           fi
           ls -l "${bin[0]}"
-          python3 projects/hrr/tests/run_catch2.py \
+          python3 projects/hrr/tests/scripts/run_catch2.py \
             --xml unit-${{ matrix.os }}.xml \
             -- "${bin[0]}"
 
       # The helpers the suites below rely on (JUnit wrapper, summary table,
       # expected-case check). They are POSIX-process code; once is enough.
+      # test_api_matrix.py imports PyYAML, which setup-python does not provide.
       - name: Test the CI helper scripts
         if: ${{ runner.os == 'Linux' }}
-        run: python3 -m unittest discover -s projects/hrr/tests -p 'test_*.py' -v
+        run: |
+          python3 -m pip install --no-cache-dir PyYAML==6.0.1
+          python3 -m unittest discover -s projects/hrr/tests/scripts -p 'test_*.py' -v
 
       - name: Upload results
         if: always()
@@ -464,9 +493,9 @@ jobs:
           # and --list-tests never calls into HIP. Checked here rather than in
           # the integration jobs so a compiled-out case fails once, straight
           # away, instead of nine times after the fan-out.
-          python3 projects/hrr/tests/check_expected_cases.py \
+          python3 projects/hrr/tests/scripts/check_expected_cases.py \
             --binary build/hrr/tests/integration/hrr-integration-tests \
-            --manifest projects/hrr/tests/expected_cases_integration.txt
+            --manifest projects/hrr/tests/integration/expected_cases.txt
 
       - name: Confirm every architecture is embedded
         run: |
@@ -564,7 +593,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
-            projects/hrr/tests/run_catch2.py
+            projects/hrr/tests/scripts/run_catch2.py
           sparse-checkout-cone-mode: false
           set-safe-directory: true
 
@@ -657,7 +686,7 @@ jobs:
           set -e
           if [ "$probe_rc" -eq 1 ]; then
             echo "::error::GPU runner has no visible ROCm-capable device"
-            python3 projects/hrr/tests/run_catch2.py \
+            python3 projects/hrr/tests/scripts/run_catch2.py \
               --xml integration-${{ matrix.family }}.xml \
               -- ./build/hrr/tests/integration/hrr-integration-tests "[cpu]"
             exit 1
@@ -668,13 +697,14 @@ jobs:
           # that finished instead of being cancelled with no output.
           #
           # The selector matters: Catch2 leaves out hidden "[.]" cases unless a
-          # tag names them, and every API-matrix tier, the kernel-argument
+          # tag names them. API-matrix tiers T0 through T4, the kernel-argument
           # regression and the HSA first-touch case are hidden drivers tagged
-          # [hrr]. "[hrr]~[direct]" runs them, leaves out the [hrr][direct]
+          # [hrr]. T5 is explicit-only. "[hrr]~[direct]" runs the tagged drivers
+          # and leaves out the [hrr][direct]
           # workloads they spawn as subprocesses, and (being an exact tag match)
           # also leaves out the [hrr-direct] workloads and the disabled
           # [hrr-repro] cases.
-          python3 projects/hrr/tests/run_catch2.py \
+          python3 projects/hrr/tests/scripts/run_catch2.py \
             --xml integration-${{ matrix.family }}.xml --timeout 1200 \
             -- ./build/hrr/tests/integration/hrr-integration-tests "[hrr]~[direct]"
 
@@ -705,7 +735,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
-            projects/hrr/tests/summarize_junit.py
+            projects/hrr/tests/scripts/summarize_junit.py
           sparse-checkout-cone-mode: false
           set-safe-directory: true
 
@@ -720,7 +750,7 @@ jobs:
         run: |
           # Written first so it sits above EnricoMi's suite dump on the job
           # summary and on the HRR test results check page.
-          python3 projects/hrr/tests/summarize_junit.py \
+          python3 projects/hrr/tests/scripts/summarize_junit.py \
             --dir . \
             --summary "${GITHUB_STEP_SUMMARY}"
 

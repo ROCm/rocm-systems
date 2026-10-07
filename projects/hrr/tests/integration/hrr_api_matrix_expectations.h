@@ -7,17 +7,17 @@
 /**
  * GENERATED FILE — do not edit by hand.
  *
- * Regenerate with:
- *   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
- *       rocm-systems/projects/hip-tests/catch/unit/hrr/hrr_api_matrix_expectations.h
+ * Regenerate with, from projects/hrr/tools/api-matrix:
+ *   ./derive_manifest.py
+ *   ./check_matrix.py --emit-cxx ../../tests/integration/hrr_api_matrix_expectations.h
  *
- * Source of truth is the pair api_classes.json (derived from HRR's generator)
- * and api_matrix.yaml (the authored tier and expectation overlay). Generating
- * this header rather than transcribing it is what keeps the Catch2 tests and
- * the aim-labs reporter from drifting into disagreeing about what an API is
- * supposed to do at replay.
+ * Source of truth is the pair api_classes.json (derived from HRR's generator
+ * by derive_manifest.py) and api_matrix.yaml (the authored tier and
+ * expectation overlay). Generating this header rather than transcribing it is
+ * what keeps the Catch2 tests and the matrix reporter from drifting into
+ * disagreeing about what an API is supposed to do at replay.
  *
- * Generated 2026-08-24 from 553 HIP APIs.
+ * Generated from 555 HIP APIs.
  */
 
 #pragma once
@@ -40,7 +40,7 @@ struct HrrApiExpectation {
   const char* api;
   const char* tier;
   int expect;          // HrrExpectCode
-  bool payload_loss;   // counted as faithful but cannot replay (section 8.3)
+  bool payload_loss;   // counted as faithful but cannot replay
   bool expect_captured;  // false: HIP folds it away before HRR records it
   // The handler is real and works, but for the arguments one of this tier's
   // own workloads records it returns an error. Observing HANDLER_ERROR is
@@ -62,7 +62,6 @@ struct HrrTierFloor {
   const char* tier;
   int min_covered;
   int gpus;
-  bool skip_by_default;
   const char* const* workloads;
 };
 
@@ -232,6 +231,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipDevSmResourceSplit", "T4", 0, true, true, false, false},
     {"hipDevSmResourceSplitByCount", "T4", 0, true, true, false, false},
     {"hipDeviceComputeCapability", "T4", 0, false, true, false, false},
+    {"hipDeviceFlushGPUDirectRDMAWrites", "T4", 0, false, true, false, false},
     {"hipDeviceGet", "T4", 1, false, true, false, false},
     {"hipDeviceGetAttribute", "T4", 0, false, true, false, false},
     {"hipDeviceGetByPCIBusId", "T4", 1, false, true, false, false},
@@ -241,7 +241,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipDeviceGetExecutionCtx", "T4", 0, false, true, false, false},
     {"hipDeviceGetGraphMemAttribute", "T4", 1, false, true, false, false},
     {"hipDeviceGetLimit", "T4", 0, false, true, false, false},
-    {"hipDeviceGetLuid", "T4", 0, false, true, false, false},
+    {"hipDeviceGetLuid", "T4", 1, false, true, false, false},
     {"hipDeviceGetMemPool", "T4", 0, false, true, false, false},
     {"hipDeviceGetName", "T4", 1, false, true, false, false},
     {"hipDeviceGetPCIBusId", "T4", 1, false, true, false, false},
@@ -311,9 +311,9 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipGetLastError", "T4", 0, false, true, false, false},
     {"hipGetProcAddress_spt", "T4", 0, false, true, false, false},
     {"hipGetStreamDeviceId", "T4", 1, false, true, false, false},
-    {"hipGetTextureObjectResourceDesc", "T4", 0, false, true, false, false},
-    {"hipGetTextureObjectResourceViewDesc", "T4", 0, false, true, false, false},
-    {"hipGetTextureObjectTextureDesc", "T4", 0, false, true, false, false},
+    {"hipGetTextureObjectResourceDesc", "T4", 0, false, true, true, false},
+    {"hipGetTextureObjectResourceViewDesc", "T4", 0, false, true, true, false},
+    {"hipGetTextureObjectTextureDesc", "T4", 0, false, true, true, false},
     {"hipGraphAddBatchMemOpNode", "T4", 0, false, true, false, false},
     {"hipGraphAddChildGraphNode", "T4", 0, false, true, false, false},
     {"hipGraphAddDependencies", "T4", 0, false, true, false, false},
@@ -384,7 +384,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipHccModuleLaunchKernel", "T4", 1, false, true, false, false},
     {"hipHostGetFlags", "T4", 1, false, true, false, false},
     {"hipInit", "T4", 0, false, true, false, false},
-    {"hipInitDevice", "T4", 0, false, true, false, false},
+    {"hipInitDevice", "T4", 1, false, true, false, false},
     {"hipKernelGetAttribute", "T4", 1, false, true, false, false},
     {"hipKernelGetFunction", "T4", 1, false, true, false, false},
     {"hipKernelGetLibrary", "T4", 1, false, true, false, false},
@@ -417,7 +417,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipMemDiscardAndPrefetchBatchAsync", "T4", 1, false, true, false, false},
     {"hipMemDiscardBatchAsync", "T4", 1, false, true, false, false},
     {"hipMemGetAddressRange", "T4", 1, false, true, false, false},
-    {"hipMemGetDefaultMemPool", "T4", 0, false, true, false, false},
+    {"hipMemGetDefaultMemPool", "T4", 1, false, true, false, false},
     {"hipMemGetMemPool", "T4", 0, false, true, false, false},
     {"hipMemPoolCreate", "T4", 0, false, true, false, false},
     {"hipMemPoolDestroy", "T4", 0, false, true, false, false},
@@ -479,6 +479,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipMemsetD8", "T4", 0, false, true, false, false},
     {"hipMemsetD8Async", "T4", 0, false, true, false, false},
     {"hipMemset_spt", "T4", 0, false, true, false, false},
+    {"hipModuleEnumerateFunctions", "T4", 1, false, true, false, false},
     {"hipModuleGetFunctionCount", "T4", 1, false, true, false, false},
     {"hipModuleGetTexRef", "T4", 1, false, true, false, false},
     {"hipModuleLaunchCooperativeKernelMultiDevice", "T4", 0, false, true, false, false},
@@ -541,7 +542,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipBindTextureToArray", "T5", 0, true, true, false, false},
     {"hipBindTextureToMipmappedArray", "T5", 0, true, true, false, false},
     {"hipCreateChannelDesc", "T5", 1, false, true, false, false},
-    {"hipCreateSurfaceObject", "T5", 0, true, true, false, false},
+    {"hipCreateSurfaceObject", "T5", 4, true, true, false, false},
     {"hipCreateTextureObject", "T5", 1, true, true, false, false},
     {"hipDestroySurfaceObject", "T5", 0, false, true, false, false},
     {"hipDestroyTextureObject", "T5", 1, false, true, false, false},
@@ -659,6 +660,15 @@ inline constexpr const char* const kHrrWorkloadsT4[] = {
     "Unit_HRR_ApiMatrix_ProcAddress_Direct",
     "Unit_HRR_ApiMatrix_SptKernelLaunch_Direct",
     "Unit_HRR_ApiMatrix_SptCoopLaunch_Direct",
+    "Unit_HRR_MemcpySpt_Direct",
+    "Unit_HRR_MemsetSpt_Direct",
+    "Unit_HRR_Memset3DSpt_Direct",
+    "Unit_HRR_Memcpy3DSpt_Direct",
+    "Unit_HRR_StreamQuerySpt_Direct",
+    "Unit_HRR_StreamWaitEventSpt_Direct",
+    "Unit_HRR_StreamCaptureBeginSpt_Direct",
+    "Unit_HRR_GraphLaunchSpt_Direct",
+    "Unit_HRR_StreamCaptureQuerySpt_Direct",
     "Unit_HRR_ApiMatrix_MemPoolShare_Direct",
     "Unit_HRR_AllApis_Direct",
     "Unit_HRR_StressApis_Direct",
@@ -693,12 +703,12 @@ inline constexpr const char* const kHrrWorkloadsT5[] = {
 };
 
 inline constexpr HrrTierFloor kHrrTierFloors[] = {
-    {"T0", 65, 1, false, kHrrWorkloadsT0},
-    {"T1", 14, 1, false, kHrrWorkloadsT1},
-    {"T2", 34, 1, false, kHrrWorkloadsT2},
-    {"T3", 20, 2, false, kHrrWorkloadsT3},
-    {"T4", 254, 1, false, kHrrWorkloadsT4},
-    {"T5", 12, 1, true, kHrrWorkloadsT5},
+    {"T0", 65, 1, kHrrWorkloadsT0},
+    {"T1", 14, 1, kHrrWorkloadsT1},
+    {"T2", 34, 1, kHrrWorkloadsT2},
+    {"T3", 20, 2, kHrrWorkloadsT3},
+    {"T4", 254, 1, kHrrWorkloadsT4},
+    {"T5", 12, 1, kHrrWorkloadsT5},
 };
 
 inline constexpr size_t kHrrTierFloorCount =
