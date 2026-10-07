@@ -491,16 +491,20 @@ struct RasCase
 
 // Runs, each in its own process, the cases that fit the visible GPU count. The GPU count is checked here in the
 // parent: an isolated run ends in EXPECT_TRUE(), so a GTEST_SKIP() inside an isolated case is reported as a pass.
-// When no case fits, gtest reports a real skip.
+// When no case fits, gtest reports a real skip. A case process exits 0 on a skip, which the parent records as a pass,
+// so a case process that cannot fit the case the parent started it for, for example after a failed HIP init, fails.
 static void runRasCases(const std::vector<RasCase>& cases)
 {
     const int nGpus = caseGateGpus();
+    const char* caseProcessTarget = std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar);
     std::string notRun;
     int registered = 0;
     for(const RasCase& c : cases)
     {
         if(nGpus < c.minGpus)
         {
+            if(caseProcessTarget != nullptr && c.name == std::string(caseProcessTarget))
+                FAIL() << "case process sees " << nGpus << " usable GPUs, " << c.name << " needs " << c.minGpus;
             notRun += std::string(" ") + c.name + " (>= " + std::to_string(c.minGpus) + " GPUs)";
             continue;
         }
