@@ -423,7 +423,3 @@ class TestCliRasCperJson(unittest.TestCase):
         self.assertEqual(len(parsed), 2)
         for row in parsed:
             self.assertEqual(row["severity"], "FATAL")
-
-
-if __name__ == "__main__":
-    unittest.main()
