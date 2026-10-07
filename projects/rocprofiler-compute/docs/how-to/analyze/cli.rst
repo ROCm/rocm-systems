@@ -726,6 +726,40 @@ Analysis database views
    :align: center
    :alt: Analysis database views
 
+.. _analysis-database-memory-chart:
+
+Memory chart layout
+-------------------
+
+The ``memory_chart_extdata`` column of ``compute_workload`` holds the workload's memory chart
+layout as JSON, a superset of the layout format that ROCm Optiq reads. It is ``NULL`` when the
+workload's architecture has no memory chart layout, or when its panel 3 configuration (for
+example from ``--config-dir``) has no single metric for each metric the layout shows.
+
+* ``version``: version of the stored layout format, currently ``1``.
+* ``blocks``: the chart's blocks. Each block has an ``id``, a ``title``, its ``column``
+  (0 is the compute side), its ``row`` (0 for the main row; negative above and positive
+  below the block it is attached to, named by ``host``), and its ``order`` within the
+  column, the parent block, or the row. ``content`` lists the metrics the block shows,
+  ``children`` lists the blocks drawn inside it, and ``note`` is a short fixed label.
+* ``arrows``: metrics drawn between blocks, each with ``from``, ``to``, ``direction``
+  (``backward``, ``forward``, or ``both``), and an optional ``group`` header.
+* Each metric reference has a ``metric`` (the ``metric_id`` of the metric in the same
+  workload), a ``title``, and a ``category``: ``read``, ``write``, ``atomic``, ``util``,
+  ``hit``, ``stall``, ``neutral``, or ``bw``.
+* ``description`` and ``scope`` (the two scope-bar labels and the block where the second
+  one starts) describe the chart as a whole.
+
+Metrics left out with ``--block`` are still referenced; they have no values. To read a
+referenced metric's value, look up its ``metric_id`` in ``compute_kernel_metric_view`` or
+``compute_workload_metric_view`` with ``value_name = 'Value'``:
+
+.. code-block:: sql
+
+   SELECT metric_id, metric_name, unit, value
+   FROM compute_workload_metric_view
+   WHERE workload_id = 1 AND metric_id = '3.1.6' AND value_name = 'Value';
+
 Analysis database example
 
 .. note::
