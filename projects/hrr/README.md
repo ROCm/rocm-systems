@@ -92,6 +92,8 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 |----------|---------|---------|
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance) |
+| `HIP_HRR_HOST_SNAPSHOTS` | on | Record the pinned host buffers each kernel reads, before the launch, so replay can refill them. `0` records none; the archive then holds no pinned host contents. Snapshots can hold token IDs and request state: keep archives private (see DESIGN.md, Threat Model: Pinned Host Snapshots) |
+| `HIP_HRR_HOST_SNAPSHOT_MAX_MB` | `64` | Largest pinned allocation snapshotted, in MiB. A larger one is skipped and listed under `unreplayable_apis` in the manifest |
 
 ### `hrr-playback` CLI options
 
@@ -168,7 +170,7 @@ the next event, so the divergence is confined to the launch under examination.
 | `HIP_HRR_REPLAY_SCAN_ARGS_ORDINAL` | `0` | Before kernel `N`, read back each pointer argument's allocation and report words that are recorded addresses (debug) |
 | `HIP_HRR_REPLAY_SCAN_ARGS_BYTES` | `4096` | Per-allocation cap for the argument scan |
 | `HIP_HRR_REPLAY_SCAN_H2D` | off | Report recorded addresses inside replayed H2D payloads (debug) |
-| `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` | off | Report kernels taking a pointer into host memory, whose contents replay cannot restore (debug) |
+| `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` | off | Report kernels taking a pointer into host memory, whose contents replay cannot restore, including pointers inside struct arguments. Allocations refilled from a pinned host snapshot are not reported (debug) |
 | `HIP_HRR_REPLAY_FILL_BYTE` | `0` | Byte to fill fresh allocations with; set it to e.g. `0xa5` to expose kernels reading memory nothing wrote (debug) |
 | `HIP_HRR_REPLAY_EXPLAIN_ADDR` | unset | At the scan ordinal, report whether an address is recorded, live, or neither, and whether the GPU can read it (debug) |
 
