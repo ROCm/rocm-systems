@@ -544,6 +544,8 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     assert_eq!(destination_bytes, source_bytes);
     private.free()?;
     uncached.free()?;
+    drop(private);
+    drop(uncached);
 
     let mut virtual_memory =
         device.create_virtual_memory(MemoryKind::System, 4096, false, false)?;
@@ -587,6 +589,9 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     mapping.free()?;
     virtual_memory.free()?;
     reservation.free()?;
+    drop(mapping);
+    drop(virtual_memory);
+    drop(reservation);
 
     let mut uncached_memory = device.create_virtual_memory(
         MemoryKind::DeviceLocal {
@@ -639,6 +644,9 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     uncached_mapping.free()?;
     uncached_memory.free()?;
     uncached_reservation.free()?;
+    drop(uncached_mapping);
+    drop(uncached_memory);
+    drop(uncached_reservation);
 
     let mut uncached_host = device.allocate(
         MemoryKind::OwnedHost {
@@ -686,6 +694,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     uncached_host.free()?;
     assert!(read_matches);
     assert!(write_matches);
+    drop(uncached_host);
 
     for cache in [
         HostCachePolicy::Coarse,
@@ -762,6 +771,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     assert_eq!(registered_info.host_address, Some(host_address));
     assert!(read_matches);
     assert!(write_matches);
+    drop(registered);
 
     for cache in [
         HostCachePolicy::Coarse,
@@ -992,6 +1002,9 @@ fn gfx1201_user_sdma_queue(ring_memory: QueueRingMemory) -> Result<(), Box<dyn E
     unsafe { queue.destroy()? };
     source.free()?;
     destination.free()?;
+    drop(queue);
+    drop(source);
+    drop(destination);
     drop(device);
     session.destroy()?;
     Ok(())

@@ -994,6 +994,9 @@ impl<'device> GpuDevice<'device> {
     ) -> Result<(Allocation, usize, u64), CopyFailure> {
         let length = u64::try_from(size).map_err(|_| invalid("staged copy size is too large"))?;
         let alignment = crate::memory::host_page_size().map_err(CopyFailure::retired)?;
+        let length = length
+            .checked_next_multiple_of(alignment)
+            .ok_or_else(|| invalid("staged copy page rounding overflow"))?;
         let staging = self
             .device()
             .allocate(MemoryKind::System, length, alignment, access)
