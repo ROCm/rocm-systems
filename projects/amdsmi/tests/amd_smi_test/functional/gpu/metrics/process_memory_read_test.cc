@@ -17,6 +17,7 @@
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -229,10 +230,13 @@ void TestProcessMemoryRead::Run(void) {
 
   // A list cached before the helper started is served for up to
   // AMDSMI_PROCESS_INFO_CACHE_MS, so query until it shows the helper.
+  const char* cache_ms = std::getenv("AMDSMI_PROCESS_INFO_CACHE_MS");
   std::vector<amdsmi_proc_info_t> procs(512);
   amdsmi_proc_info_t found{};
   bool listed = false;
-  for (const auto give_up = Clock::now() + std::chrono::seconds(10);
+  for (const auto give_up =
+           Clock::now() + std::chrono::seconds(10) +
+           std::chrono::milliseconds(cache_ms ? std::strtoul(cache_ms, nullptr, 10) : 0);
        !listed && Clock::now() < give_up;) {
     uint32_t count = static_cast<uint32_t>(procs.size());
     amdsmi_status_t list_status = amdsmi_get_gpu_process_list(gpu, &count, procs.data());
