@@ -207,6 +207,9 @@ pub extern "C" fn hsa_init() -> Status {
 #[unsafe(no_mangle)]
 pub extern "C" fn hsa_shut_down() -> Status {
     boundary(|| {
+        if runtime::LogWriteScope::active() {
+            return INVALID_RUNTIME_STATE;
+        }
         let (runtime, generation) = {
             let mut guard = match lock() {
                 Ok(guard) => guard,
@@ -1532,16 +1535,19 @@ pub unsafe extern "C" fn hsa_status_string(status: Status, output: *mut *const c
 
 /// # Safety
 /// `flags` must address eight readable bytes for the duration of this call.
-/// A non-null `file` is unsupported because this frontend does not call C
-/// stdio; null selects Rust's stderr output.
+/// A non-null `file` must be an open C `FILE*` kept live while its logging
+/// flags are enabled. Replacing the stream, disabling logging, or final HSA
+/// shutdown waits for writes already using it to finish. A nonfinal
+/// `hsa_shut_down` does not release the stream. Calls made recursively from a
+/// custom stream callback are rejected. Null selects stderr.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_void) -> Status {
     boundary(|| {
+        if runtime::LogWriteScope::active() {
+            return INVALID_RUNTIME_STATE;
+        }
         if flags.is_null() {
             return INVALID_ARGUMENT;
-        }
-        if !file.is_null() {
-            return NOT_SUPPORTED;
         }
         // SAFETY: The public ABI requires eight readable bytes for this call.
         let mut copied_flags = [0_u8; 8];
@@ -1559,7 +1565,7 @@ pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_voi
         };
         let logging = runtime.logging.clone();
         drop(guard);
-        logging.set(copied_flags)
+        logging.set(copied_flags, file)
     })
 }
 
@@ -2204,17 +2210,6 @@ mod tests {
             *mut c_void,
             *mut bool,
         ) -> Status = hsa_amd_spm_set_dest_buffer;
-    }
-
-    #[test]
-    fn logging_rejects_c_stream_without_dereferencing_it() {
-        let mut flags = [0_u8; 8];
-        // SAFETY: The valid flags array is readable; a non-null stream is
-        // rejected before inspection, even without an initialized runtime.
-        assert_eq!(
-            unsafe { hsa_amd_enable_logging(flags.as_mut_ptr(), (&raw mut flags).cast()) },
-            NOT_SUPPORTED
-        );
     }
 
     #[test]
