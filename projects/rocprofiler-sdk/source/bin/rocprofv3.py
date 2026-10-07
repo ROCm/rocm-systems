@@ -2615,16 +2615,17 @@ def main(argv=None):
         beta_acknowledged = getattr(cmd_args, "kernel_replay_beta_enabled", None)
         if beta_acknowledged is None:
             beta_acknowledged = getattr(inp, "kernel_replay_beta_enabled", None)
+        has_counters = (
+            any(getattr(cmd_args, "pmc", None) or [])
+            or any(getattr(inp, "pmc", None) or [])
+            or any(getattr(inp, "pmc_groups", None) or [])
+        )
         if job_replay_enabled and not beta_acknowledged:
             fatal_error(
                 "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
                 "feature via --kernel-replay-beta-enabled"
             )
-        if job_replay_enabled and not (
-            cli_has_pmc
-            or has_set_attr(inp, "pmc")
-            or has_set_attr(inp, "pmc_groups")
-        ):
+        if job_replay_enabled and not has_counters:
             fatal_error(
                 "--replay-mode kernel requires counter collection "
                 "(--pmc, input-file pmc, or pmc_groups)"
