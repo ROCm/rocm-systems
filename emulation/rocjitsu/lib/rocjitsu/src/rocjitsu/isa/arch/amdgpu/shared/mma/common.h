@@ -1039,66 +1039,6 @@ template <typename Run> bool dispatch_matrix_fmt_pair(uint32_t a_fmt, uint32_t b
   }
 }
 
-// ---------------------------------------------------------------------------
-// Execution kernels
-// ---------------------------------------------------------------------------
-
-/// Shared SIMD core for the MFMA/WMMA/SWMMAC executors. For every (row,col),
-/// Cbuf[row*stride+col] += sum_k Abuf[row*K+k] * Bbuf[k*stride+col], run as
-/// native-width rows over the col (N) dimension with a scalar tail. A/B/C must
-/// already be hoisted into dense buffers (lane permutation, per-element scale,
-/// and 2:4 sparsity gather folded in by the caller). Float uses fused FMA
-/// (matching the hardware's single-rounding MACs; the scalar reference is
-/// non-fused, so f32 agrees to a few ULP and packed f16/bf16 rounds identically);
-/// integer MAC is exact, so the SIMD and scalar paths are bit-identical.
-/// Templated so the `if constexpr (has_stdx_simd)` callers never instantiate it
-/// on a platform without <experimental/simd>.
-///
-/// Cbuf is the in/out accumulator: each (row,col) is read as the starting value,
-/// the K products are added, and the result written back. Callers come in two
-/// flavors — most pre-seed Cbuf with the hardware C accumulator (D = C + A*B in
-/// place), while the int32 WMMA paths instead leave Cbuf ZERO and add the
-/// hardware accumulator afterward in wider precision (for saturation). That is
-/// why the staging buffers are zero-initialized as a uniform convention: it is
-/// load-bearing for the zero-start callers and harmless (redundant) for the
-/// pre-seeded ones.
-///
-/// Read-bounds: only the used region is touched — Abuf[row*K+k] for row<M,k<K,
-/// and Bbuf/Cbuf[..*stride+col] for col<N (the vectorized loop is bounded by
-/// `col + W <= N`, the remainder is a scalar tail at col<N). The padding columns
-/// [N, stride) — present only so each row starts W-aligned — are never read.
-template <typename T>
-void wmma_simd_matmul(uint32_t M, uint32_t N, uint32_t K, uint32_t W, uint32_t stride,
-                      const T *Abuf, const T *Bbuf, T *Cbuf) {
-  for (uint32_t row = 0; row < M; ++row) {
-    uint32_t col = 0;
-    for (; col + W <= N; col += W) {
-      util::native<T> c;
-      c.copy_from(&Cbuf[row * stride + col], util::stdx::vector_aligned);
-      for (uint32_t k = 0; k < K; ++k) {
-        util::native<T> a(Abuf[row * K + k]);
-        util::native<T> bv;
-        bv.copy_from(&Bbuf[k * stride + col], util::stdx::vector_aligned);
-        if constexpr (std::is_floating_point_v<T>)
-          c = util::stdx::fma(a, bv, c);
-        else
-          c += a * bv;
-      }
-      c.copy_to(&Cbuf[row * stride + col], util::stdx::vector_aligned);
-    }
-    for (; col < N; ++col) {
-      T acc = Cbuf[row * stride + col];
-      for (uint32_t k = 0; k < K; ++k) {
-        if constexpr (std::is_floating_point_v<T>)
-          acc = std::fma(Abuf[row * K + k], Bbuf[k * stride + col], acc);
-        else
-          acc += Abuf[row * K + k] * Bbuf[k * stride + col];
-      }
-      Cbuf[row * stride + col] = acc;
-    }
-  }
-}
-
 /// Adjust a GFX9 InputLoc for wave32 physical VGPR addressing.
 ///
 /// The GFX9 MFMA layout uses 64 virtual lanes. On wave64 this maps directly
@@ -1661,6 +1601,33 @@ inline float smfmac_decode_snapshot(const uint32_t (&words)[Words], uint32_t ele
                                     uint32_t lane) {
   constexpr uint32_t elements_per_word = 32 / smfmac_input_bits<Extract>;
   return smfmac_decode_word<Extract>(words[(element / elements_per_word) * 64 + lane], element);
+}
+
+/// Column (N) leading-dimension pitch rounding A/B/C buffers up to a SIMD-width
+/// multiple, so every matmul row starts W-aligned. Bounds every real WMMA shape
+/// (M <= 32, N <= 16, K <= 128); anything larger falls back to the scalar path.
+constexpr size_t WMMA_SIMD_MAX_AB = 4096;      // max M*K
+constexpr size_t WMMA_SIMD_MAX_BSTRIDE = 4096; // max K*stride
+constexpr size_t WMMA_SIMD_MAX_C = 1024;       // max M*stride
+// Combined stack frame for the WMMA/SWMMAC staging buffers (currently 28 KiB for
+// the float and int32 paths); tripwire against silent stack-frame growth.
+static_assert((WMMA_SIMD_MAX_AB + WMMA_SIMD_MAX_BSTRIDE + WMMA_SIMD_MAX_C) * sizeof(float) <=
+                  48 * 1024,
+              "WMMA SIMD staging buffers exceed the 48 KiB stack budget");
+
+/// Pack an integer accumulator, saturating to int32 range when clamp is enabled.
+inline uint32_t pack_i32_acc(int64_t acc, bool clamp) {
+  if (clamp) {
+    acc = std::clamp(acc, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
+                     static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
+  }
+  return static_cast<uint32_t>(acc);
+}
+
+/// Return whether an f32-accumulating matrix output row divides into complete
+/// native SIMD chunks.
+constexpr bool mma_f32_native_width_supported(uint32_t n, uint32_t width) {
+  return width > 1 && n % width == 0;
 }
 
 } // namespace amdgpu

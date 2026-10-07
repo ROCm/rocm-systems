@@ -678,35 +678,6 @@ template <typename Float> inline native<Float> rndne_bits_simd(native<Float> val
 
 inline native<float> rndne_simd(native<float> a) { return rndne_bits_simd(a); }
 
-inline native<double> trunc_simd(native<double> a) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  return map_native64_scalar<double>(a, [](double x) { return std::trunc(x); });
-#else
-  return round_fixup_simd<double, false>(a, [](native<double> x) { return stdx::trunc(x); });
-#endif
-}
-inline native<double> ceil_simd(native<double> a) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  return map_native64_scalar<double>(a, [](double x) { return std::ceil(x); });
-#else
-  return round_fixup_simd<double, false>(a, [](native<double> x) { return stdx::ceil(x); });
-#endif
-}
-inline native<double> floor_simd(native<double> a) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  return map_native64_scalar<double>(a, [](double x) { return std::floor(x); });
-#else
-  return round_fixup_simd<double, false>(a, [](native<double> x) { return stdx::floor(x); });
-#endif
-}
-inline native<double> rndne_simd(native<double> a) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  return map_native64_scalar<double>(a, [](double x) { return rndne_scalar(x); });
-#else
-  return rndne_bits_simd(a);
-#endif
-}
-
 /// Scalar round-to-integer matching the round_fixup_simd / AMD-hardware NaN
 /// behavior on every compiler. clang lowers std::floor/ceil/trunc to the
 /// roundss/roundsd instruction, which quiets a signaling NaN (sign + payload
@@ -870,52 +841,6 @@ inline native<float> bf8_e5m2_to_f32_simd(native<uint32_t> v) {
 ///   if (isnan(a)||isnan(b)) return qNaN;
 ///   if (a==b)              return signbit(a) ? <tie> : <other>;
 ///   return a <cmp> b ? a : b;
-template <typename V> V ieee_maximum_simd(V a, V b) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  if constexpr (std::is_same_v<typename V::value_type, double>) {
-    return map_native64_scalar<double>(a, b, [](double lhs, double rhs) {
-      if (std::isnan(lhs) || std::isnan(rhs))
-        return std::numeric_limits<double>::quiet_NaN();
-      if (lhs == rhs)
-        return std::signbit(lhs) ? rhs : lhs;
-      return lhs > rhs ? lhs : rhs;
-    });
-  } else
-#endif
-  {
-    const auto nan = stdx::isnan(a) || stdx::isnan(b);
-    const auto eq = (a == b);
-    const auto sa = stdx::signbit(a); // true when a is negative (incl. -0)
-    V res = b;                        // a < b (and the a==b,!sa case start)
-    stdx::where(a > b, res) = a;
-    stdx::where(eq && !sa, res) = a; // ±0 / equal tie: pick the +signed operand
-    stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
-    return res;
-  }
-}
-template <typename V> V ieee_minimum_simd(V a, V b) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  if constexpr (std::is_same_v<typename V::value_type, double>) {
-    return map_native64_scalar<double>(a, b, [](double lhs, double rhs) {
-      if (std::isnan(lhs) || std::isnan(rhs))
-        return std::numeric_limits<double>::quiet_NaN();
-      if (lhs == rhs)
-        return std::signbit(lhs) ? lhs : rhs;
-      return lhs < rhs ? lhs : rhs;
-    });
-  } else
-#endif
-  {
-    const auto nan = stdx::isnan(a) || stdx::isnan(b);
-    const auto eq = (a == b);
-    const auto sa = stdx::signbit(a);
-    V res = b; // a > b (and the a==b,!sa case)
-    stdx::where(a < b, res) = a;
-    stdx::where(eq && sa, res) = a; // ±0 / equal tie: pick the -signed operand
-    stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
-    return res;
-  }
-}
 
 /// Round an in-range finite float to the nearest integer, with halfway values
 /// choosing the even integer. Unlike nearbyint(), this is independent of the
@@ -1024,81 +949,12 @@ inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
 /// renormalize via p = floor(log2(M)) read from double(M)'s exponent (M < 2^53,
 /// exact); ±0 / Inf pass through; NaN is quieted (mantissa MSB set). Bit-identical
 /// to the scalar v_frexp_mant_f64 body.
-inline native<double> frexp_mant_f64_simd(native<double> x) {
-  using U = native<uint64_t>;
-  U v = std::bit_cast<U>(x);
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  U out = map_native64_scalar<uint64_t>(v, [](uint64_t bits) -> uint64_t {
-    constexpr uint64_t kSign = 0x8000000000000000ull;
-    constexpr uint64_t kMant = 0x000FFFFFFFFFFFFFull;
-    constexpr uint64_t kQuiet = 0x0008000000000000ull;
-    uint64_t sign = bits & kSign;
-    uint64_t E = (bits >> 52) & 0x7FFull;
-    uint64_t M = bits & kMant;
-    if (E == 0ull) {
-      if (M == 0ull)
-        return bits;
-      uint64_t p = 63u - static_cast<uint64_t>(std::countl_zero(M));
-      return sign | (1022ull << 52) | ((M << (52ull - p)) & kMant);
-    }
-    if (E == 2047ull)
-      return M == 0ull ? bits : bits | kQuiet;
-    return sign | (1022ull << 52) | M;
-  });
-  return std::bit_cast<native<double>>(out);
-#else
-  U sign = v & U(0x8000000000000000ull);
-  U E = (v >> 52) & U(0x7FFull);
-  U M = v & U(0xFFFFFFFFFFFFFull); // 52 mantissa bits
-  U normal = sign | (U(1022ull) << 52) | M;
-  const native<double> mf = stdx::static_simd_cast<native<double>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
-  U dn = sign | (U(1022ull) << 52) | ((M << (U(52ull) - p)) & U(0xFFFFFFFFFFFFFull));
-  U out = normal;
-  stdx::where(E == 0ull, out) = v;                   // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn; // denormal -> renormalized
-  stdx::where(E == 2047ull, out) = v;                // Inf passes through unchanged
-  stdx::where((E == 2047ull) && (M != 0ull), out) = v | U(0x0008000000000000ull); // quiet NaN
-  return std::bit_cast<native<double>>(out);
-#endif
-}
 
 /// 64-bit-lane port of the f64 `std::frexp` exponent. Returns each int32 result
 /// in the low 32 bits of a native<uint64_t> lane (sign-extended), so the CVT
 /// f64->b32 glue narrows it with one static_simd_cast. Normal lanes give
 /// E - 1022; denormals p - 1073; ±0 / Inf / NaN give 0 (the scalar guards
 /// frexp to finite non-zero inputs). Bit-identical to v_frexp_exp_i32_f64.
-inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
-  using U = native<uint64_t>;
-  U v = std::bit_cast<U>(x);
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  return map_native64_scalar<uint64_t>(v, [](uint64_t bits) -> uint64_t {
-    uint64_t E = (bits >> 52) & 0x7FFull;
-    uint64_t M = bits & 0x000FFFFFFFFFFFFFull;
-    if (E == 0ull) {
-      if (M == 0ull)
-        return 0ull;
-      uint64_t p = 63u - static_cast<uint64_t>(std::countl_zero(M));
-      return static_cast<uint64_t>(static_cast<int64_t>(p) - 1073);
-    }
-    if (E == 2047ull)
-      return 0ull;
-    return static_cast<uint64_t>(static_cast<int64_t>(E) - 1022);
-  });
-#else
-  U E = (v >> 52) & U(0x7FFull);
-  U M = v & U(0xFFFFFFFFFFFFFull);
-  U normal = E - U(1022ull);
-  const native<double> mf = stdx::static_simd_cast<native<double>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
-  U dn = p - U(1073ull);
-  U out = normal;
-  stdx::where(E == 0ull, out) = U(0ull);
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn;
-  stdx::where(E == 2047ull, out) = U(0ull);
-  return out;
-#endif
-}
 
 /// Sum of the four per-byte absolute differences of two uint32 lanes (the core
 /// of v_sad_u8 / v_sad_hi_u8). Each byte difference is in [0,255], so the sum is
@@ -1208,6 +1064,30 @@ inline native<uint32_t> mul_hi_i32_simd(native<uint32_t> a, native<uint32_t> b) 
   stdx::where((a >> 31) != U(0u), hi) = hi - b;
   stdx::where((b >> 31) != U(0u), hi) = hi - a;
   return hi;
+}
+template <typename V> V ieee_maximum_masked_simd(V a, V b) {
+  {
+    const auto nan = stdx::isnan(a) || stdx::isnan(b);
+    const auto eq = (a == b);
+    const auto sa = stdx::signbit(a); // true when a is negative (incl. -0)
+    V res = b;                        // a < b (and the a==b,!sa case start)
+    stdx::where(a > b, res) = a;
+    stdx::where(eq && !sa, res) = a; // ±0 / equal tie: pick the +signed operand
+    stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
+    return res;
+  }
+}
+template <typename V> V ieee_minimum_masked_simd(V a, V b) {
+  {
+    const auto nan = stdx::isnan(a) || stdx::isnan(b);
+    const auto eq = (a == b);
+    const auto sa = stdx::signbit(a);
+    V res = b; // a > b (and the a==b,!sa case)
+    stdx::where(a < b, res) = a;
+    stdx::where(eq && sa, res) = a; // ±0 / equal tie: pick the -signed operand
+    stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
+    return res;
+  }
 }
 #endif // __has_include(<experimental/simd>)
 

@@ -19,9 +19,7 @@
 #include <limits>
 #include <type_traits>
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-#include <xmmintrin.h>
-#endif
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_control/select.h"
 
 namespace rocjitsu::amdgpu::fp_mode {
 
@@ -60,39 +58,14 @@ inline int host_round_mode(uint32_t round_mode) {
   }
 }
 
-#if defined(__aarch64__)
-inline uint64_t read_fpcr() {
-  uint64_t value;
-  __asm__ volatile("mrs %0, fpcr" : "=r"(value) : : "memory");
-  return value;
-}
-
-inline void write_fpcr(uint64_t value) {
-  __asm__ volatile("msr fpcr, %0" : : "r"(value) : "memory");
-}
-#endif
-
 class ScopedFenv {
 public:
   explicit ScopedFenv(uint32_t round_mode) {
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-    saved_mxcsr_ = _mm_getcsr();
-#elif defined(__aarch64__)
-    saved_fpcr_ = read_fpcr();
-#endif
+    saved_control_ = HostFpControl::save();
     saved_ = std::feholdexcept(&environment_) == 0;
     if (saved_)
       std::fesetround(host_round_mode(round_mode));
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-    constexpr uint32_t kDazMask = 1u << 6;
-    constexpr uint32_t kFtzMask = 1u << 15;
-    _mm_setcsr(_mm_getcsr() & ~(kDazMask | kFtzMask));
-#elif defined(__aarch64__)
-    constexpr uint64_t kFizMask = uint64_t{1} << 0;
-    constexpr uint64_t kFz16Mask = uint64_t{1} << 19;
-    constexpr uint64_t kFzMask = uint64_t{1} << 24;
-    write_fpcr(read_fpcr() & ~(kFizMask | kFz16Mask | kFzMask));
-#endif
+    HostFpControl::clear_denormals();
   }
 
   ScopedFenv(const ScopedFenv &) = delete;
@@ -101,21 +74,13 @@ public:
   ~ScopedFenv() {
     if (saved_)
       std::fesetenv(&environment_);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-    _mm_setcsr(saved_mxcsr_);
-#elif defined(__aarch64__)
-    write_fpcr(saved_fpcr_);
-#endif
+    HostFpControl::restore(saved_control_);
   }
 
 private:
   std::fenv_t environment_{};
   bool saved_ = false;
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-  uint32_t saved_mxcsr_ = 0;
-#elif defined(__aarch64__)
-  uint64_t saved_fpcr_ = 0;
-#endif
+  HostFpControl::State saved_control_{};
 };
 
 struct ExactF64Sum {
@@ -936,15 +901,7 @@ inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_
 inline bool native_arithmetic_matches(uint32_t round_mode, uint32_t denorm_mode) {
   if (round_mode != 0 || denorm_mode != 3 || std::fegetround() != FE_TONEAREST)
     return false;
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
-  // MXCSR rounding can differ from the x87 rounding reported by fegetround().
-  return (_mm_getcsr() & ((1u << 6) | (1u << 15) | _MM_ROUND_MASK)) == 0;
-#elif defined(__aarch64__)
-  return (detail::read_fpcr() & ((uint64_t{1} << 0) | (uint64_t{1} << 19) | (uint64_t{1} << 24))) ==
-         0;
-#else
-  return false;
-#endif
+  return detail::HostFpControl::native_arithmetic_matches();
 }
 
 /// @brief Round an F16 FMA significand before testing tininess and packing the exponent.

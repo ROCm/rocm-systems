@@ -52,6 +52,14 @@ template <SmfmacLayout Layout, uint32_t M, uint32_t N, uint32_t K, typename Extr
   return false;
 }
 
+[[gnu::always_inline]] inline bool
+try_exec_swmmac_16x16x64_16bit(auto &, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                               uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, SwmmacK64Input,
+                               SwmmacK64Accumulator, SwmmacK64Result, uint32_t, uint32_t,
+                               bool = false) {
+  return false;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
