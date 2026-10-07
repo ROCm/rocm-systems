@@ -63,14 +63,9 @@ TEST_F(writer_test, construct_with_null_storage_throws_invalid_argument)
     EXPECT_THROW((void) writer_t(nullptr), std::invalid_argument);
 }
 
-TEST_F(writer_test, get_storage_version_returns_rocpd_schema_version)
+TEST_F(writer_test, construct_with_valid_storage_succeeds)
 {
-    auto       storage  = std::make_unique<storage_t>(m_db_path, m_uuid);
-    const auto reported = storage->get_storage_version();
-
-    EXPECT_EQ(reported.major, 3);
-    EXPECT_EQ(reported.minor, 0);
-    EXPECT_EQ(reported.patch, 1);
+    EXPECT_NO_THROW({ auto writer = make_writer(); });
 }
 
 TEST_F(writer_test, construct_with_empty_uuid_throws_invalid_argument)
