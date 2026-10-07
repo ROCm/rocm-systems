@@ -47,7 +47,14 @@ MemoryPipeline::~MemoryPipeline() {
 
 MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instruction &inst) const {
   WaitCounterTokens counters;
-  if (const auto *issue = inst.amdgpu_memory_issue_info()) {
+  const DynamicInstState *state = inst.data();
+  const auto *issue = inst.amdgpu_memory_issue_info();
+  if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM)) {
+    const auto &routed = inst.data_as<VectorMemState>()->routed_issue_info;
+    if (routed)
+      issue = &*routed;
+  }
+  if (issue) {
     for (const auto obligation : issue->counter_obligations()) {
       for (uint8_t token = 0; token < obligation.counter_increment(); ++token)
         counters.types[counters.size++] = obligation.wait_counter_type();
@@ -56,7 +63,6 @@ MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instructi
   }
 
   WaitCounterType counter = counter_type_;
-  const DynamicInstState *state = inst.data();
   if (state != nullptr) {
     switch (state->tag()) {
     case SCALAR_MEM:
@@ -462,8 +468,11 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
             return outcome;
         }
     } else {
+      auto &cu = wf.raw_cu();
+      const bool allow_private_batch =
+          GpuVmAccessBatchGuard::active() && !cu.debug_active() && cu.plugin_group().empty();
       const VmAccessOutcome outcome =
-          l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id());
+          l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id(), allow_private_batch);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
@@ -504,66 +513,10 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
 
 namespace {
 
-/// @brief Apply an integer atomic RMW operation (32-bit or 64-bit).
-template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cmp_val = 0) {
-  using S = std::make_signed_t<T>;
-  switch (op) {
-  case AtomicOp::SWAP:
-    return src_val;
-  case AtomicOp::CONDXCHG32: {
-    static_assert(sizeof(T) == 4 || sizeof(T) == 8);
-    T result = old_val;
-    for (uint32_t shift = 0; shift < sizeof(T) * 8; shift += 32) {
-      const T half_mask = T{0xffffffffu} << shift;
-      const T store_mask = T{0x7fffffffu} << shift;
-      if ((src_val >> shift) & 0x80000000u)
-        result = (result & ~half_mask) | (src_val & store_mask);
-    }
-    return result;
-  }
-  case AtomicOp::CMPSWAP:
-    return (old_val == cmp_val) ? src_val : old_val;
-  case AtomicOp::MSKOR:
-    return (old_val & ~src_val) | cmp_val;
-  case AtomicOp::ADD:
-    return old_val + src_val;
-  case AtomicOp::SUB:
-    return old_val - src_val;
-  case AtomicOp::SUB_CLAMP:
-    return old_val >= src_val ? old_val - src_val : T{0};
-  case AtomicOp::COND_SUB:
-    return old_val >= src_val ? old_val - src_val : old_val;
-  case AtomicOp::WRAP:
-    return old_val >= src_val ? old_val - src_val : old_val + cmp_val;
-  case AtomicOp::RSUB:
-    return src_val - old_val;
-  case AtomicOp::SMIN:
-    return static_cast<T>(std::min(static_cast<S>(old_val), static_cast<S>(src_val)));
-  case AtomicOp::UMIN:
-    return std::min(old_val, src_val);
-  case AtomicOp::SMAX:
-    return static_cast<T>(std::max(static_cast<S>(old_val), static_cast<S>(src_val)));
-  case AtomicOp::UMAX:
-    return std::max(old_val, src_val);
-  case AtomicOp::AND:
-    return old_val & src_val;
-  case AtomicOp::OR:
-    return old_val | src_val;
-  case AtomicOp::XOR:
-    return old_val ^ src_val;
-  case AtomicOp::INC:
-    return (old_val >= src_val) ? T{0} : old_val + 1;
-  case AtomicOp::DEC:
-    return (old_val == 0 || old_val > src_val) ? src_val : old_val - 1;
-  default:
-    return old_val;
-  }
-}
-
 // Translate the deferred request into the shared ISA floating-point contract.
 template <typename Bits>
 Bits apply_fp_atomic(const VectorMemState &state, Bits old_bits, Bits source_bits,
-                     Bits compare_bits, uint32_t denorm_mode) {
+                     Bits compare_bits, uint32_t denorm_mode, bool local = false) {
   fp_mode::ScalarAtomicOp operation;
   switch (state.atomic_op) {
   case AtomicOp::FADD:
@@ -582,7 +535,7 @@ Bits apply_fp_atomic(const VectorMemState &state, Bits old_bits, Bits source_bit
     return old_bits;
   }
   return fp_mode::atomic_scalar(operation, old_bits, source_bits, compare_bits, denorm_mode,
-                                state.atomic_legacy_minmax);
+                                state.atomic_legacy_minmax, local || state.atomic_source_nan_first);
 }
 
 bool is_packed_add(AtomicOp op) {
@@ -777,8 +730,12 @@ VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d) {
           std::memcpy(&compare, &d.store_data[lane * source_stride + sizeof(source)],
                       sizeof(compare));
         compare_value = compare;
-        new_value = is_fp ? apply_fp_atomic(d, old32, source, compare, d.atomic_denorm_mode)
-                          : apply_int_atomic(d.atomic_op, old32, source, compare);
+        new_value =
+            is_packed_add(d.atomic_op)
+                ? fp_mode::atomic_add_packed_16(old32, source, d.atomic_op == AtomicOp::PK_ADD_BF16,
+                                                3, d.atomic_source_nan_first)
+            : is_fp ? apply_fp_atomic(d, old32, source, compare, d.atomic_denorm_mode)
+                    : apply_int_atomic(d.atomic_op, old32, source, compare);
       } else if (width == sizeof(uint64_t)) {
         uint64_t source = 0;
         uint64_t compare = 0;
@@ -832,15 +789,23 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
                       d.atomic_op == AtomicOp::FMAX || d.atomic_op == AtomicOp::FCMPSWAP);
 
-  for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+  if (d.lane_mask == 0)
+    return VmAccessOutcome::Complete;
+  // A retry keeps completed lanes but must not reuse a retired VM generation.
+  const auto vm_access = l2->snapshot_atomic_access(vmid);
+  DeviceCacheCoherence::AtomicBoundary boundary = l2->coherence_domain()->acquire_atomic_boundary();
+  if (boundary.outcome() != VmAccessOutcome::Complete)
+    return boundary.outcome();
+
+  for (uint32_t lane = d.translated.atomic_lane; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
 
     uint64_t ea = d.per_lane_addr[lane];
 
-    // Perform the atomic RMW under L2's atomic lock.
+    // Reuse the vector's cache-coherence boundary; each backing update remains atomic.
     const VmAccessOutcome outcome = l2->atomic_rmw(
-        ea, esz,
+        boundary, ea, esz,
         [&](uint8_t *line_data, uint32_t offset) {
           if (esz == 4) {
             uint32_t old_val;
@@ -852,7 +817,7 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
               std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
               new_val = fp_mode::atomic_add_packed_16(old_val, src_val,
                                                       d.atomic_op == AtomicOp::PK_ADD_BF16,
-                                                      /*denorm_mode=*/3);
+                                                      /*denorm_mode=*/3, d.atomic_source_nan_first);
             } else if (is_fp) {
               uint32_t source_bits = 0, compare_bits = 0;
               std::memcpy(&source_bits, &d.store_data[lane * src_stride], 4);
@@ -894,9 +859,12 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
             std::memcpy(&d.response_data[lane * 8], &old_val, 8);
           }
         },
-        vmid);
-    if (outcome != VmAccessOutcome::Complete)
+        vmid, vm_access);
+    if (outcome != VmAccessOutcome::Complete) {
+      d.translated.atomic_lane = lane;
       return outcome;
+    }
+    d.translated.atomic_lane = lane + 1;
   }
   return VmAccessOutcome::Complete;
 }
@@ -954,14 +922,16 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
       if (is_packed_add(d.atomic_op)) {
         uint32_t src_val;
         std::memcpy(&src_val, &store_data[lane * src_stride], 4);
-        new_val = fp_mode::atomic_add_packed_16(
-            old_val, src_val, d.atomic_op == AtomicOp::PK_ADD_BF16, d.packed_denorm_mode);
+        new_val =
+            fp_mode::atomic_add_packed_16(old_val, src_val, d.atomic_op == AtomicOp::PK_ADD_BF16,
+                                          d.packed_denorm_mode, /*source_first=*/true);
       } else if (is_fp) {
         uint32_t source_bits = 0, compare_bits = 0;
         std::memcpy(&source_bits, &store_data[lane * src_stride], 4);
         if (uses_two_sources)
           std::memcpy(&compare_bits, &store_data[lane * src_stride + 4], 4);
-        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_lds_denorm_mode);
+        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_lds_denorm_mode,
+                                  /*local=*/true);
       } else {
         uint32_t src_val = 0, cmp_val = 0;
         std::memcpy(&src_val, &store_data[lane * src_stride], 4);
@@ -985,7 +955,8 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
         std::memcpy(&source_bits, &store_data[lane * src_stride], 8);
         if (uses_two_sources)
           std::memcpy(&compare_bits, &store_data[lane * src_stride + 8], 8);
-        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_lds_denorm_mode);
+        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_lds_denorm_mode,
+                                  /*local=*/true);
       } else {
         uint64_t src_val = 0, cmp_val = 0;
         std::memcpy(&src_val, &store_data[lane * src_stride], 8);
@@ -1075,7 +1046,9 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
       const VmAccessOutcome outcome =
           l1_->store(d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems,
                      d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(),
-                     stride, base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit);
+                     stride, base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit,
+                     GpuVmAccessBatchGuard::active() && !wf.raw_cu().debug_active() &&
+                         wf.raw_cu().plugin_group().empty());
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }

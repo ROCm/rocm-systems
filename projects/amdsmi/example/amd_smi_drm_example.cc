@@ -604,7 +604,7 @@ int main() {
         }
 
         // Iterate through all available accelerator partition profiles
-        amdsmi_accelerator_partition_profile_config_t profile_config;
+        amdsmi_accelerator_partition_profile_config_t profile_config = {};
         ret = amdsmi_get_gpu_accelerator_partition_profile_config(processor_handles[device_index],
                                                                   &profile_config);
         for (uint32_t profile_idx = 0; profile_idx < profile_config.num_profiles; profile_idx++) {
@@ -620,7 +620,7 @@ int main() {
                     << acceleratorPartitionString(updatePartition) << "): " << err_str << "\n\n";
 
           // Get the current accelerator partition
-          amdsmi_accelerator_partition_profile_t profile;
+          amdsmi_accelerator_partition_profile_t profile = {};
           uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE];
           ret = amdsmi_get_gpu_accelerator_partition_profile(processor_handles[device_index],
                                                              &profile, partition_id);
@@ -1225,7 +1225,11 @@ int main() {
         CHK_AMDSMI_RET(ret)
         printf("    Output of amdsmi_get_gpu_driver_info:\n");
         printf("\tDriver name: %s\n", driver_info.driver_name);
+        printf("\tamdgpu kernel source version: %s\n", driver_info.driver_kernel_version);
+        printf("\tamdgpu driver version: %s\n", driver_info.amdgpu_driver_version);
         printf("\tDriver version: %s\n", driver_info.driver_version);
+        printf("\tBuild version: %s\n", driver_info.driver_build_version);
+        printf("\tFull version: %s\n", driver_info.driver_full_version);
         printf("\tDriver date: %s\n\n", driver_info.driver_date);
       } else {
         printf("\tamdsmi_get_gpu_driver_info(): not available on this device.\n");
@@ -1554,8 +1558,7 @@ int main() {
         CHK_AMDSMI_RET(ret)
       }
       printf("    Output of  amdsmi_get_temp_metric:\n");
-      std::cout << "\t\tTemperature: " << std::dec << val_i64 << "C"
-                << "\n\n";
+      std::cout << "\t\tTemperature: " << std::dec << val_i64 << "C" << "\n\n";
 
       // Get frame buffer
       amdsmi_vram_usage_t vram_usage = {};
@@ -2029,8 +2032,7 @@ int main() {
 
         std::cout << "\n";
         std::cout << " ** Note: Values MAX'ed out "
-                  << "(UINTX MAX are unsupported for the version in question) ** "
-                  << "\n\n";
+                  << "(UINTX MAX are unsupported for the version in question) ** " << "\n\n";
       }  // END GPU METRICS OUTPUTS
 
       // Get nearest GPUs

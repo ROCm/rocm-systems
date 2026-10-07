@@ -12,6 +12,7 @@
 #include "gtest/gtest.h"
 
 #include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../common/TopoRailPlane.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -200,6 +201,7 @@ protected:
   // arms the "use the default level" sentinel, so do the same before computing paths.
   struct ncclTopoSystem* buildSystem(uint64_t host) {
     struct ncclTopoSystem* built = nullptr;
+    EXPECT_EQ(RcclUnitTesting::fillMissingRailPlane(xml), ncclSuccess);
     EXPECT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
     if (built) built->netGdrLevel = -2;
     return built;
@@ -481,6 +483,7 @@ TEST_F(TopoTest, GetSystemFromXml_SingleSystem_BuildsLinks) {
   addGpuLink(pci1, "0000:01:00.0", 8);
 
   struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(RcclUnitTesting::fillMissingRailPlane(xml), ncclSuccess);
   ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
   ASSERT_NE(built, nullptr);
 
@@ -518,6 +521,7 @@ TEST_F(TopoTest, DevModel_DirectXgmiPath_IsThreeHopNvl) {
   addGpuLink(pci1, "0000:01:00.0", 8);
 
   struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(RcclUnitTesting::fillMissingRailPlane(xml), ncclSuccess);
   ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
   ASSERT_NE(built, nullptr);
   ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
@@ -546,6 +550,7 @@ TEST_F(TopoTest, DevModel_IndirectXgmiPath_IsFourHops) {
   addGpuLink(pci2, "0000:02:00.0", 8);
 
   struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(RcclUnitTesting::fillMissingRailPlane(xml), ncclSuccess);
   ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
   ASSERT_NE(built, nullptr);
   ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
@@ -578,6 +583,7 @@ TEST_F(TopoTest, GetSystemFromXml_MloPartOnNonzeroPhysicalFunction) {
   addGpuLink(gpu1, "0000:03:00.0", 1, PCI_ACCELERATOR_CLASS);
 
   struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(RcclUnitTesting::fillMissingRailPlane(xml), ncclSuccess);
   ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
   ASSERT_NE(built, nullptr);
   ASSERT_EQ(built->nodes[DEV].count, 2);
@@ -607,6 +613,7 @@ TEST_F(TopoTest, GetSystemFromXml_CpxEightMlopartsUnderPhysicalPci) {
   }
 
   struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(RcclUnitTesting::fillMissingRailPlane(xml), ncclSuccess);
   ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
   ASSERT_NE(built, nullptr);
   ASSERT_EQ(built->nodes[DEV].count, NCCL_TOPO_MLOPART_DEV_MAX);

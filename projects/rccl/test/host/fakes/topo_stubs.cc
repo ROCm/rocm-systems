@@ -11,15 +11,21 @@
 
 #include <cstdlib>
 #include <functional>
+#include <iterator>
 #include <string>
 #include <vector>
 #include <sched.h>
 
+#include "graph.h"  // PATH_DIS
 #include "nccl.h"
 #include "os.h"   // ncclAffinity
 #include "plugin/nccl_tuner.h"  // NCCL_NUM_ALGORITHMS, the width of initTransportsRank's graphs[]
 
 #include "topo_stubs.h"
+
+// src/graph/topo.cc, AMD arm; test/host/CMakeLists.txt pins this line to it.
+const char* topoPathTypeStr[] = {"LOC", "XGMI", "NVB", "C2C", "PIX", "PXB", "P2C", "PXN", "PHB", "SYS", "NET", "DIS"};
+static_assert(std::size(topoPathTypeStr) == PATH_DIS + 1, "topoPathTypeStr must name every PATH_* type");
 
 // Controllable (was fail-loud). :1982; the value reaches the AllGather3 payload, so the default is deterministic.
 std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused =

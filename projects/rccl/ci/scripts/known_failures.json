@@ -1,5 +1,5 @@
 {
-  "_comment": "Known PyTorch c10d NCCL test failures on RCCL — not regressions. Tests listed here are excluded from the pass/fail verdict. Update this file when RCCL gains support for the missing feature.",
+  "_comment": "Known PyTorch c10d NCCL test failures in this ROCm/RCCL CI suite — not regressions. Tests listed here are excluded from the pass/fail verdict. Not every cause is an RCCL gap; some are ROCm runtime behaviour or test assumptions that do not hold on ROCm. Remove each entry once its underlying cause is resolved.",
   "tests": {
     "test_extend_nccl_pg_timeout_backend0": "pg_timeout_semantics",
     "test_extend_nccl_pg_timeout_backend_nccl": "pg_timeout_semantics",
@@ -30,7 +30,8 @@
     "test_batched_send_recv_op_sizes_per_coalesce1_timing_enabled_True": "missing_duration_ms",
     "test_coalescing_manager_collective_timing_enabled_True": "missing_duration_ms",
     "test_individual_send_recv_op_sizes0_timing_enabled_True": "missing_duration_ms",
-    "test_individual_send_recv_op_sizes1_timing_enabled_True": "missing_duration_ms"
+    "test_individual_send_recv_op_sizes1_timing_enabled_True": "missing_duration_ms",
+    "test_extra_cuda_context": "extra_context_heuristic"
   },
   "categories": {
     "missing_duration_ms": "RCCL flight recorder trace omits duration_ms field",
@@ -39,6 +40,7 @@
     "trace_timeout": "Flight recorder trace tests exceed pytest-timeout (600s)",
     "trace_entry_mismatch": "Trace entry structure differs from upstream NCCL",
     "missing_dump_pipe": "RCCL does not create flight recorder dump pipe",
-    "pg_timeout_semantics": "extend_pg_timeout adds to existing vs sets absolute value"
+    "pg_timeout_semantics": "extend_pg_timeout adds to existing vs sets absolute value",
+    "extra_context_heuristic": "Test infers an extra HIP context from >70% device memory growth across a collective; on ROCm the growth is a ROCr runtime allocation, not a second context and not RCCL memory. Magnitude is build- and arch-dependent, and the ratio also varies with node co-tenancy (AICOMRCCL-2469)"
   }
 }

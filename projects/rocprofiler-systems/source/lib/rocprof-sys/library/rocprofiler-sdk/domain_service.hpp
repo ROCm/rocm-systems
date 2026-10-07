@@ -8,6 +8,7 @@
 #include "library/rocprofiler-sdk/callback_domain.hpp"
 #include "library/rocprofiler-sdk/domain_registry.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
+#include "library/rocprofiler-sdk/stream_stack_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -71,7 +72,7 @@ public:
             configure_domain(config);
         }
 
-        SdkBackend::start_context(context());
+        configure_pending_external_correlation_id();
     }
 
     void flush() const
@@ -89,7 +90,33 @@ public:
         return m_configuration;
     }
 
+    void start()
+    {
+        if(SdkBackend::context_is_valid(m_context) &&
+           !SdkBackend::context_is_active(m_context))
+        {
+            SdkBackend::start_context(m_context);
+        }
+    }
+
+    void pause()
+    {
+        if(SdkBackend::context_is_valid(m_context) &&
+           SdkBackend::context_is_active(m_context))
+        {
+            SdkBackend::stop_context(m_context);
+        }
+    }
+
 private:
+    std::vector<domains::domain_info>                 m_available_domains;
+    std::vector<domains::domain_configuration>        m_configuration;
+    std::vector<domains::buffered_domain<SdkBackend>> m_buffered_domains;
+    std::vector<domains::callback_domain<SdkBackend>> m_callback_domains;
+    std::vector<typename SdkBackend::external_correlation_request_kind_t>
+                             m_correlation_domains;
+    SdkBackend::context_id_t m_context{};
+
     [[nodiscard]] std::vector<domains::domain_configuration> resolve_configuration(
         std::span<const domain_selection> selections) const
     {
@@ -145,6 +172,11 @@ private:
         m_buffered_domains.emplace_back(definition, context(), std::move(operations));
         m_buffered_domains.back().configure();
 
+        if(definition.correlation_dependency.has_value())
+        {
+            m_correlation_domains.emplace_back(*definition.correlation_dependency);
+        }
+
         if(definition.on_configure)
         {
             definition.on_configure();
@@ -163,6 +195,11 @@ private:
 
         m_callback_domains.emplace_back(definition, context(), std::move(operations));
         m_callback_domains.back().configure();
+
+        if(definition.correlation_dependency.has_value())
+        {
+            m_correlation_domains.emplace_back(*definition.correlation_dependency);
+        }
 
         if(definition.on_configure)
         {
@@ -183,12 +220,19 @@ private:
         return m_context;
     }
 
-private:
-    std::vector<domains::domain_info>                 m_available_domains;
-    std::vector<domains::domain_configuration>        m_configuration;
-    std::vector<domains::buffered_domain<SdkBackend>> m_buffered_domains;
-    std::vector<domains::callback_domain<SdkBackend>> m_callback_domains;
-    SdkBackend::context_id_t                          m_context{};
+    void configure_pending_external_correlation_id()
+    {
+        if(m_correlation_domains.empty())
+        {
+            return;
+        }
+
+        SdkBackend::configure_external_correlation_id_request_service(
+            m_context, m_correlation_domains.data(), m_correlation_domains.size(),
+            rocprofiler_sdk::stream_stack_service<
+                SdkBackend>::request_stream_correlation_id,
+            nullptr);
+    }
 
     std::vector<domains::domain_info> filter_supported_domains(
         const auto& table, domains::collection_mode mode)
@@ -305,13 +349,10 @@ private:
     {
         std::vector<domains::operation_id_t> resolved;
 
+        // No explicit operation filter requested: leave `resolved` empty so the SDK
+        // is configured with (nullptr, 0), meaning "trace all operations".
         if(!requested.has_value())
         {
-            resolved.reserve(domain.operations.size());
-            for(const auto& operation : domain.operations)
-            {
-                resolved.push_back(operation.id);
-            }
             return resolved;
         }
 
