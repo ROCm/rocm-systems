@@ -61,6 +61,9 @@ struct callback_thread_id
     std::uint64_t handle{};
     bool          operator==(const callback_thread_id&) const = default;
 };
+// Real SDK defines rocprofiler_thread_id_t as plain std::uint64_t; match that
+// so backend<mock_sdk> type-checks cleanly.
+using thread_id = std::uint64_t;
 // Real SDK defines rocprofiler_counter_instance_id_t as plain std::uint64_t;
 // match that so backend<mock_sdk> type-checks cleanly.
 using counter_instance_id = std::uint64_t;
@@ -177,6 +180,52 @@ struct kfd_event_page_migrate_record
 {};
 struct kfd_event_page_fault_record
 {};
+
+// ─── kernel_dispatch stand-ins ──────────────────────────────────────────────
+//
+// backend<Sdk> unconditionally re-exports these three as type aliases, so
+// every Sdk stand-in must supply them even when a given test never exercises
+// kernel-dispatch behavior. Field-level detail is added only as tests need it.
+struct async_correlation_id_t
+{
+    std::uint64_t internal{};
+};
+struct kernel_dispatch_record
+{
+    async_correlation_id_t correlation_id{};
+};
+struct memory_copy_record
+{
+    async_correlation_id_t correlation_id{};
+};
+struct correlation_id_t
+{
+    std::uint64_t internal{};
+    std::uint64_t ancestor{};
+};
+struct memory_alloc_record
+{
+    correlation_id_t correlation_id{};
+};
+struct scratch_memory_record
+{
+    async_correlation_id_t correlation_id{};
+    std::uint64_t          allocation_size{};
+};
+struct stream_id
+{
+    std::uint64_t handle{};
+};
+// Real SDK defines rocprofiler_hip_stream_operation_t as an enum; a plain int
+// satisfies every comparison/assignment backend<mock_sdk> performs on it.
+using hip_stream_operation_t = int;
+struct hip_stream_data
+{
+    std::uint64_t size{};
+    struct stream_id stream_id
+    {};
+    std::uint64_t stream_value{};
+};
 
 // ─── Tracing-name table stub ────────────────────────────────────────────────
 //
@@ -388,6 +437,7 @@ struct mock_sdk
     using callback_tracing_kind                = testing::tracing_kind_cb;
     using buffer_tracing_kind                  = testing::tracing_kind_buf;
     using tracing_operation                    = testing::tracing_op;
+    using thread_id                            = testing::thread_id;
     using callback_thread_id                   = testing::callback_thread_id;
     using runtime_library_t                    = testing::runtime_library;
     using external_correlation_request_kind    = testing::ext_corr_kind;
@@ -413,6 +463,14 @@ struct mock_sdk
     using kfd_event_dropped_record             = testing::kfd_event_dropped_record;
     using kfd_event_page_migrate_record        = testing::kfd_event_page_migrate_record;
     using kfd_event_page_fault_record          = testing::kfd_event_page_fault_record;
+    using kernel_dispatch_record               = testing::kernel_dispatch_record;
+    using memory_copy_record                   = testing::memory_copy_record;
+    using async_correlation_id_t               = testing::async_correlation_id_t;
+    using memory_alloc_record                  = testing::memory_alloc_record;
+    using scratch_memory_record                = testing::scratch_memory_record;
+    using hip_stream_data                      = testing::hip_stream_data;
+    using hip_stream_operation_t               = testing::hip_stream_operation_t;
+    using stream_id                            = testing::stream_id;
 
     // compile_time_version >= 10000 selects the v1 branch in query_counter_details.
     static constexpr std::uint32_t compile_time_version = 10100u;
@@ -452,6 +510,74 @@ struct mock_sdk
     static constexpr callback_tracing_kind CALLBACK_TRACING_CODE_OBJECT          = 7;
     static constexpr callback_tracing_kind CALLBACK_TRACING_MARKER_CORE_API      = 8;
     static constexpr callback_tracing_kind CALLBACK_TRACING_RCCL_API             = 9;
+
+    // ── RCCL / NCCL types and constants ───────────────────────────────────────
+    // Minimal stand-ins so backend<Sdk>'s unconditional RCCL forwarding aliases and
+    // rccl_type_size() type-check; no test in this TU exercises RCCL behavior.
+    struct rccl_api_data
+    {};
+    using rccl_api_id_t    = int;
+    using nccl_data_type_t = int;
+    using nccl_comm_t      = void*;
+    using nccl_result_t    = int;
+
+    static constexpr nccl_result_t NCCL_SUCCESS = 0;
+
+    static constexpr nccl_data_type_t NCCL_INT8     = 0;
+    static constexpr nccl_data_type_t NCCL_UINT8    = 1;
+    static constexpr nccl_data_type_t NCCL_FLOAT16  = 2;
+    static constexpr nccl_data_type_t NCCL_BFLOAT16 = 3;
+    static constexpr nccl_data_type_t NCCL_INT32    = 4;
+    static constexpr nccl_data_type_t NCCL_UINT32   = 5;
+    static constexpr nccl_data_type_t NCCL_FLOAT32  = 6;
+    static constexpr nccl_data_type_t NCCL_INT64    = 7;
+    static constexpr nccl_data_type_t NCCL_UINT64   = 8;
+    static constexpr nccl_data_type_t NCCL_FLOAT64  = 9;
+
+    static constexpr bool k_are_nccl_fp8_types_available = false;
+
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather     = 0;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllToAll      = 1;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllReduce     = 2;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclGather        = 3;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclRecv          = 4;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduce        = 5;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclBroadcast     = 6;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduceScatter = 7;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclSend          = 8;
+
+    // ── OMPT types and constants ──────────────────────────────────────────────
+    // Minimal stand-ins so backend<Sdk>'s unconditional OMPT forwarding aliases
+    // type-check; no test in this TU exercises OMPT behavior.
+    struct ompt_data_t
+    {};
+    using ompt_operation_t = int;
+    using ompt_thread_t    = int;
+
+    static constexpr ompt_thread_t    OMPT_THREAD_INITIAL        = 1;
+    static constexpr ompt_operation_t OMPT_ID_thread_begin       = 0;
+    static constexpr ompt_operation_t OMPT_ID_thread_end         = 1;
+    static constexpr ompt_operation_t OMPT_ID_parallel_begin     = 2;
+    static constexpr ompt_operation_t OMPT_ID_parallel_end       = 3;
+    static constexpr ompt_operation_t OMPT_ID_task_create        = 4;
+    static constexpr ompt_operation_t OMPT_ID_task_schedule      = 5;
+    static constexpr ompt_operation_t OMPT_ID_implicit_task      = 6;
+    static constexpr ompt_operation_t OMPT_ID_device_initialize  = 7;
+    static constexpr ompt_operation_t OMPT_ID_device_finalize    = 8;
+    static constexpr ompt_operation_t OMPT_ID_device_load        = 9;
+    static constexpr ompt_operation_t OMPT_ID_mutex_released     = 10;
+    static constexpr ompt_operation_t OMPT_ID_dependences        = 11;
+    static constexpr ompt_operation_t OMPT_ID_task_dependence    = 12;
+    static constexpr ompt_operation_t OMPT_ID_lock_init          = 13;
+    static constexpr ompt_operation_t OMPT_ID_lock_destroy       = 14;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquire      = 15;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquired     = 16;
+    static constexpr ompt_operation_t OMPT_ID_nest_lock          = 17;
+    static constexpr ompt_operation_t OMPT_ID_flush              = 18;
+    static constexpr ompt_operation_t OMPT_ID_cancel             = 19;
+    static constexpr ompt_operation_t OMPT_ID_dispatch           = 20;
+    static constexpr ompt_operation_t OMPT_ID_error              = 21;
+    static constexpr ompt_operation_t OMPT_ID_callback_functions = 22;
 
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API         = 1;
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_AMD_EXT_API      = 2;

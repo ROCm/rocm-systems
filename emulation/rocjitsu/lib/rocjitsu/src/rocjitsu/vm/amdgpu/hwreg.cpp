@@ -34,6 +34,7 @@ enum class HwregState : uint8_t {
   WaveSchedMode,
   IbStsGfx1250,
   IbSts2Gfx1250,
+  WgpIdGfx1250,
 };
 
 enum class HwregWritePolicy : uint8_t {
@@ -351,7 +352,7 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx12, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {23, "WAVE_HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {23, "WAVE_HW_ID1", HwregState::WgpIdGfx1250, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {26, "WAVE_SCHED_MODE", HwregState::WaveSchedMode, HwregWritePolicy::UserWritable},
     {28, "IB_STS2", HwregState::IbSts2Gfx1250, HwregWritePolicy::ReadOnly},
@@ -416,6 +417,16 @@ bool field_intersects(const DecodedHwreg &decoded, uint32_t offset, uint32_t siz
   return decoded.offset < offset + size && offset < decoded.offset + decoded.size;
 }
 
+// Observe only the requested field, never the other bits read to preserve a
+// partial HWREG write. GFX12 moved SCC from STATUS[0] to STATE_PRIV[9].
+bool field_aliases_scc(const Wavefront &wf, HwregState state, const DecodedHwreg &decoded) {
+  if (state == HwregState::StatePrivGfx12)
+    return field_intersects(decoded, 9, 1);
+  const auto arch = wf.cu().arch();
+  return state == HwregState::Status && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
+         arch != ROCJITSU_CODE_ARCH_CDNA5 && field_intersects(decoded, 0, 1);
+}
+
 HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_value) {
   switch (state) {
   case HwregState::Mode:
@@ -459,6 +470,12 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     return HwregAccessResult::Success;
   case HwregState::IbSts2Gfx1250:
     raw_value = gfx1250_ib_sts2_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::WgpIdGfx1250:
+    if (!wf.cu().cus_per_shader_array() || wf.cu().cus_per_shader_array() > 16)
+      return HwregAccessResult::Unsupported;
+    // Each gfx1250 ComputeUnit models one WGP, including its shared LDS.
+    raw_value = field_value(wf.cu().shader_array_cu_id(), 10, 4);
     return HwregAccessResult::Success;
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
@@ -511,6 +528,7 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::GprAllocCdna3_4:
   case HwregState::IbStsGfx1250:
   case HwregState::IbSts2Gfx1250:
+  case HwregState::WgpIdGfx1250:
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
@@ -618,6 +636,13 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
     return HwregAccessResult::Unsupported;
   }
 
+  // Only WGP_ID[13:10] has backing state; do not fabricate the other HW_ID1 fields.
+  if (desc->state == HwregState::WgpIdGfx1250 &&
+      (decoded.offset < 10 || decoded.offset + decoded.size > 14)) {
+    value = 0;
+    return HwregAccessResult::Unsupported;
+  }
+
   uint32_t raw_value = 0;
   HwregAccessResult result = read_raw_hwreg(wf, desc->state, raw_value);
   if (result != HwregAccessResult::Success) {
@@ -625,11 +650,14 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
     return result;
   }
 
+  if (field_aliases_scc(wf, desc->state, decoded))
+    wf.check_scalar_memory_wait({RegClass::SCC, 0, 1});
   value = (raw_value >> decoded.offset) & decoded.mask;
   return HwregAccessResult::Success;
 }
 
-HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src) {
+HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
+                                    HwregWriteKind kind) {
   DecodedHwreg decoded = decode_hwreg(hwreg);
   const HwregDescriptor *desc = find_descriptor(wf.cu().arch(), decoded.id);
   if (!desc)
@@ -654,7 +682,21 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src)
   if (result != HwregAccessResult::Success)
     return result;
 
-  return write_raw_hwreg(wf, desc->state, insert_hwreg_field(raw_value, src, decoded));
+  uint32_t updated = insert_hwreg_field(raw_value, src, decoded);
+  if (desc->state == HwregState::Mode && kind != HwregWriteKind::Generic &&
+      wf.cu().setreg_vgpr_msb_fixup()) {
+    // Public LLVM's SetregVGPRMSBFixup contract records that gfx1250 MODE
+    // writes take VGPR-MSB from the unshifted source bits[12:19], regardless of
+    // the requested HWREG slice. gfx1251 lacks this target capability and uses
+    // the ordinary field insertion above.
+    updated = (updated & ~VGPR_MSB_MODE_MASK) | (src & VGPR_MSB_MODE_MASK);
+    if (kind == HwregWriteKind::SetregImm32)
+      wf.arm_setreg_vgpr_msb_hazard();
+  }
+
+  if (field_aliases_scc(wf, desc->state, decoded))
+    wf.check_scalar_memory_wait({RegClass::SCC, 0, 1}, true);
+  return write_raw_hwreg(wf, desc->state, updated);
 }
 
 } // namespace amdgpu

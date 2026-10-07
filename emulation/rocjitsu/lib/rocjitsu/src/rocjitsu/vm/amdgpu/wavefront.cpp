@@ -6,9 +6,34 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 
 namespace rocjitsu {
 namespace amdgpu {
+
+Wavefront::Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_size,
+                     uint32_t max_wf_size, uint32_t max_sgprs, uint32_t max_vgprs,
+                     bool mode_has_gpr_idx_en)
+    : cu_(cu), cu_view_(cu, *this), wf_id_(wf_id), wf_size_(default_wf_size),
+      default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
+      max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en),
+      memory_wait_checks_enabled_(cu.config().memory_wait_diagnostics !=
+                                  MemoryWaitDiagnostics::Off) {}
+
+void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
+  if (!activity_tracked_)
+    return;
+  const bool active = !is_halted();
+  const bool runnable = active && !debug_paused();
+  const uint64_t delta = (uint64_t(active) - uint64_t(was_active)) +
+                         ((uint64_t(runnable) - uint64_t(was_runnable)) << 32);
+  const uint64_t previous = cu_.wave_activity_.fetch_add(delta, std::memory_order_release);
+  assert((active || !was_active || static_cast<uint32_t>(previous) != 0) &&
+         "active wave count underflow");
+  assert((runnable || !was_runnable || (previous >> 32) != 0) && "runnable wave count underflow");
+  (void)previous;
+}
 
 Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 
@@ -20,7 +45,16 @@ bool Wavefront::uses_separate_trap_ctrl() const {
 
 bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }
 
+uint64_t Wavefront::realtime_timestamp() const {
+  if (use_system_clock_)
+    return hsa_system_timestamp();
+  auto *engine = cu_.engine();
+  return engine ? engine->global_time() : 0;
+}
+
 std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
+  if (vm_access_)
+    return *vm_access_;
   GpuVm *gpu_vm = cu_.gpu_vm();
   if (gpu_vm == nullptr)
     return std::nullopt;
@@ -30,6 +64,9 @@ std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
 VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
+    if (vm_access_)
+      return vm_access_->read(
+          addr, std::span<std::byte>(reinterpret_cast<std::byte *>(dst.data()), dst.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
     if (!access)
       return VmAccessOutcome::Faulted;
@@ -43,6 +80,10 @@ VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst
 VmAccessOutcome Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8_t> src) {
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
+    if (vm_access_)
+      return vm_access_->write(
+          addr,
+          std::span<const std::byte>(reinterpret_cast<const std::byte *>(src.data()), src.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
     if (!access)
       return VmAccessOutcome::Faulted;
@@ -71,7 +112,16 @@ void Wavefront::barrier_wait(int32_t barrier_id) { cu_.barrier_wait(*this, barri
 
 bool Wavefront::barrier_leave() { return cu_.named_barrier_leave(*this); }
 
+bool Wavefront::fail_pm4_submission() {
+  if (!pm4_failure_)
+    return false;
+  pm4_failure_->fail();
+  return true;
+}
+
 void Wavefront::halt(CpCompletionNotice notice) {
+  // Observer snapshots are not instruction-side register consumers.
+  SuspendedMemoryWaitCheck disable_wait_check;
   // s_endpgm terminates the wave, frees its resources, and notifies the CP as one
   // action, mirroring hardware. Order matters:
   //   (1) fire the halt hook while registers are still live so observers snapshot
@@ -90,7 +140,7 @@ void Wavefront::halt(CpCompletionNotice notice) {
 void Wavefront::release_wait_counter(WaitCounterType type) {
   wait_counters_.decrement(type);
   if (state_ == WfState::WAITCNT && wait_satisfied())
-    state_ = WfState::RUNNING;
+    set_state(WfState::RUNNING);
   if (state_ == WfState::ENDING && wait_counters_.empty())
     halt();
 }

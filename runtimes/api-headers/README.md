@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: MIT -->
+
 # Runtime API Headers
 
 This directory contains static, dependency-free API headers intended for both
@@ -5,7 +7,9 @@ C++ consumers and Rust API bindings.
 
 The headers are organized by API family under `include/`:
 
-- `amdf`: AMD Framework API headers.
+- `abce`: Accelerated Blit Copy Engine, the header-only SDMA copy library; see
+  `include/abce/README.md`.
+- `amdf`: AMD Fabric API headers.
 - `hsa`: Heterogeneous System Architecture API headers.
 - `uapi`: Linux userspace API headers used by ROCm runtimes.
 
@@ -20,10 +24,9 @@ These files are mirrors for runtime consumers; their primary sources remain:
 - KFD and UDMABUF: `projects/rocr-runtime/libhsakmt/include/hsakmt/linux` in
   this repository.
 
-Changes belong in the primary location first and are then copied here without
-local edits. The HSA, DRM, KFD, and UDMABUF mirrors are byte-identical to their
-primary files in this checkout.
+The AMDF headers preserve upstream contents except that their copyright line
+names Advanced Micro Devices, Inc. and their SPDX identifier is MIT. The HSA, DRM,
+KFD, and UDMABUF mirrors are byte-identical to their primary files in this
+checkout.
 
-These headers are not yet exposed through a CMake target. As runtime components
-begin consuming them from this repository, build integration will be added to
-export the target and install the headers.
+`abce` is not a mirror: `include/abce` is its primary location.

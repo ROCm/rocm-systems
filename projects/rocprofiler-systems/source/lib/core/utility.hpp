@@ -15,11 +15,10 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace utility
+namespace rocprofsys::utility
 {
 /// provides an alternative thread index for when using threading::get_id() is not
 /// desirable
@@ -39,7 +38,9 @@ get_filled_array(FuncT&& _func)
     using Tp = std::decay_t<decltype(_func())>;
     std::array<Tp, N> _v{};
     for(auto& itr : _v)
+    {
         itr = std::move(_func());
+    }
     return _v;
 }
 
@@ -170,8 +171,11 @@ filter_sort_unique(
              _v.end());
     std::sort(_v.begin(), _v.end());
 
-    auto _last = std::unique(_v.begin(), _v.end());
-    if(std::distance(_v.begin(), _last) > 0) _v.erase(_last, _v.end());
+    auto const _last = std::unique(_v.begin(), _v.end());
+    if(std::distance(_v.begin(), _last) > 0)
+    {
+        _v.erase(_last, _v.end());
+    }
     return _v;
 }
 
@@ -180,7 +184,9 @@ inline LhsT&
 combine(LhsT& _lhs, RhsT&& _rhs)
 {
     for(auto&& itr : _rhs)
+    {
         _lhs.emplace_back(itr);
+    }
     return _lhs;
 }
 
@@ -190,13 +196,18 @@ template <template <typename, typename...> class ContainerT, typename Tp,
 std::string
 get_regex_or(const ContainerT<Tp, TailT...>& _container, const std::string& _fallback)
 {
-    if(_container.empty()) return _fallback;
+    if(_container.empty())
+    {
+        return _fallback;
+    }
 
     auto _ss  = std::stringstream{};
     auto _idx = size_t{ 0 };
     _ss << "(";
     for(const auto& itr : _container)
+    {
         _ss << (_idx++ > 0 ? "|" : "") << itr;
+    }
     _ss << ")";
     return _ss.str();
 }
@@ -208,12 +219,17 @@ std::string
 get_regex_or(const ContainerT<Tp, TailT...>& _container, PredicateT&& _predicate,
              const std::string& _fallback)
 {
-    if(_container.empty()) return _fallback;
+    if(_container.empty())
+    {
+        return _fallback;
+    }
 
     auto _dest = std::vector<std::string>{};
     _dest.reserve(_container.size());
     for(const auto& itr : _container)
+    {
         _dest.emplace_back(_predicate(itr));
+    }
 
     return get_regex_or(_dest, _fallback);
 }
@@ -245,5 +261,4 @@ parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
                                                                     const std::string&,
                                                                     long);
 
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility

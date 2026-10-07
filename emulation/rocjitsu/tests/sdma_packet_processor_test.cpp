@@ -29,17 +29,17 @@ static_assert(std::same_as<decltype(std::declval<SdmaPacketProcessRequest>().con
 
 class RetryMemory final : public AddressSpaceTranslator, public PhysicalMemoryAccess {
 public:
-  RetryMemory() : bytes_(0x10000) {}
+  explicit RetryMemory(std::size_t size = 0x10000, uint64_t segment_size = 16)
+      : bytes_(size), segment_size_(segment_size) {}
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
     if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
-    constexpr uint64_t kSegment = 16;
     return {
         .outcome = VmAccessOutcome::Complete,
         .translation = {.domain = VmMemoryDomain::System,
                         .address = address,
-                        .contiguous_bytes = kSegment - (address % kSegment),
+                        .contiguous_bytes = segment_size_ - (address % segment_size_),
                         .mtype = Mtype::RW,
                         .permissions = {.readable = true, .writable = true, .executable = true}}};
   }
@@ -47,7 +47,8 @@ public:
   VmAccessOutcome read(VmMemoryDomain, uint64_t address, std::span<std::byte> bytes) override {
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(), bytes.begin());
+    std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
     return VmAccessOutcome::Complete;
   }
 
@@ -60,7 +61,7 @@ public:
     }
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<std::ptrdiff_t>(address));
+    std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     return VmAccessOutcome::Complete;
   }
 
@@ -118,6 +119,7 @@ public:
 
 private:
   std::vector<std::byte> bytes_;
+  uint64_t segment_size_;
   std::map<uint64_t, uint32_t> write_calls_;
   uint64_t unavailable_write_address_ = UINT64_MAX;
   uint64_t unavailable_atomic_store_address_ = UINT64_MAX;
@@ -128,7 +130,8 @@ private:
 
 class PacketProcessorFixture {
 public:
-  PacketProcessorFixture() : memory(std::make_shared<RetryMemory>()) {
+  explicit PacketProcessorFixture(std::size_t size = 0x10000, uint64_t segment_size = 16)
+      : memory(std::make_shared<RetryMemory>(size, segment_size)) {
     handle = vm.register_translated(7, memory, memory);
     access = vm.snapshot(handle);
   }
@@ -147,6 +150,39 @@ std::array<uint32_t, 7> copy_packet(uint64_t source, uint64_t destination, uint3
           static_cast<uint32_t>(source >> 32),
           static_cast<uint32_t>(destination),
           static_cast<uint32_t>(destination >> 32)};
+}
+
+TEST(SdmaPacketProcessorTest, ExtendedCountCopiesBeyondFourMiB) {
+  constexpr uint64_t kSource = 0x1000;
+  constexpr uint64_t kDestination = 0x500000;
+  constexpr uint32_t kBytes = 0x400010;
+  for (const auto dialect : {SdmaPacketDialect::Legacy, SdmaPacketDialect::LegacyExtendedCount,
+                             SdmaPacketDialect::Gfx11Plus, SdmaPacketDialect::Gfx1250}) {
+    SCOPED_TRACE(static_cast<int>(dialect));
+    PacketProcessorFixture fixture(kDestination + kBytes, 0x1000);
+    ASSERT_TRUE(fixture.access);
+    // Check both ends of the transfer and the first byte beyond the legacy limit.
+    fixture.memory->store<uint32_t>(kSource, 0x12345678);
+    fixture.memory->store<uint32_t>(kSource + 0x400000, 0x87654321);
+    fixture.memory->store<uint32_t>(kSource + kBytes - 4, 0xabcdef01);
+    SdmaPacketProcessor processor(dialect);
+    auto packet = copy_packet(kSource, kDestination, kBytes);
+    packet[1] |= 0xc0000000; // Reserved high bits must not extend the transfer.
+    const SdmaPacketProcessResult result =
+        processor.process({.available_dwords = packet,
+                           .access = *fixture.access,
+                           .continuation = fixture.continuation});
+    ASSERT_EQ(result.packet.status, PacketProcessStatus::Complete);
+    EXPECT_FALSE(fixture.continuation.pending());
+    EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0x12345678u);
+    if (dialect == SdmaPacketDialect::Legacy) {
+      EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination + 0x400000), 0u);
+      EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination + kBytes - 4), 0u);
+    } else {
+      EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination + 0x400000), 0x87654321u);
+      EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination + kBytes - 4), 0xabcdef01u);
+    }
+  }
 }
 
 TEST(SdmaPacketProcessorTest, CopyResumesAtFirstUncommittedPhysicalSpan) {
@@ -405,7 +441,7 @@ TEST(SdmaPacketProcessorTest, ProcessesOnlyTheDecodedPacketExtentFromALargeSuffi
       UINT32_MAX,
       0,
   };
-  std::copy(poll.begin(), poll.end(), unread_suffix.begin());
+  std::ranges::copy(poll, unread_suffix.begin());
   SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250);
 
   const SdmaPacketProcessResult first = processor.process({.available_dwords = unread_suffix,

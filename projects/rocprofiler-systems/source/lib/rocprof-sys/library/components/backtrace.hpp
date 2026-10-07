@@ -22,9 +22,7 @@
 #include <set>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 struct backtrace : comp::empty_base
 {
@@ -61,7 +59,6 @@ struct backtrace : comp::empty_base
     data_t                  get_data() const { return m_data; }
 
 private:
-    data_t m_data = {};
+    data_t m_data;
 };
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

@@ -8,11 +8,8 @@
 #include <atomic>
 #include <mutex>
 
-namespace rocprofsys
-{
-namespace locking
+namespace rocprofsys::locking
 {
 using atomic_mutex = ::tim::locking::spin_mutex;
 using atomic_lock  = ::tim::locking::spin_lock;
-}  // namespace locking
-}  // namespace rocprofsys
+}  // namespace rocprofsys::locking

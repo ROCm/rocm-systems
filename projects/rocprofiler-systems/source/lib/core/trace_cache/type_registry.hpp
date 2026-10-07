@@ -9,9 +9,7 @@
 #include <map>
 #include <optional>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 template <typename TypeIdentifierEnum, typename... SupportedTypes>
@@ -27,7 +25,7 @@ public:
 
     std::optional<variant_t> get_type(TypeIdentifierEnum id, std::uint8_t*& data)
     {
-        auto it = deserializers.find(id);
+        auto const it = deserializers.find(id);
         if(it != deserializers.end())
         {
             return it->second(data);
@@ -48,5 +46,4 @@ private:
     }
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

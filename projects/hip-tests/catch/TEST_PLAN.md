@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 608 | 608 | 0 |
-| **total** | **608** | **608** | **0** |
+| `contract` | 616 | 616 | 0 |
+| **total** | **616** | **616** | **0** |
 
 ## Tier: `contract`
 
@@ -135,10 +135,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Copy3D_HipMemcpy3D_Default_HostDeviceRoundTripsExtent` | hipMemcpy3D | a full-extent H2D then D2H 3D copy round-trips all bytes unchanged |
 | `Contract_Copy3D_HipMemcpy3D_Default_SingleSliceRoundTripsBytes` | hipMemcpy3D | a single-slice (depth=1) H2D then D2H 3D copy round-trips that slice's bytes |
 
-### `device` (7 cases)
+### `device` (11 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_InvalidScope_IsRejected` | hipDeviceFlushGPUDirectRDMAWrites | an out-of-range scope is rejected as an invalid argument |
+| `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_InvalidTarget_IsRejected` | hipDeviceFlushGPUDirectRDMAWrites | an out-of-range target is rejected as an invalid argument |
+| `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToAllDevices_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to all-devices scope is accepted or reports unsupported |
+| `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToOwner_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to owner scope is accepted or reports unsupported |
 | `Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties` | hipDeviceGetAttribute | hipDeviceAttributeWarpSize matches the warp size from hipGetDeviceProperties |
 | `Contract_Device_HipGetDeviceProperties_GetProperties_SucceedsForCurrentDevice` | hipGetDeviceProperties | succeeds in populating properties for the current device |
 | `Contract_Device_HipGetDeviceProperties_MultiProcessorCount_IsPositive` | hipGetDeviceProperties | reported multiprocessor count is positive |
@@ -896,10 +900,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Module_HipModuleLoadData_FromRtc_Succeeds` | hipModuleLoadData | a HIPRTC-produced code object loads into a non-null module handle and unloads without error |
 | `Contract_Module_HipModuleLoadData_NullImage_IsRejected` | hipModuleLoadData | loading from a null image is rejected with a non-success status |
 
-### `module_exec` (8 cases)
+### `module_exec` (12 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_Default_IncludesKnownSymbol` | hipModuleEnumerateFunctions | every enumerated function handle is non-null and includes the known module symbol |
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_NullFunctions_IsRejected` | hipModuleEnumerateFunctions | a null functions out-pointer is rejected with a non-success status |
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_NullModule_IsRejected` | hipModuleEnumerateFunctions | a null module handle is rejected with a non-success status |
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_ZeroMax_LeavesBufferUntouched` | hipModuleEnumerateFunctions | enumerating with a max of zero writes nothing into the caller buffer |
 | `Contract_ModuleExec_HipModuleGetFunctionCount_Default_ReturnsPositiveCount` | hipModuleGetFunctionCount | a module defining at least one kernel reports a function count of at least one |
 | `Contract_ModuleExec_HipModuleGetFunctionCount_NullCount_IsRejected` | hipModuleGetFunctionCount | a null count out-pointer is rejected with a non-success status |
 | `Contract_ModuleExec_HipModuleLaunchCooperativeKernel_Default_WritesExpectedValue` | hipModuleLaunchCooperativeKernel | a cooperative launch of a module function executes and deterministically publishes the expected value |

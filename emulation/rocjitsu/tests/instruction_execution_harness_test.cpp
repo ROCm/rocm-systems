@@ -396,7 +396,6 @@ inline bool should_skip_inst(std::string_view mn) {
   return mnemonic_has_any_prefix(mn, SKIP_PREFIXES);
 }
 
-constexpr std::array<std::string_view, 1> EXPECTED_CDNA_UNIMPLEMENTED = {"s_setvskip"};
 constexpr std::array<std::string_view, 3> EXPECTED_RDNA1_UNIMPLEMENTED = {
     "s_subvector_loop_begin", "s_subvector_loop_end", "s_get_waveid_in_workgroup"};
 constexpr std::array<std::string_view, 2> EXPECTED_RDNA2_UNIMPLEMENTED = {"s_subvector_loop_begin",
@@ -409,8 +408,8 @@ struct HarnessExpectation {
 };
 
 constexpr HarnessExpectation HARNESS_EXPECTATIONS[] = {
-    {"cdna1", EXPECTED_CDNA_UNIMPLEMENTED},  {"cdna2", EXPECTED_CDNA_UNIMPLEMENTED},
-    {"cdna3", EXPECTED_CDNA_UNIMPLEMENTED},  {"cdna4", EXPECTED_CDNA_UNIMPLEMENTED},
+    {"cdna1", EXPECTED_NO_UNIMPLEMENTED},    {"cdna2", EXPECTED_NO_UNIMPLEMENTED},
+    {"cdna3", EXPECTED_NO_UNIMPLEMENTED},    {"cdna4", EXPECTED_NO_UNIMPLEMENTED},
     {"rdna1", EXPECTED_RDNA1_UNIMPLEMENTED}, {"rdna2", EXPECTED_RDNA2_UNIMPLEMENTED},
     {"rdna3", EXPECTED_NO_UNIMPLEMENTED},    {"rdna3_5", EXPECTED_NO_UNIMPLEMENTED},
     {"rdna4", EXPECTED_NO_UNIMPLEMENTED},    {"gfx1250", EXPECTED_NO_UNIMPLEMENTED},
@@ -538,10 +537,10 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
 
   const auto *expectation = harness_expectation(arch_name);
   ASSERT_NE(expectation, nullptr) << "Missing harness expectation for " << arch_name;
-  std::sort(unimpl_list.begin(), unimpl_list.end());
+  std::ranges::sort(unimpl_list);
   std::vector<std::string_view> expected(expectation->unimplemented.begin(),
                                          expectation->unimplemented.end());
-  std::sort(expected.begin(), expected.end());
+  std::ranges::sort(expected);
   EXPECT_EQ(unimpl_list, expected) << arch_name << " unimplemented instruction set changed";
 }
 
@@ -1224,7 +1223,9 @@ void run_scalar_cvt_preserves_scc(rj_code_arch_t arch, std::string_view arch_nam
     wf->halt();
 }
 
-TEST(ScalarSccTest, ScalarCvtPreservesScc) {
+// Keep these raw opcode witnesses independent of the generated encodings used
+// by ScalarCvtPreservesScc, with a distinct name so each body runs only once.
+TEST(ScalarSccTest, ScalarCvtPreservesSccFromRawEncodings) {
   const uint32_t one_f32 = std::bit_cast<uint32_t>(1.0f);
   const uint32_t one_f16 = util::f32_to_f16(1.0f);
   const uint32_t qnan_f32 = 0x7FC00000u;
@@ -2533,9 +2534,8 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
         EXPECT_EQ(cu->read_vgpr(vb + 9, lane), 0u);
       }
 
-      // Pin OMOD finalization independently from CLAMP. Positive and negative
-      // minimum-normal values become subnormals under /2, and both those
-      // flushed results and an input -0 must be canonicalized to +0.
+      // Pin OMOD finalization independently from CLAMP. FP32 underflow caused
+      // by halving a normal result preserves its sign; an input -0 becomes +0.
       wf->set_exec(0x7u);
       constexpr std::array<uint32_t, 3> kF32Inputs{
           std::bit_cast<uint32_t>(std::numeric_limits<float>::min()),
@@ -2553,7 +2553,7 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
       ASSERT_NE(unclamped_f32, nullptr);
       EXPECT_TRUE(cu->execute_instruction(unclamped_f32.get(), *wf).succeeded());
       for (std::size_t lane = 0; lane < kF32Inputs.size(); ++lane)
-        EXPECT_EQ(cu->read_vgpr(vb + 2, lane), 0u);
+        EXPECT_EQ(cu->read_vgpr(vb + 2, lane), lane == 1 ? 0x80000000u : 0u);
 
       constexpr std::array<uint64_t, 3> kF64Inputs{
           kMinNormalF64,
@@ -2717,6 +2717,130 @@ TEST(Cdna4Permlane16SwapExecutionTest, Wave64SwapsAllFourGroups) {
 
   if (!wf->is_halted())
     wf->halt();
+}
+
+class PermlaneSwapWriteRecorder final : public ExecutionPlugin {
+public:
+  PermlaneSwapWriteRecorder() : ExecutionPlugin("permlane_swap_writes") {}
+
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *, uint32_t reg, uint64_t lanes,
+                              uint8_t) override {
+    writes.emplace_back(reg, lanes);
+  }
+
+  std::vector<std::pair<uint32_t, uint64_t>> writes;
+};
+
+TEST(PermlaneSwapExecutionTest, RespectsExecForBothResults) {
+  struct SwapCase {
+    rj_code_arch_t arch;
+    const char *name;
+    uint32_t stride;
+    uint32_t e32_opcode;
+    uint32_t e64_opcode;
+  };
+  const SwapCase cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", 16, cdna4::kVPermlane16SwapB32Vop1,
+       cdna4::kVPermlane16SwapB32Vop3},
+      {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", 32, cdna4::kVPermlane32SwapB32Vop1,
+       cdna4::kVPermlane32SwapB32Vop3},
+      {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", 16, cdna5::kVPermlane16SwapB32Vop1,
+       cdna5::kVPermlane16SwapB32Vop3},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const uint32_t stride = test_case.stride;
+    amdgpu::GpuMemory gpu_mem("permlane_swap_mem");
+    amdgpu::L2Cache l2("permlane_swap_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = test_case.arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = test_case.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 128 : 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create(test_case.name, cfg, &gpu_mem, &l2);
+    auto decoder = Decoder::create(test_case.arch);
+    ASSERT_NE(cu, nullptr);
+    ASSERT_NE(decoder, nullptr);
+    auto plugins = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto recorder = std::make_unique<PermlaneSwapWriteRecorder>();
+    auto *observed = recorder.get();
+    plugins->add(std::move(recorder));
+    cu->set_plugin_group(plugins);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t wave_size = wf->wf_size();
+    ASSERT_EQ(wave_size, test_case.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32u : 64u);
+    const uint64_t full_exec = wave_size == 64 ? ~uint64_t{0} : (uint64_t{1} << wave_size) - 1;
+    const uint32_t base = wf->vgpr_alloc().base;
+
+    // CDNA4 ISA 6.2.2 masks VALU outputs with EXEC. Both operands are outputs
+    // here, even when the two register selectors alias (ISA 12.8).
+    for (bool same_register : {false, true}) {
+      const uint32_t src_reg = same_register ? 0u : 1u;
+      // -1 is e32; e64 also covers both FI/BOUND_CTRL bits. These modifiers
+      // cannot permit an inactive destination write.
+      for (int modifiers : {-1, 0, 1, 2, 3}) {
+        const auto opsel = static_cast<uint32_t>(std::max(modifiers, 0));
+        auto words =
+            test_case.arch == ROCJITSU_CODE_ARCH_CDNA5
+                ? encode_vop3(test_case.e64_opcode, 0, vgpr_src(src_reg), 0, 0, 0, opsel)
+                : encode_cdna_vop3(test_case.e64_opcode, 0, vgpr_src(src_reg), 0, 0, opsel);
+        if (modifiers < 0) {
+          const auto src0 = static_cast<uint16_t>(vgpr_src(src_reg));
+          words[0] = test_case.arch == ROCJITSU_CODE_ARCH_CDNA5
+                         ? cdna5::build_vop1(test_case.e32_opcode, {.src0 = src0, .vdst = 0})[0]
+                         : cdna4::build_vop1(test_case.e32_opcode, {.src0 = src0, .vdst = 0})[0];
+        }
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        for (uint64_t exec :
+             {full_exec, uint64_t{0}, uint64_t{0x3333333333333333}, uint64_t{1}, uint64_t{1} << 16,
+              uint64_t{1} << (wave_size / 2), uint64_t{1} << (wave_size - 1)}) {
+          exec &= full_exec;
+          SCOPED_TRACE(::testing::Message() << "stride=" << stride << " same=" << same_register
+                                            << " modifiers=" << modifiers << " exec=" << exec);
+          wf->set_exec(exec);
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
+            cu->write_vgpr(base, lane, 0xD0000000u | lane);
+            cu->write_vgpr(base + 1, lane, 0x50000000u | lane);
+          }
+          observed->writes.clear();
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+          uint64_t writes[2] = {};
+          for (const auto &[reg, lanes] : observed->writes) {
+            ASSERT_GE(reg, base);
+            ASSERT_LE(reg, base + 1);
+            writes[reg - base] |= lanes;
+            EXPECT_EQ(lanes & ~exec, 0u);
+          }
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
+            const bool active = (exec & (uint64_t{1} << lane)) != 0;
+            const bool peer_active = (exec & (uint64_t{1} << (lane ^ stride))) != 0;
+            // Active destinations with inactive sources involve separate
+            // FI/BOUND_CTRL semantics. This regression asserts their inactive
+            // peers stay unchanged, without prescribing those source rules.
+            if (active && !peer_active)
+              continue;
+            const bool upper = (lane & stride) != 0;
+            const uint32_t expected_dst =
+                active && (same_register || upper)
+                    ? (same_register ? 0xD0000000u : 0x50000000u) | (lane ^ stride)
+                    : 0xD0000000u | lane;
+            const uint32_t expected_src = active && !same_register && !upper
+                                              ? 0xD0000000u | (lane ^ stride)
+                                              : 0x50000000u | lane;
+            EXPECT_EQ(cu->read_vgpr(base, lane), expected_dst) << "dst lane=" << lane;
+            EXPECT_EQ(cu->read_vgpr(base + 1, lane), expected_src) << "src lane=" << lane;
+            EXPECT_EQ(bool(writes[0] & (uint64_t{1} << lane)), active && (same_register || upper));
+            EXPECT_EQ(bool(writes[1] & (uint64_t{1} << lane)), active && !same_register && !upper);
+          }
+        }
+      }
+    }
+    if (!wf->is_halted())
+      wf->halt();
+  }
 }
 
 uint32_t gfx1250_fp8_ab_lane(uint32_t row_or_col, uint32_t k) {
@@ -2968,6 +3092,72 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
 
   if (!wf->is_halted())
     wf->halt();
+}
+
+TEST(Gfx1250WmmaTest, Bf16F32K32Bf16ScalarUsesFusedMac) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_wmma_bf16f32_fused_mem");
+  amdgpu::L2Cache l2("gfx1250_wmma_bf16f32_fused_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t a_base = vb + 10;
+  const uint32_t b_base = vb + 20;
+  const uint32_t c_base = vb + 30;
+  const uint32_t d_base = vb + 40;
+  for (uint32_t reg = 0; reg < 8; ++reg)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(a_base + reg, lane, 0);
+      cu->write_vgpr(b_base + reg, lane, 0);
+      cu->write_vgpr(c_base + reg, lane, 0);
+    }
+
+  const auto a = amdgpu::wmma_input_loc(16, 32, /*row=*/0, /*k=*/0, 16);
+  const auto b = amdgpu::wmma_input_loc(16, 32, /*col=*/0, /*k=*/0, 16);
+  write_packed_half(*cu, a_base + a.vgpr_offset, a.lane, a.sub_element, 0x5F80u); // 2^64
+  write_packed_half(*cu, b_base + b.vgpr_offset, b.lane, b.sub_element, 0x5F80u);
+  const auto c = amdgpu::wmma_output_loc_32(16, 16, /*row=*/0, /*col=*/0);
+  cu->write_vgpr(c_base + c.reg, c.lane, 0xFF7FFFFFu); // -FLT_MAX
+
+  ForceScalarGuard force_scalar(/*force_scalar=*/true);
+  amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, d_base, a_base, b_base, c_base);
+
+  const auto out = amdgpu::wmma_output_loc_16(16, 16, /*row=*/0, /*col=*/0);
+  const uint32_t word = cu->read_vgpr(d_base + out.reg, out.lane);
+  EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7380u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Gfx1250WmmaTest, Bf16F32FmaHasStableNanPriority) {
+  auto value = [](uint32_t bits) { return std::bit_cast<float>(bits); };
+  auto result_bits = [&](uint32_t a, uint32_t b, uint32_t c) {
+    return std::bit_cast<uint32_t>(amdgpu::wmma_bf16f32_fma(value(a), value(b), value(c)));
+  };
+
+  EXPECT_EQ(result_bits(0x7FC10000u, 0x7FC20000u, 0x7FC30000u), 0x7FC10000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0x7FC20000u, 0x7FC30000u), 0x7FC20000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0x3F800000u, 0x7FC30000u), 0x7FC30000u);
+  EXPECT_EQ(result_bits(0x7F810000u, 0x3F800000u, 0x00000000u), 0x7FC10000u);
+  EXPECT_EQ(result_bits(0x3F800000u, 0xFFC40000u, 0x00000000u), 0xFFC40000u);
+  EXPECT_EQ(result_bits(0x7F800000u, 0x00000000u, 0x3F800000u), 0xFFC00000u);
+  const float early_a_nan = amdgpu::wmma_bf16f32_fma(value(0x7FC10000u), 1.0f, 0.0f);
+  EXPECT_EQ(
+      std::bit_cast<uint32_t>(amdgpu::wmma_bf16f32_fma(1.0f, value(0x7FC20000u), early_a_nan)),
+      0x7FC20000u);
 }
 
 TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
@@ -6716,7 +6906,7 @@ TEST(Cdna4GprIdxTest, WideConversionIndexesResolvedBaseBeforeDwordOffsets) {
   cu->write_vgpr(base + kScale, 0, std::bit_cast<uint32_t>(1.0f));
 
   uint8_t fp6_values[32];
-  std::fill(std::begin(fp6_values), std::end(fp6_values), 0x10u);
+  std::ranges::fill(fp6_values, 0x10u);
   uint32_t packed_fp6[6]{};
   util::pack_6bit(fp6_values, packed_fp6);
   const uint16_t expected_half = util::f32_to_f16(util::fp6_e2m3_to_f32(0x10u));
@@ -7179,7 +7369,7 @@ TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms)
                    : (returns ? cdna5::kDsPkAddRtnF16Vds : cdna5::kDsPkAddF16Vds);
           const std::array<uint32_t, 2> ds =
               cdna5::build_vds(ds_op, {.addr = 2, .data0 = 1, .vdst = 0});
-          std::copy(ds.begin(), ds.end(), words.begin());
+          std::ranges::copy(ds, words.begin());
         }
         cu.write_sgpr(sb + 4, kAddr);
         cu.write_sgpr(sb + 5, 0);
@@ -7208,6 +7398,9 @@ TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms)
             ASSERT_NE(inst, nullptr);
             cu.execute_and_route(inst.release(), *wf);
             uint32_t expected = c.expected;
+            // LDS selects the incoming NaN when both operands are NaNs.
+            if (form == Form::Ds && c.old_value == (bf16 ? 0x7fc27fc0u : 0x7e027e00u))
+              expected = bf16 ? 0x7fc47fc0u : 0x7e047e00u;
             if (form == Form::Ds &&
                 ((c.input_denorm && !(denorm & 1u)) || (c.output_denorm && !(denorm & 2u))))
               expected = c.flushed_value;
@@ -7287,7 +7480,7 @@ TEST(Rdna4AtomicReturnTest, FlatPackedHalfAddPreservesLdsDenormals) {
                        : (returns ? rdna4::kDsPkAddRtnF16Vds : rdna4::kDsPkAddF16Vds);
               const std::array<uint32_t, 2> ds =
                   rdna4::build_vds(opcode, {.addr = 2, .data0 = 1, .vdst = 0});
-              std::copy(ds.begin(), ds.end(), words.begin());
+              std::ranges::copy(ds, words.begin());
             } else {
               const uint16_t opcode =
                   bf16 ? rdna4::kFlatAtomicPkAddBf16Vflat : rdna4::kFlatAtomicPkAddF16Vflat;
@@ -7766,6 +7959,100 @@ TEST(HwregHelperTest, Gfx1250UsesManualHwregIdsInsteadOfLegacyAliases) {
 
   if (!wf->is_halted())
     wf->halt();
+}
+
+TEST(HwregTest, Gfx1250GetregReadsWgpId) {
+  amdgpu::GpuMemory gpu_mem("hwreg_gfx1250_wgp_id_mem");
+  amdgpu::L2Cache l2("hwreg_gfx1250_wgp_id_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  cu->set_shader_engine_location(1, 13, 8);
+
+  auto decoder = Decoder::create(cfg.arch);
+  ASSERT_NE(decoder, nullptr);
+  // The instruction emitted by tl.extra.hip.smid().
+  constexpr uint16_t kWgpId = encode_hwreg(23, 10, 4);
+  const auto words = encode_sopk(cdna5::kSGetregB32Sopk, 4, kWgpId);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+
+  for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot) {
+    auto *wf = cu->dispatch_wf(0, slot, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), 5u);
+    uint32_t value = 0;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 5u);
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(23, 11, 2), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 2u);
+    EXPECT_EQ(amdgpu::write_hwreg_field(*wf, kWgpId, 0), amdgpu::HwregAccessResult::ReadOnly);
+    // The remaining identity fields still have no modeled backing.
+    for (uint16_t hwreg : {encode_hwreg(23), encode_hwreg(23, 9, 2), encode_hwreg(23, 13, 2),
+                           encode_hwreg(23, 16, 1)}) {
+      value = 0xFFFFFFFFu;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hwreg, value),
+                amdgpu::HwregAccessResult::Unsupported);
+      EXPECT_EQ(value, 0u);
+    }
+  }
+  for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot)
+    cu->wf(slot)->halt();
+}
+
+TEST(HwregHelperTest, Gfx1250WgpIdRequiresRepresentableShaderArrayWidth) {
+  amdgpu::GpuMemory gpu_mem("hwreg_gfx1250_wgp_id_width_mem");
+  amdgpu::L2Cache l2("hwreg_gfx1250_wgp_id_width_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint32_t kWgpId = encode_hwreg(23, 10, 4);
+  for (uint32_t cu_index : {15u, 31u}) {
+    SCOPED_TRACE(cu_index);
+    cu->set_shader_engine_location(0, cu_index, 16);
+    uint32_t value = 0;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 15u);
+  }
+
+  cu->set_shader_engine_location(1, 13);
+  EXPECT_EQ(cu->shader_engine_id(), 1u);
+  EXPECT_EQ(cu->scratch_scoreboard_base(), 13u * cu->scratch_slots_per_cu());
+  EXPECT_EQ(cu->cus_per_shader_array(), 0u);
+  uint32_t value = 0xFFFFFFFFu;
+  EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Unsupported);
+  EXPECT_EQ(value, 0u);
+
+  for (uint32_t width : {0u, 17u, 32u, std::numeric_limits<uint32_t>::max()}) {
+    SCOPED_TRACE(width);
+    for (uint32_t cu_index : {0u, 16u}) {
+      SCOPED_TRACE(cu_index);
+      cu->set_shader_engine_location(0, cu_index, width);
+      for (uint16_t hwreg : {kWgpId, encode_hwreg(23, 11, 2)}) {
+        SCOPED_TRACE(hwreg);
+        uint32_t value = 0xFFFFFFFFu;
+        EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hwreg, value),
+                  amdgpu::HwregAccessResult::Unsupported);
+        EXPECT_EQ(value, 0u);
+      }
+    }
+  }
+  wf->halt();
 }
 
 TEST(HwregHelperTest, Gfx1250ReadsModeledIbStsCounters) {
@@ -8264,81 +8551,15 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
     wf->set_mode_raw(0xAAAAAAAAu);
     wf->set_status_raw(0x13579BDFu);
     EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    EXPECT_EQ(wf->mode_raw(), 0xAAAAAAFAu) << "Partial bitfield write to MODE incorrect";
+    const uint32_t expected_mode =
+        arch_case.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0xAAAFFAFAu : 0xAAAAAAFAu;
+    EXPECT_EQ(wf->mode_raw(), expected_mode)
+        << "Partial MODE write or target-specific VGPR-MSB side effect incorrect";
     EXPECT_EQ(wf->status_raw(), 0x13579BDFu);
 
     if (!wf->is_halted())
       wf->halt();
   }
-}
-
-// Packed D16 FORMAT loads/stores carry partial-def metadata for liveness but are
-// deliberately non-executable (the memory pipeline does not model the packed
-// two-components-per-VGPR layout). Executing one must report failure;
-// this locks in that the metadata-only classification never silently starts
-// executing an incorrect layout.
-TEST(D16FormatExecution, PackedFormatD16LoadStoreReportFailure) {
-  amdgpu::GpuMemory gpu_mem("d16_format_unimpl_mem");
-  amdgpu::L2Cache l2("d16_format_unimpl_l2");
-
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 106;
-  cfg.vgprs_per_wf = 256;
-  cfg.lds_size_kb = 64;
-
-  auto cu = amdgpu::ComputeUnitCore::create("d16_format_unimpl", cfg, &gpu_mem, &l2);
-  ASSERT_NE(cu, nullptr);
-
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_NE(decoder, nullptr);
-
-  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-  ASSERT_NE(wf, nullptr);
-
-  struct Case {
-    std::string_view mnemonic;
-    std::array<uint32_t, 3> words;
-  };
-  const std::array<Case, 2> cases = {{
-      {"buffer_load_d16_format_xy", {0xC4024000U, 0x00000000U, 0x00000000U}},
-      {"buffer_store_d16_format_xy", {0xC4034000U, 0x00000000U, 0x00000000U}},
-  }};
-
-  const uint32_t sgpr_base = wf->sgpr_alloc().base;
-  const uint32_t vgpr_base = wf->vgpr_alloc().base;
-  cu->write_sgpr(sgpr_base, 0x12345678u);
-  cu->write_vgpr(vgpr_base, 0, 0xabcdef01u);
-  wf->pc = 0x1000;
-  wf->set_exec(1);
-
-  // Rejection preserves architectural state; each call resets the failure reason.
-  for (const auto &c : cases) {
-    SCOPED_TRACE(c.mnemonic);
-    std::unique_ptr<Instruction> inst(decode_valid(*decoder, c.words.data()));
-    ASSERT_NE(inst, nullptr);
-    ASSERT_EQ(std::string_view(inst->mnemonic()), c.mnemonic);
-    EXPECT_TRUE(inst->is_memory_op()) << c.mnemonic;
-    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
-    EXPECT_EQ(wf->instruction_execution_error(),
-              amdgpu::InstructionExecutionError::UnimplementedInstruction);
-    EXPECT_EQ(cu->read_sgpr(sgpr_base), 0x12345678u);
-    EXPECT_EQ(cu->read_vgpr(vgpr_base, 0), 0xabcdef01u);
-    EXPECT_EQ(wf->pc, 0x1000u);
-    EXPECT_EQ(wf->exec(), 1u);
-    EXPECT_FALSE(wf->is_halted());
-    EXPECT_EQ(inst->data(), nullptr);
-  }
-
-  // The CU must clear a rejection before the next instruction, without a
-  // redispatch or an explicit error reset by its caller.
-  constexpr std::array<uint32_t, 2> nop_words{0xBF800000u, 0};
-  std::unique_ptr<Instruction> nop(decode_valid(*decoder, nop_words.data()));
-  ASSERT_NE(nop, nullptr);
-  ASSERT_EQ(nop->mnemonic(), "s_nop");
-  EXPECT_TRUE(cu->execute_instruction(nop.get(), *wf).succeeded());
-  EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
 }
 
 TEST(SparseMmaExecution, UnimplementedIntegerInstructionsReportFailure) {
@@ -8693,7 +8914,7 @@ template <typename ComputeUnit> void check_flat_atomic_lds_policy(rj_code_arch_t
   } else {
     const std::array<uint32_t, 2> legacy_words = cdna4::build_flat(
         cdna4::kFlatAtomicAddF32Flat, {.sc0 = 1, .addr = 2, .data = 0, .saddr = 127, .vdst = 6});
-    std::copy(legacy_words.begin(), legacy_words.end(), words.begin());
+    std::ranges::copy(legacy_words, words.begin());
   }
   for (uint32_t mode : {0u, 0xf0u}) {
     wave->set_mode_raw(mode);

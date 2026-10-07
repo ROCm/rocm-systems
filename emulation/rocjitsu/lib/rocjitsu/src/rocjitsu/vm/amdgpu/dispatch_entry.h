@@ -14,7 +14,10 @@
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/consumer_cursor_journal.h"
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
+#include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
 #include "rocjitsu/vm/amdgpu/queue_doorbell.h"
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
@@ -35,6 +38,8 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class ComputeUnitCore;
+class Pm4ScratchPool;
+struct Pm4FailureState;
 using QueueCuSelection = std::optional<std::vector<ComputeUnitCore *>>;
 class GpuVmAccess;
 
@@ -55,8 +60,8 @@ class GpuVmAccess;
          (producer_pointer_address % alignof(uint64_t)) == 0;
 }
 
-/// @brief Configuration supplied when registering an AQL queue with the CP.
-struct AqlQueueConfig {
+/// @brief Initial hardware state and root ring contract of one compute queue.
+struct ComputeQueueConfig {
   AddressSpaceHandle address_space;
   InterruptSink interrupt_sink{};
   uint32_t process_id = 0;
@@ -80,6 +85,13 @@ struct AqlQueueConfig {
   /// creation path that models such a device; registering the queue replicates it
   /// onto the peer XCDs.
   bool xcd_fanout = false;
+  /// Root ring format stays fixed while an indirect stream changes the active decoder.
+  QueuePacketFormat packet_format = QueuePacketFormat::Aql;
+  std::optional<uint64_t> initial_consumer_cursor = std::nullopt;
+  Pm4PacketCallbacks packet_callbacks{};
+  /// DRM supplies command buffers directly rather than a user-mode ring.
+  bool submission_queue = false;
+  uint32_t scheduling_percentage = 100;
 };
 
 struct WorkgroupCoord {
@@ -304,6 +316,9 @@ struct DispatchEntry {
   uint32_t queue_id = 0;
   uint32_t queue_packet_id = 0;
   AddressSpaceHandle address_space;
+  /// Immutable VM snapshot captured by the queue-service transaction that
+  /// admitted this dispatch. Every wave in the dispatch shares this snapshot.
+  std::shared_ptr<const GpuVmAccess> execution_access;
   InterruptSink interrupt_sink;
   uint32_t process_id = 0;
 
@@ -326,6 +341,13 @@ struct DispatchEntry {
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
+  /// Register-programmed compute launches use the PM4 user-data register ABI.
+  bool pm4_abi = false;
+  std::shared_ptr<Pm4FailureState>
+      pm4_failure{};                     ///< Shared with all waves and the owning submission.
+  std::array<uint32_t, 16> user_sgprs{}; ///< PM4 COMPUTE_USER_DATA register values.
+  uint32_t pm4_scratch_waves_per_se = 0; ///< COMPUTE_TMPRING_SIZE wave capacity per SE.
+  std::shared_ptr<Pm4ScratchPool> pm4_scratch_pool{}; ///< Resident-wave slot allocator.
   uint32_t num_named_barriers = 0;
   /// Architectural wave size selected by the kernel descriptor and used by
   /// the dispatched wavefront.
@@ -339,6 +361,7 @@ struct DispatchEntry {
   uint32_t grid_size_x = 1;
   uint32_t grid_size_y = 1;
   uint32_t grid_size_z = 1;
+  std::array<uint32_t, 3> workgroup_origin{}; ///< PM4 COMPUTE_START origin (zero for AQL).
   uint32_t grid_wgs_x = 0;
   uint32_t grid_wgs_y = 1;
   uint32_t grid_wgs_z = 1;
@@ -355,6 +378,7 @@ struct DispatchEntry {
   bool enable_wg_id_x = true;
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;
+  bool enable_wg_info = false;
   uint8_t enable_vgpr_workitem_id = 0;
   uint16_t workgroup_size_x = 64;
   uint16_t workgroup_size_y = 1;
@@ -397,6 +421,9 @@ struct DispatchEntry {
   bool wait_for_predecessors = false;
   /// Packet-type ordering: following packets cannot pass this packet.
   bool blocks_following = false;
+  /// An AMD vendor packet executes this PM4 buffer before publishing completion.
+  uint64_t aql_pm4_ib_address = 0;
+  uint32_t aql_pm4_ib_dwords = 0;
   /// Completion hooks and signal have already been delivered.
   bool completion_notified = false;
   bool execution_begun = false;
@@ -658,16 +685,38 @@ inline constexpr uint32_t kPackedTidZShift = 20;
   return mask;
 }
 
-/// @brief Configuration and runtime state for one CP-registered AQL queue.
+/// @brief Shader dispatches currently executing within a PM4 command stream.
+struct Pm4DispatchState {
+  std::deque<DispatchEntry> entries;
+  void push_entry(DispatchEntry entry) { entries.push_back(std::move(entry)); }
+};
+
+/// @brief One compute queue owns its ring, CP execution state and all nested streams.
 ///
 /// @details Keeping the registration configuration and dispatch runtime in one
 /// record prevents queue mutation and teardown from desynchronizing parallel
 /// containers. Entries complete in submission order (in-order retirement per
 /// queue).
-struct AqlQueueRecord : AqlQueueConfig {
-  AqlQueueRecord() : read_pointer_journal(read_ptr_va) {}
-  explicit AqlQueueRecord(AqlQueueConfig config)
-      : AqlQueueConfig(std::move(config)), read_pointer_journal(read_ptr_va) {}
+struct ComputeQueueRecord : ComputeQueueConfig {
+  ComputeQueueRecord() : read_pointer_journal(read_ptr_va) {}
+  explicit ComputeQueueRecord(ComputeQueueConfig config)
+      : ComputeQueueConfig(std::move(config)),
+        read_pointer_journal(read_ptr_va, initial_consumer_cursor,
+                             packet_format == QueuePacketFormat::Pm4 ? sizeof(uint32_t)
+                                                                     : sizeof(uint64_t)) {}
+
+  /// Registers survive IB return; command frames retain their own fetch positions.
+  ComputeCommandState commands;
+  Pm4DispatchState dispatches;
+  /// Exact VM snapshot used for a root PM4 ring batch and its cursor writeback.
+  std::optional<GpuVmAccess> command_access;
+  // A transient VM access is retried only on a later CP pass.
+  bool command_retry_pending = false;
+  bool command_fault_pending = false;
+  [[nodiscard]] bool has_pending_commands() const {
+    return !entries.empty() || !dispatches.entries.empty() || !commands.submissions.empty() ||
+           command_access.has_value() || read_pointer_journal.publication_pending();
+  }
 
   enum class Status { Idle, Active, Blocked };
 
@@ -684,7 +733,11 @@ struct AqlQueueRecord : AqlQueueConfig {
   /// tears it down; fault notification is handled separately.
   bool faulted = false;
   bool debug_suspended = false;
-  bool runtime_suspended = false;
+  bool runtime_suspended = scheduling_percentage == 0;
+  bool exception_suspended = false;
+  [[nodiscard]] bool suspended() const {
+    return debug_suspended || runtime_suspended || exception_suspended;
+  }
   /// A command-processor pass observed this queue while its debugger gate was closed.
   /// Cleared on resume after scheduling one pass to process the deferred work.
   bool debug_work_deferred = false;
