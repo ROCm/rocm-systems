@@ -12,9 +12,7 @@ and lower-preset misses needed to interpret each grade.
 The Stream-K arrival and tree atomic-OR release-order faults remove both the
 LDS-completion and global-store-completion waits before the selected
 publication atomic. The atomic operation and acquire synchronization remain
-intact. Patched ISA confirms removal of both waits. Removing only the global
-wait leaves LDS publication ordered: the arrival control that retains the LDS
-wait and replaces only `s_waitcnt_vscnt` with a NOP reports zero conflicts.
+intact. Patched ISA confirms removal of both waits.
 
 Reproduce these rows with the maintained
 [validation runner](../../../tests/dbi/consan/consan_validation.py), the
