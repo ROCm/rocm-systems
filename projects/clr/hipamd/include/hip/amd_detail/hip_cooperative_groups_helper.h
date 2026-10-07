@@ -187,6 +187,33 @@ __CG_STATIC_QUALIFIER__ unsigned int barrier_signal() { return __ockl_grid_bar_a
 __CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
 }  // namespace grid
 
+// Drain copies issued by memcpy_async before a barrier releases.
+//
+// gfx12.5 async global<->LDS copies retire through the async counter. A fence,
+// s_waitcnt, and s_barrier do not wait for that counter, so it has to be waited
+// explicitly or another wave can leave the barrier and read LDS that has not
+// landed yet.
+//
+// gfx9 and gfx10 direct-to-LDS loads (global_load_lds / the lds bit on
+// global_load) retire through vmcnt. That includes gfx90a (MI210), gfx942
+// (MI300A and MI300X), and gfx950. Those CDNA targets have back-off barriers,
+// so s_barrier itself does not drain vmcnt. Immediate 0 is a full s_waitcnt
+// (vmcnt, lgkmcnt, and expcnt). gfx11 and gfx12 do not implement
+// __builtin_amdgcn_load_to_lds, and gfx12 has a different waitcnt encoding, so
+// this wait is not emitted there.
+__CG_STATIC_QUALIFIER__ void wait_async_copy_counter() {
+#if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
+    __builtin_amdgcn_s_wait_asynccnt(0);
+#endif
+}
+
+__CG_STATIC_QUALIFIER__ void wait_lds_dma() {
+#if __has_builtin(__builtin_amdgcn_load_to_lds) && __has_builtin(__builtin_amdgcn_s_waitcnt)
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_load_to_lds)) __builtin_amdgcn_s_waitcnt(0);
+#endif
+}
+
 /**
  *  @brief Functionalities related to `workgroup` (thread_block in CUDA terminology)
  *  cooperative group type
@@ -220,7 +247,13 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
 
 __CG_STATIC_QUALIFIER__ bool is_valid() { return true; }
 
-__CG_STATIC_QUALIFIER__ void sync() { __syncthreads(); }
+__CG_STATIC_QUALIFIER__ void sync() {
+  // Each wave drains its own copies before the barrier, so every other wave
+  // observes the LDS results once the barrier releases.
+  wait_async_copy_counter();
+  wait_lds_dma();
+  __syncthreads();
+}
 
 __CG_STATIC_QUALIFIER__ dim3 block_dim() {
   return (dim3(static_cast<__hip_uint32_t>(blockDim.x), static_cast<__hip_uint32_t>(blockDim.y),
@@ -228,6 +261,10 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  // Signal only after this wave's copies have landed. Waiting later, in
+  // barrier_wait, is too late: the last wave's arrive can release everyone else.
+  wait_async_copy_counter();
+  wait_lds_dma();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal))
@@ -248,6 +285,9 @@ namespace tiled_group {
 
 // enforce ordering for memory instructions
 __CG_STATIC_QUALIFIER__ void sync() {
+  // Tile memcpy_async uses the gfx12.5 per-lane async copies. One wave, so the
+  // async counter has to be drained before the wavefront fence returns.
+  wait_async_copy_counter();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
 }
@@ -258,6 +298,7 @@ namespace coalesced_group {
 
 // enforce ordering for memory instructions
 __CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copy_counter();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
 }
@@ -386,7 +427,7 @@ __CG_STATIC_QUALIFIER__ unsigned int num_threads() {
 
 __CG_STATIC_QUALIFIER__ unsigned int thread_rank() {
   return block_rank() * (blockDim.x * blockDim.y * blockDim.z) +
-      ((threadIdx.z * blockDim.y * blockDim.x) + (threadIdx.y * blockDim.x) + threadIdx.x);
+         ((threadIdx.z * blockDim.y * blockDim.x) + (threadIdx.y * blockDim.x) + threadIdx.x);
 }
 
 template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank) {

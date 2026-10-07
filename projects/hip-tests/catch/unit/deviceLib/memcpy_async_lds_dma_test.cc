@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /*
 Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
@@ -66,7 +67,10 @@ __global__ void globalToLds(const T* in, T* out, int bytes, int readBack) {
   block.sync();
 
   cg::memcpy_async(block, reinterpret_cast<T*>(raw), in, static_cast<size_t>(bytes));
-  block.sync();  // memcpy_async is asynchronous; the barrier is what makes raw readable
+  // group.sync() drains LDS DMA (vmcnt, before the barrier) on gfx9/gfx10, including
+  // MI210, MI300A, and gfx950, and drains the gfx12.5 async counter. __syncthreads()
+  // alone does not drain the gfx12.5 counter.
+  block.sync();
 
   // readBack extends past bytes. raw was zero filled, so anything memcpy_async wrote outside the
   // requested range surfaces in the guard region as a non-zero byte.
@@ -147,6 +151,30 @@ void runCase(const char* tag, int threads, int bytes, const std::vector<unsigned
   REQUIRE(mismatch == -1);
 }
 
+// Scratch is not a global address. The whole block participates so the completion path is the
+// real workgroup barrier, including a partial last wave on both wave32 and wave64.
+__global__ void privateSourceToLds(unsigned char* out) {
+  __shared__ __align__(16) unsigned char raw[16];
+  cg::thread_block block = cg::this_thread_block();
+  // Thread-dependent so this cannot live in the constant pool. Rank 0's bytes are the
+  // ones the fallback stores; a scratch address fed to global_load_lds does not match.
+  unsigned char mine[4];
+  mine[0] = 0x11;
+  mine[1] = 0x22;
+  mine[2] = 0x33;
+  mine[3] = static_cast<unsigned char>(0x40 + block.thread_rank());
+
+  for (int i = block.thread_rank(); i < 16; i += block.num_threads()) raw[i] = 0;
+  block.sync();
+
+  cg::memcpy_async(block, raw, mine, static_cast<size_t>(4));
+  block.sync();
+
+  if (block.thread_rank() == 0) {
+    for (int i = 0; i < 16; i++) out[i] = raw[i];
+  }
+}
+
 }  // namespace
 
 TEST_CASE("Unit_device_memcpy_async_paths") {
@@ -171,6 +199,30 @@ TEST_CASE("Unit_device_memcpy_async_paths") {
   SECTION("lds to global, dword aligned elements") {
     for (int t : kThreads)
       for (int b : kBytes) runCase<int>("int l2g", t, b, ref, d_in, d_out, true);
+  }
+
+  // A per-thread stack address is scratch. LDS DMA must not consume it: the global
+  // aperture cast is the wrong memory on MI210, and on MI300A the load is not replayed
+  // if it faults. Rank 0 of the fallback copies these four bytes.
+  SECTION("private source falls back") {
+    unsigned char* d_flag = nullptr;
+    HIP_CHECK(hipMalloc(&d_flag, 16));
+    HIP_CHECK(hipMemset(d_flag, 0xAB, 16));
+    privateSourceToLds<<<1, 128>>>(d_flag);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+    unsigned char got[16] = {};
+    HIP_CHECK(hipMemcpy(got, d_flag, 16, hipMemcpyDeviceToHost));
+    const unsigned char expect[4] = {0x11, 0x22, 0x33, 0x40};
+    for (int i = 0; i < 4; i++) {
+      INFO("private source byte " << i);
+      REQUIRE(got[i] == expect[i]);
+    }
+    for (int i = 4; i < 16; i++) {
+      INFO("private source wrote past 4 bytes at " << i);
+      REQUIRE(got[i] == 0);
+    }
+    HIP_CHECK(hipFree(d_flag));
   }
 
   HIP_CHECK(hipFree(d_in));

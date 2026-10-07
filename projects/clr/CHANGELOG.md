@@ -9,6 +9,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - Device Management: support for querying a device identifier.
       * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
 
+### Changed
+* `cooperative_groups::memcpy_async` can now copy global memory directly into LDS on gfx9 and gfx10, including MI210 (gfx90a), MI300A/MI300X (gfx942), and gfx950. Each lane moves 4 bytes; the hardware adds `lane_id * 4` to a wave-uniform LDS base. gfx950's 12- and 16-byte forms are not used, because those add `lane_id * 16`. gfx12.5 continues to use its per-lane async copies. On every accelerated target the destination must not be read until `group.sync()`, which drains the copy before the barrier. Scratch pointers stay on the ordinary copy.
+
 ## HIP 10.0.0 for ROCm 10.0.0
 
 ### Added
