@@ -519,7 +519,7 @@ inline namespace config
 namespace
 {
 auto cfg_fini_callbacks = std::vector<std::function<void()>>{};
-
+/*
 bool
 json_has_project_name_root(const std::string& json_path)
 {
@@ -537,7 +537,7 @@ json_has_project_name_root(const std::string& json_path)
         return false;
     }
 }
-
+*/
 void
 register_operation_include_setting(const std::shared_ptr<settings>& _config,
                                    std::unordered_set<std::string>& registered,
@@ -1691,19 +1691,11 @@ configure_settings(bool _init)
     auto const _proc      = mproc::get_concurrent_processes(_ppid);
     const bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
-    // Exit here so every caller (launcher, avail, and the preloaded library)
-    // fails the same way. Do not throw: an exception that leaves
-    // rocprofsys_init_library_hidden aborts the profiled process.
-    auto fail_config_file = [](std::string message) {
-        LOG_CRITICAL("Failed to configure settings: {}", message);
-        std::exit(EXIT_FAILURE);
-    };
-
     for(auto&& filename : rocprofsys::delimit(
             _config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
     {
         const auto expanded_filename = settings::format(filename, _config->get_tag());
-
+        /*
         // Prevent Timemory's read() silently dropping JSON config files without
         // proper root. Non-existing JSONs should not throw: default
         // ROCPROFSYS_CONFIG_FILE includes '~/.rocprofiler-systems.json' that can be
@@ -1712,12 +1704,12 @@ configure_settings(bool _init)
            path::is_regular_file(expanded_filename) &&
            !json_has_project_name_root(expanded_filename))
         {
-            fail_config_file(fmt::format(
+            throw std::runtime_error(fmt::format(
                 "Config file '{}' is missing the expected '{}' root object and cannot "
                 "be loaded. If this is a hierarchical preset configuration, pass it via "
                 "--preset instead.",
                 expanded_filename, TIMEMORY_PROJECT_NAME));
-        }
+        }*/
 
         // Timemory parses config files during static init before main() (see
         // timemory_library_constructor()->init_config()). Bad .json files fail to
@@ -1733,13 +1725,20 @@ configure_settings(bool _init)
 
         LOG_DEBUG("Reading config file {}", filename);
         validate_config_file_values(filename, _config->get_tag(), _config);
-        if(!_config->read(filename))
+        // settings::read() returns false when the file is missing, which is normal
+        // for the default '~/.rocprofiler-systems.{cfg,json}' entries. A text .cfg
+        // also returns false when it contains unknown keys; with strict config off
+        // those are warnings and the known keys are still applied. JSON and XML
+        // return false when the file exists but does not parse.
+        const bool structured_config =
+            expanded_filename.ends_with(".json") || expanded_filename.ends_with(".xml");
+        if(!_config->read(filename) && structured_config &&
+           path::is_regular_file(expanded_filename))
         {
-            fail_config_file(fmt::format(
-                "Unable to apply configuration file '{}'. The file does not contain "
-                "valid key/value formatting. If this file is intended to be used as a "
-                "preset configuration, specify it with '--preset' instead. Otherwise, "
-                "correct the file structure and try again.",
+            throw std::runtime_error(fmt::format(
+                "Unable to apply configuration file '{}'. If this file is intended to "
+                "be used as a preset configuration, specify it with '--preset' "
+                "instead. Otherwise, correct the file structure and try again.",
                 expanded_filename));
         }
         if(_main_proc && ((_config->get<bool>(std::string{ env_vars::CI }) &&
