@@ -215,6 +215,9 @@ device:
     tags: [query]
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
     <<: *level_2
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - section 'Set Env in parent and verify UUID in child' fails on gfx110X (amd_windows): REQUIRE(proc.run(t_uuid) == 1) gets 0 at hipDeviceGetUuid.cc:322. Child process that re-reads the UUID under HIP_VISIBLE_DEVICES returns failure on Windows ROCR CI; passes locally. Needs re-triage."
     tags: [query, P0]
   Unit_UUID_setEnv_Thread:
     <<: *level_2
