@@ -472,6 +472,8 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
     EXPECT_EQ(props["array_count"], 32u);
     EXPECT_EQ(props["simd_arrays_per_engine"], 1u);
     EXPECT_EQ(props["cu_per_simd_array"], 10u);
+    ASSERT_TRUE(props.count("num_cp_queues"));
+    EXPECT_EQ(props["num_cp_queues"], 24u);
     EXPECT_EQ(props["num_xcc"], num_xcc);
 
     // The same dump reads simd_count 1216, i.e. 304 of the 320 CUs the array
