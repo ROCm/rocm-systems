@@ -640,6 +640,70 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     uncached_memory.free()?;
     uncached_reservation.free()?;
 
+    let mut host_pages = Box::new([0_u8; 8192]);
+    let host_base = host_pages.as_mut_ptr() as usize;
+    let host_address = (host_base + 4095) & !4095;
+    let host_offset = host_address - host_base;
+    host_pages[host_offset..host_offset + 4096].fill(0x3c);
+    // SAFETY: The aligned 4096-byte page lies inside the boxed 8192-byte
+    // extent. The box stays mapped until native deregistration succeeds.
+    let mut registered =
+        match unsafe { device.register_host(host_address, true, 4096, 4096, access) } {
+            Ok(registered) => registered,
+            Err(error) => {
+                // Native acquisition may have retained the caller's page cover.
+                std::mem::forget(host_pages);
+                std::mem::forget(source);
+                std::mem::forget(destination);
+                std::mem::forget(device);
+                std::mem::forget(session);
+                return Err(Box::new(error));
+            }
+        };
+    let registered_info = registered.info();
+    destination_bytes.fill(0xa5);
+    // SAFETY: The registered page, source, and destination stay mapped until
+    // both copies retire. Uncertain retirement retains their native owners
+    // and the page.
+    if let Err(failure) = unsafe {
+        gpu.copy_linear(
+            destination_info.device_address,
+            registered_info.device_address,
+            4096,
+            &cancel,
+        )
+        .and_then(|()| {
+            gpu.copy_linear(
+                registered_info.device_address,
+                source_info.device_address,
+                4096,
+                &cancel,
+            )
+        })
+    } {
+        std::mem::forget(registered);
+        std::mem::forget(host_pages);
+        std::mem::forget(source);
+        std::mem::forget(destination);
+        std::mem::forget(device);
+        std::mem::forget(session);
+        return Err(Box::new(failure.error));
+    }
+    let read_matches = destination_bytes.iter().all(|byte| *byte == 0x3c);
+    let write_matches = host_pages[host_offset..host_offset + 4096] == *source_bytes;
+    if let Err(error) = registered.free() {
+        std::mem::forget(registered);
+        std::mem::forget(host_pages);
+        std::mem::forget(source);
+        std::mem::forget(destination);
+        std::mem::forget(device);
+        std::mem::forget(session);
+        return Err(Box::new(error));
+    }
+    assert_eq!(registered_info.host_address, Some(host_address));
+    assert!(read_matches);
+    assert!(write_matches);
+
     source.free()?;
     destination.free()?;
     drop(source);

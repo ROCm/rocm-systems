@@ -1050,12 +1050,9 @@ impl KfdAllocation {
                     }
                     BufferKind::Userptr(pages) => {
                         uapi::USERPTR
+                            | uapi::COHERENT
                             | uapi::NO_SUBSTITUTE
-                            | if pages.uncached {
-                                uapi::UNCACHED
-                            } else {
-                                uapi::COHERENT
-                            }
+                            | if pages.uncached { uapi::UNCACHED } else { 0 }
                     }
                 },
             ..uapi::AllocMemory::default()

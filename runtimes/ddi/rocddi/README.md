@@ -72,6 +72,10 @@ The core source is organized by ownership domain:
 
 The [safety boundary and resource state guide](docs/safety.md) records the
 native reachability rules shared by the core and both adapters.
+Caller-owned host registration uses coherent KFD USERPTR mappings. Requesting
+uncached registration adds the native uncached flag while retaining coherent
+GPU access. The caller keeps the complete host page cover mapped until native
+teardown succeeds or process teardown resolves uncertain ownership.
 
 A topology endpoint is passive metadata. It is not an activated `Device` and
 does not authorize native execution or memory operations. The current backend
