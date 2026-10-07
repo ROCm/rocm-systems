@@ -636,7 +636,7 @@ ROCP_SDK_HIP_FORMATTER(hipMemcpyAttributes,
                        v.dstLocHint,
                        v.flags,
                        '}')
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 38
+#    if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 38
 ROCP_SDK_HIP_FORMATTER(hipExtMemcpyAttributes,
                        "{}srcAccessOrder={}, srcLocHint={}, dstLocHint={}, flags={}{}",
                        '{',
@@ -645,7 +645,7 @@ ROCP_SDK_HIP_FORMATTER(hipExtMemcpyAttributes,
                        v.dstLocHint,
                        v.flags,
                        '}')
-#endif
+#    endif
 ROCP_SDK_HIP_FORMATTER(hipMemcpy3DBatchOp,
                        "{}src={}, dst={}, extent={}, srcAccessOrder={}, flags={}{}",
                        '{',

@@ -6401,7 +6401,7 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
                                size_t* failIdx, hipStream_t stream __dparm(0));
 
 /**
- * @brief Perform Batch of 1D copies with extended operation support.
+ * @brief Perform Batch of 1D copies with extended operation support.[BETA]
  *
  * Extended hipMemcpyBatchAsync. The operation and hints for each copy are selected
  * through attrs[i].flags (hipMemcpyFlags). Not supported during stream capture.
@@ -6409,8 +6409,9 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
  * @param [in] dsts        - Array of destination pointers.
  * @param [in] srcs        - Array of source pointers.
  * @param [in] sizes       - Bytes copied from srcs[i] to dsts[i].
- * @param [in] sizesDst    - Swap entries only: bytes copied from dsts[i] to srcs[i],
- *                            0 < sizesDst[i] <= sizes[i]. NULL = symmetric.
+ * @param [in] sizesDst    - Swap entries: bytes copied from dsts[i] to srcs[i],
+ *                            0 < sizesDst[i] <= sizes[i]. Must be 0 for non-swap entries.
+ *                            NULL = symmetric.
  * @param [in] waits       - Reserved for future use. Must be NULL.
  * @param [in] signals     - Reserved for future use. Must be NULL.
  * @param [in] count       - Number of copy operations.
@@ -6421,6 +6422,9 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported,
  *          #hipErrorInvalidResourceHandle, #hipErrorStreamCaptureUnsupported
+ *
+ * @warning This API is marked as Beta. While this feature is complete, it can
+ *          change and might have outstanding issues.
  */
 hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
                                   size_t* sizes, size_t* sizesDst,

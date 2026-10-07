@@ -85,8 +85,11 @@
  * taking the first compiler ID and shifting the compiler API IDs up by one.
  * A v8 reader would decode those events as the wrong API.
  * v10: a kernel launch event carries pinned host snapshot records after its
- * arguments (num_snapshots was always 0). A v9 reader would not restore them. */
-#define HRR_VERSION ((uint16_t)10u)
+ * arguments (num_snapshots was always 0). A v9 reader would not restore them.
+ * v11: hipExtMemcpyBatchAsync was appended to HipDispatchTable,
+ * shifting the compiler API IDs up by one. A v10 reader would decode
+ * those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)11u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -5868,6 +5871,57 @@ typedef struct {
     int32_t device;
 } hrr_args_hipKernelSetAttributeForDevice;
 
+/* hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t* sizesDst, hipExtMemcpyWait* waits, hipExtMemcpySignal* signals, size_t count, hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs, hipStream_t stream) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dsts;
+    uint64_t srcs;
+    uint64_t sizes;
+    uint64_t sizesDst;
+    uint64_t waits;
+    uint64_t signals;
+    uint64_t count;
+    uint64_t attrs;
+    uint64_t attrsIdxs;
+    uint64_t numAttrs;
+    uint64_t stream;
+    uint8_t dsts_bytes[128];  /* void*[16] inline copy */
+    uint8_t dsts_present;  /* 1 when dsts was non-null */
+    uint32_t dsts_n;  /* elements copied from dsts */
+    uint8_t srcs_bytes[128];  /* void*[16] inline copy */
+    uint8_t srcs_present;  /* 1 when srcs was non-null */
+    uint32_t srcs_n;  /* elements copied from srcs */
+    uint8_t sizes_bytes[128];  /* size_t[16] inline copy */
+    uint8_t sizes_present;  /* 1 when sizes was non-null */
+    uint32_t sizes_n;  /* elements copied from sizes */
+    uint8_t sizesDst_bytes[128];  /* size_t[16] inline copy */
+    uint8_t sizesDst_present;  /* 1 when sizesDst was non-null */
+    uint32_t sizesDst_n;  /* elements copied from sizesDst */
+    uint8_t waits_bytes[1024];  /* hipExtMemcpyWait[16] inline copy */
+    uint8_t waits_present;  /* 1 when waits was non-null */
+    uint32_t waits_n;  /* elements copied from waits */
+    uint8_t signals_bytes[1024];  /* hipExtMemcpySignal[16] inline copy */
+    uint8_t signals_present;  /* 1 when signals was non-null */
+    uint32_t signals_n;  /* elements copied from signals */
+    uint8_t attrs_bytes[896];  /* hipExtMemcpyAttributes[16] inline copy */
+    uint8_t attrs_present;  /* 1 when attrs was non-null */
+    uint32_t attrs_n;  /* elements copied from attrs */
+    uint8_t attrsIdxs_bytes[128];  /* size_t[16] inline copy */
+    uint8_t attrsIdxs_present;  /* 1 when attrsIdxs was non-null */
+    uint32_t attrsIdxs_n;  /* elements copied from attrsIdxs */
+} hrr_args_hipExtMemcpyBatchAsync;
+#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
+static_assert(sizeof(void*) <= 8, "hrr_args_hipExtMemcpyBatchAsync::dsts_bytes too small for void*");
+static_assert(sizeof(void*) <= 8, "hrr_args_hipExtMemcpyBatchAsync::srcs_bytes too small for void*");
+static_assert(sizeof(size_t) <= 8, "hrr_args_hipExtMemcpyBatchAsync::sizes_bytes too small for size_t");
+static_assert(sizeof(size_t) <= 8, "hrr_args_hipExtMemcpyBatchAsync::sizesDst_bytes too small for size_t");
+static_assert(sizeof(hipExtMemcpyWait) <= 64, "hrr_args_hipExtMemcpyBatchAsync::waits_bytes too small for hipExtMemcpyWait");
+static_assert(sizeof(hipExtMemcpySignal) <= 64, "hrr_args_hipExtMemcpyBatchAsync::signals_bytes too small for hipExtMemcpySignal");
+static_assert(sizeof(hipExtMemcpyAttributes) <= 56, "hrr_args_hipExtMemcpyBatchAsync::attrs_bytes too small for hipExtMemcpyAttributes");
+static_assert(sizeof(size_t) <= 8, "hrr_args_hipExtMemcpyBatchAsync::attrsIdxs_bytes too small for size_t");
+#endif
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6418,16 +6472,17 @@ typedef enum hrr_api_id {
     HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES = 545,
     HRR_API_HIPLIBRARYGETMODULE = 546,
     HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE = 547,
-    HRR_API_HIPPOPCALLCONFIGURATION = 548,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 549,
-    HRR_API_HIPREGISTERFATBINARY = 550,
-    HRR_API_HIPREGISTERFUNCTION = 551,
-    HRR_API_HIPREGISTERMANAGEDVAR = 552,
-    HRR_API_HIPREGISTERSURFACE = 553,
-    HRR_API_HIPREGISTERTEXTURE = 554,
-    HRR_API_HIPREGISTERVAR = 555,
-    HRR_API_HIPUNREGISTERFATBINARY = 556,
-    HRR_API_COUNT = 557
+    HRR_API_HIPEXTMEMCPYBATCHASYNC = 548,
+    HRR_API_HIPPOPCALLCONFIGURATION = 549,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 550,
+    HRR_API_HIPREGISTERFATBINARY = 551,
+    HRR_API_HIPREGISTERFUNCTION = 552,
+    HRR_API_HIPREGISTERMANAGEDVAR = 553,
+    HRR_API_HIPREGISTERSURFACE = 554,
+    HRR_API_HIPREGISTERTEXTURE = 555,
+    HRR_API_HIPREGISTERVAR = 556,
+    HRR_API_HIPUNREGISTERFATBINARY = 557,
+    HRR_API_COUNT = 558
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6981,6 +7036,7 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipDeviceFlushGPUDirectRDMAWrites",
     "hipLibraryGetModule",
     "hipKernelSetAttributeForDevice",
+    "hipExtMemcpyBatchAsync",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",

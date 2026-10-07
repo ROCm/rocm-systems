@@ -486,10 +486,11 @@ typedef enum hipExtMemcpyWaitOp {
 } hipExtMemcpyWaitOp;
 
 /**
- * Per-entry wait condition for hipExtMemcpyBatchAsync. Reserved for future use.
+ * Per-entry wait condition for hipExtMemcpyBatchAsync. Reserved for future use;
+ * layout may change before support is enabled.
  */
 typedef struct hipExtMemcpyWait {
-  void*    addr;        ///< GPU address to poll (NULL = no wait, use stream ordering)
+  void*    addr;        ///< GPU address to poll; NULL iff compareOp is None
   uint64_t value;       ///< Reference value for comparison
   uint64_t mask;        ///< AND mask applied before comparison (0 = full 64-bit word)
   uint32_t compareOp;   ///< Comparison function; see hipExtMemcpyWaitOp
@@ -508,10 +509,11 @@ typedef enum hipExtMemcpySignalOp {
 } hipExtMemcpySignalOp;
 
 /**
- * Per-entry signal-after-copy for hipExtMemcpyBatchAsync. Reserved for future use.
+ * Per-entry signal-after-copy for hipExtMemcpyBatchAsync. Reserved for future use;
+ * layout may change before support is enabled.
  */
 typedef struct hipExtMemcpySignal {
-  void*    addr;        ///< GPU address to signal (NULL = no signal)
+  void*    addr;        ///< GPU address to signal; NULL iff signalOp is None
   uint64_t data;        ///< Data value for the atomic operation
   uint32_t signalOp;    ///< Atomic operation; see hipExtMemcpySignalOp
   uint32_t reserved0;   ///< Reserved; must be 0
