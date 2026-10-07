@@ -8,6 +8,7 @@
 use crate::host_storage::{Buffer, Owned, Shared};
 use std::mem::{offset_of, size_of};
 use std::sync::Mutex;
+use std::sync::atomic::{Ordering, fence};
 
 use super::memory::{BufferKind, DeviceVm, KfdAllocation, error, native_error};
 use super::{sys, sysfs, uapi, util};
@@ -15,7 +16,7 @@ use crate::memory::AllocationDesc;
 use crate::memory::DeviceAccess;
 use crate::queue::{
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
-    QueueRequest, QueueScratch, QueueTransport, SdmaEngineSelection,
+    QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
 use crate::session::SessionLifetime;
 
@@ -744,6 +745,7 @@ struct ScratchControl {
 #[derive(Clone, Copy)]
 struct AqlControl {
     producer_mode: QueueProducerMode,
+    ring_memory: QueueRingMemory,
     global_work_sync: bool,
     properties: sysfs::NativeQueueProperties,
     inactive_signal: Option<u64>,
@@ -796,6 +798,7 @@ fn validate_aql(
 ) -> Result<AqlControl, Error> {
     let QueueParameters::Aql {
         producer_mode,
+        ring_memory,
         global_work_sync,
         inactive_signal,
         error_event,
@@ -831,6 +834,7 @@ fn validate_aql(
     }
     Ok(AqlControl {
         producer_mode,
+        ring_memory,
         global_work_sync,
         properties,
         inactive_signal,
@@ -876,7 +880,9 @@ impl Request {
                 "KFD queue backing is supported on GFX10.1 through GFX12.0",
             ));
         }
-        if util::page_size().map_err(|source| native_error("queue page size", source))? < 4096 {
+        let page =
+            util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
+        if page < 4096 {
             return Err(error(
                 ErrorKind::Unsupported,
                 "KFD queue allocation requires host pages of at least 4 KiB",
@@ -934,6 +940,15 @@ impl Request {
         } else {
             None
         };
+        if aql.is_some_and(|aql| aql.ring_memory == QueueRingMemory::HostVisibleLocal)
+            && (properties.gfx_target != 120_001
+                || native.public_memory_bytes < u64::from(ring_size).div_ceil(page) * page)
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "host-visible local AQL ring is unavailable on this GPU",
+            ));
+        }
         Ok(Self {
             ring_size,
             queue_type,
@@ -1458,7 +1473,17 @@ impl KfdQueue {
                 permissions,
             )
         };
-        let ring_kind = if request.aql.is_some() && lifetime == SessionLifetime::Process {
+        let local_ring = request
+            .aql
+            .is_some_and(|aql| aql.ring_memory == QueueRingMemory::HostVisibleLocal);
+        let ring_kind = if local_ring {
+            BufferKind::Vram {
+                public: true,
+                coherent: false,
+                uncached: true,
+                contiguous: false,
+            }
+        } else if request.aql.is_some() && lifetime == SessionLifetime::Process {
             BufferKind::OwnedUserptr { uncached: true }
         } else {
             // KFD USERPTR cannot be allocated in a secondary INSTANCE VM.
@@ -1477,6 +1502,11 @@ impl KfdQueue {
             let mut packet = [0; 64];
             packet[0] = 1;
             ring.fill_records(&packet, request.ring_size as usize / packet.len())?;
+        }
+        if local_ring {
+            // A public VRAM CPU mapping may be write-combined. Drain ring
+            // initialization stores before KFD can schedule this queue.
+            fence(Ordering::SeqCst);
         }
         let mut pointers = allocate(
             page,
