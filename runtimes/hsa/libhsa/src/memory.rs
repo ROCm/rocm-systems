@@ -24,6 +24,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::platform::memory as linux_interop;
+use crate::platform::memory::AisFileOperation as AisOperation;
 use crate::platform::memory::{
     KfdIpcMemoryHandle as IpcMemoryHandle, KfdSvmAccess as SvmAccess,
     KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation,
@@ -56,9 +57,7 @@ const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
 const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
 const SVM_MAX_MIGRATION_GRANULARITY: u64 = 18;
 const SVM_MAX_ATTRIBUTES: usize = 2044;
-const AIS_MAX_TRANSFER_BYTES: u64 = 0x7fff_f000;
 const EIO: i32 = 5;
-const EOVERFLOW: i32 = 75;
 
 /// Canonical metadata for every address alias of one HSA-visible allocation.
 ///
@@ -1617,10 +1616,22 @@ pub extern "C" fn hsa_amd_external_semaphore_handle_close(
     })
 }
 
-#[derive(Clone, Copy)]
-enum AisOperation {
-    Read,
-    Write,
+unsafe fn publish_ais_result(
+    result: linux_interop::AisFileResult,
+    size_copied: *mut u64,
+    operation_status: *mut i32,
+) -> Status {
+    // SAFETY: Both outputs are optional in the public ABI and, when non-null,
+    // point to caller-owned writable storage for the duration of this call.
+    unsafe {
+        if !size_copied.is_null() {
+            size_copied.write(result.size_copied);
+        }
+        if !operation_status.is_null() {
+            operation_status.write(result.status);
+        }
+    }
+    if result.status == 0 { SUCCESS } else { ERROR }
 }
 
 unsafe fn ais_transfer(
@@ -1632,72 +1643,26 @@ unsafe fn ais_transfer(
     operation_status: *mut i32,
     operation: AisOperation,
 ) -> Status {
-    let mut copied = 0usize;
-    let mut write_retries = 3;
-    let mut first = true;
-    let result = loop {
-        let remaining = size - copied;
-        if !first && remaining == 0 {
-            break Ok(());
-        }
-        first = false;
-        let Some(offset) = i64::try_from(copied)
-            .ok()
-            .and_then(|copied| file_offset.checked_add(copied))
-        else {
-            break Err(EOVERFLOW);
-        };
-        // SAFETY: The caller validated the complete host range and keeps it
-        // live for this synchronous transfer. The Linux provider borrows it.
-        let transferred = match operation {
-            AisOperation::Read => {
-                let buffer = if remaining == 0 {
-                    &mut []
-                } else {
-                    unsafe { std::slice::from_raw_parts_mut((host + copied) as *mut u8, remaining) }
-                };
-                linux_interop::read_descriptor_at(descriptor, buffer, offset)
-            }
-            AisOperation::Write => {
-                let buffer = if remaining == 0 {
-                    &[]
-                } else {
-                    unsafe { std::slice::from_raw_parts((host + copied) as *const u8, remaining) }
-                };
-                linux_interop::write_descriptor_at(descriptor, buffer, offset)
-            }
-        };
-        let transferred = match transferred {
-            Ok(transferred) => transferred,
-            Err(error) => break Err(error.raw_os_error().unwrap_or(EIO)),
-        };
-        if transferred == 0 {
-            if matches!(operation, AisOperation::Read) || remaining == 0 {
-                break Ok(());
-            }
-            if write_retries == 0 {
-                break Err(EIO);
-            }
-            write_retries -= 1;
-            continue;
-        }
-        if transferred > remaining {
-            break Err(EIO);
-        }
-        copied += transferred;
-    };
-
-    // SAFETY: Both outputs are optional in the public ABI and, when non-null,
-    // point to caller-owned writable storage for the duration of this call.
-    unsafe {
-        if !size_copied.is_null() {
-            size_copied.write(copied as u64);
-        }
-        if !operation_status.is_null() {
-            operation_status.write(result.as_ref().map_or_else(|error| -*error, |()| 0));
-        }
+    if size > 0 && (host == 0 || host.checked_add(size).is_none() || size > isize::MAX as usize) {
+        return ERROR;
     }
-    result.map_or(ERROR, |()| SUCCESS)
+    // SAFETY: ais_file_io validates the full host mapping and holds the
+    // runtime lock until this synchronous positioned I/O call returns.
+    let buffer = match operation {
+        AisOperation::Read => linux_interop::AisHostBuffer::Read(if size == 0 {
+            &mut []
+        } else {
+            unsafe { std::slice::from_raw_parts_mut(host as *mut u8, size) }
+        }),
+        AisOperation::Write => linux_interop::AisHostBuffer::Write(if size == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(host as *const u8, size) }
+        }),
+    };
+    let result = linux_interop::ais_host_transfer(descriptor, buffer, file_offset);
+    // SAFETY: The caller owns the optional output storage for this call.
+    unsafe { publish_ais_result(result, size_copied, operation_status) }
 }
 
 unsafe fn ais_file_io(
@@ -1721,7 +1686,7 @@ unsafe fn ais_file_io(
     if device_pointer.is_null() || descriptor < 0 {
         return INVALID_ARGUMENT;
     }
-    let transfer_size = match usize::try_from(size.min(AIS_MAX_TRANSFER_BYTES)) {
+    let transfer_size = match usize::try_from(size.min(linux_interop::AIS_MAX_TRANSFER_BYTES)) {
         Ok(size) => size,
         Err(_) => return ERROR,
     };
@@ -1731,23 +1696,68 @@ unsafe fn ais_file_io(
     if description.owner.handle == CPU_AGENT {
         return ERROR;
     }
-    let Some(host) = description.host_range(device_pointer as usize, transfer_size) else {
+    let address = device_pointer as usize;
+    let Some(offset) = description.offset_range(address, transfer_size) else {
         return ERROR;
     };
-    // Keep the runtime lock through positioned I/O so another HSA call cannot
-    // free or unmap the allocation while the provider borrows its host range.
-    // SAFETY: The mapped range stays owned by the locked runtime. The public
-    // call requires the descriptor to remain live for this synchronous call.
-    let status = unsafe {
-        ais_transfer(
+    // Hold the runtime lock through either synchronous transfer, preventing
+    // another HSA call from freeing the allocation during the borrow.
+    let status = if let Some(host) = description.host_address(address) {
+        // SAFETY: The mapped host range stays owned by the locked runtime.
+        // The public call keeps its descriptor live until this call returns.
+        unsafe {
+            ais_transfer(
+                descriptor,
+                host,
+                transfer_size,
+                file_offset,
+                size_copied,
+                operation_status,
+                operation,
+            )
+        }
+    } else {
+        let Some(memory) = owned_memory(runtime, address).filter(|memory| {
+            memory.description.agent_base == description.agent_base
+                && memory.description.host_base == description.host_base
+                && memory.description.offset_range(address, transfer_size) == Some(offset)
+        }) else {
+            return ERROR;
+        };
+        let offset = match u64::try_from(offset) {
+            Ok(offset) => offset,
+            Err(_) => return ERROR,
+        };
+        let size = match u64::try_from(transfer_size) {
+            Ok(size) => size,
+            Err(_) => return ERROR,
+        };
+        match linux_interop::ais_transfer(
+            &memory.allocation,
             descriptor,
-            host,
-            transfer_size,
+            offset,
+            size,
             file_offset,
-            size_copied,
-            operation_status,
             operation,
-        )
+        ) {
+            Ok(result) => {
+                // SAFETY: Optional outputs belong to the caller for this call.
+                unsafe { publish_ais_result(result, size_copied, operation_status) }
+            }
+            Err(error) => {
+                // The ioctl input overlaps its output. On error KFD's copied
+                // count cannot be trusted, so leave size_copied untouched.
+                let errno = error
+                    .native_error_code()
+                    .filter(|errno| *errno > 0)
+                    .unwrap_or(EIO);
+                if !operation_status.is_null() {
+                    // SAFETY: The non-null optional output is caller-owned.
+                    unsafe { operation_status.write(-errno) };
+                }
+                ERROR
+            }
+        }
     };
     drop(guard);
     status
@@ -3091,27 +3101,29 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_fabric_handle(
     })
 }
 
+fn owned_memory(runtime: &Runtime, address: usize) -> Option<&Memory> {
+    runtime
+        .allocations
+        .values()
+        .find(|memory| memory.contains(address))
+        .or_else(|| {
+            runtime
+                .ipc_allocations
+                .values()
+                .find(|memory| memory.contains(address))
+        })
+        .or_else(|| {
+            runtime
+                .interop_allocations
+                .values()
+                .find(|memory| memory.contains(address))
+        })
+}
+
 fn pointer_description(runtime: &Runtime, address: usize) -> Option<PointerDescription> {
     vmem_pointer_description(runtime, address).or_else(|| {
-        runtime
-            .allocations
-            .values()
-            .find(|memory| memory.contains(address))
+        owned_memory(runtime, address)
             .map(|memory| memory.description.clone())
-            .or_else(|| {
-                runtime
-                    .ipc_allocations
-                    .values()
-                    .find(|memory| memory.contains(address))
-                    .map(|memory| memory.description.clone())
-            })
-            .or_else(|| {
-                runtime
-                    .interop_allocations
-                    .values()
-                    .find(|memory| memory.contains(address))
-                    .map(|memory| memory.description.clone())
-            })
             .or_else(|| {
                 runtime
                     .locked_allocations

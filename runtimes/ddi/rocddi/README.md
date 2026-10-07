@@ -126,6 +126,10 @@ status. On an ioctl error, the input and output fields overlap in the UAPI, so
 the byte count is unknown and rocddi preserves the native errno without
 replaying the operation. Linux storage and PCI P2P capability determine whether
 KFD can execute a particular transfer.
+For CPU-visible storage, `ais_host_transfer` uses positioned host I/O through
+the same Linux interop provider. It reports a known copied-byte prefix and
+errno on failure, including short reads at end of file. The frontend owns
+public pointer validation and HSA status translation for both routes.
 
 Direct SDMA queues use byte-addressed rings and monotonic 64-bit read and
 write indices. `QueueParameters::Sdma` keeps the KFD-selected engine route.

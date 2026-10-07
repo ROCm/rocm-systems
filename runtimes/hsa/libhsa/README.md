@@ -133,7 +133,16 @@ nonfinal `hsa_shut_down` only releases one runtime reference and keeps the
 logging configuration. Logging calls made recursively from a custom C stream
 callback are rejected.
 Linux descriptor calls for memory and loader operations go through the
-rocddi provider.
+rocddi provider. The AIS file read and write entry points accept a borrowed
+descriptor and a range within a GPU-owned allocation. CPU-visible ranges use
+rocddi's positioned host file transfer, including partial-read and write
+progress. GPU-only KFD VRAM uses the mapped allocation handle and rocddi's
+native AIS ioctl. Each call transfers at most Linux `MAX_RW_COUNT` bytes and
+leaves the descriptor's shared file position unchanged. The HSA registry lock
+keeps the allocation live for the synchronous operation. On native ioctl
+failure, the operation status receives the negative Linux errno when supplied
+and `-EIO` otherwise. The copied byte count remains untouched because KFD's
+input and output fields overlap.
 
 Loaded executable segments retain a CPU mapping alongside their GPU address.
 For executable loading, the supported GPU target is GFX1201. The loader also
