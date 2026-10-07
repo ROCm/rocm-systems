@@ -203,15 +203,14 @@ std::string hex(uint64_t v) {
   return b;
 }
 
-// A replay without placement gets the stored pointer wrong, unless the runtime
-// happened to return the recorded address anyway. The pointer dump of the
-// first launch says which. When it did there is nothing to catch, and the
-// section says it skipped instead of passing.
+// A replay that does not place `buf` gets the stored pointer wrong. The
+// caller denies `buf` with HIP_HRR_REPLAY_PLACE_DENY, which holds its range
+// even with placement off, so the runtime cannot return the recorded address
+// by chance. The pointer dump of the first launch says where it went.
 void hrr_require_stale(int rc, const std::string& out, uint64_t buf) {
   uint64_t live = 0;
   REQUIRE(hrr_place_live_arg(out, buf, &live));
-  if (live == buf)
-    SKIP("the runtime returned the recorded address by itself; nothing to catch");
+  REQUIRE(live != buf);
   int pass = 0, fail = 0;
   REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
   CHECK(fail >= 1);
@@ -269,6 +268,11 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
                        << " again=" << hex(pc.again));
   const std::vector<std::pair<std::string, std::string>> dump = {
       {"HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL", "1"}};
+  // The sections that turn placement off deny `buf`, so it cannot come back
+  // at its recorded address by chance.
+  const std::vector<std::pair<std::string, std::string>> deny = {
+      {"HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL", "1"},
+      {"HIP_HRR_REPLAY_PLACE_DENY", hex(pc.buf)}};
 
   SECTION("placement on: the stored pointer is right and nothing falls back") {
     auto [rc, out] = hrr_playback_merged(pc.archive, "", dump);
@@ -292,9 +296,10 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
   }
 
   SECTION("--no-placement: the stored pointer is stale") {
-    auto [rc, out] = hrr_playback_merged(pc.archive, "--no-placement", dump);
+    auto [rc, out] = hrr_playback_merged(pc.archive, "--no-placement", deny);
     INFO("Replay:\n" << out);
     CHECK(out.find("Placement : off (--no-placement)") != std::string::npos);
+    CHECK(out.find("1 range(s) treated as taken") != std::string::npos);
     CHECK(out.find("placed at capture address") == std::string::npos);
     hrr_require_stale(rc, out, pc.buf);
   }
@@ -356,9 +361,10 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
   }
 
   SECTION("--guard-segments turns placement off") {
-    auto [rc, out] = hrr_playback_merged(pc.archive, "--guard-segments", dump);
+    auto [rc, out] = hrr_playback_merged(pc.archive, "--guard-segments", deny);
     INFO("Replay:\n" << out);
     CHECK(out.find("Placement : off (--guard-segments") != std::string::npos);
+    CHECK(out.find("1 range(s) treated as taken") != std::string::npos);
     CHECK(out.find("placed at capture address") == std::string::npos);
     hrr_require_stale(rc, out, pc.buf);
   }
@@ -366,9 +372,11 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
   SECTION("HIP_HRR_REPLAY_ALLOC_PAD_FACTOR above 1 turns placement off") {
     auto [rc, out] = hrr_playback_merged(pc.archive, "",
                                          {{"HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL", "1"},
+                                          {"HIP_HRR_REPLAY_PLACE_DENY", hex(pc.buf)},
                                           {"HIP_HRR_REPLAY_ALLOC_PAD_FACTOR", "2"}});
     INFO("Replay:\n" << out);
     CHECK(out.find("Placement : off (HIP_HRR_REPLAY_ALLOC_PAD_FACTOR=2") != std::string::npos);
+    CHECK(out.find("1 range(s) treated as taken") != std::string::npos);
     CHECK(out.find("placed at capture address") == std::string::npos);
     hrr_require_stale(rc, out, pc.buf);
   }

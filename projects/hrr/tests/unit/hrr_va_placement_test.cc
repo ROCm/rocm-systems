@@ -625,6 +625,21 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_VmmHoldRestoredAfterMiss) {
   REQUIRE_FALSE(page_taken(R));
 }
 
+HRR_TEST_CASE(Unit_HRR_VaPlacement_DeniedHeldWithPlacementOff) {
+  // With placement off, HIP_HRR_REPLAY_PLACE_DENY still holds the denied
+  // ranges, so the runtime cannot return a recorded address by chance. The
+  // holds leave placement inactive, and teardown drops them.
+  const uint64_t R = free_range(4);
+  hrr::VaPlacement pl;
+  REQUIRE(pl.hold_denied({{R, R + 4 * P}}));
+  REQUIRE_FALSE(pl.active());
+  REQUIRE(page_taken(R));
+  REQUIRE(page_taken(R + 3 * P));
+  pl.release_all();
+  REQUIRE_FALSE(page_taken(R));
+  REQUIRE_FALSE(page_taken(R + 3 * P));
+}
+
 namespace {
 // What `fn` writes to stderr.
 template <class Fn>

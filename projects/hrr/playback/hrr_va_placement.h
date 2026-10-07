@@ -601,6 +601,11 @@ class VaPlacement {
     // Before hipInit: hold every planned range with a placeholder. Returns
     // false when the platform cannot (Windows), which leaves placement off.
     bool hold(PlacementPlan plan);
+    // Placement off, HIP_HRR_REPLAY_PLACE_DENY set: hold only the denied
+    // ranges, before hipInit, so the runtime cannot return those addresses.
+    // Placement stays inactive; release_all() drops the holds. Returns false
+    // when the platform cannot (Windows).
+    bool hold_denied(const std::vector<VaRange>& denied);
 
     // After hipInit, before the first replayed event: check that every device
     // supports VMM, then swap each allocation placeholder for a reservation at
@@ -651,7 +656,7 @@ class VaPlacement {
     void vmm_reserved(uint64_t rec, size_t size, bool held, uint64_t live);
 
     // Teardown: unmap whatever is still mapped, then free the reservations
-    // and drop every placeholder.
+    // and drop every placeholder, the denied ones too when placement is off.
     void release_all();
 
     // Between the warm-up pass and the timed pass. The line budget starts

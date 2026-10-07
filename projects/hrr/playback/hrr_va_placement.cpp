@@ -148,6 +148,18 @@ bool VaPlacement::hold(PlacementPlan plan) {
 #endif
 }
 
+bool VaPlacement::hold_denied(const std::vector<VaRange>& denied) {
+#ifdef _WIN32
+    (void)denied;
+    return false;
+#else
+    std::lock_guard<std::mutex> lk(mu_);
+    const std::vector<VaRange> occ = read_proc_maps();
+    for (const auto& r : denied) hold_free_pieces(r.base, r.end, occ, &denied_held_);
+    return true;
+#endif
+}
+
 void VaPlacement::reserve_line(bool whole, uint64_t b, uint64_t e, const char* why) {
     if (++reserve_lines_ > kFallbackLines && !verbose_) return;
     if (whole)
@@ -499,6 +511,8 @@ void VaPlacement::vmm_reserved(uint64_t rec, size_t size, bool held, uint64_t li
 void VaPlacement::release_all() {
 #ifndef _WIN32
     std::lock_guard<std::mutex> lk(mu_);
+    for (const auto& r : denied_held_) drop_hold(r.base, r.end);
+    denied_held_.clear();
     if (!active_) return;
     for (const auto* m : {&mapped_, &deferred_})
         for (const auto& [pb, mm] : *m) (void)unmap_one(pb, mm);
@@ -512,8 +526,6 @@ void VaPlacement::release_all() {
     for (const auto& r : vmm_held_) drop_hold(r.base, r.end);
     vmm_held_.clear();
     vmm_released_.clear();
-    for (const auto& r : denied_held_) drop_hold(r.base, r.end);
-    denied_held_.clear();
     active_ = false;
 #endif
 }

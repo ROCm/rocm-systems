@@ -1222,7 +1222,9 @@ static void print_usage(const char* argv0) {
     "  HIP_HRR_REPLAY_PLACE_DENY=A[,B...]   treat the range of each recorded\n"
     "                                       allocation containing address A as\n"
     "                                       taken: it is held so nothing lands\n"
-    "                                       there, which exercises the fallback\n"
+    "                                       there, which exercises the fallback.\n"
+    "                                       With placement off it is still held,\n"
+    "                                       so the runtime cannot return it.\n"
     "\n"
     "Default mode: single-threaded, serialize GPU after pass, abort on first error.\n"
     "Use --sync-after-event to pinpoint the exact event causing a GPU fault or hang.\n",
@@ -1434,19 +1436,28 @@ int main(int argc, char** argv) {
   } else if (ctx.guard_segments) {
     printf("[HRR] Placement : off (--guard-segments needs a gap after every "
            "allocation, and the recorded layout has none)\n");
-  } else {
+  }
+  const bool placement_off = no_placement || pad_factor > 1 || ctx.guard_segments;
+  const std::vector<uint64_t> deny =
+      hrr::parse_place_deny(std::getenv("HIP_HRR_REPLAY_PLACE_DENY"));
+  if (!placement_off || !deny.empty()) {
     std::vector<hrr::VaRange> segments;
     if (ctx.regions_enabled)
       ctx.regions.for_each_declared_segment(
           [&](uint64_t b, uint64_t n) { segments.push_back({b, b + n}); });
-    hrr::PlacementPlan plan = hrr::plan_placement(
-        archive.events, segments,
-        hrr::parse_place_deny(std::getenv("HIP_HRR_REPLAY_PLACE_DENY")));
+    hrr::PlacementPlan plan = hrr::plan_placement(archive.events, segments, deny);
     if (!plan.denied.empty())
       printf("[HRR] Placement : %zu range(s) treated as taken "
              "(HIP_HRR_REPLAY_PLACE_DENY)\n", plan.denied.size());
-    if (!ctx.placement->hold(std::move(plan)))
+    // With placement off the denied ranges are still held, so the runtime
+    // cannot hand an allocation its recorded address back by chance.
+    if (placement_off) {
+      if (!plan.denied.empty() && !ctx.placement->hold_denied(plan.denied))
+        printf("[HRR] Placement : HIP_HRR_REPLAY_PLACE_DENY ignored (not "
+               "supported on this platform)\n");
+    } else if (!ctx.placement->hold(std::move(plan))) {
       printf("[HRR] Placement : off (not supported on this platform)\n");
+    }
   }
 
   HIP_CHECK(hipInit(0));
