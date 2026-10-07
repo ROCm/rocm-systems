@@ -21,6 +21,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed wrong values from PM metrics and register table queries in the Python library**.  
+  - The record names were correct, but every value was wrong.
+
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
 
@@ -232,9 +235,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps that fall between clock levels**.  
   - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.
   - `sclk` supports a continuous frequency range, so its requested `max` is honored exactly (e.g. `600` enforces a limit of 600MHz) and is not snapped.
-
-- **Fixed `amdsmi_get_gpu_pm_metrics_info()` and `amdsmi_get_gpu_reg_table_info()` returning blank names and zeroed values**.  
-  - The Python name/value decoder walked the returned buffer with a 72-byte stride instead of the 264-byte `amdsmi_name_value_t`, so each value was read from inside the preceding name buffer. Only the first entry's name survived and every value came back as `0`. Both APIs now return the complete set of pairs.
 
 - **Fixed AI-NICs disappearing from `amd-smi` when the RDMA driver is unavailable**.  
   - Discovery treated a missing RDMA device list as a fatal error for the whole NIC, so a host with `ionic_rdma` blacklisted (or otherwise not loaded) dropped the NIC entirely and reported no AI-NIC at all.
