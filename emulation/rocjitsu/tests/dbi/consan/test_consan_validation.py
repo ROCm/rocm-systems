@@ -614,7 +614,9 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(workloads["llama-rdna4-rms-norm"]["targets"], ("gfx1201",))
 
-    def test_status_ledgers_are_single_tables_matching_manifests(self) -> None:
+    def test_status_ledgers_have_one_qualification_table_matching_manifests(
+        self,
+    ) -> None:
         status_root = (
             Path(validation.__file__).resolve().parents[3] / "docs/consan/validation"
         )
@@ -631,14 +633,18 @@ class ConSanValidationTest(unittest.TestCase):
             with self.subTest(target=target):
                 status = (status_root / filename).read_text()
                 self.assertEqual(status.count("| Set | Priority |"), 1)
-                self.assertEqual(status.count("| --- | ---: | --- | --- | --- |"), 1)
                 introduction = status.split("| Set |", 1)[0]
                 self.assertIn("VALIDATION.md#status-colors", introduction)
                 for color in ("🟥", "🟧", "🟨", "🟩"):
                     self.assertIn(color, introduction)
+                # Evidence tables outside the qualification ledger have their own schemas.
+                ledger = status[status.index("| Set | Priority |") :].split("\n\n", 1)[
+                    0
+                ]
+                self.assertEqual(ledger.count("| --- | ---: | --- | --- | --- |"), 1)
                 rows = [
                     line
-                    for line in status.splitlines()
+                    for line in ledger.splitlines()
                     if line.startswith("| ")
                     and not line.startswith("| Set |")
                     and not line.startswith("| ---")
@@ -6172,11 +6178,13 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_fault_template_matches_target_barrier_geometry(self) -> None:
         workload = validation.WORKLOAD_BY_ID["d128-block"]
-        rdna_fault = validation._fault_template("gfx1201", workload)["faults"][0]
-        self.assertIn(
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY",
-            rdna_fault["environment"],
-        )
+        for target in ("gfx1201", "gfx1250"):
+            with self.subTest(target=target):
+                paired_fault = validation._fault_template(target, workload)["faults"][0]
+                self.assertIn(
+                    "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY",
+                    paired_fault["environment"],
+                )
         for target in ("gfx942", "gfx950", "gfx1100"):
             with self.subTest(target=target):
                 singleton_fault = validation._fault_template(target, workload)[

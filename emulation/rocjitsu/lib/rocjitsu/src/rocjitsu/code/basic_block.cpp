@@ -49,16 +49,20 @@ bool is_unconditional_branch(const Instruction &inst) {
 }
 
 bool uses_zero_filled_text_padding(rj_code_arch_t arch) {
-  // Zero is not an instruction in these ISAs. Their toolchains use zero-filled
-  // alignment after bodies whose symbol-derived range extends to the next
-  // aligned body.
+  // Qualified toolchain output for RDNA3, RDNA4 and CDNA5 uses zero-filled alignment
+  // after bodies whose symbol-derived range extends to the next aligned body. Zero is
+  // not an instruction in these ISAs. RDNA3_5 is deliberately excluded until its
+  // padding is qualified independently; ISA similarity alone does not admit it.
   return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
          arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 bool permits_implicit_text_termination(rj_code_arch_t arch) {
-  // RDNA3 alignment holes do not establish that an unterminated path ends.
-  // Keep its missing fallthroughs visible to CFG consumers.
+  // Preserve the existing RDNA4/CDNA5 inference for compiler-emitted unreachable tails.
+  // This compatibility policy is separate from recognizing alignment: a hole alone is
+  // not proof of termination on any architecture. RDNA3 qualification covers padding
+  // after terminated bodies, not this inference, so retain its missing fallthroughs.
+  // All other architectures, including RDNA3_5, remain outside the inference policy.
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 

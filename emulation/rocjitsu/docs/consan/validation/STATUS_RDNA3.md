@@ -188,6 +188,61 @@ and the linked allowlist procedure below. The runner's `manifest` and `explain`
 commands provide the current target-native workload commands, profile
 environment, correctness oracles, and fault policy.
 
+The checked-in specification includes all seven rocBLAS and six PyTorch
+campaigns reported above. Select the following fault IDs with `fault --spec`
+and `--fault`; use the indicated `--profile` rather than combining detector
+profiles. Each specification retains its eight trials and six-detection bar,
+including configurations that did not pass. Importing these reviewed
+specifications does not constitute a new hardware revalidation.
+
+| Workload | Fault ID | Profile |
+| --- | --- | --- |
+| `rocblas-sgemm-square-64` | `drop-initial-publication-default` | `default` |
+| `rocblas-sgemm-square-64` | `drop-initial-publication-high` | `default` |
+| `rocblas-sgemm-square-64` | `drop-initial-publication-wg1-cell256` | `default` |
+| `rocblas-sgemm-square-64` | `drop-initial-publication-sc-sleep15` | `supercollider` |
+| `rocblas-sgemm-square-64` | `drop-initial-publication-sc-sleep15-reads` | `supercollider` |
+| `rocblas-sgemm-square-64` | `drop-initial-publication-sc-sleep127-all` | `supercollider` |
+| `rocblas-sgemm-square-64` | `drop-initial-publication-sc-sleep127-reads` | `supercollider` |
+| `pytorch-torch-mode` | `mode-initial-lds-publication-high` | `default` |
+| `pytorch-torch-sort` | `sort-first-lds-publication-high` | `default` |
+| `pytorch-norm-softmax` | `norm-lds-publication-high` | `default` |
+| `pytorch-norm-softmax` | `norm-lds-publication-higher` | `default` |
+| `pytorch-norm-softmax` | `norm-lds-publication-max` | `default` |
+| `pytorch-norm-softmax` | `softmax-lds-publication-high` | `default` |
+
+Mode retains the two adjacent singleton barriers as one grouped mutation;
+sort retains the corrected exact-site selector without a paired-barrier
+selector. PyTorch specifications deliberately omit an unconditional static
+reach witness: the detections above use detector-owned runtime diagnostics,
+and norm's undetected trials remain without reach proof. The rocBLAS entries
+retain their reviewed input-specific unconditional reach proof.
+
+For norm and softmax, the workload ID remains `pytorch-norm-softmax`, but the
+recorded campaigns execute one component at a time. Pass
+`--launcher-json '["env", "CONSAN_PYTORCH_REDUCTION_COMPONENT=norm"]'` for all
+three `norm-lds-publication-*` faults and
+`--launcher-json '["env", "CONSAN_PYTORCH_REDUCTION_COMPONENT=softmax"]'` for
+`softmax-lds-publication-high`. Use the same launcher for native discovery,
+inventory, and matching clean controls. The fault JSON does not install these
+launchers; omitting one runs the combined workload and does not reproduce the
+component-only evidence. Mode, sort, and rocBLAS fault campaigns use no launcher.
+
+Before each fault campaign, require a passing clean comparator with the same
+allowlist, component selection, and operating point. For Default preset
+campaigns, set `CONSAN_VALIDATION_DEFAULT_PRESET` to the specified preset for
+the clean run. For the rocBLAS `wg1-cell256` clean comparator, use
+`--launcher-json '["env", "RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE=1", "RJ_CONSAN_CELL_SAMPLE_STRIDE=256"]'`;
+the fault specification sets those two controls directly in every trial.
+For SuperCollider clean comparators, set `CONSAN_VALIDATION_SC_DELAY_MODE=sleep`,
+`CONSAN_VALIDATION_SC_DELAY` to 15 or 127, and
+`CONSAN_VALIDATION_SC_DELAY_READS_ONLY` to 0 for all-access delay or 1 for
+reads-only delay. The corresponding fault trials carry those controls in the
+specification (`sc-sleep15` retains the default all-access delay).
+Use separate artifact roots for each operating point. See
+[validation controls](VALIDATION.md#explicit-sampling-configurations) and
+`fault --help` for the remaining execution and health-probe arguments.
+
 Keep exact commands, exit statuses, toolchain versions, binary identities,
 mutation offsets, and raw reports in the execution records. Regenerate native
 inventories and review fault sites for the binaries under test. This status

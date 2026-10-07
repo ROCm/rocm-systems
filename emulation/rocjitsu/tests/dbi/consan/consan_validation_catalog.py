@@ -39,6 +39,7 @@ PROCESS_OUTPUT_DRAIN_SECONDS = 2
 PROCESS_TERMINATION_GRACE_SECONDS = 5
 NATIVE_CDNA_TARGETS = frozenset(("gfx942", "gfx950"))
 ATOMIC_ORDER_ONLY_TARGETS = NATIVE_CDNA_TARGETS | {"gfx1100"}
+SINGLETON_BARRIER_TARGETS = NATIVE_CDNA_TARGETS | {"gfx1100"}
 SINGLE_REPETITION_TARGETS = frozenset(("gfx942", "gfx950", "gfx1250"))
 QWEN_OVERHEAD_REPETITIONS = {target: 1 for target in SINGLE_REPETITION_TARGETS}
 QWEN_BUILD_MANIFEST_SCHEMA_VERSION = 1
@@ -144,7 +145,7 @@ assert (
 
 def _fault_family_environment(target: str, family: str) -> dict[str, str]:
     environment = dict(FAULT_FAMILY_ENVIRONMENTS[family])
-    if target in NATIVE_CDNA_TARGETS | {"gfx1100"} and family == "barrier-drop":
+    if target in SINGLETON_BARRIER_TARGETS and family == "barrier-drop":
         # CDNA3/4 and RDNA3 represent a full workgroup barrier with one
         # s_barrier. Unlike RDNA4's signal/wait pair, it has no two-member
         # logical sequence that must be selected and dropped atomically.
