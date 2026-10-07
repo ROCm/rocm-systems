@@ -4,7 +4,7 @@ name: "rocjitsu-formatting"
 on:
   pull_request:
     # NOTE: Only files under these paths trigger CI formatting checks.
-    # Shared files (e.g. .github/scripts/) are not covered — run
+    # Other shared files (e.g. .github/scripts/) are not covered — run
     # `pre-commit run --all-files` locally to catch issues outside this
     # scope. We should incrementally add more paths here as projects
     # adopt pre-commit.
@@ -16,6 +16,7 @@ on:
       - "emulation/mirage/**"
       - "emulation/rocjitsu/**"
       - ".github/workflows/rocjitsu-*.yml"
+      - ".github/scripts/test-rocjitsu-formatting.py"
       - ".pre-commit-config.yaml"
 
 permissions:
@@ -33,8 +34,8 @@ jobs:
         with:
           fetch-depth: 0
           # Sparse checkout controls which files are on disk, and therefore
-          # which files pre-commit can check. To add a new project to this
-          # CI job, add its path here. That's the only change needed.
+          # which files pre-commit can check. Keep the full-subtree scan below
+          # aligned with this list when adding a gated component.
           sparse-checkout: |
             emulation/mirage
             emulation/rocjitsu
@@ -46,24 +47,44 @@ jobs:
 
       - run: pip install pre-commit
 
-      - name: Run pre-commit on changed files
+      - name: Test formatting file selection
+        run: python3 .github/scripts/test-rocjitsu-formatting.py
+
+      - name: Run pre-commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # Find the common ancestor between the PR base and head.
-          MERGE_BASE=$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
 
-          # List files that were added, copied, modified, or renamed in
-          # the PR, then keep only those present on disk. HEAD is the
-          # pull-request merge commit in GitHub Actions, so diff against
-          # the PR head SHA directly to avoid checking files that changed
-          # only on the target branch.
-          FILES=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" ${{ github.event.pull_request.head.sha }} \
-            | while IFS= read -r f; do if [ -f "$f" ]; then echo "$f"; fi; done)
+          # HEAD can be GitHub's merge commit; use the PR head for the diff.
+          head = os.environ["HEAD_SHA"]
+          base = subprocess.check_output(
+              ["git", "merge-base", os.environ["BASE_SHA"], head], text=True
+          ).strip()
+          changed = subprocess.check_output(
+              ["git", "diff", "--name-only", "--diff-filter=ACMR", "-z", base, head]
+          )
+          files = {os.fsdecode(path) for path in changed.split(b"\0") if path}
+          if files & {".pre-commit-config.yaml", ".github/workflows/rocjitsu-formatting.yml"}:
+              tracked = subprocess.check_output([
+                  "git", "ls-files", "-z", "--", "emulation/mirage/", "emulation/rocjitsu/"
+              ])
+              files.update(os.fsdecode(path) for path in tracked.split(b"\0") if path)
 
-          if [ -z "$FILES" ]; then
-            echo "No checked-in files changed in sparse checkout, skipping."
-            exit 0
-          fi
+          files = sorted(path for path in files if Path(path).is_file())
+          if files:
+              print(f"Checking {len(files)} files", flush=True)
+              raise SystemExit(subprocess.run(["pre-commit", "run", "--files", *files]).returncode)
+          print("No checked-in files to check in sparse checkout, skipping.")
+          PY
 
-          echo "Checking files:"
-          echo "$FILES"
-          pre-commit run --files $FILES
+      - name: Install Rust formatter
+        run: rustup toolchain install 1.88.0 --profile minimal --component rustfmt --no-self-update
+
+      - name: Check Mirage Rust formatting
+        working-directory: emulation/mirage
+        run: cargo +1.88.0 fmt --all -- --check
