@@ -124,9 +124,14 @@ complete. Virtual memory copy ranges must fit within one mapped subrange and
 have the required read or write access for the selected copy agent. Unmapping
 or changing access waits until an accepted copy releases its borrow.
 
-The logging ABI accepts a null stream and writes to stderr using Rust's
-standard library. Non-null C `FILE*` streams return
-`HSA_STATUS_ERROR_NOT_SUPPORTED`; this frontend does not import C stdio.
+The logging ABI writes to stderr for a null stream and uses C stdio for a
+non-null `FILE*`. The stream is borrowed from the caller. Each write holds the
+logging lock, so replacing the stream, disabling logging, and shutdown wait for
+earlier writes before returning. Callers keep an enabled stream open until an
+explicit disable or replacement completes, or until final HSA shutdown. A
+nonfinal `hsa_shut_down` only releases one runtime reference and keeps the
+logging configuration. Logging calls made recursively from a custom C stream
+callback are rejected.
 Linux descriptor calls for memory and loader operations go through the
 rocddi provider.
 
