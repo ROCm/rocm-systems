@@ -70,6 +70,8 @@ class RegionMap {
     // after warm-up) re-applies the timeline from the start. Does not free
     // materialised buffers; those stay registered in PlaybackContext::alloc_map.
     void rewind();
+    // Whether the segment based at `rec_base` is backed by a materialised buffer.
+    bool holds(uint64_t rec_base) const { return materialized_.count(rec_base) != 0; }
 
     // Back the segment containing `rec_addr`, if one is declared live and has
     // not been backed already, and return the live address for `rec_addr`.

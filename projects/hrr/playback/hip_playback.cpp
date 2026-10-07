@@ -14,6 +14,7 @@
 #include "hip_playback.h"
 #include "hrr/hrr_api_args.h"
 #include "hrr_reader.h"   // hrr::hash_hex
+#include "hrr_va_placement.h"
 
 #include <hip/hip_runtime.h>
 // hipExtModuleLaunchKernel is declared in <hip/hip_ext.h>. That header redeclares
@@ -2143,6 +2144,12 @@ static void hrr_replay_alloc_pad_params(size_t* factor_out, size_t* max_out) {
     *max_out    = g_max;
 }
 
+size_t hrr_replay_alloc_pad_factor() {
+    size_t fac, mx;
+    hrr_replay_alloc_pad_params(&fac, &mx);
+    return fac;
+}
+
 static size_t replay_padded_alloc_size(size_t orig_sz) {
     size_t fac, mx;
     hrr_replay_alloc_pad_params(&fac, &mx);
@@ -2236,12 +2243,17 @@ static void hrr_zero_init_alloc(PlaybackContext& ctx, void* live, size_t sz) {
 // case the caller allocates the way it always did. A placed allocation is
 // never padded: the recording had nothing after it but the next allocation,
 // and that one is placed too.
+static hrr::VaPlacement* hrr_placing(PlaybackContext& ctx) {
+    hrr::VaPlacement* p = ctx.placement.get();
+    return p && p->active() ? p : nullptr;
+}
+
 static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
-                            const char* api, void** live) {
-    if (!ctx.placement.active()) return false;
-    int dev = 0;
-    (void)hipGetDevice(&dev);
-    return ctx.placement.map_at(rec, size, dev, api, live);
+                            const char* api, void** live, int device = -1) {
+    hrr::VaPlacement* pl = hrr_placing(ctx);
+    if (!pl) return false;
+    if (device < 0) (void)hipGetDevice(&device);
+    return pl->map_at(rec, size, device, api, live, ctx.in_graph_capture.any());
 }
 
 // ---- External region materialisation ----------------------------------------
@@ -2438,9 +2450,76 @@ static bool hrr_guard_free(PlaybackContext& ctx, void* live) {
 
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live) {
     if (!live) return;
-    if (ctx.placement.unmap(live)) return;
+    if (hrr::VaPlacement* pl = hrr_placing(ctx);
+        pl && pl->unmap(live, ctx.in_graph_capture.any()))
+        return;
     if (hrr_guard_free(ctx, live)) return;
     (void)hipFree(live);
+}
+
+void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
+                               const uint8_t* payload, size_t size) {
+    // Pools are remembered whether or not placement is on: a pool created
+    // before a fallback still says where its allocations go.
+    switch (event_type) {
+        case HRR_API_HIPMEMPOOLCREATE: {
+            const auto* a = reinterpret_cast<const hrr_args_hipMemPoolCreate*>(payload);
+            if (a->ret != hipSuccess) break;
+            hipMemPoolProps props{};
+            std::memcpy(&props, a->pool_props_bytes, sizeof(props));
+            const int dev = props.location.type == hipMemLocationTypeDevice
+                                ? props.location.id : -1;
+            std::unique_lock lk(ctx.map_mutex);
+            ctx.pool_device[a->mem_pool] = dev;
+            break;
+        }
+        case HRR_API_HIPDEVICEGETDEFAULTMEMPOOL:
+        case HRR_API_HIPDEVICEGETMEMPOOL: {
+            // The two records have the same layout.
+            const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetMemPool*>(payload);
+            if (a->ret != hipSuccess) break;
+            std::unique_lock lk(ctx.map_mutex);
+            ctx.pool_device[a->mem_pool] = a->device;
+            break;
+        }
+        default:
+            break;
+    }
+
+    hrr::VaPlacement* pl = hrr_placing(ctx);
+    if (!pl) return;
+    hrr::Unplaced u;
+    if (hrr::placement_unplaced(payload, size, &u)) {
+        pl->fell_back(u.rec, u.size, u.api, u.why.c_str());
+        return;
+    }
+    switch (event_type) {
+        case HRR_API_HIPDEVICESYNCHRONIZE:
+        case HRR_API_HIPSTREAMSYNCHRONIZE:
+        case HRR_API_HIPSTREAMENDCAPTURE:
+            // Allocations freed during a capture are unmapped at the first
+            // point where no capture is open.
+            if (!ctx.in_graph_capture.any()) (void)pl->drain_deferred();
+            break;
+        case HRR_API_HIPPOINTERGETATTRIBUTES: {
+            if (!ctx.verbose) break;
+            const auto* a =
+                reinterpret_cast<const hrr_args_hipPointerGetAttributes*>(payload);
+            hipPointerAttribute_t attr{};
+            if (hipPointerGetAttributes(&attr, ctx.translate_ptr(a->ptr)) != hipSuccess) {
+                (void)hipGetLastError();
+                break;
+            }
+            fprintf(stderr,
+                    "[HRR] hipPointerGetAttributes 0x%llx -> type=%d device=%d "
+                    "devicePointer=0x%llx\n",
+                    (unsigned long long)a->ptr, static_cast<int>(attr.type), attr.device,
+                    (unsigned long long)reinterpret_cast<uint64_t>(attr.devicePointer));
+            break;
+        }
+        default:
+            break;
+    }
 }
 
 // ---- Block guard (--guard-blocks) -------------------------------------------
@@ -2775,16 +2854,54 @@ hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* p
 // A placed stream-ordered allocation is mapped at once rather than when the
 // stream reaches it, which only makes it available earlier. Inside a graph
 // capture the allocation is a graph node with its own address, so placement
-// cannot apply and it falls back. The pool's attributes and location are not
-// carried over to a placed allocation.
+// cannot apply and it falls back. The pool's attributes are not carried over
+// to a placed allocation; its location is, as the device the mapping is on.
+static bool hrr_stream_capturing(hipStream_t stream) {
+    hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
+    return hipStreamIsCapturing(stream, &st) == hipSuccess &&
+           st != hipStreamCaptureStatusNone;
+}
+
+// The device a stream-ordered allocation on `stream` lands on: the stream's,
+// or the current device's for the null stream.
+static int hrr_stream_device(hipStream_t stream) {
+    int dev = 0;
+    hipDevice_t sd = 0;
+    if (stream && hipStreamGetDevice(stream, &sd) == hipSuccess) return static_cast<int>(sd);
+    (void)hipGetDevice(&dev);
+    return dev;
+}
+
 static bool hrr_place_async_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
-                                  const char* api, void** live) {
-    if (!ctx.placement.active()) return false;
-    if (ctx.in_graph_capture) {
-        ctx.placement.fell_back(rec, size, api, "it was allocated inside a graph capture");
+                                  const char* api, hipStream_t stream, int device,
+                                  void** live) {
+    hrr::VaPlacement* pl = hrr_placing(ctx);
+    if (!pl) return false;
+    if (hrr_stream_capturing(stream)) {
+        pl->fell_back(rec, size, api, "it was allocated inside a graph capture");
         return false;
     }
-    return hrr_place_alloc(ctx, rec, size, api, live);
+    return hrr_place_alloc(ctx, rec, size, api, live, device);
+}
+
+// The device a recorded pool allocates on, or a reason it cannot be placed.
+static const char* hrr_pool_place_device(PlaybackContext& ctx, uint64_t rec_pool,
+                                         int* device, char* buf, size_t n) {
+    int d = -2;
+    {
+        std::shared_lock lk(ctx.map_mutex);
+        auto it = ctx.pool_device.find(rec_pool);
+        if (it != ctx.pool_device.end()) d = it->second;
+    }
+    if (d == -2) return "replay does not know which device its pool allocates on";
+    if (d < 0) return "its pool allocates host memory";
+    hrr::VaPlacement* pl = hrr_placing(ctx);
+    if (pl && d >= pl->device_count()) {
+        snprintf(buf, n, "its pool is on device %d, which replay cannot see", d);
+        return buf;
+    }
+    *device = d;
+    return nullptr;
 }
 
 hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
@@ -2795,12 +2912,14 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     size_t orig_sz = static_cast<size_t>(a->size);
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     hipError_t r = hipSuccess;
-    if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocAsync", &live))
+    const bool capturing = hrr_stream_capturing(stream);
+    if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocAsync", stream,
+                              hrr_stream_device(stream), &live))
         pad_sz = orig_sz;
     else
         r = hipMallocAsync(&live, pad_sz, stream);
     if (r == hipSuccess) {
-        if (hrr_replay_zero_init() && !ctx.in_graph_capture)
+        if (hrr_replay_zero_init() && !capturing)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
         ctx.record_alloc(a->dev_ptr, live, pad_sz);
     }
@@ -2816,12 +2935,23 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     size_t orig_sz = static_cast<size_t>(a->size);
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     hipError_t r = hipSuccess;
-    if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocFromPoolAsync", &live))
-        pad_sz = orig_sz;
-    else
+    const bool capturing = hrr_stream_capturing(stream);
+    int device = 0;
+    char buf[96];
+    const char* why = hrr_placing(ctx) && !capturing
+        ? hrr_pool_place_device(ctx, a->mem_pool, &device, buf, sizeof(buf))
+        : nullptr;
+    if (why) {
+        hrr_placing(ctx)->fell_back(a->dev_ptr, orig_sz, "hipMallocFromPoolAsync", why);
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
+    } else if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocFromPoolAsync",
+                                     stream, device, &live)) {
+        pad_sz = orig_sz;
+    } else {
+        r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
+    }
     if (r == hipSuccess) {
-        if (hrr_replay_zero_init() && !ctx.in_graph_capture)
+        if (hrr_replay_zero_init() && !capturing)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
         ctx.record_alloc(a->dev_ptr, live, pad_sz);
     }
@@ -3042,10 +3172,16 @@ hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t*
 
 hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFree*>(pl);
+    // A free the runtime refused at capture (one inside a graph capture, say)
+    // freed nothing, so replay frees nothing either.
+    if (a->ret != hipSuccess) return hipSuccess;
     void* live = ctx.translate_ptr(a->ptr);
     if (!live) return hipSuccess;
-    // A placed allocation or a --guard-segments one: a VMM mapping.
-    if (ctx.placement.unmap(live) || hrr_guard_free(ctx, live)) {
+    // A placed allocation or a --guard-segments one: a VMM mapping. During a
+    // graph capture the unmap waits until no capture is open.
+    hrr::VaPlacement* placing = hrr_placing(ctx);
+    if ((placing && placing->unmap(live, ctx.in_graph_capture.any())) ||
+        hrr_guard_free(ctx, live)) {
         ctx.remove_alloc(a->ptr);
         return hipSuccess;
     }
@@ -3058,15 +3194,19 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a  = reinterpret_cast<const hrr_args_hipFreeAsync*>(pl);
     void*       live   = ctx.translate_ptr(a->dev_ptr);
     hipStream_t stream = ctx.translate_stream(a->stream);
+    // CLR refuses to free memory a graph did not allocate while the stream is
+    // capturing (hipErrorInvalidValue). Nothing was freed, so nothing is here.
+    if (a->ret != hipSuccess) return hipSuccess;
     if (!live) return hipSuccess;
     // A placed allocation is a VMM mapping that the stream may still be using.
     // Wait for the stream, then unmap. Inside a graph capture neither is legal,
-    // so the mapping stays until the same address is allocated again.
-    if (ctx.placement.is_mapped(live)) {
-        if (!ctx.in_graph_capture) {
-            (void)hipStreamSynchronize(stream);
-            (void)ctx.placement.unmap(live);
-        }
+    // so the unmap is deferred until no capture is open, and nothing is placed
+    // over the mapping until then.
+    hrr::VaPlacement* placing = hrr_placing(ctx);
+    if (placing && placing->is_mapped(live)) {
+        const bool capturing = ctx.in_graph_capture.any();
+        if (!capturing) (void)hipStreamSynchronize(stream);
+        (void)placing->unmap(live, capturing);
         ctx.remove_alloc(a->dev_ptr);
         return hipSuccess;
     }
@@ -3260,7 +3400,7 @@ static void scan_h2d_payload(PlaybackContext& ctx, const void* blob, size_t n,
     const uint8_t* p = static_cast<const uint8_t*>(blob);
     // A placed allocation is at its recorded address, so an address of it in
     // the payload is still right. Only the ones that moved are worth naming.
-    const auto ranges = ctx.recorded_ranges(/*moved_only=*/ctx.placement.active());
+    const auto ranges = ctx.recorded_ranges(/*moved_only=*/hrr_placing(ctx) != nullptr);
     size_t hits = 0;
     for (size_t off = 0; off + 8 <= n; off += 8) {
         uint64_t w;
@@ -3312,7 +3452,11 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                     (unsigned long long)dst_rec, copy_sz, avail);
             copy_sz = avail;
         }
-        if (ctx.scan_h2d) scan_h2d_payload(ctx, blob, copy_sz, dst_rec);
+        // Scan when asked, and on its own once any allocation fell back:
+        // from then on a stored address in a payload can be stale.
+        const hrr::VaPlacement* placing = hrr_placing(ctx);
+        if (ctx.scan_h2d || (placing && placing->fallbacks() > 0))
+            scan_h2d_payload(ctx, blob, copy_sz, dst_rec);
         if (is_async)
             r = hipMemcpyAsync(dst, blob, copy_sz, hipMemcpyHostToDevice, stream);
         else
@@ -3613,7 +3757,7 @@ hipError_t playback_hipStreamBeginCapture(PlaybackContext& ctx,
                     r, hipGetErrorString(r));
     }
     if (r == hipSuccess)
-        ctx.in_graph_capture = true;
+        ctx.in_graph_capture.begin();
     return r;
 }
 
@@ -3628,7 +3772,7 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
                 (unsigned long long)a->stream);
         return hipSuccess;  // non-fatal
     }
-    ctx.in_graph_capture = false;
+    ctx.in_graph_capture.end();
     hipGraph_t live_graph = nullptr;
     hipError_t r = hipStreamEndCapture(stream, &live_graph);
     if (r == hipSuccess && live_graph) {
@@ -4752,21 +4896,22 @@ hipError_t playback_hipMemAddressReserve(PlaybackContext& ctx, const uint8_t* pl
     // The runtime silently reserves elsewhere when the hint is taken, so the
     // returned address is what says whether it worked.
     const size_t size = static_cast<size_t>(a->size);
-    const bool hinted = ctx.placement.active();
-    const bool held   = hinted && ctx.placement.release_vmm_hold(rec_ptr, size);
+    hrr::VaPlacement* placing = hrr_placing(ctx);
+    const bool hinted = placing != nullptr;
+    const bool held   = hinted && placing->release_vmm_hold(rec_ptr, size);
     void* live_va = nullptr;
     hipError_t r = hipMemAddressReserve(&live_va, size,
                                         static_cast<size_t>(a->alignment),
                                         hinted ? reinterpret_cast<void*>(rec_ptr) : nullptr,
                                         static_cast<unsigned long long>(a->flags));
     if (r == hipSuccess && live_va) {
+        // Elsewhere, the recorded range is held again for a later reserve.
         if (hinted)
-            ctx.placement.note_vmm(reinterpret_cast<uint64_t>(live_va) == rec_ptr,
-                                   rec_ptr, size, reinterpret_cast<uint64_t>(live_va));
+            placing->vmm_reserved(rec_ptr, size, held, reinterpret_cast<uint64_t>(live_va));
         std::unique_lock lk(ctx.map_mutex);
         ctx.vmm_va_map[rec_ptr] = {live_va, size};
     } else if (held) {
-        ctx.placement.restore_vmm_hold(rec_ptr, size);
+        placing->restore_vmm_hold(rec_ptr, size);
     }
     return r;
 }
@@ -4782,8 +4927,9 @@ hipError_t playback_hipMemAddressFree(PlaybackContext& ctx, const uint8_t* pl) {
             ctx.vmm_va_map.erase(a->devPtr);
         }
         // Hold the range again for a later reservation recorded there.
-        if (reinterpret_cast<uint64_t>(live_va) == a->devPtr)
-            ctx.placement.restore_vmm_hold(a->devPtr, static_cast<size_t>(a->size));
+        hrr::VaPlacement* placing = hrr_placing(ctx);
+        if (placing && reinterpret_cast<uint64_t>(live_va) == a->devPtr)
+            placing->restore_vmm_hold(a->devPtr, static_cast<size_t>(a->size));
     }
     return r;
 }

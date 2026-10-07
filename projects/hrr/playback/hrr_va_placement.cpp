@@ -20,10 +20,12 @@ namespace hrr {
 
 namespace {
 
-// Report at most this many fallbacks one by one. The rest are counted in the
-// summary: past a handful, the lines stop helping anyone find the one that
-// matters.
+// Report at most this many fallbacks, and as many reserve failures, one by
+// one unless --verbose. The rest are counted: past a handful, the lines stop
+// helping anyone find the one that matters.
 constexpr uint64_t kFallbackLines = 16;
+
+using ull = unsigned long long;
 
 #ifndef _WIN32
 // Hold [b, e) with an inaccessible placeholder. MAP_FIXED_NOREPLACE fails
@@ -40,9 +42,7 @@ bool hold_exact(uint64_t b, uint64_t e) {
 }
 
 // Hold what can be held of [b, e). A range that collides with something
-// already mapped is split in half until the free pieces are found, so one
-// library mapped into the middle of a recorded range costs only the pages it
-// covers.
+// mapped is split in half until the free pieces are found.
 void hold_pieces(uint64_t b, uint64_t e, std::vector<VaRange>* out) {
     if (b >= e) return;
     if (hold_exact(b, e)) { out->push_back({b, e}); return; }
@@ -55,12 +55,41 @@ void hold_pieces(uint64_t b, uint64_t e, std::vector<VaRange>* out) {
 void drop_hold(uint64_t b, uint64_t e) {
     if (b < e) munmap(reinterpret_cast<void*>(b), e - b);
 }
+#else
+bool hold_exact(uint64_t, uint64_t) { return false; }
+void drop_hold(uint64_t, uint64_t) {}
 #endif
 
 }  // namespace
 
+std::vector<VaRange> read_proc_maps() {
+#ifndef _WIN32
+    std::string text;
+    if (FILE* f = fopen("/proc/self/maps", "r")) {
+        char buf[65536];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) text.append(buf, n);
+        fclose(f);
+    }
+    return parse_proc_maps(text);
+#else
+    return {};
+#endif
+}
+
+void hold_free_pieces(uint64_t b, uint64_t e, const std::vector<VaRange>& occupied,
+                      std::vector<VaRange>* out) {
+#ifndef _WIN32
+    if (b >= e) return;
+    for (const auto& r : va_subtract({{b, e}}, occupied)) hold_pieces(r.base, r.end, out);
+#else
+    (void)b; (void)e; (void)occupied; (void)out;
+#endif
+}
+
 hipError_t hrr_vmm_map_into(void* va, size_t len, int device,
-                            hipMemGenericAllocationHandle_t* out_handle) {
+                            hipMemGenericAllocationHandle_t* out_handle,
+                            const std::vector<int>& peers) {
     hipMemAllocationProp prop{};
     prop.type          = hipMemAllocationTypePinned;
     prop.location.type = hipMemLocationTypeDevice;
@@ -73,11 +102,13 @@ hipError_t hrr_vmm_map_into(void* va, size_t len, int device,
     r = hipMemMap(va, len, 0, handle, 0);
     if (r != hipSuccess) { (void)hipMemRelease(handle); return r; }
 
-    hipMemAccessDesc desc{};
-    desc.location.type = hipMemLocationTypeDevice;
-    desc.location.id   = device;
-    desc.flags         = hipMemAccessFlagsProtReadWrite;
-    r = hipMemSetAccess(va, len, &desc, 1);
+    std::vector<hipMemAccessDesc> desc(1 + peers.size());
+    for (size_t i = 0; i < desc.size(); ++i) {
+        desc[i].location.type = hipMemLocationTypeDevice;
+        desc[i].location.id   = i == 0 ? device : peers[i - 1];
+        desc[i].flags         = hipMemAccessFlagsProtReadWrite;
+    }
+    r = hipMemSetAccess(va, len, desc.data(), desc.size());
     if (r != hipSuccess) {
         (void)hipMemUnmap(va, len);
         (void)hipMemRelease(handle);
@@ -93,16 +124,19 @@ bool VaPlacement::hold(PlacementPlan plan) {
     return false;
 #else
     std::lock_guard<std::mutex> lk(mu_);
+    // One read of the address map serves all three lists: they are disjoint.
+    const std::vector<VaRange> occ = read_proc_maps();
     std::vector<VaRange> held;
-    for (const auto& r : plan.alloc) hold_pieces(r.base, r.end, &held);
+    for (const auto& r : plan.alloc) hold_free_pieces(r.base, r.end, occ, &held);
     plan.alloc = va_round_merge(std::move(held), kPlacePage);
+    alloc_holds_ = plan.alloc;
     held.clear();
-    for (const auto& r : plan.vmm) hold_pieces(r.base, r.end, &held);
+    for (const auto& r : plan.vmm) hold_free_pieces(r.base, r.end, occ, &held);
     vmm_held_ = va_round_merge(std::move(held), kPlacePage);
     // A denied range is held too, so the fallback cannot land back on it by
     // chance: the runtime has to put that allocation somewhere else.
     held.clear();
-    for (const auto& r : plan.denied) hold_pieces(r.base, r.end, &held);
+    for (const auto& r : plan.denied) hold_free_pieces(r.base, r.end, occ, &held);
     denied_held_ = std::move(held);
     plan_ = std::move(plan);
     active_ = true;
@@ -110,26 +144,67 @@ bool VaPlacement::hold(PlacementPlan plan) {
 #endif
 }
 
-void VaPlacement::reserve(int device) {
-#ifndef _WIN32
-    std::lock_guard<std::mutex> lk(mu_);
-    if (!active_) return;
-    hipMemAllocationProp prop{};
-    prop.type          = hipMemAllocationTypePinned;
-    prop.location.type = hipMemLocationTypeDevice;
-    prop.location.id   = device;
-    size_t g = 0;
-    if (hipMemGetAllocationGranularity(&g, &prop, hipMemAllocationGranularityMinimum)
-            == hipSuccess && g >= kPlacePage)
-        gran_ = g;
+void VaPlacement::reserve_line(bool whole, uint64_t b, uint64_t e, const char* why) {
+    if (++reserve_lines_ > kFallbackLines && !verbose_) return;
+    if (whole)
+        fprintf(stderr,
+                "[HRR] Placement: could not reserve 0x%llx-0x%llx as one range (%s); "
+                "reserving each allocation in it on its own\n",
+                (ull)b, (ull)e, why);
+    else
+        fprintf(stderr,
+                "[HRR] Placement: could not reserve 0x%llx-0x%llx at its recorded "
+                "address (%s); allocations there will move\n",
+                (ull)b, (ull)e, why);
+}
 
+bool VaPlacement::reserve(int device_count, bool peer_access) {
+#ifndef _WIN32
+    std::unique_lock<std::mutex> lk(mu_);
+    if (!active_) return false;
+    for (int d = 0; d < device_count; ++d) {
+        int vmm = 0;
+        if (hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported,
+                                  d) != hipSuccess || !vmm) {
+            fprintf(stderr,
+                    "[HRR] Placement : off (device %d does not support virtual memory "
+                    "management)\n", d);
+            lk.unlock();
+            release_all();
+            return false;
+        }
+    }
+    device_count_ = device_count;
+    for (int d = 0; d < device_count; ++d) {
+        hipMemAllocationProp prop{};
+        prop.type          = hipMemAllocationTypePinned;
+        prop.location.type = hipMemLocationTypeDevice;
+        prop.location.id   = d;
+        size_t g = 0;
+        if (hipMemGetAllocationGranularity(&g, &prop, hipMemAllocationGranularityMinimum)
+                == hipSuccess && g > gran_)
+            gran_ = g;
+    }
+    peers_.assign(device_count, {});
+    if (peer_access && device_count > 1)
+        for (int d = 0; d < device_count; ++d)
+            for (int p = 0; p < device_count; ++p) {
+                int can = 0;
+                // Can device p reach memory that lives on device d?
+                if (p != d && hipDeviceCanAccessPeer(&can, p, d) == hipSuccess && can)
+                    peers_[d].push_back(p);
+            }
+
+    std::vector<VaRange> holds;
     for (const auto& r : plan_.alloc) {
         // A granularity coarser than the page shrinks the range to whole
         // granules. The edges keep their placeholders and the allocations
         // there fall back.
         const uint64_t b = va_ceil(r.base, gran_);
         const uint64_t e = va_floor(r.end, gran_);
-        if (b == 0 || b >= e) { ++lost_ranges_; continue; }
+        if (b == 0 || b >= e) { holds.push_back(r); ++lost_ranges_; continue; }
+        if (r.base < b) holds.push_back({r.base, b});
+        if (e < r.end) holds.push_back({e, r.end});
         drop_hold(b, e);
         void* va = nullptr;
         // ROCr asks the thunk for exactly this address and, when that fails,
@@ -142,91 +217,160 @@ void VaPlacement::reserve(int device) {
             continue;
         }
         if (err == hipSuccess) (void)hipMemAddressFree(va, e - b);
-        ++lost_ranges_;
-        fprintf(stderr,
-                "[HRR] Placement: could not reserve 0x%llx-0x%llx at its recorded "
-                "address (%s); allocations there will move\n",
-                (unsigned long long)b, (unsigned long long)e,
-                err == hipSuccess ? "the runtime returned another address"
-                                  : hipGetErrorString(err));
+        reserve_line(true, b, e,
+                     err == hipSuccess ? "the runtime returned another address"
+                                       : hipGetErrorString(err));
+        // Hold the range again, then reserve each allocation's own granules,
+        // so one obstacle costs only the allocations it touches.
+        std::vector<VaRange> re;
+        hold_free_pieces(b, e, read_proc_maps(), &re);
+        re = va_round_merge(std::move(re), kPlacePage);
+        for (const auto& p : va_reserve_pieces(plan_.pieces, b, e, gran_)) {
+            if (!va_find_containing(re, p.base, p.end)) {
+                ++lost_ranges_;
+                reserve_line(false, p.base, p.end, "something else is mapped there");
+                continue;
+            }
+            drop_hold(p.base, p.end);
+            void* pv = nullptr;
+            const hipError_t pr = hipMemAddressReserve(&pv, p.end - p.base, 0,
+                                                       reinterpret_cast<void*>(p.base), 0);
+            if (pr == hipSuccess && reinterpret_cast<uint64_t>(pv) == p.base) {
+                reserved_.push_back(p);
+                held_bytes_ += p.end - p.base;
+                re = va_subtract(re, {p});
+                continue;
+            }
+            if (pr == hipSuccess) (void)hipMemAddressFree(pv, p.end - p.base);
+            ++lost_ranges_;
+            reserve_line(false, p.base, p.end,
+                         pr == hipSuccess ? "the runtime returned another address"
+                                          : hipGetErrorString(pr));
+            if (!hold_exact(p.base, p.end)) re = va_subtract(re, {p});
+        }
+        holds.insert(holds.end(), re.begin(), re.end());
     }
+    if (reserve_lines_ > kFallbackLines && !verbose_)
+        fprintf(stderr,
+                "[HRR] Placement: %zu more reserve failure(s) not shown; --verbose "
+                "names every one\n", reserve_lines_ - kFallbackLines);
+    std::sort(reserved_.begin(), reserved_.end(),
+              [](const VaRange& x, const VaRange& y) { return x.base < y.base; });
+    alloc_holds_ = std::move(holds);
+    return true;
 #else
-    (void)device;
+    (void)device_count; (void)peer_access;
+    return false;
 #endif
 }
 
 void VaPlacement::fell_back(uint64_t rec, size_t size, const char* api,
                             const char* why) {
-    const uint64_t n = ++fallbacks_;
-    if (n <= kFallbackLines)
+    ++fallbacks_;
+    const uint64_t n = ++lines_;
+    if (n <= kFallbackLines || verbose_) {
+        char where[40] = "";
+        if (rec) snprintf(where, sizeof(where), " 0x%llx", (ull)rec);
+        char bytes[40] = "";
+        if (size) snprintf(bytes, sizeof(bytes), " (%zu bytes)", size);
         fprintf(stderr,
-                "[HRR] Placement: %s 0x%llx (%zu bytes) not placed at its recorded "
-                "address: %s. It replays elsewhere, so a copy of its address "
-                "stored in device memory is stale (HIP_HRR_REPLAY_SCAN_H2D=1 "
-                "finds those)\n",
-                api, (unsigned long long)rec, size, why);
-    else if (n == kFallbackLines + 1)
-        fprintf(stderr, "[HRR] Placement: further fallbacks are only counted\n");
+                "[HRR] Placement: %s%s%s not placed at its recorded address: %s. It "
+                "replays elsewhere, so a copy of its address stored in device memory "
+                "is stale; replay now scans H2D payloads for such copies\n",
+                api, where, bytes, why);
+    } else if (n == kFallbackLines + 1) {
+        fprintf(stderr,
+                "[HRR] Placement: further fallbacks are only counted; --verbose "
+                "names every one\n");
+    }
 }
 
 bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
-                         void** live) {
+                         void** live, bool capturing) {
     if (!active_ || size == 0 || rec > UINT64_MAX - size) return false;
     const uint64_t pb = va_floor(rec, gran_);
     const uint64_t pe = va_ceil(rec + size, gran_);
+    char buf[128];
     const char* why = nullptr;
-    char buf[96];
-    {
-        std::lock_guard<std::mutex> lk(mu_);
-        if (pe != 0 && va_overlaps(plan_.exported, pb, pe)) {
-            why = "the recording exports it to another process, which VMM memory "
-                  "does not support";
-        } else if (pe == 0 || !va_find_containing(reserved_, pb, pe)) {
-            why = "its range could not be held";
-        } else {
-            // The mapping nearest below pe is the only one that can overlap.
-            auto it = mapped_.lower_bound(pe);
-            if (it != mapped_.begin()) {
-                --it;
-                if (it->second.end > pb) {
-                    if (it->second.rec == rec && it->first == pb && it->second.end == pe) {
-                        // The same allocation again with no free in between:
-                        // the warm-up pass replays every event a second time.
-                        *live = reinterpret_cast<void*>(rec);
-                        ++placed_;
-                        return true;
-                    }
-                    snprintf(buf, sizeof(buf),
-                             "it shares a page with live allocation 0x%llx",
-                             (unsigned long long)it->second.rec);
-                    why = buf;
-                }
+    for (int attempt = 0; attempt < 2 && !why; ++attempt) {
+        uint64_t freed = 0;
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            if (pe != 0 && va_overlaps(plan_.exported, pb, pe)) {
+                why = "the recording exports it to another process, which VMM memory "
+                      "does not support";
+                break;
             }
-            if (!why) {
+            if (pe == 0 || !va_find_containing(reserved_, pb, pe)) {
+                why = "its range could not be held";
+                break;
+            }
+            if (device < 0 || device >= device_count_) {
+                snprintf(buf, sizeof(buf), "device %d is not one replay can see", device);
+                why = buf;
+                break;
+            }
+            if (const auto* m = va_mapping_overlapping(deferred_, pb, pe)) {
+                freed = m->rec;
+            } else if (const auto* l = va_mapping_overlapping(mapped_, pb, pe)) {
+                snprintf(buf, sizeof(buf), "it shares a page with live allocation 0x%llx",
+                         (ull)l->rec);
+                why = buf;
+                break;
+            } else {
                 hipMemGenericAllocationHandle_t h{};
-                const hipError_t r = hrr_vmm_map_into(reinterpret_cast<void*>(pb),
-                                                      pe - pb, device, &h);
+                const hipError_t r = hrr_vmm_map_into(reinterpret_cast<void*>(pb), pe - pb,
+                                                      device, &h, peers_[device]);
                 if (r == hipSuccess) {
                     mapped_[pb] = {pe, rec, h};
                     *live = reinterpret_cast<void*>(rec);
                     ++placed_;
                     return true;
                 }
-                snprintf(buf, sizeof(buf), "mapping it failed (%s)",
-                         hipGetErrorString(r));
+                snprintf(buf, sizeof(buf), "mapping it failed (%s)", hipGetErrorString(r));
                 why = buf;
+                break;
             }
+        }
+        // A mapping freed during a graph capture is still there. Unmap the
+        // deferred ones now if no capture is open, then look again; never map
+        // over one, because the graph may still use it.
+        if (capturing || attempt == 1 || drain_deferred() == 0) {
+            snprintf(buf, sizeof(buf),
+                     "allocation 0x%llx, freed there during a graph capture, is still "
+                     "mapped", (ull)freed);
+            why = buf;
         }
     }
     fell_back(rec, size, api, why);
     return false;
 }
 
-bool VaPlacement::unmap(void* live) {
+bool VaPlacement::unmap_one(uint64_t pb, const PlacedMapping& m) {
+    // hipMemUnmap waits for every stream, so nothing still queued can touch
+    // the pages once they are gone. The reservation stays.
+    hipError_t r = hipMemUnmap(reinterpret_cast<void*>(pb), m.end - pb);
+    if (r != hipSuccess) {
+        fprintf(stderr,
+                "[HRR] Placement: hipMemUnmap of 0x%llx (%llu bytes) failed (%s); the "
+                "mapping stays and nothing is placed over it\n",
+                (ull)m.rec, (ull)(m.end - pb), hipGetErrorString(r));
+        return false;
+    }
+    r = hipMemRelease(m.handle);
+    if (r != hipSuccess)
+        fprintf(stderr,
+                "[HRR] Placement: hipMemRelease for 0x%llx failed (%s); its memory is "
+                "lost until exit\n",
+                (ull)m.rec, hipGetErrorString(r));
+    return true;
+}
+
+bool VaPlacement::unmap(void* live, bool defer) {
     if (!active_ || !live) return false;
     const uint64_t v = reinterpret_cast<uint64_t>(live);
     uint64_t pb = 0;
-    Mapping m{};
+    PlacedMapping m{};
     {
         std::lock_guard<std::mutex> lk(mu_);
         auto it = mapped_.upper_bound(v);
@@ -236,12 +380,39 @@ bool VaPlacement::unmap(void* live) {
         pb = it->first;
         m  = it->second;
         mapped_.erase(it);
+        if (defer) {
+            deferred_[pb] = m;
+            ++deferred_total_;
+            return true;
+        }
     }
-    // hipMemUnmap waits for every stream, so nothing still queued can touch
-    // the pages once they are gone. The reservation stays.
-    (void)hipMemUnmap(reinterpret_cast<void*>(pb), m.end - pb);
-    (void)hipMemRelease(m.handle);
+    if (!unmap_one(pb, m)) {
+        // Still mapped: keep it where map_at will not place over it and the
+        // next drain tries again.
+        std::lock_guard<std::mutex> lk(mu_);
+        deferred_[pb] = m;
+    }
     return true;
+}
+
+size_t VaPlacement::drain_deferred() {
+    PlacedMap work;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (deferred_.empty()) return 0;
+        work.swap(deferred_);
+    }
+    size_t n = 0;
+    PlacedMap kept;
+    for (const auto& [pb, m] : work) {
+        if (unmap_one(pb, m)) ++n;
+        else kept[pb] = m;
+    }
+    if (!kept.empty()) {
+        std::lock_guard<std::mutex> lk(mu_);
+        deferred_.insert(kept.begin(), kept.end());
+    }
+    return n;
 }
 
 bool VaPlacement::is_mapped(void* live) {
@@ -254,18 +425,27 @@ bool VaPlacement::is_mapped(void* live) {
     return it->second.rec == v;
 }
 
+std::vector<uint64_t> VaPlacement::mapped_bases() {
+    std::lock_guard<std::mutex> lk(mu_);
+    std::vector<uint64_t> out;
+    for (const auto& kv : mapped_) out.push_back(kv.second.rec);
+    return out;
+}
+
 bool VaPlacement::release_vmm_hold(uint64_t base, size_t size) {
 #ifndef _WIN32
     if (!active_ || size == 0) return false;
     std::lock_guard<std::mutex> lk(mu_);
     const uint64_t b = base, e = base + size;
-    bool any = false;
+    std::vector<VaRange> dropped;
     for (const auto& r : vmm_held_) {
         const uint64_t lo = std::max(r.base, b), hi = std::min(r.end, e);
-        if (lo < hi) { drop_hold(lo, hi); any = true; }
+        if (lo < hi) { drop_hold(lo, hi); dropped.push_back({lo, hi}); }
     }
-    if (any) vmm_held_ = va_subtract(vmm_held_, {{b, e}});
-    return any;
+    if (dropped.empty()) return false;
+    vmm_held_ = va_subtract(vmm_held_, {{b, e}});
+    vmm_released_[base] = std::move(dropped);
+    return true;
 #else
     (void)base; (void)size;
     return false;
@@ -276,43 +456,50 @@ void VaPlacement::restore_vmm_hold(uint64_t base, size_t size) {
 #ifndef _WIN32
     if (!active_ || size == 0) return;
     std::lock_guard<std::mutex> lk(mu_);
-    if (!hold_exact(base, base + size)) return;
-    std::vector<VaRange> v = vmm_held_;
-    v.push_back({base, base + size});
-    vmm_held_ = va_round_merge(std::move(v), kPlacePage);
+    // Hold again exactly what release_vmm_hold gave up, minus whatever the
+    // runtime has put there since.
+    std::vector<VaRange> want;
+    auto it = vmm_released_.find(base);
+    if (it != vmm_released_.end()) {
+        want = std::move(it->second);
+        vmm_released_.erase(it);
+    } else {
+        want.push_back({base, base + size});
+    }
+    const std::vector<VaRange> occ = read_proc_maps();
+    std::vector<VaRange> got = vmm_held_;
+    for (const auto& r : want) hold_free_pieces(r.base, r.end, occ, &got);
+    vmm_held_ = va_round_merge(std::move(got), kPlacePage);
 #else
     (void)base; (void)size;
 #endif
 }
 
-void VaPlacement::note_vmm(bool placed, uint64_t rec, size_t size, uint64_t live) {
-    if (placed) { ++placed_; return; }
+void VaPlacement::vmm_reserved(uint64_t rec, size_t size, bool held, uint64_t live) {
+    if (live == rec) { ++placed_; return; }
     char why[96];
-    snprintf(why, sizeof(why), "the runtime reserved 0x%llx instead",
-             (unsigned long long)live);
+    snprintf(why, sizeof(why), "the runtime reserved 0x%llx instead", (ull)live);
     fell_back(rec, size, "hipMemAddressReserve", why);
+    // The recorded range is free again: hold it for a later reserve there.
+    if (held) restore_vmm_hold(rec, size);
 }
 
 void VaPlacement::release_all() {
 #ifndef _WIN32
     std::lock_guard<std::mutex> lk(mu_);
     if (!active_) return;
-    for (auto& [pb, m] : mapped_) {
-        (void)hipMemUnmap(reinterpret_cast<void*>(pb), m.end - pb);
-        (void)hipMemRelease(m.handle);
-    }
+    for (const auto* m : {&mapped_, &deferred_})
+        for (const auto& [pb, mm] : *m) (void)unmap_one(pb, mm);
     mapped_.clear();
+    deferred_.clear();
     for (const auto& r : reserved_)
         (void)hipMemAddressFree(reinterpret_cast<void*>(r.base), r.end - r.base);
     reserved_.clear();
-    // The granule edges reserve() left as placeholders, and every VMM range
-    // the recording never got round to reserving.
-    for (const auto& r : plan_.alloc) {
-        drop_hold(r.base, std::min(r.end, va_ceil(r.base, gran_)));
-        drop_hold(std::max(r.base, va_floor(r.end, gran_)), r.end);
-    }
+    for (const auto& r : alloc_holds_) drop_hold(r.base, r.end);
+    alloc_holds_.clear();
     for (const auto& r : vmm_held_) drop_hold(r.base, r.end);
     vmm_held_.clear();
+    vmm_released_.clear();
     for (const auto& r : denied_held_) drop_hold(r.base, r.end);
     denied_held_.clear();
     active_ = false;

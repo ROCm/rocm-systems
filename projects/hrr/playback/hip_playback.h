@@ -20,10 +20,13 @@
 #include <shared_mutex>
 #include <chrono>
 #include <unordered_set>
+#include <memory>
+#include <thread>
 
 #include "hrr/hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 #include "hrr_region_map.h"    // external region annotations (regions/*.hrrr)
-#include "hrr_va_placement.h"  // allocations at their capture-time address
+
+namespace hrr { class VaPlacement; }  // hrr_va_placement.h, not installed
 
 // Whether a replayed H2D blob restore must be drained before subsequent
 // replay work. Draining is skipped while a stream graph capture is active,
@@ -52,6 +55,41 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
 // ---------------------------------------------------------------------------
 // PlaybackContext — central replay state
 // ---------------------------------------------------------------------------
+
+// Which replay threads are inside a stream capture. One thread's
+// hipStreamEndCapture must not clear the flag while another thread is still
+// capturing, so each thread is counted on its own. Converting to bool asks
+// whether any thread is capturing: device synchronization, hipMemUnmap and
+// event timing are illegal process-wide while one is (HIP 900/901).
+class ThreadCaptureFlag {
+  public:
+    void begin() {
+        std::lock_guard<std::mutex> lk(mu_);
+        ++open_[std::this_thread::get_id()];
+        ++total_;
+    }
+    // A capture may end on a thread other than the one that began it.
+    void end() {
+        std::lock_guard<std::mutex> lk(mu_);
+        auto it = open_.find(std::this_thread::get_id());
+        if (it == open_.end()) it = open_.begin();
+        if (it == open_.end()) return;
+        if (--it->second == 0) open_.erase(it);
+        --total_;
+    }
+    bool any() const { return total_.load(std::memory_order_acquire) > 0; }
+    operator bool() const { return any(); }
+    bool this_thread() const {
+        if (!any()) return false;
+        std::lock_guard<std::mutex> lk(mu_);
+        return open_.count(std::this_thread::get_id()) != 0;
+    }
+
+  private:
+    mutable std::mutex mu_;
+    std::map<std::thread::id, int> open_;
+    std::atomic<int> total_{0};
+};
 
 // How an alloc_map entry's live_ptr was obtained — determines which API must
 // release it at teardown. Mixing them up (e.g. hipFree on a host pointer)
@@ -202,7 +240,7 @@ struct PlaybackContext {
     // HIP event timing must be skipped during graph capture: recording an
     // event on a captured stream inserts it into the graph and invalidates
     // the capture state, causing error 901 on all subsequent operations.
-    bool in_graph_capture  = false;
+    ThreadCaptureFlag in_graph_capture;
 
     // Global submission order for MT replay.
     // Each thread spin-waits until next_seq reaches its event's sequence_id,
@@ -319,8 +357,12 @@ struct PlaybackContext {
     // Device allocations land at the address the recording had, so a device
     // pointer the program stored in memory is still true at replay. Active
     // once hold() succeeded; --no-placement and --guard-segments leave it off.
-    // See hrr_va_placement.h.
-    hrr::VaPlacement placement;
+    // See hrr_va_placement.h. Null when the replayer never set it up.
+    std::shared_ptr<hrr::VaPlacement> placement;
+    // The device each recorded memory pool allocates on: hipMemPoolCreate's
+    // location, or the device hipDeviceGetDefaultMemPool/hipDeviceGetMemPool
+    // named. -1 for a pool on the host. Guarded by map_mutex.
+    std::unordered_map<uint64_t, int> pool_device;
 
     // ---- Guard pages ----
     // Both off by default. --guard-segments puts a gap after every allocation,
@@ -785,6 +827,18 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 // than a hipMalloc and hipFree cannot release it, so every teardown path has
 // to go through here.
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
+
+// HIP_HRR_REPLAY_ALLOC_PAD_FACTOR as replay applies it: 1 when unset or invalid.
+size_t hrr_replay_alloc_pad_factor();
+
+// Called by dispatch_event after every event a handler replayed successfully.
+// Placement's bookkeeping that is not any one handler's business: reports a
+// fallback for each allocation API placement does not place, remembers which
+// device each memory pool allocates on, unmaps allocations freed during a
+// graph capture once no capture is open, and under --verbose prints what
+// hipPointerGetAttributes says about the replayed pointer.
+void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
+                               const uint8_t* payload, size_t size);
 
 // ---------------------------------------------------------------------------
 // hrr_note_unreplayable — this API cannot be reproduced, and here is why.
