@@ -81,8 +81,11 @@ validated_load_destinations(const amdgpu::VectorMemState &state, const amdgpu::W
     if (!registers_for.owns_vgpr_range(physical_base, count))
       return false;
     const uint32_t logical_base = physical_base - wave.vgpr_alloc().base;
+    // Validate the full span before discarding preserved block words, matching
+    // completion and wait tracking. An empty result still represents a counter event.
     for (uint32_t i = 0; i < count; ++i)
-      registers.push_back(logical_base + i);
+      if (state.block_dword_enabled(i))
+        registers.push_back(logical_base + i);
     return true;
   };
 
@@ -444,7 +447,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         return;
       std::vector<uint32_t> registers = std::move(*destinations);
       const uint8_t byte_mask = vector_memory_byte_mask(d, wf);
-      const uint8_t last_byte_mask = vector_memory_byte_mask(d, wf, registers.size() - 1);
+      const uint8_t last_byte_mask =
+          registers.empty() ? byte_mask : vector_memory_byte_mask(d, wf, registers.size() - 1);
       for (uint32_t i = 0; i < registers.size(); ++i)
         rs->checkVgprWrite(static_cast<int>(registers[i]), d.exec_mask,
                            vector_memory_byte_mask(d, wf, i), memoryOrder);

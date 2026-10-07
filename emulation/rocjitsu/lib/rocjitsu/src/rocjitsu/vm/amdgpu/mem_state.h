@@ -154,7 +154,9 @@ public:
   }
   std::array<uint64_t, 64> per_lane_addr = {};
   uint64_t lane_mask = 0;
-  /// Optional per-element lane validity for untyped DWORD-component bounds.
+  /// Optional per-element lane validity for untyped DWORD-component bounds
+  /// and M0-masked block transfers. Disabled block words preserve their
+  /// destinations, unlike buffer-OOB elements, which are zero-filled on load.
   /// Empty means every element uses lane_mask; otherwise the container has
   /// exactly num_elems masks and lane_mask is their union.
   ElementLaneMasks element_lane_masks;
@@ -272,16 +274,25 @@ public:
   std::vector<uint8_t> ds2_response_data;
   TranslatedMemoryProgress translated;
 
+  /// Capture the issue-time M0 mask and populate element_lane_masks from the
+  /// current lane_mask. An empty mask clears lane_mask; exec_mask is retained
+  /// so the instruction still participates in wait-counter accounting.
   void set_block_dword_mask(uint32_t mask) {
     assert(elem_size == 4 && num_elems == 32);
     block_dword_mask = mask;
     element_lane_masks.assign(32, 0);
     for (uint32_t i = 0; i < 32; ++i) {
-      if (mask & (uint32_t{1} << i))
+      if (block_dword_enabled(i))
         element_lane_masks[i] = lane_mask;
     }
     if (mask == 0)
       lane_mask = 0;
+  }
+
+  /// Whether the captured block mask enables this DWORD. Other instructions
+  /// retain the all-ones default; results wider than a block are not masked.
+  [[nodiscard]] bool block_dword_enabled(uint32_t word) const {
+    return word >= 32 || (block_dword_mask & (uint32_t{1} << word)) != 0;
   }
 
   /// Number of consecutive VGPRs written starting at dst_reg_base.
