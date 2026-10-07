@@ -1698,14 +1698,7 @@ fn container_library_path(env: &BTreeMap<String, String>, runtime_dir: &std::pat
 
 /// The in-container path a host library is bind-mounted at.
 ///
-/// `LD_PRELOAD` is a `:`-separated *list*, and at least one backend uses
-/// it as one: hotswap preloads its patched ROCR and then its intercept,
-/// as `"<dir>/libhsa-runtime64.so:<dir>/libhsa_intercept.so"`. Treating
-/// that as a single path made `Path::file_name` return only the last
-/// component, so the patched ROCR silently vanished from the preload and
-/// the mount built from the same string named a file with a `:` in it —
-/// which `-v host:container:ro` cannot even express. Each entry is
-/// mapped separately.
+/// Map each entry in the `LD_PRELOAD` library list separately.
 fn libraries_in_container(host_paths: &str) -> Option<String> {
     let mapped: Vec<String> = split_library_list(host_paths)
         .filter_map(library_in_container)
@@ -1937,15 +1930,11 @@ mod tests {
 
     #[test]
     fn a_multi_entry_preload_keeps_every_entry() {
-        // hotswap preloads its patched ROCR *and* its intercept, as one
-        // `:`-separated value. Treating that as a single path kept only
-        // the last component — so the patched ROCR silently vanished from
-        // `LD_PRELOAD` and the workload ran against the unpatched runtime
-        // while mirage reported success.
+        // Every library in a colon-separated preload must survive remapping.
         assert_eq!(
-            libraries_in_container("/opt/hs/libhsa-runtime64.so:/opt/hs/libhsa_intercept.so"),
+            libraries_in_container("/opt/x/libone.so:/opt/x/libtwo.so"),
             Some(format!(
-                "{CONTAINER_LIB_DIR}/libhsa-runtime64.so:{CONTAINER_LIB_DIR}/libhsa_intercept.so"
+                "{CONTAINER_LIB_DIR}/libone.so:{CONTAINER_LIB_DIR}/libtwo.so"
             ))
         );
         assert_eq!(
@@ -1961,11 +1950,11 @@ mod tests {
         // that does not exist inside the container.
         let dir = tempfile::tempdir().unwrap();
         let injection = InjectionDef {
-            ld_preload: Some("/opt/hs/libhsa-runtime64.so:/opt/hs/libhsa_intercept.so".to_string()),
+            ld_preload: Some("/opt/x/libone.so:/opt/x/libtwo.so".to_string()),
             ..Default::default()
         };
         let plan = plan_container(&ctx(dir.path().to_path_buf()), &injection);
-        for name in ["libhsa-runtime64.so", "libhsa_intercept.so"] {
+        for name in ["libone.so", "libtwo.so"] {
             assert!(
                 plan.mounts
                     .iter()

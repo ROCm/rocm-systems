@@ -6,7 +6,7 @@ This guide covers building the `mirage` CLI and (optionally) the
 mirage is a single Cargo workspace ([`emulation/mirage/`](../)). One
 `cargo build` produces the unified `mirage` binary from a set of crates —
 `core`, `ctl`, `supervisor`, `container`, `builtin`, `rocjitsu_sys`, and
-the emulator backends (`rocjitsu`, `hotswap`). See
+the emulator backend (`rocjitsu`). See
 [`architecture.md`](architecture.md) for the full crate map.
 
 ## TL;DR
@@ -175,13 +175,10 @@ feature flag literally adds or removes an entry from
 
 | Feature | Default | Backend |
 |---------|---------|---------|
-| `rocjitsu` | on | two entries: `rocjitsu`, the GPU emulator, and `rocjitsu-dbt`, which translates a GPU's code objects to run on a different physical GPU |
-| `hotswap` | off | the HotSwap intercept backend |
+| `rocjitsu` | on | the GPU emulator |
 
 ```sh
 cargo build                                              # rocjitsu only
-cargo build --features hotswap                           # both
-cargo build --no-default-features --features hotswap     # hotswap only
 ```
 
 A build with no backend at all compiles, but `profile create` then fails
@@ -205,8 +202,7 @@ described under [Linting](#linting).
 
 Options worth knowing: `MIRAGE_CARGO_FEATURES` (comma-separated extra
 cargo features), `MIRAGE_CARGO_PROFILE` (default `release`),
-`MIRAGE_BUILD_HOTSWAP` (build HotSwap's LLVM + COMGR + ROCR stack from
-source — a long build, hence opt-in), `MIRAGE_LINT_TESTS` (on; turn it
+`MIRAGE_LINT_TESTS` (on; turn it
 off to register only `cargo_test`), and `MIRAGE_ALLOW_TEST_SKIP`, which
 is the `ctest` spelling of `MIRAGE_E2E_ALLOW_SKIP=1` described below.
 
@@ -272,15 +268,9 @@ something that is not there is skipped rather than fatal, so an
 environment left over from another checkout degrades to the search rather
 than breaking the build.
 
-The DBT backend follows the same policy for `librocjitsu_hooks.so`, with
-`ROCJITSU_HOOKS_LIB` in place of `ROCJITSU_LIB`. HotSwap is the one that
-opts out: it takes `HOTSWAP_HOME` (an install root, with
-`lib/libhotswap_intercept.so` under it) and does not consult
-`$LD_LIBRARY_PATH` or the ROCm variables at all.
-
-Reach for the file overrides — `ROCJITSU_LIB`, `ROCJITSU_HOOKS_LIB` — when
+Reach for the file override — `ROCJITSU_LIB` — when
 you have a library in a place no search would guess, or when you want to
-pin one build while another sits in the way. They are also what you need
+pin one build while another sits in the way. It is also what you need
 when the prefix itself is the problem: step 3 outranks
 `ROCM_HOME`/`ROCM_PATH`, so those two select an ordinary install root but
 cannot override a `<prefix>/lib` beside the `mirage` you are running —
@@ -292,12 +282,12 @@ found none, every path it tried and the variables that would fix it:
 
 ```sh
 $ mirage emulators -l
-hotswap
+rocjitsu
   ...
   installed: no
-  runtime:   not found (libhotswap_intercept.so)
-  searched:  /path/that/was/tried/libhotswap_intercept.so
-  set:       HOTSWAP_HOME=<install root, with lib/libhotswap_intercept.so under it>
+  runtime:   not found (librocjitsu.so)
+  searched:  /path/that/was/tried/librocjitsu.so
+  set:       ROCJITSU_LIB=<path to librocjitsu.so>
 ```
 
 If nothing is found mirage still builds and runs; the backend is simply
@@ -359,7 +349,6 @@ includes daemon startup for every builtin agent — the list is taken from
 `mirage agent list`, so a GPU added to RocJITsu is covered without
 editing a test — legacy-agent upgrades, the container and lifecycle
 suites, and the software-emulator matrix.
-Hardware-dependent DBT cases remain capability-gated.
 
 ## Linting
 
@@ -381,10 +370,9 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
-Every flag is load-bearing. `--all-targets` reaches the integration test
+`--all-targets` reaches the integration test
 targets under `tests/`, which are where most of the `unwrap` temptation
-lives; `--all-features` reaches the `hotswap` backend that the default
-feature set leaves uncompiled; and `-D warnings` is what turns the
+lives; `-D warnings` is what turns the
 warn-level entries in the policy (`unreachable_pub`,
 `unused_qualifications`, `missing_debug_implementations`) into failures
 rather than output you scroll past.
@@ -436,5 +424,5 @@ test suite.
   first. It prints every path that was searched for that backend's
   library and the environment variables that would resolve it, which is
   faster than guessing. Then either build rocjitsu (Option B), or point
-  `ROCJITSU_LIB` (or `ROCJITSU_HOOKS_LIB`, or `HOTSWAP_HOME`) at a
+  `ROCJITSU_LIB` at a
   library you already have.

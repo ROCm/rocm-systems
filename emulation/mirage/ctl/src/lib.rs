@@ -491,7 +491,7 @@ pub enum ProfileCmd {
 pub struct ProfileCreateArgs {
     /// Profile name. Prompted for when omitted on a terminal.
     pub name: Option<String>,
-    /// Emulator name (e.g. `rocjitsu`, `hotswap`). Defaults to the
+    /// Emulator name (`rocjitsu`). Defaults to the
     /// first installed backend; see `mirage emulators`.
     #[arg(long)]
     pub emulator: Option<String>,
@@ -754,8 +754,8 @@ pub struct RunArgs {
     /// Profile to use. Defaults to the `mi350x` builtin.
     #[arg(long, default_value = "mi350x")]
     profile: String,
-    /// Override the profile's emulator backend (e.g. `rocjitsu`,
-    /// `rocjitsu-dbt`, `hotswap`). See `mirage emulators` for
+    /// Override the profile's emulator backend (`rocjitsu`).
+    /// See `mirage emulators` for
     /// the available backends.
     #[arg(long)]
     emulator: Option<String>,
@@ -3748,7 +3748,7 @@ mod tests {
     #[test]
     fn an_unknown_option_key_is_rejected_and_names_the_ones_that_work() {
         let schema = ["target_isa".to_string(), "source_isa".to_string()];
-        let e = check_option_keys("rocjitsu-dbt", &schema, &["targt_isa".to_string()])
+        let e = check_option_keys("test", &schema, &["targt_isa".to_string()])
             .unwrap_err()
             .to_string();
         assert!(e.contains("targt_isa"), "the typo must be named: {e}");
@@ -3756,7 +3756,7 @@ mod tests {
             e.contains("target_isa") && e.contains("source_isa"),
             "the error must list what would have worked: {e}"
         );
-        check_option_keys("rocjitsu-dbt", &schema, &["target_isa".to_string()]).unwrap();
+        check_option_keys("test", &schema, &["target_isa".to_string()]).unwrap();
     }
 
     #[test]
@@ -3784,7 +3784,7 @@ mod tests {
         );
         check_plugin_names("rocjitsu", &available, &["race".to_string()]).unwrap();
 
-        let none = check_plugin_names("hotswap", &[], &["race".to_string()])
+        let none = check_plugin_names("test", &[], &["race".to_string()])
             .unwrap_err()
             .to_string();
         assert!(none.contains("none of its plugins"), "{none}");

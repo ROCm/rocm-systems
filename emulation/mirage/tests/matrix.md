@@ -36,7 +36,6 @@ The matrix is the full cross product of the following dimensions.
 | Value          | Description                                                                |
 | -------------- | -------------------------------------------------------------------------- |
 | `rocjitsu`     | Software GPU emulator. Runs on any host once its KMD library is installed. |
-| `rocjitsu-dbt` | Dynamic binary translation. Runs translated code on a **physical** GPU.    |
 
 ### Containerization
 
@@ -73,12 +72,6 @@ The matrix is the full cross product of the following dimensions.
 A combination is **skipped** (not failed) when the host cannot run it.
 The reason is recorded in the test output. The following rules apply:
 
-* **`rocjitsu-dbt` without a translation-target GPU** — DBT executes
-  translated code on real hardware, so it is skipped on any host without
-  a supported physical GPU. This is the primary hardware-gated skip.
-* **`rocjitsu-dbt` with an `mi450x` guest** — `gfx1250` is not a
-  DBT-translatable source ISA, so this guest is skipped even when GPU
-  hardware is present.
 * **`rocjitsu` without its KMD library** — the software emulator is
   skipped when `mirage` reports it as not installed (its KMD library
   could not be located by mirage's own discovery).

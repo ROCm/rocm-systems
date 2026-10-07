@@ -31,8 +31,7 @@ itself has none.
 | `mirage_supervisor` | The engine a `mirage run` is built out of: `Run`, `Session`, `Exec`, the shared spec builder, process spawn/supervise/reap, and the socket a run serves. |
 | `mirage_container`  | Container provider abstraction (podman/docker) for containerised sessions. |
 | `mirage_builtin`    | The RocJITsu configs embedded as builtin agents and the unpacker that seeds them, Mirage's system topologies, and the builtin profiles it generates from those agents rather than storing. |
-| `mirage_rocjitsu`   | The `rocjitsu` (and `rocjitsu-dbt`) backend.                         |
-| `mirage_hotswap`    | The `hotswap` load-time ISA-rewriting backend.                       |
+| `mirage_rocjitsu`   | The `rocjitsu` backend.                         |
 | `rocjitsu_sys`      | FFI bindings to `librocjitsu.so`, plus safe RAII wrappers over them.  |
 
 Emulator backends are **link-only** dependencies: each registers itself
