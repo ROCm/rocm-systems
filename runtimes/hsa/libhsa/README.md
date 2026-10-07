@@ -171,7 +171,9 @@ allocations and virtual-memory handles. For CPU pools, it requests coherent,
 uncached rocddi-owned host pages. CPU pool allocations in a secondary KFD
 context use rocddi system backing, which is already uncached. Pointer info
 reports the effective fine-grained and kernarg flags for uncached pool
-allocations and host locks; peer access remains governed by the owning pool.
+allocations and host locks. The AMD PCIe flag requests coherent access, and
+pointer info reports fine-grained global flags for those allocations. Peer
+access remains governed by the owning pool.
 For linear asynchronous CPU-to-GPU and GPU-to-CPU copies, rocddi stages a
 CPU-accessible operand that is not mapped to that GPU. The HSA worker reads
 the source after dependency signals complete, copies a staged destination

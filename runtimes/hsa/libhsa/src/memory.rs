@@ -148,12 +148,36 @@ impl Memory {
         owner: HsaAgent,
         pool_global_flags: u32,
         uncached: bool,
-        alloc_flags: u32,
+        flags: u32,
         accessible: Vec<HsaAgent>,
     ) -> Self {
         let info = allocation.info();
         let agent_base = info.device_address as usize;
-        let global_flags = effective_global_flags(pool_global_flags, uncached);
+        let global_flags =
+            effective_global_flags(pool_global_flags, uncached, flags & ALLOC_PCIE != 0);
+        let alloc_flags = POINTER_ALLOC_NONPAGED
+            | if info.host_address.is_some() {
+                POINTER_ALLOC_HOST_ACCESS
+            } else {
+                0
+            }
+            | if flags & ALLOC_CONTIGUOUS != 0 {
+                POINTER_ALLOC_CONTIGUOUS
+            } else {
+                0
+            }
+            | if flags & ALLOC_EXECUTABLE != 0 {
+                POINTER_ALLOC_EXECUTABLE
+            } else {
+                0
+            }
+            | if pool_global_flags & POOL_FLAG_FINE != 0 && flags & ALLOC_UNCACHED == 0 {
+                POINTER_ALLOC_ATOMIC_FULL
+            } else if flags & ALLOC_PCIE != 0 {
+                POINTER_ALLOC_ATOMIC_PARTIAL
+            } else {
+                0
+            };
         Self {
             allocation,
             pool_global_flags,
@@ -436,11 +460,13 @@ fn cpu_pool_memory_kind(pool: HsaMemoryPool, lifetime: SessionLifetime, flags: u
     }
 }
 
-fn effective_global_flags(pool_flags: u32, uncached: bool) -> u32 {
+fn effective_global_flags(pool_flags: u32, uncached: bool, pcie: bool) -> u32 {
     if uncached {
         (pool_flags & !(POOL_FLAG_COARSE | POOL_FLAG_EXTENDED_FINE))
             | POOL_FLAG_FINE
             | POOL_FLAG_KERNARG
+    } else if pcie {
+        (pool_flags & !POOL_FLAG_COARSE) | POOL_FLAG_FINE
     } else {
         pool_flags
     }
@@ -1188,29 +1214,6 @@ unsafe fn memory_pool_allocate(
         let accessible = vec![HsaAgent {
             handle: GPU_AGENT_BASE + device_index as u64,
         }];
-        let alloc_flags = POINTER_ALLOC_NONPAGED
-            | if info.host_address.is_some() {
-                POINTER_ALLOC_HOST_ACCESS
-            } else {
-                0
-            }
-            | if flags & ALLOC_CONTIGUOUS != 0 {
-                POINTER_ALLOC_CONTIGUOUS
-            } else {
-                0
-            }
-            | if flags & ALLOC_EXECUTABLE != 0 {
-                POINTER_ALLOC_EXECUTABLE
-            } else {
-                0
-            }
-            | if global_flags & POOL_FLAG_FINE != 0 && flags & ALLOC_UNCACHED == 0 {
-                POINTER_ALLOC_ATOMIC_FULL
-            } else if flags & ALLOC_PCIE != 0 {
-                POINTER_ALLOC_ATOMIC_PARTIAL
-            } else {
-                0
-            };
         runtime.allocations.insert(
             pointer_value,
             Memory::new(
@@ -1219,7 +1222,7 @@ unsafe fn memory_pool_allocate(
                 owner,
                 global_flags,
                 uncached,
-                alloc_flags,
+                flags,
                 accessible,
             ),
         );
@@ -2072,7 +2075,7 @@ unsafe fn memory_lock_to_pool(
         host_base,
         device_base,
         size,
-        effective_global_flags(global_flags, flags & ALLOC_UNCACHED != 0),
+        effective_global_flags(global_flags, flags & ALLOC_UNCACHED != 0, false),
         accessible,
     ));
     // SAFETY: The caller supplied writable pointer storage.
