@@ -55,8 +55,9 @@ namespace RcclUnitTesting {
 
 // Isolated because the profiler plugin is loaded once per process, at the first communicator.
 TEST(ProfilerApiEventRank, ApiEventsCarryCommRank) {
-  if (int n = 0; hipGetDeviceCount(&n) != hipSuccess || n < 2) GTEST_SKIP() << "requires at least 2 GPUs";
   RUN_ISOLATED_TEST_WITH_ENV("ProfilerApiEventRank.ApiEventsCarryCommRank", []() {
+    // Here rather than in the TEST body: the re-exec'd child runs that body too, and a skip there reads as a pass.
+    if (int n = 0; hipGetDeviceCount(&n) != hipSuccess || n < 2) GTEST_SKIP() << "requires at least 2 GPUs";
     constexpr int kRanks = 2;
     constexpr size_t kCount = 1024;
     ncclComm_t comms[kRanks];
@@ -67,6 +68,7 @@ TEST(ProfilerApiEventRank, ApiEventsCarryCommRank) {
       ASSERT_EQ(hipSetDevice(r), hipSuccess);
       ASSERT_EQ(hipStreamCreate(&streams[r]), hipSuccess);
       ASSERT_EQ(hipMalloc(&bufs[r], 3 * kCount * sizeof(float)), hipSuccess);
+      ASSERT_EQ(hipMemset(bufs[r], 0, 3 * kCount * sizeof(float)), hipSuccess);
     }
     // Highest rank first, so the outermost group API event is opened on rank 1's communicator.
     ASSERT_EQ(ncclGroupStart(), ncclSuccess);
@@ -77,8 +79,11 @@ TEST(ProfilerApiEventRank, ApiEventsCarryCommRank) {
       ASSERT_EQ(ncclRecv(bufs[r] + 2 * kCount, kCount, ncclFloat, peer, comms[r], streams[r]), ncclSuccess);
     }
     ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
+    // Both streams first: rank 1's kernels can still reach rank 0's buffer after rank 0's stream is done.
     for (int r = 0; r < kRanks; ++r) {
       ASSERT_EQ(hipStreamSynchronize(streams[r]), hipSuccess);
+    }
+    for (int r = 0; r < kRanks; ++r) {
       ASSERT_EQ(ncclCommDestroy(comms[r]), ncclSuccess);
       ASSERT_EQ(hipStreamDestroy(streams[r]), hipSuccess);
       ASSERT_EQ(hipFree(bufs[r]), hipSuccess);

@@ -330,7 +330,7 @@ if(BUILD_TESTS)
     INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/net/example/nccl)
 
   # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
-  # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
+  # export only the plugin symbols the tests need (narrow, unlike a broad -rdynamic).
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12"
     "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
