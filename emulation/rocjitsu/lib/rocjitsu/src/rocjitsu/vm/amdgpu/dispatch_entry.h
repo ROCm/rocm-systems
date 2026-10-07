@@ -418,6 +418,9 @@ struct DispatchEntry {
   bool wait_for_predecessors = false;
   /// Packet-type ordering: following packets cannot pass this packet.
   bool blocks_following = false;
+  /// An AMD vendor packet executes this PM4 buffer before publishing completion.
+  uint64_t aql_pm4_ib_address = 0;
+  uint32_t aql_pm4_ib_dwords = 0;
   /// Completion hooks and signal have already been delivered.
   bool completion_notified = false;
   bool execution_begun = false;

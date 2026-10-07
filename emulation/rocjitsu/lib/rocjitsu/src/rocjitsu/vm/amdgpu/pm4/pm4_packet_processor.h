@@ -23,6 +23,8 @@ struct Pm4ExecutionContext {
   /// @brief Target architecture for architecture-specific packet behavior.
   /// @details INVALID represents a CP without a compute unit.
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  /// @brief XCD index used by PRED_EXEC in CDNA vendor command buffers.
+  uint32_t xcc_id = 0;
   /// @brief Flush GPU caches before packet memory effects and stream completion.
   std::function<void()> flush_caches;
   /// @brief Admit a dispatch through CP using X, Y, Z, and the initiator word.
