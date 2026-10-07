@@ -474,71 +474,76 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
     return ScanProcForKfdPids(procs, num_allocated, num_procs_found);
   }
 
-  errno = 0;
-  auto proc_dir = opendir(kKFDProcPathRoot);
-
-  if (proc_dir == nullptr) {
-    perror("Unable to open process directory");
-    return errno;
-  }
-  auto dentry = readdir(proc_dir);
-
   std::string proc_id_str;
   std::string tmp;
   // Keep track of PIDs we've already seen to avoid duplicates
   // (e.g., if both "1234" and "pid:1234-id:1" exist)
   std::unordered_set<uint32_t> seen_pids;
 
-  while (dentry != nullptr) {
-    if (dentry->d_name[0] == '.') {
-      dentry = readdir(proc_dir);
-      continue;
+  // readdir() of this sysfs directory can skip an entry that exists the whole
+  // time when another process's entry is removed during the scan. Scan twice,
+  // so a process goes missing only if both scans skip it.
+  for (int scan = 0; scan < 2; ++scan) {
+    errno = 0;
+    auto proc_dir = opendir(kKFDProcPathRoot);
+
+    if (proc_dir == nullptr) {
+      perror("Unable to open process directory");
+      return errno;
     }
+    auto dentry = readdir(proc_dir);
 
-    proc_id_str = dentry->d_name;
-
-    // Check if the entry is a plain number (traditional format)
-    if (is_number(proc_id_str)) {
-      uint32_t pid = static_cast<uint32_t>(std::stoul(proc_id_str));
-      if (seen_pids.find(pid) == seen_pids.end()) {
-        seen_pids.insert(pid);
-        if (procs && *num_procs_found < num_allocated) {
-          procs[*num_procs_found].process_id = pid;
-        }
-        ++(*num_procs_found);
+    while (dentry != nullptr) {
+      if (dentry->d_name[0] == '.') {
+        dentry = readdir(proc_dir);
+        continue;
       }
-    }
-    // Check for "pid:XXXX-id:X" format (alternative format for multi-context processes)
-    else if (proc_id_str.find("pid:") == 0) {
-      // Extract PID from "pid:XXXX-id:X" format
-      size_t dash_pos = proc_id_str.find('-');
-      if (dash_pos != std::string::npos) {
-        std::string pid_part =
-            proc_id_str.substr(4, dash_pos - 4);  // Extract XXXX from "pid:XXXX-id:X"
-        if (is_number(pid_part)) {
-          uint32_t pid = static_cast<uint32_t>(std::stoul(pid_part));
-          if (seen_pids.find(pid) == seen_pids.end()) {
-            seen_pids.insert(pid);
-            if (procs && *num_procs_found < num_allocated) {
-              procs[*num_procs_found].process_id = pid;
+
+      proc_id_str = dentry->d_name;
+
+      // Check if the entry is a plain number (traditional format)
+      if (is_number(proc_id_str)) {
+        uint32_t pid = static_cast<uint32_t>(std::stoul(proc_id_str));
+        if (seen_pids.find(pid) == seen_pids.end()) {
+          seen_pids.insert(pid);
+          if (procs && *num_procs_found < num_allocated) {
+            procs[*num_procs_found].process_id = pid;
+          }
+          ++(*num_procs_found);
+        }
+      }
+      // Check for "pid:XXXX-id:X" format (alternative format for multi-context processes)
+      else if (proc_id_str.find("pid:") == 0) {
+        // Extract PID from "pid:XXXX-id:X" format
+        size_t dash_pos = proc_id_str.find('-');
+        if (dash_pos != std::string::npos) {
+          std::string pid_part =
+              proc_id_str.substr(4, dash_pos - 4);  // Extract XXXX from "pid:XXXX-id:X"
+          if (is_number(pid_part)) {
+            uint32_t pid = static_cast<uint32_t>(std::stoul(pid_part));
+            if (seen_pids.find(pid) == seen_pids.end()) {
+              seen_pids.insert(pid);
+              if (procs && *num_procs_found < num_allocated) {
+                procs[*num_procs_found].process_id = pid;
+              }
+              ++(*num_procs_found);
             }
-            ++(*num_procs_found);
           }
         }
+      } else {
+        // Skip unexpected entries that don't match known formats
+        // (e.g., non-numeric, non-pid: format files/directories)
+        dentry = readdir(proc_dir);
+        continue;
       }
-    } else {
-      // Skip unexpected entries that don't match known formats
-      // (e.g., non-numeric, non-pid: format files/directories)
+
       dentry = readdir(proc_dir);
-      continue;
     }
 
-    dentry = readdir(proc_dir);
-  }
-
-  errno = 0;
-  if (closedir(proc_dir)) {
-    return errno;
+    errno = 0;
+    if (closedir(proc_dir)) {
+      return errno;
+    }
   }
   return 0;
 }
