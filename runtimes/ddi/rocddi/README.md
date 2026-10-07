@@ -100,7 +100,13 @@ the bound KFD interface version; KFD 1.20 or newer is required.
 `GpuDevice::copy_linear`, `copy_rect`, `copy_rects`, and `fill_u32` provide
 GFX1201 SDMA copies and dword fills through a bounded DRM submission context
 and a rocddi-owned command allocation. `copy_rects` validates every shape
-before submission and reuses one native queue across its entries.
+before submission and reuses one native queue across its entries. Clones of an
+activated GPU share an idle copy context for the default path and each selected
+DRM DMA ring. A completed copy or fill returns a healthy context to its slot;
+concurrent operations acquire independent contexts.
+`GpuDevice::preload_linear_copy` prepares the default context and every
+advertised ring before the first copy. Failed or unretired contexts are never
+reused.
 `GpuCopySequence` uses the same queue and command allocation for an ordered mix
 of device-to-device, host-to-device, and device-to-host linear copies. It stages
 each host operand when that entry runs and retires each packet before starting

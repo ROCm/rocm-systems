@@ -329,10 +329,21 @@ impl Session {
     /// Partial native setup remains owned for safe cleanup or a later retry.
     pub fn activate(&self, endpoint: &Endpoint) -> Result<Device, Error> {
         let activated = self.inner.activate(endpoint)?;
+        let copy_pool = activated
+            .endpoint
+            .gpu()
+            .map(|_| {
+                Shared::new(
+                    crate::gpu::CopyResourcePool::default(),
+                    activated.driver.allocator(),
+                )
+            })
+            .transpose()?;
         Ok(Device {
             driver: activated.driver,
             state: activated.state,
             endpoint: activated.endpoint,
+            copy_pool,
         })
     }
 

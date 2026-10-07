@@ -136,6 +136,8 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     let device = session.activate(&endpoint)?;
     let gpu = device.gpu()?;
     assert!(gpu.supports_linear_copy());
+    gpu.preload_linear_copy().map_err(|failure| failure.error)?;
+    gpu.preload_linear_copy().map_err(|failure| failure.error)?;
     let counters = gpu.clock_counters()?;
     assert!(counters.gpu_frequency > 0);
 
@@ -180,6 +182,28 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
         return Err(Box::new(failure.error));
     }
     assert_eq!(destination_bytes, source_bytes);
+
+    source_bytes[..64].fill(0x5a);
+    destination_bytes[..64].fill(0xa5);
+    // SAFETY: The two mapped allocations remain live through this second
+    // default-ring copy after the first operation returned its native context.
+    if let Err(failure) = unsafe {
+        gpu.copy_linear(
+            destination_info.device_address,
+            source_info.device_address,
+            64,
+            &cancel,
+        )
+    } {
+        if failure.operands_may_be_live {
+            std::mem::forget(source);
+            std::mem::forget(destination);
+            std::mem::forget(device);
+            std::mem::forget(session);
+        }
+        return Err(Box::new(failure.error));
+    }
+    assert_eq!(&destination_bytes[..64], &source_bytes[..64]);
 
     let ring_mask = gpu.available_sdma_rings()?;
     assert_ne!(ring_mask & 1, 0);

@@ -60,6 +60,7 @@ fn complete_deferred_shutdown(runtime: Runtime, generation: u64) {
 }
 
 const HSA_RUNTIME_VERSION_MINOR: u16 = 21;
+const AMD_AGENT_PRELOAD_SKIP_BLITS: u64 = 1 << 1;
 
 unsafe fn write_value<T: Copy>(output: *mut c_void, value: T) -> Status {
     if output.is_null() {
@@ -1657,16 +1658,33 @@ pub extern "C" fn hsa_amd_coherency_set_type(agent: HsaAgent, kind: u32) -> Stat
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, _flags: u64) -> Status {
+pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, flags: u64) -> Status {
     boundary(|| {
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
+        let (device, _call) = {
+            let guard = match lock() {
+                Ok(guard) => guard,
+                Err(status) => return status,
+            };
+            let Some(runtime) = guard.as_ref() else {
+                return NOT_INITIALIZED;
+            };
+            let Some(index) = runtime.gpu_index(agent) else {
+                return INVALID_AGENT;
+            };
+            if flags & AMD_AGENT_PRELOAD_SKIP_BLITS != 0 {
+                return SUCCESS;
+            }
+            let Some(token) = runtime.inflight.enter() else {
+                return OUT_OF_RESOURCES;
+            };
+            (runtime.gpus[index].device.clone(), token)
         };
-        match guard.as_ref() {
-            Some(runtime) if runtime.gpu_index(agent).is_some() => SUCCESS,
-            Some(_) => INVALID_AGENT,
-            None => NOT_INITIALIZED,
+        match device
+            .gpu()
+            .and_then(|gpu| gpu.preload_linear_copy().map_err(|failure| failure.error))
+        {
+            Ok(()) => SUCCESS,
+            Err(error) => map_error(error),
         }
     })
 }

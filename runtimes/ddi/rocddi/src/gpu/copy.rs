@@ -3,6 +3,8 @@
 //! Linear copy and dword fill through a bounded native SDMA submission context.
 
 use std::mem::ManuallyDrop;
+use std::ops::{Deref, DerefMut};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 
 use crate::gpu::GpuDevice;
@@ -132,6 +134,13 @@ fn invalid(detail: &'static str) -> CopyFailure {
     CopyFailure::retired(Error::Operation {
         kind: ErrorKind::InvalidArgument,
         detail,
+    })
+}
+
+fn poisoned_pool() -> CopyFailure {
+    CopyFailure::retired(Error::Operation {
+        kind: ErrorKind::Internal,
+        detail: "SDMA copy resource pool is poisoned",
     })
 }
 
@@ -461,6 +470,153 @@ impl Drop for CopyResources {
     }
 }
 
+/// One idle SDMA context per queue format, shared by activated-device clones.
+/// Busy callers acquire independent contexts instead of serializing copies.
+#[derive(Default)]
+pub(crate) struct CopyResourcePool {
+    idle: Mutex<CopyResourceSlots>,
+}
+
+#[derive(Default)]
+struct CopyResourceSlots {
+    default: Option<CopyResources>,
+    rings: [Option<CopyResources>; u32::BITS as usize],
+}
+
+impl CopyResourceSlots {
+    fn for_format(
+        &mut self,
+        format: KernelQueueFormat,
+    ) -> Result<&mut Option<CopyResources>, CopyFailure> {
+        match format {
+            KernelQueueFormat::Sdma => Ok(&mut self.default),
+            KernelQueueFormat::SdmaOnRing(ring) => self
+                .rings
+                .get_mut(ring as usize)
+                .ok_or_else(|| invalid("SDMA ring index is out of range")),
+            KernelQueueFormat::Pm4 => Err(invalid("PM4 is not an SDMA copy format")),
+        }
+    }
+}
+
+impl CopyResourcePool {
+    fn take<'a>(
+        &'a self,
+        gpu: &GpuDevice<'_>,
+        format: KernelQueueFormat,
+    ) -> Result<CopyResourceLease<'a>, CopyFailure> {
+        let cached = self
+            .idle
+            .lock()
+            .map_err(|_| poisoned_pool())?
+            .for_format(format)?
+            .take();
+        let resources = match cached {
+            Some(resources) if resources.queue.status().terminal.is_none() => resources,
+            Some(_) | None => CopyResources::new(gpu, format)?,
+        };
+        Ok(CopyResourceLease {
+            resources: Some(resources),
+            pool: self,
+            format,
+            reusable: true,
+        })
+    }
+
+    fn preload(&self, gpu: &GpuDevice<'_>, format: KernelQueueFormat) -> Result<(), CopyFailure> {
+        if self
+            .idle
+            .lock()
+            .map_err(|_| poisoned_pool())?
+            .for_format(format)?
+            .as_ref()
+            .is_some_and(|resources| resources.queue.status().terminal.is_none())
+        {
+            return Ok(());
+        }
+        let resources = CopyResources::new(gpu, format)?;
+        let mut idle = self.idle.lock().map_err(|_| poisoned_pool())?;
+        let slot = idle.for_format(format)?;
+        let stale = if slot
+            .as_ref()
+            .is_none_or(|resources| resources.queue.status().terminal.is_some())
+        {
+            slot.replace(resources)
+        } else {
+            None
+        };
+        drop(idle);
+        drop(stale);
+        Ok(())
+    }
+}
+
+struct CopyResourceLease<'pool> {
+    resources: Option<CopyResources>,
+    pool: &'pool CopyResourcePool,
+    format: KernelQueueFormat,
+    reusable: bool,
+}
+
+impl CopyResourceLease<'_> {
+    fn discard(&mut self) {
+        self.reusable = false;
+    }
+}
+
+impl Deref for CopyResourceLease<'_> {
+    type Target = CopyResources;
+
+    #[allow(
+        clippy::expect_used,
+        reason = "only Drop can remove a lease's resource"
+    )]
+    fn deref(&self) -> &Self::Target {
+        self.resources
+            .as_ref()
+            .expect("a live SDMA copy lease owns its resources")
+    }
+}
+
+impl DerefMut for CopyResourceLease<'_> {
+    #[allow(
+        clippy::expect_used,
+        reason = "only Drop can remove a lease's resource"
+    )]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.resources
+            .as_mut()
+            .expect("a live SDMA copy lease owns its resources")
+    }
+}
+
+impl Drop for CopyResourceLease<'_> {
+    fn drop(&mut self) {
+        if !self.reusable {
+            return;
+        }
+        let Some(mut resources) = self.resources.take() else {
+            return;
+        };
+        resources.refresh_retirement();
+        if resources.pending.is_some()
+            || resources.submitting
+            || resources.queue.status().terminal.is_some()
+        {
+            return;
+        }
+        resources.timing = None;
+        resources.submitted_any = false;
+        if let Ok(mut idle) = self.pool.idle.lock() {
+            if let Ok(slot) = idle.for_format(self.format) {
+                if slot.is_none() {
+                    *slot = Some(resources);
+                }
+            }
+        }
+    }
+}
+
 /// Raw global GPU clock ticks around a native SDMA copy sequence.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GpuCopyTimestamps {
@@ -482,7 +638,7 @@ struct CopyTiming {
 pub struct GpuCopySequence<'device, 'cancel> {
     gpu: GpuDevice<'device>,
     cancel: &'cancel AtomicBool,
-    resources: CopyResources,
+    resources: CopyResourceLease<'device>,
     staging: Option<Allocation>,
     timing: Option<CopyTiming>,
     terminal_retention: Option<bool>,
@@ -523,10 +679,11 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
                 detail: "linear SDMA copy is not qualified for this GPU",
             }));
         }
+        let resources = gpu.copy_resources(format)?;
         Ok(Self {
             gpu,
             cancel,
-            resources: CopyResources::new(&gpu, format)?,
+            resources,
             staging: None,
             timing: None,
             terminal_retention: None,
@@ -549,6 +706,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
     fn record(&mut self, result: Result<(), CopyFailure>) -> Result<(), CopyFailure> {
         if let Err(failure) = &result {
             self.terminal_retention = Some(failure.operands_may_be_live);
+            self.resources.discard();
         }
         result
     }
@@ -787,7 +945,48 @@ impl Drop for GpuCopySequence<'_, '_> {
     }
 }
 
-impl GpuDevice<'_> {
+impl<'device> GpuDevice<'device> {
+    fn copy_resource_pool(&self) -> Result<&'device CopyResourcePool, CopyFailure> {
+        self.device.copy_pool.as_deref().ok_or_else(|| {
+            CopyFailure::retired(Error::Operation {
+                kind: ErrorKind::DriverContract,
+                detail: "activated GPU has no SDMA copy resource pool",
+            })
+        })
+    }
+
+    fn copy_resources(
+        &self,
+        format: KernelQueueFormat,
+    ) -> Result<CopyResourceLease<'device>, CopyFailure> {
+        self.copy_resource_pool()?.take(self, format)
+    }
+
+    /// Prepares default and advertised-ring SDMA queues and command allocations
+    /// for later copies or fills on this activated GPU. Subsequent calls leave
+    /// healthy idle resources in place; concurrent copies acquire independent
+    /// contexts.
+    ///
+    /// # Errors
+    /// Returns an unqualified-target, allocation, or native queue failure.
+    pub fn preload_linear_copy(&self) -> Result<(), CopyFailure> {
+        if !self.supports_linear_copy() {
+            return Err(CopyFailure::retired(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "linear SDMA copy is not qualified for this GPU",
+            }));
+        }
+        let pool = self.copy_resource_pool()?;
+        pool.preload(self, KernelQueueFormat::Sdma)?;
+        let mut rings = self.available_sdma_rings().map_err(CopyFailure::retired)?;
+        while rings != 0 {
+            let ring = rings.trailing_zeros();
+            pool.preload(self, KernelQueueFormat::SdmaOnRing(ring))?;
+            rings &= rings - 1;
+        }
+        Ok(())
+    }
+
     fn staging(
         &self,
         size: usize,
@@ -947,9 +1146,12 @@ impl GpuDevice<'_> {
                 detail: "linear SDMA copy is not qualified for this GPU",
             }));
         }
-        let mut resources = CopyResources::new(self, KernelQueueFormat::Sdma)?;
+        let mut resources = self.copy_resources(KernelQueueFormat::Sdma)?;
         for rect in rects {
-            resources.copy_rect(*rect, cancel)?;
+            if let Err(failure) = resources.copy_rect(*rect, cancel) {
+                resources.discard();
+                return Err(failure);
+            }
         }
         Ok(())
     }
@@ -982,18 +1184,22 @@ impl GpuDevice<'_> {
                 detail: "SDMA fill is not qualified for this GPU",
             }));
         }
-        let mut resources = CopyResources::new(self, KernelQueueFormat::Sdma)?;
+        let mut resources = self.copy_resources(KernelQueueFormat::Sdma)?;
         let mut completed = 0;
         while completed < count {
             let chunk = (count - completed).min(MAX_FILL_PACKET_DWORDS) as u32;
-            resources.submit_packet(
+            let result = resources.submit_packet(
                 SdmaCommand::Fill {
                     destination: destination + completed * 4,
                     value,
                     count: chunk,
                 },
                 cancel,
-            )?;
+            );
+            if let Err(failure) = result {
+                resources.discard();
+                return Err(failure);
+            }
             completed += u64::from(chunk);
         }
         Ok(())
