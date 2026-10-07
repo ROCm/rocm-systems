@@ -62,6 +62,26 @@ def _repo_root():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
 
+def _configured_or_source(request, option, *source_parts):
+    """The path given by ``option``, else the source-tree copy.
+
+    The source-tree fallback only exists when the tests run from the source
+    tree. CTest runs a copy in the build tree, where it would silently point at
+    nothing, so the build must pass the option (tests/rocprofv3-doctor/
+    CMakeLists.txt); fail loudly when neither is available.
+    """
+    configured = request.config.getoption(option)
+    if configured:
+        return configured
+    path = os.path.join(_repo_root(), *source_parts)
+    if not os.path.exists(path):
+        pytest.fail(
+            "{} was not given and {} does not exist (tests running outside the "
+            "source tree must be passed {})".format(option, path, option)
+        )
+    return path
+
+
 @pytest.fixture(scope="session", autouse=True)
 def rocprofv3_package(request):
     """Make the rocprofv3 package importable, preferring the built copy."""
@@ -80,11 +100,9 @@ def rocprofv3_package(request):
 @pytest.fixture
 def doctor_path(request):
     """Path to the doctor script behind rocprofv3 --doctor, or the source copy."""
-    configured = request.config.getoption("--doctor-path")
-    if configured:
-        return configured
-    return os.path.join(
-        _repo_root(),
+    return _configured_or_source(
+        request,
+        "--doctor-path",
         "source",
         "libexec",
         "rocprofiler-sdk",
@@ -96,10 +114,9 @@ def doctor_path(request):
 @pytest.fixture
 def rocprofv3_path(request):
     """Path to the rocprofv3 script, or the source-tree copy."""
-    configured = request.config.getoption("--rocprofv3-path")
-    if configured:
-        return configured
-    return os.path.join(_repo_root(), "source", "bin", "rocprofv3.py")
+    return _configured_or_source(
+        request, "--rocprofv3-path", "source", "bin", "rocprofv3.py"
+    )
 
 
 class FakeAccessor(object):

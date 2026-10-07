@@ -50,6 +50,11 @@ foreach(
                    ${CMAKE_CURRENT_BINARY_DIR}/${_FILE} COPYONLY)
 endforeach()
 
+# Locations of the configured launcher and doctor script (plain `rocprofv3`, no .py),
+# resolved at configure time from the imported targets.
+get_target_property(_ROCPROFV3_EXE rocprofiler-sdk::rocprofv3 IMPORTED_LOCATION)
+get_target_property(_DOCTOR_EXE rocprofiler-sdk::rocprofv3-doctor IMPORTED_LOCATION)
+
 # GPU-free unit tests for the check framework: registry ordering, dependency validation,
 # skip-propagation, exception isolation, filtering, and the individual checks driven
 # through a synthetic accessor. Registered through rocprofiler_sdk_pytest_discover_tests
@@ -64,7 +69,14 @@ rocprofiler_sdk_pytest_discover_tests(
     # NOTE: rocprofiler-sdk_LIB_DIR, not PROJECT_BINARY_DIR: the project() call above
     # rebinds PROJECT_BINARY_DIR to this test directory, which would point the tests at a
     # path that never exists. This mirrors tests/rocpd/CMakeLists.txt.
-    EXTRA_ARGS --rocprofv3-package-dir ${rocprofiler-sdk_LIB_DIR}/python3/site-packages
+    EXTRA_ARGS --rocprofv3-package-dir
+               ${rocprofiler-sdk_LIB_DIR}/python3/site-packages
+               # the tests run from this binary directory, where the source-tree fallbacks
+               # for these two paths do not exist
+               --rocprofv3-path
+               ${_ROCPROFV3_EXE}
+               --doctor-path
+               ${_DOCTOR_EXE}
     PROPERTIES
     LABELS "unittests"
     TIMEOUT 120)
