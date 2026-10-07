@@ -28,6 +28,8 @@
 #include <array>
 #include <barrier>
 #include <bit>
+#include <chrono>
+#include <iostream>
 #include <memory>
 #include <semaphore>
 #include <set>
@@ -616,6 +618,87 @@ TEST(MatrixCoexecutionTest, SharedPoolClaimsAndReclaimsCapacityAcrossBitmapWords
       EXPECT_EQ(pool.available(), capacity != 0);
     }
   }
+}
+
+TEST(MatrixCoexecutionTest, SharedPoolMakesProgressUnderConcurrentHandoffs) {
+  struct alignas(64) Progress {
+    std::atomic<uint64_t> completed{0};
+    uint64_t offloads = 0;
+    bool matched = true;
+  };
+  std::array<Progress, 8> progress;
+  Instruction increment("increment",
+                        [](Instruction &, void *opaque) { ++*static_cast<uint64_t *>(opaque); });
+  mc::SharedPool pool(progress.size());
+  ASSERT_TRUE(mc::helpers_enabled());
+  std::atomic<bool> stop{false};
+  std::barrier started(progress.size() + 1);
+  std::array<std::thread, 8> issuers;
+  for (size_t i = 0; i != issuers.size(); ++i)
+    issuers[i] = std::thread([&, i] {
+      uint64_t value = 0;
+      uint64_t completed = 0;
+      started.arrive_and_wait();
+      while (!stop.load(std::memory_order_relaxed)) {
+        const auto before = value;
+        auto ticket = pool.submit(increment, &value);
+        if (ticket) {
+          if (pool.finish(ticket))
+            progress[i].matched = false;
+          ++progress[i].offloads;
+        } else {
+          increment.execute(increment, &value);
+        }
+        if (value != before + 1)
+          progress[i].matched = false;
+        if (!progress[i].matched)
+          stop.store(true, std::memory_order_relaxed);
+        // Do not add an atomic RMW or other synchronization between submit and
+        // finish: a locked instruction could mask the publication race.
+        progress[i].completed.store(++completed, std::memory_order_relaxed);
+      }
+    });
+
+  started.arrive_and_wait();
+  using Clock = std::chrono::steady_clock;
+  const auto begin = Clock::now();
+  std::array<uint64_t, 8> previous{};
+  std::array<Clock::time_point, 8> advanced;
+  advanced.fill(begin);
+  while (!stop.load(std::memory_order_relaxed) && Clock::now() - begin < std::chrono::seconds(20)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    const auto now = Clock::now();
+    for (size_t i = 0; i != progress.size(); ++i) {
+      const auto completed = progress[i].completed.load(std::memory_order_relaxed);
+      if (completed != previous[i]) {
+        previous[i] = completed;
+        advanced[i] = now;
+      } else if (now - advanced[i] >= std::chrono::seconds(6)) {
+        ADD_FAILURE() << "SharedPool issuer " << i << " made no progress for six seconds";
+        std::cerr << "SharedPool handoff progress:";
+        for (const auto &issuer : progress)
+          std::cerr << ' ' << issuer.completed.load(std::memory_order_relaxed);
+        std::cerr << std::endl;
+        stop.store(true, std::memory_order_relaxed);
+        break;
+      }
+    }
+  }
+  stop.store(true, std::memory_order_relaxed);
+  // CTest's external timeout also covers a blocked finish/join and idle-helper
+  // destruction. Do not send recovery notifications that could hide the bug.
+  for (auto &issuer : issuers)
+    issuer.join();
+  uint64_t completed = 0;
+  uint64_t offloads = 0;
+  for (size_t i = 0; i != progress.size(); ++i) {
+    EXPECT_TRUE(progress[i].matched) << "issuer " << i;
+    EXPECT_GT(progress[i].completed.load(std::memory_order_relaxed), 0u) << "issuer " << i;
+    completed += progress[i].completed.load(std::memory_order_relaxed);
+    offloads += progress[i].offloads;
+  }
+  EXPECT_GT(offloads, 0u);
+  std::cout << "SharedPool completed=" << completed << " offloads=" << offloads << std::endl;
 }
 
 class QueueRetirementProbe final : public DynamicInstState {
