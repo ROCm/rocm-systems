@@ -1019,6 +1019,7 @@ if(ENABLE_ROCSHMEM)
 endif()
 if(ENABLE_ROCSHMEM_GIN)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM_GIN)
+  target_compile_definitions(rccl PRIVATE GDA_MLX5 GDA_BNXT GDA_IONIC)
 endif()
 # Uncached (fine-grained) VMM/cuMem allocation type. Available natively on
 # HIP >= 7.12.60540 and via the ROCm 7.0.2.x backport range [7.0.51831, 7.0.60000).
