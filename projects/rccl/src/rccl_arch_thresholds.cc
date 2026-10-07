@@ -172,11 +172,11 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
 };
 
-// gfx950: DDA-IPC cap is 128 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
+// gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
 static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  .ddaVmmMax      = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
+  .ddaVmmMax      = {0, 0, 64ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
   .ddaVmmMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ddaVmmMaxGraph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ceNonRegMin    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
