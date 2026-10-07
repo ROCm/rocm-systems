@@ -8209,6 +8209,9 @@ class CodeGenerator:
         """Return the number of counter tokens contributed by one issue."""
         if sem_class == 'smem_load' and (getattr(sem, 'num_elems', None) or 1) > 1:
             return 2
+        # Scalar atomics return elem_size bytes; compare-swap data dwords don't count.
+        if sem_class == 'smem_atomic' and (getattr(sem, 'elem_size', None) or 4) > 4:
+            return 2
         return 1
 
     def _additional_memory_obligation(

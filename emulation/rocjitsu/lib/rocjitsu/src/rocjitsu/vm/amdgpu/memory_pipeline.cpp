@@ -387,10 +387,18 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   return MemoryAccessCompletion::Complete;
 }
 
-VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
+/// @brief Compute the memory value a scalar atomic stores over @p old.
+/// @details T is the atomic width; the source occupies the low data dwords.
+template <typename T> T scalar_atomic_result(const ScalarMemState &d, T old) {
+  T source;
+  std::memcpy(&source, d.store_data, sizeof(source));
+  return apply_int_atomic(d.atomic_op, old, source);
+}
+
+template <typename T> VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
   assert(d.translated.access.has_value());
   if (!d.translated.atomic_loaded) {
-    const AtomicLoadResult loaded = d.translated.access->atomic_load(d.addr, d.elem_size);
+    const AtomicLoadResult loaded = d.translated.access->atomic_load(d.addr, sizeof(T));
     if (loaded.outcome != VmAccessOutcome::Complete)
       return loaded.outcome;
     d.translated.atomic_loaded_value = loaded.value;
@@ -399,14 +407,14 @@ VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
 
   // Retain the load across unavailable CAS attempts, as for vector atomics.
   while (true) {
-    const uint32_t old = static_cast<uint32_t>(d.translated.atomic_loaded_value);
-    const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
+    const T old = static_cast<T>(d.translated.atomic_loaded_value);
+    const T value = scalar_atomic_result(d, old);
     const AtomicCompareExchangeResult exchanged =
-        d.translated.access->compare_exchange(d.addr, d.elem_size, old, value);
+        d.translated.access->compare_exchange(d.addr, sizeof(T), old, value);
     if (exchanged.outcome != VmAccessOutcome::Complete)
       return exchanged.outcome;
     if (exchanged.exchanged) {
-      d.response_data[0] = old;
+      std::memcpy(d.response_data, &old, sizeof(old));
       d.translated.atomic_loaded = false;
       return VmAccessOutcome::Complete;
     }
@@ -414,18 +422,29 @@ VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
   }
 }
 
+template <typename T>
+VmAccessOutcome execute_cached_scalar_atomic_rmw(ScalarMemState &d, L2Cache &l2, uint32_t vmid) {
+  return l2.atomic_rmw(
+      d.addr, sizeof(T),
+      [&](uint8_t *line, uint32_t offset) {
+        T old;
+        std::memcpy(&old, line + offset, sizeof(old));
+        const T value = scalar_atomic_result(d, old);
+        std::memcpy(line + offset, &value, sizeof(value));
+        std::memcpy(d.response_data, &old, sizeof(old));
+      },
+      vmid);
+}
+
 } // namespace
 
 VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
-  const auto atomic_mutation = [&](std::span<std::byte> target) {
-    uint32_t old;
-    std::memcpy(&old, target.data(), sizeof(old));
-    const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
-    std::memcpy(target.data(), &value, sizeof(value));
-    d.response_data[0] = old;
-  };
-  if (d.atomic_op != AtomicOp::NONE && (d.elem_size != 4 || d.num_dwords != 1))
+  // Scalar atomics are one or two dwords wide. A misaligned two-dword atomic
+  // raises a memory violation on hardware without modifying memory.
+  if (d.atomic_op != AtomicOp::NONE &&
+      (d.elem_size != 4 || (d.num_dwords != 1 && d.num_dwords != 2) ||
+       d.addr % (d.num_dwords * sizeof(uint32_t)) != 0))
     return VmAccessOutcome::Malformed;
   // Masked loads still write the zero response, without taking a VM snapshot or
   // touching backing memory, including byte and halfword requests.
@@ -443,7 +462,8 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     }
     if (!d.translated.access->info().legacy_cache_compatible) {
       if (d.atomic_op != AtomicOp::NONE)
-        return execute_translated_scalar_atomic_rmw(d);
+        return d.num_dwords == 1 ? execute_translated_scalar_atomic_rmw<uint32_t>(d)
+                                 : execute_translated_scalar_atomic_rmw<uint64_t>(d);
       if (d.is_load) {
         if (d.elem_size >= 4 && d.load_dword_mask != 0xffff) {
           while (d.translated.request_index < d.num_dwords) {
@@ -490,12 +510,9 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
   }
 
   if (d.atomic_op != AtomicOp::NONE) {
-    return wf.raw_cu().l2()->atomic_rmw(
-        d.addr, d.elem_size,
-        [&](uint8_t *line, uint32_t offset) {
-          atomic_mutation({reinterpret_cast<std::byte *>(line + offset), d.elem_size});
-        },
-        wf.process_id());
+    L2Cache &l2 = *wf.raw_cu().l2();
+    return d.num_dwords == 1 ? execute_cached_scalar_atomic_rmw<uint32_t>(d, l2, wf.process_id())
+                             : execute_cached_scalar_atomic_rmw<uint64_t>(d, l2, wf.process_id());
   }
   if (d.is_load) {
     if (d.load_dword_mask == 0) {
