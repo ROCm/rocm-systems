@@ -47,11 +47,19 @@ currently behave as follows:
 * **Link state:** prints no line. The check reports NVIDIA NVLink links and
   finds none on AMD GPUs. The state of the AMD Infinity Fabric (XGMI) links is
   not checked.
+* **NVIDIA graphics driver version:** reports ``unavailable via NVML``. The
+  check compares the version of the NVIDIA kernel driver across the ranks.
 
 ``unavailable`` results are tagged ``[INFO]`` and do not indicate a problem
 with the system. Use ``amd-smi`` to check the GPU inventory, the ECC counters,
-and the XGMI link state of a node, for example ``amd-smi list``,
-``amd-smi metric --ecc``, and ``amd-smi xgmi``.
+the XGMI link state, and the ``amdgpu`` driver version of a node, for example
+``amd-smi list``, ``amd-smi metric --ecc``, ``amd-smi xgmi``, and
+``amd-smi static --driver``.
+
+The report also contains the results of checks that come from NCCL and are not
+described here: ``rdma_topo``, ``IOMMU mode``, ``ATS state``, ``Xid/SXid``, and
+``Paths``. A check that finds no data on the system reports ``[INFO]``, as in
+the sample report in `Reading the report`_.
 
 Prerequisites
 =============
@@ -171,7 +179,13 @@ one process per GPU, looks like this:
    node01:4242 NCCL DIAG [OK]   CUDA driver version: 71526333 consistent across 8 ranks in comm 0x5fa31c27a9e0d1b4
    node01:4242 NCCL DIAG [INFO] ECC: unavailable via NVML across 8 ranks in comm 0x5fa31c27a9e0d1b4
    node01:4242 NCCL DIAG [OK]   NCCL environment: NCCL_* env vars consistent across 8 ranks in comm 0x5fa31c27a9e0d1b4
-   node01:4242 NCCL DIAG RAS diagnostics completed in 38.4 ms across 8 ranks
+   node01:4242 NCCL DIAG [INFO] rdma_topo check: not usable on 8/8 ranks in comm 0x5fa31c27a9e0d1b4 (unavailable)
+   node01:4242 NCCL DIAG [INFO] IOMMU mode: unable to identify relevant GPU/NIC pairs on 8/8 ranks in comm 0x5fa31c27a9e0d1b4
+   node01:4242 NCCL DIAG [INFO] ATS state: unable to identify relevant NICs on 8/8 ranks in comm 0x5fa31c27a9e0d1b4
+   node01:4242 NCCL DIAG [INFO] Xid/SXid: no kernel-log source was available on host node01
+   node01:4242 NCCL DIAG [INFO] NVIDIA graphics driver version: unavailable via NVML across 8 ranks in comm 0x5fa31c27a9e0d1b4
+   node01:4242 NCCL DIAG [OK]   Paths: self+XGMI across 8 ranks in comm 0x5fa31c27a9e0d1b4
+   node01:4242 NCCL DIAG RAS diagnostics completed in 49.0 ms across 8 ranks
 
 The ``completed`` line of an initialization-time report counts the ranks of
 the communicator. The ``completed`` line of an on-demand report counts the RAS
