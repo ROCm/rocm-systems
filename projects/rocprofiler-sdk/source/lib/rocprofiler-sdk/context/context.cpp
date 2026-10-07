@@ -695,6 +695,7 @@ stop_context(rocprofiler_context_id_t idx)
 
     if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
     if(_expected->dispatch_thread_trace) _expected->dispatch_thread_trace->stop_context();
+
     // Phase three, relocked: retire the slot. The element address is stable across phase two --
     // stable_vector never moves an element once constructed -- so slot is still the entry the
     // search found.

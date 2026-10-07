@@ -63,7 +63,6 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
     auto*                          spm_packet = static_cast<hsa::SPMPacket*>(userdata);
     auto                           samples    = spm_sample_vec{};
     rocprofiler::buffer::instance* buf        = nullptr;
-
     if(data_size == 0) return;
 
     auto& desc_v0 = *static_cast<rocprofiler::spm::spm_desc_v0_t*>(
