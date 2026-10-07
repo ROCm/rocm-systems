@@ -647,11 +647,7 @@ def test_doctor_framework_rocprofv3_doctor_after_separator_is_application_arg(
 ):
     """Review P1: `rocprofv3 ... -- app --doctor` must profile app, not divert
     to the doctor; only rocprofv3's own options are inspected."""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("rocprofv3_launcher", rocprofv3_path)
-    launcher = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(launcher)
+    launcher = _load_launcher(rocprofv3_path, "rocprofv3_launcher")
 
     dispatched = []
     parsed = []
@@ -676,11 +672,19 @@ def test_doctor_framework_rocprofv3_doctor_after_separator_is_application_arg(
 
 
 def _load_launcher(rocprofv3_path, name):
+    """Import the rocprofv3 launcher script as a module.
+
+    An explicit SourceFileLoader, because the configured launcher in a build or
+    install tree is named plain ``rocprofv3``: spec_from_file_location infers
+    the loader from a ``.py`` suffix and returns None without one.
+    """
+    import importlib.machinery
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location(name, rocprofv3_path)
+    loader = importlib.machinery.SourceFileLoader(name, rocprofv3_path)
+    spec = importlib.util.spec_from_loader(name, loader)
     launcher = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(launcher)
+    loader.exec_module(launcher)
     return launcher
 
 
