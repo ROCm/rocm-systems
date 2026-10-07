@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Concrete KFD queue ownership. Every ring and pointer page is a separate BO:
 //! `CREATE_QUEUE` checks their GPU mapping extents, so suballocating from a larger
 //! mapping would violate the kernel contract. Compute queues also retain EOP
@@ -6,6 +8,7 @@
 use crate::host_storage::{Buffer, Owned, Shared};
 use std::mem::{offset_of, size_of};
 use std::sync::Mutex;
+use std::sync::atomic::{Ordering, fence};
 
 use super::memory::{BufferKind, DeviceVm, KfdAllocation, error, native_error};
 use super::{sys, sysfs, uapi, util};
@@ -13,7 +16,7 @@ use crate::memory::AllocationDesc;
 use crate::memory::DeviceAccess;
 use crate::queue::{
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
-    QueueRequest, QueueScratch, QueueTransport,
+    QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
 use crate::session::SessionLifetime;
 
@@ -591,12 +594,20 @@ struct ComputeStorage {
 /// Fully validated native queue request used by the acquisition path.
 struct Request {
     ring_size: u32,
+    ring_memory: QueueRingMemory,
     queue_type: u32,
     priority: u32,
     device_producer: bool,
     compute: Option<ComputeStorage>,
     aql: Option<AqlControl>,
     pm4: Option<Pm4Control>,
+    sdma_target: Option<SdmaTarget>,
+}
+
+#[derive(Clone, Copy)]
+struct SdmaTarget {
+    selection: SdmaEngineSelection,
+    count: u32,
 }
 
 /// A peer VM's mappings of the queue ring and control/index allocation.
@@ -735,6 +746,7 @@ struct ScratchControl {
 #[derive(Clone, Copy)]
 struct AqlControl {
     producer_mode: QueueProducerMode,
+    global_work_sync: bool,
     properties: sysfs::NativeQueueProperties,
     inactive_signal: Option<u64>,
     error_event: Option<QueueErrorEvent>,
@@ -786,9 +798,11 @@ fn validate_aql(
 ) -> Result<AqlControl, Error> {
     let QueueParameters::Aql {
         producer_mode,
+        global_work_sync,
         inactive_signal,
         error_event,
         scratch,
+        ..
     } = desc.parameters
     else {
         return Err(error(
@@ -800,6 +814,12 @@ fn validate_aql(
         return Err(error(
             ErrorKind::InvalidArgument,
             "AQL inactive signal handle is null",
+        ));
+    }
+    if global_work_sync && properties.gws_count == 0 {
+        return Err(error(
+            ErrorKind::Unsupported,
+            "native GPU does not advertise global work synchronization",
         ));
     }
     if error_event.is_some_and(|event| {
@@ -814,6 +834,7 @@ fn validate_aql(
     }
     Ok(AqlControl {
         producer_mode,
+        global_work_sync,
         properties,
         inactive_signal,
         error_event,
@@ -858,10 +879,12 @@ impl Request {
                 "KFD queue backing is supported on GFX10.1 through GFX12.0",
             ));
         }
-        if util::page_size().map_err(|source| native_error("queue page size", source))? != 4096 {
+        let page =
+            util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
+        if page < 4096 {
             return Err(error(
                 ErrorKind::Unsupported,
-                "KFD queue allocation requires a checked 4 KiB host-page layout",
+                "KFD queue allocation requires host pages of at least 4 KiB",
             ));
         }
         let ring_size = u32::try_from(desc.ring_size_bytes).map_err(|_| {
@@ -891,19 +914,54 @@ impl Request {
                 validate_sdma(properties, desc)?;
                 (1, None, None)
             }
+            QueueParameters::SdmaByEngine { .. } => {
+                validate_sdma(properties, desc)?;
+                (4, None, None)
+            }
+        };
+        let sdma_target = if let QueueParameters::SdmaByEngine { selection, .. } = desc.parameters {
+            let count = properties
+                .sdma_engines
+                .checked_add(properties.sdma_xgmi_engines)
+                .ok_or_else(|| error(ErrorKind::InvalidData, "SDMA engine count overflows"))?;
+            if matches!(selection, SdmaEngineSelection::Id(id) if id >= count) {
+                return Err(error(
+                    ErrorKind::InvalidArgument,
+                    "selected SDMA engine ID is out of range",
+                ));
+            }
+            Some(SdmaTarget { selection, count })
+        } else {
+            None
         };
         let compute = if queue_type == 0 || queue_type == 2 {
             Some(compute_storage(properties)?)
         } else {
             None
         };
+        let ring_memory = match desc.parameters {
+            QueueParameters::Aql { ring_memory, .. }
+            | QueueParameters::SdmaByEngine { ring_memory, .. } => ring_memory,
+            QueueParameters::Pm4 | QueueParameters::Sdma => QueueRingMemory::System,
+        };
+        if ring_memory == QueueRingMemory::HostVisibleLocal
+            && (properties.gfx_target != 120_001
+                || native.public_memory_bytes < u64::from(ring_size).div_ceil(page) * page)
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "host-visible local queue ring is unavailable on this GPU",
+            ));
+        }
         Ok(Self {
             ring_size,
+            ring_memory,
             queue_type,
             device_producer: desc.device_producer,
             compute,
             aql,
             pm4,
+            sdma_target,
             priority: match desc.priority {
                 QueuePriority::Low => 0,
                 QueuePriority::Normal => 7,
@@ -1168,7 +1226,14 @@ fn compute_storage(properties: sysfs::NativeQueueProperties) -> Result<ComputeSt
     let debug_size = (properties.compute_units / xcc_count)
         .checked_mul(32 * 32)
         .ok_or_else(|| error(ErrorKind::DriverContract, "KFD debugger storage overflows"))?;
-    let total_size = (u64::from(context_size) + u64::from(debug_size)) * u64::from(xcc_count);
+    let total_size = (u64::from(context_size) + u64::from(debug_size))
+        .checked_mul(u64::from(xcc_count))
+        .ok_or_else(|| error(ErrorKind::Unsupported, "KFD context-save extent overflows"))?;
+    let page = util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
+    let total_size = total_size
+        .div_ceil(page)
+        .checked_mul(page)
+        .ok_or_else(|| error(ErrorKind::Unsupported, "KFD context-save extent overflows"))?;
     // DebugOffset and DebugSize in the native header are u32. Check their
     // complete multi-XCC extent before any buffer is acquired or initialized.
     if total_size > u64::from(u32::MAX) {
@@ -1182,7 +1247,7 @@ fn compute_storage(properties: sysfs::NativeQueueProperties) -> Result<ComputeSt
         control_stack_size,
         debug_size,
         xcc_count,
-        total_size: total_size.div_ceil(4096) * 4096,
+        total_size,
     })
 }
 
@@ -1377,37 +1442,6 @@ pub(crate) struct KfdQueue {
 }
 
 impl KfdQueue {
-    fn uncertain_ownership(failure: Error) -> Error {
-        match failure {
-            Error::NativeOperation {
-                operation, source, ..
-            } => Error::NativeOperation {
-                kind: ErrorKind::ResourceOwnershipUncertain,
-                operation,
-                source,
-            },
-            Error::Operation { detail, .. } => error(ErrorKind::ResourceOwnershipUncertain, detail),
-            Error::Capacity { .. } => error(
-                ErrorKind::ResourceOwnershipUncertain,
-                "KFD queue cleanup failed after acquisition",
-            ),
-        }
-    }
-
-    fn abort_creation(mut queue: Owned<Self>, original: Error) -> Error {
-        match queue.destroy() {
-            Ok(()) => original,
-            Err(cleanup) if queue.id.is_none() => cleanup,
-            Err(cleanup) => {
-                // No queue owner can be returned for a later retry. Retain
-                // native backing and tell the frontend to retain its raw
-                // signal and scratch allocations as well.
-                std::mem::forget(queue);
-                Self::uncertain_ownership(cleanup)
-            }
-        }
-    }
-
     #[allow(
         clippy::too_many_lines,
         reason = "keep native queue acquisition and publication in one auditable path"
@@ -1427,26 +1461,42 @@ impl KfdQueue {
         if request.aql.is_some() {
             vm.initialize_scratch()?;
         }
-        let allocate = |size, kind, permissions| {
+        let selected_sdma_engine_id = request.sdma_target.map(|target| match target.selection {
+            SdmaEngineSelection::Any => vm.next_sdma_engine_id(target.count),
+            SdmaEngineSelection::Id(id) => id,
+        });
+        let page =
+            util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
+        let allocate = |size: u64, kind, permissions| {
             KfdAllocation::create(
                 vm.clone(),
                 AllocationDesc {
-                    size,
-                    alignment: 4096,
+                    size: size.div_ceil(page) * page,
+                    alignment: page,
                 },
                 kind,
                 permissions,
             )
         };
-        let ring_kind = if request.aql.is_some() && lifetime == SessionLifetime::Process {
-            BufferKind::OwnedUserptr { uncached: true }
+        let local_ring = request.ring_memory == QueueRingMemory::HostVisibleLocal;
+        let ring_kind = if local_ring {
+            BufferKind::Vram {
+                public: true,
+                coherent: false,
+                uncached: true,
+                contiguous: false,
+            }
+        } else if request.aql.is_some() && lifetime == SessionLifetime::Process {
+            BufferKind::OwnedUserptr {
+                cache: crate::memory::HostCachePolicy::Uncached,
+            }
         } else {
             // KFD USERPTR cannot be allocated in a secondary INSTANCE VM.
             // Coherent GTT provides a host view of the ring in that context.
             BufferKind::Gtt
         };
         let mut ring = allocate(
-            u64::from(request.ring_size).div_ceil(4096) * 4096,
+            u64::from(request.ring_size).div_ceil(page) * page,
             ring_kind,
             DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
         )?;
@@ -1458,8 +1508,13 @@ impl KfdQueue {
             packet[0] = 1;
             ring.fill_records(&packet, request.ring_size as usize / packet.len())?;
         }
+        if local_ring {
+            // A public VRAM CPU mapping may be write-combined. Drain ring
+            // initialization stores before KFD can schedule this queue.
+            fence(Ordering::SeqCst);
+        }
         let mut pointers = allocate(
-            4096,
+            page,
             BufferKind::Gtt,
             DeviceAccess::READ | DeviceAccess::WRITE,
         )?;
@@ -1472,7 +1527,7 @@ impl KfdQueue {
         let mut context = None;
         if let Some(compute) = &request.compute {
             eop = Some(allocate(
-                4096,
+                page,
                 BufferKind::Vram {
                     public: false,
                     coherent: false,
@@ -1530,6 +1585,7 @@ impl KfdQueue {
             ring_host_address,
             ring_device_address,
             ring_size_bytes: u64::from(request.ring_size),
+            sdma_engine_id: selected_sdma_engine_id,
             read_index_host_address: pointer_host_address + read_offset,
             read_index_device_address: pointer_device_address + read_offset as u64,
             write_index_host_address: pointer_host_address + write_offset,
@@ -1553,13 +1609,14 @@ impl KfdQueue {
             ring_size: request.ring_size,
             gpu_id: vm.gpu_id(),
             queue_type: request.queue_type,
+            sdma_engine_id: selected_sdma_engine_id.unwrap_or(0),
             percentage: 100,
             priority: request.priority,
             ..uapi::CreateQueue::default()
         };
         if let (Some(eop), Some(context), Some(compute)) = (&eop, &context, &request.compute) {
             args.eop_address = eop.device_address(&vm)?;
-            args.eop_size = 4096;
+            args.eop_size = page;
             args.context_address = context.address(&vm)?;
             args.context_size = compute.context_size;
             args.control_stack_size = compute.control_stack_size;
@@ -1597,26 +1654,57 @@ impl KfdQueue {
                 .is_some_and(|source| source.raw_os_error() == Some(14));
         }
         if let Err(source) = result {
-            let failure = native_error("AMDKFD_IOC_CREATE_QUEUE", source);
             return Err(if queue.uncertain {
-                Self::uncertain_ownership(failure)
+                Error::QueueBackingMayBeLive {
+                    operation: "AMDKFD_IOC_CREATE_QUEUE outcome is uncertain",
+                    source: Some(source),
+                }
             } else {
-                failure
+                native_error("AMDKFD_IOC_CREATE_QUEUE", source)
             });
         }
-        let doorbell = match queue.vm.doorbells.addresses(
-            &queue.vm,
-            args.doorbell_offset,
-            request.device_producer,
-        ) {
+        if request.aql.is_some_and(|aql| aql.global_work_sync) {
+            if let Err(failure) = queue.vm.kfd().alloc_queue_gws(args.queue_id) {
+                if queue.destroy().is_err() {
+                    std::mem::forget(queue);
+                    return Err(Error::QueueBackingMayBeLive {
+                        operation: "KFD queue cleanup after GWS allocation",
+                        source: None,
+                    });
+                }
+                return Err(native_error("AMDKFD_IOC_ALLOC_QUEUE_GWS", failure));
+            }
+        }
+        let doorbell =
+            queue
+                .vm
+                .doorbells
+                .addresses(&queue.vm, args.doorbell_offset, request.device_producer);
+        let doorbell = match doorbell {
             Ok(doorbell) => doorbell,
-            Err(source) => return Err(Self::abort_creation(queue, source)),
+            Err(failure) => {
+                if queue.destroy().is_err() {
+                    std::mem::forget(queue);
+                    return Err(Error::QueueBackingMayBeLive {
+                        operation: "KFD queue cleanup after transport acquisition",
+                        source: None,
+                    });
+                }
+                return Err(failure);
+            }
         };
         queue.info.doorbell_host_address = doorbell.host;
         queue.info.doorbell_device_address = doorbell.device;
         queue.doorbell_offset = args.doorbell_offset;
-        if let Err(source) = queue.vm.check() {
-            return Err(Self::abort_creation(queue, source));
+        if let Err(failure) = queue.vm.check() {
+            if queue.destroy().is_err() {
+                std::mem::forget(queue);
+                return Err(Error::QueueBackingMayBeLive {
+                    operation: "KFD queue cleanup after device check",
+                    source: None,
+                });
+            }
+            return Err(failure);
         }
         Ok(queue)
     }
@@ -1906,7 +1994,13 @@ impl KfdQueue {
 
 impl Drop for KfdQueue {
     fn drop(&mut self) {
-        if self.destroy().is_err() {
+        // A returned queue may still have a producer even when one sample of
+        // its indices is empty. Only an explicit destroy call can carry the
+        // adapter's producer-quiescence contract into native teardown. Queue
+        // creation failures have no published transport and can still clean up
+        // here when no native ID was acquired.
+        let live_without_explicit_teardown = self.id.is_some() && !self.destroying;
+        if live_without_explicit_teardown || self.destroy().is_err() {
             // Native queue references can outlive an unsuccessful destructor.
             // Retain their exact BOs and mappings without allocating cleanup
             // work; the kernel's process teardown remains the final owner.

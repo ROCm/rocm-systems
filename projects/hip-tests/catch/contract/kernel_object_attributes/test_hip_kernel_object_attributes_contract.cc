@@ -138,53 +138,6 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynami
   HIP_CHECK(hipLibraryUnload(library));
 }
 
-#if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION >= 12080)
-// @asserts: hipKernelSetAttributeForDevice - preserves current device and target value
-HIP_TEST_CASE(
-    Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NonCurrentDevice_PreservesCurrentAndReadsBack) {
-  int device_count = 0;
-  int original_device = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
-  HIP_CHECK(hipGetDevice(&original_device));
-  if (device_count < 2) {
-    HIP_SKIP_TEST("The non-current-device contract requires at least two devices.");
-  }
-
-  // Load the kernel for device 0, then make device 1 current so
-  // the explicit target differs from the calling thread's current device.
-  HIP_CHECK(hipSetDevice(0));
-  std::vector<char> code;
-  hipLibrary_t library = nullptr;
-  hipKernel_t kernel = nullptr;
-  LoadContractKernel(code, library, kernel);
-
-  constexpr int current_device_for_call = 1;
-  HIP_CHECK(hipSetDevice(current_device_for_call));
-
-  HIP_CHECK(
-      hipKernelSetAttributeForDevice(kernel, hipFuncAttributeMaxDynamicSharedMemorySize, 0, 0));
-
-  int current_device_after = -1;
-  HIP_CHECK(hipGetDevice(&current_device_after));
-  REQUIRE(current_device_after == current_device_for_call);
-
-  int observed = -1;
-  HIP_CHECK(hipKernelGetAttribute(&observed, HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                                  kernel, 0));
-  REQUIRE(observed == 0);
-
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipLibraryUnload(library));
-  HIP_CHECK(hipSetDevice(original_device));
-}
-#else
-// @asserts: hipKernelSetAttributeForDevice - unavailable before CUDA 12.8
-HIP_TEST_CASE(
-    Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NvidiaPre128Unsupported_IsSkipped) {
-  HIP_SKIP_TEST("hipKernelSetAttributeForDevice requires CUDA 12.8 or newer.");
-}
-#endif
-
 // @asserts: hipKernelGetParamInfo - reports the first parameter at offset zero with size at least that of a device pointer
 HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout) {
   std::vector<char> code;

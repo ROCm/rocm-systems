@@ -637,6 +637,36 @@ enum class TriState : uint8
     Count
 };
 
+/// Enum to specify tmz feature status for gpu memory
+/// Setting an allocation's TMZ mode allows access to TMZ-protected content. Each mode maps to a fixed combination of
+/// read/write permissions for each HW IP family, as defined in the table below.
+///
+/// | IP Family  | Hwdrm | HwdrmPlus | Notes                       |
+/// | ---------- | ----- | --------- | --------------------------- |
+/// | GfxIp      | RW    | None      | Includes GFX, ACE, and SDMA |
+/// | DcnIp      | R     | R         | The display engine          |
+#if PAL_BUILD_BRIGHTON
+/// | BrightonIp | RW    | RW        |                             |
+#endif
+///
+/// Note that clients must verify that their device supports a TmzMode before using it. The @ref supportedTmzModes
+/// field in DeviceProperties::gpuMemoryProperties advertises which modes are supported using @ref TmzModeSupport.
+enum class TmzMode : uint32
+{
+    Disabled = 0, // Resource is not protected.
+    Hwdrm,        // Standard "HWDRM" support plus GfxIp access.
+    HwdrmPlus,    // Standard "HWDRM" support without GfxIp access (yes, "plus" removes functionality).
+    Count
+};
+
+/// Helper flags for storing a device's set of supported TMZ modes in a single bitmask.
+enum TmzModeSupport : uint32
+{
+    SupportsTmzModeDisabled  = (1u << uint32(TmzMode::Disabled)),
+    SupportsTmzModeHwdrm     = (1u << uint32(TmzMode::Hwdrm)),
+    SupportsTmzModeHwdrmPlus = (1u << uint32(TmzMode::HwdrmPlus)),
+};
+
 /// @mainpage
 ///
 /// Introduction
