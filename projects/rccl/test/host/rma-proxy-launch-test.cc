@@ -2436,6 +2436,7 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
   }
   coordinationCondition.notify_all();
   if (!reclaimWorkerStarted) {
+    // The reclaim worker publishes reclaimFinished on both exits; doing it here strands it inside the UUT.
     publish(abortCoordination);
     publish(allowPauseAcknowledgment);
     reclaim.join();
