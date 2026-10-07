@@ -2,19 +2,19 @@
 name: rocprofv3-doctor
 description: >-
   Diagnoses why rocprofv3 or ROCm GPU profiling does not work on a machine, by running
-  rocprofv3-doctor and turning its report into ordered, root-cause fixes. Use when rocprofv3
+  `rocprofv3 --doctor` and turning its report into ordered, root-cause fixes. Use when rocprofv3
   fails, crashes, hangs, finds no GPU, or will not start; when an error such as "cannot open
   shared object file", "undefined symbol", "HSA_STATUS_ERROR_OUT_OF_RESOURCES",
   "hipErrorNoDevice", "/dev/kfd: Permission denied", or "could not be locked for profiling"
   appears; when the user asks whether a ROCm installation, container, or TheRock install is
-  ready for profiling; or when the user asks to run rocprofv3-doctor or rocprofv3 --doctor.
+  ready for profiling; or when the user asks to run rocprofv3 --doctor.
   Not for profiling a working application, choosing counters, or reading profiling results:
   use the rocprofv3 skill for those.
 ---
 
 # rocprofv3-doctor
 
-`rocprofv3-doctor` inspects the machine and the ROCprofiler-SDK installation and reports
+`rocprofv3 --doctor` inspects the machine and the ROCprofiler-SDK installation and reports
 what would stop `rocprofv3` from working. Run it, find the root causes in its report, and
 give the user an ordered list of fixes.
 
@@ -25,9 +25,10 @@ enumeration).
 
 ## Prerequisites
 
-- Linux, with a ROCm installation whose rocprofiler-sdk includes `rocprofv3-doctor`. ROCm
-  releases that predate it can be inspected from a rocm-systems source checkout (see
-  Step 1).
+- Linux, with a ROCm installation whose `rocprofv3` supports `--doctor`. ROCm releases
+  that predate it can be inspected from a rocm-systems source checkout (see Step 1).
+- Run it as the user who runs `rocprofv3`, never with `sudo`: as root it reports on root's
+  access and environment, not the user's (it warns when that happens).
 - Python 3 for the summary script (standard library only).
 - No GPU is required to run it: a missing or inaccessible GPU is one of the things it
   reports.
@@ -35,23 +36,25 @@ enumeration).
 
 ## Step 1: Find the tool
 
-Use the first of these that prints a version:
+Use the first of these that runs (it prints version information; a source checkout
+shows unfilled `@...@` placeholders, which is fine). A `rocprofv3` that predates `--doctor`
+rejects the option ("unrecognized arguments"); move on to the next.
 
-1. `rocprofv3-doctor --version`
-2. `rocprofv3 --doctor --version`
-3. `<prefix>/bin/rocprofv3-doctor --version`, for each ROCm prefix: `/opt/rocm`,
+1. `rocprofv3 --doctor --version`
+2. `<prefix>/bin/rocprofv3 --doctor --version`, for each ROCm prefix: `/opt/rocm`,
    `/opt/rocm/core-*`, `$ROCM_PATH`, `$ROCM_HOME`, or, in a TheRock Python virtualenv,
    `$(rocm-sdk path --root)`
-4. From a rocm-systems checkout:
-   `python3 <checkout>/projects/rocprofiler-sdk/source/bin/rocprofv3-doctor.py`, always
+3. From a rocm-systems checkout:
+   `python3 <checkout>/projects/rocprofiler-sdk/source/bin/rocprofv3.py --doctor`, always
    with `--rocm-root <prefix>` so it inspects the installation, not the checkout
 
-If none works, tell the user `rocprofv3-doctor` is not available for their ROCm, and stop.
+Use that same command in place of `rocprofv3 --doctor` in the steps below. If none works,
+tell the user `rocprofv3 --doctor` is not available for their ROCm, and stop.
 
 ## Step 2: Run it and summarize
 
 ```bash
-rocprofv3-doctor --format json --output rocprofv3-doctor.json > /dev/null
+rocprofv3 --doctor --format json --output rocprofv3-doctor.json > /dev/null
 echo "exit=$?"
 python3 <this-skill-dir>/scripts/summarize_report.py rocprofv3-doctor.json
 ```
@@ -119,20 +122,20 @@ Rules:
 After the user applies a fix, re-run only what it should change:
 
 ```bash
-rocprofv3-doctor --only <check-id-or-group>
+rocprofv3 --doctor --only <check-id-or-group>
 ```
 
 - `--only` also runs the selected checks' prerequisites.
-- List check ids with `rocprofv3-doctor --list-checks`.
+- List check ids with `rocprofv3 --doctor --list-checks`.
 - Group-membership fixes take effect only in a new login session.
 
 ## Going further (ask first)
 
-- **Smoke checks:** `rocprofv3-doctor --run-smoke-test` (or `--only smoke`) runs
+- **Smoke checks:** `rocprofv3 --doctor --run-smoke-test` (or `--only smoke`) runs
   `rocprofv3-avail info` and `rocprofv3` itself, and can take 30 seconds or more. A
   passing launcher check shows that rocprofv3 starts and injects its tool. It does not
   show that kernel tracing works, because the test program launches no GPU work.
-- **Bug report:** `rocprofv3-doctor --verbose --output rocprofv3-doctor-report.txt`.
+- **Bug report:** `rocprofv3 --doctor --verbose --output rocprofv3-doctor-report.txt`.
 - **An error from the user's own application:** the doctor cannot reproduce it. Report
   its findings as context, and say that the error itself was not reproduced. Once the
   setup is healthy, profile with the rocprofv3 skill.

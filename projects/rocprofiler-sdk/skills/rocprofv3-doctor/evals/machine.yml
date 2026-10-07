@@ -1,4 +1,4 @@
-# Behavioral cases run rocprofv3-doctor on a ROCm machine. It needs no
+# Behavioral cases run rocprofv3 --doctor on a ROCm machine. It needs no
 # particular GPU architecture, and it runs without a GPU too, but the cases
 # are only meaningful on a machine with ROCm installed.
 os: [Linux]

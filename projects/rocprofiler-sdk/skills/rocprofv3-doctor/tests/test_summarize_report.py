@@ -23,7 +23,7 @@
 # THE SOFTWARE.
 
 
-"""GPU-free unit tests for the rocprofv3-doctor report summary script."""
+"""GPU-free unit tests for the rocprofv3 --doctor report summary script."""
 
 from __future__ import annotations
 
@@ -162,7 +162,7 @@ class SummarizeReportTest(unittest.TestCase):
         _, out, _ = run(report(checks))
         self.assertIn("None: no check failed", out)
         self.assertIn("## Doctor errors (not findings about this system)", out)
-        self.assertIn("rocprofv3-doctor bug", out)
+        self.assertIn("rocprofv3 --doctor bug", out)
 
     def test_diagnoses_show_confidence_and_evidence(self):
         diagnosis = {
@@ -218,7 +218,7 @@ class SummarizeReportTest(unittest.TestCase):
     def test_unreadable_inputs_exit_2_with_a_message(self):
         cases = {
             "not json": "is not JSON",
-            json.dumps({"hello": 1}): "is not a rocprofv3-doctor report",
+            json.dumps({"hello": 1}): "is not a rocprofv3 --doctor report",
             json.dumps(report(KFD_CHAIN, schema_version=2)): "schema_version 2",
         }
         for text, message in cases.items():
