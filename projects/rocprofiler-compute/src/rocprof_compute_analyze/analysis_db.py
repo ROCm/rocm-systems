@@ -12,6 +12,8 @@ import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
+from memory_chart.extdata import layout_extdata
+from memory_chart.loader import Layouts
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
     InstructionPipelines,
@@ -82,7 +84,13 @@ from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
 )
-from utils.utils_common import get_uuid, get_version, normalize_filter_to_str_list
+from utils.utils_common import (
+    get_uuid,
+    get_version,
+    is_mem_chart_panel,
+    normalize_filter_to_str_list,
+    panel_metric_ids,
+)
 from utils.utils_counter_defs import (
     extract_counters_and_variables,
     get_build_in_vars,
@@ -357,6 +365,7 @@ class db_analysis(OmniAnalyze_Base):
                     workload_path
                 ),
                 profiling_config_extdata=self._profiling_config,
+                memory_chart_extdata=self._memory_chart_extdata(sys_info["gpu_arch"]),
             )
             Database.get_session().add(workload_obj)
             workload_objs.append(workload_obj)
@@ -494,6 +503,28 @@ class db_analysis(OmniAnalyze_Base):
                 )
             )
         return workload_isa_exports
+
+    def _memory_chart_extdata(self, gpu_arch: str) -> Optional[dict[str, Any]]:
+        """The memory chart layout stored for a workload, or None without one.
+
+        Ids come from the unfiltered panel config, so metrics left out by
+        --block are still referenced, without values.
+        """
+        layout = Layouts.for_arch(gpu_arch)
+        panels = self._arch_configs[gpu_arch].panel_configs.values()
+        panel = next((p for p in panels if is_mem_chart_panel(p)), None)
+        if layout is None or panel is None:
+            return None
+        metric_ids = panel_metric_ids(panel)
+        # A custom --config-dir memory chart panel may not match the layout
+        missing = layout.metrics() - metric_ids.keys()
+        if missing:
+            console_debug(
+                "No memory chart layout stored; the memory chart panel has no "
+                f"unique metric named {sorted(missing)}"
+            )
+            return None
+        return layout_extdata(layout, metric_ids)
 
     def run_analysis_metrics(
         self,
