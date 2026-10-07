@@ -139,12 +139,8 @@ class TestCliBase(unittest.TestCase):
 
     # Exit codes a single argument may also answer with, beyond NOT_SUPPORTED
     SWEEP_TOLERATED_CODES = {
-        # Not all ASICs support setting all modes, which is an invalid set option.
-        # A profile the ASIC does not list is out of bounds for it.
-        "set": {
-            "--memory-partition": amdsmi.AmdSmiStatus.INVAL,
-            "--profile": amdsmi.AmdSmiStatus.INPUT_OUT_OF_BOUNDS,
-        },
+        # Not all ASICs support setting all modes, which is an invalid set option
+        "set": {"--memory-partition": amdsmi.AmdSmiStatus.INVAL},
         # This reset is a read -- the kernel clears xgmi_error when it is read --
         # so the read's errno becomes the reset's status, and some drivers reject
         # it with EINVAL.
@@ -477,7 +473,9 @@ class TestCliBase(unittest.TestCase):
                                     options.append(f"{items[item_index]} {perf_level}")
                             elif sub_arg == "PROFILE_LEVEL":  # arg --profile
                                 for profile_level in self.profile_levels:
-                                    options.append(f"{items[item_index]} {profile_level}")
+                                    options.append(
+                                        f"{items[item_index]} {{profile_{profile_level}}}"
+                                    )
                             elif sub_arg == "SCLKMAX":  # arg --perf-determinism
                                 options.append("{perf_determinism}")
                             elif sub_arg == "TYPE/INDEX":  # arg
@@ -550,6 +548,8 @@ class TestCliBase(unittest.TestCase):
                         # Put in sub_arg if it was not found
                         if "Set" in match_str:
                             pass
+                        elif "Reset" in match_str and items[item_index] == "--profile":
+                            options.append("{reset_profile}")
                         else:
                             options.append(items[item_index])
             if match_str in line:
@@ -757,6 +757,17 @@ class TestCliBase(unittest.TestCase):
                         cmd = cmd.replace(nameStr, f"{clk_type} {levels}", 1)
                     else:
                         cmd = ""
+                elif nameStr.startswith("{profile_"):
+                    profile = nameStr[len("{profile_") : -1]
+                    if self._profile_supported(gpu_index, explicit_gpu, profile):
+                        cmd = cmd.replace(nameStr, profile, 1)
+                    else:
+                        cmd = ""
+                elif nameStr == "{reset_profile}":
+                    if self._profile_supported(gpu_index, explicit_gpu):
+                        cmd = cmd.replace(nameStr, "--profile", 1)
+                    else:
+                        cmd = ""
                 elif nameStr == "{soc_pstate}":
                     soc_pstate = self.static_data["gpu_data"][gpu_index]["soc_pstate"]
                     if type(soc_pstate) is dict:
@@ -936,6 +947,22 @@ class TestCliBase(unittest.TestCase):
     def _prompt_answer_for(self, cmd):
         """Reply to pipe to a command whose parser prompts, else None."""
         return self._lookup(self.PROMPT_ANSWERS, cmd)
+
+    def _profile_supported(self, gpu_index, explicit_gpu, profile=None):
+        """Whether `amd-smi static --profile` lists *profile* on the target devices.
+
+        Without an explicit --gpu the command runs on every device, so every one
+        must list it. A device without profile support has no profile table and
+        lists nothing. With no *profile*, any profile table will do (reset --profile).
+        """
+        indices = [gpu_index] if explicit_gpu else range(len(self.static_data["gpu_data"]))
+        for index in indices:
+            status = self.static_data["gpu_data"][index].get("profile")
+            if not isinstance(status, dict):
+                return False
+            if profile is not None and profile not in status.get("available_profiles", []):
+                return False
+        return True
 
     def _clk_level_count(self, clk_type, gpu_index, explicit_gpu):
         """How many levels a ``--clk-level`` mask for *clk_type* may name.
