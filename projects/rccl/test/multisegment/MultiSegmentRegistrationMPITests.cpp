@@ -55,12 +55,12 @@ TEST_F(UBR_MultiSegment, Generic)
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(
         createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
     {
         const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
             "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
         if (!why.empty()) GTEST_SKIP() << why;
     }
-    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
 
     const size_t halfSize = buf.totalSize / 2;
     ASSERT_EQ(halfSize % sizeof(T), 0u);
@@ -164,12 +164,12 @@ TEST_F(UBR_MultiSegment, Generic_Reuse_BeforeCePlanBypassesRegistrationCache)
     constexpr int kNumSegments = 4;
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kRequestedSegmentSize, kNumSegments, buf));
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
     {
         const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
             "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
         if (!why.empty()) GTEST_SKIP() << why;
     }
-    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
 
     const size_t halfSize = buf.totalSize / 2;
     char* base = reinterpret_cast<char*>(buf.vaBase);
@@ -285,10 +285,12 @@ TEST_F(UBR_MultiSegment, NetProxyPartialFinalSegment)
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(
         createMultiSegmentBuffer(dev, kSegmentSize, kMappedSegments, buf));
-    if (buf.totalSize == 0) {
-        GTEST_SKIP() << "Raw VMM allocation unavailable on this runtime";
-    }
     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+    {
+        const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
+            "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
+        if (!why.empty()) GTEST_SKIP() << why;
+    }
 
     const size_t registeredBytes = 2 * buf.segmentSize + buf.segmentSize / 2;
     const size_t halfSize = registeredBytes / 2;
@@ -391,12 +393,12 @@ TEST_F(UBR_MultiSegment, NetProxyPartialFinalSegment)
  
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kRequestedSegmentSize, kNumSegments, buf));
+     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
      {
          const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
              "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
          if (!why.empty()) GTEST_SKIP() << why;
      }
-     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
  
      const size_t halfSize = buf.totalSize / 2;
      ASSERT_EQ(halfSize % sizeof(T), 0u);
@@ -472,12 +474,12 @@ TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
 
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(createDeepEpElasticBuffer(dev, kGpuBytes, kCpuBytes, buf));
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
     {
         const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
             "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime");
         if (!why.empty()) GTEST_SKIP() << why;
     }
-    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
 
     ncclWindow_t win = nullptr;
     ncclResult_t result = ncclCommWindowRegister(
@@ -580,12 +582,12 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Gating)
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(
          createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
+     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
      {
          const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
              "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime");
          if (!why.empty()) GTEST_SKIP() << why;
      }
-     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
  
      SCOPED_TRACE("Host-backed symmetric window registration must be rejected "
                   "when NCCL_ELASTIC_BUFFER_REGISTER=0");
