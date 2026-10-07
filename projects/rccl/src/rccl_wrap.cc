@@ -2213,6 +2213,29 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize) {
   comm->p2pNetChunkSize = p2pNetChunkSize;
   rcclP2pNetChunkSize = p2pNetChunkSize;
 }
+
+ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments) {
+  *numSegments = regRecord->rcclNet.nSegments;
+  if (*numSegments != 0) return ncclSuccess;
+  // endAddr is rounded up to a page, but hipMalloc reports its unrounded size,
+  // so a walk to endAddr can query past the allocation. The real end lies
+  // inside the last page; stop there.
+  const size_t walkSize = regRecord->endAddr - regRecord->begAddr - comm->regCache.pageSize + 1;
+  CUdeviceptr base = 0;
+  size_t baseSize = 0;
+  return ncclCuMemGetAddressRange((CUdeviceptr)regRecord->begAddr, walkSize, &base, &baseSize, numSegments);
+}
+
+void rcclNetRegCommit(struct ncclComm* comm, struct ncclReg* regRecord, int numSegments) {
+  // Reached only when every peer registered. A later-peer failure leaves the
+  // cache unset, since the first peer already set NET_REG_COMPLETE.
+  if (!regRecord->rcclNet.allPeers) {
+    INFO(NCCL_REG, "rank %d - NET register regSize %ld numSegments %d", comm->rank,
+         (long)(regRecord->endAddr - regRecord->begAddr), numSegments);
+  }
+  regRecord->rcclNet.allPeers = true;
+  regRecord->rcclNet.nSegments = numSegments;
+}
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels) {
   static int userChannelControlInput = RCCL_VALUE_UNSET;
