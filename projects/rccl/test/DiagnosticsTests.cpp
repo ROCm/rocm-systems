@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <iterator>
@@ -26,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "common/EnvVars.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "common/ResourceGuards.hpp"
 #include "common/TestChecks.hpp"
@@ -118,12 +120,39 @@ static int okEdgeCount(const std::string& line)
     return std::regex_search(line, m, re) ? std::stoi(m[1].str()) : -1;
 }
 
+// Only inside an isolated case: HIP state does not survive the fork() of later TestBed suites, so the gtest parent
+// must not call HIP. The parent uses detectedGpus().
 static int usableGpus()
 {
     int devCount = 0;
     if(hipGetDeviceCount(&devCount) != hipSuccess)
         return 0;
     return std::min(devCount, kMaxGpus);
+}
+
+// GPU count for the gtest parent. EnvVars counts the GPUs in a re-exec'd probe process, without HIP in this one.
+static int detectedGpus()
+{
+    static const int detected = std::min(EnvVars().GetNumDetectedGpus(), kMaxGpus);
+    return detected;
+}
+
+// True only in a process re-exec'd by ProcessIsolatedTestRunner, which sets this marker before execv().
+static bool isIsolatedChild()
+{
+    return std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr;
+}
+
+// src/graph/paths.cc applies the PATH_PXB P2P level of Intel, Zhaoxin and ARM hosts after the NCCL_P2P_DISABLE and
+// NCCL_P2P_LEVEL override, so there the override does not take pairs out of the check.
+static bool hostCpuIsAmd()
+{
+    std::ifstream cpuinfo("/proc/cpuinfo");
+    std::string line;
+    while(std::getline(cpuinfo, line))
+        if(line.rfind("vendor_id", 0) == 0)
+            return line.find("AuthenticAMD") != std::string::npos;
+    return false;
 }
 
 static std::vector<int> firstDevices(int n)
@@ -279,10 +308,12 @@ struct DiagCase
 
 // Runs, each in its own process, the cases that fit the visible GPU count. The GPU count is checked here in the
 // parent: RUN_ISOLATED_TESTS-style runs end in EXPECT_TRUE(), so a GTEST_SKIP() inside an isolated case is reported
-// as a pass. When no case fits, gtest reports a real skip.
+// as a pass. When no case fits, gtest reports a real skip. The re-exec'd child registers every case, so the runner
+// finds the one it was started for.
 static void runDiagCases(const std::vector<DiagCase>& cases)
 {
-    const int nGpus = usableGpus();
+    const bool child = isIsolatedChild();
+    const int nGpus  = child ? kMaxGpus : detectedGpus();
     std::string notRun;
     int registered = 0;
     for(const DiagCase& c : cases)
@@ -450,7 +481,8 @@ TEST_F(Diagnostics, RunsAtEveryCommInit)
 }
 
 // With P2P disabled there are no topology-eligible P2P edges. The run still completes and reports
-// no failures; it prints no p2p summary line because nothing was tested.
+// no failures; it prints no p2p summary line because nothing was tested. On a host without an AMD CPU
+// the pairs stay eligible (see hostCpuIsAmd()), so only the absence of failures is checked there.
 TEST_F(Diagnostics, P2pDisabledReportsNoEdges)
 {
     runDiagCases({{"P2pDisabledReportsNoEdges", 2, []() {
@@ -465,8 +497,11 @@ TEST_F(Diagnostics, P2pDisabledReportsNoEdges)
         const DiagReport report = parseDiagReport(out);
         EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
         EXPECT_EQ(report.count("NCCL diagnostics completed in"), 1) << report.dump();
-        EXPECT_EQ(report.count(kDiagSummary), 0) << report.dump();
-        EXPECT_EQ(report.count(kDiagPartialSummary), 0) << report.dump();
+        if(hostCpuIsAmd())
+        {
+            EXPECT_EQ(report.count(kDiagSummary), 0) << report.dump();
+            EXPECT_EQ(report.count(kDiagPartialSummary), 0) << report.dump();
+        }
         EXPECT_TRUE(report.failures().empty()) << report.dump();
         checkAllReduce(comms);
     }}});
