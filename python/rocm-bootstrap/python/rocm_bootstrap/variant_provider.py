@@ -2,8 +2,8 @@
 
 Implements the ``variant_plugins`` entry point protocol defined by
 `variantlib <https://github.com/wheelnext/variantlib>`_. Reports
-detected GFX architectures as variant features so that uv/pip can
-select the correct device-specific wheel.
+package owners for detected GFX architectures as variant features so that
+uv/pip can select the corresponding device wheel.
 
 This plugin is duck-typed against ``variantlib.protocols.PluginType``
 and does NOT depend on variantlib at runtime.
@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from rocm_bootstrap.detect import detect_gfx_targets
+from rocm_bootstrap.package_metadata import group_package_targets
 from rocm_bootstrap.targets import ALL_TARGETS
 
 
@@ -37,8 +38,8 @@ class AMDVariantPlugin:
     """WheelNext variant plugin for AMD GPUs.
 
     Detects AMD GPUs on the current system and reports their GFX
-    architecture as a variant feature. This allows package installers
-    to select the correct device-specific wheel.
+    package owner as a variant feature. This selects a shared package without
+    asserting that its contents include every target owned by that package.
 
     Registered via ``[project.entry-points.variant_plugins]`` in
     pyproject.toml.
@@ -49,22 +50,22 @@ class AMDVariantPlugin:
 
     @classmethod
     def get_all_configs(cls) -> list[VariantFeatureConfig]:
-        """All possible GFX architecture values.
+        """All possible package-owner values for the gfx_arch feature.
 
         Built dynamically from the target registry — no hardcoded lists.
-        Returns every known GFX target as a possible value.
+        Returns each package owner once, in target registry order.
         """
         return [
             VariantFeatureConfig(
                 name="gfx_arch",
-                values=[t.name for t in ALL_TARGETS],
+                values=list(group_package_targets(t.name for t in ALL_TARGETS)),
                 multi_value=True,
             ),
         ]
 
     @classmethod
     def get_supported_configs(cls) -> list[VariantFeatureConfig]:
-        """GFX architectures detected on the current system.
+        """Package owners for GFX architectures detected on the current system.
 
         Returns an empty list if no AMD GPUs are detected (e.g., on
         Intel/NVIDIA systems or when detection is disabled).
@@ -75,7 +76,7 @@ class AMDVariantPlugin:
         return [
             VariantFeatureConfig(
                 name="gfx_arch",
-                values=[t.name for t in targets],
+                values=list(group_package_targets(t.name for t in targets)),
                 multi_value=True,
             ),
         ]

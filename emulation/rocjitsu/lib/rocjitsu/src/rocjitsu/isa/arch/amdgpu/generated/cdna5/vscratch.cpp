@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vscratch.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -17,7 +16,8 @@ ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_u8", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadU8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -29,11 +29,18 @@ ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadU8Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadU8Vscratch(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_u8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadU8Vscratch>(opcode);
 }
 } // namespace detail
@@ -42,7 +49,8 @@ ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_i8", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadI8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -54,11 +62,18 @@ ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadI8Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadI8Vscratch(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_i8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadI8Vscratch>(opcode);
 }
 } // namespace detail
@@ -67,7 +82,8 @@ ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_u16", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadU16Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -79,11 +95,18 @@ ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadU16Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadU16Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_u16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadU16Vscratch>(opcode);
 }
 } // namespace detail
@@ -92,7 +115,8 @@ ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_i16", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadI16Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -104,11 +128,18 @@ ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadI16Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadI16Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_i16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadI16Vscratch>(opcode);
 }
 } // namespace detail
@@ -117,7 +148,8 @@ ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b32", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadB32Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -129,11 +161,18 @@ ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadB32Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadB32Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_b32", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadB32Vscratch>(opcode);
 }
 } // namespace detail
@@ -142,7 +181,8 @@ ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b64", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadB64Vscratch)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -154,11 +194,18 @@ ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadB64Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadB64Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_b64", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadB64Vscratch>(opcode);
 }
 } // namespace detail
@@ -167,7 +214,8 @@ ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b96", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadB96Vscratch)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(96, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -179,11 +227,18 @@ ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadB96Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadB96Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_b96", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadB96Vscratch>(opcode);
 }
 } // namespace detail
@@ -192,7 +247,8 @@ ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b128", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadB128Vscratch)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -204,11 +260,18 @@ ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadB128Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadB128Vscratch(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_b128", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadB128Vscratch>(opcode);
 }
 } // namespace detail
@@ -216,7 +279,8 @@ std::unique_ptr<Instruction> decodeScratchLoadB128Vscratch(const MachineInst *op
 ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b8", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchStoreB8Vscratch)),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -229,11 +293,18 @@ ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchStoreB8Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchStoreB8Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchStoreB8Vscratch>(opcode);
 }
 } // namespace detail
@@ -241,7 +312,8 @@ std::unique_ptr<Instruction> decodeScratchStoreB8Vscratch(const MachineInst *opc
 ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b16", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchStoreB16Vscratch)),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
@@ -254,11 +326,18 @@ ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchStoreB16Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchStoreB16Vscratch(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchStoreB16Vscratch>(opcode);
 }
 } // namespace detail
@@ -266,7 +345,8 @@ std::unique_ptr<Instruction> decodeScratchStoreB16Vscratch(const MachineInst *op
 ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b32", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchStoreB32Vscratch)),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
@@ -279,11 +359,18 @@ ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchStoreB32Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchStoreB32Vscratch(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b32", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchStoreB32Vscratch>(opcode);
 }
 } // namespace detail
@@ -291,7 +378,8 @@ std::unique_ptr<Instruction> decodeScratchStoreB32Vscratch(const MachineInst *op
 ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b64", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchStoreB64Vscratch)),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0) {
@@ -304,11 +392,18 @@ ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchStoreB64Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchStoreB64Vscratch(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b64", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchStoreB64Vscratch>(opcode);
 }
 } // namespace detail
@@ -316,7 +411,8 @@ std::unique_ptr<Instruction> decodeScratchStoreB64Vscratch(const MachineInst *op
 ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b96", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchStoreB96Vscratch)),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(96, OperandType::OPR_GPUMEM, 0) {
@@ -329,11 +425,18 @@ ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchStoreB96Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchStoreB96Vscratch(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b96", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchStoreB96Vscratch>(opcode);
 }
 } // namespace detail
@@ -341,7 +444,8 @@ std::unique_ptr<Instruction> decodeScratchStoreB96Vscratch(const MachineInst *op
 ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b128", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchStoreB128Vscratch)),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(128, OperandType::OPR_GPUMEM, 0) {
@@ -354,11 +458,18 @@ ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchStoreB128Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchStoreB128Vscratch(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b128", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchStoreB128Vscratch>(opcode);
 }
 } // namespace detail
@@ -367,7 +478,8 @@ ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadD16U8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -379,33 +491,28 @@ ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadD16U8Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadD16U8Vscratch(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_u8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadD16U8Vscratch>(opcode);
 }
 } // namespace detail
-
-void ScratchLoadD16U8Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16U8Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadD16I8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -417,33 +524,28 @@ ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadD16I8Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadD16I8Vscratch(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_i8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadD16I8Vscratch>(opcode);
 }
 } // namespace detail
-
-void ScratchLoadD16I8Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16I8Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadD16B16Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -455,33 +557,28 @@ ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadD16B16Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadD16B16Vscratch(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_b16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadD16B16Vscratch>(opcode);
 }
 } // namespace detail
-
-void ScratchLoadD16B16Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16B16Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadD16HiU8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -493,33 +590,28 @@ ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadD16HiU8Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadD16HiU8Vscratch(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_hi_u8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadD16HiU8Vscratch>(opcode);
 }
 } // namespace detail
-
-void ScratchLoadD16HiU8Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16HiU8Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadD16HiI8Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -531,33 +623,28 @@ ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadD16HiI8Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadD16HiI8Vscratch(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_hi_i8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadD16HiI8Vscratch>(opcode);
 }
 } // namespace detail
-
-void ScratchLoadD16HiI8Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16HiI8Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadD16HiB16Vscratch)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -569,32 +656,28 @@ ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadD16HiB16Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadD16HiB16Vscratch(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_hi_b16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadD16HiB16Vscratch>(opcode);
 }
 } // namespace detail
 
-void ScratchLoadD16HiB16Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16HiB16Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
-
 ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchStoreD16HiB8Vscratch)),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -607,11 +690,19 @@ ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchStoreD16HiB8Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchStoreD16HiB8Vscratch(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_d16_hi_b8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchStoreD16HiB8Vscratch>(opcode);
 }
 } // namespace detail
@@ -619,7 +710,8 @@ std::unique_ptr<Instruction> decodeScratchStoreD16HiB8Vscratch(const MachineInst
 ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchStoreD16HiB16Vscratch)),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
@@ -632,11 +724,19 @@ ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *in
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchStoreD16HiB16Vscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchStoreD16HiB16Vscratch(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_d16_hi_b16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchStoreD16HiB16Vscratch>(opcode);
 }
 } // namespace detail
@@ -645,7 +745,8 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
     : Vscratch("scratch_load_block", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchLoadBlockVscratch)),
       vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
@@ -659,11 +760,18 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchLoadBlockVscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchLoadBlockVscratch(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_block", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchLoadBlockVscratch>(opcode);
 }
 } // namespace detail
@@ -671,7 +779,8 @@ std::unique_ptr<Instruction> decodeScratchLoadBlockVscratch(const MachineInst *o
 ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
     : Vscratch("scratch_store_block", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(InstructionExecutionId::ScratchStoreBlockVscratch)),
-      vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((reinterpret_cast<const OpEncoding *>(inst)->sve ? 32 : 0), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(1024, OperandType::OPR_GPUMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -686,11 +795,18 @@ ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeScratchStoreBlockVscratch(const MachineInst *opcode) {
+DecodeResult decodeScratchStoreBlockVscratch(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_block", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ScratchStoreBlockVscratch>(opcode);
 }
 } // namespace detail

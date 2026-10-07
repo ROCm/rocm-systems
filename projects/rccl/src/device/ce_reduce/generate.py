@@ -112,12 +112,22 @@ VECTORIZE_OK = {
 with open(os.path.join(out_dir, "ce_reduce_impl.h"), "w") as f:
     f.write(IMPL_HEADER)
 
+# Per-type, redop-independent reporting wrapper: block count without launching.
+# Emitted once per type (in the Sum TU) so it has exactly one definition; both
+# the launcher and this wrapper route through ncclCeLocalReduceBlocksT<T>.
+BLOCKS_FN = string.Template(
+    "\n// Reporting wrapper: reduce-kernel block count for host-side impl selection.\n"
+    "int ncclCeLocalReduceBlocks_${tag}(size_t chunkElems) {\n"
+    "  return ncclCeLocalReduceBlocksT<${ctype}>(chunkElems);\n"
+    "}\n")
+
 for tag, ctype in TYPES:
     for redname, redval in REDOPS:
         fname = "ce_reduce_%s_%s.cpp" % (tag, redname)
         vec_define = "#define CE_REDUCE_VECTORIZE_OK\n" if (tag, redname) in VECTORIZE_OK else ""
+        blocks_fn = BLOCKS_FN.substitute(tag=tag, ctype=ctype) if redname == "Sum" else ""
         with open(os.path.join(out_dir, fname), "w") as f:
             f.write(LAUNCHER_TEMPLATE.substitute(tag=tag, ctype=ctype, redname=redname, redval=redval,
-                                                  vec_define=vec_define))
+                                                  vec_define=vec_define, blocks_fn=blocks_fn))
 
 print("-- Generated %d CE-reduce kernel TUs in %s" % (len(TYPES) * len(REDOPS), out_dir))

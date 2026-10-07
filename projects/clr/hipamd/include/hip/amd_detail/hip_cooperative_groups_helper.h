@@ -108,6 +108,28 @@ __CG_STATIC_QUALIFIER__ unsigned long long adjust_mask(unsigned long long base_m
   return out;
 }
 }  // namespace helper
+
+/**
+ * @brief Drain the asynchronous global<->LDS copies issued by this wave.
+ *
+ * gfx12.5 async global<->LDS copies retire through ASYNCcnt, which is per-wave and is not drained
+ * by a fence, s_waitcnt, or s_barrier. Each wave drains its own counter before the group barrier,
+ * so the barrier publishes the data to the rest of the group.
+ *
+ * gfx9 direct-to-LDS loads retire through vmcnt. The workgroup release fence inside __syncthreads()
+ * and barrier_arrive() already waits for vmcnt when such a load is in flight, and omits the wait
+ * when none is. An unconditional s_waitcnt here would drain vmcnt in every kernel that calls
+ * sync(), including ones that never issue memcpy_async, which measured 1.24x-1.36x slower than
+ * __syncthreads() on gfx950 for a kernel that keeps a global load in flight across a barrier.
+ * This function therefore waits only on the async counter.
+ */
+__CG_STATIC_QUALIFIER__ void wait_async_copies() {
+#if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
+    __builtin_amdgcn_s_wait_asynccnt(0);
+#endif
+}
+
 /**
  *
  * @brief  Functionalities related to multi-grid cooperative group type
@@ -134,7 +156,10 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
 
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_multi_grid_is_valid()); }
 
-__CG_STATIC_QUALIFIER__ void sync() { __ockl_multi_grid_sync(); }
+__CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
+  __ockl_multi_grid_sync();
+}
 
 }  // namespace multi_grid
 
@@ -173,16 +198,25 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
 
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_grid_is_valid()); }
 
-__CG_STATIC_QUALIFIER__ void sync() { __ockl_grid_sync(); }
+__CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
+  __ockl_grid_sync();
+}
 
 __CG_STATIC_QUALIFIER__ dim3 grid_dim() {
   return (dim3(static_cast<__hip_uint32_t>(gridDim.x), static_cast<__hip_uint32_t>(gridDim.y),
                static_cast<__hip_uint32_t>(gridDim.z)));
 }
 
-__CG_STATIC_QUALIFIER__ unsigned int barrier_arrive() { return __ockl_grid_bar_arrive(); }
+__CG_STATIC_QUALIFIER__ unsigned int barrier_arrive() {
+  wait_async_copies();
+  return __ockl_grid_bar_arrive();
+}
 
-__CG_STATIC_QUALIFIER__ unsigned int barrier_signal() { return __ockl_grid_bar_arrive(); }
+__CG_STATIC_QUALIFIER__ unsigned int barrier_signal() {
+  wait_async_copies();
+  return __ockl_grid_bar_arrive();
+}
 
 __CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
 }  // namespace grid
@@ -199,28 +233,6 @@ __CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait
 #else
 #define __CG_LDS_DMA_TARGET 0
 #endif
-
-// Drain copies issued by memcpy_async before a barrier releases.
-//
-// gfx12.5 async global<->LDS copies retire through the async counter. A fence, s_waitcnt
-// and s_barrier do not wait for that counter, so it has to be waited explicitly or another
-// wave can leave the barrier and read LDS that has not landed yet. This is the only copy
-// form that needs an explicit drain.
-//
-// gfx9 direct-to-LDS loads (global_load_lds_dword, or global_load_dword with the lds bit on
-// gfx90a) retire through vmcnt, and vmcnt IS covered by the workgroup release fence that
-// __syncthreads() and barrier_arrive() already perform: the memory legalizer emits
-// s_waitcnt vmcnt(0) ahead of the barrier exactly when such a load is in flight, and omits
-// it when none is. An unconditional s_waitcnt here would instead drain vmcnt in every
-// kernel that calls sync(), including the ones that never issue a memcpy_async, which
-// measured 1.24x-1.36x slower than __syncthreads() on gfx950 for a kernel that keeps a
-// global load in flight across a barrier. So no gfx9 drain is emitted here by design.
-__CG_STATIC_QUALIFIER__ void wait_async_copy_counter() {
-#if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
-    __builtin_amdgcn_s_wait_asynccnt(0);
-#endif
-}
 
 /**
  *  @brief Functionalities related to `workgroup` (thread_block in CUDA terminology)
@@ -256,10 +268,9 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
 __CG_STATIC_QUALIFIER__ bool is_valid() { return true; }
 
 __CG_STATIC_QUALIFIER__ void sync() {
-  // Each wave drains its own copies before the barrier, so every other wave observes the
-  // LDS results once the barrier releases. gfx9 LDS DMA needs nothing here; the workgroup
-  // release fence inside __syncthreads() already waits vmcnt when such a copy is in flight.
-  wait_async_copy_counter();
+  // gfx9 LDS DMA needs nothing beyond __syncthreads(): its workgroup release fence already
+  // waits vmcnt when such a copy is in flight. gfx12.5 async copies need the counter drain.
+  wait_async_copies();
   __syncthreads();
 }
 
@@ -270,9 +281,8 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
 
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
   // Signal only after this wave's copies have landed. Waiting later, in barrier_wait, is
-  // too late: the last wave's arrive can release everyone else. gfx9 LDS DMA is drained by
-  // the workgroup release fence below, same as in sync().
-  wait_async_copy_counter();
+  // too late: the last wave's arrive can release everyone else.
+  wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal))
@@ -295,7 +305,7 @@ namespace tiled_group {
 __CG_STATIC_QUALIFIER__ void sync() {
   // Tile memcpy_async uses the gfx12.5 per-lane async copies. One wave, so the
   // async counter has to be drained before the wavefront fence returns.
-  wait_async_copy_counter();
+  wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
 }
@@ -306,7 +316,7 @@ namespace coalesced_group {
 
 // enforce ordering for memory instructions
 __CG_STATIC_QUALIFIER__ void sync() {
-  wait_async_copy_counter();
+  wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
 }
@@ -336,6 +346,7 @@ __CG_STATIC_QUALIFIER__ unsigned int masked_bit_count(lane_mask x, unsigned int 
 
 namespace cluster {
 __CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
   // is_invocable still names the builtin, so a compiler that does not have it
@@ -354,6 +365,7 @@ __CG_STATIC_QUALIFIER__ void sync() {
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal) &&
@@ -472,9 +484,10 @@ template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank
 
 __CG_STATIC_QUALIFIER__ unsigned int query_shared_rank(const void* in) {
 #if __has_builtin(__builtin_amdgcn_query_shared_rank)
-  if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_query_shared_rank)) __builtin_trap();
-  return static_cast<unsigned int>(
-      __builtin_amdgcn_query_shared_rank((__attribute__((address_space(11))) const void*)in));
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_query_shared_rank))
+    return static_cast<unsigned int>(
+        __builtin_amdgcn_query_shared_rank((__attribute__((address_space(11))) const void*)in));
+  __builtin_trap();
 #else
   return 0;
 #endif

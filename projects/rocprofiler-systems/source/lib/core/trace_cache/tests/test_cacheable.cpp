@@ -69,15 +69,16 @@ TEST_F(cacheable_test, store_value_unsigned_char)
 
 TEST_F(cacheable_test, store_value_string_literal)
 {
-    auto value = "Hello World"sv;
+    auto const value = "Hello World"sv;
     rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
 
-    const size_t expected_size = value.size() + sizeof(size_t);
+    const size_t expected_size = value.size() + sizeof(char) + sizeof(size_t);
     EXPECT_EQ(position, expected_size);
 
     const std::string stored_value(
         reinterpret_cast<const char*>(buffer.data() + sizeof(size_t)));
     EXPECT_EQ(stored_value, "Hello World");
+    EXPECT_EQ(buffer[sizeof(size_t) + value.size()], '\0');
 }
 
 TEST_F(cacheable_test, store_value_optional)
@@ -100,11 +101,11 @@ TEST_F(cacheable_test, store_value_optional_empty)
 
 TEST_F(cacheable_test, store_value_empty_string)
 {
-    auto value = ""sv;
+    auto const value = ""sv;
     rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
 
-    EXPECT_EQ(position, sizeof(size_t));
-    EXPECT_EQ(buffer[0], '\0');
+    EXPECT_EQ(position, sizeof(size_t) + sizeof(char));
+    EXPECT_EQ(buffer[sizeof(size_t)], '\0');
 }
 
 TEST_F(cacheable_test, store_value_byte_array)
@@ -139,14 +140,14 @@ TEST_F(cacheable_test, store_multiple_values)
 {
     const int    int_val    = 100;
     const double double_val = 2.718;
-    auto         str_val    = "test"sv;
+    auto const   str_val    = "test"sv;
 
     rocprofsys::trace_cache::utility::store_value(int_val, buffer.data(), position);
     rocprofsys::trace_cache::utility::store_value(double_val, buffer.data(), position);
     rocprofsys::trace_cache::utility::store_value(str_val, buffer.data(), position);
 
     const size_t expected_total =
-        sizeof(int) + sizeof(double) + str_val.size() + sizeof(size_t);
+        sizeof(int) + sizeof(double) + str_val.size() + sizeof(char) + sizeof(size_t);
     EXPECT_EQ(position, expected_total);
 }
 
@@ -194,7 +195,7 @@ TEST_F(cacheable_test, parse_value_unsigned_long)
 
 TEST_F(cacheable_test, parse_value_string)
 {
-    auto original_value = "Parse this string"sv;
+    auto const original_value = "Parse this string"sv;
     rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
                                                   position);
 
@@ -203,12 +204,13 @@ TEST_F(cacheable_test, parse_value_string)
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_EQ(parsed_value, "Parse this string");
-    EXPECT_EQ(data_pos, buffer.data() + original_value.size() + sizeof(size_t));
+    EXPECT_EQ(data_pos,
+              buffer.data() + original_value.size() + sizeof(char) + sizeof(size_t));
 }
 
 TEST_F(cacheable_test, parse_value_empty_string)
 {
-    auto original_value = ""sv;
+    auto const original_value = ""sv;
     rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
                                                   position);
 
@@ -217,7 +219,7 @@ TEST_F(cacheable_test, parse_value_empty_string)
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_EQ(parsed_value, "");
-    EXPECT_EQ(data_pos, buffer.data() + sizeof(size_t));
+    EXPECT_EQ(data_pos, buffer.data() + sizeof(char) + sizeof(size_t));
 }
 
 TEST_F(cacheable_test, parse_value_optional)
@@ -327,7 +329,7 @@ TEST_F(cacheable_test, parse_multiple_values_with_optional)
 {
     const int                          int_val   = 100;
     const std::optional<std::uint32_t> opt_val   = std::uint32_t{ 777 };
-    auto                               str_val   = "mixed"sv;
+    auto const                         str_val   = "mixed"sv;
     const std::optional<double>        opt_empty = std::nullopt;
 
     rocprofsys::trace_cache::utility::store_value(int_val, buffer.data(), position);
@@ -426,7 +428,8 @@ TEST_F(cacheable_test, roundtrip_optional_string_view_with_value)
     std::optional<std::string_view> original = "hello optional"sv;
     rocprofsys::trace_cache::utility::store_value(original, buffer.data(), position);
 
-    const size_t expected_size = sizeof(std::uint8_t) + sizeof(size_t) + original->size();
+    const size_t expected_size =
+        sizeof(std::uint8_t) + sizeof(size_t) + original->size() + sizeof(char);
     EXPECT_EQ(position, expected_size);
 
     std::uint8_t*                   data_pos = buffer.data();
@@ -458,7 +461,7 @@ TEST_F(cacheable_test, roundtrip_optional_string_view_empty_string)
     const std::optional<std::string_view> original = ""sv;
     rocprofsys::trace_cache::utility::store_value(original, buffer.data(), position);
 
-    const size_t expected_size = sizeof(std::uint8_t) + sizeof(size_t);
+    const size_t expected_size = sizeof(std::uint8_t) + sizeof(size_t) + sizeof(char);
     EXPECT_EQ(position, expected_size);
 
     std::uint8_t*                   data_pos = buffer.data();
@@ -537,7 +540,7 @@ TEST_F(cacheable_test, parse_multiple_values)
 {
     const int           int_val    = 42;
     const double        double_val = 3.14;
-    auto                str_val    = "multi"sv;
+    auto const          str_val    = "multi"sv;
     const unsigned char uchar_val  = 128;
 
     rocprofsys::trace_cache::utility::store_value(int_val, buffer.data(), position);
@@ -577,9 +580,9 @@ TEST_F(cacheable_test, get_size_helper_double)
 
 TEST_F(cacheable_test, get_size_helper_string_literal)
 {
-    auto         value = "test string"sv;
+    auto const   value = "test string"sv;
     const size_t size  = rocprofsys::trace_cache::utility::get_size(value);
-    EXPECT_EQ(size, value.size() + sizeof(size_t));
+    EXPECT_EQ(size, value.size() + sizeof(char) + sizeof(size_t));
 }
 
 TEST_F(cacheable_test, get_size_helper_optional)
@@ -621,7 +624,7 @@ TEST_F(cacheable_test, get_size_optional_string_view)
 {
     std::optional<std::string_view> val = "test"sv;
     const size_t size                   = rocprofsys::trace_cache::utility::get_size(val);
-    EXPECT_EQ(size, sizeof(std::uint8_t) + sizeof(size_t) + 4);
+    EXPECT_EQ(size, sizeof(std::uint8_t) + sizeof(size_t) + 4 + sizeof(char));
 }
 
 TEST_F(cacheable_test, get_size_optional_string_view_nullopt)
@@ -778,7 +781,7 @@ TEST_F(cacheable_test, store_value_int_vector)
     const size_t stored_size = *reinterpret_cast<size_t*>(buffer.data());
     EXPECT_EQ(stored_size, expected_data_size);
 
-    int* data_start = reinterpret_cast<int*>(buffer.data() + sizeof(size_t));
+    int const* data_start = reinterpret_cast<int*>(buffer.data() + sizeof(size_t));
     for(size_t i = 0; i < value.size(); ++i)
     {
         EXPECT_EQ(data_start[i], value[i]);

@@ -158,6 +158,8 @@ public:
 
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
 
+  hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override;
+
  private:
   /// @brief Flags for @ref ExportMemoryHandleImpl.
   enum ExportMemoryFlags : uint32_t {
@@ -187,6 +189,19 @@ public:
   /// It is legal for a system with Xnack ON to have devices that do not support
   /// Xnack functionality.
   static bool BindXnackMode();
+
+  /// @brief Take the one topology snapshot reference this driver owns.
+  hsa_status_t AcquireTopologySnapshot() const;
+
+  /// @brief Release this driver's topology snapshot reference, if held.
+  hsa_status_t ReleaseTopologySnapshot();
+
+  /// @brief Disable the KFD runtime if Init() enabled it.
+  hsa_status_t DisableRuntime();
+
+  mutable bool topology_snapshot_acquired_ = false;
+  bool runtime_enabled_ = false;
+  mutable HsaSystemProperties sys_props_{};
 
   // Minimum acceptable KFD version numbers.
   static const uint32_t kfd_version_major_min = 0;

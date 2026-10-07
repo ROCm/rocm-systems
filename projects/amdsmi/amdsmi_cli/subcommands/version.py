@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import logging
 
@@ -68,20 +51,19 @@ class VersionCommands:
         self.logger.output["version"] = f"{__version__}"
         self.logger.output["amdsmi_library_version"] = f"{amdsmi_lib_version_str}"
         self.logger.output["rocm_version"] = f"{rocm_version_str}"
+        # Initialize conditional version keys to N/A so CSV/JSON export can rely on them
+        self.logger.output["amdgpu_version"] = "N/A"
+        self.logger.output["amd_hsmp_driver_version"] = "N/A"
+        self.logger.output["nic_driver_version"] = "N/A"
 
         if args.gpu_version:
             try:
                 gpus = amdsmi_interface.amdsmi_get_processor_handles()
                 if isinstance(gpus, list) and len(gpus) > 0:
-                    gpu_version_info = amdsmi_interface.amdsmi_get_gpu_driver_info(gpus[0])
-                    gpu_version_str = gpu_version_info["driver_version"]
-                else:
-                    gpu_version_str = "N/A"
+                    driver_info = amdsmi_interface.amdsmi_get_gpu_driver_info(gpus[0])
+                    self.logger.output["amdgpu_version"] = driver_info["driver_full_version"]
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Failed to get amdgpu version | %s", e.get_error_info())
-                gpu_version_str = "N/A"
-
-            self.logger.output["amdgpu_version"] = gpu_version_str
+                logging.debug("Failed to get amdgpu driver versions | %s", e.get_error_info())
         if args.cpu_version:
             try:
                 ret = amdsmi_interface.amdsmi_get_cpu_handles()
@@ -123,7 +105,8 @@ class VersionCommands:
             )
             if args.gpu_version:
                 human_readable_output = (
-                    human_readable_output + f" | amdgpu version: {gpu_version_str}"
+                    human_readable_output
+                    + f" | amdgpu version: {self.logger.output['amdgpu_version']}"
                 )
             if args.cpu_version:
                 human_readable_output = (

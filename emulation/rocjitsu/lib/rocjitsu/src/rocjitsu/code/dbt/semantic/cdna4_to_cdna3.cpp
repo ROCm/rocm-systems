@@ -6,7 +6,7 @@
 
 #include "rocjitsu/code/dbt/semantic/rules.h"
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_lds.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
@@ -764,10 +764,8 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   // row-swap instruction. Run the data-gather portion with EXEC forced to all
   // lanes so mbcnt() produces physical lane IDs and ds_bpermute can read both
   // source half-waves. Only after both old values are captured do we narrow EXEC
-  // to the exact write lane groups. Do not intersect those masks with the
-  // original EXEC: generated execution semantics mark V_PERMLANE*_SWAP_B32 as
-  // EXEC-ignoring, and later control flow may re-enable lanes that depend on
-  // these swapped values.
+  // to each write lane group intersected with the original EXEC. Inactive
+  // destinations must retain their original values.
   emit_s_mov_b64(words, *saved_exec, kExecLo);
   emit_cdna3_exec_mask(words, UINT64_MAX);
   if (scratch->spilled) {
@@ -788,15 +786,32 @@ ExpandResult lower_permlane_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   emit_cdna3_ds(words, cdna3::kDsBpermuteB32Ds, from_src_low, partner_addr, vsrc);
   emit_cdna3_lgkm_wait(words);
 
-  const uint64_t group_mask = (uint64_t{1} << half_wave_lanes) - 1u;
-  uint64_t low_mask = 0;
-  for (uint8_t lane = 0; lane < 64; lane = static_cast<uint8_t>(lane + 2 * half_wave_lanes))
-    low_mask |= group_mask << lane;
-  const uint64_t high_mask = low_mask << half_wave_lanes;
-  emit_cdna3_exec_mask(words, low_mask);
+  const auto emit_write_mask = [&](bool high) {
+    for (uint8_t half = 0; half < 2; ++half) {
+      const uint8_t saved = static_cast<uint8_t>(*saved_exec + half);
+      const uint8_t exec = static_cast<uint8_t>(kExecLo + half);
+      if (half_wave_lanes == 16) {
+        // Pack with zero to retain the selected 16 bits of each saved EXEC
+        // word. Unlike S_AND_B32/B64, S_PACK leaves the guest SCC unchanged.
+        words.push_back(
+            cdna3::build_sop2(high ? cdna3::kSPackHhB32B16Sop2 : cdna3::kSPackLlB32B16Sop2,
+                              {.ssrc0 = high ? static_cast<uint8_t>(kInlineConst0) : saved,
+                               .ssrc1 = high ? saved : static_cast<uint8_t>(kInlineConst0),
+                               .sdst = exec})[0]);
+      } else {
+        // A 32-lane group occupies a whole EXEC word; copy that word and
+        // clear the other one, also without changing SCC.
+        words.push_back(cdna3::build_sop1(
+            cdna3::kSMovB32Sop1,
+            {.ssrc0 = high == (half == 1) ? saved : static_cast<uint8_t>(kInlineConst0),
+             .sdst = exec})[0]);
+      }
+    }
+  };
+  emit_write_mask(false);
   emit_cdna3_vop3(words, cdna3::kVMovB32Vop3, vsrc, vgpr_src(from_dst_high));
 
-  emit_cdna3_exec_mask(words, high_mask);
+  emit_write_mask(true);
   emit_cdna3_vop3(words, cdna3::kVMovB32Vop3, vdst, vgpr_src(from_src_low));
 
   if (scratch->spilled) {

@@ -709,10 +709,8 @@ void aggregateForTypeAndOp(AggregationType aggType,
   std::mt19937_64 gen(Catch::rngSeed());
   dim3 gridDim = { 1 };
   hipError_t status;
-  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
-                                         (std::is_signed<T>::value? -1023 : 0);
-  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
-                                         1023;
+  typename distribution::result_type a = TestRange<T>::minimum;
+  typename distribution::result_type b = TestRange<T>::maximum;
   distribution distInput {a, b};
   int numAggregation = 0;
   void* kernelPtr;
@@ -845,9 +843,7 @@ void runAggregationRandomForType(AggregationType aggType, dim3 blockDim)
 }
 
 template <bool Coalesced, class T, int WarpSize, class Op = void>
-void runAggregationRandomForOps(AggregationType aggType, const std::tuple<>)
-{
-}
+void runAggregationRandomForOps(AggregationType, const std::tuple<>) {}
 
 template <bool Coalesced, class T, int WarpSize, class Op, class... Ops>
 void runAggregationRandomForOps(AggregationType aggType, const std::tuple<Op, Ops...>)
@@ -881,7 +877,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_arithmetic, int, uns
 }
 
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_boolean, int, unsigned int, long long,
-                   unsigned long long)
+                       unsigned long long)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -913,6 +909,8 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Custom_Op)
 
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Scan_Custom_Op)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   dim3 blockDim = {static_cast<unsigned int>(getWarpSize())};
   // only using 4 threads to avoid long long overflows
   runAggregationRandomForType<false, NonCommutativeOp<long long>, long long, 4>(
@@ -994,6 +992,8 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters)
 
 TEST_CASE(Unit_Thread_Block_Tile_Scan_Trivially_Copyable_Parameters)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   dim3 gridDim = { 1 };
   dim3 blockDim = { 4 };
   LinearAllocGuard<Vector> h_result(LinearAllocs::malloc, sizeof(Vector) * blockDim.x);
@@ -1278,6 +1278,8 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes)
 
 TEST_CASE(Unit_Thread_Block_Tile_Scan_All_Parameter_Sizes)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   SECTION("sum") {
     testArgsDifferentSizesScan<32, Sum>(AggregationType::InclusiveScan);
     testArgsDifferentSizesScan<32, Sum>(AggregationType::ExclusiveScan);
@@ -1340,7 +1342,7 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Standard_Op_Custom_Type)
 }
 
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsigned int, long long,
-                   unsigned long long, float, half, double)
+                       unsigned long long, float, half, double, unsigned char)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1355,7 +1357,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsig
   }
 }
 
-HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned int, long long, unsigned long long)
+HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned int,
+                       long long, unsigned long long, bool)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1473,6 +1476,8 @@ void testScanForTileSize()
 
 TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   using Op = cooperative_groups::plus<int>;
   static constexpr AggregationType AggType = AggregationType::InclusiveScan;
 
@@ -1489,8 +1494,10 @@ TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half)
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half, bool, unsigned char)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   static constexpr AggregationType AggType = AggregationType::ExclusiveScan;
 
   SECTION("plus") {
@@ -1526,8 +1533,10 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half)
 // for all the tile sizes and all input types, using random input values, calculates the scan
 // values. Additionally, randomly make some threads not participate for the coalesced_threads case
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned int, long long,
-                   unsigned long long, float, half, double)
+                   unsigned long long, float, half, double, unsigned char)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   std::tuple<cooperative_groups::plus<TestType>,
              cooperative_groups::less<TestType>,
              cooperative_groups::greater<TestType>> types;
@@ -1549,9 +1558,37 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int, long long,
-                   unsigned long long)
+// checks scans that use bool values and cg::less and greater as operators which are completely
+// defined e.g. false < true
+TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_Bool_Less_Greater)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
+  std::tuple<cooperative_groups::less<bool>,
+             cooperative_groups::greater<bool>> types;
+
+  SECTION("inclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, bool, 32>(AggregationType::InclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, bool, 64>(AggregationType::InclusiveScan, types);
+    }
+  }
+
+  SECTION("exclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, bool, 32>(AggregationType::ExclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, bool, 64>(AggregationType::ExclusiveScan, types);
+    }
+  }
+}
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int, long long,
+                   unsigned long long, bool)
+{
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   std::tuple<cooperative_groups::bit_and<TestType>,
              cooperative_groups::bit_or<TestType>,
              cooperative_groups::bit_xor<TestType>> types;
@@ -1576,6 +1613,8 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int
 // make sures that tiled blocks that use the y or z dimension work correctly
 TEST_CASE(Unit_Thread_Block_Tile_2D_3D_Blocks)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   int wavefrontSize = getWarpSize();
 
   SECTION("2D") {
@@ -1608,8 +1647,10 @@ TEST_CASE(Unit_Thread_Block_Tile_2D_3D_Blocks)
 }
 
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned int, long long,
-                   unsigned long long, float, half, double)
+                   unsigned long long, float, half, double, unsigned char)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   std::tuple<cooperative_groups::plus<TestType>,
              cooperative_groups::less<TestType>,
              cooperative_groups::greater<TestType>> ops;
@@ -1632,8 +1673,10 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned in
 }
 
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_boolean, int, unsigned int, long long,
-                   unsigned long long)
+                   unsigned long long, bool)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   std::tuple<cooperative_groups::bit_and<TestType>,
              cooperative_groups::bit_or<TestType>,
              cooperative_groups::bit_xor<TestType>> ops;
@@ -1690,6 +1733,8 @@ void __global__ binaryPartitionTiled(int* out, int* ranks)
 
 TEST_CASE(Unit_Thread_Block_Scan_partition)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   int wavefrontSize = getWarpSize();
   LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int) * wavefrontSize);
   LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, h_result.size_bytes());
@@ -1774,6 +1819,8 @@ __global__ void multiDimReduce(int* output)
 // into 16 threads tiles, each one contributing the tid to their reduces
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Multi_Dimensional_Reduce)
 {
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
   LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int) * 128);
   LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, h_result.size_bytes());
   dim3 gridDim = { 1 };

@@ -1881,6 +1881,7 @@ class VInterpP2LegacyF16Vop3 : public Vop3 {
 public:
   VInterpP2LegacyF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src1;
   Operand src0;
@@ -1891,6 +1892,7 @@ class VInterpP2F16Vop3 : public Vop3 {
 public:
   VInterpP2F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src1;
   Operand src0;
@@ -1991,6 +1993,7 @@ class VWritelaneB32Vop3 : public Vop3 {
 public:
   VWritelaneB32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
   Operand src1;

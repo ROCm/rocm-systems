@@ -115,6 +115,49 @@ def test_perfetto_data(pftrace_data, json_data):
     )
 
 
+def test_perfetto_counter_samples(pftrace_reader, json_data):
+    samples = pftrace_reader.query_tp("""
+        SELECT counter_track.name AS track_name, counter.ts, counter.value
+        FROM counter
+        JOIN counter_track ON counter.track_id = counter_track.id
+        WHERE counter_track.name GLOB 'Agent * PMC *'
+        """)
+    assert not samples.empty
+    assert (samples["ts"] > 0).all()
+    assert (samples["value"] >= 0).all()
+
+    data = json_data["rocprofiler-sdk-tool"]
+    counter_names = {
+        counter["id"]["handle"]: counter["name"] for counter in data["counters"]
+    }
+    agent_nodes = {
+        agent["id"]["handle"]: agent["logical_node_id"] for agent in data["agents"]
+    }
+    expected_tracks = {
+        "Agent [{}] PMC {}".format(
+            agent_nodes[entry["dispatch_data"]["dispatch_info"]["agent_id"]["handle"]],
+            counter_names[record["counter_id"]["handle"]],
+        )
+        for entry in data["callback_records"]["counter_collection"]
+        for record in entry["records"]
+    }
+    actual_tracks = set(samples["track_name"])
+    assert expected_tracks == actual_tracks
+    maxima = samples.groupby("track_name")["value"].max()
+    assert all(maxima[track] > 0 for track in expected_tracks)
+
+
+def test_out_of_range_device_qualifier_is_skipped(counter_input_data):
+    """A NAME:device=N qualifier restricts NAME to the agent whose GPU index is N.
+    The fixtures request SQ_CYCLES and SQ_BUSY_CYCLES with indices no system has, so
+    those counters must be dropped while the rest of the request is still collected."""
+    unavailable = {"SQ_CYCLES", "SQ_BUSY_CYCLES"}
+    collected = set(counter_input_data["Counter_Name"])
+
+    assert collected
+    assert not unavailable & collected
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

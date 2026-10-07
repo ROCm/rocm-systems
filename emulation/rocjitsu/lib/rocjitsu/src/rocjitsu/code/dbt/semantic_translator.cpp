@@ -30,7 +30,7 @@ namespace {
     return {semantic_expand_rules_cdna4_to_cdna3(), {}};
   // gfx1250 A0 and B0 share one architectural target ID. Select the B0-to-A0
   // profile only for that explicit revision pair.
-  if (guest == ROCJITSU_CODE_ARCH_GFX1250 && host == ROCJITSU_CODE_ARCH_GFX1250 &&
+  if (guest == ROCJITSU_CODE_ARCH_CDNA5 && host == ROCJITSU_CODE_ARCH_CDNA5 &&
       input_revision == ProcessorRevision::Gfx1250B0 &&
       output_revision == ProcessorRevision::Gfx1250A0)
     return rewrite_registry_gfx1250_b0_to_a0();
@@ -70,8 +70,8 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
   // is the catch-all for one added later without it. Strict ordering, matching
   // that predicate: a duplicated key would leave the second rule unreachable
   // behind the first.
-  assert(std::adjacent_find(expand_rule_keys_.begin(), expand_rule_keys_.end(),
-                            std::greater_equal<>{}) == expand_rule_keys_.end() &&
+  assert(std::ranges::adjacent_find(expand_rule_keys_, std::greater_equal<>{}) ==
+             expand_rule_keys_.end() &&
          "semantic rule tables must stay strictly sorted by (encoding id, opcode)");
   if (!expand_rules_.empty()) {
     // Candidate collection scans every decoded instruction in large kernels.
@@ -88,7 +88,7 @@ const TranslationRule *SemanticTranslator::find_expand_rule(const Instruction &i
   if (!has_expand_rule_encoding(inst.encoding_id()))
     return nullptr;
   const uint32_t key = packed_rule_key(inst.encoding_id(), inst.opcode());
-  auto it = std::lower_bound(expand_rule_keys_.begin(), expand_rule_keys_.end(), key);
+  auto it = std::ranges::lower_bound(expand_rule_keys_, key);
   if (it == expand_rule_keys_.end() || *it != key)
     return nullptr;
   const size_t index = static_cast<size_t>(it - expand_rule_keys_.begin());

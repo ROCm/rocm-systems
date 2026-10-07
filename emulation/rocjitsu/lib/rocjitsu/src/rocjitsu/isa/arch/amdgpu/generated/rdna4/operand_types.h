@@ -47,10 +47,10 @@ enum class OperandType {
   OPR_VCC,
   OPR_VERSION,
   OPR_VGPR,
-  OPR_WAITCNT,
   OPR_WAIT_ALU,
   OPR_WAIT_EVENT,
   OPR_WAIT_MEM_DS,
+  OPR_WAITCNT,
 };
 
 enum OpSelAttr {

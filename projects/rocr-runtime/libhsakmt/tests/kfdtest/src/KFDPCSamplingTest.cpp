@@ -37,7 +37,7 @@
 #include "PM4Packet.hpp"
 #include "SDMAQueue.hpp"
 #include "SDMAPacket.hpp"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 
 #define N_PROCESSES             (2)     /* Number of processes running in parallel, must be at least 2 */
 

@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/path.hpp"
-#include "filesystem.hpp"
 
+#include <array>
+#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
 #include <sys/stat.h>
+#include <system_error>
 #include <unistd.h>
 
 using namespace rocprofsys::common::path;
@@ -21,8 +23,8 @@ protected:
 
     std::string create_temp_dir()
     {
-        char  tmpl[] = "/tmp/rocprofsys_path_test_XXXXXX";
-        char* dir    = mkdtemp(tmpl);
+        char        tmpl[] = "/tmp/rocprofsys_path_test_XXXXXX";
+        char const* dir    = mkdtemp(tmpl);
         if(!dir)
         {
             throw std::runtime_error("Failed to create temp directory");
@@ -32,9 +34,12 @@ protected:
 
     void cleanup_temp_dir(const std::string& dir)
     {
-        if(dir.empty()) return;
+        if(dir.empty())
+        {
+            return;
+        }
         std::error_code ec;
-        test_common::fs::remove_all(dir, ec);
+        std::filesystem::remove_all(dir, ec);
     }
 
     std::string create_file(const std::string& name, const std::string& content = "test")
@@ -258,7 +263,7 @@ TEST_F(PathTest, IsDirectory_RelativePath)
 
 TEST_F(PathTest, IsRegularFile_ExistingFile)
 {
-    std::string file_path = create_file("isregular_file.txt");
+    std::string const file_path = create_file("isregular_file.txt");
     EXPECT_TRUE(is_regular_file(file_path));
 }
 
@@ -276,21 +281,21 @@ TEST_F(PathTest, IsRegularFile_NonexistentPath)
 
 TEST_F(PathTest, IsRegularFile_SymlinkToFile)
 {
-    std::string target    = create_file("isregular_target.txt");
-    std::string link_path = create_symlink(target, "isregular_link_to_file");
+    std::string const target    = create_file("isregular_target.txt");
+    std::string const link_path = create_symlink(target, "isregular_link_to_file");
     EXPECT_TRUE(is_regular_file(link_path));
 }
 
 TEST_F(PathTest, IsRegularFile_SymlinkToDirectory)
 {
-    std::string subdir    = create_subdir("isregular_target_dir");
-    std::string link_path = create_symlink(subdir, "isregular_link_to_dir");
+    std::string const subdir    = create_subdir("isregular_target_dir");
+    std::string const link_path = create_symlink(subdir, "isregular_link_to_dir");
     EXPECT_FALSE(is_regular_file(link_path));
 }
 
 TEST_F(PathTest, IsRegularFile_BrokenSymlink)
 {
-    std::string link_path =
+    std::string const link_path =
         create_symlink("/nonexistent/target", "isregular_broken_link");
     EXPECT_FALSE(is_regular_file(link_path));
 }
@@ -299,13 +304,13 @@ TEST_F(PathTest, IsRegularFile_EmptyPath) { EXPECT_FALSE(is_regular_file("")); }
 
 TEST_F(PathTest, IsRegularFile_SpecialCharactersInPath)
 {
-    std::string file_path = create_file("isregular file with spaces.txt");
+    std::string const file_path = create_file("isregular file with spaces.txt");
     EXPECT_TRUE(is_regular_file(file_path));
 }
 
 TEST_F(PathTest, IsRegularFile_Fifo)
 {
-    std::string fifo_path = m_test_dir + "/isregular_fifo";
+    std::string const fifo_path = m_test_dir + "/isregular_fifo";
     ASSERT_EQ(mkfifo(fifo_path.c_str(), 0644), 0);
     EXPECT_FALSE(is_regular_file(fifo_path));
 }
@@ -501,4 +506,90 @@ TEST_F(PathTest, Filename_RelativePath) { EXPECT_EQ(filename("a/b/c"), "c"); }
 TEST_F(PathTest, Filename_AcceptsTemporary)
 {
     EXPECT_EQ(filename(std::string("/a/b/c.so")), "c.so");
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_CreatesParentTree)
+{
+    const std::string file_path = m_test_dir + "/new/nested/tree/out.txt";
+
+    std::ofstream out_fstream;
+    EXPECT_TRUE(create_parent_dirs_and_open_ofstream(out_fstream, file_path));
+    EXPECT_TRUE(out_fstream.is_open());
+    out_fstream << "hello";
+    out_fstream.close();
+
+    EXPECT_TRUE(is_directory(m_test_dir + "/new/nested/tree"));
+    EXPECT_TRUE(is_regular_file(file_path));
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_ExistingDirectoryIsNotAnError)
+{
+    const std::string existing_dir = create_subdir("already_here");
+
+    std::ofstream out_fstream;
+    EXPECT_TRUE(
+        create_parent_dirs_and_open_ofstream(out_fstream, existing_dir + "/out.txt"));
+    EXPECT_TRUE(out_fstream.is_open());
+    out_fstream.close();
+
+    EXPECT_TRUE(is_regular_file(existing_dir + "/out.txt"));
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_BareFilenameCreatesNoDirectory)
+{
+    std::array<char, PATH_MAX> saved_cwd{};
+    ASSERT_NE(getcwd(saved_cwd.data(), saved_cwd.size()), nullptr);
+    ASSERT_EQ(chdir(m_test_dir.c_str()), 0);
+
+    std::ofstream out_fstream;
+    EXPECT_TRUE(create_parent_dirs_and_open_ofstream(out_fstream, "bare.txt"));
+    EXPECT_TRUE(out_fstream.is_open());
+    out_fstream.close();
+
+    EXPECT_TRUE(is_regular_file(m_test_dir + "/bare.txt"));
+
+    ASSERT_EQ(chdir(saved_cwd.data()), 0);
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_UncreatableParentReturnsFalse)
+{
+    // a regular file as an intermediate component makes create_directories fail
+    const std::string blocker = create_file("blocker");
+
+    std::ofstream out_fstream;
+    EXPECT_FALSE(
+        create_parent_dirs_and_open_ofstream(out_fstream, blocker + "/sub/out.txt"));
+    EXPECT_FALSE(out_fstream.is_open());
+    EXPECT_FALSE(is_regular_file(blocker + "/sub/out.txt"));
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_TargetIsDirectoryReturnsFalse)
+{
+    const std::string existing_dir = create_subdir("a_directory");
+
+    std::ofstream out_fstream;
+    EXPECT_FALSE(create_parent_dirs_and_open_ofstream(out_fstream, existing_dir));
+    EXPECT_FALSE(out_fstream.is_open());
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_EmptyPathReturnsFalse)
+{
+    std::ofstream out_fstream;
+    EXPECT_FALSE(create_parent_dirs_and_open_ofstream(out_fstream, ""));
+    EXPECT_FALSE(out_fstream.is_open());
+}
+
+TEST_F(PathTest, CreateParentDirsAndOpenOfstream_TruncatesExistingFile)
+{
+    const std::string file_path = create_file("truncate_me.txt", "0123456789");
+
+    std::ofstream out_fstream;
+    EXPECT_TRUE(create_parent_dirs_and_open_ofstream(out_fstream, file_path));
+    out_fstream << "ab";
+    out_fstream.close();
+
+    std::ifstream in_fstream{ file_path };
+    std::string   content;
+    std::getline(in_fstream, content);
+    EXPECT_EQ(content, "ab");
 }

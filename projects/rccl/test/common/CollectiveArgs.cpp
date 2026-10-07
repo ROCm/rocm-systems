@@ -99,6 +99,18 @@ namespace RcclUnitTesting
     }
     CHECK_CALL(this->outputCpu.AllocateCpuMem(this->numOutputBytesAllocated));
 
+    // Device-data mode: a device-resident expected buffer for device-side validate.
+    // Allocated only for collectives whose prep func builds expected on the GPU
+    // (AllToAll, AllReduce, ReduceScatter), so no other collective pays an extra
+    // device buffer.
+    this->expectedOnDevice = false;
+    if (UtDeviceDataEnabled() &&
+        (this->funcType == ncclCollAlltoAll || this->funcType == ncclCollAllReduce
+         || this->funcType == ncclCollReduceScatter))
+    {
+      CHECK_CALL(this->expectedGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
+    }
+
     // Allocate bias buffers if bias is enabled
     if (this->options.useBias)
     {
@@ -114,6 +126,11 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::PrepareData(CollFuncPtr const prepareDataFunc)
   {
+    // Reset per call: buffers are reused across sub-cases (AllocateMem is not re-run for
+    // each), so a prior device sub-case must not leave this true for a later host-path
+    // sub-case (which would validate against a stale expectedGpu). Device prep funcs set
+    // it true only when they actually build expectedGpu.
+    this->expectedOnDevice = false;
     CollFuncPtr prepFunc = (prepareDataFunc == nullptr ? DefaultPrepareDataFunc : prepareDataFunc);
     return prepFunc(*this);
   }
@@ -128,9 +145,60 @@ namespace RcclUnitTesting
     if (this->funcType == ncclCollSend) return TEST_SUCCESS; // on the send receive pair only recv needs to be checked
     size_t const numOutputBytes = (this->numOutputElements * DataTypeToBytes(this->dataType));
 
-    CHECK_HIP(hipMemcpy(this->outputCpu.ptr, this->outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
-
     bool isMatch = true;
+
+    // Device-data mode: compare outputGpu vs the device-built expectedGpu on the GPU
+    // (no D2H copy, no host element loop), using the same per-type tolerances as IsEqual.
+    if (UtDeviceDataEnabled() && this->expectedOnDevice)
+    {
+      size_t mismatches = 0;
+      CHECK_CALL(PtrUnion::IsEqualDevice(this->dataType,
+                                         this->numOutputElements,
+                                         this->outputGpu.ptr,
+                                         this->expectedGpu.ptr,
+                                         mismatches));
+      isMatch = (mismatches == 0);
+      if (!isMatch)
+      {
+        TEST_ERROR("Mismatch (%zu elements) for %s", mismatches, this->GetDescription().c_str());
+      }
+      return isMatch ? TEST_SUCCESS : TEST_FAIL;
+    }
+
+    if (this->funcType == ncclCollRecv && numOutputBytes != 0)
+    {
+      // outputCpu comes from AllocateCpuMem, which is calloc, so the buffer is
+      // pageable. Send returns above; only Recv reads a result. ExecuteCollectives
+      // has already synchronized the collective streams, including the extra
+      // stream sync that flushes the GPU cache before validation. That does not
+      // cover this copy. On gfx1250, hipMemcpy into the pageable buffer can
+      // still return success before the GPU has a stable mapping for the
+      // destination. SendRecv.SinglePairs then faulted on the host heap or
+      // compared a partial result. Copy into page-locked memory, wait for the
+      // device, then memcpy into the comparison buffer. Other collectives did
+      // not hit this and keep the direct hipMemcpy below.
+      PtrUnion staging;
+      CHECK_HIP(hipHostMalloc(&staging.ptr, numOutputBytes));
+      // CHECK_HIP returns on failure, so free the staging buffer before that
+      // return. Otherwise a failed copy or sync leaks the pinned allocation.
+      hipError_t stagingCopy = hipMemcpy(staging.ptr, this->outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost);
+      hipError_t stagingSync = hipSuccess;
+      if (stagingCopy == hipSuccess)
+        stagingSync = hipDeviceSynchronize();
+      if (stagingCopy != hipSuccess || stagingSync != hipSuccess)
+      {
+        (void)hipHostFree(staging.ptr);
+        staging.ptr = nullptr;
+        CHECK_HIP(stagingCopy != hipSuccess ? stagingCopy : stagingSync);
+      }
+      memcpy(this->outputCpu.ptr, staging.ptr, numOutputBytes);
+      CHECK_HIP(hipHostFree(staging.ptr));
+    }
+    else
+    {
+      CHECK_HIP(hipMemcpy(this->outputCpu.ptr, this->outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
+    }
+
     CHECK_CALL(this->outputCpu.IsEqual(this->dataType,
                                        this->numOutputElements,
                                        this->expected,
@@ -158,6 +226,10 @@ namespace RcclUnitTesting
 
     this->outputCpu.FreeCpuMem();
     this->expected.FreeCpuMem();
+    if (this->expectedGpu.ptr != nullptr)
+    {
+      this->expectedGpu.FreeGpuMem(this->userRegistered);
+    }
 
     if (this->localScalar.ptr != nullptr)
     {

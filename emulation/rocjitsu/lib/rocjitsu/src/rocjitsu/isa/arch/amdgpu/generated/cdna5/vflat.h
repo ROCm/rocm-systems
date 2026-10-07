@@ -158,8 +158,6 @@ class FlatLoadD16U8Vflat : public Vflat {
 public:
   FlatLoadD16U8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -170,8 +168,6 @@ class FlatLoadD16I8Vflat : public Vflat {
 public:
   FlatLoadD16I8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -182,8 +178,6 @@ class FlatLoadD16B16Vflat : public Vflat {
 public:
   FlatLoadD16B16Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -194,8 +188,6 @@ class FlatLoadD16HiU8Vflat : public Vflat {
 public:
   FlatLoadD16HiU8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -206,8 +198,6 @@ class FlatLoadD16HiI8Vflat : public Vflat {
 public:
   FlatLoadD16HiI8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -218,8 +208,6 @@ class FlatLoadD16HiB16Vflat : public Vflat {
 public:
   FlatLoadD16HiB16Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;

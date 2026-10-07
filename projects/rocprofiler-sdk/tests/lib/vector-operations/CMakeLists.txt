@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -35,11 +35,12 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(vector-ops.cpp PROPERTIES LANGUAGE HIP)
 add_library(vector-ops-shared-library SHARED)
 target_sources(vector-ops-shared-library PRIVATE vector-ops.cpp)
-target_compile_options(vector-ops-shared-library PRIVATE -W -Wall -Wextra -Wpedantic
-                                                         -Wshadow -Werror)
+target_compile_options(vector-ops-shared-library PRIVATE -Wpedantic)
 target_include_directories(vector-ops-shared-library PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 set_target_properties(vector-ops-shared-library PROPERTIES OUTPUT_NAME vector-ops)
 
 find_package(Threads REQUIRED)
-target_link_libraries(vector-ops-shared-library
-                      PRIVATE Threads::Threads rocprofiler-sdk::tests-common-library)
+target_link_libraries(
+    vector-ops-shared-library
+    PRIVATE Threads::Threads rocprofiler-sdk::tests-common-library
+            rocprofiler-sdk::tests-build-flags)

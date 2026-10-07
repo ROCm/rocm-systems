@@ -4,7 +4,8 @@
 /// @file scalar_scc_test.cpp
 /// @brief Cross-architecture scalar SCC execution and preservation tests.
 
-#include "rocjitsu/analysis/def_use_chain.h"
+#include "decode_test_util.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -118,7 +119,7 @@ const std::array<ScalarSccProfile, 10> kScalarSccProfiles{{
     {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", rdna3_encoding, WrexecDialect::AndNot, true},
     {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rdna3_5_encoding, WrexecDialect::AndNot, true},
     {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
+    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
 }};
 
 EncodingWords require_encoding(const ScalarSccProfile &profile, std::string_view mnemonic) {
@@ -211,7 +212,7 @@ public:
 
   std::unique_ptr<Instruction> decode(const EncodingWords &words,
                                       std::string_view expected_mnemonic) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     if (inst) {
       EXPECT_EQ(std::string_view(inst->mnemonic()), expected_mnemonic) << profile.name;
     }
@@ -225,7 +226,7 @@ public:
     ASSERT_NE(cmov, nullptr) << profile.name;
     EXPECT_EQ(wf->read_scc(), expected_scc) << profile.name << " " << context;
     cu->write_sgpr(sgpr_base() + 8, kCmovSentinel);
-    cu->execute_instruction(cmov.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(cmov.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_sgpr(sgpr_base() + 8), expected_scc ? 0x1234u : kCmovSentinel)
         << profile.name << " " << context;
   }
@@ -278,16 +279,16 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
   const uint8_t width = pair.is_b64 ? 2 : 1;
   for (const auto mnemonic : {pair.first, pair.second}) {
     const auto words = encode_sop1(profile, mnemonic, kDestSgpr, kSourceSgpr);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr) << profile.name << " " << mnemonic;
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
 
     const RegisterRef source{RegClass::SGPR, kSourceSgpr, width};
     const RegisterRef destination{RegClass::SGPR, kDestSgpr, width};
-    // The implicit EXEC read/write and SCC def are modeled as inert fieldless
-    // operands (to_register_ref() == nullopt): they add to the operand counts
-    // but contribute nothing to def/use at this time. The field-bearing SGPR
-    // source/dest stay at index 0.
+    // The implicit EXEC read/write and SCC def are fieldless special operands
+    // (to_register_ref() == nullopt): they become singleton special members of
+    // the def/use sets, but stay out of the ordinary projection asserted below.
+    // The field-bearing SGPR source/dest stay at index 0.
     ASSERT_EQ(inst->num_src_operands(), 2) << profile.name << " " << mnemonic;
     ASSERT_EQ(inst->num_dst_operands(), 3) << profile.name << " " << mnemonic;
     EXPECT_EQ(inst->src_operand(0)->to_register_ref(), source) << profile.name << " " << mnemonic;
@@ -307,8 +308,20 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
     EXPECT_FALSE(def_use.uses.contains(destination)) << profile.name << " " << mnemonic;
     EXPECT_TRUE(def_use.defs.contains(destination)) << profile.name << " " << mnemonic;
     EXPECT_FALSE(def_use.defs.contains(source)) << profile.name << " " << mnemonic;
-    EXPECT_EQ(def_use.uses.size(), static_cast<size_t>(width)) << profile.name << " " << mnemonic;
-    EXPECT_EQ(def_use.defs.size(), static_cast<size_t>(width)) << profile.name << " " << mnemonic;
+    EXPECT_EQ(def_use.uses.ordinary_size(), static_cast<size_t>(width))
+        << profile.name << " " << mnemonic;
+    EXPECT_EQ(def_use.defs.ordinary_size(), static_cast<size_t>(width))
+        << profile.name << " " << mnemonic;
+
+    // wrexec reads and writes EXEC and sets SCC: these fieldless special
+    // operands are singleton members of the def/use sets (outside the ordinary
+    // projection asserted above).
+    EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::EXEC, 0, 1}))
+        << profile.name << " " << mnemonic;
+    EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::EXEC, 0, 1}))
+        << profile.name << " " << mnemonic;
+    EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::SCC, 0, 1}))
+        << profile.name << " " << mnemonic;
   }
 }
 
@@ -355,7 +368,7 @@ void run_wrexec_scc_cases(const ScalarSccProfile &profile, const WrexecPair &pai
     fixture.wf->set_exec_raw(raw_exec);
     const bool expected_scc = test_case.expected != 0;
     fixture.wf->write_scc(!expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
 
     uint64_t actual = fixture.cu->read_sgpr(sb + kDestSgpr);
     if (pair.is_b64) {
@@ -508,7 +521,7 @@ void run_saveexec_case(ScalarSccFixture &fixture, const ScalarSccProfile &profil
       is_b64 ? old_exec : (static_cast<uint64_t>(kHighSentinel) << 32) | old_exec;
   fixture.wf->set_exec_raw(initial_raw_exec);
   fixture.wf->write_scc(expected == 0);
-  fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
 
   if (is_b64) {
     const uint64_t saved = fixture.cu->read_sgpr(sb + sdst) |
@@ -628,7 +641,7 @@ void run_addk_scc_cases(const ScalarSccProfile &profile) {
 
     fixture.cu->write_sgpr(sb + 4, test_case.initial);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     EXPECT_EQ(fixture.cu->read_sgpr(sb + 4), test_case.expected) << profile.name;
     fixture.expect_scc_consumer(test_case.expected_scc, mnemonic);
   }
@@ -665,7 +678,7 @@ void run_mulk_cases(const ScalarSccProfile &profile) {
     for (const bool initial_scc : {false, true}) {
       fixture.cu->write_sgpr(sb + 4, test_case.initial);
       fixture.wf->write_scc(initial_scc);
-      fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+      EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
       EXPECT_EQ(fixture.cu->read_sgpr(sb + 4), test_case.expected) << profile.name;
       fixture.expect_scc_consumer(initial_scc, "s_mulk_i32");
     }
@@ -684,12 +697,13 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
     const std::array mnemonics{addk_mnemonic(profile), std::string_view{"s_mulk_i32"}};
     for (const auto mnemonic : mnemonics) {
       const auto words = encode_sopk(profile, mnemonic, /*sdst=*/4, /*simm16=*/1);
-      std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr) << profile.name << " " << mnemonic;
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
 
-      // s_addk_i32 sets SCC, modeled as an inert fieldless dst operand;
-      // s_mulk_i32 does not touch SCC. SCC carries no def/use either way.
+      // s_addk_i32 sets SCC through a fieldless dst operand (no RegisterRef);
+      // s_mulk_i32 does not. InstDefUse records that SCC write as a singleton
+      // special member of defs, kept out of the ordinary projection below.
       const bool sets_scc = mnemonic != std::string_view{"s_mulk_i32"};
       ASSERT_EQ(inst->num_src_operands(), 2) << profile.name << " " << mnemonic;
       ASSERT_EQ(inst->num_dst_operands(), sets_scc ? 2 : 1) << profile.name << " " << mnemonic;
@@ -712,8 +726,12 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
           << profile.name << " " << mnemonic;
       EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
-      EXPECT_EQ(def_use.uses.size(), 1u) << profile.name << " " << mnemonic;
-      EXPECT_EQ(def_use.defs.size(), 1u) << profile.name << " " << mnemonic;
+      // The implicit SCC def is a special member of defs; the ordinary
+      // projection is just the s4 read-modify-write.
+      EXPECT_EQ(def_use.defs.contains(RegisterRef{RegClass::SCC, 0, 1}), sets_scc)
+          << profile.name << " " << mnemonic;
+      EXPECT_EQ(def_use.uses.ordinary_size(), 1u) << profile.name << " " << mnemonic;
+      EXPECT_EQ(def_use.defs.ordinary_size(), 1u) << profile.name << " " << mnemonic;
     }
   }
 }
@@ -770,7 +788,7 @@ void run_sop2_scc_cases(const ScalarSccProfile &profile) {
     fixture.cu->write_sgpr(sb, test_case.lhs);
     fixture.cu->write_sgpr(sb + 1, test_case.rhs);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     EXPECT_EQ(fixture.cu->read_sgpr(sb + 2), test_case.expected_result)
         << profile.name << " " << test_case.mnemonic;
     fixture.expect_scc_consumer(test_case.expected_scc, test_case.mnemonic);
@@ -823,7 +841,7 @@ void run_sop2_carry_input_cases(const ScalarSccProfile &profile) {
     fixture.cu->write_sgpr(sb, test_case.lhs);
     fixture.cu->write_sgpr(sb + 1, test_case.rhs);
     fixture.wf->write_scc(test_case.input_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     EXPECT_EQ(fixture.cu->read_sgpr(sb + 2), test_case.expected_result)
         << profile.name << " " << test_case.mnemonic;
     fixture.expect_scc_consumer(test_case.expected_scc, test_case.mnemonic);
@@ -862,7 +880,7 @@ void run_sopc_sopk_compare_scc_cases(const ScalarSccProfile &profile) {
     fixture.cu->write_sgpr(sb, test_case.lhs);
     fixture.cu->write_sgpr(sb + 1, test_case.rhs);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     fixture.expect_scc_consumer(test_case.expected_scc, test_case.mnemonic);
   }
 
@@ -886,7 +904,7 @@ void run_sopc_sopk_compare_scc_cases(const ScalarSccProfile &profile) {
 
     fixture.cu->write_sgpr(sb + 4, test_case.src);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     fixture.expect_scc_consumer(test_case.expected_scc, "s_cmpk_eq_i32");
   }
 }
@@ -932,7 +950,7 @@ void run_scalar_unary_preserves_scc(const ScalarSccProfile &profile,
       fixture.cu->write_sgpr(sb + 2, 0u);
       fixture.cu->write_sgpr(sb + 3, kHighDestinationSentinel);
       fixture.wf->write_scc(initial_scc);
-      fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+      EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
 
       uint64_t actual = fixture.cu->read_sgpr(sb + 2);
       if (test_case.result_is_64_bit) {
@@ -1052,15 +1070,15 @@ void run_scalar_scan_carry_chain(const ScalarSccProfile &profile) {
   fixture.cu->write_sgpr(sb + 12, 1u);
   fixture.wf->write_scc(false);
 
-  fixture.cu->execute_instruction(add.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(add.get(), *fixture.wf).succeeded());
   ASSERT_EQ(fixture.cu->read_sgpr(sb), 0u);
   ASSERT_TRUE(fixture.wf->read_scc());
 
-  fixture.cu->execute_instruction(scan.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(scan.get(), *fixture.wf).succeeded());
   ASSERT_EQ(fixture.cu->read_sgpr(sb + 10), 0u);
   ASSERT_TRUE(fixture.wf->read_scc());
 
-  fixture.cu->execute_instruction(addc.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(addc.get(), *fixture.wf).succeeded());
   EXPECT_EQ(fixture.cu->read_sgpr(sb + 1), 0x55u);
   EXPECT_FALSE(fixture.wf->read_scc());
 }

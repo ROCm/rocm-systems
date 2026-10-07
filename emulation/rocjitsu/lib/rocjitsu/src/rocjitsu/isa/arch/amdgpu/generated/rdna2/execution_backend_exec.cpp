@@ -615,9 +615,6 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<VFrexpMantF32Vop3>,
     &execute_with_backend<VClrexcpVop3>,
     &execute_with_backend<VMovreldB32Vop3>,
-    &execute_with_backend<VMovrelsB32Vop3>,
-    &execute_with_backend<VMovrelsdB32Vop3>,
-    &execute_with_backend<VMovrelsd2B32Vop3>,
     &execute_with_backend<VCvtF16U16Vop3>,
     &execute_with_backend<VCvtF16I16Vop3>,
     &execute_with_backend<VCvtU16F16Vop3>,
@@ -1411,6 +1408,9 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<FlatAtomicFcmpswapX2Flat>,
     &execute_with_backend<FlatAtomicFminX2Flat>,
     &execute_with_backend<FlatAtomicFmaxX2Flat>,
+    &execute_with_backend<GlobalLoadDwordAddtidFlat>,
+    &execute_with_backend<GlobalStoreDwordAddtidFlat>,
+    &execute_with_backend<GlobalAtomicCsubFlat>,
 }};
 
 } // namespace

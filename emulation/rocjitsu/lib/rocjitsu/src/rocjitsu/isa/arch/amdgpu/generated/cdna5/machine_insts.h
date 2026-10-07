@@ -81,7 +81,7 @@ struct Vop3pMachineInst {
   uint32_t vdst : 8;
   uint32_t neg_hi : 3;
   uint32_t opsel : 3;
-  uint32_t pad_14 : 1;
+  uint32_t opsel_hi_2 : 1;
   uint32_t clamp : 1;
   uint32_t op : 8;
   uint32_t encoding : 8;
@@ -486,7 +486,7 @@ struct Vop3pInstLiteralMachineInst {
   uint32_t vdst : 8;
   uint32_t neg_hi : 3;
   uint32_t opsel : 3;
-  uint32_t pad_14 : 1;
+  uint32_t opsel_hi_2 : 1;
   uint32_t clamp : 1;
   uint32_t op : 8;
   uint32_t encoding : 8;
@@ -502,7 +502,7 @@ struct Vop3pVopDpp8MachineInst {
   uint32_t vdst : 8;
   uint32_t neg_hi : 3;
   uint32_t opsel : 3;
-  uint32_t pad_14 : 1;
+  uint32_t opsel_hi_2 : 1;
   uint32_t clamp : 1;
   uint32_t op : 8;
   uint32_t encoding : 8;
@@ -526,7 +526,7 @@ struct Vop3pVopDpp16MachineInst {
   uint32_t vdst : 8;
   uint32_t neg_hi : 3;
   uint32_t opsel : 3;
-  uint32_t pad_14 : 1;
+  uint32_t opsel_hi_2 : 1;
   uint32_t clamp : 1;
   uint32_t op : 8;
   uint32_t encoding : 8;

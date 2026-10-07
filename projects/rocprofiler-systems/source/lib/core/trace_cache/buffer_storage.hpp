@@ -7,11 +7,10 @@
 #include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 
-#include "common/defines.h"
+#include "policies/thread_state_policy.hpp"
 
 #include <atomic>
 #include <cassert>
-#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -25,9 +24,7 @@
 
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 using ofs_t             = std::basic_ostream<char>;
@@ -82,17 +79,8 @@ struct flush_worker_factory_t
     }
 };
 
-namespace type_traits
-{
-template <typename T>
-concept thread_state_policy = requires(state::thread::State state_to_set) {
-    { T::scoped(state_to_set) } -> std::destructible;
-    { T::Internal } -> std::convertible_to<state::thread::State>;
-};
-}  // namespace type_traits
-
 template <typename WorkerFactory, typename TypeIdentifierEnum,
-          type_traits::thread_state_policy ThreadStatePolicy = state::thread>
+          rocprofsys::policies::thread_state_policy ThreadStatePolicy = state::thread>
 class buffer_storage
 {
     static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,
@@ -152,8 +140,8 @@ public:
         using TypeIdentifierEnumUderlayingType =
             std::underlying_type_t<TypeIdentifierEnum>;
 
-        size_t sample_size      = get_size(value);
-        size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
+        size_t const sample_size      = get_size(value);
+        size_t const bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
 
         // Hold the mutex for the entire reserve-and-write operation so that
         // the flush worker thread never reads a buffer region whose write is
@@ -161,12 +149,13 @@ public:
         // for position management; extending the critical section to cover the
         // actual memcpy closes the window that TSan (correctly) flags.
         //
-        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-        std::lock_guard scope{ m_mutex };
+        auto const thread_state_guard =
+            ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+        std::lock_guard const scope{ m_mutex };
 
-        auto*  buf      = reserve_memory_space(bytes_to_reserve);
-        size_t position = 0;
-        auto   type_identifier_value =
+        auto*      buf      = reserve_memory_space(bytes_to_reserve);
+        size_t     position = 0;
+        auto const type_identifier_value =
             static_cast<TypeIdentifierEnumUderlayingType>(Type::type_identifier);
 
         utility::store_value(type_identifier_value, buf, position);
@@ -174,7 +163,7 @@ public:
         serialize(buf + position, value);
     }
 
-    ROCPROFSYS_INLINE bool is_running() const
+    [[nodiscard]] __attribute__((always_inline)) bool is_running() const
     {
         return m_worker_synchronization != nullptr &&
                m_worker_synchronization->is_running;
@@ -185,18 +174,20 @@ private:
     {
         // Hold m_mutex for the full read so store() cannot write into the
         // region we are draining to the file.
-        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-        std::lock_guard guard{ m_mutex };
+        auto const thread_state_guard =
+            ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+        std::lock_guard const guard{ m_mutex };
 
-        size_t _head = m_head;
-        size_t _tail = m_tail;
+        size_t const _head = m_head;
+        size_t const _tail = m_tail;
 
         if(_head == _tail)
         {
             return;
         }
 
-        auto used_space = _head > _tail ? (_head - _tail) : (buffer_size - _tail + _head);
+        auto const used_space =
+            _head > _tail ? (_head - _tail) : (buffer_size - _tail + _head);
         if(!force && used_space < flush_threshold)
         {
             return;
@@ -239,7 +230,8 @@ private:
     }
 
     // Caller must hold m_mutex.
-    ROCPROFSYS_INLINE std::uint8_t* reserve_memory_space(const size_t& number_of_bytes)
+    [[nodiscard]] __attribute__((always_inline)) std::uint8_t* reserve_memory_space(
+        const size_t& number_of_bytes)
     {
         if(__builtin_expect((m_head + number_of_bytes + header_size<TypeIdentifierEnum>) >
                                 buffer_size,
@@ -265,5 +257,4 @@ private:
     std::unique_ptr<buffer_array_t> m_buffer{ std::make_unique<buffer_array_t>() };
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

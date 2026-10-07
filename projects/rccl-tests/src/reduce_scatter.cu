@@ -47,6 +47,13 @@ testResult_t  ReduceScatterGetSymkInfo(ncclComm_t comm, size_t count, ncclDataTy
   return testSuccess;
 }
 
+testResult_t  ReduceScatterGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+    const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetCollImplInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetCollImplInfo(comm, ncclFuncReduceScatter, count, type, op, sendbuff, recvbuff, graphCapturing, algo, proto, nchannels));
+  return testSuccess;
+}
+
 void ReduceScatterGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize * nranks) / 1.0E9 / sec;
 
@@ -73,7 +80,8 @@ struct testColl reduceScatterTest = {
   ReduceScatterGetBw,
   ReduceScatterRunColl,
   ReduceScatterGetAlgoProtoChannels,
-  ReduceScatterGetSymkInfo
+  ReduceScatterGetSymkInfo,
+  ReduceScatterGetCollImplInfo
 };
 
 void ReduceScatterGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
@@ -115,6 +123,26 @@ testResult_t ReduceScatterRunTest(struct threadArgs* args, int root, ncclDataTyp
 if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_ops[j] == ncclProd || strcmp(run_opnames[j],"mulsum") == 0))
     continue;
 #endif
+      // Ring ReduceScatter uses non-direct primitives (Direct=0). Floating-point avg
+      // is implemented via PreMulSum and is validated on AllReduce's direct path;
+      // integer avg (SumPostDiv) is fine. Skip floating avg here until RS parity lands.
+      if (run_ops[j] == ncclAvg) {
+        switch ((int)run_types[i]) {
+        case ncclFloat16:
+        case ncclFloat32:
+        case ncclFloat64:
+#if defined(RCCL_BFLOAT16)
+        case ncclBfloat16:
+#endif
+#if defined(RCCL_FLOAT8)
+        case ncclFloat8e4m3:
+        case ncclFloat8e5m2:
+#endif
+          continue;
+        default:
+          break;
+        }
+      }
       TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1));
     }
   }

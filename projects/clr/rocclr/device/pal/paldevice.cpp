@@ -89,6 +89,8 @@ static constexpr PalDevice supportedPalDevices[] = {
     {11, 5, 1, "gfx1151", Pal::AsicRevision::StrixHalo},
     {11, 5, 2, "gfx1152", Pal::AsicRevision::Krackan1},
     {11, 5, 3, "gfx1153", Pal::AsicRevision::Krackan2},
+    {11, 7, 0, "gfx1170", Pal::AsicRevision::Gfx1170},
+    {11, 7, 1, "gfx1171", Pal::AsicRevision::Gfx1171},
     {12, 0, 0, "gfx1200", Pal::AsicRevision::Navi44},
     {12, 0, 1, "gfx1201", Pal::AsicRevision::Navi48},
 };
@@ -352,14 +354,14 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.globalMemSize_ = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
                           static_cast<uint64_t>(localRAM) / 100u);
 
-  uint uswcPercentAvailable =
-      ((static_cast<uint64_t>(heaps[Pal::GpuHeapGartUswc].logicalSize) / Mi) > 1536 && IS_WINDOWS)
-          ? 75
-          : 50;
+  const uint64_t gartSize = static_cast<uint64_t>(heaps[Pal::GpuHeapGartUswc].logicalSize);
+
+  // The aperture is host DRAM the GPU addresses directly, so discount it by at most
+  // 25%, capped at 4 GiB, rather than the 50/75% heuristic. Applies to every APU.
+  const uint64_t gartCredit = gartSize - std::min<uint64_t>(gartSize / 4, 4 * Gi);
+
   if (settings().apuSystem_) {
-    info_.globalMemSize_ +=
-        (static_cast<uint64_t>(heaps[Pal::GpuHeapGartUswc].logicalSize) * uswcPercentAvailable) /
-        100;
+    info_.globalMemSize_ += gartCredit;
   }
 
   // Find the largest heap form FB memory
@@ -373,10 +375,10 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 
 #if IS_WINDOWS
   if (settings().apuSystem_) {
-    info_.maxMemAllocSize_ = std::max(
-        (static_cast<uint64_t>(heaps[Pal::GpuHeapGartUswc].logicalSize) * uswcPercentAvailable) /
-            100,
-        info_.maxMemAllocSize_);
+    // One allocation is not confined to a single heap, so the ceiling is the whole pool:
+    // carve-out plus aperture. Measured on gfx1151 at 100 GiB across a carve-out split
+    // 64 GiB visible plus 32 GiB invisible.
+    info_.maxMemAllocSize_ = info_.globalMemSize_;
   }
 #endif
   info_.maxMemAllocSize_ =

@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
@@ -29,6 +10,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <iosfwd>
 #include <limits>
 #include <optional>
 #include <string>
@@ -318,19 +300,37 @@ amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* 
 const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
 
 /**
- *  @brief Whether gfx activity should be reported as N/A for this GPU.
+ *  @brief Reset amdsmi_asic_info_t to its not-supported state.
  *
- *  AMDSMI_SILENCE_GFX_ACTIVITY overrides everything ("1" silences, any other
- *  value shows). When unset, silencing auto-enables for GPUs whose graphics and
- *  RLC firmware versions fall in the affected ranges.
+ *  Backends call this before filling in what they can, so a field a backend
+ *  does not know about reports N/A rather than a plausible zero.
+ *
+ *  @param[out] info Structure to reset to its not-supported state.
  */
-bool is_gfx_activity_silenced(amdsmi_processor_handle processor_handle);
+void init_asic_info_defaults(amdsmi_asic_info_t* info);
+
+inline constexpr auto kAmdgpuDkmsRoot = std::string_view{"/var/lib/dkms/amdgpu"};
+
+auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
+                                      std::string_view package_version, amdsmi_driver_info_t* info)
+    -> amdsmi_status_t;
 
 /**
- *  @brief Force the gfx activity fields of @p metrics to the uint-max N/A
- *  sentinel when silenced (whole-GPU and per-XCP busy values). No-op otherwise.
+ *  @brief Select the DKMS package built for a running kernel.
+ *
+ *  @details Reads ``kernel-<release>-<machine>`` under @p dkms_root, then
+ *  validates only that PACKAGE_VERSION directory through the dkms.conf behind
+ *  its source symlink. Does not scan sibling packages.
+ *
+ *  @param[in] dkms_root Directory that contains kernel-* symlinks (for example
+ *             /var/lib/dkms/amdgpu).
+ *  @param[in] release Kernel release from uname, such as 6.8.0-124-generic.
+ *  @param[in] machine Hardware name from uname, such as x86_64.
+ *  @param[out] active_version Cleared on entry. Set to PACKAGE_VERSION when
+ *              the kernel symlink points at a validated package.
  */
-void apply_gfx_activity_overrides(amdsmi_processor_handle processor_handle,
-                                  amdsmi_gpu_metrics_t* metrics);
+auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_view release,
+                                        std::string_view machine, std::string* active_version)
+    -> amdsmi_status_t;
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

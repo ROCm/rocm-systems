@@ -46,9 +46,5 @@ target_compile_options(
 
 set_target_properties(
     profiler-hub_queries
-    PROPERTIES
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-        POSITION_INDEPENDENT_CODE ON
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
 )

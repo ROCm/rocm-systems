@@ -255,6 +255,10 @@ uint32_t get_direct_link_cpu(uint32_t gpu_node);
 HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props);
 HSAKMT_STATUS topology_get_node_props(HSAuint32 NodeId,
 				      HsaNodeProperties *NodeProperties);
+void topology_clear_snapshot_refs(void);
+void topology_abandon_after_fork(void);
+bool topology_snapshot_is_live(void);
+void topology_drop_snapshot_at_last_close(void);
 HSAKMT_STATUS topology_get_iolink_props(HSAuint32 NodeId,
 					HSAuint32 NumIoLinks,
 					HsaIoLinkProperties *IoLinkProperties);

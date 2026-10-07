@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -27,7 +28,7 @@ static_assert(std::is_same_v<decltype(rj_code_inst_next(nullptr)), const rj_code
 
 TEST(DecoderCApiTest, InvalidInstructionReturnsErrorAndClearsOutput) {
   rj_code_decoder_t *decoder = nullptr;
-  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_GFX1250, &decoder), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_CDNA5, &decoder), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(decoder, nullptr);
 
   auto *instruction = reinterpret_cast<rj_code_inst_t *>(static_cast<uintptr_t>(1));
@@ -132,7 +133,7 @@ TEST(DecoderCApiTest, HeapAllocationScopeForgetsDestroyedPool) {
 
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<rocjitsu::Instruction> instruction(decoder->decode(&kCdnaSEndpgm));
+  std::unique_ptr<rocjitsu::Instruction> instruction(decode_valid(*decoder, &kCdnaSEndpgm));
   ASSERT_NE(instruction, nullptr);
   EXPECT_EQ(instruction->mnemonic(), "s_endpgm");
 }

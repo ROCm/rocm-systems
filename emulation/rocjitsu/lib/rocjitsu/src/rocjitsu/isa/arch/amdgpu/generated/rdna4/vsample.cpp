@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vsample.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -24,10 +23,16 @@ ImageMsaaLoadVsample::ImageMsaaLoadVsample(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageMsaaLoadVsample(const MachineInst *opcode) {
+DecodeResult decodeImageMsaaLoadVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_msaa_load", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageMsaaLoadVsample>(opcode);
 }
 } // namespace detail
@@ -46,10 +51,16 @@ ImageSampleVsample::ImageSampleVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleVsample(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleVsample>(opcode);
 }
 } // namespace detail
@@ -68,10 +79,16 @@ ImageSampleDVsample::ImageSampleDVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleDVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleDVsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleDVsample>(opcode);
 }
 } // namespace detail
@@ -90,10 +107,16 @@ ImageSampleLVsample::ImageSampleLVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleLVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleLVsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleLVsample>(opcode);
 }
 } // namespace detail
@@ -112,10 +135,16 @@ ImageSampleBVsample::ImageSampleBVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleBVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleBVsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleBVsample>(opcode);
 }
 } // namespace detail
@@ -134,10 +163,16 @@ ImageSampleLzVsample::ImageSampleLzVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleLzVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleLzVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleLzVsample>(opcode);
 }
 } // namespace detail
@@ -156,10 +191,16 @@ ImageSampleCVsample::ImageSampleCVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCVsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCVsample>(opcode);
 }
 } // namespace detail
@@ -178,10 +219,16 @@ ImageSampleCDVsample::ImageSampleCDVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCDVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCDVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCDVsample>(opcode);
 }
 } // namespace detail
@@ -200,10 +247,16 @@ ImageSampleCLVsample::ImageSampleCLVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCLVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCLVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCLVsample>(opcode);
 }
 } // namespace detail
@@ -222,10 +275,16 @@ ImageSampleCBVsample::ImageSampleCBVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCBVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCBVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCBVsample>(opcode);
 }
 } // namespace detail
@@ -244,10 +303,16 @@ ImageSampleCLzVsample::ImageSampleCLzVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCLzVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCLzVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCLzVsample>(opcode);
 }
 } // namespace detail
@@ -266,10 +331,16 @@ ImageSampleOVsample::ImageSampleOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleOVsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleOVsample>(opcode);
 }
 } // namespace detail
@@ -288,10 +359,16 @@ ImageSampleDOVsample::ImageSampleDOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleDOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleDOVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleDOVsample>(opcode);
 }
 } // namespace detail
@@ -310,10 +387,16 @@ ImageSampleLOVsample::ImageSampleLOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleLOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleLOVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_l_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleLOVsample>(opcode);
 }
 } // namespace detail
@@ -332,10 +415,16 @@ ImageSampleBOVsample::ImageSampleBOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleBOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleBOVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_b_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleBOVsample>(opcode);
 }
 } // namespace detail
@@ -354,10 +443,16 @@ ImageSampleLzOVsample::ImageSampleLzOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleLzOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleLzOVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleLzOVsample>(opcode);
 }
 } // namespace detail
@@ -376,10 +471,16 @@ ImageSampleCOVsample::ImageSampleCOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCOVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCOVsample>(opcode);
 }
 } // namespace detail
@@ -398,10 +499,16 @@ ImageSampleCDOVsample::ImageSampleCDOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCDOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCDOVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCDOVsample>(opcode);
 }
 } // namespace detail
@@ -420,10 +527,16 @@ ImageSampleCLOVsample::ImageSampleCLOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCLOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCLOVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_l_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCLOVsample>(opcode);
 }
 } // namespace detail
@@ -442,10 +555,16 @@ ImageSampleCBOVsample::ImageSampleCBOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCBOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCBOVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_b_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCBOVsample>(opcode);
 }
 } // namespace detail
@@ -464,10 +583,16 @@ ImageSampleCLzOVsample::ImageSampleCLzOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCLzOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCLzOVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCLzOVsample>(opcode);
 }
 } // namespace detail
@@ -486,10 +611,16 @@ ImageGather4Vsample::ImageGather4Vsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4Vsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4Vsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4Vsample>(opcode);
 }
 } // namespace detail
@@ -508,10 +639,16 @@ ImageGather4LVsample::ImageGather4LVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4LVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4LVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4LVsample>(opcode);
 }
 } // namespace detail
@@ -530,10 +667,16 @@ ImageGather4BVsample::ImageGather4BVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4BVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4BVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4BVsample>(opcode);
 }
 } // namespace detail
@@ -552,10 +695,16 @@ ImageGather4LzVsample::ImageGather4LzVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4LzVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4LzVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4LzVsample>(opcode);
 }
 } // namespace detail
@@ -574,10 +723,16 @@ ImageGather4CVsample::ImageGather4CVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4CVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4CVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4CVsample>(opcode);
 }
 } // namespace detail
@@ -596,10 +751,16 @@ ImageGather4CLzVsample::ImageGather4CLzVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4CLzVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4CLzVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4CLzVsample>(opcode);
 }
 } // namespace detail
@@ -618,10 +779,16 @@ ImageGather4OVsample::ImageGather4OVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4OVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4OVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4OVsample>(opcode);
 }
 } // namespace detail
@@ -640,10 +807,16 @@ ImageGather4LzOVsample::ImageGather4LzOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4LzOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4LzOVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4LzOVsample>(opcode);
 }
 } // namespace detail
@@ -662,10 +835,16 @@ ImageGather4CLzOVsample::ImageGather4CLzOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4CLzOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4CLzOVsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4CLzOVsample>(opcode);
 }
 } // namespace detail
@@ -684,10 +863,16 @@ ImageGetLodVsample::ImageGetLodVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGetLodVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGetLodVsample(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_get_lod", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGetLodVsample>(opcode);
 }
 } // namespace detail
@@ -706,10 +891,16 @@ ImageSampleDG16Vsample::ImageSampleDG16Vsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleDG16Vsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleDG16Vsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleDG16Vsample>(opcode);
 }
 } // namespace detail
@@ -728,10 +919,16 @@ ImageSampleCDG16Vsample::ImageSampleCDG16Vsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCDG16Vsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCDG16Vsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCDG16Vsample>(opcode);
 }
 } // namespace detail
@@ -750,10 +947,16 @@ ImageSampleDOG16Vsample::ImageSampleDOG16Vsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleDOG16Vsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleDOG16Vsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_o_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleDOG16Vsample>(opcode);
 }
 } // namespace detail
@@ -772,10 +975,16 @@ ImageSampleCDOG16Vsample::ImageSampleCDOG16Vsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCDOG16Vsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCDOG16Vsample(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_o_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCDOG16Vsample>(opcode);
 }
 } // namespace detail
@@ -794,10 +1003,16 @@ ImageSampleClVsample::ImageSampleClVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleClVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleClVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleClVsample>(opcode);
 }
 } // namespace detail
@@ -816,10 +1031,16 @@ ImageSampleDClVsample::ImageSampleDClVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleDClVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleDClVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleDClVsample>(opcode);
 }
 } // namespace detail
@@ -838,10 +1059,16 @@ ImageSampleBClVsample::ImageSampleBClVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleBClVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleBClVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleBClVsample>(opcode);
 }
 } // namespace detail
@@ -860,10 +1087,16 @@ ImageSampleCClVsample::ImageSampleCClVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCClVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCClVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCClVsample>(opcode);
 }
 } // namespace detail
@@ -882,10 +1115,16 @@ ImageSampleCDClVsample::ImageSampleCDClVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCDClVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCDClVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCDClVsample>(opcode);
 }
 } // namespace detail
@@ -904,10 +1143,16 @@ ImageSampleCBClVsample::ImageSampleCBClVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCBClVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCBClVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCBClVsample>(opcode);
 }
 } // namespace detail
@@ -926,10 +1171,16 @@ ImageSampleClOVsample::ImageSampleClOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleClOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleClOVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleClOVsample>(opcode);
 }
 } // namespace detail
@@ -948,10 +1199,16 @@ ImageSampleDClOVsample::ImageSampleDClOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleDClOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleDClOVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleDClOVsample>(opcode);
 }
 } // namespace detail
@@ -970,10 +1227,16 @@ ImageSampleBClOVsample::ImageSampleBClOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleBClOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleBClOVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_b_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleBClOVsample>(opcode);
 }
 } // namespace detail
@@ -992,10 +1255,16 @@ ImageSampleCClOVsample::ImageSampleCClOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCClOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCClOVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCClOVsample>(opcode);
 }
 } // namespace detail
@@ -1014,10 +1283,16 @@ ImageSampleCDClOVsample::ImageSampleCDClOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCDClOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCDClOVsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCDClOVsample>(opcode);
 }
 } // namespace detail
@@ -1036,10 +1311,16 @@ ImageSampleCBClOVsample::ImageSampleCBClOVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCBClOVsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCBClOVsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_b_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCBClOVsample>(opcode);
 }
 } // namespace detail
@@ -1058,10 +1339,16 @@ ImageSampleCDClG16Vsample::ImageSampleCDClG16Vsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCDClG16Vsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCDClG16Vsample(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_cl_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCDClG16Vsample>(opcode);
 }
 } // namespace detail
@@ -1080,10 +1367,16 @@ ImageSampleDClOG16Vsample::ImageSampleDClOG16Vsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleDClOG16Vsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleDClOG16Vsample(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_cl_o_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleDClOG16Vsample>(opcode);
 }
 } // namespace detail
@@ -1102,10 +1395,17 @@ ImageSampleCDClOG16Vsample::ImageSampleCDClOG16Vsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleCDClOG16Vsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleCDClOG16Vsample(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vsample::validate_encoding("image_sample_c_d_cl_o_g16",
+                                 reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleCDClOG16Vsample>(opcode);
 }
 } // namespace detail
@@ -1124,10 +1424,16 @@ ImageSampleDClG16Vsample::ImageSampleDClG16Vsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleDClG16Vsample(const MachineInst *opcode) {
+DecodeResult decodeImageSampleDClG16Vsample(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_cl_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleDClG16Vsample>(opcode);
 }
 } // namespace detail
@@ -1146,10 +1452,16 @@ ImageGather4ClVsample::ImageGather4ClVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4ClVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4ClVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4ClVsample>(opcode);
 }
 } // namespace detail
@@ -1168,10 +1480,16 @@ ImageGather4BClVsample::ImageGather4BClVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4BClVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4BClVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4BClVsample>(opcode);
 }
 } // namespace detail
@@ -1190,10 +1508,16 @@ ImageGather4CClVsample::ImageGather4CClVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4CClVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4CClVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4CClVsample>(opcode);
 }
 } // namespace detail
@@ -1212,10 +1536,16 @@ ImageGather4CLVsample::ImageGather4CLVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4CLVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4CLVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4CLVsample>(opcode);
 }
 } // namespace detail
@@ -1234,10 +1564,16 @@ ImageGather4CBVsample::ImageGather4CBVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4CBVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4CBVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4CBVsample>(opcode);
 }
 } // namespace detail
@@ -1256,10 +1592,16 @@ ImageGather4CBClVsample::ImageGather4CBClVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4CBClVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4CBClVsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4CBClVsample>(opcode);
 }
 } // namespace detail
@@ -1278,10 +1620,16 @@ ImageGather4hVsample::ImageGather4hVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGather4hVsample(const MachineInst *opcode) {
+DecodeResult decodeImageGather4hVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4h", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGather4hVsample>(opcode);
 }
 } // namespace detail

@@ -12,6 +12,11 @@ import shutil
 
 gensrc = sys.argv[1]
 
+# The second argument, when present, is CMake's GPU_TARGETS list. It selects the
+# arch-specific algos below; absent (e.g. a bare run of this script) nothing
+# arch-specific is emitted.
+gpu_targets = sys.argv[2] if len(sys.argv) > 2 else ""
+
 if os.path.exists(gensrc):
   for name in os.listdir(gensrc):
     path = os.path.join(gensrc, name)
@@ -90,17 +95,29 @@ ty_to_cxxtype = {
   "f8e5m2": "rccl_bfloat8"
 }
 
+# The Tma* algos stage their tiles through a DMA engine rather than per-lane vector
+# loads (see NCCL_SYMK_ASYNC_TILE in src/device/symmetric/primitives.cuh). On ROCm
+# that engine is the gfx1250 Tensor Data Mover, so on any other target these kernels
+# would compile down to a duplicate of their vector counterpart -- emit them only
+# when a capable arch is in GPU_TARGETS.
+have_tdm = "gfx1250" in gpu_targets
+
 def enumerate_kernels():
-  for algo in ["LL","ST"]:
+  ag_algos = ["LL","ST"] + (["TmaST"] if have_tdm else [])
+  # AllGather_TmaSTMC and the other *MC algos need multimem, which ROCm has no
+  # equivalent for, so they stay out regardless of the target.
+  ar_algos = ["AGxLL_R","RSxLD_AGxST"] + (["RSxTmaLD_AGxTmaST"] if have_tdm else [])
+  rs_algos = ["LL","LD"] + (["TmaLD"] if have_tdm else [])
+  for algo in ag_algos:
     yield Rec(coll="AllGather", algo=algo)
   for red in all_reds:
     for ty in all_tys:
-      for algo in ["AGxLL_R","RSxLD_AGxST"]:
+      for algo in ar_algos:
         # AllReduce implements sum only; skip avg (matches upstream).
         if red == "avg":
           continue
         yield Rec(coll="AllReduce", algo=algo, red=red, ty=ty)
-      for algo in ["LL","LD"]:
+      for algo in rs_algos:
         # ReduceScatter emits sum and avg for every float type.
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
       # Multi-node GIN ReduceScatter; non-multicast only (no NVLS/multimem on ROCm).
@@ -122,7 +139,7 @@ def required_cuda(k):
       if k.algo in ldmc_algos:
         cudart = 12070
         arch = None
-        specific_sms = ["100a", "101a", "100f", "101f", "120a", "121a"]
+        specific_sms = ["100a", "101a", "107", "100f", "101f", "120a", "121a"]
   return (cudart, arch, specific_sms)
 
 ################################################################################
@@ -141,6 +158,13 @@ def kernel_fname(k):
       return paste('_', coll_to_lower[k.coll], k.red, k.ty) + '.cpp'
   else:
     return coll_to_lower[k.coll] + '.cpp'
+
+# Sibling .cpp holding the instrumented (_profile) instantiations, kept separate so
+# the build compiles the default and profile variants concurrently. RCCL emits
+# .cpp (hipified) where upstream emits .cu.
+def profile_fname(fname):
+  assert fname.endswith('.cpp')
+  return fname[:-len('.cpp')] + '_profile.cpp'
 
 def kernel_gencode(k):
   if k.coll in reductions and k.algo in ldmc_algos and k.ty.startswith('f8'):
@@ -165,28 +189,43 @@ def kernel_conds(k):
     arch_cond = " || ".join(["0"] + ["NCCL_CUDA_ARCH_%sSPECIFIC==%d"%("FAMILY_" if sm[-1] == "f" else "", 10*int(sm.replace('a', '').replace('f', ''))) for sm in specific_sms])
   return cudart_cond, arch_cond
 
-def instantiate(k):
+# Each kernel has two __global__ entrypoints: {cname} -> ncclSymkRun_{id}<false,...>
+# (no profiler code) and {cname}_profile -> Start + ncclSymkRun_{id}<true,...> + Stop.
+# The host selects the _profile variant only when profiling is active.
+def kernel_cname_profile(k):
+  return kernel_cname(k) + "_profile"
+
+def instantiate(k, profile):
   form_red_ty = (
     "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
-    "  ncclSymkRun_{id}<{red}, {ty}>(&args4K.args);\n"
+    "{start}"
+    "  ncclSymkRun_{id}<{prof}, {red}, {ty}>(&args4K.args);\n"
+    "{stop}"
     "}}"
   )
   form = (
     "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
-    "  ncclSymkRun_{id}(&args4K.args);\n"
+    "{start}"
+    "  ncclSymkRun_{id}<{prof}>(&args4K.args);\n"
+    "{stop}"
     "}}"
   )
 
   id = k.coll+'_'+k.algo
-  cname = kernel_cname(k)
+  cname = kernel_cname_profile(k) if profile else kernel_cname(k)
+  prof = 'true' if profile else 'false'
+  start = '  ncclSymkProfilerStart(&args4K.args);\n' if profile else ''
+  stop  = '  ncclSymkProfilerStop(&args4K.args);\n' if profile else ''
   if k.coll in reductions:
-    inst = form_red_ty.format(cname=cname, id=id, red=red_to_Func[k.red], ty=ty_to_cxxtype[k.ty])
+    inst = form_red_ty.format(cname=cname, id=id, prof=prof, red=red_to_Func[k.red], ty=ty_to_cxxtype[k.ty],
+                              start=start, stop=stop)
   else:
-    inst = form.format(cname=cname, id=id)
+    inst = form.format(cname=cname, id=id, prof=prof, start=start, stop=stop)
   return inst
 
 def prototype(k):
-  return "__global__ void {cname}(ncclSymkDevWorkArgs4K const);".format(cname=kernel_cname(k))
+  form = "__global__ void {cname}(ncclSymkDevWorkArgs4K const);"
+  return "\n".join(form.format(cname=cname) for cname in (kernel_cname(k), kernel_cname_profile(k)))
 
 ################################################################################
 
@@ -209,20 +248,30 @@ for coll in set(k.coll for k in enumerate_kernels()):
     kernels_by_file[fname, coll] = []
 
 files_to_print = ""
-# Generate each kernel instantiation file
+# Generate each kernel instantiation file, plus a sibling _profile.cpp with the
+# instrumented variants so both compile concurrently.
 for (fname, coll), ks in kernels_by_file.items():
   files_to_print += fname + ";"
+  # GIN instantiation TUs need the *_gin.h header for the RailA2A/RailRing defs.
+  coll_include = '#include "symmetric/{coll}{gin}.h"'.format(
+    coll=coll_to_lower[coll], gin='_gin' if (ks and all(k.algo in gin_algos for k in ks)) else '')
   with open(os.path.join(gensrc, fname), "w") as f:
     print("-- Generating %s" % os.path.join(gensrc, fname))
     emitln(f, '#include "sym_kernels.h"')
     emitln(f, '#include "symmetric/kernel.h"')
-    # GIN instantiation TUs need the *_gin.h header for the RailA2A/RailRing defs.
-    if ks and all(k.algo in gin_algos for k in ks):
-      emitln(f, '#include "symmetric/{coll}_gin.h"'.format(coll=coll_to_lower[coll]))
-    else:
-      emitln(f, '#include "symmetric/{coll}.h"'.format(coll=coll_to_lower[coll]))
+    emitln(f, coll_include)
     for k in ks:
-      emitln(f, instantiate(k))
+      emitln(f, instantiate(k, profile=False))
+  if ks:
+    pfname = profile_fname(fname)
+    files_to_print += pfname + ";"
+    with open(os.path.join(gensrc, pfname), "w") as f:
+      print("-- Generating %s" % os.path.join(gensrc, pfname))
+      emitln(f, '#include "sym_kernels.h"')
+      emitln(f, '#include "symmetric/kernel.h"')
+      emitln(f, coll_include)
+      for k in ks:
+        emitln(f, instantiate(k, profile=True))
 
 # Generate <gensrc>/sym_kernels_host.cc
 with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
@@ -240,6 +289,14 @@ with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
   emitln(f, 'void* ncclSymkKernelList[] = {')
   for k in kernel_list:
     emitln(f, '(void*){cname},'.format(cname=kernel_cname(k)))
+  emitln(f, 'nullptr};')
+  emitln(f, '')
+
+  # Parallel list of instrumented variants, indexed identically to
+  # ncclSymkKernelList (ncclSymkGetKernelIndex / requirements / smem are shared).
+  emitln(f, 'void* ncclSymkKernelListProfile[] = {')
+  for k in kernel_list:
+    emitln(f, '(void*){cname},'.format(cname=kernel_cname_profile(k)))
   emitln(f, 'nullptr};')
   emitln(f, '')
 
