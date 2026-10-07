@@ -8981,19 +8981,19 @@ class CodeGenerator:
     ) -> str:
         """Generate a GWS (Global Wave Sync) execute() body (DS encoding).
 
-          * Decode the 6-bit resource id as (M0[21:16] + offset0[5:0]) & 0x3f
-            (the hardware convention; it is not spelled out in the ISA XML).
-          * For init/barrier/sema_br (which carry one source VGPR), read the
-            count from the ADDR operand's first active lane, honoring the DS acc
-            bit so the AGPR bank is used when selected. sema_v/p/release_all
-            carry no operand.
-          * Route to the matching ComputeUnitCore GWS hook, then publish a
-            zero-payload LOCAL_MEM VectorMemState so the DS pipeline still
-            increments and retires the lgkmcnt/GDS wait counter and plugins
-            observe the instruction (the structural accounting path).
-          * When EXEC is zero the wave contributes no active lane, so the
-            operation is a pure structural no-op (no rid decode, no count read,
-            no hook call) -- this keeps GWS EXEC-independent.
+        * Decode the 6-bit resource id as (M0[21:16] + offset0[5:0]) & 0x3f
+          (the hardware convention; it is not spelled out in the ISA XML).
+        * For init/barrier/sema_br (which carry one source VGPR), read the
+          count from the ADDR operand's first active lane, honoring the DS acc
+          bit so the AGPR bank is used when selected. sema_v/p/release_all
+          carry no operand.
+        * Route to the matching ComputeUnitCore GWS hook, then publish a
+          zero-payload LOCAL_MEM VectorMemState so the DS pipeline still
+          increments and retires the lgkmcnt/GDS wait counter and plugins
+          observe the instruction (the structural accounting path).
+        * When EXEC is zero the wave contributes no active lane, so the
+          operation is a pure structural no-op (no rid decode, no count read,
+          no hook call) -- this keeps GWS EXEC-independent.
         """
         op = sem.operation
         has_count = op in ('init', 'barrier', 'sema_br')
