@@ -39,6 +39,7 @@ pub(super) const FREE_MEMORY: u64 = request(1, 0x17, 8);
 pub(super) const MAP_MEMORY: u64 = request(3, 0x18, 24);
 pub(super) const UNMAP_MEMORY: u64 = request(3, 0x19, 24);
 pub(super) const SET_CU_MASK: u64 = request(1, 0x1a, 16);
+pub(super) const ALLOC_QUEUE_GWS: u64 = request(3, 0x1e, 16);
 pub(super) const GET_DMABUF_INFO: u64 = request(3, 0x1c, 32);
 pub(super) const IMPORT_DMABUF: u64 = request(3, 0x1d, 24);
 pub(super) const EXPORT_DMABUF: u64 = request(3, 0x24, 16);
@@ -134,6 +135,15 @@ pub(super) struct ClockCounters {
 pub(super) struct AvailableMemory {
     pub available: u64,
     pub gpu_id: u32,
+    pub pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct AllocQueueGws {
+    pub queue_id: u32,
+    pub num_gws: u32,
+    pub first_gws: u32,
     pub pad: u32,
 }
 
@@ -466,6 +476,9 @@ const _: () = {
     assert!(offset_of!(UpdateQueue, queue_id) == 8);
     assert!(size_of::<SetCuMask>() == 16);
     assert!(offset_of!(SetCuMask, mask) == 8);
+    assert!(size_of::<AllocQueueGws>() == 16);
+    assert!(offset_of!(AllocQueueGws, first_gws) == 8);
+    assert!(ALLOC_QUEUE_GWS == 0xc010_4b1e);
     assert!(size_of::<Version>() == 8);
     assert!(size_of::<ClockCounters>() == 40);
     assert!(offset_of!(ClockCounters, gpu_id) == 32);

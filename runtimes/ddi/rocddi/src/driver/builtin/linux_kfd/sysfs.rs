@@ -48,6 +48,7 @@ pub(crate) struct NativeQueueProperties {
     pub control_stack_size: u32,
     pub sdma_engines: u32,
     pub sdma_xgmi_engines: u32,
+    pub gws_count: u32,
     pub compute_queues: u32,
     pub sdma_qualified: bool,
 }
@@ -747,6 +748,7 @@ fn read_node(
         control_stack_size: stack.unwrap_or(0),
         sdma_engines: sdma.unwrap_or(0),
         sdma_xgmi_engines,
+        gws_count,
         compute_queues: p.u32("num_cp_queues")?,
         sdma_qualified,
     };

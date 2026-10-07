@@ -814,6 +814,7 @@ unsafe fn create_hardware_queue(
                             } else {
                                 QueueProducerMode::Multiple
                             },
+                            global_work_sync: false,
                             inactive_signal: Some(inactive_signal.handle()),
                             error_event: Some(inactive_signal.error_event()),
                             scratch,
