@@ -1440,3 +1440,46 @@ class TestMemoryCoherencyModelEnum:
     def test_values_are_distinct(self):
         vals = [m.value for m in MemoryCoherencyModel]
         assert len(vals) == len(set(vals))
+
+
+@pytest.mark.parametrize(
+    ('profile', 'supported'),
+    [
+        (Cdna1Profile(), True),
+        (Cdna2Profile(), True),
+        (CdnaProfile(), True),
+        (Cdna4Profile(), True),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), False),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+        (Cdna5Profile(), False),
+    ],
+)
+@pytest.mark.parametrize(
+    'encoding',
+    [
+        'ENC_VOP1',
+        'ENC_VOP2',
+        'ENC_VOP3',
+        'ENC_VOPC',
+        'ENC_VOP3P',
+        'VOP3_SDST_ENC',
+        'VOP3P_MFMA',
+        'ENC_MUBUF',
+        'ENC_MTBUF',
+        'ENC_MIMG',
+        'ENC_DS',
+        'ENC_FLAT',
+        'ENC_EXP',
+        'ENC_VINTRP',
+    ],
+)
+def test_vskip_vector_encodings(profile, supported, encoding):
+    assert profile.vskip_affected_encoding(encoding) is supported
+
+
+@pytest.mark.parametrize('encoding', ['ENC_SOP1', 'ENC_SOPC', 'ENC_SOPP', 'ENC_SMEM'])
+def test_vskip_does_not_suppress_scalar_encodings(encoding):
+    assert not CdnaProfile().vskip_affected_encoding(encoding)

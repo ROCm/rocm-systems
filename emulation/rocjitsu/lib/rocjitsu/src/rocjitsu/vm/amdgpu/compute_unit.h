@@ -249,6 +249,7 @@ public:
   /// @brief Execute up to one functional quantum of step() iterations on this CU.
   /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
   FunctionalQuantumResult run_quantum() {
+    const GpuVmAccessBatchGuard vm_access_batch;
     // Reuse instruction-fetch snapshots only within this execution quantum.
     // Restore the outer scope on exceptions and nested quantum execution too.
     InstructionVmSnapshot snapshot;
@@ -446,8 +447,25 @@ public:
   void abort_dispatch(uint32_t dispatch_id);
 
   /// @brief Set the execution plugin group (shared ownership).
+  /// @details Replacement refreshes resident waves' hot-hook subscriptions but
+  /// does not replay dispatch callbacks or migrate or clear wave-local plugin
+  /// state. Stateful plugins must tolerate missing initialization and state
+  /// left in a reused slot when attached to an already-resident wave.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
-    plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
+    std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
+    auto replacement = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
+    if (plugin_group_.get() != replacement.get()) {
+      // A resident wave's cached decisions belong to the group that observed
+      // its dispatch. A replacement group may have the same plugin count but
+      // different per-wave subscriptions, so force it onto the live-query path.
+      for (const auto &wf : wfs_) {
+        if (!wf)
+          continue;
+        wf->hot_hook_subscriptions_valid_ = false;
+        wf->hot_hook_observer_count_ = 0;
+      }
+    }
+    plugin_group_ = std::move(replacement);
     observes_before_execute_instruction_ = plugin_group_->observes_before_execute_instruction();
     observes_after_execute_instruction_ = plugin_group_->observes_after_execute_instruction();
     observes_async_instruction_issued_ = plugin_group_->observes_async_instruction_issued();
