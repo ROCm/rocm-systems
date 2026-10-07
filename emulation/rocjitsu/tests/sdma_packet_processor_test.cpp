@@ -464,8 +464,9 @@ std::array<uint32_t, 13> linear_rect_packet(bool gfx12_rect, uint64_t source, ui
                                             uint32_t element, uint32_t rect_x, uint32_t rect_y,
                                             uint32_t rect_z, uint32_t src_pitch_bytes,
                                             uint32_t dst_pitch_bytes, uint32_t src_slice_bytes = 0,
-                                            uint32_t dst_slice_bytes = 0, uint32_t src_off_x = 0,
-                                            uint32_t dst_off_x = 0) {
+                                           uint32_t dst_slice_bytes = 0, uint32_t src_off_x = 0,
+                                           uint32_t dst_off_x = 0, uint32_t src_off_z = 0,
+                                           uint32_t dst_off_z = 0) {
   const uint32_t element_bytes = 1u << element;
   const uint32_t src_pitch_elements = src_pitch_bytes / element_bytes;
   const uint32_t dst_pitch_elements = dst_pitch_bytes / element_bytes;
@@ -478,18 +479,18 @@ std::array<uint32_t, 13> linear_rect_packet(bool gfx12_rect, uint64_t source, ui
   packet[7] = static_cast<uint32_t>(destination >> 32);
   packet[8] = dst_off_x;
   if (gfx12_rect) {
-    packet[4] = (src_pitch_elements - 1u) << 16;
-    packet[9] = (dst_pitch_elements - 1u) << 16;
-    if (rect_z > 1) {
+    packet[4] = src_off_z | ((src_pitch_elements - 1u) << 16);
+    packet[9] = dst_off_z | ((dst_pitch_elements - 1u) << 16);
+    if (src_slice_bytes != 0 || dst_slice_bytes != 0) {
       packet[5] = src_slice_bytes / element_bytes - 1u;
       packet[10] = dst_slice_bytes / element_bytes - 1u;
     }
     packet[11] = (rect_x - 1u) | ((rect_y - 1u) << 16);
     packet[12] = rect_z - 1u;
   } else {
-    packet[4] = (src_pitch_elements - 1u) << 13;
-    packet[9] = (dst_pitch_elements - 1u) << 13;
-    if (rect_z > 1) {
+    packet[4] = src_off_z | ((src_pitch_elements - 1u) << 13);
+    packet[9] = dst_off_z | ((dst_pitch_elements - 1u) << 13);
+    if (src_slice_bytes != 0 || dst_slice_bytes != 0) {
       packet[5] = src_slice_bytes / element_bytes - 1u;
       packet[10] = dst_slice_bytes / element_bytes - 1u;
     }
@@ -563,6 +564,41 @@ TEST(SdmaPacketProcessorTest, LinearRectHonorsElementSizeAndSlicePitch) {
               fixture.memory->load<uint64_t>(kSource + offset));
     EXPECT_EQ(fixture.memory->load<uint64_t>(kDestination + offset + 8),
               fixture.memory->load<uint64_t>(kSource + offset + 8));
+  }
+}
+
+TEST(SdmaPacketProcessorTest, LinearRectUsesZOriginWhenTheCopyIsOneSlice) {
+  const struct {
+    bool gfx12_rect;
+    SdmaPacketDialect dialect;
+  } cases[] = {
+      {false, SdmaPacketDialect::LegacyExtendedCount},
+      {true, SdmaPacketDialect::Gfx1250},
+  };
+  for (const auto &test_case : cases) {
+    PacketProcessorFixture fixture;
+    ASSERT_TRUE(fixture.access);
+    constexpr uint64_t kSource = 0x1000;
+    constexpr uint64_t kDestination = 0x1800;
+    fixture.memory->store<uint32_t>(kSource, 0x11111111u);
+    fixture.memory->store<uint32_t>(kSource + 32, 0x22222222u);
+    fixture.memory->store<uint32_t>(kDestination, 0);
+
+    const std::array<uint32_t, 13> packet =
+        linear_rect_packet(test_case.gfx12_rect, kSource, kDestination, /*element=*/0,
+                           /*rect_x=*/4, /*rect_y=*/1, /*rect_z=*/1, /*src_pitch_bytes=*/4,
+                           /*dst_pitch_bytes=*/4, /*src_slice_bytes=*/32, /*dst_slice_bytes=*/32,
+                           /*src_off_x=*/0, /*dst_off_x=*/0, /*src_off_z=*/1, /*dst_off_z=*/0);
+    SdmaPacketProcessor processor(test_case.dialect);
+    const SdmaPacketProcessResult result =
+        processor.process({.available_dwords = packet,
+                           .access = *fixture.access,
+                           .continuation = fixture.continuation});
+
+    EXPECT_EQ(result.packet.status, PacketProcessStatus::Complete)
+        << static_cast<int>(test_case.dialect);
+    EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0x22222222u)
+        << static_cast<int>(test_case.dialect);
   }
 }
 

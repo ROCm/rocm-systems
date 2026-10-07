@@ -647,14 +647,12 @@ private:
         (bit_field(word(frame, 12), 16, 2) != 0 || bit_field(word(frame, 12), 24, 2) != 0))
       return false;
 
-    uint64_t src_slice_elements = 0;
-    uint64_t dst_slice_elements = 0;
-    if (rect_z > 1) {
-      src_slice_elements =
-          (gfx12_rect ? word(frame, 5) : bit_field(word(frame, 5), 0, 28)) + uint64_t{1};
-      dst_slice_elements =
-          (gfx12_rect ? word(frame, 10) : bit_field(word(frame, 10), 0, 28)) + uint64_t{1};
-    }
+    // A one-slice copy can still name a nonzero Z origin. The slice field is
+    // stored as value-minus-one, including when the copy itself has one slice.
+    const uint64_t src_slice_elements =
+        (gfx12_rect ? word(frame, 5) : bit_field(word(frame, 5), 0, 28)) + uint64_t{1};
+    const uint64_t dst_slice_elements =
+        (gfx12_rect ? word(frame, 10) : bit_field(word(frame, 10), 0, 28)) + uint64_t{1};
 
     uint64_t src_pitch = 0;
     uint64_t dst_pitch = 0;
