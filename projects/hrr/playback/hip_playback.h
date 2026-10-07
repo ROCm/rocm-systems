@@ -67,9 +67,12 @@ class StreamCaptureFlag {
         std::lock_guard<std::mutex> lk(mu_);
         if (open_.insert(stream).second) ++total_;
     }
-    void end(uint64_t stream) {
+    // True when the stream had a capture open.
+    bool end(uint64_t stream) {
         std::lock_guard<std::mutex> lk(mu_);
-        if (open_.erase(stream)) --total_;
+        if (!open_.erase(stream)) return false;
+        --total_;
+        return true;
     }
     bool any() const { return total_.load(std::memory_order_acquire) > 0; }
     operator bool() const { return any(); }

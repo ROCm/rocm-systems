@@ -3181,9 +3181,6 @@ hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t*
 
 hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFree*>(pl);
-    // A free the runtime refused at capture (one inside a graph capture, say)
-    // freed nothing, so replay frees nothing either.
-    if (a->ret != hipSuccess) return hipSuccess;
     void* live = ctx.translate_ptr(a->ptr);
     if (!live) return hipSuccess;
     // A placed allocation or a --guard-segments one: a VMM mapping. During a
@@ -3204,9 +3201,6 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a  = reinterpret_cast<const hrr_args_hipFreeAsync*>(pl);
     void*       live   = ctx.translate_ptr(a->dev_ptr);
     hipStream_t stream = ctx.translate_stream(a->stream);
-    // CLR refuses to free memory a graph did not allocate while the stream is
-    // capturing (hipErrorInvalidValue). Nothing was freed, so nothing is here.
-    if (a->ret != hipSuccess) return hipSuccess;
     if (!live) return hipSuccess;
     // A placed allocation is a VMM mapping that the stream may still be using.
     // hipMemUnmap waits for every stream on the device, which would turn each
@@ -3717,6 +3711,11 @@ hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
     hipError_t r = hipSuccess;
     if (stream) r = hipStreamDestroy(stream);
     ctx.remove_stream(a->stream);
+    // Destroying a capturing stream ends its capture. The recording shows no
+    // hipStreamEndCapture when the program's own call failed, because failed
+    // calls are not recorded: a capture invalidated by a synchronous copy or
+    // memset ends here. The frees made inside it can be unmapped now.
+    if (ctx.in_graph_capture.end(a->stream)) hrr_placement_at_sync(ctx, "hipStreamDestroy");
     return r;
 }
 
@@ -3773,25 +3772,9 @@ hipError_t playback_hipStreamBeginCapture(PlaybackContext& ctx,
 hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
                                         const uint8_t* payload) {
     const auto* a = reinterpret_cast<const hrr_args_hipStreamEndCapture*>(payload);
-    hipStream_t stream = ctx.translate_stream(a->stream);
-    if (a->ret != hipSuccess) {
-        // The recorded call failed. One that failed because the capture had
-        // been invalidated still ended it: the runtime resets the stream's
-        // capture state before returning hipErrorStreamCaptureInvalidated. So
-        // replay ends its own capture too, and drops the graph if it got one.
-        // Any other failure ended nothing. Either way the capture flag follows
-        // what replay's stream now says.
-        if (a->ret == hipErrorStreamCaptureInvalidated && stream &&
-            hrr_stream_capturing(stream)) {
-            hipGraph_t g = nullptr;
-            (void)hipStreamEndCapture(stream, &g);
-            if (g) (void)hipGraphDestroy(g);
-            (void)hipGetLastError();
-        }
-        if (!stream || !hrr_stream_capturing(stream)) ctx.in_graph_capture.end(a->stream);
-        return hipSuccess;
-    }
+    if (a->ret != hipSuccess) return hipSuccess;  // original call failed — skip
 
+    hipStream_t stream = ctx.translate_stream(a->stream);
     if (!stream) {
         fprintf(stderr, "[HRR] hipStreamEndCapture: stream 0x%llx not found in map\n",
                 (unsigned long long)a->stream);

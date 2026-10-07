@@ -1096,7 +1096,9 @@ again, at a replayed `hipDeviceSynchronize`, `hipStreamSynchronize` or
 `hipCtxSynchronize`, at the end of the last open capture, and when an allocation
 is placed over a deferred one. Nothing drains while any recorded stream is still
 capturing. A replayed `hipStreamEndCapture` closes its stream's capture even when
-the call fails, so a capture that ended badly does not hold the list forever.
+replay's call fails. The capture also closes at `hipStreamDestroy`. Failed calls
+are not recorded, so a capture the program's own `hipStreamEndCapture` failed to
+end leaves no end in the archive; destroying its stream is where it ends.
 Until it drains, nothing is mapped over a deferred mapping, because the graph or
 the stream may still use it. The summary counts these frees.
 

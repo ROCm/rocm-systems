@@ -692,8 +692,9 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&out, kBytes));
 
   // (a) A free inside a capture that a synchronous hipMemset then
-  // invalidates, so hipStreamEndCapture fails. The capture is over all the
-  // same, and the next allocation at the freed address must be placed.
+  // invalidates, so hipStreamEndCapture fails. Failed calls are not recorded,
+  // so the archive has neither; the capture ends at hipStreamDestroy. The
+  // next allocation at the freed address must be placed.
   void* doomed = nullptr;
   HRR_HIP_CHECK(hipMalloc(&doomed, kBytes));
   hipStream_t cs = nullptr;
@@ -801,6 +802,10 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Lifetimes) {
     int pass = 0, fail = 0;
     REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
     CHECK(fail == 0);
+    // The capture ends where its stream is destroyed, and the free made
+    // inside it is unmapped there.
+    CHECK(out.find("[HRR] Placement: unmapped 1 deferred free(s) at hipStreamDestroy") !=
+          std::string::npos);
     // Nothing is still mapped where `again` goes, so it lands there.
     CHECK(out.find("is still mapped") == std::string::npos);
     int placed = 0, fell = -1;
