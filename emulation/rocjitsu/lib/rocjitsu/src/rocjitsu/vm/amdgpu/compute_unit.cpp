@@ -688,14 +688,54 @@ uint32_t ComputeUnitCore::release_gws_waiters(uint32_t dispatch_id, uint32_t wg_
   return woke;
 }
 
+bool ComputeUnitCore::gws_has_active_peer(uint32_t dispatch_id, uint32_t wg_id,
+                                          const Wavefront &self) const {
+  for (const auto &w : wfs_) {
+    if (!w || w.get() == &self)
+      continue;
+    if (w->dispatch_id() == dispatch_id && w->wg_id() == wg_id && w->state() != WfState::HALTED &&
+        w->state() != WfState::GWS_WAIT)
+      return true;
+  }
+  return false;
+}
+
+// Global Wave Sync (GWS) scheduling policy (authoritative description).
+//
+// GWS state is CU-local and workgroup-private: gws_resources_ is keyed by
+// wg_key(dispatch_id, wg_id), so a given resource can only ever be touched by
+// waves of one workgroup. Because a workgroup's waves are all-or-nothing
+// co-resident on a single CU (like s_barrier), that scope is the only place a
+// rendezvous can be proven deadlock-free.
+//
+//  * Barrier: hardware/LLVM program the resource with (participants - 1); the
+//    MI200 pseudocode queues an arrival while the counter is positive and
+//    releases every queued arrival once an arrival observes zero. We follow that
+//    convention exactly (see gws_barrier_arrive) and only park when the whole
+//    participant set (count + 1) is provably resident; larger sets fall back to
+//    a non-blocking structural no-op.
+//  * Semaphore: V/BR add credits and wake queued P waiters; P consumes a credit
+//    or parks -- but only when a co-resident peer could still signal. A P whose
+//    producer lives outside this workgroup cannot rendezvous in this model, so
+//    it completes structurally rather than parking.
+//  * Deadlock-escape (update_wf_states): if every non-halted wave of a workgroup
+//    is blocked in GWS_WAIT or at an s_barrier, no wave can ever signal/arrive,
+//    so the parked GWS waves are released. This is the backstop that keeps the
+//    model from hanging on any unmodeled participant pattern.
+//
+// Widening residency does not automatically extend blocking support: the
+// workgroup-private key means cross-workgroup participants remain unmodeled
+// until shared GWS state and participant residency are tracked explicitly.
 void ComputeUnitCore::gws_init(Wavefront &wf, uint32_t rid, uint32_t count) {
   if (rid >= kGwsResourcesPerWg)
     return;
   auto &res = gws_resources_[wg_key(wf.dispatch_id(), wf.wg_id())][rid];
-  res.init_count = count;
-  res.pending = count;
+  // Barrier: (participants - 1) is the programmed reload/counter value.
+  res.reload = count;
+  res.counter = count;
+  res.armed = true;
+  // Semaphore reuses the same init to seed the initial credit count.
   res.credits = count;
-  res.phase = 0;
 }
 
 void ComputeUnitCore::gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count) {
@@ -705,26 +745,28 @@ void ComputeUnitCore::gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t c
   uint32_t resident = 0;
   if (auto it = active_wgs_.find(key); it != active_wgs_.end())
     resident = it->second;
-  // Co-residency gate: park only when the whole participant set is provably
-  // resident in this workgroup's scope (its waves are all-or-nothing co-resident
-  // on one CU, like s_barrier). A count that exceeds the resident set would
-  // reference waves that are not -- and may never be -- admitted, so fall back to
-  // a non-blocking structural no-op instead of risking a deadlock.
-  if (count == 0 || count > resident)
+  // GWS programs the barrier value as (participants - 1), so the participant set
+  // size is count + 1. Park only when that whole set is provably resident in this
+  // workgroup's scope; a larger set would reference waves that may never be
+  // admitted, so fall back to a non-blocking structural no-op.
+  const uint32_t participants = count + 1;
+  if (participants > resident)
     return;
   auto &res = gws_resources_[key][rid];
-  if (res.pending == 0) {
-    res.init_count = count;
-    res.pending = count;
+  if (!res.armed) {
+    res.reload = count;
+    res.counter = count;
+    res.armed = true;
   }
-  --res.pending;
-  if (res.pending == 0) {
-    // Final arrival closes this phase: reset for reuse and release the peers.
-    res.pending = res.init_count;
-    ++res.phase;
+  if (res.counter == 0) {
+    // This arrival observes zero: it is the releasing arrival. Wake the queued
+    // peers, re-arm for the next phase, and proceed without parking.
     release_gws_waiters(wf.dispatch_id(), wf.wg_id(), rid, std::numeric_limits<uint32_t>::max());
+    res.counter = res.reload;
     return;
   }
+  // Positive counter: queue this arrival and park.
+  --res.counter;
   wf.gws_wait_rid_ = rid;
   wf.set_state(WfState::GWS_WAIT);
 }
@@ -746,8 +788,12 @@ void ComputeUnitCore::gws_sema_p(Wavefront &wf, uint32_t rid) {
     --res.credits;
     return;
   }
-  // No credit: park within the co-resident scope. If no sibling ever signals,
-  // update_wf_states()'s deadlock-escape scan releases the wave non-blockingly.
+  // A credit-less P can only be released by a co-resident peer issuing
+  // V/BR/release_all on this workgroup-private resource. If no such peer can run,
+  // the producer is outside the modeled scope, so complete the wait structurally
+  // instead of parking.
+  if (!gws_has_active_peer(wf.dispatch_id(), wf.wg_id(), wf))
+    return;
   wf.gws_wait_rid_ = rid;
   wf.set_state(WfState::GWS_WAIT);
 }
@@ -1526,8 +1572,11 @@ void ComputeUnitCore::update_wf_states() {
 
   // GWS deadlock-escape: a wave parked in GWS_WAIT is only released when a
   // co-resident peer arrives/signals the same resource. If every non-halted wave
-  // of a workgroup is already parked in GWS_WAIT, no peer can ever make progress,
-  // so release them all non-blockingly (the structural-fallback semantics).
+  // of a workgroup is already blocked -- parked in GWS_WAIT or stalled at an
+  // s_barrier -- no wave can ever reach a GWS signal/arrival, so release the
+  // parked GWS waves non-blockingly (the structural-fallback semantics). Covering
+  // BARRIER here also breaks the mixed deadlock where some waves wait at a GWS
+  // barrier while their siblings wait at an s_barrier.
   for (auto &w : wfs_) {
     if (!w || w->state() != WfState::GWS_WAIT)
       continue;
@@ -1536,7 +1585,7 @@ void ComputeUnitCore::update_wf_states() {
     bool all_parked = true;
     for (auto &w2 : wfs_) {
       if (w2 && w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() != WfState::HALTED &&
-          w2->state() != WfState::GWS_WAIT) {
+          w2->state() != WfState::GWS_WAIT && w2->state() != WfState::BARRIER) {
         all_parked = false;
         break;
       }

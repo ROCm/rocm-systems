@@ -1419,16 +1419,20 @@ protected:
   /// ordinary s_barrier.
   static constexpr uint32_t kGwsResourcesPerWg = 64;
   struct GwsResource {
-    uint32_t init_count = 0; ///< Seeded barrier member count / initial credits.
-    uint32_t pending = 0;    ///< Remaining arrivals before the barrier releases.
-    uint32_t credits = 0;    ///< Available semaphore credits (V/BR add, P consumes).
-    uint32_t phase = 0;      ///< Monotonic barrier generation counter.
+    uint32_t reload = 0;  ///< Barrier reload value (participants - 1); see gws_barrier_arrive.
+    uint32_t counter = 0; ///< Live barrier counter: decremented per arrival, releases at zero.
+    uint32_t credits = 0; ///< Semaphore credits (V/BR add, P consumes).
+    bool armed = false;   ///< Whether the barrier counter has been seeded (init or first arrival).
   };
   std::unordered_map<uint64_t, std::array<GwsResource, kGwsResourcesPerWg>> gws_resources_;
   /// @brief Wake up to @p max_wake waves parked on one GWS resource.
   /// @returns Number of waves released.
   uint32_t release_gws_waiters(uint32_t dispatch_id, uint32_t wg_id, uint32_t rid,
                                uint32_t max_wake);
+  /// @brief Whether a co-resident peer of @p self (same wg, not halted, not
+  /// already parked on GWS) could still issue a GWS signal/arrival. Used to keep
+  /// waits whose participants cannot be established in this model non-blocking.
+  bool gws_has_active_peer(uint32_t dispatch_id, uint32_t wg_id, const Wavefront &self) const;
 
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;

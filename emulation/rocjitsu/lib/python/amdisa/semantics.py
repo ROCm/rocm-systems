@@ -2549,13 +2549,9 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     # DS_ADD_GS_REG_RTN / DS_SUB_GS_REG_RTN contain _ADD / _SUB.
     if upper in ('DS_ADD_GS_REG_RTN', 'DS_SUB_GS_REG_RTN'):
         return InstructionSemantics(name, 'nop')
-    # GWS (Global Wave Sync) — cross-workgroup scheduling primitives (barrier,
-    # init, and the V/P/BR/release_all semaphore operations). rocjitsu runs
-    # workgroups sequentially, so these cannot block; they are modeled
-    # structurally as zero-payload GDS operations that participate correctly in
-    # lgkmcnt/GDS wait accounting and plugin observation without any
-    # cross-workgroup effect. The per-mnemonic operation is carried through so
-    # the generator can keep each variant distinct.
+    # GWS (Global Wave Sync) classification. Map each of the six GWS DS opcodes
+    # to its per-mnemonic operation so the generator can decode the operands and
+    # the matching ComputeUnitCore hook can apply the right semantics.
     _DS_GWS_MAP = {
         'DS_GWS_INIT': 'init',
         'DS_GWS_SEMA_V': 'sema_v',
@@ -2570,9 +2566,9 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
                 return InstructionSemantics(
                     name, 'ds_gws', operation=op, elem_size=4, num_elems=0
                 )
-        return InstructionSemantics(
-            name, 'ds_gws', operation='barrier', elem_size=4, num_elems=0
-        )
+        # An unrecognized DS_GWS_* mnemonic matches none of the six supported
+        # operations; leave it unsupported (falls through to nop) rather than
+        # assigning it synchronization behavior.
     # GDS ordered count.
     if upper == 'DS_ORDERED_COUNT':
         return InstructionSemantics(name, 'nop')

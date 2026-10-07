@@ -8981,46 +8981,19 @@ class CodeGenerator:
     ) -> str:
         """Generate a GWS (Global Wave Sync) execute() body (DS encoding).
 
-        GWS barrier/init/semaphore operations coordinate scheduling across
-        workgroups. rocjitsu does not guarantee that all workgroups of a grid
-        are co-resident (they are admitted up to CU register/LDS/wave-slot
-        capacity, and the rendezvous machinery is scoped to one workgroup's
-        waves on one CU), so a blocking cross-workgroup barrier could wait on a
-        peer that is not resident and cannot be admitted -- a deadlock. The
-        operation is therefore modeled structurally as a zero-payload GDS store:
-        it issues on the DS pipeline, increments and then immediately retires
-        the lgkmcnt/GDS wait counter, and is observed by plugins, but produces
-        no register result and leaves memory unchanged. A valid (empty)
-        VectorMemState is still published via set_data so the memory pipeline
-        takes the ordinary completion path rather than the producer-without-op
-        diagnostic.
-
-        Stateful GWS: a per-resource GWS counter table lives CU-local and
-        workgroup-private (keyed by the resident workgroup and the 6-bit resource
-        id). The resource id is decoded as
-        M0[21:16] + offset0[5:0] (the hardware convention; it is not spelled out
-        in the ISA XML), and the barrier/semaphore count comes from the ADDR
-        VGPR's first active lane (init/barrier/sema_br carry one source VGPR;
-        sema_v/p/release_all carry none). Operations route to the CU hooks:
-        init seeds the count/credits, barrier rendezvous (co-residency gated),
-        sema_v/br add credits and release waiters, sema_p consumes or parks, and
-        release_all wakes every waiter.
-
-        To stay deadlock-free, the parking flavor only blocks when all
-        participants are provably co-resident (single-workgroup GWS, whose waves
-        are all-or-nothing co-resident on one CU like s_barrier) and falls back
-        to a non-blocking no-op otherwise. That co-residency gate is
-        forward-compatible: as rocjitsu widens residency it covers more cases
-        automatically, and only a true cooperative-launch guarantee (full
-        participant set resident, oversized grids rejected at launch) makes
-        unconditional parking safe.
-
-        The structural memory op is preserved regardless of parking: a
-        zero-payload VectorMemState is still published via set_data so the DS
-        pipeline increments and retires the lgkmcnt/GDS wait counter and plugins
-        observe the instruction. When EXEC is zero the wave contributes no active
-        lane, so the operation is a pure structural no-op (no rid decode, no
-        count read, no rendezvous) -- this keeps GWS EXEC-independent.
+          * Decode the 6-bit resource id as (M0[21:16] + offset0[5:0]) & 0x3f
+            (the hardware convention; it is not spelled out in the ISA XML).
+          * For init/barrier/sema_br (which carry one source VGPR), read the
+            count from the ADDR operand's first active lane, honoring the DS acc
+            bit so the AGPR bank is used when selected. sema_v/p/release_all
+            carry no operand.
+          * Route to the matching ComputeUnitCore GWS hook, then publish a
+            zero-payload LOCAL_MEM VectorMemState so the DS pipeline still
+            increments and retires the lgkmcnt/GDS wait counter and plugins
+            observe the instruction (the structural accounting path).
+          * When EXEC is zero the wave contributes no active lane, so the
+            operation is a pure structural no-op (no rid decode, no count read,
+            no hook call) -- this keeps GWS EXEC-independent.
         """
         op = sem.operation
         has_count = op in ('init', 'barrier', 'sema_br')
@@ -9028,8 +9001,8 @@ class CodeGenerator:
         L.append('  uint64_t exec = wf.exec();')
         L.append('  if (exec) {')
         L.append(
-            '    uint32_t rid = ((wf.m0() >> 16) & 0x3fu) + '
-            '(static_cast<uint32_t>(inst_.offset0) & 0x3fu);'
+            '    uint32_t rid = (((wf.m0() >> 16) & 0x3fu) + '
+            '(static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;'
         )
         if has_count:
             L.append(
@@ -9037,7 +9010,7 @@ class CodeGenerator:
             )
             L.append('    auto &cu = wf.cu();')
             L.append(
-                f'    uint32_t gws_base = {self._vgpr_base_expr("addr", use_acc=False)};'
+                f'    uint32_t gws_base = {self._vgpr_base_expr("addr", use_acc=True)};'
             )
             L.append(
                 '    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);'

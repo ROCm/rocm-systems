@@ -2495,6 +2495,35 @@ class TestDeriveDsSwizzle:
         assert block is not None
 
 
+class TestDeriveDsGws:
+    @pytest.mark.parametrize(
+        ('name', 'operation'),
+        [
+            ('DS_GWS_INIT', 'init'),
+            ('DS_GWS_SEMA_V', 'sema_v'),
+            ('DS_GWS_SEMA_P', 'sema_p'),
+            ('DS_GWS_SEMA_BR', 'sema_br'),
+            ('DS_GWS_SEMA_RELEASE_ALL', 'sema_release_all'),
+            ('DS_GWS_BARRIER', 'barrier'),
+        ],
+    )
+    def test_classifies_each_gws_opcode(self, name, operation):
+        sem = derive_semantics(name, 'ENC_DS')
+        assert sem is not None
+        assert sem.semantic_class == 'ds_gws'
+        assert sem.operation == operation
+        # GWS publishes a zero-payload 4-byte store for wait accounting.
+        assert sem.elem_size == 4
+        assert sem.num_elems == 0
+
+    def test_unknown_gws_mnemonic_is_unsupported(self):
+        # An unrecognized DS_GWS_* name must not be assigned synchronization
+        # behavior; it falls through to a nop instead of defaulting to barrier.
+        sem = derive_semantics('DS_GWS_FUTURE_VARIANT', 'ENC_DS')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
+
+
 @pytest.mark.parametrize('dtype', ['f16', 'bf16'])
 @pytest.mark.parametrize(
     ('prefix', 'encoding', 'semantic_class'),
