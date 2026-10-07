@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -111,6 +112,11 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
  protected:
   void SetUp() override {
     ResetAllFakes();
+#ifndef CE_BATCH_ASYNC_SUPPORTED
+    if (GetParam() == LaunchPath::kBatchAsync) {
+      GTEST_SKIP() << "hip_runtime_api.h has no hipMemcpyBatchAsync, so ce_coll.cc builds without the batch path";
+    }
+#endif
     g_hipStreamBatchMemOp = [](hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int) {
       return hipSuccess;
     };
@@ -259,16 +265,30 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
     }
   }
 
+  // Copies in rounds of two or more ops; a one-op round takes the single-stream fallback even with copy streams.
+  static size_t MultiOpRoundCopies(const RankRun& run) {
+    std::map<uint32_t, size_t> roundOps;
+    for (uint32_t epoch : run.slotEpochs) {
+      if (epoch != 0) {
+        ++roundOps[epoch];
+      }
+    }
+    size_t copies = 0;
+    for (const auto& [epoch, ops] : roundOps) {
+      if (ops > 1) {
+        copies += ops;
+      }
+    }
+    return copies;
+  }
+
   // Guards the parameter itself: each arm must really reach the copy API it is named for.
   void ExpectLaunchPathTaken(const std::vector<RankRun>& runs) {
     for (size_t rank = 0; rank < runs.size(); ++rank) {
       const size_t expectedBatch = GetParam() == LaunchPath::kBatchAsync ? runs[rank].copies : 0;
       EXPECT_EQ(runs[rank].batchCopies, expectedBatch) << "rank " << rank;
-      if (GetParam() != LaunchPath::kMultiStream) {
-        EXPECT_EQ(runs[rank].copyStreamCopies, 0u) << "rank " << rank;
-      } else if (runs[rank].barriers == 2 && runs[rank].copies > 1) {
-        EXPECT_EQ(runs[rank].copyStreamCopies, runs[rank].copies) << "rank " << rank;
-      }
+      const size_t expectedCopyStream = GetParam() == LaunchPath::kMultiStream ? MultiOpRoundCopies(runs[rank]) : 0;
+      EXPECT_EQ(runs[rank].copyStreamCopies, expectedCopyStream) << "rank " << rank;
     }
   }
 
@@ -371,8 +391,7 @@ TEST_P(CeAlltoAllvSyncMicrotest, Dense16Ranks_Over512MiB_EveryRankIssuesSameBarr
 
   const std::vector<RankRun> runs = Run(send, kFreq);
 
-  EXPECT_GT(runs[0].barriers, 2u);
-  EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, runs[0].barriers));
+  ExpectRoundSyncBarriers(runs, kNRanks, kFreq);
   ExpectRowsCopied(send, runs, kFreq);
   ExpectLaunchPathTaken(runs);
 }
@@ -390,10 +409,7 @@ TEST_P(CeAlltoAllvSyncMicrotest, SixteenRanks_EachSendsToExactlyFreqPeers_OnlyRe
 }
 
 INSTANTIATE_TEST_SUITE_P(LaunchPaths, CeAlltoAllvSyncMicrotest,
-                         ::testing::Values(LaunchPath::kSingleStream, LaunchPath::kMultiStream,
-#ifdef CE_BATCH_ASYNC_SUPPORTED
-                                           LaunchPath::kBatchAsync,
-#endif
+                         ::testing::Values(LaunchPath::kSingleStream, LaunchPath::kMultiStream, LaunchPath::kBatchAsync,
                                            LaunchPath::kLegacyNullStream, LaunchPath::kGraphCapture),
                          LaunchPathName);
 
