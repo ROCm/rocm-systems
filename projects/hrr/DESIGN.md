@@ -636,7 +636,8 @@ u64 length
 u64 hash_lo    blob holding the chunk
 u64 hash_hi
 u8  direction  0 = restore the host contents before the launch
-               1 = unchanged, read while the stream was busy; leave alone
+               1 = unchanged, read while work the launch waits for was
+                   still queued; leave alone
 ```
 
 **Controls.** Capture reads the three flags when it uses them, never when it
@@ -1408,7 +1409,7 @@ not recorded in these cases:
 - the kernel is launched into a stream under graph capture, or through a graph
   kernel node;
 - the allocation is larger than `HIP_HRR_HOST_SNAPSHOT_MAX_MB`, its shadow copy
-  would pass `HIP_HRR_HOST_SNAPSHOT_TOTAL_MB`, or snapshots are off.
+  would pass `HIP_HRR_HOST_SNAPSHOT_TOTAL_MB`, or snapshots are off;
 - the launch is the first one of a kernel handle capture does not trust yet,
   such as a handle from `hipKernelGetFunction`.
 

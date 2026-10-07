@@ -192,12 +192,15 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 // device work rewrites the buffer between launches: replay would keep the
 // device-written bytes while capture saw the host put the old ones back.
 //
-// The snapshot never waits for the launch stream. Earlier work on it may wait
-// on a flag the host sets only after this launch returns (hipStreamWaitValue32
-// on host memory), and waiting would hang the application. When that work is
-// still running, the bytes are read anyway: a piece that changed is recorded
-// for replay to restore, and a piece that did not is recorded as unchanged and
-// left alone. The manifest counts such launches as host_snapshots_unordered.
+// The snapshot never waits for the work the launch waits for: the launch
+// stream's, the null stream's for a blocking stream, and every blocking
+// stream's for the null stream. That work may wait on a flag the host sets
+// only after this launch returns (hipStreamWaitValue32 on host memory), and
+// waiting would hang the application. Checking it queues nothing either. When
+// that work is still running, the bytes are read anyway: a piece that changed
+// is recorded for replay to restore, and a piece that did not is recorded as
+// unchanged and left alone. The manifest counts such launches as
+// host_snapshots_unordered.
 //
 // The snapshot runs before the launch, so it updates the shadow before it
 // knows whether the launch will be recorded. When the launch fails, the chunks
@@ -819,7 +822,7 @@ static void known_fn_forget_module(hipModule_t m) {
 //     u64  hash_lo, u64 hash_hi (blob holding the chunk's bytes)
 //     u8   direction (0 = host contents before the launch, for replay to
 //                     restore; 1 = unchanged since the allocation's previous
-//                     record and read while earlier work on the stream was
+//                     record and read while work the launch waits for was
 //                     still running, for replay to leave alone)
 // ---------------------------------------------------------------------------
 

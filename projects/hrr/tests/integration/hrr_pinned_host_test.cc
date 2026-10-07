@@ -975,20 +975,28 @@ TEST_CASE("Unit_HRR_PinnedHost_OtherStream_Direct", "[.][hrr-direct]") {
   fill(h, 1);
   read_pinned(h, out, 1, kPinnedInts, launch);
 
-  // 1
-  HRR_HIP_CHECK(hipStreamWaitValue32(writer, flag, 1, hipStreamWaitValueEq, 0xFFFFFFFF));
+  // 1. Errors are checked only after the flag is set: a check that failed
+  // first would leave the writer stream blocked, and the process would hang in
+  // teardown instead of failing.
+  const hipError_t wait_err =
+      hipStreamWaitValue32(writer, flag, 1, hipStreamWaitValueEq, 0xFFFFFFFF);
   hipLaunchKernelGGL(hrr_pinned_write, dim3(kBlocks), dim3(kThreads), 0, writer, h,
                      kPinnedInts, kSeed);
-  HRR_HIP_CHECK(hipGetLastError());
+  const hipError_t write_err = hipGetLastError();
 
   // 2
   hipLaunchKernelGGL(hrr_pinned_read, dim3(kBlocks), dim3(kThreads), 0, launch, h, out,
                      kPinnedInts);
-  HRR_HIP_CHECK(hipGetLastError());
-  // Still blocked: neither kernel has run.
-  CHECK(hipStreamQuery(launch) == hipErrorNotReady);
-  CHECK(h[0] == pattern(1, 0));
+  const hipError_t read_err = hipGetLastError();
+  const hipError_t query = hipStreamQuery(launch);
+  const int h0 = h[0];
   __atomic_store_n(flag, 1u, __ATOMIC_SEQ_CST);
+  HRR_HIP_CHECK(wait_err);
+  HRR_HIP_CHECK(write_err);
+  HRR_HIP_CHECK(read_err);
+  // Still blocked: neither kernel has run.
+  CHECK(query == hipErrorNotReady);
+  CHECK(h0 == pattern(1, 0));
   check_out(out, [](int i) { return (kSeed ^ i) * 3 + 1; });
 
   HRR_HIP_CHECK(hipStreamDestroy(blocking));

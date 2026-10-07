@@ -459,7 +459,8 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 //   then:     u32 n_attrs, u32 stride, n_attrs * stride attribute bytes
 //   then:     num_snapshots * 41-byte records: u64 ptr, offset, length,
 //             hash_lo, hash_hi, u8 direction (0 = restore before the launch,
-//             1 = read unchanged while the stream was busy, leave alone).
+//             1 = read unchanged while work the launch waited for was
+//             still queued, leave alone).
 
 // ext_global_worksize: the captured grid[] holds *global work-item counts*
 // (HSA/OpenCL semantics, as passed to hipExtModuleLaunchKernel), NOT workgroup

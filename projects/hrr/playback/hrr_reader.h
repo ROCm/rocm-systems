@@ -95,9 +95,9 @@ struct KernelArg {
 // Pinned host snapshot: the bytes [offset, offset + length) of the pinned
 // allocation recorded at ptr_handle, held in blob (hash_lo, hash_hi), as the
 // host left them before the launch. direction 0: replay restores them;
-// 1: unchanged since the last snapshot and read while the launch stream was
-// busy, so replay leaves them to the replayed device work. Replay rejects any
-// other value.
+// 1: unchanged since the last snapshot and read while work the launch waits
+// for (its stream's, or a stream it waits on) was still queued, so replay
+// leaves them to the replayed device work. Replay rejects any other value.
 struct BufferSnapshot {
   uint64_t ptr_handle;
   uint64_t offset;
