@@ -330,7 +330,14 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
           // Need to get new info from system
           std::unordered_set<uint64_t> gpu_set;
           gpu_set.insert(get_kfd_gpu_id());
-          GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set);
+          // A failed refresh leaves the list's totals over all GPUs in place. Drop them:
+          // mem keeps this GPU's fdinfo total and the other KFD stats read as unknown.
+          if (GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set) != 0) {
+            rsmi_proc_info.vram_usage = 0;
+            rsmi_proc_info.sdma_usage = std::numeric_limits<uint64_t>::max();
+            rsmi_proc_info.cu_occupancy = std::numeric_limits<uint32_t>::max();
+            rsmi_proc_info.evicted_time = std::numeric_limits<uint32_t>::max();
+          }
           get_process_info(rsmi_proc_info, tmp_amdsmi_proc_info);
           cache_ptr->process_info[rsmi_proc_info.process_id] = tmp_amdsmi_proc_info;
         }
