@@ -2242,10 +2242,9 @@ def _destination_result(
 ) -> tuple[str, str, bool] | None:
     """Return (dtype, bits, transcendental) for a result rounded to its format.
 
-    gfx1201 applies OMOD, then CLAMP, to the result after rounding it to its
-    destination format. Every target uses this order; it is measured on
-    gfx1201 and gfx1100 and extrapolated to RDNA3.5 and CDNA1-5 (see
-    output_modifier.h). Returns None for operations that keep another path.
+    Migrated VOP3 writes round before the shared OMOD/CLAMP stage. Return None
+    to retain expression-level modifiers. See output_modifier.h for migration
+    scope and hardware evidence.
     """
     if _is_integral_rounding(node):
         rounded = _lower_expr(node, ctx)
@@ -2390,6 +2389,10 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
     Operates in float domain: bit_cast input to float/double, apply omod,
     returns float/double.
 
+    Direct F16 wrapper lowering is legacy. Production F16 destination writes
+    use _destination_result and the shared output stage.
+    Remaining formats use this live expression-level path; see output_modifier.h.
+
     CALL children: [ID('apply_omod'), rhs_expr]
     """
     if len(node.children) < 2:
@@ -2487,6 +2490,10 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
     Operates in float domain: bit_cast input to float/double, apply clamp,
     returns float/double. The final bit_cast back to uint32_t/uint64_t
     happens at the destination write site.
+
+    Direct F16 wrapper lowering is legacy. Production F16 destination writes
+    use _destination_result and the shared output stage.
+    Remaining formats use this live expression-level path; see output_modifier.h.
 
     CALL children: [ID('apply_clamp'), rhs_expr]
     """

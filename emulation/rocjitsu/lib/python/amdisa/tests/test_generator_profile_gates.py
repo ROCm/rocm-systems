@@ -27,7 +27,7 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_movrel,
     gen_vector_cvt_pk,
 )
-from amdisa.codegen.execute.vector_alu import gen_vector_unary
+from amdisa.codegen.execute.vector_alu import gen_legacy_vector_unary
 from amdisa.codegen.execute.matrix import gen_mfma as emit_mfma
 from amdisa.codegen.execute.vector_cmp import (
     gen_vector_add_co,
@@ -2876,7 +2876,7 @@ def test_cdna3_fp8_cvt_uses_fnuz_helper_variant():
     assert 'util::bf8_e5m2_fnuz_to_f32' in packed
     assert 'util::bf8_e5m2_to_f32' not in packed
 
-    unary = gen_vector_unary(
+    unary = gen_legacy_vector_unary(
         ['vdst'],
         ['src0'],
         'cvt_f32_fp8',
@@ -2907,7 +2907,7 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
     assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' not in narrow
     assert 'wf.fp16_ovfl()' in narrow
 
-    unary = gen_vector_unary(
+    unary = gen_legacy_vector_unary(
         ['vdst'],
         ['src0'],
         'cvt_f32_fp8',
@@ -2919,7 +2919,7 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
 
 
 def test_f32_to_f16_vector_conversion_threads_fp16_ovfl():
-    unary = gen_vector_unary(['vdst'], ['src0'], 'cvt', 'f16_f32')
+    unary = gen_legacy_vector_unary(['vdst'], ['src0'], 'cvt', 'f16_f32')
 
     assert 'util::f32_to_f16_mode(s, wf.fp16_ovfl())' in unary
 

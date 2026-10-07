@@ -16,7 +16,7 @@ from amdisa.codegen.execute.simd_codegen import (
     local_coverage_probe,
     simd_probe_line,
 )
-from amdisa.codegen.execute.vector_alu import gen_vector_unary
+from amdisa.codegen.execute.vector_alu import gen_legacy_vector_unary
 from amdisa.codegen.execute.vector_special import (
     _TRIG_PREOP_CHUNK_BITS,
     _TRIG_PREOP_TWO_OVER_PI_CHUNKS,
@@ -41,7 +41,7 @@ from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
 
 
 def test_cls_i32_codegen():
-    scalar = gen_vector_unary(['vdst'], ['src0'], 'cls_i32', None)
+    scalar = gen_legacy_vector_unary(['vdst'], ['src0'], 'cls_i32', None)
     semantic = _INLINE_UNARY_OPS['cls_i32']
     simd = SIMD_VOP1_UNARY['v_cls_i32_vop1'][2]
 

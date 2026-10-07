@@ -561,12 +561,10 @@ util::native<double> apply_vop3_src_mod_f64(util::native<double> value, uint32_t
       source_modifier::apply<fp_format::F64>(bits, SrcIdx, abs, neg));
 }
 
-/// In-vector VOP3 destination modifier, bit-exact with the scalar tail: `omod`
-/// scales by an exact power of two (1->*2, 2->*4, 3->*0.5; IEEE-exact, no
-/// rounding), then `clamp` saturates to [0,1]. The clamp uses ordered compares
-/// (`v < 0`, `v > 1`), which are false for NaN, so NaN passes through unchanged —
-/// using the selected architecture/MODE NaN policy. Instantiated for float and double;
-/// the `_f32`/`_f64` wrappers below name the two lane types the VOP3 paths use.
+/// @brief Apply OMOD, then CLAMP, to host floating-point SIMD lanes.
+/// @details Live helper outside the shared raw-bit stage; see output_modifier.h.
+/// The caller establishes rounding and resolves effective OMOD and NaN clamping.
+/// Power-of-two scaling is exact for normal finite results except at format limits.
 template <typename T>
 util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t clamp,
                                    bool clamp_nan_to_zero) {
@@ -675,9 +673,8 @@ inline uint32_t effective_vop3_omod_f64(const Wavefront &wf, uint32_t omod) {
 
 /// @brief Resolve instruction fields and wave MODE into an output policy for `Fmt`.
 /// @details Architecture rules decide whether OMOD is active and CLAMP clears NaNs.
-/// Once active, every target applies OMOD and CLAMP to the result rounded to
-/// `Fmt`. That order is measured on gfx1201 and gfx1100 and extrapolated to
-/// RDNA3.5 and CDNA1-5; see output_modifier.h for the evidence per target.
+/// Callers of output_modifier::apply supply result bits already rounded to `Fmt`.
+/// See output_modifier.h for migration scope and hardware evidence per target.
 /// @param omod VOP3 OMOD field.
 /// @param clamp VOP3 CLAMP field.
 template <typename Fmt>
@@ -832,6 +829,7 @@ fma_f16_mode_simd(util::native<uint32_t> src0, util::native<uint32_t> src1,
 /// F32 FMA runs in the caller's guest-rounding environment and applies MODE
 /// denormal controls explicitly. Exceptional lanes use scalar NaN selection
 /// and minimum-normal boundary handling.
+/// Nonzero effective OMOD forces output flushing here, before destination scaling.
 inline util::native<float> fma_f32_simd(util::native<float> a, util::native<float> b,
                                         util::native<float> c, const Wavefront &wf,
                                         uint32_t omod = 0, bool force_flush = false) {
@@ -3084,8 +3082,9 @@ template <typename Inst, typename FmaOp>
   return false;
 }
 
-/// @brief Execute VOP3 F16 accumulation with promoted F32 output modifiers.
-/// @details Widen src0/src1/vdst; apply ABS/NEG only to src0/src1, evaluate,
+/// @brief Legacy VOP3 F16 accumulator SIMD with promoted F32 output modifiers.
+/// @details No generated caller; production FMAC uses the MODE-aware FMA path.
+/// Widen src0/src1/vdst; apply ABS/NEG only to src0/src1, evaluate,
 /// then apply F32 OMOD/CLAMP before narrowing to F16.
 /// Storage: generic uses low halves and zero-extends vdst; true16 selects
 /// source and accumulator/destination halves with OP_SEL.

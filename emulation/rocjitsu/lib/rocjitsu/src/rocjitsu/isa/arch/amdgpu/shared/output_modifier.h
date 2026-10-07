@@ -12,11 +12,21 @@
 /// - Shared scalar/SIMD stage for migrated VOP3 results on every target.
 /// - Older targets enable OMOD only with IEEE=0 and output denormals flushed.
 ///
-/// Paths outside this stage include:
-/// - SDWA F16 (dpp_sdwa_ops.h): scales before narrowing; no captures.
-/// - F16 ternary/accumulator SIMD: OMOD/CLAMP still precede narrowing.
+/// Live production paths outside this stage include:
+/// - Host-result scalar lowering and SIMD destination helpers: separate
+///   OMOD/CLAMP implementations for remaining F32/F64 operations.
+/// - Specialized generators using vop3_dst_mod: F32 intermediate modifiers,
+///   including before F16 narrowing in DIV_FIXUP.
+/// - SDWA F16 (dpp_sdwa_ops.h): separate arithmetic and rounded-TRANS helpers;
+///   no captures.
+/// - F16 ternary SIMD: OMOD/CLAMP still precede narrowing.
 /// - Pseudo-scalar F32 transcendentals: scale the exact value before one F32
 ///   rounding; match gfx1201 captures.
+///
+/// Migration must preserve operation-specific rounding and flushing. In F32
+/// arithmetic, effective OMOD also selects output flushing before scaling.
+/// Test-only vector emitters use legacy names; they do not add a production path.
+/// The promoted-F32 F16 accumulator helper is unused; FMAC uses the MODE-aware path.
 ///
 /// Hardware evidence:
 /// - gfx1201 (RDNA4): every F16/F32/F64 min/max matches under all probed MODEs.
