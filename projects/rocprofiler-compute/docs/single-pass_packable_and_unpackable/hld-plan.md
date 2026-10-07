@@ -150,7 +150,7 @@ Code: `src/rocprof_compute_soc/counter_grouping_single_pass.py`, `counter_groupi
 
 Code: `src/utils/metrics/pass_provenance.py`, plus the shadow columns in file I/O and analysis utilities.
 
-TCC series affinity (channel instances of one event base, affinity pairs in the same pass) is a layout harden on this phase. It does not add passes on gfx942 (14 stays 14) and it is not a Phase 2 concern. Details are in the grouping note.
+TCC series affinity (channel instances of one event base, affinity pairs in the same pass) is a layout harden on this phase. It does not add passes on gfx942 (14 stays 14) and it is not a Phase 2 concern. Panel 1805 stays one packing group: `TCC_EA0_RDREQ`, `TCC_EA0_WRREQ`, and `TCC_EA0_ATOMIC` are one replay, in the pass that already holds them with `TCC_EA0_ATOMIC_LEVEL`. The extra `RDREQ` and `WRREQ` copies in that pass stay. Rows 1806 and 1807 bind to the pass that holds each LEVEL with its request series. Row 1808 binds to the pass that holds `ATOMIC_LEVEL` and `ATOMIC`. Details are in the grouping note.
 
 ### Phase 2 — collectables for Single-pass unpackable (SPU)
 
@@ -213,6 +213,7 @@ Rollback via those environment variables stays available until this change lands
 | Phase 2 only for the 16 SPU parents | Those sets do not fit one pass after placement. None of them include GRBM | `WEIGHTED_AVG` for the 75 POLICY_GAP metrics |
 | `WEIGHTED_AVG` only for a split-weight ratio | \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\) rebuilds one ratio | One composite operator for every parent |
 | Largest-first greedy placement | It meets the gfx942 gates (`packable_multi == 0`, ~14 passes). A solver on the allocate path is harder to explain when a metric is split | CP-SAT as the production allocator (removed from allocate) |
+| Panel 1805 stays one packing group | The read, write, and atomic request columns are one execution. Extra `RDREQ` and `WRREQ` copies stay in the pass that already holds them with `ATOMIC_LEVEL`. Latency ratios bind to the pass that contains both counters. gfx942 stays at 14 passes | Splitting 1805 into three packing groups and dropping those copies |
 | Escape hatches until a separate cleanup | Soak has to tell a packing change from a bind change | Deleting the old allocator in the same change as the collectables |
 
 ---
@@ -254,7 +255,6 @@ No new privilege, network, or credential surface. Profile still launches the exi
 ## Open questions
 
 - Pass budgets other than gfx942 are not locked. gfx1250 may need an explicit rule that some blocks never share a bucket (VALU versus VMEM). That constraint is not in this design.
-- After the TCC series harden, panel **1805** (one Single-pass packable (SPP) metric whose PMC set is the read, write, and atomic columns together) may no longer fit one bucket if orphan per-channel REQ copies are dropped. Offline `packable_multi` would then read **1** unless those columns are separate packing groups. The grouping note states the consequence; the split is not decided here.
 - Filtered `--block` / `--set` profiles allocate only the counters that were requested. There is no separate acceptance count for those subsets.
 - Composite `min` / `max` stay unset (FR-8). A later definition of composite min/max is deferred.
 - Iteration multiplexing inside one replay is outside same-pass bind.

@@ -25,7 +25,7 @@ Why this allocator: the shipping pack minimizes passes for the whole counter lis
 - Default path is SPP packing. During migration, `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1` or `ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0` restores the shipping allocator.
 - Do **not** use `WEIGHTED_AVG` for former POLICY_GAP metrics (shipping multi-pass layouts that are SPP). Packing covers them.
 - Priority policy YAML is not required for the packable guarantee.
-- gfx942 offline packing gates: `packable_multi == 0`, passes ≈ **14**, SPU count == **16**, SPU extra passes == **0**. `packable_multi` counts SPP metrics whose PMC set is not fully inside one bucket. The `packable_multi == 0` gate is the SPP allocator before the panel-1805 grouping follow-up in §3.
+- gfx942 offline packing gates: `packable_multi == 0`, passes ≈ **14**, SPU count == **16**, SPU extra passes == **0**. `packable_multi` counts SPP metrics whose PMC set is not fully inside one bucket. Panel 1805 stays one packing group in one pass (§3), so that gate includes it.
 
 **Primary packing code:** `counter_grouping_single_pass.py`, `counter_grouping_buckets.py`, `soc_base.py`.
 
@@ -100,6 +100,14 @@ On gfx942, TCC allows **4 event bases per pass** (channel instances `[i]` are di
 1. Pack by **series base**; when a TCC series is selected, expand **all collectable channel instances** in that pass.
 2. Keep affinity pairs in the **same pass** (e.g. `TCC_EA0_RDREQ_LEVEL` with `TCC_EA0_RDREQ`, and WR/ATOMIC analogues) so latency ratios are not joined across replays — L2 channel maps can remap between passes.
 3. Cover every selected series from the profile/YAML set; do **not** prune to runtime-nonzero channels.
-4. Do **not** duplicate the same per-channel REQ series into a second pass with a different channel map (orphan REQ copies invite wrong same-pass bind / cross-pass joins).
+4. Panel **1805**, "L2-Fabric Requests (per normUnit)", stays **one packing group**. Its three columns are collected in one pass: `TCC_EA0_RDREQ` (read), `TCC_EA0_WRREQ` (write and atomic), and `TCC_EA0_ATOMIC` (atomic). On gfx942 that pass is bucket 1 / `pmc_perf_1`, which already holds those three request series together with `TCC_EA0_ATOMIC_LEVEL` (four TCC event bases).
+5. The extra `TCC_EA0_RDREQ` and `TCC_EA0_WRREQ` copies in that pass stay. They have no matching LEVEL there. They exist so the three 1805 columns are one replay.
+6. Latency rows still bind to the pass that holds the whole expression:
+   - **1806** binds to the pass that holds `TCC_EA0_RDREQ_LEVEL` and `TCC_EA0_RDREQ` (bucket 2 on gfx942).
+   - **1807** binds to the pass that holds `TCC_EA0_WRREQ_LEVEL` and `TCC_EA0_WRREQ` (bucket 2).
+   - **1808** binds to the pass that holds `TCC_EA0_ATOMIC_LEVEL` and `TCC_EA0_ATOMIC` (bucket 1).
+   Same-pass bind does not read the extra `RDREQ` / `WRREQ` copies in bucket 1 for 1806 or 1807, because those LEVEL counters are not in that pass.
 
-**Impact:** Enforcing this on gfx942 default SPP is a **layout** harden and does **not** add passes (**14 → 14**). It is not a Phase 2 / Single-pass unpackable (SPU) concern. Dropping orphan `RDREQ` / `WRREQ` copies means panel **1805** (an SPP metric whose PMC set is the read, write, and atomic columns together) no longer fits one bucket, so offline `packable_multi` would read **1** unless those columns are separate packing groups.
+**Accuracy rule:** the request table is one execution. The latency ratios still use the pass that contains both counters.
+
+**Impact:** This layout harden does **not** add a pass. gfx942 stays at **14** passes. It is not a Phase 2 / Single-pass unpackable (SPU) concern. `packable_multi` stays **0** because 1805 remains one PMC set inside one bucket.
