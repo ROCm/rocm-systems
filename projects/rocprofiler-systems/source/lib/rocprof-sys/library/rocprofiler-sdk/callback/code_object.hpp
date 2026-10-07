@@ -22,16 +22,26 @@ on_code_object_enter(typename SdkBackend::callback_tracing_record_t     record,
 {
     if(record.operation == SdkBackend::CODE_OBJECT_LOAD)
     {
-        auto data_v = *static_cast<SdkBackend::code_object_load_data_t*>(record.payload);
+        const auto* data_v =
+            static_cast<const SdkBackend::code_object_load_data_t*>(record.payload);
+        if(data_v == nullptr)
+        {
+            return;
+        }
 
-        Externals::get_metadata_registry().add_code_object(data_v);
+        Externals::get_metadata_registry().add_code_object(*data_v);
     }
     else if(record.operation == SdkBackend::CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
-        auto data_v =
-            *static_cast<SdkBackend::code_object_kernel_symbol_register_data_t*>(
+        const auto* data_v =
+            static_cast<const SdkBackend::code_object_kernel_symbol_register_data_t*>(
                 record.payload);
-        Externals::get_metadata_registry().add_kernel_symbol(data_v);
+        if(data_v == nullptr)
+        {
+            return;
+        }
+
+        Externals::get_metadata_registry().add_kernel_symbol(*data_v);
     }
 }
 

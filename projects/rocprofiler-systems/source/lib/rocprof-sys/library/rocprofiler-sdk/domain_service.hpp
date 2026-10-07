@@ -67,7 +67,7 @@ public:
         LOG_DEBUG("Resolved {} domain configuration(s)", m_configuration.size());
 
         m_buffered_domains.reserve(m_configuration.size());
-        m_callback_domains.reserve(m_configuration.size());
+        m_callback_domains.reserve(m_configuration.size() + k_always_on_callback_domains);
         for(const auto& config : m_configuration)
         {
             configure_domain(config);
@@ -132,6 +132,9 @@ private:
                              m_correlation_domains;
     SdkBackend::context_id_t m_context{};
     SdkBackend::context_id_t m_code_object_context{};
+
+    // The always-on code_object domain is appended after the configured callback domains.
+    static constexpr std::size_t k_always_on_callback_domains = 1;
 
     // code_object is not in the registry, so it is never user-selectable: it always
     // runs, on its own context, so kernel names resolve even while m_context is paused.

@@ -3,10 +3,8 @@
 
 #pragma once
 
-#include "common/synchronized.hpp"
 #include "core/agent_manager.hpp"
 #include "core/perfetto.hpp"
-#include "core/state.hpp"
 #include "core/timemory.hpp"
 
 #include <rocprofiler-sdk/agent.h>

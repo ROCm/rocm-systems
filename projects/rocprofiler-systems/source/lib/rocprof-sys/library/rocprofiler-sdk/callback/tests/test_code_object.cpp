@@ -82,6 +82,34 @@ TEST(code_object_test, on_code_object_enter_registers_kernel_symbol)
     g_metadata_registry_mock.reset();
 }
 
+TEST(code_object_test, on_code_object_enter_ignores_null_code_object_payload)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+
+    auto record      = mock_sdk::callback_tracing_record_t{};
+    record.operation = mock_sdk::CODE_OBJECT_LOAD;
+    record.payload   = nullptr;
+    mock_sdk::user_data_t user_data{};
+
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr);
+
+    g_metadata_registry_mock.reset();
+}
+
+TEST(code_object_test, on_code_object_enter_ignores_null_kernel_symbol_payload)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+
+    auto record      = mock_sdk::callback_tracing_record_t{};
+    record.operation = mock_sdk::CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+    record.payload   = nullptr;
+    mock_sdk::user_data_t user_data{};
+
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr);
+
+    g_metadata_registry_mock.reset();
+}
+
 TEST(code_object_test, on_record_dispatches_by_phase_without_crashing)
 {
     constexpr const auto& k_domain = k_code_object<mock_sdk, externals>;

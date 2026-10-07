@@ -90,7 +90,8 @@ struct backend
     using memory_copy_record_t           = Wrapper::memory_copy_record;
     using scratch_memory_record_t        = Wrapper::scratch_memory_record;
     using code_object_load_data_t        = Wrapper::code_object_load_data;
-    using code_object_kernel_symbol_register_data_t = Wrapper::kernel_symbol_data;
+    using code_object_kernel_symbol_register_data_t =
+        Wrapper::code_object_kernel_symbol_register_data;
 #if ROCPROFILER_VERSION >= 700
     using async_correlation_id_t    = Wrapper::async_correlation_id_t;
     using tracing_hip_stream_data_t = Wrapper::hip_stream_data;

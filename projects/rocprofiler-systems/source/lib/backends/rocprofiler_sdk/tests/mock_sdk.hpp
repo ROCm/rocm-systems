@@ -475,7 +475,7 @@ struct mock_sdk
     using hip_stream_operation_t               = testing::hip_stream_operation_t;
     using stream_id                            = testing::stream_id;
     using code_object_load_data                = testing::code_object_load_data;
-    using kernel_symbol_data                   = testing::kernel_symbol_data;
+    using code_object_kernel_symbol_register_data = testing::kernel_symbol_data;
 
     // compile_time_version >= 10000 selects the v1 branch in query_counter_details.
     static constexpr std::uint32_t compile_time_version = 10100u;
