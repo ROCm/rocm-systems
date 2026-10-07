@@ -1611,6 +1611,7 @@ class GraphKernelNode : public GraphNode {
   int globalWorkSizeY_remainder_;
   int globalWorkSizeZ_remainder_;
   dim3 clusterDim_;                    //!< Cluster dimensions for cluster launch
+  bool clusterDimsSpecified_ = false;  //!< Cluster dimensions were explicitly supplied
   uint32_t launchFlags_;               //!< Ext launch flags (e.g. hipExtAnyOrderLaunch)
   hipFunction_t resolvedFunc_ = nullptr;  //!< Cached resolved function to avoid redundant lookups
   hipError_t paramCopyStatus_ = hipSuccess;
@@ -1627,6 +1628,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeY_remainder_ = rhs.globalWorkSizeY_remainder_;
     globalWorkSizeZ_remainder_ = rhs.globalWorkSizeZ_remainder_;
     clusterDim_ = rhs.clusterDim_;
+    clusterDimsSpecified_ = rhs.clusterDimsSpecified_;
     launchFlags_ = rhs.launchFlags_;
     hipError_t status = copyParams(&rhs.kernelParams_);
     paramCopyStatus_ = status;
@@ -1875,6 +1877,7 @@ class GraphKernelNode : public GraphNode {
                   int globalWorkSizeY_remainder = 0,
                   int globalWorkSizeZ_remainder = 0,
                   dim3 clusterDim = {1, 1, 1},
+                  bool clusterDimsSpecified = false,
                   uint32_t launchFlags = 0)
       : GraphNode(hipGraphNodeTypeKernel, "bold", "octagon", "KERNEL") {
     kernelEvents_ = {0};
@@ -1892,6 +1895,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeY_remainder_ = globalWorkSizeY_remainder;
     globalWorkSizeZ_remainder_ = globalWorkSizeZ_remainder;
     clusterDim_ = clusterDim;
+    clusterDimsSpecified_ = clusterDimsSpecified;
     launchFlags_ = launchFlags;
   }
 
@@ -1931,7 +1935,9 @@ class GraphKernelNode : public GraphNode {
         globalWorkSizeY_remainder_ != other->globalWorkSizeY_remainder_ ||
         globalWorkSizeZ_remainder_ != other->globalWorkSizeZ_remainder_ ||
         clusterDim_.x != other->clusterDim_.x || clusterDim_.y != other->clusterDim_.y ||
-        clusterDim_.z != other->clusterDim_.z || launchFlags_ != other->launchFlags_ ||
+        clusterDim_.z != other->clusterDim_.z ||
+        clusterDimsSpecified_ != other->clusterDimsSpecified_ ||
+        launchFlags_ != other->launchFlags_ ||
         std::memcmp(&accessPolicyWindow_, &other->accessPolicyWindow_, sizeof(accessPolicyWindow_)) != 0 ||
         cooperative_ != other->cooperative_ ||
         priority_ != other->priority_ ||
@@ -1995,7 +2001,7 @@ class GraphKernelNode : public GraphNode {
       resolvedFunc_ = func;
     }
     if (!paramsValidated_) {
-      status = validateKernelParams(&kernelParams_, func, dev_id_);
+      status = validateKernelParams(&kernelParams_, func, dev_id_, clusterDim_);
       if (hipSuccess != status) {
         return status;
       }
@@ -2031,14 +2037,27 @@ class GraphKernelNode : public GraphNode {
   void GetParams(hipKernelNodeParams* params) { *params = kernelParams_; }
 
   hipError_t SetParams(const hipKernelNodeParams* params) {
+    return SetParams(params, clusterDim_, clusterDimsSpecified_);
+  }
+
+  hipError_t SetParams(const hipKernelNodeParams* params, dim3 clusterDim,
+                       bool clusterDimsSpecified) {
     // Update device ID since new params may require validation for the current device.
     dev_id_ = ihipGetDevice();
     hipFunction_t func = getFunc(*params, dev_id_);
     if (!func) {
       return hipErrorInvalidDeviceFunction;
     }
+
+    dim3 resolvedClusterDim = clusterDimsSpecified ? clusterDim : dim3{0, 0, 0};
+    hipError_t status =
+        ihipResolveGraphClusterDimensions(func, dev_id_, params->gridDim, &resolvedClusterDim);
+    if (status != hipSuccess) {
+      return status;
+    }
+
     // updates kernel params
-    hipError_t status = validateKernelParams(params, func, dev_id_);
+    status = validateKernelParams(params, func, dev_id_, resolvedClusterDim);
     if (hipSuccess != status) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to validateKernelParams");
       return status;
@@ -2049,6 +2068,8 @@ class GraphKernelNode : public GraphNode {
       kernelParams_ = *params;
       resolvedFunc_ = func;
       paramsValidated_ = true;
+      clusterDim_ = resolvedClusterDim;
+      clusterDimsSpecified_ = clusterDimsSpecified;
       return status;
     }
     status = copyParams(params);
@@ -2057,6 +2078,8 @@ class GraphKernelNode : public GraphNode {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to set params");
     } else {
       paramsValidated_ = true;
+      clusterDim_ = resolvedClusterDim;
+      clusterDimsSpecified_ = clusterDimsSpecified;
     }
     return status;
   }
@@ -2127,6 +2150,7 @@ class GraphKernelNode : public GraphNode {
         return hipErrorInvalidConfiguration;
       }
       clusterDim_ = clusterDim;
+      clusterDimsSpecified_ = true;
       return hipSuccess;
     } else {
       return hipErrorInvalidValue;
@@ -2158,6 +2182,7 @@ class GraphKernelNode : public GraphNode {
   //! Copy all attribute slots from srcNode, mirroring its exact state.
   hipError_t CopyAttr(const GraphKernelNode* srcNode) {
     clusterDim_ = srcNode->clusterDim_;
+    clusterDimsSpecified_ = srcNode->clusterDimsSpecified_;
     accessPolicyWindow_ = srcNode->accessPolicyWindow_;
     cooperative_ = srcNode->cooperative_;
     priority_ = srcNode->priority_;
@@ -2169,17 +2194,15 @@ class GraphKernelNode : public GraphNode {
     if (coopKernel_ != kernelNode->coopKernel_) {
       return hipErrorInvalidValue;
     }
-    dim3 oldClusterDim = clusterDim_;
     int oldGlobalWorkSizeX_remainder = globalWorkSizeX_remainder_;
     int oldGlobalWorkSizeY_remainder = globalWorkSizeY_remainder_;
     int oldGlobalWorkSizeZ_remainder = globalWorkSizeZ_remainder_;
-    clusterDim_ = kernelNode->clusterDim_;
     globalWorkSizeX_remainder_ = kernelNode->globalWorkSizeX_remainder_;
     globalWorkSizeY_remainder_ = kernelNode->globalWorkSizeY_remainder_;
     globalWorkSizeZ_remainder_ = kernelNode->globalWorkSizeZ_remainder_;
-    hipError_t status = SetParams(&kernelNode->kernelParams_);
+    hipError_t status = SetParams(&kernelNode->kernelParams_, kernelNode->clusterDim_,
+                                  kernelNode->clusterDimsSpecified_);
     if (status != hipSuccess) {
-      clusterDim_ = oldClusterDim;
       globalWorkSizeX_remainder_ = oldGlobalWorkSizeX_remainder;
       globalWorkSizeY_remainder_ = oldGlobalWorkSizeY_remainder;
       globalWorkSizeZ_remainder_ = oldGlobalWorkSizeZ_remainder;
@@ -2187,12 +2210,16 @@ class GraphKernelNode : public GraphNode {
     }
     launchFlags_ = kernelNode->launchFlags_;
     kernelEvents_ = kernelNode->kernelEvents_;
+    const dim3 resolvedClusterDim = clusterDim_;
+    const bool clusterDimsSpecified = clusterDimsSpecified_;
     CopyAttr(kernelNode);
+    clusterDim_ = resolvedClusterDim;
+    clusterDimsSpecified_ = clusterDimsSpecified;
     return status;
   }
 
-  hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams,
-                                  hipFunction_t func, int devId) {
+  hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams, hipFunction_t func,
+                                  int devId, dim3 clusterDim) {
 
     const amd::Device* device = g_devices[devId]->devices()[0];
     amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
@@ -2200,7 +2227,7 @@ class GraphKernelNode : public GraphNode {
                                        pNodeParams->blockDim.y, pNodeParams->blockDim.z,
                                        pNodeParams->sharedMemBytes, *device, globalWorkSizeX_remainder_,
                                        globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
-                                       clusterDim_.x, clusterDim_.y, clusterDim_.z);
+                                       clusterDim.x, clusterDim.y, clusterDim.z);
 
     if (!launch_params.IsValidConfig()) {
       HIP_RETURN(hipErrorInvalidConfiguration);

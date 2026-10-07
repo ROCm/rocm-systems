@@ -157,10 +157,49 @@ HIP_TEST_CASE(Unit_hipKernelSetAttributeForDevice_Positive_ClusterLaunch) {
   graph_node = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipGraphAddKernelNode(&graph_node, graph, nullptr, 0, &graph_params));
+
+  hipKernel_t sub_kernel = nullptr;
+  hipFunction_t sub_function = nullptr;
+  HIP_CHECK(hipLibraryGetKernel(&sub_kernel, library, "sub_kernel"));
+  HIP_CHECK(hipKernelGetFunction(&sub_function, sub_kernel));
+  HIP_CHECK(
+      hipKernelSetAttributeForDevice(sub_kernel, hipFuncAttributeRequiredClusterWidth, 1, 0));
+  HIP_CHECK(
+      hipKernelSetAttributeForDevice(sub_kernel, hipFuncAttributeRequiredClusterHeight, 1, 0));
+  HIP_CHECK(
+      hipKernelSetAttributeForDevice(sub_kernel, hipFuncAttributeRequiredClusterDepth, 1, 0));
+
+  hipKernelNodeAttrValue observed_cluster_attribute{};
+  HIP_CHECK(hipGraphKernelNodeGetAttribute(graph_node, hipLaunchAttributeClusterDimension,
+                                           &observed_cluster_attribute));
+  REQUIRE(observed_cluster_attribute.clusterDim.x == 2);
+
+  hipKernelNodeParams updated_graph_params = graph_params;
+  updated_graph_params.func = sub_function;
+  HIP_CHECK(hipGraphKernelNodeSetParams(graph_node, &updated_graph_params));
+  HIP_CHECK(hipGraphKernelNodeGetAttribute(graph_node, hipLaunchAttributeClusterDimension,
+                                           &observed_cluster_attribute));
+  REQUIRE(observed_cluster_attribute.clusterDim.x == 1);
+
+  HIP_CHECK(hipGraphKernelNodeSetParams(graph_node, &graph_params));
+  HIP_CHECK(hipGraphKernelNodeGetAttribute(graph_node, hipLaunchAttributeClusterDimension,
+                                           &observed_cluster_attribute));
+  REQUIRE(observed_cluster_attribute.clusterDim.x == 2);
+
   hipKernelNodeAttrValue graph_cluster_attribute{};
   graph_cluster_attribute.clusterDim = {2, 1, 1};
   HIP_CHECK(hipGraphKernelNodeSetAttribute(graph_node, hipLaunchAttributeClusterDimension,
                                            &graph_cluster_attribute));
+
+  HIP_CHECK_ERROR(hipGraphKernelNodeSetParams(graph_node, &updated_graph_params),
+                  hipErrorInvalidClusterSize);
+  hipKernelNodeParams observed_graph_params{};
+  HIP_CHECK(hipGraphKernelNodeGetParams(graph_node, &observed_graph_params));
+  REQUIRE(observed_graph_params.func == function);
+  HIP_CHECK(hipGraphKernelNodeGetAttribute(graph_node, hipLaunchAttributeClusterDimension,
+                                           &observed_cluster_attribute));
+  REQUIRE(observed_cluster_attribute.clusterDim.x == 2);
+
   graph_cluster_attribute.clusterDim = {4, 1, 1};
   HIP_CHECK_ERROR(hipGraphKernelNodeSetAttribute(graph_node, hipLaunchAttributeClusterDimension,
                                                  &graph_cluster_attribute),
