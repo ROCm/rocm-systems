@@ -12,6 +12,8 @@ set(NET_IB_CAST_SOURCES
     src/transport/net_ib_cast/p2p_resiliency_recovery_internal.h
     src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.h
     src/transport/net_ib_cast/qp_sharing.h
+    src/transport/net_ib_cast/capability_cast.h
+    src/transport/net_ib_cast/capability.cc
     src/transport/net_ib_cast/common.cc
     src/transport/net_ib_cast/connect.cc
     src/transport/net_ib_cast/gdr.cc
@@ -37,7 +39,8 @@ set(NET_IB_CAST_SOURCES
 set(NET_IB_CAST_INCLUDE_DIRS
     "${CMAKE_BINARY_DIR}/hipify/src/transport/net_ib_cast"
     "${CMAKE_BINARY_DIR}/hipify/src/transport"
-    PARENT_SCOPE)
+    PARENT_SCOPE
+)
 
 # Propagate sources to parent scope so src/CMakeLists.txt can use ${NET_IB_CAST_SOURCES}
 set(NET_IB_CAST_SOURCES ${NET_IB_CAST_SOURCES} PARENT_SCOPE)

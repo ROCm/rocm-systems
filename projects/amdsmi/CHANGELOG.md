@@ -6,6 +6,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.2.0
 
+### Added
+
+- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
+  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
+  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
+  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
+  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
+
+### Changed
+
+- **`amd-smi`, `amd-smi version`, and `amd-smi static --driver` include the DKMS build in the amdgpu version**.  
+  - For example `6.19.14.31400000-2370381`. Labels and JSON/CSV keys are unchanged.
+
 ### Resolved Issues
 
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
@@ -173,6 +186,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi version` advertising `--cpu_version` on systems without that hardware**.  
   - Every other CPU surface in the CLI (the `--cpu`/`--core` device arguments and the CPU option groups in `static`/`metric`/`set`) is only registered when the corresponding hardware is initialized, but `version` always listed `-c`/`--cpu_version` in `version --help` and accepted it even when no CPU was present.
   - `version` now registers `--cpu_version` only when CPU (amd_hsmp) is initialized, so the flag is hidden from help and rejected when its hardware is absent. Plain `amd-smi version` also omits the corresponding line instead of printing `N/A`. `--gpu_version` and `--nic_version` are unchanged.
+- **Fixed xGMI read and write data counters reading as unavailable on MI450**.  
+  - On MI450 the GPU connects to the CPU over xGMI, and the driver reports that link's traffic as a single counter. It was dropped instead of being stored as the first link, so `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`).
 
 - **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
   - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.

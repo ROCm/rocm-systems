@@ -65,15 +65,10 @@ class VersionCommands:
             try:
                 gpus = amdsmi_interface.amdsmi_get_processor_handles()
                 if isinstance(gpus, list) and len(gpus) > 0:
-                    gpu_version_info = amdsmi_interface.amdsmi_get_gpu_driver_info(gpus[0])
-                    gpu_version_str = gpu_version_info["driver_version"]
-                else:
-                    gpu_version_str = "N/A"
+                    driver_info = amdsmi_interface.amdsmi_get_gpu_driver_info(gpus[0])
+                    self.logger.output["amdgpu_version"] = driver_info["driver_full_version"]
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Failed to get amdgpu version | %s", e.get_error_info())
-                gpu_version_str = "N/A"
-
-            self.logger.output["amdgpu_version"] = gpu_version_str
+                logging.debug("Failed to get amdgpu driver versions | %s", e.get_error_info())
         if args.cpu_version:
             try:
                 ret = amdsmi_interface.amdsmi_get_cpu_handles()
@@ -115,7 +110,8 @@ class VersionCommands:
             )
             if args.gpu_version:
                 human_readable_output = (
-                    human_readable_output + f" | amdgpu version: {gpu_version_str}"
+                    human_readable_output
+                    + f" | amdgpu version: {self.logger.output['amdgpu_version']}"
                 )
             if args.cpu_version:
                 human_readable_output = (
