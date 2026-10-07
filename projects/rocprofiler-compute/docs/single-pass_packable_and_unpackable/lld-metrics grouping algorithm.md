@@ -33,7 +33,7 @@ Why this allocator: the shipping pack minimizes passes for the whole counter lis
 
 ## 2. Flowchart
 
-A **bucket** is one perfmon pass. Flow — Single-pass packable (SPP) placement plus Single-pass unpackable (SPU) residual fill (default). TCC series affinity is **not** in this chart; it is the layout harden in §3. The TCC event-base budget is still this flow's hardware-block check. §3 times the other TCC rules.
+A **bucket** is one perfmon pass. Flow — Single-pass packable (SPP) placement plus Single-pass unpackable (SPU) residual fill (default). TCC series affinity is **not** in this chart; it is the layout harden in §3. The TCC event-base budget is still this flow's hardware-block check.
 
 **How an SPP PMC set is placed.** Candidates are the unique sets, visited largest first. For each set the allocator tries buckets already opened before it opens a new one:
 
@@ -93,67 +93,26 @@ Visit order: largest PMC sets first (M1, then HBM-like, M2, M3).
 
 ## 3. TCC series affinity + coverage
 
-The TCC handling in this section is a **short-term solution**. The TCC rules live in one module so they can be replaced later. Generalizing it is **out of scope for this design**. [Instance-aware metrics](#instance-aware-metrics-out-of-scope) records that boundary.
+The TCC handling here is a **short-term solution**. Those rules live in one module so a later design can replace them. A general hardware-instance framework is **out of scope**. [Instance-aware metrics](#instance-aware-metrics-out-of-scope) records that boundary.
 
-TCC channel series need packing rules beyond co-locating one Single-pass packable (SPP) metric's PMC set in a single pass. Why: an L2 channel map can change between replays, so a latency ratio that joins a request counter and its level counter from different passes is not one execution.
+An L2 channel map can change between replays, so the counters one expression joins share a pass. gfx942 is the example, not the only architecture, and the pass count there stays **14**. A selected series keeps every collectable channel. Channel expansion follows that architecture's own L2 channels, and single-die parts (gfx908, gfx115x) are not an XCD multiple of a multi-die (XCD) part.
 
-On gfx942, TCC allows **4 event bases per pass** (channel instances `[i]` are dimensions of one base, not extra slots). Full policy: [TCC series affinity + coverage](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-tcc-series-affinity-coverage.md).
-
-1. Pack by **series base**. Every collectable channel index of a selected series is already in the candidate set before placement. Writing the perfmon file does not add channels later.
-2. Keep affinity pairs in the **same pass** (e.g. `TCC_EA0_RDREQ_LEVEL` with `TCC_EA0_RDREQ`, and WR/ATOMIC analogues) so latency ratios are not joined across replays — L2 channel maps can remap between passes.
-3. Cover every selected series from the profile/YAML set; do **not** prune to runtime-nonzero channels.
-4. Panel **1805**, "L2-Fabric Requests (per normUnit)", stays **one packing group**. Its three columns are collected in one pass: `TCC_EA0_RDREQ` (read), `TCC_EA0_WRREQ` (write and atomic), and `TCC_EA0_ATOMIC` (atomic). On gfx942 that pass is bucket 1 / `pmc_perf_1`, which already holds those three request series together with `TCC_EA0_ATOMIC_LEVEL` (four TCC event bases).
-5. The extra `TCC_EA0_RDREQ` and `TCC_EA0_WRREQ` copies in that pass stay. They have no matching LEVEL there. They exist so the three 1805 columns are one replay.
-6. Latency rows still bind to the pass that holds the whole expression:
-   - **1806** binds to the pass that holds `TCC_EA0_RDREQ_LEVEL` and `TCC_EA0_RDREQ` (bucket 2 on gfx942).
-   - **1807** binds to the pass that holds `TCC_EA0_WRREQ_LEVEL` and `TCC_EA0_WRREQ` (bucket 2).
-   - **1808** binds to the pass that holds `TCC_EA0_ATOMIC_LEVEL` and `TCC_EA0_ATOMIC` (bucket 1).
-   Same-pass bind does not read the extra `RDREQ` / `WRREQ` copies in bucket 1 for 1806 or 1807, because those LEVEL counters are not in that pass.
-
-**Accuracy rule:** the request table is one execution. The latency ratios still use the pass that contains both counters.
-
-### Order relative to the main flow
-
-These rules are not a second copy of the flowchart in §2, and they do not all run after that flow.
-
-**Before placement.** Candidate groups are built first. Panel 1805 stays one group: `TCC_EA0_RDREQ`, `TCC_EA0_WRREQ`, and `TCC_EA0_ATOMIC`. Each latency row is one group of a LEVEL counter plus its request series (1806, 1807, 1808). A TCC name that still ends in `[` is expanded to every collectable channel index here (`detect_counters`, then `iter_metric_groups`), before a bucket is chosen.
-
-**Inside placement.** The TCC event-base budget is the hardware-block check in §2 (`CounterFile.add`). On gfx942 that budget is 4. Another channel of a base already in the bucket does not take another base. Placing the 1805 group and the latency groups is what leaves the extra `RDREQ` and `WRREQ` copies in the pass that also holds `ATOMIC_LEVEL`.
-
-**After buckets exist.** A cleanup then drops a request series from a pass that lacks its LEVEL, and it leaves those extra copies when the 1805 group still needs them in that one pass. Same-pass bind runs at analyze and picks the pass that holds the whole expression, so 1806 and 1807 do not read the copies in bucket 1. Writing `pmc_perf_*.yaml` records the channel instances already in the bucket and emits a `select()` definition for each one. It does not expand the series.
-
-**TCC rule order** (not the general placement flow):
+A multi-column L2-fabric request row (read, write, and atomic; panel 1805) stays one group so those columns are one replay. Each latency row keeps its LEVEL counter with its request series. Extra request copies stay when the request row needs them. Same-pass bind uses the pass that holds the whole expression.
 
 ```mermaid
 flowchart TD
-  B[Before placement:<br/>build the candidate groups]
-  B --> G[1805 is one group:<br/>RDREQ, WRREQ, ATOMIC]
-  B --> L[1806, 1807, 1808:<br/>LEVEL plus its request series]
-  B --> C[Channel templates expand to<br/>every collectable index]
-  G --> P
+  R[Request row stays one group:<br/>read, write, atomic]
+  L[Each latency row:<br/>LEVEL with its request series]
+  R --> P[Keep extra request copies<br/>the request row needs]
   L --> P
-  C --> P
-  P[Inside placement:<br/>TCC event-base budget<br/>is the hardware-block check<br/>4 bases on gfx942]
-  P --> R[Placing those groups leaves<br/>extra RDREQ and WRREQ copies<br/>in the 1805 pass]
-  R --> K[After buckets exist:<br/>cleanup keeps those copies<br/>when the 1805 group needs them]
-  K --> N[Analyze: same-pass bind uses<br/>the pass that holds<br/>the whole expression]
+  P --> B[Same-pass bind uses the pass<br/>that holds the whole expression]
 ```
-
-**Impact:** This layout harden does **not** add a pass. gfx942 stays at **14** passes. It is not a Phase 2 / Single-pass unpackable (SPU) concern. `packable_multi` stays **0** because 1805 remains one PMC set inside one bucket.
-
-TCC balancing and affinity are one case of a broader class: hardware-instance metrics. Today the replicated block is a TCC channel. The same pattern can appear for TCC, TCP, a shader engine, SDMA, or any other hardware block the chip repeats. A TCC-series-affinity concept names today's consumer, and it is the wrong abstraction for the class. The underlying issue is aggregation across multiple hardware instances: each replica exposes its own counters, and a metric has to say how those readings combine and which of them must share a pass.
-
-**Short-term shape (this design).** TCC-specific logic leads to the TCC affinity rules above, which keep the TCC balance metrics in one valid layout.
-
-**Later shape (out of scope).** A hardware-instance metric framework would sit above any one block and produce a TCC balance metric, a TCP balance metric, a shader-engine balance metric, and future metrics of the same kind.
 
 ### Instance-aware metrics (out of scope)
 
-That later framework would cover four parts:
+Today the replicated block is a TCC channel. TCP, a shader engine, and SDMA come later. TCC is the first consumer. The later framework would cover:
 
-- **Per-instance counters.** Each replica of a block exposes its own counter. The channel index on a TCC event is one case.
-- **Aggregation strategies.** A metric may sum, average, or otherwise combine the per-instance readings. That choice belongs to the metric.
-- **Balance metrics.** A balance metric compares instances with each other, such as how evenly traffic is spread.
-- **Affinity requirements.** Some expressions are valid only when the counters they join were collected in the same pass, because the mapping from instance to counter can change between replays. A LEVEL counter paired with its request series is that requirement for TCC.
-
-TCC is only the first consumer. TCP per WGP is the same class, not a second special case to add in this design.
+- **Per-instance counters.** Each replica of a block exposes its own counter.
+- **Aggregation strategies.** A metric sums, averages, or otherwise combines those readings.
+- **Balance metrics.** A balance metric compares instances with each other.
+- **Affinity requirements.** Joined counters share a pass when the instance map can change between replays.
