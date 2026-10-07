@@ -114,6 +114,7 @@ struct gin_dest_info {
   int qpn;
   int psn;
   union ibv_gid gid;
+  enum ibv_mtu active_mtu;
 };
 
 struct rocshmem_gin_qp_set {
@@ -844,12 +845,40 @@ static int gin_modify_qps_rst_to_init(rocshmem_gin_qp_set* set) {
   return 0;
 }
 
+<<<<<<< Updated upstream
+// Mirrors GDABackend::ibv_mtu_to_int() (rocshmem/src/gda/backend_gda.cpp) — duplicated locally
+// since this file is standalone and doesn't take a GDABackend dependency (see file header).
+=======
+// GID Format
+// global:  |              64b  - subnet-prefix                |                 64b - EUI                          |
+// raw   :  | 10b fixed | 22b 0 | 16b FLID | 16b subnet-prefix |                 64b - EUI                          |
+static uint16_t ginExtractLocalSubnetPrefix(uint64_t subnet_prefix) {
+  return (be64toh(subnet_prefix) & 0xffff);
+}
+
+static int ginExtractFlid(union ibv_gid* gid) {
+  return ntohs(*((uint16_t*)((uintptr_t)(gid->raw) + 4)));
+}
+
+>>>>>>> Stashed changes
+static int ginIbvMtuToInt(enum ibv_mtu mtu) {
+  switch (mtu) {
+  case IBV_MTU_256: return 256;
+  case IBV_MTU_512: return 512;
+  case IBV_MTU_1024: return 1024;
+  case IBV_MTU_2048: return 2048;
+  case IBV_MTU_4096: return 4096;
+  default:
+    LOG_WARN("GIN QP factory: invalid ibv_mtu %d", mtu);
+    return 0;
+  }
+}
+
 static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_info* remote_info) {
   struct ibv_qp_attr attr;
   memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTR;
   attr.min_rnr_timer = 12;
-  attr.path_mtu = set->nic.portinfo.active_mtu;
   attr.ah_attr.port_num = set->nic.port;
 
 #if defined(GDA_IONIC)
@@ -861,7 +890,14 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
   int mask = IBV_QP_STATE | IBV_QP_PATH_MTU | IBV_QP_RQ_PSN | IBV_QP_DEST_QPN | IBV_QP_AV | IBV_QP_MAX_DEST_RD_ATOMIC |
              IBV_QP_MIN_RNR_TIMER;
 
+  enum ibv_mtu local_mtu = set->nic.portinfo.active_mtu;
+
   for (int i = 0; i < set->nRanks; i++) {
+    if (ginIbvMtuToInt(local_mtu) == 0 || ginIbvMtuToInt(remote_info[i].active_mtu) == 0) {
+      return -1;
+    }
+    attr.path_mtu = (local_mtu < remote_info[i].active_mtu) ? local_mtu : remote_info[i].active_mtu;
+
     if (set->nic.portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
       attr.ah_attr.grh.sgid_index = set->nic.gid_index;
       attr.ah_attr.is_global = 1;
@@ -1150,6 +1186,7 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
       local_infos[i].lid = set->nic.portinfo.lid;
       local_infos[i].psn = 0;
       local_infos[i].gid = set->nic.gid;
+      local_infos[i].active_mtu = set->nic.portinfo.active_mtu;
 #if defined(GDA_MLX5)
       if (set->provider == GDAProvider::MLX5) local_infos[i].qpn = set->mlx5_qps[i].qpn;
       else
