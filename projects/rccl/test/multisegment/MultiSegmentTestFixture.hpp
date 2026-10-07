@@ -79,10 +79,11 @@ protected:
         if (numSegments <= 0) return ncclInvalidArgument;
 
         hipMemAllocationProp prop = {};
-        prop.type                = hipMemAllocationTypePinned;
-        prop.location.type       = hipMemLocationTypeDevice;
-        prop.location.id         = dev;
-        prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+        prop.type                            = hipMemAllocationTypePinned;
+        prop.location.type                   = hipMemLocationTypeDevice;
+        prop.location.id                     = dev;
+        prop.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
+        prop.allocFlags.gpuDirectRDMACapable = 1;
 
         size_t granularity = 0;
         HIP_TEST_CHECK(hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
@@ -174,6 +175,7 @@ protected:
             const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
                 "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
             if (!why.empty()) {
+                releaseMultiSegmentBuffer(buf);
                 GTEST_SKIP() << why;
                 return;
             }
@@ -193,6 +195,9 @@ protected:
         *recvBuf = base + recvOffset;
         *count = *totalBytes / sizeof(T);
         if (*nRanks <= 0 || *count % static_cast<size_t>(*nRanks) != 0) {
+            if (*win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), *win));
+            *win = nullptr;
+            releaseMultiSegmentBuffer(buf);
             GTEST_SKIP() << "count must be divisible by nRanks";
             return;
         }
@@ -211,8 +216,8 @@ protected:
      *
      * HIP/CLR has no host-NUMA VMM type and only accepts a plain Host location
      * (id must be 0). Host VMM follows NCCL_CUMEM_HOST_VERSION_SUPPORTED
-     * (native 7.12 or the 7.0.2.x backport); if it is unsupported,
-     * buf.totalSize is left 0 so the caller can GTEST_SKIP() instead of failing.
+     * (native 7.12 or the 7.0.2.x backport). Any HIP failure leaves
+     * buf.totalSize at 0 so the caller can GTEST_SKIP() instead of failing.
      */
     void createMixedMultiSegmentBuffer(int dev,
                                        size_t requestedSegmentSize,
@@ -227,10 +232,11 @@ protected:
         ASSERT_LE(numHostSegments, numSegments);
 
         hipMemAllocationProp devProp = {};
-        devProp.type                = hipMemAllocationTypePinned;
-        devProp.location.type       = hipMemLocationTypeDevice;
-        devProp.location.id         = dev;
-        devProp.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+        devProp.type                            = hipMemAllocationTypePinned;
+        devProp.location.type                   = hipMemLocationTypeDevice;
+        devProp.location.id                     = dev;
+        devProp.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
+        devProp.allocFlags.gpuDirectRDMACapable = 1;
 
         hipMemAllocationProp hostProp = {};
         hostProp.type                = hipMemAllocationTypePinned;
@@ -240,7 +246,10 @@ protected:
 
         size_t devGran = 0;
         size_t hostGran = 0;
-        HIP_CHECK(hipMemGetAllocationGranularity(&devGran, &devProp, hipMemAllocationGranularityMinimum));
+        if (hipMemGetAllocationGranularity(&devGran, &devProp, hipMemAllocationGranularityMinimum) != hipSuccess
+            || devGran == 0) {
+            return;
+        }
         if (numHostSegments > 0 &&
             hipMemGetAllocationGranularity(&hostGran, &hostProp, hipMemAllocationGranularityMinimum) != hipSuccess) {
             return;
@@ -253,41 +262,40 @@ protected:
         const int    numDevSegments = numSegments - numHostSegments;
 
         hipDeviceptr_t vaBase = 0;
-        HIP_CHECK(hipMemAddressReserve(&vaBase, totalSize, gran, 0, 0));
+        if (hipMemAddressReserve(&vaBase, totalSize, gran, 0, 0) != hipSuccess) {
+            return;
+        }
         char* vaBaseBytes = static_cast<char*>(vaBase);
 
         std::vector<hipMemGenericAllocationHandle_t> handles(numSegments, 0);
-        bool hostUnsupported = false;
-        int  mapped          = 0;
-        for (int i = 0; i < numSegments; i++) {
-            const bool isHost = (i >= numDevSegments);
-            hipMemAllocationProp& prop = isHost ? hostProp : devProp;
-            hipError_t err = hipMemCreate(&handles[i], segSize, &prop, 0);
-            if (isHost && err != hipSuccess) {
-                hostUnsupported = true;
-                break;
-            }
-            HIP_CHECK(err);
-            HIP_CHECK(hipMemMap(vaBaseBytes + i * segSize, segSize, 0, handles[i], 0));
-            mapped++;
-        }
-
-        if (hostUnsupported) {
+        int mapped = 0;
+        auto releasePartial = makeScopeGuard([&]() {
+            if (buf.totalSize != 0) return;
+            (void)hipGetLastError();
             for (int i = 0; i < mapped; i++) {
-                HIP_EXPECT(hipMemUnmap(vaBaseBytes + i * segSize, segSize));
+                HIP_EXPECT(hipMemUnmap(vaBaseBytes + static_cast<size_t>(i) * segSize, segSize));
             }
             for (auto h : handles) {
                 if (h != 0) HIP_EXPECT(hipMemRelease(h));
             }
-            HIP_EXPECT(hipMemAddressFree(vaBase, totalSize));
-            return;
+            if (vaBase != 0) HIP_EXPECT(hipMemAddressFree(vaBase, totalSize));
+        });
+
+        for (int i = 0; i < numSegments; i++) {
+            const bool isHost = (i >= numDevSegments);
+            hipMemAllocationProp& prop = isHost ? hostProp : devProp;
+            if (hipMemCreate(&handles[i], segSize, &prop, 0) != hipSuccess) return;
+            if (hipMemMap(vaBaseBytes + static_cast<size_t>(i) * segSize, segSize, 0, handles[i], 0) != hipSuccess) {
+                return;
+            }
+            mapped++;
         }
 
         hipMemAccessDesc accessDesc = {};
         accessDesc.location.type    = hipMemLocationTypeDevice;
         accessDesc.location.id      = dev;
         accessDesc.flags            = hipMemAccessFlagsProtReadWrite;
-        HIP_CHECK(hipMemSetAccess(vaBase, totalSize, &accessDesc, 1));
+        if (hipMemSetAccess(vaBase, totalSize, &accessDesc, 1) != hipSuccess) return;
 
         buf.vaBase      = vaBase;
         buf.segmentSize = segSize;
