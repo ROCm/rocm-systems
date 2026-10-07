@@ -1133,7 +1133,7 @@ def show_all(
             if not hasattr(output, "isatty") or not output.isatty():
                 panel_content = strip_ansi(panel_content)
             # A panel drawn entirely as the memory chart carries its own heading
-            if _panel_is_mem_chart_only(panel) and not _tty_view_is_table(args):
+            if mem_chart_data and _panel_is_mem_chart_only(panel):
                 print(panel_content, file=output)
             else:
                 print(f"\n{'-' * 80}", file=output)

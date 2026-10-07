@@ -84,6 +84,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
 
+* Fixed the Memory Chart tables printing without their titles or panel heading when the chart is not drawn, such as when comparing several workloads.
+
 ### Upcoming changes
 
 ### Known issues
