@@ -7924,19 +7924,38 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
+        # Semantics has no op-less smem_atomic fallback, so a missing op is a
+        # derivation bug rather than an unimplemented variant.
+        op_enum = self._ATOMIC_OP_ENUM.get(sem.operation)
+        if op_enum is None:
+            raise ValueError(
+                f'{sem.name}: unsupported smem_atomic operation: {sem.operation}'
+            )
+        # Compare-swap carries more data dwords than it returns.
+        data_dwords = sem.num_elems
+        return_dwords = sem.elem_size // 4
         L = [
-            '  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);',
+            f'  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, {data_dwords}u);',
             '  if (!data_register) return;',
             '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
             '  d->dst_register = *data_register;',
-            '  d->num_dwords = 1;',
-            '  d->elem_size = 4;',
-            f'  d->atomic_op = amdgpu::AtomicOp::{sem.operation.upper()};',
-            # Scalar atomic GLC selects return data, not cache policy.
-            '  d->is_load = inst_.glc != 0;',
-            '  d->mtype = amdgpu::Mtype::UC;',
-            '  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);',
         ]
+        if return_dwords != data_dwords:
+            L.append(f'  d->dst_register.width = {return_dwords};')
+        L.extend(
+            [
+                f'  d->num_dwords = {return_dwords};',
+                '  d->elem_size = 4;',
+                f'  d->atomic_op = {op_enum};',
+                # Scalar atomic GLC selects return data, not cache policy.
+                '  d->is_load = inst_.glc != 0;',
+                '  d->mtype = amdgpu::Mtype::UC;',
+            ]
+        )
+        for i in range(data_dwords):
+            L.append(
+                f'  d->store_data[{i}] = amdgpu::read_scalar_register(wf, *data_register, {i});'
+            )
         self._append_wait_counter_type(L, sem)
         L.extend(
             [

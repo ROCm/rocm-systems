@@ -2141,6 +2141,48 @@ class TestDeriveSmemHints:
         assert block.is_empty
 
 
+_SCALAR_ATOMIC_OPS = (
+    'SWAP',
+    'CMPSWAP',
+    'ADD',
+    'SUB',
+    'SMIN',
+    'UMIN',
+    'SMAX',
+    'UMAX',
+    'AND',
+    'OR',
+    'XOR',
+    'INC',
+    'DEC',
+)
+
+
+class TestDeriveSmemAtomic:
+    def test_dec_derives_scalar_atomic(self):
+        sem = derive_semantics('S_ATOMIC_DEC', 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'smem_atomic'
+        assert sem.operation == 'dec'
+        assert sem.elem_size == 4
+        assert sem.num_elems == 1
+
+    @pytest.mark.parametrize(
+        'name',
+        [
+            f'{prefix}{op}{width}'
+            for prefix in ('S_ATOMIC_', 'S_BUFFER_ATOMIC_')
+            for op in _SCALAR_ATOMIC_OPS
+            for width in ('', '_X2')
+            if f'{prefix}{op}{width}' != 'S_ATOMIC_DEC'
+        ],
+    )
+    def test_unimplemented_scalar_atomics_stay_nop(self, name):
+        sem = derive_semantics(name, 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
+
+
 class TestDeriveBufferLoad:
     def test_buffer_load(self):
         sem = _FakeSem('BUFFER_LOAD_B32', 'buffer_load')
