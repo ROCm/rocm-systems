@@ -387,8 +387,15 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           // completes the modeled request before its acknowledgement.
           value = words[3];
         } else if (space == 1 && (operation == 0 || operation == 3)) {
-          const auto loaded =
-              access->read(address(1), {reinterpret_cast<std::byte *>(&value), wide ? 8u : 4u});
+          VmAccessOutcome loaded;
+          if (wide) {
+            // Pair with the producer's release store of the entire wait operand.
+            const auto result = access->atomic_load(address(1), sizeof(uint64_t));
+            loaded = result.outcome;
+            value = result.value;
+          } else {
+            loaded = access->read(address(1), {reinterpret_cast<std::byte *>(&value), 4u});
+          }
           if (loaded == VmAccessOutcome::Unavailable) {
             ib.address -= count * 4;
             ib.dwords += count;
