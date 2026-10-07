@@ -565,8 +565,8 @@ start_context(rocprofiler_context_id_t context_id)
                     cfg->dispatch_thread_trace->intersects(*itr->dispatch_thread_trace))
             {
                 // Two dispatch ATT contexts can run concurrently as long as they target disjoint
-                // sets of GPU agents. Overlapping agent sets would cross-talk in
-                // post_kernel_call.
+                // sets of GPU agents. A tracer is configured per agent, so unlike SPM there is no
+                // unrestricted context that claims every agent.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
         }
