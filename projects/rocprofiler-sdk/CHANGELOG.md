@@ -8,6 +8,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- rocpd schema bumped to 3.0.5 with `shader_array` and `wgp` columns on SPM counter records.
+
 ### Resolved issues
 
 ### Known issues

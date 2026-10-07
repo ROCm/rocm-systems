@@ -502,15 +502,27 @@ def insert_minimal_data(
             (_SAMPLE_SPM_ID, guid, _TRACK_SPM_ID, _T_START + 50_000, _EVT_KERNEL_1, "{}"),
         )
 
-        conn.executemany(
-            f"INSERT INTO {tbl('rocpd_pmc_event')} "
-            "(id, guid, event_id, sample_id, pmc_id, value, xcc, shader_engine, instance) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            [
-                (1, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 0, 0),
-                (2, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 1, 0),
-            ],
-        )
+        if ver >= (3, 0, 5):
+            conn.executemany(
+                f"INSERT INTO {tbl('rocpd_pmc_event')} "
+                "(id, guid, event_id, sample_id, pmc_id, value, xcc, shader_engine, "
+                "shader_array, wgp, instance) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (1, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 0, 1, 2, 0),
+                    (2, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 1, 0, 3, 0),
+                ],
+            )
+        else:
+            conn.executemany(
+                f"INSERT INTO {tbl('rocpd_pmc_event')} "
+                "(id, guid, event_id, sample_id, pmc_id, value, xcc, shader_engine, instance) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                [
+                    (1, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 0, 0),
+                    (2, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 1, 0),
+                ],
+            )
 
     # HIP event barrier data was introduced in schema 3.0.4.
     if ver >= (3, 0, 4):
