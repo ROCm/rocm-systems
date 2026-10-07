@@ -2270,6 +2270,9 @@ class Device : public RuntimeObject {
 
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const {};
 
+  //! Commands a direct-dispatch queue batches before a marker completes them
+  virtual size_t SubmissionBatchLimit() const { return DEBUG_CLR_MAX_BATCH_SIZE; }
+
   virtual uint32_t getPreferredNumaNode() const {
     return static_cast<uint32_t>(-1); //!< PAL doesn't support it
   }
