@@ -212,29 +212,32 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     // Clear the process info cache when refreshing
     cache_ptr->process_info.clear();
 
-    status_code = rsmi_compute_process_info_get(nullptr, &cache_ptr->num_running_processes);
-    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      return static_cast<int32_t>(status_code);
-    }
-    if (cache_ptr->num_running_processes <= 0) {
-      compute_process_list.clear();
-      cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
-      return static_cast<int32_t>(status_code);
-    }
+    // A GPU process that starts or exits between the count and the read fails the
+    // read, so a busy system needs another try before that becomes an error.
+    constexpr int kReadAttempts = 3;
+    for (int attempt = 1;; ++attempt) {
+      status_code = rsmi_compute_process_info_get(nullptr, &cache_ptr->num_running_processes);
+      if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS &&
+          cache_ptr->num_running_processes <= 0) {
+        compute_process_list.clear();
+        cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
+        return static_cast<int32_t>(status_code);
+      }
 
-    /**
-     *  Make a type safe pointer, then
-     *
-     * second call to rsmi_compute_process_info_get() to get the actual data into
-     *  the allocated rsmi_process_info_t array.
-     */
-    cache_ptr->list_all_processes_ptr =
-        std::make_unique<rsmi_process_info_t[]>(cache_ptr->num_running_processes);
-
-    status_code = rsmi_compute_process_info_get(cache_ptr->list_all_processes_ptr.get(),
-                                                &cache_ptr->num_running_processes);
-    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      return static_cast<int32_t>(status_code);
+      /**
+       *  Make a type safe pointer, then
+       *
+       * second call to rsmi_compute_process_info_get() to get the actual data into
+       *  the allocated rsmi_process_info_t array.
+       */
+      if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
+        cache_ptr->list_all_processes_ptr =
+            std::make_unique<rsmi_process_info_t[]>(cache_ptr->num_running_processes);
+        status_code = rsmi_compute_process_info_get(cache_ptr->list_all_processes_ptr.get(),
+                                                    &cache_ptr->num_running_processes);
+      }
+      if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) break;
+      if (attempt == kReadAttempts) return static_cast<int32_t>(status_code);
     }
 
     if (cache_ptr->num_running_processes <= 0) {
@@ -440,16 +443,14 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
   return static_cast<int32_t>(status_code);
 }
 
-GPUComputeProcessList_t AMDSmiGPUDevice::amdgpu_get_compute_process_list(
-    ComputeProcessListType_t list_type) {
-  // Local per call: other threads may query this GPU at the same time.
-  GPUComputeProcessList_t compute_process_list;
+amdsmi_status_t AMDSmiGPUDevice::amdgpu_get_compute_process_list(
+    GPUComputeProcessList_t& compute_process_list, ComputeProcessListType_t list_type) {
   auto error_code = get_compute_process_list_impl(compute_process_list, list_type);
   if (error_code) {
     compute_process_list.clear();
+    return rsmi_to_amdsmi_status(static_cast<rsmi_status_t>(error_code));
   }
-
-  return compute_process_list;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 // Convert `amdsmi_bdf_t` to a PCI BDF string

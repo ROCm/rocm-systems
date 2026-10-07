@@ -50,7 +50,6 @@ static_assert(sizeof(kfd_ioctl_acquire_vm_args) == 8 &&
 const char kKfdProcRoot[] = "/sys/class/kfd/kfd/proc/";
 constexpr size_t kMaxProcs = 512;
 constexpr auto kPhaseBudget = std::chrono::seconds(20);
-constexpr auto kEmptyRetryBudget = std::chrono::seconds(2);
 const uint64_t kPageSize = static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
 
 // VRAM the helper holds on GPU `gpu`: 2 MiB steps tell the GPUs apart, and
@@ -165,45 +164,7 @@ struct HelperStopper {
   }
 };
 
-// Counts changes to the set of GPU processes. The library returns an empty
-// list when a GPU process starts or exits while it scans them (a separate
-// issue), and only such a change excuses an empty list.
-class ChurnWatch {
- public:
-  ChurnWatch() : last_(KfdProcesses()), thread_([this] { Watch(); }) {}
-  ~ChurnWatch() {
-    done_ = true;
-    thread_.join();
-  }
-  int changes() const { return changes_; }
-  // Waits for a sample that starts after this call, so the count includes
-  // every change made before it.
-  int SettledChanges() const {
-    const int samples = samples_;
-    while (samples_ < samples + 2) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    return changes_;
-  }
-
- private:
-  void Watch() {
-    while (!done_) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      std::vector<std::string> now = KfdProcesses();
-      if (now != last_) {
-        ++changes_;
-        last_ = std::move(now);
-      }
-      ++samples_;
-    }
-  }
-  std::vector<std::string> last_;
-  std::atomic<bool> done_{false};
-  std::atomic<int> changes_{0};
-  std::atomic<int> samples_{0};
-  std::thread thread_;
-};
-
-enum Outcome { kRight, kWrongVram, kMissing, kEmpty, kChurnEmpty, kError, kNumOutcomes };
+enum Outcome { kRight, kWrongVram, kMissing, kEmpty, kError, kNumOutcomes };
 
 // Looks the helper up in one GPU's process list.
 Outcome QueryOnce(amdsmi_processor_handle gpu, pid_t pid, uint64_t vram,
@@ -225,22 +186,6 @@ Outcome QueryOnce(amdsmi_processor_handle gpu, pid_t pid, uint64_t vram,
   return kMissing;
 }
 
-// Like QueryOnce(), but an empty list is queried again until it is no longer
-// empty, and is excused (kChurnEmpty) only if GPU processes changed meanwhile.
-Outcome QueryHelper(const ChurnWatch& churn, amdsmi_processor_handle gpu, pid_t pid, uint64_t vram,
-                    std::vector<amdsmi_proc_info_t>* procs) {
-  const int changes = churn.changes();
-  const Outcome outcome = QueryOnce(gpu, pid, vram, procs);
-  if (outcome != kEmpty) return outcome;
-  for (const auto give_up = Clock::now() + kEmptyRetryBudget; Clock::now() < give_up;) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    const Outcome again = QueryOnce(gpu, pid, vram, procs);
-    if (again == kRight) return churn.SettledChanges() != changes ? kChurnEmpty : kEmpty;
-    if (again != kEmpty) return again;
-  }
-  return kEmpty;
-}
-
 struct Tally {
   std::atomic<int> count[kNumOutcomes] = {};
   int failures() const {
@@ -250,8 +195,7 @@ struct Tally {
     std::ostringstream ss;
     ss << count[kWrongVram] << " with another VRAM value, " << count[kMissing]
        << " without the helper, " << count[kEmpty] << " empty, " << count[kError]
-       << " failed calls, " << count[kChurnEmpty] << " empty during process churn, of "
-       << failures() + count[kRight] + count[kChurnEmpty];
+       << " failed calls, of " << failures() + count[kRight];
     return ss.str();
   }
 };
@@ -372,8 +316,6 @@ void TestProcessListConcurrentRead::Run(void) {
     ASSERT_EQ(outcome, kRight) << "GPU " << i << " does not list the helper with its VRAM";
   }
 
-  ChurnWatch churn;
-
   // Query the GPUs in turn: each list must carry that GPU's own numbers. At the
   // default cache period this mostly checks attribution; a cross-GPU mix-up of
   // cached data also shows here with AMDSMI_PROCESS_INFO_CACHE_MS=100.
@@ -382,8 +324,7 @@ void TestProcessListConcurrentRead::Run(void) {
   const auto in_turn_end = Clock::now() + kPhaseBudget;
   for (int round = 0; round < rounds && Clock::now() < in_turn_end; ++round) {
     for (size_t i = 0; i < num_gpus && Clock::now() < in_turn_end; ++i) {
-      ++in_turn
-            .count[QueryHelper(churn, processor_handles_[i], kfd_pid, HelperVram(i, tag), &procs)];
+      ++in_turn.count[QueryOnce(processor_handles_[i], kfd_pid, HelperVram(i, tag), &procs)];
     }
   }
   EXPECT_EQ(in_turn.failures(), 0) << "Queries in turn: " << in_turn.str();
@@ -398,8 +339,8 @@ void TestProcessListConcurrentRead::Run(void) {
     readers.emplace_back([&, gpu = r % num_gpus] {
       std::vector<amdsmi_proc_info_t> list(kMaxProcs);
       for (int c = 0; c < calls && Clock::now() < concurrent_end; ++c) {
-        ++concurrent.count[QueryHelper(churn, processor_handles_[gpu], kfd_pid,
-                                       HelperVram(gpu, tag), &list)];
+        ++concurrent
+              .count[QueryOnce(processor_handles_[gpu], kfd_pid, HelperVram(gpu, tag), &list)];
       }
     });
   }
