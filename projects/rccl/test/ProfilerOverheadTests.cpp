@@ -62,10 +62,11 @@ namespace RcclUnitTesting {
 // KernelPhase times symmetric kernels' barriers; regular kernels used to stamp it with KernelCh on.
 TEST(ProfilerOverhead, RegularKernelsEmitNoKernelPhase) {
   if (int n = 0; hipGetDeviceCount(&n) != hipSuccess || n < kRanks) GTEST_SKIP() << "requires 2 GPUs";
-  RUN_ISOLATED_TEST_WITH_ENV("ProfilerOverhead.RegularKernelsEmitNoKernelPhase", []() {
+  using Config = ProcessIsolatedTestRunner::TestConfig;
+  RUN_ISOLATED_TESTS(Config("ProfilerOverhead.RegularKernelsEmitNoKernelPhase", []() {
     // Wait before teardown: ncclCommDestroy drops pending events. Each channel's phase events precede its KernelCh
     // stop, but each comm drains on its own profiler thread, so wait until the stops have settled, not just begun.
-    runTwoRanks([](ncclComm_t comm, char* buf, hipStream_t stream) {
+    ASSERT_NO_FATAL_FAILURE(runTwoRanks([](ncclComm_t comm, char* buf, hipStream_t stream) {
       return ncclAllReduce(buf, buf, 1024, ncclFloat, ncclSum, comm, stream);
     }, [](ncclComm_t*) {
       for (int i = 0, last = -1, quiet = 0; i < 1000 && quiet < 20; ++i) {
@@ -74,10 +75,10 @@ TEST(ProfilerOverhead, RegularKernelsEmitNoKernelPhase) {
         quiet = (now >= kRanks && now == last) ? quiet + 1 : 0;
         last = now;
       }
-    });
+    }));
     ASSERT_GE(kernelChStops.load(), kRanks) << "KernelCh events missing, so KernelPhase events could be too";
     EXPECT_EQ(kernelPhases.load(), 0) << "KernelPhase events reported for a non-symmetric kernel";
-  }, {{"NCCL_PROFILER_PLUGIN", "STATIC_PLUGIN"}});
+  }).withEnvironment({{"NCCL_PROFILER_PLUGIN", "STATIC_PLUGIN"}}).withNumGpus(kRanks));
 }
 
 // Bcast work has no profiling bit; the kernel used to read bit 15 of the root's sendbuff instead.
@@ -86,9 +87,10 @@ TEST(ProfilerOverhead, NoPluginBroadcastPublishesNoKernelCh) {
   GTEST_SKIP() << "WarpSpeed layout: the misread bit is sendbuff bit 47, which no user pointer sets";
 #endif
   if (int n = 0; hipGetDeviceCount(&n) != hipSuccess || n < kRanks) GTEST_SKIP() << "requires 2 GPUs";
-  RUN_ISOLATED_TEST_WITH_ENV("ProfilerOverhead.NoPluginBroadcastPublishesNoKernelCh", []() {
+  using Config = ProcessIsolatedTestRunner::TestConfig;
+  RUN_ISOLATED_TESTS(Config("ProfilerOverhead.NoPluginBroadcastPublishesNoKernelCh", []() {
     // Two roots in one group, so the broadcasts are batched as Bcast work (NCCL_ALLGATHERV_ENABLE).
-    runTwoRanks([](ncclComm_t comm, char* buf, hipStream_t stream) {
+    ASSERT_NO_FATAL_FAILURE(runTwoRanks([](ncclComm_t comm, char* buf, hipStream_t stream) {
       char* send = buf + (~reinterpret_cast<uintptr_t>(buf) & 0x8000);
       ncclResult_t res = ncclBroadcast(send, buf + 2 * kBytes, kBytes, ncclInt8, 0, comm, stream);
       return res != ncclSuccess ? res : ncclBroadcast(send, buf + 3 * kBytes, kBytes, ncclInt8, 1, comm, stream);
@@ -101,7 +103,7 @@ TEST(ProfilerOverhead, NoPluginBroadcastPublishesNoKernelCh) {
         }
       }
       EXPECT_EQ(published, 0u) << "KernelCh work-start counters published with no profiler plugin loaded";
-    });
-  }, {{"NCCL_PROFILER_PLUGIN", "none"}, {"NCCL_ALLGATHERV_ENABLE", "1"}});
+    }));
+  }).withEnvironment({{"NCCL_PROFILER_PLUGIN", "none"}, {"NCCL_ALLGATHERV_ENABLE", "1"}}).withNumGpus(kRanks));
 }
 } // namespace RcclUnitTesting
