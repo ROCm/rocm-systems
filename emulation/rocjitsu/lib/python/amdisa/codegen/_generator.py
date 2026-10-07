@@ -8982,14 +8982,30 @@ class CodeGenerator:
         """Generate a GWS (Global Wave Sync) execute() body (DS encoding).
 
         GWS barrier/init/semaphore operations coordinate scheduling across
-        workgroups. rocjitsu executes workgroups sequentially, so there is no
-        peer to synchronize with and the operation cannot block. It is modeled
-        structurally as a zero-payload GDS store: it issues on the DS pipeline,
-        increments and then immediately retires the lgkmcnt/GDS wait counter,
-        and is observed by plugins, but produces no register result and leaves
-        memory unchanged. A valid (empty) VectorMemState is still published via
-        set_data so the memory pipeline takes the ordinary completion path
-        rather than the producer-without-op diagnostic.
+        workgroups. rocjitsu does not guarantee that all workgroups of a grid
+        are co-resident (they are admitted up to CU register/LDS/wave-slot
+        capacity, and the rendezvous machinery is scoped to one workgroup's
+        waves on one CU), so a blocking cross-workgroup barrier could wait on a
+        peer that is not resident and cannot be admitted -- a deadlock. The
+        operation is therefore modeled structurally as a zero-payload GDS store:
+        it issues on the DS pipeline, increments and then immediately retires
+        the lgkmcnt/GDS wait counter, and is observed by plugins, but produces
+        no register result and leaves memory unchanged. A valid (empty)
+        VectorMemState is still published via set_data so the memory pipeline
+        takes the ordinary completion path rather than the producer-without-op
+        diagnostic.
+
+        Upgrade path (stateful "Option B"): add a per-resource GWS counter table
+        and branch per operation here (init seeds from M0/ADDR, sema_v/br/
+        release_all adjust credits, sema_p consumes, barrier rendezvous). To stay
+        deadlock-free, the safe way to build the parking flavor is to park only
+        when all participants are provably co-resident (e.g. single-workgroup
+        GWS, whose waves are all-or-nothing co-resident on one CU like
+        s_barrier), and fall back to non-blocking otherwise. That co-residency
+        gate is forward-compatible: as rocjitsu widens residency it covers more
+        cases automatically, and only a true cooperative-launch guarantee (full
+        participant set resident, oversized grids rejected at launch) makes
+        unconditional parking safe.
         """
         L = []
         L.append(f'  (void)wf; // {sem.operation} is a structural no-op')
