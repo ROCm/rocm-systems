@@ -1072,6 +1072,7 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling_analysis
         test_pc_sampling_analyze_cli
         test_pc_sampling_profile
+        test_per_kernel_isa_export
         test_metrics_common
         test_metric_validation
         test_native_tool_finder
@@ -1264,6 +1265,26 @@ install(
     PATTERN "*.py"
     PATTERN "Makefile"
     PATTERN "workloads" EXCLUDE
+)
+# Agent Skills
+install(
+    DIRECTORY skills/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/skills
+    COMPONENT main
+    USE_SOURCE_PERMISSIONS
+)
+# Docs the skills link to
+install(
+    DIRECTORY docs/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/docs
+    COMPONENT main
+    FILES_MATCHING
+    PATTERN "*.rst"
+    PATTERN "*.md"
+    PATTERN "archive" EXCLUDE
+    PATTERN "design" EXCLUDE
+    PATTERN "sphinx" EXCLUDE
+    PATTERN "_templates" EXCLUDE
 )
 # modulefile
 install(

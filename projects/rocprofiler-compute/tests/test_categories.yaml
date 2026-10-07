@@ -84,6 +84,7 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_bench
@@ -176,6 +177,7 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_extra_options
@@ -269,6 +271,7 @@ test_categories:
       - test_profile_kernel_execution
       - test_profile_misc
       - test_profile_path
+      - test_profile_membw
       - test_pc_sampling
       - test_profile_roofline_dir
       - test_profile_roofline_extra_options
