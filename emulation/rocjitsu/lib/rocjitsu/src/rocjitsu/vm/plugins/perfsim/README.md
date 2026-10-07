@@ -124,7 +124,9 @@ launcher stops the local VM engine, joins it, and delivers `on_shutdown` while
 the backend library is still loaded. That includes exits where HIP or ROCr
 still hold KFD descriptors. The simulated driver stays up until those
 descriptors close, so a later runtime finalizer can still release memory.
-Plugin shutdown does not wait for that close.
+Plugin shutdown does not wait for that close. If another plugin's shutdown
+throws, RocJITsu logs a warning naming that plugin and still calls
+`on_shutdown` on the rest.
 
 A killed process, for example `SIGKILL`, does not run this path. `on_shutdown`
 is not called, and a backend that writes its report only from that callback

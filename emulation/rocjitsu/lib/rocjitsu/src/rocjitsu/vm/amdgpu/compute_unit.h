@@ -125,6 +125,9 @@ class RJ_API_TYPE_EXPORT ComputeUnitCore : public simdojo::CompositeComponent {
 public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
   static constexpr uint32_t kDebugFunctionalQuantum = 64;
+  /// @brief Steps between engine stop checks within one functional quantum.
+  /// @details Equal to the default quantum, so default-sized quanta never poll.
+  static constexpr uint32_t kStopPollInterval = kFunctionalQuantum;
   static constexpr uint32_t kMaxNamedBarriers = 16;
   static constexpr uint32_t kMaxMemoryWaitDiagnostics = 16;
 
@@ -261,6 +264,11 @@ public:
     const uint32_t quantum = debug_active() ? kDebugFunctionalQuantum : functional_quantum();
     for (uint32_t i = 0; i < quantum; ++i) {
       if (!has_active_wfs())
+        break;
+      // The engine checks for exit only between events, so an unbounded quantum
+      // (functional_quantum: 0) would hold request_exit() until its wavefronts end.
+      if (i != 0 && i % kStopPollInterval == 0 && this->engine() &&
+          this->engine()->stop_requested())
         break;
       result.ran = true;
       if (!step())

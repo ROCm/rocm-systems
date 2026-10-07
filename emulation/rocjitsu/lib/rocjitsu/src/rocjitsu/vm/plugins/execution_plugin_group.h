@@ -21,6 +21,7 @@
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -194,11 +195,22 @@ public:
     });
   }
 
-  void onShutdown() {
+  /// @brief Deliver onShutdown() to every plugin, even after one of them throws.
+  /// @returns One "name: reason" entry per plugin whose onShutdown() threw.
+  std::vector<std::string> onShutdown() {
+    std::vector<std::string> failures;
     dispatch_with_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onShutdown();
+      for (auto &entry : plugins_) {
+        try {
+          entry.plugin->onShutdown();
+        } catch (const std::exception &ex) {
+          failures.push_back(entry.plugin->name() + ": " + ex.what());
+        } catch (...) {
+          failures.push_back(entry.plugin->name() + ": non-standard exception");
+        }
+      }
     });
+    return failures;
   }
 
   // -- AMDGPU (non-virtual) --

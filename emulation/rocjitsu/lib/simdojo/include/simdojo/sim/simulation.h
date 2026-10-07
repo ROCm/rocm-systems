@@ -232,6 +232,12 @@ public:
   /// @param code Exit code (0 = success).
   void request_exit(std::string reason, int code = 0);
 
+  /// @brief Whether the engine has been told to stop, for any reason.
+  /// @details Thread-safe. Set by request_exit(), shutdown() and the run's own
+  /// termination; cleared only by create(). Lets a component that runs a long batch
+  /// inside one event stop early instead of waiting for the batch to end.
+  bool stop_requested() const { return done_.load(std::memory_order_acquire); }
+
   /// @brief Register the calling component as a primary (work-producing).
   ///
   /// @details Primary components participate in the end-of-simulation consensus

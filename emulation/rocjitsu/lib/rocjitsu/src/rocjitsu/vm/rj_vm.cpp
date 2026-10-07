@@ -29,12 +29,23 @@ RJ_DIAGNOSTIC_POP
 
 using namespace rocjitsu;
 
-void rj_vm_shutdown_plugins(rj_vm_t *vm) {
+void rj_vm_shutdown_plugins(rj_vm_t *vm) noexcept {
   // Host API preconditions keep this outside the simulation-callback interval:
   // either execution has not started, or the engine workers have stopped and
   // joined. callback_mutex_ is intentionally not lifecycle synchronization.
-  if (vm && vm->soc && vm->plugin_group_active.exchange(false, std::memory_order_acq_rel))
-    vm->soc->plugin_group().onShutdown();
+  if (!vm || !vm->soc || !vm->plugin_group_active.exchange(false, std::memory_order_acq_rel))
+    return;
+  // One delivery attempt per plugin: retrying would call onShutdown() twice on
+  // the plugins that succeeded. Callers include rj_vm_run() on the local VM
+  // engine thread, where an escaping exception would call std::terminate.
+  try {
+    for (const auto &failure : vm->soc->plugin_group().onShutdown())
+      util::Logger::warn("rocjitsu: plugin onShutdown failed: ", failure);
+  } catch (const std::exception &ex) {
+    util::Logger::warn("rocjitsu: plugin shutdown failed: ", ex.what());
+  } catch (...) {
+    util::Logger::warn("rocjitsu: plugin shutdown failed with a non-standard exception");
+  }
 }
 
 namespace {

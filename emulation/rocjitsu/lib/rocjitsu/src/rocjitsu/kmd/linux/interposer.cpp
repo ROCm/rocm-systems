@@ -2359,20 +2359,14 @@ public:
     } catch (...) {
       // This runs from the DSO finalizer. An escaping exception would terminate
       // the process and skip the warning that names the group left active.
-      failure = "stopping the local VM engine threw a non-standard exception";
+      failure = "joining the local VM engine threw a non-standard exception";
     }
 
-    if (joined && stop.vm) {
-      try {
-        // rj_vm_run() already does this before it returns. The second call is a
-        // no-op unless run() bailed out before reaching it.
-        rj_vm_shutdown_plugins(stop.vm);
-      } catch (const std::exception &ex) {
-        failure = ex.what();
-      } catch (...) {
-        failure = "plugin shutdown threw a non-standard exception";
-      }
-    }
+    // rj_vm_run() already does this before it returns, and logs any plugin whose
+    // onShutdown() threw. The second call is a no-op unless run() bailed out
+    // before reaching it.
+    if (joined)
+      rj_vm_shutdown_plugins(stop.vm);
 
     DoomedLocalVm doomed;
     std::string warning;
@@ -2381,12 +2375,6 @@ public:
       engine_join_in_progress_ = false;
       if (joined) {
         stop.thread.reset();
-        if (!failure.empty() ||
-            (stop.vm && stop.vm->plugin_group_active.load(std::memory_order_acquire))) {
-          warning = plugin_shutdown_failure_message(
-              stop.vm, failure.empty() ? "plugin shutdown did not complete after the engine stopped"
-                                       : failure.c_str());
-        }
         doomed = shutdown_local_vm_if_idle_locked();
       } else if (stop.thread && stop.thread->joinable()) {
         local_vm_thread_ = std::move(stop.thread);
