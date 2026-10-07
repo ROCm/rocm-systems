@@ -47,7 +47,14 @@ MemoryPipeline::~MemoryPipeline() {
 
 MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instruction &inst) const {
   WaitCounterTokens counters;
-  if (const auto *issue = inst.amdgpu_memory_issue_info()) {
+  const DynamicInstState *state = inst.data();
+  const auto *issue = inst.amdgpu_memory_issue_info();
+  if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM)) {
+    const auto &routed = inst.data_as<VectorMemState>()->routed_issue_info;
+    if (routed)
+      issue = &*routed;
+  }
+  if (issue) {
     for (const auto obligation : issue->counter_obligations()) {
       for (uint8_t token = 0; token < obligation.counter_increment(); ++token)
         counters.types[counters.size++] = obligation.wait_counter_type();
@@ -56,7 +63,6 @@ MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instructi
   }
 
   WaitCounterType counter = counter_type_;
-  const DynamicInstState *state = inst.data();
   if (state != nullptr) {
     switch (state->tag()) {
     case SCALAR_MEM:
@@ -462,8 +468,11 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
             return outcome;
         }
     } else {
+      auto &cu = wf.raw_cu();
+      const bool allow_private_batch =
+          GpuVmAccessBatchGuard::active() && !cu.debug_active() && cu.plugin_group().empty();
       const VmAccessOutcome outcome =
-          l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id());
+          l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id(), allow_private_batch);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
@@ -1037,7 +1046,9 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
       const VmAccessOutcome outcome =
           l1_->store(d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems,
                      d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(),
-                     stride, base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit);
+                     stride, base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit,
+                     GpuVmAccessBatchGuard::active() && !wf.raw_cu().debug_active() &&
+                         wf.raw_cu().plugin_group().empty());
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }

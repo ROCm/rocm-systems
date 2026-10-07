@@ -43,11 +43,11 @@ public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
 
   /// Apply the issue backpressure required before an instruction adds one
-  /// token to a finite hardware counter. This must run before checking that
-  /// instruction's operands.
+  /// token to a finite hardware counter. Call before operand checks when the
+  /// counter is known statically, or after routing for address-dependent FLAT.
   void prepareForCounterIncrement(amdgpu::WaitCounterType, uint8_t increment = 1);
 
-  /// Apply pre-operand backpressure to every counter incremented by an issue.
+  /// Apply backpressure to every counter incremented by a resolved issue.
   void prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &);
 
   /// Register an in-flight memory event that does not involve LDS.

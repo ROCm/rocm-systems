@@ -1423,6 +1423,16 @@
           "test_filter": "Recorder.VerifyMultithread"
         },
         {
+          "name": "Recorder.RedOpRecordJson",
+          "description": "Recorder RedOp record JSON output",
+          "test_filter": "Recorder.RedOpRecordJson"
+        },
+        {
+          "name": "Recorder.RedOpRecordBinary",
+          "description": "Recorder RedOp record binary output",
+          "test_filter": "Recorder.RedOpRecordBinary"
+        },
+        {
           "name": "ProxyTrace.nonEmptySingleton",
           "description": "Proxy trace non-empty singleton",
           "test_filter": "ProxyTraceTestFixture.nonEmptySingleton"
@@ -4467,6 +4477,14 @@
           "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",
           "env_variables": {
             "NCCL_GIN_NCONTEXTS": "3"
+          }
+        },
+        {
+          "name": "GIN_SignalReset_MultiContext",
+          "description": "resetSignal on one GIN context leaves the other contexts' reads and offsets intact (NCCL_GIN_NCONTEXTS=4)",
+          "test_filter": "GinMPIDeviceTests.SignalReset_IsPerContext_MultiContext",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "4"
           }
         },
         {

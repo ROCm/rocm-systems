@@ -108,6 +108,19 @@ public:
         }
     }
 
+    void finalize()
+    {
+        for(auto& domain : m_callback_domains)
+        {
+            domain.finalize();
+        }
+
+        for(auto& domain : m_buffered_domains)
+        {
+            domain.finalize();
+        }
+    }
+
 private:
     std::vector<domains::domain_info>                 m_available_domains;
     std::vector<domains::domain_configuration>        m_configuration;
