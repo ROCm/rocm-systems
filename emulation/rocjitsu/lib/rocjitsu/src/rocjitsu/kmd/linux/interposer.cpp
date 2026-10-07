@@ -4488,8 +4488,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrPrimeHandleToFd && arg) {
       auto *prime = static_cast<drm_prime_handle *>(arg);
-      int exported =
-          InterposerContext::ctx.prime_export(drm_file, prime->handle, prime->flags);
+      int exported = InterposerContext::ctx.prime_export(drm_file, prime->handle, prime->flags);
       if (exported < 0)
         return kfd_ioctl_ret(exported);
       prime->fd = exported;

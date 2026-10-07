@@ -620,8 +620,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
   EXPECT_EQ(rdna4.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
   EXPECT_TRUE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
-  EXPECT_EQ(rdna4.soc()->sdma_queue_scheduler().packet_dialect(),
-            amdgpu::SdmaPacketDialect::Rdna4);
+  EXPECT_EQ(rdna4.soc()->sdma_queue_scheduler().packet_dialect(), amdgpu::SdmaPacketDialect::Rdna4);
 
   auto rdna3 =
       config::load_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json", rocjitsu::kEmbeddedSchema);

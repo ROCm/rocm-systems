@@ -643,8 +643,8 @@ private:
     const uint64_t rect_x = bit_field(word(frame, 11), 0, gfx12_rect ? 16 : 14) + uint64_t{1};
     const uint64_t rect_y = bit_field(word(frame, 11), 16, gfx12_rect ? 16 : 14) + uint64_t{1};
     const uint64_t rect_z = bit_field(word(frame, 12), 0, gfx12_rect ? 14 : 11) + uint64_t{1};
-    if (!gfx12_rect && (bit_field(word(frame, 12), 16, 2) != 0 ||
-                        bit_field(word(frame, 12), 24, 2) != 0))
+    if (!gfx12_rect &&
+        (bit_field(word(frame, 12), 16, 2) != 0 || bit_field(word(frame, 12), 24, 2) != 0))
       return false;
 
     uint64_t src_slice_elements = 0;
@@ -674,8 +674,8 @@ private:
       return false;
 
     const auto origin_address = [&](uint32_t low, uint32_t high, uint32_t off_x, uint32_t off_y,
-                                     uint32_t off_z, uint64_t pitch, uint64_t slice,
-                                     uint64_t &address) {
+                                    uint32_t off_z, uint64_t pitch, uint64_t slice,
+                                    uint64_t &address) {
       uint64_t x_bytes = 0;
       uint64_t y_bytes = 0;
       uint64_t z_bytes = 0;
@@ -765,8 +765,7 @@ private:
           const uint64_t column = operation.completed % operation.rect_row_bytes;
           room = std::min(room, static_cast<uint64_t>(operation.rect_row_bytes) - column);
         }
-        operation.chunk_size =
-            static_cast<std::size_t>(std::min<uint64_t>(kTransferBytes, room));
+        operation.chunk_size = static_cast<std::size_t>(std::min<uint64_t>(kTransferBytes, room));
       }
       const auto address_at = [&](uint64_t base, uint64_t pitch, uint64_t slice) {
         if (!operation.rectangular)
