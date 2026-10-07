@@ -70,6 +70,7 @@ int main() {
   ExpectReject("other.1275.host", "rep", "");
   ExpectReject("abc.1275.host", "rep", "");
   ExpectReject("rep..host", "rep", "");
+  ExpectReject("rep.1275x.host", "rep", "");
   // "rcclReplayer log.replaylog" splits into base "log" and ext ".replaylog"; a stray log.txt is shorter than both.
   ExpectReject("log.txt", "log", ".replaylog");
   // Recorded 1 + 3 ranks: the host replaying 3 ranks must get the host that left 3 logs, whatever the name order.
