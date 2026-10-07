@@ -928,6 +928,151 @@ TEST_CASE("Unit_HRR_PinnedHost_LibraryKernel_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(h));
 }
 
+// ===========================================================================
+// A read whose own stream is idle, queued behind a write into its buffer on a
+// stream it waits for.
+//
+//   0  read      host filled pattern 1, everything idle
+//   1  write     the buffer, seed 0x3c3c, held on the writer stream by
+//                hipStreamWaitValue32 on a flag the host sets only after
+//                launch 2 returns
+//   2  read      on the launch stream, which has nothing queued of its own;
+//                the launch waits on the GPU for the writer stream
+// HRR_PINNED_ORDER picks the two streams:
+//   0  launch on a hipStreamCreate stream, write on the null stream
+//   1  launch on hipStreamPerThread, which is blocking; write on the null
+//      stream
+//   2  launch on hipStreamLegacy, write on a hipStreamCreate stream
+// The writer is a kernel because capture synchronizes the stream of a D2H
+// hipMemcpyAsync to record its bytes, which would never return here.
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_OtherStream_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int can_wait = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&can_wait, hipDeviceAttributeCanUseStreamWaitValue, 0));
+  REQUIRE(can_wait != 0);
+  const int order = env_int("HRR_PINNED_ORDER");
+  REQUIRE((order >= 0 && order <= 2));
+
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                              hipHostMallocDefault));
+  uint32_t* flag = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&flag), sizeof(uint32_t),
+                              hipHostMallocMapped));
+  *flag = 0;
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+  hipStream_t blocking = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&blocking));
+  const hipStream_t launch = order == 0   ? blocking
+                             : order == 1 ? hipStreamPerThread
+                                          : hipStreamLegacy;
+  const hipStream_t writer = order == 2 ? blocking : nullptr;
+  constexpr int kSeed = 0x3c3c;
+
+  // 0
+  fill(h, 1);
+  read_pinned(h, out, 1, kPinnedInts, launch);
+
+  // 1
+  HRR_HIP_CHECK(hipStreamWaitValue32(writer, flag, 1, hipStreamWaitValueEq, 0xFFFFFFFF));
+  hipLaunchKernelGGL(hrr_pinned_write, dim3(kBlocks), dim3(kThreads), 0, writer, h,
+                     kPinnedInts, kSeed);
+  HRR_HIP_CHECK(hipGetLastError());
+
+  // 2
+  hipLaunchKernelGGL(hrr_pinned_read, dim3(kBlocks), dim3(kThreads), 0, launch, h, out,
+                     kPinnedInts);
+  HRR_HIP_CHECK(hipGetLastError());
+  // Still blocked: neither kernel has run.
+  CHECK(hipStreamQuery(launch) == hipErrorNotReady);
+  CHECK(h[0] == pattern(1, 0));
+  __atomic_store_n(flag, 1u, __ATOMIC_SEQ_CST);
+  check_out(out, [](int i) { return (kSeed ^ i) * 3 + 1; });
+
+  HRR_HIP_CHECK(hipStreamDestroy(blocking));
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(flag));
+  HRR_HIP_CHECK(hipHostFree(h));
+}
+
+// Spins for `ticks` of the wall clock, then writes seed ^ i over buf and
+// raises *done once the writes are visible to the host. One block.
+__global__ void hrr_pinned_slow_write(int* buf, int n, int seed, unsigned long long ticks,
+                                      unsigned int* done) {
+  if (threadIdx.x == 0) {
+    const unsigned long long t0 = wall_clock64();
+    while (wall_clock64() - t0 < ticks) {
+    }
+  }
+  __syncthreads();
+  for (int i = threadIdx.x; i < n; i += blockDim.x) buf[i] = seed ^ i;
+  __threadfence_system();
+  __syncthreads();
+  if (threadIdx.x == 0) *reinterpret_cast<volatile unsigned int*>(done) = 1;
+}
+
+// ===========================================================================
+// A read on a blocking stream after a null-stream kernel the host waited for
+// without a HIP call.
+//
+//   0  read      on a hipStreamCreate stream, host filled pattern 1
+//   1  write     on the null stream: spins for kSpinMs, then writes seed
+//                0x4d4d over the buffer and raises a done flag in pinned
+//                memory
+//   2  read      on the hipStreamCreate stream, after the host saw the flag
+//                with plain loads and set h[0] = -7
+// No HIP call orders launch 2 after launch 1 on the host, so replay reaches
+// launch 2 while launch 1 still spins, and only the launch's own wait on the
+// null stream orders the two on the GPU.
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_PolledNull_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  constexpr int kSpinMs = 500;
+  constexpr int kSeed   = 0x4d4d;
+  int rate_khz = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&rate_khz, hipDeviceAttributeWallClockRate, 0));
+  REQUIRE(rate_khz > 0);
+  const unsigned long long ticks = static_cast<unsigned long long>(rate_khz) * kSpinMs;
+
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                              hipHostMallocDefault));
+  unsigned int* done = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&done), sizeof(unsigned int),
+                              hipHostMallocMapped));
+  *done = 0;
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+  hipStream_t s = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+
+  // 0
+  fill(h, 1);
+  read_pinned(h, out, 1, kPinnedInts, s);
+
+  // 1
+  hipLaunchKernelGGL(hrr_pinned_slow_write, dim3(1), dim3(kThreads), 0, nullptr, h,
+                     kPinnedInts, kSeed, ticks, done);
+  HRR_HIP_CHECK(hipGetLastError());
+  while (__atomic_load_n(done, __ATOMIC_ACQUIRE) == 0) {
+  }
+  REQUIRE(h[1] == (kSeed ^ 1));
+
+  // 2
+  h[0] = -7;
+  hipLaunchKernelGGL(hrr_pinned_read, dim3(kBlocks), dim3(kThreads), 0, s, h, out,
+                     kPinnedInts);
+  HRR_HIP_CHECK(hipGetLastError());
+  check_out(out, [](int i) { return (i == 0 ? -7 : kSeed ^ i) * 3 + 1; });
+
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(done));
+  HRR_HIP_CHECK(hipHostFree(h));
+}
+
 namespace {
 constexpr const char* kDirect = "Unit_HRR_PinnedHost_Direct";
 // A capture or replay that takes longer than this has hung.
@@ -1556,6 +1701,99 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_NoWaitOnBusyStream) {
   unsigned long long restored = 0, rejected = 0;
   host_snapshot_summary(out, restored, rejected);
   CHECK(restored == 3);
+  CHECK(rejected == 0);
+#ifndef _WIN32
+  int d2h_pass = 0, d2h_fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+  CHECK(d2h_pass >= 2);
+  CHECK(d2h_fail == 0);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// A launch whose own stream is idle but which waits for another stream is
+// unordered too.
+//
+// A launch into a blocking stream, the per-thread stream among them, waits
+// for the null stream; a launch into hipStreamLegacy waits for every blocking
+// stream. Launch 2 has nothing queued on its own stream, while the write it
+// waits for is held behind a flag. Capture must count it unordered and record
+// its unchanged chunks as direction 1: recorded for restore, they would hold
+// the bytes from before the write, and replay would put those back over what
+// the replayed write left. The write itself is unordered as well. Replay
+// restores launch 0's two chunks and nothing else, and the read sees the
+// written bytes.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_WaitsForOtherStream) {
+  for (const char* order : {"0", "1", "2"}) {
+    INFO("HRR_PINNED_ORDER=" << order);
+    ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_other_stream.hrr");
+    capture_case("Unit_HRR_PinnedHost_OtherStream_Direct", cap.path,
+                 {{"HRR_PINNED_ORDER", order}});
+    const fs::path archive = hrr_single_process_archive(cap.path);
+
+    const std::string manifest = read_text_file(archive / "manifest.json");
+    INFO("manifest:\n" << manifest);
+    CHECK(manifest_count(manifest, "host_snapshots_unordered") == 2);
+    CHECK(manifest_count(manifest, "host_snapshot_chunks") == 2);
+
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(archive.string(), arc));
+    const auto kls = launches_of(arc);
+    REQUIRE(kls.size() == 3);
+    for (size_t k : {1, 2}) {
+      INFO("launch " << k);
+      REQUIRE(kls[k]->snapshots.size() == 2);
+      CHECK(kls[k]->snapshots[0].direction == 1);
+      CHECK(kls[k]->snapshots[1].direction == 1);
+      CHECK(same_hashes(kls[0], kls[k]));
+    }
+
+    auto [rc, out] = replay(archive);
+    INFO("Replay:\n" << out);
+    CHECK(rc == 0);
+    unsigned long long restored = 0, rejected = 0;
+    host_snapshot_summary(out, restored, rejected);
+    CHECK(restored == 2);
+    CHECK(rejected == 0);
+#ifndef _WIN32
+    int d2h_pass = 0, d2h_fail = 0;
+    REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+    CHECK(d2h_pass >= 2);
+    CHECK(d2h_fail == 0);
+#endif
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Replay drains the null stream before it restores a launch into a blocking
+// stream.
+//
+// The host waited for the null-stream kernel by polling a flag, which records
+// nothing, so replay reaches launch 2 while that kernel still spins. Launch 2
+// waits for it on the GPU, and the kernel then writes over the whole buffer: a
+// restore of h[0] = -7 made before the kernel finished is lost. Capture saw
+// the kernel's bytes, so both chunks are recorded for restore whether or not
+// the null stream had retired the kernel by then.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_NullStreamDrainedFirst) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_polled_null.hrr");
+  capture_case("Unit_HRR_PinnedHost_PolledNull_Direct", cap.path);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() == 3);
+  REQUIRE(kls[2]->snapshots.size() == 2);
+  CHECK(kls[2]->snapshots[0].direction == 0);
+  CHECK(kls[2]->snapshots[1].direction == 0);
+
+  auto [rc, out] = replay(archive);
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
   CHECK(rejected == 0);
 #ifndef _WIN32
   int d2h_pass = 0, d2h_fail = 0;

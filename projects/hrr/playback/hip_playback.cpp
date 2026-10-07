@@ -1021,7 +1021,8 @@ static void decode_kernel_args(
 // with a message.
 //
 // Direction 0 is applied. The restore is not stream-ordered: replay waits on
-// the host for the launch stream to drain, then copies the bytes in with
+// the host for the launch stream to drain, and for the null stream as well
+// when the launch stream is a blocking one, then copies the bytes in with
 // memcpy, leaving alone a chunk that already holds them (typically because
 // replayed device work wrote the same thing). Direction 1 is a chunk capture
 // read unchanged while the stream still had work queued; that work may have
@@ -1107,8 +1108,18 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
             if (rec_bases_out) rec_bases_out->insert(arec);
             continue;
         }
-        // Earlier work on this stream may still be reading or writing the buffer.
-        if (!synced) { (void)hipStreamSynchronize(stream); synced = true; }
+        // Earlier work the launch waits for may still be reading or writing
+        // the buffer: the launch stream's and, on a blocking stream, the null
+        // stream's. Synchronizing a blocking stream does not drain the null
+        // stream; hipStreamLegacy's synchronize drains the null stream alone.
+        if (!synced) {
+            (void)hipStreamSynchronize(stream);
+            unsigned int flags = 0;
+            if (stream != nullptr && hipStreamGetFlags(stream, &flags) == hipSuccess &&
+                !(flags & hipStreamNonBlocking))
+                (void)hipStreamSynchronize(hipStreamLegacy);
+            synced = true;
+        }
         auto* dst = static_cast<uint8_t*>(live) + off;
         if (memcmp(dst, blob->data(), len) != 0) {
             memcpy(dst, blob->data(), len);
@@ -1273,7 +1284,8 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
 
     // Pinned host memory the kernel reads, as the host left it before the
     // launch at capture time. Written back now: replay waits on the host for
-    // the stream to drain, then copies the bytes in (not stream-ordered).
+    // the work the launch waits for to drain, then copies the bytes in (not
+    // stream-ordered).
     std::set<uint64_t> refilled;
     if (num_snapshots) {
         if (!tail_ok) {

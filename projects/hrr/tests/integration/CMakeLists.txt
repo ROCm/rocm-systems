@@ -40,10 +40,11 @@
 # hrr_pinned_host_test.cc covers pinned host buffers a kernel reads directly,
 # with no copy for capture to see: capture snapshots them before each launch
 # and replay writes them back. Contains its own hidden [.][hrr-direct]
-# workloads: busy streams, size caps, every pinned allocator and free, every
-# launch entry point, graph capture, a failed launch, a device reset, a failed
-# free, pinned pointers in by-value structs, enumerated handles and handles
-# trusted after a launch. It edits captured archives to check that replay
+# workloads: busy streams, launches waiting for another stream, a null-stream
+# kernel replay must drain first, size caps, every pinned allocator and free,
+# every launch entry point, graph capture, a failed launch, a device reset, a
+# failed free, pinned pointers in by-value structs, enumerated handles and
+# handles trusted after a launch. It edits captured archives to check that replay
 # refuses malformed records and leaves unchanged ones alone.
 #
 # hrr_disk_space_test.cc covers how capture stops before the file system

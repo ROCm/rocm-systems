@@ -582,8 +582,14 @@ refused.
 **When.** The snapshot is taken before the real launch, without waiting for the
 launch's stream. Waiting would be exact, but it can hang the application: earlier
 work on the stream may wait on a flag in pinned memory (`hipStreamWaitValue32`)
-that the host sets only after this launch returns. Capture asks the stream with
-`hipStreamQuery` instead:
+that the host sets only after this launch returns. Capture asks instead whether
+the work the launch will wait for is done. That is the launch stream's own work,
+found with `hipStreamQuery`. A launch into a blocking stream (`hipStreamCreate`,
+or the per-thread stream) also waits for the null stream, which that query does
+not look at; capture reads the null stream's last command as the launch does. A
+launch into `hipStreamLegacy` waits for every blocking stream, and capture asks
+the null-stream query, which covers them, rather than the `hipStreamLegacy` one,
+which does not:
 
 - idle: the bytes are the ones the kernel will read, and the snapshot is exact;
 - busy: the bytes are read anyway. A chunk that changed since its last record is
@@ -662,8 +668,9 @@ event or the tail is malformed, every record the launch claims is counted. A
 valid direction 0 record of a launch replayed into a graph capture is not
 applied either, but it is not rejected: it is counted apart and printed on its
 own summary line. The restore is not stream-ordered: replay
-waits on the host for the launch's stream to drain, then copies a chunk with
-`memcpy` only when the buffer holds different bytes. The summary prints the
+waits on the host for the launch's stream to drain, and for the null stream too
+when the launch stream is a blocking one, then copies a chunk with `memcpy` only
+when the buffer holds different bytes. The summary prints the
 chunks restored and the records rejected. Snapshot blobs are held in a cache of
 at most 256 MiB, oldest out first, rather than the unbounded blob cache.
 
@@ -731,8 +738,8 @@ exists to put chosen bytes in front of those kernels.
 - A launch on a busy stream records the bytes as they were when it was queued,
   not when it ran. Device work queued ahead of it that writes the buffer, or a
   host thread that writes it in between, makes the replayed input differ.
-- Replay waits for the stream to drain before it restores a direction 0
-  record. Capture did not wait, so a stream blocked on a value that only a
+- Replay waits for the stream, and for a blocking stream the null stream, to
+  drain before it restores a direction 0 record. Capture did not wait, so a stream blocked on a value that only a
   later replayed call releases would hang the replay there. Replay of
   `hipStreamWaitValue*` does not wait today, so no such stream exists yet.
 - A by-value scalar whose value happens to fall inside a pinned allocation the

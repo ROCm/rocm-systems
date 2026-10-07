@@ -471,11 +471,32 @@ static const char* const kHostSnapApi = "pinned host snapshot";
 
 enum class LaunchStream { Idle, Busy, Capturing, Skip };
 
-// Whether the launch stream has finished its earlier work, found without
-// waiting for it. Skip means the stream is not one the launch can use, so the
-// launch will fail on its own. None of the calls may change the error the
-// application sees from hipGetLastError, nor take an asynchronous error from
-// the stream before the application asks for it.
+// Whether the null stream of a blocking stream's device still has work the
+// launch will wait for. The rule is the launch's own (Device::WaitActiveStreams
+// with only the null stream): the null stream's last queued command, done or
+// not. hipStreamQuery on the blocking stream does not look at the null stream,
+// and querying the null stream through the API would take its asynchronous
+// error; this reads the command's status and nothing else.
+static bool null_stream_busy(hip::Stream* hs) {
+  hip::Device* dev = hs->GetDevice();
+  hip::Stream* ns  = dev ? dev->GetNullStream() : nullptr;
+  if (ns == nullptr || ns == hs) return false;
+  amd::Command* cmd = ns->getLastQueuedCommand(true);
+  if (cmd == nullptr) return false;
+  bool ready = ns->device().IsHwEventReady(cmd->event());
+  if (!ready) ready = cmd->status() == CL_COMPLETE;
+  if (!ready) cmd->notifyCmdQueue();
+  cmd->release();
+  return !ready;
+}
+
+// Whether the work the launch will wait for has finished, found without
+// waiting for it. That is the launch stream's earlier work and, for a blocking
+// stream, the null stream's; a launch into hipStreamLegacy or the null stream
+// also waits for every blocking stream of the device. Skip means the stream is
+// not one the launch can use, so the launch will fail on its own. None of the
+// calls may change the error the application sees from hipGetLastError, nor
+// take an asynchronous error from a stream before the application asks for it.
 static LaunchStream launch_stream_state(hipStream_t stream) {
   if (!g_real_table.hipStreamIsCapturing_fn || !g_real_table.hipStreamQuery_fn)
     return LaunchStream::Skip;
@@ -495,7 +516,10 @@ static LaunchStream launch_stream_state(hipStream_t stream) {
         (cr == hipSuccess && status == hipStreamCaptureStatusActive)) {
       st = LaunchStream::Capturing;
     } else if (cr == hipSuccess && status == hipStreamCaptureStatusNone) {
-      const hipError_t qr = g_real_table.hipStreamQuery_fn(s);
+      // hipStreamQuery(hipStreamLegacy) looks at the null stream alone; the
+      // null-stream query also looks at the blocking streams, as the launch
+      // does.
+      const hipError_t qr = g_real_table.hipStreamQuery_fn(s == hipStreamLegacy ? nullptr : s);
       switch (qr) {
         case hipErrorNotReady: st = LaunchStream::Busy; break;
         case hipSuccess:       st = LaunchStream::Idle; break;
@@ -510,6 +534,11 @@ static LaunchStream launch_stream_state(hipStream_t stream) {
           if (hip::Stream* hs = hip::getStream(s, false)) hs->SetAsyncError(qr);
           st = LaunchStream::Idle;
           break;
+      }
+      if (st == LaunchStream::Idle && s != nullptr && s != hipStreamLegacy) {
+        auto* hs = reinterpret_cast<hip::Stream*>(s);
+        if (!(hs->Flags() & hipStreamNonBlocking) && null_stream_busy(hs))
+          st = LaunchStream::Busy;
       }
     }
   }
