@@ -58,8 +58,9 @@ Prerequisites
 
 RAS diagnostics need the RAS subsystem, which is enabled by default
 (``NCCL_RAS_ENABLE=1``). With ``NCCL_RAS_ENABLE=0``, a communicator created
-with ``NCCL_RUN_RAS_DIAGNOSTICS=1`` prints the report header, but no check runs
-and no ``completed`` line follows.
+with ``NCCL_RUN_RAS_DIAGNOSTICS=1`` prints only
+``NCCL DIAG INFO RAS diagnostics skipped: NCCL_RAS_ENABLE=0``: no check runs,
+and no report header or ``completed`` line is printed.
 
 The RAS threads of all processes of the job listen for client connections on
 ``localhost``, port ``28028``. Set ``NCCL_RAS_ADDR`` to change the address, for

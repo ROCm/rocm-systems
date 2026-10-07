@@ -59,6 +59,7 @@ static constexpr size_t kAllReduceElems = 1 << 20;
 
 static const char* const kDiagPrefix = "NCCL DIAG ";
 static const char* const kRasHeader  = "NCCL DIAG === RAS Diagnostics ===";
+static const char* const kRasSkipped = "NCCL DIAG INFO RAS diagnostics skipped: NCCL_RAS_ENABLE=0";
 static const char* const kRasDone    = "NCCL DIAG RAS diagnostics completed in ";
 static const char* const kTagOk      = "NCCL DIAG [OK]   ";
 static const char* const kTagInfo    = "NCCL DIAG [INFO] ";
@@ -871,8 +872,8 @@ TEST(RasDiagnosticsWorker, Run)
     EXPECT_EQ(value, 3.0f);
 }
 
-// The init-time report needs the RAS subsystem: with NCCL_RAS_ENABLE=0 rank 0 still prints the header, but no check
-// runs and no completion line is printed, and communicator creation still succeeds.
+// The init-time report needs the RAS subsystem: with NCCL_RAS_ENABLE=0 rank 0 prints only that the diagnostics were
+// skipped, with no header, check or completion line, and communicator creation still succeeds.
 TEST_F(RasDiagnostics, RasDisabledRunsNoChecks)
 {
     runRasCases({{"RasDisabledRunsNoChecks", 2, []() {
@@ -883,13 +884,14 @@ TEST_F(RasDiagnostics, RasDisabledRunsNoChecks)
         std::vector<ncclComm_t> comms;
         ASSERT_NO_FATAL_FAILURE(initAll(comms, usableGpus()));
         const auto commGuards = guardComms(comms);
-        // Only the header is synchronous; give the RAS thread the time a report takes on a loaded node to show that
+        // Only the skip line is synchronous; give a RAS thread the time a report takes on a loaded node to show that
         // nothing follows it.
         capture.waitForReports(1, std::chrono::seconds(5));
         capture.restore();
         checkAllReduce(comms);
         const RasReport report = parseRasReport(capture.read());
-        EXPECT_EQ(report.count(kRasHeader), 1) << report.dump();
+        EXPECT_EQ(report.count(kRasSkipped), 1) << report.dump();
+        EXPECT_EQ(report.count(kRasHeader), 0) << report.dump();
         EXPECT_EQ(report.lines.size(), 1u) << report.dump();
         EXPECT_EQ(report.count(kRasDone), 0) << report.dump();
         for(const char* label : {kGpuInventory, kDriver, kEcc, kEnv})
