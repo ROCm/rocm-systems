@@ -42,11 +42,6 @@ ncclTeam_t DefaultNcclTeamLsa(ncclComm_t comm) {
   return t;
 }
 
-// MIRROR of src/dev_runtime.cc's ncclDevCommCopyLsaData body, not a call into it: dev_runtime.cc is
-// not in RCCL_MICRO_TEST_SOURCES and cannot be host-compiled standalone, so the seam is the honest
-// microtest boundary. Keep this span expression in lockstep with the production one -- a hand-edit
-// there is invisible to every test whose name says "RealCopy" / "MovesLsaPrefix". What IS pinned
-// against the real struct is the 128-byte span itself, static_asserted in devcomm-test.cc.
 void DefaultNcclDevCommCopyLsaData(void* dst, void const* src) {
   std::memcpy(dst, src,
               offsetof(struct ncclDevComm, railGinBarrier) - offsetof(struct ncclDevComm, rank));
@@ -57,7 +52,9 @@ std::function<void(void*, void const*)> g_ncclDevCommCopyLsaData = DefaultNcclDe
 
 // The externals the #included devcomm .cc files link against.
 extern "C" ncclTeam_t ncclTeamLsa(ncclComm_t comm) { return g_ncclTeamLsa(comm); }
-void ncclDevCommCopyLsaData(void* dst, void const* src) { g_ncclDevCommCopyLsaData(dst, src); }
+// No wrapper definition here: dev_runtime.cc supplies the real
+// ncclDevCommCopyLsaData in this binary. The hook above survives because
+// devcomm-test.cc macro-shims its own call sites onto it.
 
 void ResetDevcommFakes() {
   g_ncclTeamLsa = DefaultNcclTeamLsa;

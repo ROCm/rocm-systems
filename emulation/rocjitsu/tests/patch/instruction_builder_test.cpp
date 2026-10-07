@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -19,6 +21,40 @@ namespace {
 TEST(InstructionBuilder, Sop2SetsEncodingPrefix) {
   const uint32_t word = build_s_lshl_b32(1, 2, 3, ROCJITSU_CODE_ARCH_RDNA4);
   EXPECT_EQ((word >> 30) & 0x3u, 0x2u);
+}
+
+TEST(InstructionBuilder, DelayAluReturnsEncodingOrFailure) {
+  constexpr auto rdna4 = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(rdna4.succeeded());
+  static_assert(rdna4.value() == 0xBF870009u);
+  constexpr auto cdna4 = build_s_delay_alu(0, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(cdna4.failed());
+
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    const auto word = build_s_delay_alu(0xFFFF, arch);
+    ASSERT_TRUE(word.succeeded());
+    EXPECT_EQ(word.value(), 0xBF87FFFFu);
+  }
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
+                    ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID})
+    EXPECT_TRUE(build_s_delay_alu(0, arch).failed());
+}
+
+TEST(InstructionBuilder, DelayAluEmitsOnlyRequestedFailureDiagnostic) {
+  unsigned messages = 0;
+  std::string message;
+  auto callback = [&](std::string_view text) {
+    ++messages;
+    message = text;
+  };
+  const util::DiagnosticEmitter error(callback);
+  EXPECT_TRUE(build_s_delay_alu(0, ROCJITSU_CODE_ARCH_RDNA4, &error).succeeded());
+  EXPECT_EQ(messages, 0u);
+  EXPECT_TRUE(build_s_delay_alu(0, ROCJITSU_CODE_ARCH_CDNA4, &error).failed());
+  EXPECT_EQ(messages, 1u);
+  EXPECT_EQ(message, "s_delay_alu for target architecture");
 }
 
 // SOPP semantics under test:

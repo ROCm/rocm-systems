@@ -84,6 +84,7 @@
 #include <rocprofiler-sdk/version.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/cxx/pc_sampling.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -193,6 +194,12 @@ struct chained_siginfo
     std::optional<sigaction_t> action  = {};
 };
 
+struct child_t
+{
+    pid_t pid{};
+    int   status{};
+};
+
 auto&
 get_chained_signals()
 {
@@ -277,10 +284,11 @@ struct buffer_ids
     rocprofiler_buffer_id_t hip_graph_trace         = {};
     rocprofiler_buffer_id_t rocshmem_api_trace      = {};
     rocprofiler_buffer_id_t hipfile_api_trace       = {};
+    rocprofiler_buffer_id_t hip_event_trace         = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 17>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 18>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -296,7 +304,8 @@ struct buffer_ids
                                                        ompt_trace,
                                                        hip_graph_trace,
                                                        rocshmem_api_trace,
-                                                       hipfile_api_trace};
+                                                       hipfile_api_trace,
+                                                       hip_event_trace};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -1272,6 +1281,16 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                         *record, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
                     domain_type::MEMORY_COPY);
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_EVENT)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_hip_event_record_t*>(header->payload);
+
+                auto attr = get_ext_attribution(record);
+                tool::write_ring_buffer(
+                    tool::tool_buffer_tracing_hip_event_ext_record_t{*record, attr.stream_id},
+                    domain_type::HIP_EVENT);
+            }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
             {
                 auto* record = static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
@@ -1834,13 +1853,40 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
                 auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_stochastic_v0_t*>(
                     cur_header->payload);
 
-                auto pc_sample_tool_record =
-                    rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(
-                        *pc_sample, get_instruction_index(pc_sample->pc));
+                auto instruction_index = get_instruction_index(pc_sample->pc);
 
-                rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
-                                                     domain_type::PC_SAMPLING_STOCHASTIC);
-                valid_samples_cnt++;
+                // For unknown code objects/agents, we simply provide samples as is.
+                // In other cases, we try to verify them first.
+                auto verification_status = ROCPROFILER_STATUS_SUCCESS;
+                if(pc_sample->pc.code_object_id != ROCPROFILER_CODE_OBJECT_ID_NONE)
+                {
+                    if(auto agent_id = CHECK_NOTNULL(tool_metadata)
+                                           ->get_code_object_agent(pc_sample->pc.code_object_id))
+                    {
+                        if(const auto* agent = tool_metadata->get_agent(*agent_id))
+                        {
+                            verification_status = rocprofiler::sdk::pc_sampling::verify_sample(
+                                *pc_sample,
+                                tool_metadata->get_instruction(instruction_index),
+                                agent->gfx_target_version);
+                        }
+                    }
+                }
+
+                if(verification_status == ROCPROFILER_STATUS_ERROR)
+                {
+                    invalid_samples_cnt++;
+                }
+                else
+                {
+                    auto pc_sample_tool_record =
+                        rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(
+                            *pc_sample, instruction_index);
+
+                    rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
+                                                         domain_type::PC_SAMPLING_STOCHASTIC);
+                    valid_samples_cnt++;
+                }
             }
             else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE)
             {
@@ -3019,6 +3065,24 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                         ? resolve_ompt_ops(tool::get_config().ompt_trace_operations)
                         : std::vector<rocprofiler_tracing_operation_t>{};
 
+    auto is_kfd_service = [](rocprofiler_buffer_tracing_kind_t kind) {
+        switch(kind)
+        {
+            case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE:
+            case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU:
+            case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS:
+            case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE:
+            case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT:
+            case ROCPROFILER_BUFFER_TRACING_KFD_QUEUE: return true;
+            default: return false;
+        }
+    };
+    auto kfd_service_unavailable = [](rocprofiler_status_t status) {
+        return status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL ||
+               status == ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+    };
+    auto kfd_configure_status = ROCPROFILER_STATUS_SUCCESS;
+
     for(auto&& itr : {buffer_service_config{tool::get_config().kernel_trace,
                                             ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                             get_buffers().kernel_trace},
@@ -3092,11 +3156,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                             ompt_ops},
                       buffer_service_config{tool::get_config().hip_graph_trace,
                                             ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
-                                            get_buffers().hip_graph_trace}})
+                                            get_buffers().hip_graph_trace},
+                      buffer_service_config{tool::get_config().hip_event_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                                            get_buffers().hip_event_trace}})
 
     {
         if(itr.option)
         {
+            if(is_kfd_service(itr.kind) && kfd_service_unavailable(kfd_configure_status)) continue;
+
             // in sdk callback overhead benchmarking, we don't want to use the buffer services
             if(tool::get_config().benchmark_mode == tool::config::benchmark::sdk_callback_overhead)
                 continue;
@@ -3131,10 +3200,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                 (!itr.operations.empty()) ? itr.operations.data() : nullptr;
             size_t num_operations = itr.operations.size();
 
-            ROCPROFILER_CALL(
-                rocprofiler_configure_buffer_tracing_service(
-                    get_client_ctx(), itr.kind, operations, num_operations, itr.buffer_id),
-                "buffer tracing service configure");
+            auto status = rocprofiler_configure_buffer_tracing_service(
+                get_client_ctx(), itr.kind, operations, num_operations, itr.buffer_id);
+            if(is_kfd_service(itr.kind) && kfd_service_unavailable(status))
+            {
+                kfd_configure_status = status;
+                ROCP_WARNING << "KFD buffer tracing is unavailable: "
+                             << rocprofiler_get_status_string(status)
+                             << " Continuing with the other requested trace services.";
+                continue;
+            }
+            ROCPROFILER_CALL(status, "buffer tracing service configure");
         }
     }
 
@@ -3224,6 +3300,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         global_parameters.push_back(
             {ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {simd_select}});
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {buffer_sz}});
+        global_parameters.push_back(
+            {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
+             {static_cast<uint64_t>(tool::get_config().att_resource_mode_value)}});
         global_parameters.push_back(
             {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL,
@@ -3513,11 +3592,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
     {
         auto external_corr_id_request_kinds =
-            std::array<rocprofiler_external_correlation_id_request_kind_t, 4>{
+            std::array<rocprofiler_external_correlation_id_request_kind_t, 5>{
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API};
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT};
 
         ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
                              get_client_ctx(),
@@ -3815,13 +3895,14 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     // function can warn if data was left unflushed, but nothing is written.
     if(skip_output) return;
 
-    // OMPT, rocSHMEM, hipFILE do not produce direct CSV/stats output. OMPT is rocpd-only (not
-    // emitted to JSON either), while rocSHMEM is emitted directly only to JSON and rocpd;
-    // both rely on `rocpd convert` for CSV/Perfetto/OTF2. The record count above is still
-    // tallied so that rocpd/JSON output is produced even when one of these is the only
+    // OMPT, rocSHMEM, hipFILE, and HIP_EVENT do not produce direct CSV/stats output. OMPT is
+    // rocpd-only (not emitted to JSON either), while rocSHMEM is emitted directly only to JSON
+    // and rocpd; all rely on `rocpd convert` for CSV/Perfetto/OTF2. HIP_EVENT is handled by
+    // csv.py, the libpyrocpd Perfetto writer, and otf2.py. The record count above is
+    // still tallied so that rocpd/JSON output is produced even when one of these is the only
     // active trace domain.
     if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM &&
-                 DomainT != domain_type::HIPFILE)
+                 DomainT != domain_type::HIPFILE && DomainT != domain_type::HIP_EVENT)
     {
         if(tool::get_config().stats || tool::get_config().summary_output)
         {
@@ -3883,6 +3964,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     auto rocjpeg_output  = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
     auto rocshmem_output = tool::rocshmem_buffered_output_t{tool::get_config().rocshmem_api_trace};
     auto hipfile_output  = tool::hipfile_buffered_output_t{tool::get_config().hipfile_api_trace};
+    auto hip_event_output =
+        tool::hip_event_buffered_output_ext_t{tool::get_config().hip_event_trace};
     auto pc_sampling_stochastic_output =
         tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
 
@@ -3930,6 +4013,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     generate_output(hip_graph_output, outdata, contributions, cleanups, skip_output);
     generate_output(rocshmem_output, outdata, contributions, cleanups, skip_output);
     generate_output(hipfile_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hip_event_output, outdata, contributions, cleanups, skip_output);
 
     if(!skip_output && tool::get_config().advanced_thread_trace &&
        !tool_metadata->att_filenames.empty())
@@ -3998,7 +4082,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                          spm_counters_output.get_generator(),
                          hip_graph_output.get_generator(),
                          rocshmem_output.get_generator(),
-                         hipfile_output.get_generator());
+                         hipfile_output.get_generator(),
+                         hip_event_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -4044,7 +4129,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                           ompt_output.get_generator(),
                           hip_graph_output.get_generator(),
                           rocshmem_output.get_generator(),
-                          hipfile_output.get_generator());
+                          hipfile_output.get_generator(),
+                          hip_event_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
@@ -4279,44 +4365,26 @@ get_sigaction_function()
 bool signal_handler_exit =
     rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
 
-// Read once here because getenv() is not async-signal-safe; <= 0 waits indefinitely.
-int signal_abort_flush_timeout_sec =
-    rocprofiler::tool::get_env("ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS", 10);
+// Bounds the blocking waits during signal finalization: the SIGABRT flush wait and the
+// child-reap poll. Read once here because getenv() is not async-signal-safe; <= 0 waits
+// indefinitely.
+int signal_finalize_wait_timeout_sec =
+    rocprofiler::tool::get_env("ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS", 10);
 
 }  // namespace
 
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
 
-std::optional<int>
-wait_pid(pid_t _pid, int _opts = 0)
+// Returns the waitpid()
+//   result: >0 = child reaped (fills _status),
+//   result: =0 = still alive
+//   result: <0 = gone/unwaitable (e.g. ECHILD when the app reaped the child itself).
+child_t
+wait_pid(pid_t _pid, int _opts)
 {
-    auto this_pid  = getpid();
-    auto this_ppid = getppid();
-    auto this_tid  = common::get_tid();
-    auto this_func = std::string_view{__FUNCTION__};
-
-    ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for child {}",
-                             this_ppid,
-                             this_pid,
-                             this_tid,
-                             this_func,
-                             _pid);
-
-    int   _status = 0;
-    pid_t _pid_v  = -1;
-    _opts |= WUNTRACED;
-    do
-    {
-        if((_opts & WNOHANG) > 0)
-        {
-            std::this_thread::yield();
-            std::this_thread::sleep_for(std::chrono::milliseconds{100});
-        }
-        _pid_v = waitpid(_pid, &_status, _opts);
-    } while(_pid_v == 0);
-
-    if(_pid_v < 0) return std::nullopt;
-    return _status;
+    child_t ret{};
+    ret.pid = waitpid(_pid, &ret.status, _opts | WUNTRACED);
+    return ret;
 }
 
 extern "C" {
@@ -4440,6 +4508,9 @@ diagnose_status(pid_t _pid, int _status)
 void
 wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::string_view context)
 {
+    constexpr auto this_func = __FUNCTION__;
+    namespace chrono         = std::chrono;
+
     auto get_children = [&this_pid]() {
         auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
         auto ifs      = std::ifstream{fname};
@@ -4460,17 +4531,50 @@ wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::strin
 
     auto _children = get_children();
     ROCP_WARNING << fmt::format(
-        "[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for {} children to exit",
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for children [{}] to exit",
         this_ppid,
         this_pid,
         this_tid,
         context,
-        _children.size());
+        fmt::join(_children, ", "));
 
-    for(auto itr : _children)
+    const auto _deadline =
+        (signal_finalize_wait_timeout_sec > 0)
+            ? chrono::steady_clock::now() + chrono::seconds{signal_finalize_wait_timeout_sec}
+            : chrono::steady_clock::time_point::max();
+
+    while(!_children.empty() && chrono::steady_clock::now() <= _deadline)
     {
-        auto status = wait_pid(itr, WUNTRACED | WNOHANG);
-        if(status) diagnose_status(itr, status.value());
+        for(size_t i = 0; i < _children.size(); ++i)
+        {
+            const auto [_rc, _status] = wait_pid(_children[i], WUNTRACED | WNOHANG);
+
+            if(_rc == 0) continue;                               // still alive: keep it
+            if(_rc > 0) diagnose_status(_children[i], _status);  // reaped: report status
+
+            // Reaped or gone (already reaped by the app): drop it by swapping the last element
+            // into this slot.
+            // NOTE: with ++i we skip re-checking that swapped-in element this pass, but
+            // the next pass handles it (bounded by _deadline). Updates to removal should
+            // keep the loop increment correct so nothing is examined twice or lost.
+            _children[i] = _children.back();
+            _children.pop_back();
+        }
+
+        if(!_children.empty()) std::this_thread::sleep_for(chrono::milliseconds{100});
+    }
+
+    if(!_children.empty())
+    {
+        ROCP_WARNING << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] gave up waiting for children [{}]: finalize wait "
+            "budget ({}s) exhausted",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            fmt::join(_children, ", "),
+            signal_finalize_wait_timeout_sec);
     }
 }
 
@@ -4574,9 +4678,16 @@ signal_finalization_worker()
     }
 
     // Best-effort reap to avoid leaving zombies if the app keeps running (e.g. a chained handler
-    // that returns). We do NOT drive the signal into children -- delivering it to a separate PID
-    // is the app's/OS's job; a child that received the signal finalizes via its own worker.
-    wait_for_children(this_pid, this_ppid, this_tid, this_func);
+    // that returns). We do NOT signal the children. That is the app's/OS's job. A child that
+    // received the signal finalizes via its own worker.
+    //
+    // signo == 0 is the normal-exit wake (finalize_rocprofv3 then join): no signal was
+    // delivered, so a child the app left running is the app's own business. Reaping it would
+    // block on a child that may never exit, so skip it.
+    if(sw.signo != 0)
+    {
+        wait_for_children(this_pid, this_ppid, this_tid, this_func);
+    }
 
     ROCP_INFO << fmt::format(
         "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal... complete",
@@ -4640,7 +4751,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     // So wait for the flush here, then return into abort(). Unlike the async signals, this can
     // block on a lock the aborting thread holds as abort() often fires from lock-holding runtime
     // paths, e.g. heap-corruption detection. Bound the wait with
-    // ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
+    // ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
     // beats a hung process. <= 0 waits forever.
     if(signo == SIGABRT)
     {
@@ -4648,12 +4759,12 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         {
             // FUTEX_WAIT_BITSET takes an absolute CLOCK_MONOTONIC deadline, so compute it once and
             // let the kernel track the time remaining across wakeups. <= 0 waits indefinitely.
-            const auto bounded  = (signal_abort_flush_timeout_sec > 0);
+            const auto bounded  = (signal_finalize_wait_timeout_sec > 0);
             auto       deadline = timespec{};
             if(bounded)
             {
                 clock_gettime(CLOCK_MONOTONIC, &deadline);
-                deadline.tv_sec += signal_abort_flush_timeout_sec;
+                deadline.tv_sec += signal_finalize_wait_timeout_sec;
             }
 
             while(sw.finalize_done.load(std::memory_order_acquire) == 0)

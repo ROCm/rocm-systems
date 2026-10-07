@@ -10,6 +10,13 @@
 
 #include "comm.h"
 #include "device.h"
+#include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this stands in for
+#include "signature-drift.h"
+#include "tuner.h"
+#include "tuning.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_tuningCompute, ncclTuningCompute);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // Defaults to ncclSystemError, NOT success. Production wraps this in NCCLCHECK,
 // so the effect is that the FIRST eligible lookup aborts the caller with an
@@ -30,10 +37,19 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
   return g_topoGetAlgoTime(comm, coll, algorithm, protocol, nBytes, numPipeOps, time);
 }
 
-int64_t g_paramMinNchannels = 0;
-int64_t g_paramMaxNchannels = MAXCHANNELS;
+ncclResult_t ncclTuningFinalize(struct ncclComm* comm) {
+  if (comm->tuner == nullptr) return ncclSuccess;
+  ncclResult_t ret = comm->tuner->finalize(comm->tunerContext);
+  if (ret != ncclSuccess) return ret;
+  return ncclTunerPluginUnload(comm);
+}
+
+int64_t g_paramMinNchannels = -2;
+int64_t g_paramMaxNchannels = -2;
 int64_t ncclParamMinNchannels() { return g_paramMinNchannels; }
 int64_t ncclParamMaxNchannels() { return g_paramMaxNchannels; }
+// Referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover it.
+int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 0); }  // graph/tuning.cc:1105
 
 int g_tuningIndexValue = 0;
 std::string g_tuningIndexLastArch;
@@ -42,11 +58,21 @@ int rcclGetTuningIndexForArch(const char* gfxarch) {
   return g_tuningIndexValue;
 }
 
+static ncclResult_t DefaultTuningCompute(struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
+  return ncclSystemError;
+}
+std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> g_tuningCompute =
+    DefaultTuningCompute;
+ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncclTuningResult_t* const result) {
+  return g_tuningCompute(input, result);
+}
+
 void ResetTuningFakes() {
   g_topoGetAlgoTime = DefaultTopoGetAlgoTime;
   g_topoGetAlgoTimeCalls = 0;
-  g_paramMinNchannels = 0;
-  g_paramMaxNchannels = MAXCHANNELS;
+  g_paramMinNchannels = -2;
+  g_paramMaxNchannels = -2;
   g_tuningIndexValue = 0;
   g_tuningIndexLastArch.clear();
+  g_tuningCompute = DefaultTuningCompute;
 }

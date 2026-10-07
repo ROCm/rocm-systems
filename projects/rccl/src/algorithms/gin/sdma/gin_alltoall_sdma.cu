@@ -19,6 +19,7 @@
 #include "param.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstdint>
 
@@ -158,7 +159,8 @@ ncclResult_t ncclGinA2AInitOnce(ncclComm* comm) {
     reqs.ginSignalCount = kGinA2AMaxCtas;
     reqs.barrierCount = kGinA2ASdmaCtas;
     reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
-    NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, /*isInternal=*/true));
+    NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, /*isInternal=*/true,
+                                         /*deviceCodeVersion=*/NCCL_VERSION_CODE));
     state->initialized = true;
   }
   return ncclSuccess;
@@ -181,7 +183,9 @@ bool ncclAllToAllGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) return false;
 
   // This path runs on the comm's shared GIN backend, so it has to be SDMA.
-  if (comm->sharedRes->ginState.ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
+  ncclGinType_t ginType = NCCL_GIN_TYPE_NONE;
+  if (ncclGetGinType(comm, &ginType) != ncclSuccess) return false;
+  if (ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
 
   // Every rank must be reachable over LSA.
   if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
@@ -225,11 +229,13 @@ ncclResult_t ncclAllToAllGinSdma(const void* sendbuff, void* recvbuff, size_t co
 
   bool useSdma = bytesPerPeer >= (size_t)ncclParamGinA2ASdmaMinBytes();
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   if (useSdma) {
     int sdmaThreads = ginA2ASdmaThreads(comm->nRanks);
     INFO(NCCL_COLL, "AllToAll GIN: transport=sdma bytesPerPeer=%zu threads=%d", bytesPerPeer, sdmaThreads);
-    ncclGinA2AKernel<true><<<kGinA2ASdmaCtas, sdmaThreads, 0, stream>>>(
-      sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, bytesPerPeer, 0, comm->ginA2AState.devComm);
+    hipExtLaunchKernelGGL((ncclGinA2AKernel<true>), kGinA2ASdmaCtas, sdmaThreads, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, bytesPerPeer,
+                          /*chunkBytes=*/0, comm->ginA2AState.devComm);
   } else {
     // Under LSA the CTAs do the copying, so the grid scales with the message.
     int lsaChunks, lsaThreads;
@@ -238,8 +244,9 @@ ncclResult_t ncclAllToAllGinSdma(const void* sendbuff, void* recvbuff, size_t co
 
     INFO(NCCL_COLL, "AllToAll GIN: transport=lsa bytesPerPeer=%zu chunks=%d ctas=%d threads=%d", bytesPerPeer,
          lsaChunks, comm->nRanks * lsaChunks, lsaThreads);
-    ncclGinA2AKernel<false><<<dim3(comm->nRanks, lsaChunks), lsaThreads, 0, stream>>>(
-      sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, bytesPerPeer, lsaChunkBytes, comm->ginA2AState.devComm);
+    hipExtLaunchKernelGGL((ncclGinA2AKernel<false>), dim3(comm->nRanks, lsaChunks), lsaThreads, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, sendWin->vidmem, sendOff, recvWin->vidmem,
+                          recvOff, bytesPerPeer, lsaChunkBytes, comm->ginA2AState.devComm);
   }
   CUDACHECK(cudaGetLastError());
 

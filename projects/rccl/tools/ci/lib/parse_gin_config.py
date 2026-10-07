@@ -10,7 +10,11 @@ Column layout:
   mca<SEP><flags>
   debug_env<SEP><-x flags>   (appended to every test only when RCCL_CI_DEBUG=1)
   test<SEP><name><SEP><kind><SEP><bin><SEP><-x env flags><SEP><args>
-    kind: rocshmem | rccl-tests | fixtures (fixtures: gtest binary, no mpirun)
+    kind: rocshmem | rccl-tests | fixtures | pytest
+      rocshmem/rccl-tests: mpirun benchmark; bin is the executable name
+      fixtures: single-process gtest; bin is the executable name
+      pytest: rccl-tests opt-in pytest; bin is a file under test/ (e.g.
+        test_Broadcast.py); args are forwarded to pytest (e.g. -k gin_sdma -v)
 """
 
 # ASCII unit separator: distinct from whitespace and unlikely in flags/args.

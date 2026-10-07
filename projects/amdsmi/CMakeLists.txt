@@ -167,7 +167,7 @@ cmake_dependent_option(
     AUTO_BUILD_STATIC_LIBS
     "auto-build static library (tests/examples link to static)"
     ON
-    "NOT BUILD_SHARED_LIBS OR BUILD_TESTS"
+    "NOT BUILD_SHARED_LIBS OR BUILD_TESTS OR BUILD_EXAMPLES"
     OFF
 )
 cmake_dependent_option(
@@ -471,6 +471,8 @@ install(
     PATTERN "*.txt"
     PATTERN "build*" EXCLUDE
     PATTERN ".cache*" EXCLUDE
+    # Includes impl headers that are build-only, so it cannot compile against an install tree.
+    PATTERN "amd_smi_cper.cc" EXCLUDE
 )
 
 # Make for goamdsmi_shim library

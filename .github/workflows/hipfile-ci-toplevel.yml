@@ -41,7 +41,7 @@ jobs:
           "g++"
         ]
       # C++20 is the production standard. C++23 is a forward-compat smoke test
-      # run once via MATRIX_INCLUDE (ubuntu + amdclang++ + 7.2.x), not fanned out.
+      # run once via MATRIX_INCLUDE (ubuntu + amdclang++ + 10.0.0), not fanned out.
       CXX_STANDARD: >-
         [
           20

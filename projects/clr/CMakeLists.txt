@@ -19,12 +19,11 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     if (AMD_COMPUTE_WIN)
         # shared prebuilt libs are release, allows hip to be debug
-        add_compile_options(/MT)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
         add_compile_options("$<$<CONFIG:Debug>:-D_ITERATOR_DEBUG_LEVEL=0>")
         add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
     else()
-        add_compile_options("$<$<CONFIG:Debug>:/MTd>")
-        add_compile_options("$<$<NOT:$<CONFIG:Debug>>:/MT>")
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
     endif()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -42,6 +41,7 @@ endif()
 
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
+option(CLR_HRR_CODEGEN_CHECK "Generate and validate HRR generated sources during CLR builds" OFF)
 option(USE_NEW_HOSTCALL_IMPL
   "Use the new phase/occupancy-based hostcall implementation" OFF)
 
@@ -49,6 +49,8 @@ option(USE_NEW_HOSTCALL_IMPL
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/CLRHardening.cmake")
 
 #############
 # Build steps

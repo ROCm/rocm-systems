@@ -24,6 +24,16 @@
 #    include "library/pmc/collectors/nic/perfetto_policy.hpp"
 #endif
 
+#if defined(ROCPROFSYS_BUILD_HIPFILE)
+#    include "backends/hipfile/backend.hpp"
+#    include "backends/hipfile/wrapper.hpp"
+#    include "library/pmc/collectors/hipfile/cache_policy.hpp"
+#    include "library/pmc/collectors/hipfile/collector.hpp"
+#    include "library/pmc/collectors/hipfile/device.hpp"
+#    include "library/pmc/collectors/hipfile/perfetto_policy.hpp"
+#    include "library/pmc/device_providers/hipfile/provider.hpp"
+#endif
+
 #include "library/pmc/collectors/cpu/cache_policy.hpp"
 #include "library/pmc/collectors/cpu/collector.hpp"
 #include "library/pmc/collectors/cpu/perfetto_policy.hpp"
@@ -53,7 +63,6 @@
 
 #include <atomic>
 #include <cassert>
-#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -133,6 +142,25 @@ using cpu_provider_factory_t =
 using cpu_provider_t  = cpu_provider_factory_t::provider_t;
 using cpu_collector_t = collectors::cpu::collector<cpu_provider_t, cpu_production_config>;
 
+#if defined(ROCPROFSYS_BUILD_HIPFILE)
+struct hipfile_production_config
+{
+    using SettingsApi = collectors::settings_policy;
+    // hipFile counter tracks reach Perfetto from hipfile_pmc_sample records, so
+    // the legacy per-collector Perfetto policy is a no-op rather than a second producer.
+    using PerfettoApi = collectors::hipfile::perfetto_policy;
+    using CacheApi    = collectors::hipfile::cache_policy;
+};
+
+using hipfile_provider_factory_t = device_providers::hipfile::provider_factory<
+    backends::hipfile::backend_factory<backends::hipfile::wrapper>>;
+using hipfile_provider_t = hipfile_provider_factory_t::provider_t;
+using hipfile_device_t   = collectors::hipfile::device<hipfile_provider_t::backend_t>;
+using hipfile_collector_t =
+    collectors::hipfile::collector<hipfile_provider_t, hipfile_device_t,
+                                   hipfile_production_config>;
+#endif
+
 std::shared_ptr<provider_t> g_device_provider;
 
 std::unique_ptr<gpu_collector_t> g_gpu_collector;
@@ -147,9 +175,34 @@ std::unique_ptr<nic_collector_t> g_nic_collector;
 std::shared_ptr<cpu_provider_t>  g_cpu_provider;
 std::unique_ptr<cpu_collector_t> g_cpu_collector;
 
+#if defined(ROCPROFSYS_BUILD_HIPFILE)
+std::shared_ptr<hipfile_provider_t>  g_hipfile_provider;
+std::unique_ptr<hipfile_collector_t> g_hipfile_collector;
+#endif
+
 std::vector<collectors::collector_slice> g_collector_slices;
 
 std::atomic<bool> g_reinit_pending{ false };
+
+// Timestamp of a pause whose zero-valued sample could not be written because the
+// sampling thread held the AMD SMI lock. Zero means nothing is outstanding.
+std::atomic<std::int64_t> g_pending_pause_ts{ 0 };
+
+// Requires type_mutex<category::amd_smi> to be held.
+void
+write_pause_samples(std::int64_t timestamp)
+{
+    for(auto& slice : g_collector_slices)
+    {
+        slice.pause(timestamp);
+    }
+#if ROCPROFILER_VERSION >= 600
+    if(g_gpu_perf_counter_collector)
+    {
+        g_gpu_perf_counter_collector->pause(timestamp);
+    }
+#endif
+}
 
 // Tears down the AMD SMI collector slices and marks the sampler uninitialized.
 // This is the only teardown performed on the post-fork reinit path: that reinit
@@ -194,7 +247,10 @@ shutdown_gpu_hw_collector()
 
     LOG_DEBUG("Shutting down rocprofiler-sdk GPU hardware counter collector.");
 
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
+    if(g_gpu_perf_counter_collector)
+    {
+        g_gpu_perf_counter_collector->shutdown();
+    }
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
 #endif
@@ -204,7 +260,10 @@ void
 reinit_if_pending()
 {
     bool _expected = true;
-    if(!g_reinit_pending.compare_exchange_strong(_expected, false)) return;
+    if(!g_reinit_pending.compare_exchange_strong(_expected, false))
+    {
+        return;
+    }
 
     LOG_DEBUG("Performing deferred PMC reinit after fork.");
     shutdown_amd_smi_collectors();
@@ -250,7 +309,10 @@ sample()
         slice.sample(timestamp);
     }
 #if ROCPROFILER_VERSION >= 600
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->sample(timestamp);
+    if(g_gpu_perf_counter_collector)
+    {
+        g_gpu_perf_counter_collector->sample(timestamp);
+    }
 #endif
 }
 
@@ -291,6 +353,16 @@ setup()
 #endif
         }
 
+#if defined(ROCPROFSYS_BUILD_HIPFILE)
+        if(config::get_use_hipfile())
+        {
+            g_hipfile_provider = hipfile_provider_factory_t::create();
+            g_hipfile_collector =
+                std::make_unique<hipfile_collector_t>(g_hipfile_provider);
+            g_collector_slices.emplace_back(*g_hipfile_collector);
+        }
+#endif
+
         for(auto& slice : g_collector_slices)
         {
             slice.setup();
@@ -319,7 +391,10 @@ post_process()
     }
     g_collector_slices.clear();
 #if ROCPROFILER_VERSION >= 600
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->post_process();
+    if(g_gpu_perf_counter_collector)
+    {
+        g_gpu_perf_counter_collector->post_process();
+    }
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
 #endif
@@ -330,23 +405,46 @@ post_process()
 void
 pause()
 {
-    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+    const auto timestamp =
+        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+
+    // sample() holds this lock for a whole AMD SMI sweep, and the caller is an
+    // application thread leaving a traced region. Hand the timestamp to the
+    // sampling thread rather than waiting for the sweep to finish.
+    const std::unique_lock pause_lock{ type_mutex<category::amd_smi>(),
+                                       std::try_to_lock };
+
+    if(!pause_lock.owns_lock())
+    {
+        g_pending_pause_ts.store(timestamp, std::memory_order_release);
+        return;
+    }
 
     if(pmc::get_state() != state::process::Active || !is_initialized())
     {
         return;
     }
 
-    auto timestamp =
-        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    write_pause_samples(timestamp);
+}
 
-    for(auto& slice : g_collector_slices)
+void
+flush_pending_pause()
+{
+    const auto timestamp = g_pending_pause_ts.exchange(0, std::memory_order_acq_rel);
+    if(timestamp == 0)
     {
-        slice.pause(timestamp);
+        return;
     }
-#if ROCPROFILER_VERSION >= 600
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->pause(timestamp);
-#endif
+
+    auto_lock_t pause_lock{ type_mutex<category::amd_smi>() };
+
+    if(pmc::get_state() != state::process::Active || !is_initialized())
+    {
+        return;
+    }
+
+    write_pause_samples(timestamp);
 }
 
 void
@@ -369,6 +467,10 @@ postfork_child_cleanup()
     g_gpu_collector.reset();
 #if defined(ROCPROFSYS_BUILD_AINIC)
     g_nic_collector.reset();
+#endif
+#if defined(ROCPROFSYS_BUILD_HIPFILE)
+    g_hipfile_collector.reset();
+    g_hipfile_provider.reset();
 #endif
     g_cpu_collector.reset();
     g_device_provider.reset();
@@ -437,7 +539,8 @@ register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agen
         {
             for(const auto& gpu_agent : agent_list)
             {
-                counters.push_back({ name, gpu_agent->device_type_index });
+                counters.push_back(
+                    { .name = name, .device_index = gpu_agent->device_type_index });
             }
         }
 

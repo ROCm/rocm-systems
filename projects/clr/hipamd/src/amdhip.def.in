@@ -563,4 +563,6 @@ hipExecutionCtxSynchronize
 hipExecutionCtxWaitEvent
 hipMemGetDefaultMemPool
 hipKernelNameRefByPtr
+hipModuleEnumerateFunctions
+hipDeviceFlushGPUDirectRDMAWrites
 @HSA_EXPORTS@

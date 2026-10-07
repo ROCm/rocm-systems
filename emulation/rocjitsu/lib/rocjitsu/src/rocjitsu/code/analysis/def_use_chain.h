@@ -9,6 +9,28 @@
 /// registers, source operands use registers. Operand::to_register_ref()
 /// determines which register class and index are involved. Instruction
 /// subclasses may also report hidden register effects through implicit hooks.
+///
+/// `defs`/`uses` hold both ordinary register-file effects (SGPR/VGPR/AccVGPR)
+/// and architectural special-register effects (EXEC/VCC/SCC/M0/PC/...) in one
+/// RegisterSet each. Special registers are singleton members of that set;
+/// consumers that drive scratch-allocation liveness project them out with
+/// `RegisterSet::ordinary_only()` so special state never looks allocatable.
+///
+/// Special-register effects are surfaced only from *field-less* special operands
+/// — dedicated operand types (OPR_PC, OPR_SDST_EXEC, OPR_SDST_M0,
+/// OPR_SSRC_SPECIAL_SCC, OPR_VCC) whose `to_special_reg_class()` names the class
+/// directly. A special register named through a *generic selector* field instead
+/// (e.g. `s_mov_b32 exec_lo, 0`, where EXEC_LO is encoding value 126 in the
+/// OPR_SDST selector) *does* decode to a special `RegisterRef` via
+/// `to_register_ref()`, but that ref collapses the LO/HI halves into one
+/// class-wide singleton — an imprecise representation — so InstDefUse drops it:
+/// only ordinary SGPR/VGPR/AccVGPR refs
+/// from `to_register_ref()` are recorded, and such selector-encoded specials
+/// appear in neither `defs`/`uses` nor the ordinary projection. Surfacing them
+/// precisely is follow-up work (a generator change mapping special selector
+/// values to their RegClass, plus width-aware special storage); until then,
+/// consumers must not assume selector-encoded EXEC/VCC/M0 reads or writes are
+/// visible here.
 
 #pragma once
 
@@ -33,8 +55,8 @@ public:
   InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vgpr_msb = nullptr,
              UnknownVgprDefPolicy unknown_vgpr_defs = UnknownVgprDefPolicy::Omit);
 
-  RegisterSet defs; ///< Registers overwritten by the instruction.
-  RegisterSet uses; ///< Registers read before the instruction writes defs.
+  RegisterSet defs; ///< Registers written (ordinary lanes + special singletons).
+  RegisterSet uses; ///< Registers read before defs (ordinary lanes + special singletons).
   bool has_exec_masked_vector_def =
       false; ///< True if the instruction doesn't ignore EXEC and has a vector def.
   bool has_predicated_def = false; ///< True if defs preserve old values on some paths.
