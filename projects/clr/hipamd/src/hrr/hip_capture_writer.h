@@ -89,26 +89,8 @@ bool is_incomplete();
 // per process.
 void note_unreplayable(const char* api, const char* reason);
 
-// Record in manifest.json whether pinned host buffers were snapshotted before
-// each kernel launch ("host_snapshots": true/false). An archive with true holds
-// host memory the application filled (inputs, token ids, request state).
-void set_host_snapshots(bool enabled);
-
-// Count one pinned host chunk stored as a blob ("host_snapshot_chunks"), and
-// one launch whose pinned inputs were read while earlier work on its stream was
-// still running ("host_snapshots_unordered"). Both go in manifest.json when
-// host snapshots are on.
-void count_host_snapshot_chunk();
-void count_host_snapshot_unordered();
-
-// Functions the writer's pthread_atfork handlers call: prepare before it takes
-// its own lock, parent after the fork in the parent, and child in the child
-// before the archive is reopened. Any of them may be null.
-void set_fork_hooks(void (*prepare)(), void (*parent)(), void (*child)());
-
 // Write a buffer as a content-addressed blob. Returns hash, or {} when the
-// writer is not open, capture has stopped for lack of space, or the file could
-// not be written.
+// writer is not open or capture has stopped for lack of space.
 // Thread-safe. Skips write if blob already exists on disk.
 Hash128 write_blob(const void* data, size_t len);
 
