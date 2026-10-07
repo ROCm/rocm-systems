@@ -563,6 +563,8 @@ static bool needs_ordering(uint16_t etype) {
     case HRR_API_HIPHOSTUNREGISTER:
     case HRR_API_HIPHOSTGETDEVICEPOINTER:
     case HRR_API_HIPHOSTMALLOC:
+    case HRR_API_HIPHOSTALLOC:
+    case HRR_API_HIPMEMALLOCHOST:
     case HRR_API_HIPMEMADDRESSRESERVE:
     case HRR_API_HIPMEMCREATE:
     // Stream create / destroy
