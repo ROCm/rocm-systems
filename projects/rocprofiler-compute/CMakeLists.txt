@@ -612,6 +612,20 @@ add_test(
 
 # Memory chart tests — no GPU required
 add_test(
+    NAME test_memory_chart_loader
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_loader.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_loader.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_memory_chart_units
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_units.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_units.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_mem_chart_gfx11
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx11.xml
@@ -1080,6 +1094,8 @@ if(${ENABLE_COVERAGE})
         test_analysis_cli
         test_pattern_matching
         test_list_metrics_cli
+        test_memory_chart_loader
+        test_memory_chart_units
         test_mem_chart_common
         test_mem_chart_gfx9
         test_mem_chart_gfx11
@@ -1216,6 +1232,13 @@ install(
 # src/rocprof_compute_profile
 install(
     DIRECTORY src/rocprof_compute_profile
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
+# src/memory_chart (renderer and its JSON layouts)
+install(
+    DIRECTORY src/memory_chart
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
