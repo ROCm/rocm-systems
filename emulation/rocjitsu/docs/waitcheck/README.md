@@ -17,6 +17,15 @@ The LLVM parity map is used as a regression checklist for known wait patterns,
 not as a requirement that kernels came from LLVM. See
 [`../waitcheck-llvm-parity.md`](../waitcheck-llvm-parity.md).
 
+A pending memory result protects its physical destination from reads and
+unordered writes until the corresponding completion wait. This also applies
+when that register held a value before the load or is overwritten by VALU while
+the load is pending. In particular, CDNA3/4 do not get a separate readable or
+writable register generation in the checker. Same-class ordered VMEM writes
+and supported nonoverlapping D16 halves retain their specific ordering rules.
+Static analysis conservatively retains pending registers across EXEC changes;
+it does not prove that arbitrary divergent lane masks are disjoint.
+
 ## Support Matrix
 
 Both the offline CLI and HSA tools hook support every target below.

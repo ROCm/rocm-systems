@@ -93,10 +93,6 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
-[[nodiscard]] bool tracks_committed_vgpr_generations(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
-}
-
 [[nodiscard]] bool tracks_gfx12_sgpr_hazards(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA4;
 }
@@ -443,7 +439,6 @@ struct PendingEvent {
   WaitCounterKind counter = WaitCounterKind::Load;
   WaitEventKind kind = WaitEventKind::Unknown;
   RegisterSet regs;
-  RegisterSet old_value_regs;
   // LLVM tracks the low/high 16-bit physical subregisters used by D16 memory
   // operations independently. Keep the exceptional partial destination
   // sparse: almost every event still covers whole 32-bit register lanes.
@@ -451,7 +446,6 @@ struct PendingEvent {
   uint8_t partial_reg_mask = kVgprFull32Mask;
   std::optional<RegisterRef> special_reg;
   std::optional<int64_t> barrier_id;
-  bool produces_regs = false;
   bool check_uses = true;
   bool check_defs = true;
   bool check_exec_defs = false;
@@ -564,7 +558,6 @@ struct PendingState {
   // need a full PendingEvent. Scalar memory makes its counter out of order.
   std::array<bool, kCounterCount> pending_smem{};
   std::array<bool, kCounterCount> uncertain_order{};
-  RegisterSet ready_regs;
   SgprHazardState sgpr_hazards;
   VaVdstHazardState va_vdst_hazards;
   VgprMsbState vgpr_msb;
@@ -588,14 +581,6 @@ struct CounterParityRequirement {
   const Instruction *consumer = nullptr;
   uint64_t consumer_section_offset = 0;
   uint64_t consumer_file_offset = 0;
-};
-
-enum class DependencyView {
-  // Model which committed VGPR generation an ISA instruction can observe.
-  RuntimeVisibleGeneration,
-  // Mirror LLVM's post-RA wait insertion: every pending physical-register
-  // definition that intersects an operand contributes to the required wait.
-  CompilerPendingDefinition,
 };
 
 struct PendingWaitGroup {
@@ -664,7 +649,6 @@ struct Analyzer {
 
     PendingState state;
     state.expert_scheduling.enabled = supports_expert_scheduling(arch);
-    RegisterSet local_ready_regs;
     std::optional<PendingWaitGroup> pending_wait_group;
     size_t word_index = 0;
     while (word_index < words.size()) {
@@ -697,8 +681,7 @@ struct Analyzer {
       const auto file_offset = file_offset_base + section_offset;
       update_counter_parity_group(pending_wait_group, state, *inst, section_name, section_offset,
                                   file_offset, arch);
-      analyze_instruction(state, local_ready_regs, *inst, section_name, section_offset, file_offset,
-                          arch, true);
+      analyze_instruction(state, *inst, section_name, section_offset, file_offset, arch, true);
       ++report_.instructions_analyzed;
       word_index += inst_words;
       if (should_stop_after_diagnostic())
@@ -974,8 +957,6 @@ struct Analyzer {
         if (lhs.uncertain_order[counter] != rhs.uncertain_order[counter])
           append("uncertain-order");
       }
-      if (lhs.ready_regs != rhs.ready_regs)
-        append("ready-regs");
       if (lhs.sgpr_hazards != rhs.sgpr_hazards)
         append("sgpr-hazards");
       if (lhs.va_vdst_hazards != rhs.va_vdst_hazards)
@@ -1000,10 +981,8 @@ struct Analyzer {
       dataflow_worklist.pop_front();
       queued[i] = 0;
 
-      // Accumulate inputs across visits: old-value availability is a must fact
-      // and cannot be regained just because an earlier, more precise state
-      // circulates around a loop. Keep the full join (including all pending
-      // events), rather than ignoring differences once an order is uncertain.
+      // Accumulate inputs across visits so pending events and conservative
+      // ordering facts cannot disappear as earlier states circulate in a loop.
       // An unvisited input is bottom, not an initialized empty state.
       PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized,
                                                out_initialized[i] ? &in[i] : nullptr);
@@ -1150,21 +1129,19 @@ private:
     // older events on the same hardware counter. Once those ages have been
     // advanced, retaining one static PendingEvent per token adds no
     // information and makes large store-heavy CFGs quadratic in memory.
-    return event.regs.size() == 0 && event.old_value_regs.size() == 0 && !event.special_reg &&
-           !event.barrier_id && !event.produces_regs && !event.check_uses && !event.check_defs &&
-           !event.check_exec_defs && !event.check_memory_order && !event.check_program_end &&
-           !event.check_counter_parity_order;
+    return event.regs.size() == 0 && !event.special_reg && !event.barrier_id && !event.check_uses &&
+           !event.check_defs && !event.check_exec_defs && !event.check_memory_order &&
+           !event.check_program_end && !event.check_counter_parity_order;
   }
 
   [[nodiscard]] static bool same_event_identity(const PendingEvent &lhs, const PendingEvent &rhs) {
     return lhs.counter == rhs.counter && lhs.kind == rhs.kind && lhs.regs == rhs.regs &&
            lhs.partial_reg == rhs.partial_reg && lhs.partial_reg_mask == rhs.partial_reg_mask &&
            lhs.special_reg == rhs.special_reg && lhs.barrier_id == rhs.barrier_id &&
-           lhs.produces_regs == rhs.produces_regs && lhs.check_uses == rhs.check_uses &&
-           lhs.check_defs == rhs.check_defs && lhs.check_exec_defs == rhs.check_exec_defs &&
-           lhs.section_name == rhs.section_name && lhs.section_offset == rhs.section_offset &&
-           lhs.file_offset == rhs.file_offset && lhs.instruction == rhs.instruction &&
-           lhs.check_memory_order == rhs.check_memory_order &&
+           lhs.check_uses == rhs.check_uses && lhs.check_defs == rhs.check_defs &&
+           lhs.check_exec_defs == rhs.check_exec_defs && lhs.section_name == rhs.section_name &&
+           lhs.section_offset == rhs.section_offset && lhs.file_offset == rhs.file_offset &&
+           lhs.instruction == rhs.instruction && lhs.check_memory_order == rhs.check_memory_order &&
            lhs.check_program_end == rhs.check_program_end &&
            lhs.check_counter_parity_order == rhs.check_counter_parity_order;
   }
@@ -1193,16 +1170,14 @@ private:
   }
 
   [[nodiscard]] static bool event_identity_less(const PendingEvent &lhs, const PendingEvent &rhs) {
-    const auto lhs_key =
-        std::tie(lhs.section_name, lhs.section_offset, lhs.file_offset, lhs.instruction,
-                 lhs.counter, lhs.kind, lhs.barrier_id, lhs.produces_regs, lhs.check_uses,
-                 lhs.check_defs, lhs.check_exec_defs, lhs.check_memory_order, lhs.check_program_end,
-                 lhs.check_counter_parity_order);
-    const auto rhs_key =
-        std::tie(rhs.section_name, rhs.section_offset, rhs.file_offset, rhs.instruction,
-                 rhs.counter, rhs.kind, rhs.barrier_id, rhs.produces_regs, rhs.check_uses,
-                 rhs.check_defs, rhs.check_exec_defs, rhs.check_memory_order, rhs.check_program_end,
-                 rhs.check_counter_parity_order);
+    const auto lhs_key = std::tie(
+        lhs.section_name, lhs.section_offset, lhs.file_offset, lhs.instruction, lhs.counter,
+        lhs.kind, lhs.barrier_id, lhs.check_uses, lhs.check_defs, lhs.check_exec_defs,
+        lhs.check_memory_order, lhs.check_program_end, lhs.check_counter_parity_order);
+    const auto rhs_key = std::tie(
+        rhs.section_name, rhs.section_offset, rhs.file_offset, rhs.instruction, rhs.counter,
+        rhs.kind, rhs.barrier_id, rhs.check_uses, rhs.check_defs, rhs.check_exec_defs,
+        rhs.check_memory_order, rhs.check_program_end, rhs.check_counter_parity_order);
     if (lhs_key != rhs_key)
       return lhs_key < rhs_key;
     if (register_ref_key(lhs.special_reg) != register_ref_key(rhs.special_reg))
@@ -1811,7 +1786,6 @@ private:
     }
     visit_dependencies(
         *requirement_state, consumer, du, current_events, arch,
-        DependencyView::CompilerPendingDefinition,
         [&](const PendingEvent &event, RegisterRef reg, WaitcheckAccessKind access,
             uint32_t required_count) {
           bool can_improve =
@@ -2220,7 +2194,6 @@ private:
       };
       visit_dependencies(
           *dependency_state, instruction, du, current_events, arch,
-          DependencyView::CompilerPendingDefinition,
           [&](const PendingEvent &event, RegisterRef reg, WaitcheckAccessKind access, uint32_t) {
             if (event.counter == counter)
               record_if_original(event, reg, access);
@@ -2247,9 +2220,7 @@ private:
       if (strongest && strongest->required_count <= emitted_count)
         return strongest;
 
-      RegisterSet local_ready_regs;
-      analyze_instruction(state, local_ready_regs, instruction, group.section_name,
-                          view.section_offset,
+      analyze_instruction(state, instruction, group.section_name, view.section_offset,
                           group.file_offset - group.section_offset + view.section_offset, arch,
                           /*emit_diagnostics=*/false);
       if (is_program_end(instruction.mnemonic()))
@@ -2569,7 +2540,6 @@ private:
           dst.pending[i].insert(position, event);
         } else {
           position->min_younger = std::min(position->min_younger, event.min_younger);
-          position->old_value_regs &= event.old_value_regs;
         }
       }
     }
@@ -2591,7 +2561,6 @@ private:
     PendingState merged;
 
     std::array<std::optional<std::vector<PendingEvent>>, kCounterCount> first_source;
-    std::optional<RegisterSet> ready_regs;
     std::optional<VgprMsbState> first_vgpr_msb;
     std::optional<ExpertSchedulingState> first_expert_scheduling;
     std::optional<bool> all_previous_vm_vsrc_zero_wait;
@@ -2600,11 +2569,6 @@ private:
         all_previous_vm_vsrc_zero_wait = input.previous_vm_vsrc_zero_wait;
       } else {
         *all_previous_vm_vsrc_zero_wait &= input.previous_vm_vsrc_zero_wait;
-      }
-      if (!ready_regs) {
-        ready_regs = input.ready_regs;
-      } else {
-        *ready_regs &= input.ready_regs;
       }
       if (!first_expert_scheduling) {
         first_expert_scheduling = input.expert_scheduling;
@@ -2640,8 +2604,6 @@ private:
       merged.vgpr_msb = *first_vgpr_msb;
     if (first_expert_scheduling)
       merged.expert_scheduling = *first_expert_scheduling;
-    if (ready_regs)
-      merged.ready_regs = *ready_regs;
     if (all_previous_vm_vsrc_zero_wait)
       merged.previous_vm_vsrc_zero_wait = *all_previous_vm_vsrc_zero_wait;
     return merged;
@@ -2652,9 +2614,6 @@ private:
                                            uint64_t file_offset_base, rj_code_arch_t arch,
                                            bool emit_diagnostics) {
     PendingState state = input;
-    if (!tracks_committed_vgpr_generations(arch))
-      state.ready_regs = {};
-    RegisterSet local_ready_regs;
     std::optional<PendingWaitGroup> pending_wait_group;
     uint64_t section_offset = block.start_offset();
     for (const Instruction &inst : block.instructions()) {
@@ -2662,7 +2621,7 @@ private:
         update_counter_parity_group(pending_wait_group, state, inst, section_name, section_offset,
                                     file_offset_base + section_offset, arch);
       }
-      analyze_instruction(state, local_ready_regs, inst, section_name, section_offset,
+      analyze_instruction(state, inst, section_name, section_offset,
                           file_offset_base + section_offset, arch, emit_diagnostics);
       if (emit_diagnostics)
         ++report_.instructions_analyzed;
@@ -2672,59 +2631,7 @@ private:
     }
     if (emit_diagnostics)
       finish_counter_parity_block(pending_wait_group, arch);
-    if (!tracks_committed_vgpr_generations(arch))
-      state.ready_regs = {};
     return state;
-  }
-
-  [[nodiscard]] static bool same_register_generation(const PendingEvent &lhs,
-                                                     const PendingEvent &rhs) {
-    return lhs.produces_regs && rhs.produces_regs && lhs.regs == rhs.regs &&
-           lhs.section_name == rhs.section_name && lhs.section_offset == rhs.section_offset &&
-           lhs.file_offset == rhs.file_offset && lhs.instruction == rhs.instruction;
-  }
-
-  static void make_retired_generations_ready(PendingState &state,
-                                             std::span<const PendingEvent> retired_events) {
-    for (const PendingEvent &retired : retired_events) {
-      if (!retired.produces_regs)
-        continue;
-      retired.regs.for_each([&](RegisterRef reg) {
-        if (reg.cls != RegClass::VGPR && reg.cls != RegClass::ACC_VGPR)
-          return;
-        const bool generation_still_pending =
-            std::ranges::any_of(state.pending, [&](const std::vector<PendingEvent> &events) {
-              return std::ranges::any_of(events, [&](const PendingEvent &pending) {
-                return pending.regs.contains(reg) && same_register_generation(retired, pending);
-              });
-            });
-        if (generation_still_pending)
-          return;
-
-        state.ready_regs.expand(reg);
-        for (auto &events : state.pending) {
-          for (PendingEvent &pending : events) {
-            if (pending.produces_regs && pending.regs.contains(reg))
-              pending.old_value_regs.expand(reg);
-          }
-        }
-      });
-    }
-  }
-
-  template <typename Predicate>
-  static void retire_events(PendingState &state, std::vector<PendingEvent> &events,
-                            Predicate should_retire) {
-    std::vector<PendingEvent> retired_events;
-    const auto retained =
-        std::remove_if(events.begin(), events.end(), [&](const PendingEvent &event) {
-          if (!should_retire(event))
-            return false;
-          retired_events.push_back(event);
-          return true;
-        });
-    events.erase(retained, events.end());
-    make_retired_generations_ready(state, retired_events);
   }
 
   static void apply_wait_to_event_ages(PendingState &state, WaitCounterKind counter,
@@ -2741,12 +2648,12 @@ private:
     auto &pending = state.pending[idx];
     apply_wait_to_event_ages(state, counter, count);
     if (count == 0) {
-      retire_events(state, pending, [](const PendingEvent &) { return true; });
+      pending.clear();
       state.pending_smem[idx] = false;
       state.uncertain_order[idx] = false;
       return;
     }
-    retire_events(state, pending,
+    std::erase_if(pending,
                   [count](const PendingEvent &event) { return event.min_younger >= count; });
     if (pending.empty())
       state.uncertain_order[idx] = false;
@@ -2809,7 +2716,7 @@ private:
     const size_t idx = counter_index(WaitCounterKind::VmVsrc);
     auto &pending = state.pending[idx];
     if (count == 0) {
-      retire_events(state, pending, is_implied);
+      std::erase_if(pending, is_implied);
       retire_event_kind_ages(state, WaitCounterKind::VmVsrc, is_implied);
       if (pending.empty())
         state.uncertain_order[idx] = false;
@@ -2838,7 +2745,7 @@ private:
       return;
     }
     const uint32_t youngest_retired_age = matching_ages[count];
-    retire_events(state, pending, [&](const PendingEvent &event) {
+    std::erase_if(pending, [&](const PendingEvent &event) {
       return is_implied(event) && event.min_younger >= youngest_retired_age;
     });
     retire_event_kind_ages(state, WaitCounterKind::VmVsrc, is_implied, youngest_retired_age);
@@ -2896,7 +2803,7 @@ private:
   static void retire_xcnt_group(PendingState &state, Predicate belongs_to_group) {
     const size_t idx = counter_index(WaitCounterKind::X);
     auto &pending = state.pending[idx];
-    retire_events(state, pending, belongs_to_group);
+    std::erase_if(pending, belongs_to_group);
     auto &ages = state.pending_event_ages[idx].values;
     for (size_t kind_index = 0; kind_index < ages.size(); ++kind_index) {
       PendingEvent probe;
@@ -3091,7 +2998,7 @@ private:
         return vm_vsrc_event_implied_by_wait(source.kind, counter) && age != kNoPendingEventAge &&
                age >= count;
       };
-      retire_events(state, sources, [&](const PendingEvent &source) {
+      std::erase_if(sources, [&](const PendingEvent &source) {
         if (!vm_vsrc_event_implied_by_wait(source.kind, counter))
           return false;
         if (kind_completed(source))
@@ -4169,11 +4076,11 @@ private:
   }
 
   [[nodiscard]] static std::optional<RegisterRef>
-  first_dependency_intersection(const PendingEvent &event, const RegisterSet &pending_regs,
-                                const Instruction &inst, const RegisterSet &current_regs,
-                                WaitcheckAccessKind access, rj_code_arch_t arch) {
+  first_dependency_intersection(const PendingEvent &event, const Instruction &inst,
+                                const RegisterSet &current_regs, WaitcheckAccessKind access,
+                                rj_code_arch_t arch) {
     std::optional<RegisterRef> result;
-    pending_regs.for_each([&](RegisterRef ref) {
+    event.regs.for_each([&](RegisterRef ref) {
       if (!result && current_regs.contains(ref) &&
           (pending_register_mask(event, ref) &
            instruction_register_mask(inst, ref, access, arch)) != 0)
@@ -4232,21 +4139,6 @@ private:
     }
     if (required_count)
       apply_xcnt_wait(state, *required_count);
-  }
-
-  [[nodiscard]] static bool
-  creates_immediate_overlay_generation(rj_code_arch_t arch, const Instruction &inst,
-                                       std::span<const ClassifiedEvent> current_events) {
-    if (!tracks_committed_vgpr_generations(arch) || inst.is_memory_op())
-      return false;
-    // CDNA software pipelines can schedule ordinary VALU and AccVGPR transfers
-    // into the currently visible generation while an asynchronous replacement
-    // of the same VGPR is pending. A memory instruction creates another pending
-    // generation and therefore does not qualify for this synchronous-overlay
-    // exception.
-    return std::ranges::none_of(current_events, [](const ClassifiedEvent &event) {
-      return event.registers == TrackedRegisterSource::Defs;
-    });
   }
 
   [[nodiscard]] static std::string reg_name(RegisterRef ref) {
@@ -4779,11 +4671,9 @@ private:
     const std::vector<size_t> producer_block_indices =
         cfg_block_indices_containing(event.section_offset);
     if (before_target && current_cfg_view_index_ && *current_cfg_view_index_ < cfg_views_.size() &&
-        std::ranges::any_of(
-            producer_block_indices,
-            [&](size_t producer_block_index) {
-              return cfg_block_dominates(producer_block_index, *current_cfg_view_index_);
-            })) {
+        std::ranges::any_of(producer_block_indices, [&](size_t producer_block_index) {
+          return cfg_block_dominates(producer_block_index, *current_cfg_view_index_);
+        })) {
       feasible_path_cache_[cache_key] = true;
       return true;
     }
@@ -5090,36 +4980,21 @@ private:
   template <typename Visitor>
   void visit_dependencies(const PendingState &state, const Instruction &inst, const InstDefUse &du,
                           std::span<const ClassifiedEvent> current_events, rj_code_arch_t arch,
-                          DependencyView dependency_view, Visitor &&visit) {
+                          Visitor &&visit) {
     for (size_t counter_idx = 0; counter_idx < state.pending.size(); ++counter_idx) {
       const auto &events = state.pending[counter_idx];
       for (size_t i = 0; i < events.size(); ++i) {
         const PendingEvent &event = events[i];
         std::optional<RegisterRef> reg;
         WaitcheckAccessKind access = WaitcheckAccessKind::Use;
+        // An earlier value or a later synchronous write does not make a pending
+        // physical destination ready. Keep both RAW and WAW dependencies until
+        // an explicit wait or a qualified ordering rule retires the event.
         if (event.check_uses) {
-          // An asynchronous load creates a pending register generation.  Until
-          // the matching wait retires it, instructions may still consume a
-          // committed generation that was available when the load issued.
-          // Restrict RAW diagnostics to lanes for which no such old generation
-          // exists. Definitions are handled separately below because CDNA also
-          // supports synchronous overlays of the visible generation.
-          const RegisterSet dependency_regs =
-              dependency_view == DependencyView::CompilerPendingDefinition
-                  ? event.regs
-                  : event.regs - event.old_value_regs;
-          reg = first_dependency_intersection(event, dependency_regs, inst, du.uses,
-                                              WaitcheckAccessKind::Use, arch);
+          reg = first_dependency_intersection(event, inst, du.uses, WaitcheckAccessKind::Use, arch);
         }
         if (!reg && event.check_defs) {
-          RegisterSet dependency_regs = dependency_view == DependencyView::CompilerPendingDefinition
-                                            ? event.regs
-                                            : event.regs - event.old_value_regs;
-          if (dependency_view == DependencyView::RuntimeVisibleGeneration &&
-              creates_immediate_overlay_generation(arch, inst, current_events))
-            dependency_regs -= du.defs;
-          reg = first_dependency_intersection(event, dependency_regs, inst, du.defs,
-                                              WaitcheckAccessKind::Def, arch);
+          reg = first_dependency_intersection(event, inst, du.defs, WaitcheckAccessKind::Def, arch);
           access = WaitcheckAccessKind::Def;
         }
         if (!reg && event.special_reg) {
@@ -5181,7 +5056,6 @@ private:
                           std::span<const ClassifiedEvent> current_events, uint64_t section_offset,
                           uint64_t file_offset, rj_code_arch_t arch) {
     visit_dependencies(state, inst, du, current_events, arch,
-                       DependencyView::RuntimeVisibleGeneration,
                        [&](const PendingEvent &event, RegisterRef reg, WaitcheckAccessKind access,
                            uint32_t required_count) {
                          emit_diagnostic(inst, event, reg, access, required_count, section_offset,
@@ -5492,10 +5366,10 @@ private:
       set_vcc_hazard(state, is_valu, producer);
   }
 
-  void add_event(PendingState &state, const RegisterSet &local_ready_regs,
-                 ClassifiedEvent classification, const Instruction &inst, const InstDefUse &du,
-                 std::string section_name, uint64_t section_offset, uint64_t file_offset,
-                 std::string instruction, rj_code_arch_t arch, bool record_stats) {
+  void add_event(PendingState &state, ClassifiedEvent classification, const Instruction &inst,
+                 const InstDefUse &du, std::string section_name, uint64_t section_offset,
+                 uint64_t file_offset, std::string instruction, rj_code_arch_t arch,
+                 bool record_stats) {
     PendingEvent event;
     event.counter = classification.counter;
     event.kind = classification.kind;
@@ -5507,10 +5381,6 @@ private:
         event.partial_reg_mask = partial->mask;
       }
     }
-    event.produces_regs = tracks_committed_vgpr_generations(arch) &&
-                          classification.registers == TrackedRegisterSource::Defs;
-    if (event.produces_regs)
-      event.old_value_regs = event.regs & (state.ready_regs | local_ready_regs);
     event.special_reg = classification.special_reg;
     event.barrier_id = classification.barrier_id;
     event.check_uses = classification.check_uses;
@@ -5544,16 +5414,14 @@ private:
     auto position = std::ranges::lower_bound(state.pending[idx], event, event_identity_less);
     if (position != state.pending[idx].end() && same_event_identity(*position, event)) {
       position->min_younger = 0;
-      position->old_value_regs &= event.old_value_regs;
     } else {
       state.pending[idx].insert(position, std::move(event));
     }
   }
 
-  void analyze_instruction(PendingState &state, RegisterSet &local_ready_regs,
-                           const Instruction &inst, const std::string &section_name,
-                           uint64_t section_offset, uint64_t file_offset, rj_code_arch_t arch,
-                           bool emit_diagnostics) {
+  void analyze_instruction(PendingState &state, const Instruction &inst,
+                           const std::string &section_name, uint64_t section_offset,
+                           uint64_t file_offset, rj_code_arch_t arch, bool emit_diagnostics) {
     const bool record_stats = emit_diagnostics;
     // The cap limits stored details, not detection or the observed count.
     const bool emit_report_diagnostics = emit_diagnostics;
@@ -5632,47 +5500,13 @@ private:
       return;
     }
 
-    RegisterSet asynchronous_defs;
     for (const ClassifiedEvent &event : events) {
-      if (event.registers == TrackedRegisterSource::Defs)
-        asynchronous_defs |= registers_for_event(inst, du, event, state.vgpr_msb, arch);
-      add_event(state, local_ready_regs, event, inst, du, section_name, section_offset, file_offset,
+      add_event(state, event, inst, du, section_name, section_offset, file_offset,
                 inst.disassemble(), arch, record_stats);
     }
     if (is_async_barrier) {
       state.async_barrier_post_wait =
           SgprHazardProducer{section_name, section_offset, file_offset, inst.disassemble()};
-    }
-    if (tracks_committed_vgpr_generations(arch)) {
-      RegisterSet unavailable_regs;
-      for (const auto &pending : state.pending) {
-        for (const PendingEvent &pending_event : pending) {
-          if (pending_event.produces_regs)
-            unavailable_regs |= pending_event.regs - pending_event.old_value_regs;
-        }
-      }
-      // A register that is consumed without an outstanding producer already
-      // has a committed generation, including ABI/live-in VGPRs such as the
-      // workitem id. Remember it so a later asynchronous replacement does not
-      // make that old value appear unavailable. Do not bless a first use of a
-      // pending load result: it remains unavailable and is diagnosed above.
-      const RegisterSet committed_uses = du.uses - unavailable_regs;
-      committed_uses.for_each([&](RegisterRef reg) {
-        if (reg.cls == RegClass::VGPR || reg.cls == RegClass::ACC_VGPR)
-          local_ready_regs.expand(reg);
-      });
-      const RegisterSet synchronous_defs = du.defs - asynchronous_defs;
-      synchronous_defs.for_each([&](RegisterRef reg) {
-        if (reg.cls != RegClass::VGPR && reg.cls != RegClass::ACC_VGPR)
-          return;
-        state.ready_regs.expand(reg);
-        for (auto &pending : state.pending) {
-          for (PendingEvent &pending_event : pending) {
-            if (pending_event.produces_regs && pending_event.regs.contains(reg))
-              pending_event.old_value_regs.expand(reg);
-          }
-        }
-      });
     }
     finish_instruction();
   }
