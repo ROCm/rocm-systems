@@ -9,11 +9,12 @@
 
 use std::error::Error;
 use std::io;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering, fence};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU16, AtomicU64, Ordering, fence};
 use std::time::{Duration, Instant};
 
 use rocddi::gpu::queue::{
-    QueueAccessWidth, QueueParameters, QueuePriority, QueueRequest, SdmaEngineSelection,
+    QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
+    SdmaEngineSelection,
 };
 use rocddi::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::{DeviceAccess, MemoryKind};
@@ -524,6 +525,135 @@ fn gfx1201_user_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
     unsafe { queue.destroy()? };
     source.free()?;
     destination.free()?;
+    drop(device);
+    session.destroy()?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one native queue lifetime covers AQL publication, completion, and teardown"
+)]
+fn gfx1201_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
+    const AQL_PACKET_BYTES: usize = 64;
+    const BARRIER_HEADER: u16 = 3 | (1 << 8) | (2 << 9) | (2 << 11);
+
+    let mut session = Session::new(SessionLifetime::Process)?;
+    let mut selected = None;
+    session.enumerate(&mut |endpoint| {
+        if endpoint
+            .gpu()
+            .is_some_and(|gpu| (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping) == (12, 0, 1))
+        {
+            selected = Some(endpoint);
+        }
+        Ok(())
+    })?;
+    let endpoint = selected.ok_or_else(|| io::Error::other("GFX1201 endpoint is unavailable"))?;
+    let device = session.activate(&endpoint)?;
+    let mut signal = device.allocate(
+        MemoryKind::System,
+        4096,
+        4096,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+    )?;
+    let signal_info = signal.info();
+    let signal_host = signal_info
+        .host_address
+        .ok_or_else(|| io::Error::other("signal has no host mapping"))?;
+    assert_eq!(signal_host % 64, 0);
+    assert_eq!(signal_info.device_address % 64, 0);
+    // AMD's 64-byte user signal record has its kind at byte 0 and its
+    // completion value at byte 8. Both addresses belong to the live allocation.
+    let signal_value = unsafe {
+        std::ptr::write_bytes(signal_host as *mut u8, 0, 64);
+        (&*(signal_host as *const AtomicI64)).store(1, Ordering::Relaxed);
+        let value = &*((signal_host + 8) as *const AtomicI64);
+        value.store(1, Ordering::Relaxed);
+        value
+    };
+
+    // SAFETY: The sole producer writes one complete packet before ringing the
+    // doorbell. Its completion signal stays mapped until native retirement.
+    let mut queue = unsafe {
+        device.gpu()?.create_queue(QueueRequest {
+            ring_size_bytes: 4096,
+            parameters: QueueParameters::Aql {
+                producer_mode: QueueProducerMode::Single,
+                inactive_signal: None,
+                error_event: None,
+                scratch: None,
+            },
+            priority: QueuePriority::Normal,
+            device_producer: false,
+        })?
+    };
+    let transport = queue.info();
+    assert_eq!(transport.index_unit_bytes, AQL_PACKET_BYTES as u32);
+    assert_eq!(transport.read_index_width, QueueAccessWidth::Bits64);
+    assert_eq!(transport.write_index_width, QueueAccessWidth::Bits64);
+    assert_eq!(transport.doorbell_width, QueueAccessWidth::Bits64);
+    assert_eq!(transport.ring_host_address % AQL_PACKET_BYTES, 0);
+    assert_eq!(transport.write_index_host_address % 8, 0);
+    assert_eq!(transport.doorbell_host_address % 8, 0);
+    assert!(transport.ring_size_bytes >= AQL_PACKET_BYTES as u64);
+
+    let mut packet = [0_u8; AQL_PACKET_BYTES];
+    packet[56..64].copy_from_slice(&signal_info.device_address.to_ne_bytes());
+    // SAFETY: The queue owns a writable AQL ring and 64-bit index and doorbell
+    // words. The release header publishes the initialized packet, the release
+    // write index publishes slot 0, and the MMIO doorbell notifies firmware.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            packet.as_ptr(),
+            transport.ring_host_address as *mut u8,
+            AQL_PACKET_BYTES,
+        );
+        (&*(transport.ring_host_address as *const AtomicU16))
+            .store(BARRIER_HEADER, Ordering::Release);
+        (&*(transport.write_index_host_address as *const AtomicU64)).store(1, Ordering::Release);
+        fence(Ordering::SeqCst);
+        std::ptr::write_volatile(transport.doorbell_host_address as *mut u64, 0);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let completion: Result<(), Box<dyn Error>> = loop {
+        let value = signal_value.load(Ordering::Acquire);
+        match queue.progress() {
+            Ok((read, write)) if value == 0 && read == 1 && write == 1 => break Ok(()),
+            Ok((read, write)) if read <= write && Instant::now() < deadline => {
+                std::thread::yield_now();
+            }
+            Ok((read, write)) => {
+                break Err(io::Error::other(format!(
+                    "AQL barrier did not retire: signal={value}, read={read}, write={write}"
+                ))
+                .into());
+            }
+            Err(error) => break Err(Box::new(error)),
+        }
+    };
+    if let Err(error) = completion {
+        // Native reachability is unresolved, so retain the queue and signal.
+        std::mem::forget(queue);
+        std::mem::forget(signal);
+        std::mem::forget(device);
+        std::mem::forget(session);
+        return Err(error);
+    }
+    // SAFETY: The completion signal changed and native read progress reached
+    // the one published packet; the sole producer has stopped.
+    if let Err(error) = unsafe { queue.destroy() } {
+        std::mem::forget(queue);
+        std::mem::forget(signal);
+        std::mem::forget(device);
+        std::mem::forget(session);
+        return Err(Box::new(error));
+    }
+    signal.free()?;
+    drop(queue);
     drop(device);
     session.destroy()?;
     Ok(())

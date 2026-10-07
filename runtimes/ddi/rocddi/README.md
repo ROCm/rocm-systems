@@ -189,7 +189,8 @@ host staging and a device virtual-memory mapping, and submits a packet through
 a targeted user SDMA ring with device-producer mappings, byte-index, and
 doorbell progress checks. The capability case checks expert queue scheduling
 against KFD 1.20 or newer and the GFX1201 scratch aperture against the
-reported XCC count.
+reported XCC count. The AQL case submits a barrier through a compute queue
+and checks GPU signal completion and queue retirement.
 
 The CMake build from `runtimes/` stages the same combined shared image and
 AMDF static archive. Native allocations, virtual mappings, and frontend pools
