@@ -3194,9 +3194,7 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
  * and #hipStreamNonBlocking.
  *
  * @warning Stream priority is currently disabled by default to avoid queue-priority-related
- * issues in KFD. Developers who require stream priority can set the
- * `DEBUG_HIP_IGNORE_STREAM_PRIORITY` environment variable to allow KFD to elevate hardware queue
- * priorities.
+ * issues in KFD.
  *
  * @see hipStreamCreate, hipStreamSynchronize, hipStreamWaitEvent, hipStreamDestroy
  *
@@ -3219,9 +3217,7 @@ hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, 
  * automatically clamped to within the valid range.
  *
  * @warning Stream priority is currently disabled by default to avoid queue-priority-related
- * issues in KFD. Developers who require stream priority can set the
- * `DEBUG_HIP_IGNORE_STREAM_PRIORITY` environment variable to allow KFD to elevate hardware queue
- * priorities.
+ * issues in KFD.
  */
 hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority);
 /**
@@ -3336,9 +3332,7 @@ hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
  * returned
  *
  * @warning Stream priority is currently disabled by default to avoid queue-priority-related
- * issues in KFD. Developers who require stream priority can set the
- * `DEBUG_HIP_IGNORE_STREAM_PRIORITY` environment variable to allow KFD to elevate hardware queue
- * priorities.
+ * issues in KFD.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle.
  *
