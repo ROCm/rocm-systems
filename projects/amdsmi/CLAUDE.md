@@ -13,6 +13,7 @@ Core C++ library (`libamd_smi.so`) with Python bindings, CLI, Go shim, and Rust 
 4. **Version** is defined in `include/amd_smi/amdsmi.h` (`AMDSMI_LIB_VERSION_MAJOR/MINOR/RELEASE`). CMake extracts it from there.
 5. **Excluded from formatting/linting**: `docs/`, `build/`, `esmi_ib_library/`, `third_party/`, `*.md`, `*.rst`
 6. **Agent working files are ephemeral** — write specs, plans, handoff docs, and scratch notes to `${TMPDIR:-/tmp}/amdsmi-agent-*`, never into the workspace. The only curated agent docs that belong in git are `.claude/context/CONTEXT.md` and `.claude/context/agent-flow.md`.
+7. **`CHANGELOG.md` entries are user-facing** — describe the user-visible impact, not internal mechanics. Keep each entry to a short bold summary plus one concise bullet; drop function names, signal/abort details, enum constants, and file internals.
 
 ## Behavioral Guidelines
 
