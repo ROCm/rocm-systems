@@ -3,7 +3,13 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
-## (unreleased) rocJPEG 1.11.0
+## (unreleased) rocJPEG 1.12.0
+
+### Changed
+
+* Changed the single-image decode path to use the unified batched color-conversion kernels with a batch size of one, and removed the per-format single-image HIP kernels. No public API or output change.
+
+## rocJPEG 1.11.0
 
 ### Changed
 
