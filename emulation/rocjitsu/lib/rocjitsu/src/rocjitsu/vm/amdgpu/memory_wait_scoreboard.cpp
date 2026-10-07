@@ -82,6 +82,21 @@ std::optional<RegisterRef> RegisterAccess::source_register(const Operand &op, bo
   return std::nullopt;
 }
 
+std::array<std::optional<RegisterRef>, 4>
+RegisterAccess::buffer_resource_registers(const Operand &op, bool scalar) const {
+  std::array<std::optional<RegisterRef>, 4> result{};
+  const auto &wf = wavefront();
+  const auto selector = op.encoding_value();
+  if (scalar ? !resolve_scalar_register_range(wf, selector, 2)
+             : !addr_calc::buffer_resource_range_is_backed(wf, selector))
+    return result;
+  const unsigned words = scalar && wf.cu().arch() != ROCJITSU_CODE_ARCH_CDNA5 ? 3 : 4;
+  for (unsigned word = 0; word < words; ++word)
+    if (const auto range = resolve_scalar_register_range(wf, selector + word, 1))
+      result[word] = range->register_ref();
+  return result;
+}
+
 bool MemoryWaitScoreboard::result_is_written(const Instruction &inst, Wavefront &wf) {
   if (inst.mnemonic() == "lds_direct_load" || inst.mnemonic() == "ds_direct_load")
     return valid_lds_direct_operand(wf.m0());
@@ -111,7 +126,8 @@ uint64_t MemoryWaitScoreboard::result_lanes(const Instruction &inst, Wavefront &
     lanes = wave32_exec_all_if_nonzero(lanes);
   if (modifiers.exec_whole_quads)
     lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) : 0;
-  if (lanes && wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 && modifiers.buffer_resource) {
+  if (lanes && wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 && modifiers.buffer_resource &&
+      !modifiers.scalar_buffer_resource) {
     const auto selector = modifiers.buffer_resource->encoding_value();
     if (addr_calc::buffer_resource_range_is_backed(wf, selector))
       if (const auto word3 = RegisterAccess(wf).scalar_control_value(selector + 3))
@@ -219,20 +235,16 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     access({RegClass::EXEC, 0, static_cast<uint8_t>(wf.wf_size() / 32)}, ~uint64_t{0}, 0xf, false);
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
+  const RegisterAccess registers(wf);
   if (modifiers.exec_all_if_nonzero)
     lanes = wave32_exec_all_if_nonzero(lanes);
   if (modifiers.exec_whole_quads)
     lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) : 0;
   if (const auto *resource = modifiers.buffer_resource) {
-    const auto selector = resource->encoding_value();
-    if (addr_calc::buffer_resource_range_is_backed(wf, selector)) {
-      // A resource at s[104:107] crosses from SGPRs into VCC. Resolve each
-      // selector as execution does instead of assuming one register file.
-      for (unsigned word = 0; word < 4; ++word)
-        if (const auto range = resolve_scalar_register_range(wf, selector + word, 1))
-          if (const auto reg = range->register_ref())
-            access(*reg, ~uint64_t{0}, 0xf, false);
-    }
+    for (const auto reg :
+         registers.buffer_resource_registers(*resource, modifiers.scalar_buffer_resource))
+      if (reg)
+        access(*reg, ~uint64_t{0}, 0xf, false);
   }
   // FLAT's result ordering depends on its planned memory domains. The issuer
   // checks those results after checking address sources, still before execution.
@@ -252,7 +264,6 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     src0_lanes = dpp::dpp_physical_source_mask(plan, lanes, wf.wf_size());
     destination_lanes &= plan.row_bank_mask & plan.source_write_mask;
   }
-  const RegisterAccess registers(wf);
   if (modifiers.ds_permutation != DsPermutation::None) {
     std::optional<RegisterRef> address;
     if (modifiers.src1) {

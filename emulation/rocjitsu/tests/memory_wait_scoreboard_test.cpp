@@ -3755,6 +3755,133 @@ TEST(MemoryWaitExecutionTest, ScalarMemoryRegisterOffsetIsCheckedBeforeAddressCa
   }
 }
 
+TEST(MemoryWaitExecutionTest, ScalarBufferDescriptorChecksItsConsumedVccWords) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    GpuMemory memory("smem_buffer_wait_memory");
+    L2Cache l2("smem_buffer_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    auto cu = ComputeUnitCore::create("smem_buffer_wait_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, 32);
+    ASSERT_NE(wf, nullptr);
+    auto decoder = Decoder::create(arch);
+    const auto load = [&](uint8_t destination, bool buffer) {
+      const uint8_t base = buffer ? 52 : 0;
+      switch (arch) {
+      case ROCJITSU_CODE_ARCH_RDNA1:
+        return rdna1::build_smem(buffer ? rdna1::kSBufferLoadDwordSmem : rdna1::kSLoadDwordSmem,
+                                 {.sbase = base, .sdata = destination, .soffset = 125});
+      case ROCJITSU_CODE_ARCH_RDNA3:
+        return rdna3::build_smem(buffer ? rdna3::kSBufferLoadB32Smem : rdna3::kSLoadB32Smem,
+                                 {.sbase = base, .sdata = destination, .soffset = 124});
+      case ROCJITSU_CODE_ARCH_RDNA4:
+        return rdna4::build_smem(buffer ? rdna4::kSBufferLoadB32Smem : rdna4::kSLoadB32Smem,
+                                 {.sbase = base, .sdata = destination, .soffset = 124});
+      default:
+        return cdna5::build_smem(buffer ? cdna5::kSBufferLoadB32Smem : cdna5::kSLoadB32Smem,
+                                 {.sbase = base, .sdata = destination, .soffset = 124});
+      }
+    };
+    util::StringDiagnostic error;
+    auto consumer = decoder->decode_window(load(8, true), 0, error.emitter());
+    ASSERT_TRUE(consumer.succeeded()) << error.message();
+    cu->write_sgpr(wf->sgpr_alloc().base + 104, 0x400000);
+    cu->write_sgpr(wf->sgpr_alloc().base + 105, 0);
+    wf->set_vcc_raw(4);
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    for (uint8_t word : {0, 1})
+      for (bool waited : {false, true}) {
+        SCOPED_TRACE(word);
+        SCOPED_TRACE(waited);
+        auto producer = decoder->decode_window(load(106 + word, false), 0, error.emitter());
+        ASSERT_TRUE(producer.succeeded()) << error.message();
+        state.clear();
+        cu->track_memory_wait(*producer.value(), *wf);
+        ASSERT_EQ(state.events().size(), 1u);
+        ASSERT_EQ(state.events().front().reg, (RegisterRef{RegClass::VCC, word, 1}));
+        if (waited)
+          state.wait(state.events().front().counter, 0);
+        unsigned reports = 0;
+        state.bind(0x200, &reports,
+                   [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
+        state.check_instruction(*consumer.value(), *wf);
+        const bool consumed = word == 0 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+        EXPECT_EQ(reports, consumed && !waited ? 1u : 0u);
+        ASSERT_TRUE(cu->execute_instruction(consumer.value().get(), *wf).succeeded());
+        ASSERT_NE(consumer.value()->data(), nullptr);
+        const auto *payload = consumer.value()->data_as<ScalarMemState>();
+        EXPECT_EQ(payload->addr, 0x400000u);
+        EXPECT_EQ(payload->load_dword_mask, 1u);
+      }
+  }
+}
+
+TEST(MemoryWaitFootprintTest, ScalarBufferDescriptorsRetainOnlyBackedAndConsumedWords) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA5})
+    for (unsigned sgprs : {62u, 63u, 64u, 65u, 66u}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(sgprs);
+      GpuMemory memory("smem_prefix_memory");
+      L2Cache l2("smem_prefix_l2");
+      ComputeUnitCore::Config config{};
+      config.arch = arch;
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      config.xcnt_diagnostics = arch == ROCJITSU_CODE_ARCH_CDNA5 ? MemoryWaitDiagnostics::Warn
+                                                                 : MemoryWaitDiagnostics::Off;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = sgprs;
+      config.vgprs_per_wf = 32;
+      auto cu = ComputeUnitCore::create("smem_prefix_cu", config, &memory, &l2);
+      auto *wf = cu->dispatch_wf(0, 0x100, sgprs, 32, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
+      ASSERT_NE(wf, nullptr);
+      const auto words = arch == ROCJITSU_CODE_ARCH_CDNA5
+                             ? cdna5::build_smem(cdna5::kSBufferLoadB32Smem,
+                                                 {.sbase = 31, .sdata = 8, .soffset = 124})
+                         : arch == ROCJITSU_CODE_ARCH_RDNA3
+                             ? rdna3::build_smem(rdna3::kSBufferLoadB32Smem,
+                                                 {.sbase = 31, .sdata = 8, .soffset = 124})
+                             : cdna4::build_smem(cdna4::kSBufferLoadDwordSmem,
+                                                 {.sbase = 31, .sdata = 8, .imm = 1});
+      auto decoder = Decoder::create(arch);
+      util::StringDiagnostic error;
+      auto inst = decoder->decode_window(words, 0, error.emitter());
+      ASSERT_TRUE(inst.succeeded()) << error.message();
+      auto &state = wf->ensure_memory_wait_scoreboard();
+      for (uint16_t pending : {62, 63, 64, 65}) {
+        SCOPED_TRACE(pending);
+        state.clear();
+        state.add({state.issue(WaitCounterKind::Km),
+                   0x100,
+                   ~uint64_t{0},
+                   {RegClass::SGPR, pending, 1},
+                   WaitCounterKind::Km,
+                   0xf});
+        unsigned reports = 0;
+        state.bind(0x200, &reports,
+                   [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
+        state.check_instruction(*inst.value(), *wf);
+        const bool consumed =
+            sgprs >= 64 && pending < sgprs && (pending < 65 || arch == ROCJITSU_CODE_ARCH_CDNA5);
+        EXPECT_EQ(reports, consumed ? 1u : 0u);
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          state.clear();
+          reports = 0;
+          cu->track_memory_wait(*inst.value(), *wf);
+          state.bind(0x200, &reports,
+                     [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
+          state.access({RegClass::SGPR, pending, 1}, ~uint64_t{0}, 0xf, true);
+          EXPECT_EQ(reports, consumed ? 1u : 0u);
+        }
+      }
+    }
+}
+
 TEST(MemoryWaitExecutionTest, DirectLdsResultsUseWholeQuadsAndValidateM0BeforeExecution) {
   GpuMemory memory("lds_direct_plan_memory");
   L2Cache l2("lds_direct_plan_l2");
@@ -4181,24 +4308,38 @@ TEST(XcntExecutionTest, BufferResourceCrossingVccProtectsBothAliasWords) {
   wf->set_exec(1);
   wf->set_mode_raw(wf->mode_raw() | (1u << 25));
   auto decoder = Decoder::create(config.arch);
-  const auto words =
-      cdna5::build_vbuffer(cdna5::kBufferLoadB32Vbuffer,
-                           {.soffset = 128, .vdata = 8, .rsrc = 104, .offen = 1, .vaddr = 0});
-  util::StringDiagnostic error;
-  auto decoded = decoder->decode_window(words, 0, error.emitter());
-  ASSERT_TRUE(decoded.succeeded()) << error.message();
-  for (bool waited : {false, true})
-    for (uint16_t half : {0, 1}) {
-      auto &state = wf->ensure_memory_wait_scoreboard();
-      state.clear();
-      cu->track_memory_wait(*decoded.value(), *wf);
-      unsigned reports = 0;
-      state.bind(0x200, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
-      if (waited)
-        state.wait(WaitCounterKind::X, 0);
-      state.access({RegClass::VCC, half, 1}, ~uint64_t{0}, 0xf, true);
-      EXPECT_EQ(reports, waited ? 0u : 1u) << half;
-    }
+  for (bool scalar : {false, true}) {
+    SCOPED_TRACE(scalar);
+    util::StringDiagnostic error;
+    auto decoded =
+        scalar
+            ? decoder->decode_window(cdna5::build_smem(cdna5::kSBufferLoadB32Smem,
+                                                       {.sbase = 52, .sdata = 8, .soffset = 124}),
+                                     0, error.emitter())
+            : decoder->decode_window(
+                  cdna5::build_vbuffer(
+                      cdna5::kBufferLoadB32Vbuffer,
+                      {.soffset = 128, .vdata = 8, .rsrc = 104, .offen = 1, .vaddr = 0}),
+                  0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    for (unsigned wait = 0; wait < 3; ++wait)
+      for (uint16_t half : {0, 1}) {
+        SCOPED_TRACE(wait);
+        SCOPED_TRACE(half);
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        state.clear();
+        cu->track_memory_wait(*decoded.value(), *wf);
+        unsigned reports = 0;
+        state.bind(0x200, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+        if (wait)
+          state.wait(wait == 1 ? WaitCounterKind::X
+                     : scalar  ? WaitCounterKind::Km
+                               : WaitCounterKind::Load,
+                     0);
+        state.access({RegClass::VCC, half, 1}, ~uint64_t{0}, 0xf, true);
+        EXPECT_EQ(reports, wait ? 0u : 1u);
+      }
+  }
 }
 
 TEST(MemoryWaitFootprintTest, DsLanePermutationsUseConsumedSourceLanes) {

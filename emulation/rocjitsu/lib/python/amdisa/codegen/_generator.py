@@ -10663,6 +10663,13 @@ class CodeGenerator:
                         )
                     if inst_sem:
                         access_conditions = []
+                        if is_smem and inst.name.startswith('S_BUFFER_LOAD_'):
+                            access_conditions.extend(
+                                (
+                                    'modifiers.buffer_resource = &sbase;',
+                                    'modifiers.scalar_buffer_resource = true;',
+                                )
+                            )
                         if inst.name in ('LDS_DIRECT_LOAD', 'DS_DIRECT_LOAD'):
                             access_conditions.append(
                                 'modifiers.exec_whole_quads = true;'

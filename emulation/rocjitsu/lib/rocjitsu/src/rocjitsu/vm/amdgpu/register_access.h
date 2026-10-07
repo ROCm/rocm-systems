@@ -988,6 +988,13 @@ public:
   [[nodiscard]] std::optional<RegisterRef> source_register(const Operand &op,
                                                            bool wordwise = false) const;
 
+  /// @brief Resolve consumed buffer descriptor words without reading their values.
+  /// @details Vector descriptors require complete backing. Scalar loads validate
+  /// the base pair first, then read word 2 (and word 3 on CDNA5) independently.
+  /// Preserve backed inputs even if a later scalar word has no backing.
+  [[nodiscard]] std::array<std::optional<RegisterRef>, 4>
+  buffer_resource_registers(const Operand &op, bool scalar) const;
+
   // Scalar and per-lane operand access. Instruction implementations use these
   // for value-semantic operand reads and writes; Operand remains the
   // ISA-specific resolver/backend.

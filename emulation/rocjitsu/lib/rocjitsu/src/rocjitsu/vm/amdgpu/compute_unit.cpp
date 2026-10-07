@@ -19,7 +19,6 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
@@ -1201,12 +1200,10 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
           for (int i = 0; i < inst.num_src_operands(); ++i) {
             const auto *operand = inst.src_operand(i);
             if (operand && operand == modifiers.buffer_resource) {
-              const unsigned selector = operand->encoding_value();
-              if (addr_calc::buffer_resource_range_is_backed(wf, selector))
-                for (unsigned word = 0; word < 4; ++word)
-                  if (const auto range = resolve_scalar_register_range(wf, selector + word, 1))
-                    if (const auto reg = range->register_ref())
-                      add_source(*reg);
+              for (const auto reg :
+                   registers.buffer_resource_registers(*operand, modifiers.scalar_buffer_resource))
+                if (reg)
+                  add_source(*reg);
             } else if (operand) {
               if (auto reg = registers.source_register(*operand,
                                                        operand == modifiers.wordwise_source0 ||
