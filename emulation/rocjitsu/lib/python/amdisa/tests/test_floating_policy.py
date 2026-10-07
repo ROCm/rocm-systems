@@ -1,10 +1,10 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests that the F16 policy table reaches the scalar, per-lane and SIMD generators.
+"""F16 policy wiring for production scalar/SIMD and the legacy per-lane generator.
 
-The expectations are written out here rather than read from floating_policy.py,
-so a wrong table entry fails these tests before anyone regenerates code.
+The per-lane generator is a reference helper without a production caller.
+Explicit expectations catch incorrect policy entries before regeneration.
 """
 
 import pytest

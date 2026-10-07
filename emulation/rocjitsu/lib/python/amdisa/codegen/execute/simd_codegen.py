@@ -1,24 +1,12 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""SIMD specialization codegen for AMDGPU execute kernels.
-
-Emits an `<experimental/simd>`-based fast path on top of the generated
-scalar per-lane bodies. The scalar body is preserved verbatim as a
-fallback; the SIMD probe is a single line at the start of the kernel:
-
-    ROCJITSU_TRY_SIMD_VOP2_BINARY(T, op_functor);
-
-That macro (defined in ``simd_glue.h``) expands to a call to
-``try_execute_binary_vop2_simd<T>`` plus an early ``return`` on success.
-
-`try_execute_binary_vop2_simd` in ``simd_glue.h`` is a constrained
-template (``requires(util::has_stdx_simd)``) plus an unconstrained
-fallback that returns ``false``. On toolchains without
-``<experimental/simd>``, overload resolution picks the fallback and the
-compiler inlines the probe to a dead branch.
+"""SIMD fast-path probes for generated AMDGPU execute kernels.
 
 Instruction tables select functors and helpers for each format and encoding.
+Probes return after successful SIMD execution; scalar bodies remain fallbacks.
+Toolchains without ``<experimental/simd>`` use helpers that return false.
+
 IEEE-2019 min/max uses float_minmax.simd_probe and shared raw-bit selection,
 including source/output modifiers on VOP3. VOP2 F16 *_NUM entries use the same
 selection through SIMD_VOP2_BINARY for register-half handling. Older host-float
@@ -303,15 +291,9 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
 # kernels preserve the generated scalar result: elementwise bit operations,
 # exact casts, and floating-point helpers with matching guest policies.
 # LOG/EXP and RCP/RSQ use the shared hardware mappings. SIN/COS stay scalar.
-# VOP1 base mnemonics whose VOP3 form applies float abs/neg/omod/clamp modifiers
-# over an f32 source and result (so the VOP3 twin routes through the f32 unary
-# modifier glue rather than reusing the plain VOP1 path).
-# NOTE: v_mov_b32 / v_accvgpr_mov_b32 are deliberately NOT here. They are integer
-# bit-moves: OMOD/CLAMP are float-only modifiers, so their generated VOP3 scalar
-# body is a raw copy that ignores them. Routing them through the f32 modifier glue
-# made the SIMD path apply clamp/omod the scalar never does (clamp=1: scalar keeps
-# the raw bits vs simd clamps to 1.0). They fall through to the plain VOP1 unary
-# raw-copy path below, matching the scalar body for every modifier combination.
+# VOP3 F32 twins that require floating source and output modifiers.
+# MOV_B32/ACCVGPR_MOV_B32 use the generic raw-copy path: their scalar
+# bodies ignore floating modifiers.
 _VOP3_UNARY_FP_F32 = {
     'v_floor_f32',
     'v_ceil_f32',
@@ -327,16 +309,13 @@ _VOP3_UNARY_FP_F32 = {
     'v_frexp_mant_f32',
 }
 
-# VOP1 base mnemonics whose VOP3 twin stays scalar: the f16 rounding/transcendental
-# forms carry modifiers applied around an f16<->f32 round trip (not yet handled).
-# v_mov_b16 is here for the same reason — its VOP3 body reads src0 as a u16 value,
-# widens it to f32, applies omod/clamp, then narrows back to u16 (a 16-bit->f32->16-bit
-# modifier round trip). The plain `a & 0xFFFFu` VOP1 functor it would otherwise reuse
-# ignores those modifiers, so with clamp/omod set the SIMD path diverged from scalar
-# (clamp=1: scalar 0x1 vs simd 0xffff). The f32 FP8/BF8 VOP3 decoders use op_sel[1:0]
-# as a bit-swapped byte selector, while the VOP1 SIMD functor always consumes byte 0. Leaving these
-# VOP3 twins scalar keeps both modifier and byte-select behavior correct; the
-# modifier-free / byte0 VOP1 forms still take the fast path.
+# VOP3 twins excluded from generic VOP1 reuse:
+# - F16 unary/FREXP: SIMD_VOP3_UNARY_FP16 and SIMD_VOP3_FREXP_FP.
+# - FREXP_EXP_I32_F32: SIMD_VOP3_UNARY_INT_EXTRA's integer result route.
+# - FREXP_EXP_I32_F64: SIMD_VOP3_FREXP_FP's mixed-width route.
+# - MOV_B16: scalar; the VOP1 raw copy lacks VOP3's numeric modifiers.
+# - CVT_F32_FP8/BF8: scalar; VOP3's byte selector differs from VOP1 byte 0.
+# The VOP1 forms remain eligible for SIMD.
 _VOP3_UNARY_SKIP = {
     'v_floor_f16',
     'v_ceil_f16',
@@ -487,12 +466,9 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         ' return (x << 16) | (x >> 16); }',
     ),
     # --- frexp (f32 split into mantissa / exponent) ----------------------------
-    # frexp_mant returns the significand m with |m| in [0.5,1) (±0/Inf/NaN pass
-    # through); read as float so the VOP3 twin reuses the f32 unary FP glue for
-    # abs/neg/omod/clamp (added to _VOP3_UNARY_FP_F32 below). frexp_exp returns
-    # the raw int32 exponent bits; its VOP3 twin applies float omod/clamp to
-    # float(exp) and bit-casts (a different output encoding than the VOP1 int),
-    # so the VOP3 form stays scalar (_VOP3_UNARY_SKIP).
+    # VOP1 returns mantissa floats or integer exponent bits.
+    # VOP3 mantissa uses _VOP3_UNARY_FP_F32; the exponent twin uses
+    # SIMD_VOP3_UNARY_INT_EXTRA (ABS/NEG leave the exponent unchanged).
     'v_frexp_mant_f32_vop1': (
         'float32_t',
         'float32_t',
@@ -506,11 +482,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         ' return static_cast<uint32_t>(amdgpu::frexp_f32(std::bit_cast<float>('
         'static_cast<uint32_t>(a[i])), wf.fp_denorm_mode_f32()).exponent); }); }',
     ),
-    # frexp f16: the scalar widens src to f32, runs std::frexp, then narrows the
-    # mantissa (or float(exp)) back to f16 via f32_to_f16. Compose the bit-exact
-    # f16<->f32 ports with the f32 frexp helpers; the f16<->f32 round trips and
-    # frexp are each bit-identical, so the composition matches. The VOP3 twins
-    # carry omod/clamp around that round trip (not reproduced) -> _VOP3_UNARY_SKIP.
+    # FREXP F16: widen -> FREXP -> narrow mantissa or unsigned float(exp).
+    # VOP3 twins use SIMD_VOP3_FREXP_FP for source and output modifiers.
     'v_frexp_mant_f16_vop1': (
         'uint32_t',
         'uint32_t',
@@ -523,7 +496,7 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         # The scalar narrows `static_cast<uint32_t>(exp)` to f16 -- the int->float
         # conversion is UNSIGNED, so a negative exponent (0xFFFF_FFxx) becomes a
-        # ~4.29e9 float and f32_to_f16 saturates it to +Inf (0x7C00). Mirror that
+        # ~4.29e9 float and f32_to_f16 overflows it to +Inf (0x7C00). Mirror that
         # with an unsigned static_simd_cast (no signed intermediate).
         '[](auto a) {'
         ' auto e = util::frexp_exp_f32_simd('
@@ -1084,10 +1057,8 @@ SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
         ' auto r = util::cvt_u32_f64_saturate_input_simd(s);'
         ' return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r); }',
     ),
-    # frexp exponent (f64 -> int32). util::frexp_exp_f64_simd returns the int32 in
-    # the low 32 bits of each 64-bit lane; the narrowing cast keeps them. The VOP3
-    # twin applies float omod/clamp to float(exp) + bit-casts (a different output
-    # encoding), so it stays scalar (_VOP3_UNARY_SKIP gates the cvt auto-route).
+    # FREXP exponent (F64 -> int32): narrow the low 32 exponent bits.
+    # The VOP3 twin uses SIMD_VOP3_FREXP_FP for float(exp) and modifiers.
     'v_frexp_exp_i32_f64_vop1': (
         'int32_t',
         '[](auto s) {'
@@ -2013,15 +1984,12 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
 }
 
 
-# VOP3 f16 unary operations widen to f32 for modifiers and narrow the result.
-# Input policy per entry:
-# - CEIL and FLOOR receive a source half flushed under MODE input denormals
-#   (INPUT_FLUSHED_ROUNDING).
-# - TRUNC and RNDNE keep the source unflushed; a subnormal gives a signed zero
-#   either way.
-# - FRACT keeps the source unflushed; its input flush is not implemented yet.
-# - Transcendentals receive a flushed source half, apply the half overflow and
-#   NaN policies, and round to f16 before OMOD.
+# F16 unary glue: flush source -> widen + ABS/NEG -> op -> round F16 -> OMOD -> CLAMP.
+# Operation             Source policy             Output policy
+# CEIL/FLOOR            MODE flush                ordinary
+# TRUNC/RNDNE           preserve                  ordinary
+# FRACT                 preserve (flush TODO)     ordinary
+# SQRT/RCP/RSQ/EXP/LOG  MODE flush                TRANS
 SIMD_VOP3_UNARY_FP16: dict[str, str] = {
     'v_ceil_f16_vop3': '[](auto a) { return util::ceil_simd(a); }',
     'v_floor_f16_vop3': '[](auto a) { return util::floor_simd(a); }',
@@ -2055,24 +2023,16 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
         'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
         'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
     ),
-    # v_fract_f16: x - floor(x) in the widened f32 domain (the glue widens/narrows
-    # and applies abs/neg/omod/clamp), mirroring the covered v_fract_f16_vop1.
+    # FRACT evaluates x - floor(x) in F32; the glue handles the F16 result.
     'v_fract_f16_vop3': '[](auto a) { return a - util::floor_simd(a); }',
 }
 
 
-# VOP3 frexp twins routed through the EXISTING unary FP glue. Their generated
-# scalar bodies apply src0 abs/neg, compute the frexp exp/mantissa, then apply
-# result omod/clamp on the (float-domain) value and bit_cast / f32_to_f16 it to
-# the dst — exactly what the f32 / f16 unary FP glue produces. So only the
-# functor differs from the proven VOP1 forms.
-#   route 'fp16' -> ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16   (f16<->f32 widen glue)
-#   route 'fp32' -> ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, ...)
-# frexp_exp returns the uint32 two's-complement exponent (±0/Inf/NaN -> 0); the
-# static_simd_cast<float> reproduces the scalar `(float)(uint32_t)exp` exactly
-# (negative exp -> large float -> f16 +Inf, like scalar). frexp_mant_f32_simd is
-# the already-proven VOP1 helper. (v_frexp_exp_i32_f64 needs a new f64->f32
-# mixed-width glue and stays in _VOP3_UNARY_SKIP / scalar for now.)
+# Specialized VOP3 FREXP routes:
+# - fp16: F16 unary glue; round to half before OMOD/CLAMP.
+# - fp64cvt: F64 source -> F32 float(exp), with source/output modifiers.
+# Exponents use uint32 -> float conversion; negative exponents become large
+# positive values and can overflow F16. Zero/Inf/NaN inputs give exponent 0.
 SIMD_VOP3_FREXP_FP: dict[str, tuple[str, str]] = {
     'v_frexp_mant_f16_vop3': (
         'fp16',
@@ -2083,12 +2043,8 @@ SIMD_VOP3_FREXP_FP: dict[str, tuple[str, str]] = {
         '[](auto a) { return util::stdx::static_simd_cast<util::native<float>>('
         'util::frexp_exp_f32_simd(std::bit_cast<util::native<uint32_t>>(a))); }',
     ),
-    # f64 source -> float(exp) dst. Mixed-width (read64 / narrow32 store): the new
-    # cvt-vop3 f64->b32 glue applies the f64 src abs/neg + float omod/clamp.
-    # frexp_exp_f64_simd returns the int32 exp in the low 32 bits of each 64-bit
-    # lane; narrow to uint32 (scalar `(uint32_t)exp`) then to float (scalar
-    # unsigned `(float)(uint32_t)exp`). The intermediate uint32 narrow is
-    # load-bearing — a direct uint64->float would convert the full 64-bit value.
+    # Narrow exponent bits to uint32 before converting to float, preserving
+    # the scalar unsigned interpretation of negative exponents.
     'v_frexp_exp_i32_f64_vop3': (
         'fp64cvt',
         '[](auto s) { return util::stdx::static_simd_cast<util::narrow32<float32_t>>('
@@ -3024,8 +2980,7 @@ def _simd_probe_line(
         if template_name.split('_')[1] in ('ceil', 'floor', 'trunc', 'rndne'):
             return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_ROUNDED_FP64({spec3unaf64});'
         return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64({spec3unaf64});'
-    # VOP3 f16 unary (widen-then-modify-then-narrow). FTZ-free ops only:
-    # ceil/floor/trunc/rndne/sqrt. Transcendentals deferred.
+    # Specialized FREXP routes: F16 unary and mixed-width F64.
     specfrexp = SIMD_VOP3_FREXP_FP.get(template_name)
     if specfrexp is not None:
         route, fn = specfrexp
@@ -3039,6 +2994,7 @@ def _simd_probe_line(
         if route == 'fp64cvt':
             return f'  ROCJITSU_TRY_SIMD_CVT_VOP3_F64_TO_B32_FP({fn});'
         return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {fn});'
+    # F16 unary glue: integral rounding, FRACT and SQRT/RCP/RSQ/EXP/LOG.
     spec3unaf16 = SIMD_VOP3_UNARY_FP16.get(template_name)
     if spec3unaf16 is not None:
         macro = (
@@ -3108,12 +3064,9 @@ def _simd_probe_line(
                 ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {_fp16_ovfl_cpp_op(cpp_op)});'
                 return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
             return probe
-        # VOP3-encoded twins of the SIMD VOP1 unary ops. Integer forms reuse the
-        # VOP1 path; integer-to-f32 conversions use it only without output
-        # modifiers. The f32 forms (and the float-domain
-        # v_mov_b32) carry abs/neg/omod/clamp and route through the f32 unary glue.
-        # The f16 forms also carry modifiers, but applying them around the f16<->f32
-        # round trip is not yet handled, so they are left scalar (_VOP3_UNARY_SKIP).
+        # VOP3 twins: F32 modifier glue or eligible VOP1 functors.
+        # Specialized F16 routes precede this block; _VOP3_UNARY_SKIP only
+        # blocks generic reuse. Integer conversions have modifier gates below.
         spec1v3 = SIMD_VOP1_UNARY.get(base + '_vop1')
         if spec1v3 is not None:
             cpp_tin, cpp_tout, cpp_op = spec1v3
@@ -3176,9 +3129,8 @@ def _simd_probe_line(
         # present in the plain VOP1 functors.)
         speccvtoutv3 = SIMD_CVT_F64_TO_B32.get(base + '_vop1')
         if speccvtoutv3 is not None:
-            # Unlike the plain cvt ops, v_frexp_exp_i32_f64's VOP3 body keeps the
-            # modifiers (float omod/clamp on float(exp) + bit_cast) — a different
-            # output encoding than the VOP1 int. Keep that twin scalar.
+            # Specialized FREXP routes precede this block. The skip list blocks
+            # reuse of the plain conversion's integer output encoding.
             if base in _VOP3_UNARY_SKIP:
                 return None
             out_t, cpp_op = speccvtoutv3

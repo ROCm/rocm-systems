@@ -2548,16 +2548,18 @@ template <typename Inst, typename UnOp>
   return false;
 }
 
-/// VOP3 f16 unary SIMD fast path. Mirrors the scalar body's
-/// f16_to_f32 -> abs/neg -> op -> omod/clamp -> f32_to_f16_mode chain. The generic
-/// form reads the low source half and zero-extends the full destination dword;
-/// the true16 form selects the source half and writes the selected destination
-/// half per the ISA's op_sel[3] policy.
-/// The operation's result is rounded to F16 first; the shared OMOD/CLAMP stage
-/// then acts on that half. `transcendental` selects the TRANS-unit output
-/// policy, whose OMOD overflow rounds to nearest in every MODE. input_policy flushes
-/// the source half before widening; ABS/NEG only change the sign, so the order
-/// relative to them does not matter.
+/// @brief Execute VOP3 F16 unary SIMD with destination-format output modifiers.
+/// @details Per-lane pipeline:
+/// 1. Flush the raw source half under `input_policy` when required.
+/// 2. Widen to F32 and apply ABS/NEG.
+/// 3. Evaluate `un_op`.
+/// 4. Round to F16.
+/// 5. Apply OMOD, then CLAMP.
+///
+/// `transcendental` selects TRANS OMOD overflow rounding: nearest in every MODE.
+/// Storage:
+/// - Generic: low source half; zero-extended destination dword.
+/// - True16: selected source/destination halves, per OP_SEL and ISA storage policy.
 template <bool True16, typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool
@@ -2802,12 +2804,10 @@ template <typename Inst, typename FmaOp>
   return false;
 }
 
-/// VOP3 f16 ternary SIMD fast path. Mirrors the scalar f16 chain across three
-/// sources: widen each via util::f16_to_f32_simd, apply f32 abs/neg, run
-/// `tern_op` on native<float>, apply omod/clamp, narrow via f32_to_f16_mode_simd.
-/// The generic form zero-extends the full destination dword; the true16 form
-/// selects all source halves and writes the selected destination half per the
-/// ISA's op_sel[3] policy.
+/// @brief Execute VOP3 F16 ternary SIMD with promoted F32 output modifiers.
+/// @details Pipeline: widen sources -> ABS/NEG -> `tern_op` -> F32 OMOD/CLAMP -> round F16.
+/// Storage: generic zero-extends the destination dword; true16 selects source
+/// and destination halves per OP_SEL and ISA storage policy.
 template <bool True16, typename Inst, typename FmaOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop3_fp16_simd(Inst &inst, Wavefront &wf,
@@ -3084,11 +3084,11 @@ template <typename Inst, typename FmaOp>
   return false;
 }
 
-/// VOP3 dst-accumulate FMA fast path (f16). f16 widen chain across src0/src1
-/// + vdst (accumulator). NO abs/neg on accumulator (per scalar). The generic
-/// form treats vdst as a low-half f16 value and zero-extends the full dword;
-/// the true16 form selects src0/src1 and the accumulator/destination half with
-/// OPSEL.
+/// @brief Execute VOP3 F16 accumulation with promoted F32 output modifiers.
+/// @details Widen src0/src1/vdst; apply ABS/NEG only to src0/src1, evaluate,
+/// then apply F32 OMOD/CLAMP before narrowing to F16.
+/// Storage: generic uses low halves and zero-extends vdst; true16 selects
+/// source and accumulator/destination halves with OP_SEL.
 template <bool True16, typename Inst, typename FmaOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_fmac_vop3_fp16_simd(Inst &inst, Wavefront &wf,
@@ -5346,9 +5346,8 @@ template <bool Vop3, typename Inst>
   return
 #endif
 
-/// VOP3 f16 unary counterpart (raw uint32 lanes; widen f16->f32, src0 abs/neg,
-/// op, omod/clamp, narrow f32->f16). The functor takes already-widened-and-
-/// modified `native<float>` and returns `native<float>`; variadic.
+/// VOP3 F16 unary entry point; see try_execute_unary_vop3_fp16_simd for the pipeline.
+/// Functor: ABS/NEG-modified native<float> -> native<float>; variadic.
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16(...)                                                     \
   if (::rocjitsu::amdgpu::try_execute_unary_vop3_fp16_simd<false>(inst, wf, __VA_ARGS__))          \
   return

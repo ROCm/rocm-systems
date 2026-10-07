@@ -4,42 +4,40 @@
 #pragma once
 
 /// @file output_modifier.h
-/// @brief VOP3 output modifiers applied to a result already in its destination format.
+/// @brief Apply OMOD, then CLAMP, to destination-format results.
+/// @details Disabled stages preserve the input. Callers resolve effective OMOD
+/// and MODE through output_modifier_policy in simd_glue.h.
 ///
-/// Apply OMOD first, then CLAMP. Each stage passes the result through unchanged
-/// when disabled. The policy contains the effective OMOD and the result format's
-/// MODE settings; output_modifier_policy in simd_glue.h resolves these for callers.
-/// The decision tables below describe the rules when each stage is enabled.
+/// Scope:
+/// - Shared scalar/SIMD stage for migrated VOP3 results on every target.
+/// - Older targets enable OMOD only with IEEE=0 and output denormals flushed.
 ///
-/// gfx1201 captures of every min/max instruction match these rules bit for
-/// bit, in F16, F32 and F64, under every MODE setting probed. OMOD overflow
-/// was checked for both signs under all four rounding modes, with FP16_OVFL
-/// disabled and enabled. gfx1201 captures also show that F16 and F64
-/// arithmetic, F16 unary and transcendental, conversion and division results
-/// are rounded to their destination format before OMOD and CLAMP.
+/// Paths outside this stage include:
+/// - SDWA F16 (dpp_sdwa_ops.h): scales before narrowing; no captures.
+/// - F16 ternary/accumulator SIMD: OMOD/CLAMP still precede narrowing.
+/// - Pseudo-scalar F32 transcendentals: scale the exact value before one F32
+///   rounding; match gfx1201 captures.
 ///
-/// Every target uses this stage once fp_mode::effective_omod has decided that
-/// OMOD applies; older targets apply it only under MODE.IEEE=0 with output
-/// denormals flushed. Hardware evidence for the order differs by target:
-/// - gfx1201 (RDNA4): measured, as above.
-/// - gfx1100 (RDNA3, W7900): measured with MODE.IEEE=0. Captured F16 MUL/ADD
-///   div:2 lanes that overflow before scaling, or keep the sign of a halved
-///   negative normal, match gfx1201.
-/// - gfx1030 (RDNA2, RX 6800 XT) and gfx1010 (RDNA1, RX 5700 XT): with
-///   MODE.IEEE=0 and output denormals flushed, captures with OMOD applied
-///   match gfx1201 on every non-NaN lane; gfx1010 matches gfx1030 bit for bit.
-/// legacy_rounded_result_modifier_cases in valu_fp_mode_test.cpp decodes
-/// captured gfx1100 and gfx1030 lanes, including IEEE=1 controls.
-/// - RDNA3.5 and CDNA1-5: no captures. The order is extrapolated from the
-///   targets above and requires hardware verification.
+/// Hardware evidence:
+/// - gfx1201 (RDNA4): every F16/F32/F64 min/max matches under all probed MODEs.
+///   OMOD overflow checked both signs, four rounding modes, FP16_OVFL off/on.
+///   Captures also establish round-before-modifiers for affected arithmetic,
+///   F16 unary/TRANS, conversion and division results.
+/// - gfx1100 (RDNA3, W7900): IEEE=0 F16 MUL/ADD div:2 captures match gfx1201
+///   for overflow before scaling and the sign of a halved negative normal.
+/// - gfx1030 (RDNA2, RX 6800 XT) / gfx1010 (RDNA1, RX 5700 XT): IEEE=0 with
+///   output denormals flushed matches gfx1201 on all non-NaN OMOD lanes;
+///   gfx1010 matches gfx1030 bit for bit.
+/// - RDNA3.5 / CDNA1-5: extrapolated; no captures, hardware verification required.
 ///
 /// CDNA4 V_MINIMUM3_F32/V_MAXIMUM3_F32 retain the emulator's wave-IEEE-based
 /// OMOD policy. The ISA specifies forced IEEE=1 for these instructions and
 /// disables OMOD under IEEE=1; whether that override also suppresses their
 /// OMOD needs hardware verification and a separate instruction-policy follow-up.
 ///
-/// Scalar and SIMD callers use the same implementation on unsigned encodings.
-/// F16 occupies the low half of a 32-bit lane; F32 and F64 use 32 and 64 bits.
+/// legacy_rounded_result_modifier_cases in valu_fp_mode_test.cpp decodes
+/// gfx1100/gfx1030 captures, including IEEE=1 controls.
+/// Encodings: F16 in the low half of uint32; F32/F64 in uint32/uint64.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lane_select.h"

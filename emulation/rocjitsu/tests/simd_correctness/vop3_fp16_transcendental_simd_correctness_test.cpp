@@ -3,8 +3,8 @@
 
 /// @file vop3_fp16_transcendental_simd_correctness_test.cpp
 /// @brief SIMD/scalar comparison for the CDNA4 F16 VOP3 transcendentals.
-/// Inputs are promoted to F32, modified, evaluated, and narrowed to F16.
-/// RSQ honors the F16 input-denormal mode and preserves quieted NaN payloads.
+/// @details Uses try_execute_unary_vop3_fp16_simd's documented modifier pipeline.
+/// Sources honor the F16 input-denormal mode; RSQ preserves quieted NaN payloads.
 /// Each case runs with scalar execution forced and then with SIMD allowed,
 /// using identical inputs and EXEC. RSQ compares every active lane exactly;
 /// the other operations retain their existing NaN-result exclusions.

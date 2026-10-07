@@ -2,19 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_fp16_unary_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the f16 VOP3
-/// unary rounding ops (ceil/floor/trunc/rndne) plus sqrt on CDNA4. The scalar
-/// body widens f16 -> f32, applies src0 abs/neg, runs the op, applies
-/// omod/clamp, narrows back via f32_to_f16. The new SIMD glue
-/// (try_execute_unary_vop3_fp16_simd) does the same chain in-vector. The process
-/// runs one fixed execute mode (RJ_FORCE_SCALAR, immutable); each (case, mods)
-/// runs TWICE in the same process -- once forcing the scalar body, once the SIMD
-/// fast path, with identical inputs/EXEC -- and the results are asserted equal
-/// per active, non-skipped lane (util::set_force_scalar_for_testing flips the
-/// gate in-process). NaN-result lanes carry an accepted payload divergence and
-/// are excluded from the comparison — NaN-ness is deterministic from the inputs,
-/// so both runs skip the same lanes. In-process inactive lanes must keep the
-/// sentinel.
+/// @brief Compare SIMD/scalar CDNA4 F16 VOP3 CEIL/FLOOR/TRUNC/RNDNE/SQRT results.
+/// @details Uses try_execute_unary_vop3_fp16_simd's documented modifier pipeline.
+/// Each case runs with identical inputs/EXEC, first forced scalar, then SIMD
+/// allowed, via util::set_force_scalar_for_testing.
+/// Checks: active non-NaN results match; inactive lanes retain the sentinel.
+/// NaN-result lanes are excluded because payloads may differ.
 
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
