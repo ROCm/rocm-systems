@@ -124,6 +124,8 @@ int64_t ncclParamEnqueueRearchEnable() { return 0; }
 // Emitted by init.cc in the real build; dev_runtime.cc only declares it extern.
 // Returns the NCCL_PARAM default so window registration is not opted out.
 int64_t ncclParamWinEnable() { return 1; }
+// Emitted by rocmwrap.cc; NCCL_PARAM default, so host VMM GIN is not failed closed.
+int64_t ncclParamDmaBufEnable() { return 1; }
 
 // ---------------------------------------------------------------------------
 // Proxy / mgmt task enqueue.

@@ -171,6 +171,8 @@ int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int
 // like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0
 // opt-out in ncclCommWindowRegister_impl.
 int64_t ncclParamWinEnable() { return g_loadParam("WIN_ENABLE", 1); }
+// Emitted by rocmwrap.cc; read by the host VMM GIN fail-closed check.
+int64_t ncclParamDmaBufEnable() { return g_loadParam("DMABUF_ENABLE", 1); }
 
 // ---------------------------------------------------------------------------
 // Proxy.
