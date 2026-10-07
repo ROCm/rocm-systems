@@ -99,6 +99,29 @@ TEST_F(MemoryWaitScoreboardTest, PartialWaitReleasesOnlyTheOlderLoad) {
   EXPECT_EQ(hazards[0].reg.index, 6u);
 }
 
+TEST_F(MemoryWaitScoreboardTest, WideAccessReportsThePendingRegisterIntersection) {
+  for (auto cls : {RegClass::VGPR, RegClass::SGPR})
+    for (bool write : {false, true})
+      for (const auto &[producer, consumer, overlap] :
+           {std::tuple{RegisterRef{cls, 51, 1}, RegisterRef{cls, 50, 4}, RegisterRef{cls, 51, 1}},
+            std::tuple{RegisterRef{cls, 48, 4}, RegisterRef{cls, 50, 4}, RegisterRef{cls, 50, 2}},
+            std::tuple{RegisterRef{cls, 50, 4}, RegisterRef{cls, 51, 1},
+                       RegisterRef{cls, 51, 1}}}) {
+        SCOPED_TRACE(static_cast<unsigned>(cls));
+        SCOPED_TRACE(write);
+        SCOPED_TRACE(producer.index);
+        state.clear();
+        hazards.clear();
+        state.add(
+            {state.issue(WaitCounterKind::Load), 0x100, 1, producer, WaitCounterKind::Load, 0xf});
+        state.access(consumer, 1, 0xf, write);
+        ASSERT_EQ(hazards.size(), 1u);
+        EXPECT_EQ(hazards[0].reg, overlap);
+        EXPECT_EQ(hazards[0].producer.reg, producer);
+        EXPECT_EQ(hazards[0].write, write);
+      }
+}
+
 TEST_F(MemoryWaitScoreboardTest, MixedCounterPartialWaitUsesOnlyOrderedYoungerOperations) {
   state.add({state.issue(WaitCounterKind::Ds, false, 1),
              0x100,
@@ -3313,6 +3336,108 @@ TEST(MemoryWaitExecutionTest, BufferTypeSuppressesResultsButKeepsEncodedSourceDe
       }
     }
   }
+}
+
+TEST(MemoryWaitExecutionTest, DelayImmediatesDoNotAliasPendingRegisters) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA5})
+    for (unsigned pending_kind : {0u, 1u, 2u}) {
+      // Exercise the VGPR-only shortcut, a pending SMEM result, and XCNT's
+      // scalar/EXEC replay sources, using decoded memory producers.
+      if (pending_kind == 2 && arch != ROCJITSU_CODE_ARCH_CDNA5)
+        continue;
+      SCOPED_TRACE(static_cast<unsigned>(arch));
+      SCOPED_TRACE(pending_kind);
+      GpuMemory memory("immediate_wait_memory");
+      L2Cache l2("immediate_wait_l2");
+      ComputeUnitCore::Config config{};
+      config.arch = arch;
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      config.xcnt_diagnostics =
+          pending_kind == 2 ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 256;
+      auto cu = ComputeUnitCore::create("immediate_wait_cu", config, &memory, &l2);
+      auto *wf = cu->dispatch_wf(0, 0x100, 106, 256, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_mode_raw(wf->mode_raw() | (1u << 25));
+      auto decoder = Decoder::create(arch);
+      for (bool delay : {false, true}) {
+        if (delay && arch == ROCJITSU_CODE_ARCH_CDNA4)
+          continue;
+        for (uint16_t immediate : {0x33, 0x133, 0x1ff}) {
+          SCOPED_TRACE(delay);
+          SCOPED_TRACE(immediate);
+          const auto destination = static_cast<uint8_t>(immediate >= 256 ? immediate - 256 : 51);
+          std::vector<uint32_t> load, scalar, control;
+          if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            append_instruction(load, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                                          {.saddr = 0, .vdst = destination}));
+            append_instruction(scalar, make_s_load_b32_scaled_imm(4, 0, 0));
+            append_instruction(
+                control,
+                cdna5::build_vop1(cdna5::kVMovB32Vop1,
+                                  {.src0 = static_cast<uint16_t>(256 + destination), .vdst = 8}));
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+            append_instruction(load,
+                               cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
+                                                 {.seg = 2, .saddr = 0, .vdst = destination}));
+            append_instruction(scalar, cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sdata = 4}));
+            append_instruction(
+                control,
+                cdna4::build_vop1(cdna4::kVMovB32Vop1,
+                                  {.src0 = static_cast<uint16_t>(256 + destination), .vdst = 8}));
+          } else {
+            append_instruction(load,
+                               rdna3::build_flat(rdna3::kFlatLoadB32Flat,
+                                                 {.seg = 2, .saddr = 0, .vdst = destination}));
+            append_instruction(scalar, rdna3::build_smem(rdna3::kSLoadB32Smem, {.sdata = 4}));
+            append_instruction(
+                control,
+                rdna3::build_vop1(rdna3::kVMovB32Vop1,
+                                  {.src0 = static_cast<uint16_t>(256 + destination), .vdst = 8}));
+          }
+          const auto words =
+              arch == ROCJITSU_CODE_ARCH_CDNA4
+                  ? cdna4::build_sopp(cdna4::kSSleepSopp, {.simm16 = immediate})
+                  : rdna3::build_sopp(delay ? rdna3::kSDelayAluSopp : rdna3::kSSleepSopp,
+                                      {.simm16 = immediate});
+          util::StringDiagnostic error;
+          auto producer = decoder->decode_window(load, 0, error.emitter());
+          auto smem = decoder->decode_window(scalar, 0, error.emitter());
+          auto consumer = decoder->decode_window(words, 0, error.emitter());
+          auto actual_read = decoder->decode_window(control, 0, error.emitter());
+          ASSERT_TRUE(producer.succeeded()) << error.message();
+          ASSERT_TRUE(smem.succeeded()) << error.message();
+          ASSERT_TRUE(consumer.succeeded()) << error.message();
+          ASSERT_TRUE(actual_read.succeeded()) << error.message();
+          for (uint64_t exec : {0ull, 1ull}) {
+            SCOPED_TRACE(exec);
+            auto &state = wf->ensure_memory_wait_scoreboard();
+            state.clear();
+            wf->set_exec(1);
+            cu->track_memory_wait(*producer.value(), *wf);
+            if (pending_kind == 1)
+              cu->track_memory_wait(*smem.value(), *wf);
+            if (pending_kind == 2) {
+              EXPECT_GT(state.outstanding(WaitCounterKind::X), 0u);
+            }
+            std::vector<MemoryWaitScoreboard::Hazard> hazards;
+            state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
+              static_cast<decltype(hazards) *>(p)->push_back(hazard);
+            });
+            wf->set_exec(exec);
+            state.check_instruction(*consumer.value(), *wf);
+            EXPECT_TRUE(hazards.empty());
+            wf->set_exec(1);
+            state.check_instruction(*actual_read.value(), *wf);
+            ASSERT_EQ(hazards.size(), 1u);
+            EXPECT_EQ(hazards[0].reg, (RegisterRef{RegClass::VGPR, destination, 1}));
+            EXPECT_EQ(hazards[0].consumer_pc, 0x200u);
+          }
+        }
+      }
+    }
 }
 
 TEST(MemoryWaitExecutionTest, DecodedScalarIssueUsesArchitecturalWaitDomain) {

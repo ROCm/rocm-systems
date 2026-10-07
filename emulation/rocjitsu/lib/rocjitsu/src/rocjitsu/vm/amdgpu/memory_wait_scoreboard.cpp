@@ -52,7 +52,8 @@ std::optional<RegisterRef> RegisterAccess::source_register(const Operand &op, bo
     return std::nullopt;
   const auto &wf = wavefront();
   auto width = static_cast<uint8_t>(std::max(1, op.size_bits() / 32));
-  if (auto base = op.simd_vgpr_base(wf)) {
+  // Immediate encodings can overlap the numeric VGPR selector range.
+  if (auto base = op.is_vgpr() ? op.simd_vgpr_base(wf) : std::nullopt) {
     // Qualified memory bodies acquire source dwords independently. Preserve a
     // backed prefix when a later word lies beyond this wave's ownership block.
     if (wordwise)
@@ -1054,7 +1055,10 @@ void MemoryWaitScoreboard::access_pending(RegisterRef reg, uint64_t lanes, uint8
       continue;
     event.reported = true;
     if (reporter_) {
-      reporter_(context_, {event, pc_, reg, write, required_wait(event)});
+      const auto first = std::max(reg.index, event.reg.index);
+      const auto end = std::min(reg.index + reg.width, event.reg.index + event.reg.width);
+      const RegisterRef overlap{reg.cls, first, static_cast<uint8_t>(end - first)};
+      reporter_(context_, {event, pc_, overlap, write, required_wait(event)});
     }
   }
   const auto size = events_.size();
