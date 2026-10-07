@@ -8,6 +8,51 @@ the network layer for GIN CPU Proxy and for one-sided NCCL operations (e.g. `ncc
 This document uses `ncclImpl` to refer to NCCL's internal (non-customized) implementations of these APIs.
 References to `ncclImpl` are just examples, custom implementations may make other design decisions.
 
+## Plugin architecture
+
+### Plugin name and supporting multiple RMA plugins
+
+When NCCL is initialized, it will look for a `libnccl-rma.so` library and
+dynamically load it, then look for symbols inside the library.
+
+The `NCCL_RMA_PLUGIN` environment variable allows users to select one or more
+RMA plugins. If set to a bare plugin name such as `myrma`, NCCL can load a
+library named `libnccl-rma-myrma.so`. `NCCL_RMA_PLUGIN` can also be set to a
+shared library file name or an absolute path to the plugin file. Multiple
+plugins can be specified as a comma-separated list.
+
+For example, any of the following can be used to load a plugin:
+
+```shell
+export NCCL_RMA_PLUGIN=myrma
+export NCCL_RMA_PLUGIN=libnccl-rma-myrma.so
+export NCCL_RMA_PLUGIN=/path/to/your/plugin/libnccl-rma-myrma.so
+```
+
+Set the `LD_LIBRARY_PATH` to include the plugin directory when using a bare name
+or shared library file name:
+
+```shell
+export LD_LIBRARY_PATH=/path/to/your/plugin:$LD_LIBRARY_PATH
+```
+
+If none of the listed plugins can be loaded, NCCL looks for the RMA symbols in
+the GIN plugin and in the NET plugin, and finally falls back to its internal RMA
+implementation over InfiniBand.
+
+Only one RMA implementation is used: NCCL picks the first one that both succeeds
+`init` and reports at least one device from `devices`, and disables the remaining
+external plugins.
+
+### Struct versioning
+
+Once a library is found, NCCL will look for a symbol named `ncclRmaPlugin_vX`,
+with `X` increasing over time. The versioning ensures that the plugin and NCCL
+core are compatible.
+
+Plugins are encouraged to provide multiple of those symbols, implementing
+multiple versions of the NCCL RMA API, so that the same plugin can be compiled
+and support a wide range of NCCL versions.
 
 ## RMA Concepts
 
@@ -37,24 +82,24 @@ nothing prevents applications from creating more or less.
 
 ### Operations
 
-**Put**  
+**Put**
 Put moves data from a local source buffer to a (likely remote) target buffer. A single call to `Put`
 may include a signal operation. See below for more details.
 
-**Get**  
+**Get**
 Get moves data from a (likely remote) source buffer to a local target buffer. Gets are
 not required to be completed in the order they are requested.
 
-**Signal**  
+**Signal**
 Signal increments a target memory address by a fixed value. There's 2 types of visibility guarantees:
 strong and weak. The visibility of a *strong* signal guarantees the completion/visibility of all previous
 puts and signals, including the bundled put in the case of put+signal. The visibility of a *weak*
 signal guarantees the completion/visibility of the bundled put (in the case of put+signal), but makes
 no guarantees on previous puts or previous signals.
 
-**Flush**  
+**Flush**
 Flush flushes the PCIe path from a NIC to a GPU. The completion of a flush must guarantee that the data
-from all previous *completed* gets is visible on the GPU. Gets that are not complete at the time flush 
+from all previous *completed* gets is visible on the GPU. Gets that are not complete at the time flush
 is issued need not have data visible.
 
 ## `ncclRma` API
@@ -120,3 +165,22 @@ not a functional network transport. Build it with:
 ```shell
 make -C plugins/rma/example
 ```
+
+### Loading the example plugin
+
+Set the `LD_LIBRARY_PATH` to include the example plugin directory:
+
+```shell
+export LD_LIBRARY_PATH=/path/to/nccl/plugins/rma/example:$LD_LIBRARY_PATH
+```
+
+Set `NCCL_RMA_PLUGIN` to either the plugin name, the shared library file name, or
+the absolute path to the plugin file. Any of the following can work:
+
+```shell
+export NCCL_RMA_PLUGIN=example
+export NCCL_RMA_PLUGIN=libnccl-rma-example.so
+export NCCL_RMA_PLUGIN=/path/to/nccl/plugins/rma/example/libnccl-rma-example.so
+```
+
+NCCL will automatically discover and load the plugin based on the exported symbol names.
