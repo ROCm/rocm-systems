@@ -58,16 +58,24 @@ no producer should write.
 import os, stat
 
 def process_instance():
-    with open("/proc/sys/kernel/random/boot_id") as f:
-        boot = f.readline().strip()
-    with open("/proc/self/stat") as f:
-        line = f.readline()
+    """This process as the writer names it, or None if /proc cannot say."""
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            boot = f.readline().strip()
+        with open("/proc/self/stat") as f:
+            line = f.readline()
+    except OSError:
+        return None
     # The command name may hold spaces and ")"; field 22 is the 20th after it.
-    return f"{boot} {line[line.rfind(')') + 1:].split()[19]}"
+    fields = line[line.rfind(")") + 1:].split()
+    if not boot or len(fields) < 20 or not fields[19].isdigit():
+        return None
+    return f"{boot} {fields[19]}"
 
 def capture_active():
     root = os.environ.get("HIP_HRR_CAPTURE_OUTPUT")
-    if not root:
+    instance = process_instance()
+    if not root or instance is None:
         return False
     d = os.path.join(root, f"pid-{os.getpid()}")
     marker = os.path.join(d, "active")
@@ -75,15 +83,15 @@ def capture_active():
         ds = os.lstat(d)
         fs = os.lstat(marker)
         fd = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            line = os.read(fd, 256).decode("ascii", "replace").split("\n", 1)[0]
+        finally:
+            os.close(fd)
     except OSError:
         return False
-    try:
-        line = os.read(fd, 256).decode("ascii", "replace").split("\n", 1)[0]
-    finally:
-        os.close(fd)
     return (stat.S_ISDIR(ds.st_mode) and ds.st_uid == os.geteuid()
             and stat.S_ISREG(fs.st_mode) and fs.st_uid == os.geteuid()
-            and fs.st_nlink == 1 and line == process_instance())
+            and fs.st_nlink == 1 and line == instance)
 ```
 
 Neither the directory nor its `events.bin` is enough: both stay when the

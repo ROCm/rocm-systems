@@ -153,7 +153,7 @@ capture.hrr/
     events.bin         hrr_file_header(8) + [EventHeader(32) + payload]* + [hrr_eof_record(44)]
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (present only mid-capture; removed on clean shutdown)
-    active             empty marker: present while this process's capture is on (see Transport)
+    active             names this process instance: present while its capture is on (see Transport)
     blobs/<2hex>/      content-addressed host buffers keyed by FNV-1a-128 hash
     code_objects/      .hsaco ELFs (unused in current fat-binary path)
     regions/*.hrrr     external region annotations (optional; written by producers
@@ -377,9 +377,10 @@ Version history, so an archive written by an older runtime can be placed:
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
                        size); present only mid-capture, removed on clean shutdown
-    active             empty file created as the last step of a successful
-                       writer::open(), removed on clean shutdown and when
-                       capture stops for lack of space
+    active             one line naming the process instance (boot id and
+                       start time; creation time on Windows), created as the
+                       last step of a successful writer::open(), removed on
+                       clean shutdown and when capture stops for lack of space
     events.bin         8-byte hrr_file_header, then repeated records
     blobs/<2hex>/      FNV-1a-128 content-addressed raw buffers (.blob ext)
     code_objects/      .hsaco ELFs keyed by hash
