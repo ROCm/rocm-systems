@@ -8,7 +8,9 @@
 
 #include <hip/hip_runtime.h>
 #include <algorithm>
+#include <deque>
 #include <map>
+#include <memory>
 #include <set>
 #include <unordered_map>
 #include <string>
@@ -736,6 +738,13 @@ struct PlaybackContext {
     // Returns nullptr if not found. Memory is owned by the context (cached).
     const void* load_blob(uint64_t hash_lo, uint64_t hash_hi,
                           size_t* sz_out = nullptr) const;
+    // Load a pinned host snapshot blob. Unlike load_blob, the cache is bounded
+    // (kSnapshotCacheBytes, oldest first out): a workload that rewrites a large
+    // pinned buffer before every launch stores a new blob each time, and
+    // keeping them all would grow replay's memory with the archive.
+    std::shared_ptr<const std::vector<uint8_t>>
+    load_snapshot_blob(uint64_t hash_lo, uint64_t hash_hi) const;
+    static constexpr size_t kSnapshotCacheBytes = size_t(256) << 20;
     // Load a code object from archive_dir/code_objects/<hash>.hsaco
     const void* load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                  size_t* sz_out) const;
@@ -751,6 +760,11 @@ struct PlaybackContext {
 
 private:
     mutable std::unordered_map<std::string, std::vector<uint8_t>> blob_cache_;
+    mutable std::mutex snap_cache_mu_;
+    mutable std::unordered_map<std::string,
+                               std::shared_ptr<const std::vector<uint8_t>>> snap_cache_;
+    mutable std::deque<std::string> snap_cache_order_;
+    mutable size_t snap_cache_bytes_ = 0;
 };
 
 // ---------------------------------------------------------------------------

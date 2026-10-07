@@ -232,7 +232,7 @@ static bool resolve_archive_path(const std::string& input, std::string& resolved
 //            (kind 3: u16 n_ptrs, n_ptrs * u16 offsets)
 //   u32 num_attrs, u32 attr stride, num_attrs * stride bytes
 //   per snapshot (41 bytes): u64 ptr_handle, u64 offset, u64 length,
-//            u64 hash_lo, u64 hash_hi, u8 direction
+//            u64 hash_lo, u64 hash_hi, u8 direction (0 restore, 1 leave)
 // ---------------------------------------------------------------------------
 
 static bool parse_kernel_launch(const uint8_t* data, size_t len,

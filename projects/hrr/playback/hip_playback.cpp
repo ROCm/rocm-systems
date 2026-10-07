@@ -272,6 +272,33 @@ const void* PlaybackContext::load_blob(uint64_t hash_lo, uint64_t hash_hi,
     return it->second.data();
 }
 
+std::shared_ptr<const std::vector<uint8_t>>
+PlaybackContext::load_snapshot_blob(uint64_t hash_lo, uint64_t hash_hi) const {
+    if (!hash_lo && !hash_hi) return nullptr;
+    std::string key = hrr::hash_hex(hash_lo, hash_hi);
+    {
+        std::lock_guard<std::mutex> lk(snap_cache_mu_);
+        auto it = snap_cache_.find(key);
+        if (it != snap_cache_.end()) return it->second;
+    }
+    auto data = std::make_shared<const std::vector<uint8_t>>(
+        read_file(blob_path(archive_dir, hash_lo, hash_hi)));
+    if (data->empty()) return nullptr;
+    std::lock_guard<std::mutex> lk(snap_cache_mu_);
+    auto [it, inserted] = snap_cache_.emplace(key, data);
+    if (!inserted) return it->second;
+    snap_cache_order_.push_back(key);
+    snap_cache_bytes_ += data->size();
+    // The newest entry stays even when it alone is over the budget.
+    while (snap_cache_bytes_ > kSnapshotCacheBytes && snap_cache_order_.size() > 1) {
+        auto old = snap_cache_.find(snap_cache_order_.front());
+        snap_cache_bytes_ -= old->second->size();
+        snap_cache_.erase(old);
+        snap_cache_order_.pop_front();
+    }
+    return data;
+}
+
 const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                               size_t* sz_out) const {
     if (!hash_lo && !hash_hi) return nullptr;
@@ -425,8 +452,14 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 //   [+30..31] num_snapshots (uint16_t; records follow the attribute tail)
 //   per arg:  u8 value_kind, u16 size, <size> bytes data
 //             value_kind: 0=scalar, 1=gpu-pointer, 2=hidden,
-//                         3=scalar/struct with embedded gpu pointer(s);
+//                         3=scalar/struct with embedded pointer(s): device
+//                           pointers, and pointers into pinned host memory
+//                           that this launch's snapshot records cover;
 //             kind 3 appends u16 n_ptrs then n_ptrs * u16 byte offsets.
+//   then:     u32 n_attrs, u32 stride, n_attrs * stride attribute bytes
+//   then:     num_snapshots * 41-byte records: u64 ptr, offset, length,
+//             hash_lo, hash_hi, u8 direction (0 = restore before the launch,
+//             1 = read unchanged while the stream was busy, leave alone).
 
 // ext_global_worksize: the captured grid[] holds *global work-item counts*
 // (HSA/OpenCL semantics, as passed to hipExtModuleLaunchKernel), NOT workgroup
@@ -620,6 +653,14 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
 //
 // `rls` is the caller's per-launch guard bookkeeping, or null on the graph
 // kernel-node path where a relocation could never be undone.
+//
+// `snap_bases`, on the kernel-launch path, holds the recorded bases of the
+// pinned host allocations this launch's snapshot records name. A word inside
+// a by-value argument that resolves to pinned host memory is rewritten only
+// when its allocation is in that set: capture marks such a word only for an
+// allocation it snapshotted, so any other match is a scalar that happens to
+// equal a host address. Null keeps the older rule, under which any word that
+// resolves is rewritten.
 static void decode_kernel_args(
     PlaybackContext& ctx, const uint8_t*& p, const uint8_t* end,
     uint16_t num_args, const std::string& kernel_name,
@@ -627,7 +668,8 @@ static void decode_kernel_args(
     std::vector<std::vector<uint8_t>>& arg_storage,
     RegionLaunchState* rls = nullptr,
     std::vector<std::tuple<unsigned, uint64_t, void*>>* dbg_ptrs_out = nullptr,
-    std::string* dbg_args_out = nullptr) {
+    std::string* dbg_args_out = nullptr,
+    const std::set<uint64_t>* snap_bases = nullptr) {
     (void)kernel_name;
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_sink;
     const bool dbg_dump_ptrs = (dbg_ptrs_out != nullptr);
@@ -785,7 +827,7 @@ static void decode_kernel_args(
                 fprintf(stderr, "[HRR]   arg[%u]: ptr 0x%llx -> %p%s\n",
                         i, (unsigned long long)rec_ptr, live,
                         live ? "" : " (MISSING!)");
-        } else if (value_kind == 3) {  // scalar/struct with embedded gpu pointer(s)
+        } else if (value_kind == 3) {  // scalar/struct with embedded pointer(s)
             storage.assign(data, data + arg_size);
 
             // Translate the 8-byte word at `off` (read from the *original*
@@ -812,6 +854,17 @@ static void decode_kernel_args(
                 if (!live && ctx.regions_enabled)
                     live = ctx.regions.materialize_for(ctx, rec_ptr);
                 if (!live) return false;
+                // Pinned host memory counts only when this launch's snapshot
+                // records name it (see snap_bases above).
+                if (snap_bases) {
+                    void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
+                    AllocKind akind = AllocKind::Device;
+                    if (ctx.live_alloc_of(live, &abase, &asize, &arec, &akind) &&
+                        (akind == AllocKind::HostMalloc ||
+                         akind == AllocKind::HostRegister) &&
+                        !snap_bases->count(arec))
+                        return false;
+                }
                 // Same region check as a whole-pointer argument: a device
                 // address embedded in a by-value struct addresses a tensor
                 // block just as much as one passed directly.
@@ -957,11 +1010,20 @@ static void decode_kernel_args(
 
 // Write back the pinned host bytes a launch read at capture time. Each record
 // names a chunk of a pinned allocation and the blob holding its bytes. The
-// archive is untrusted input, so a record is applied only when its range lies
-// inside a live host allocation and the blob is exactly its length; any other
-// record is skipped with a message. A chunk that already holds the recorded
-// bytes, typically because replayed device work wrote the same thing, is left
-// alone. rec_bases_out gets the recorded base of every allocation written to.
+// archive is untrusted input, so a record is used only when its direction is
+// known, its range lies inside a live host allocation and, to be applied, its
+// blob is exactly its length; any other record is skipped with a message.
+//
+// Direction 0 is applied. The restore is not stream-ordered: replay waits on
+// the host for the launch stream to drain, then copies the bytes in with
+// memcpy, leaving alone a chunk that already holds them (typically because
+// replayed device work wrote the same thing). Direction 1 is a chunk capture
+// read unchanged while the stream still had work queued; that work may have
+// written it before the kernel ran, so replay leaves it to the replayed work.
+//
+// rec_bases_out gets the recorded base of every allocation a valid record
+// names, applied or not: decode_kernel_args uses it to decide which pinned
+// words in by-value arguments are pointers.
 static constexpr size_t kHostSnapRecordSize = 8 * 5 + 1;
 
 static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
@@ -976,13 +1038,13 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
                 "of the event — none applied\n", kname.c_str(), n);
         return;
     }
-    if (ctx.in_graph_capture) {
+    const bool apply = !ctx.in_graph_capture;
+    if (!apply) {
         static std::atomic<bool> warned{false};
         if (!warned.exchange(true))
             fprintf(stderr,
                     "[HRR] pinned host snapshots are not applied to kernels "
                     "replayed into a graph capture\n");
-        return;
     }
     auto skip = [&](uint16_t i, uint64_t ptr, uint64_t off, uint64_t len,
                     const char* why) {
@@ -1001,7 +1063,7 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
         memcpy(&hlo, p + 24, 8);
         memcpy(&hhi, p + 32, 8);
         const uint8_t direction = p[40];
-        if (direction != 0) { skip(i, ptr, off, len, "has an unknown direction"); continue; }
+        if (direction > 1) { skip(i, ptr, off, len, "has an unknown direction"); continue; }
         if (len == 0) continue;
         void* live = ctx.translate_ptr(ptr);
         void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
@@ -1021,22 +1083,46 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
             skip(i, ptr, off, len, "is out of bounds of its allocation");
             continue;
         }
-        size_t blob_sz = 0;
-        const void* blob = ctx.load_blob(hlo, hhi, &blob_sz);
+        if (direction == 1 || !apply) {
+            if (rec_bases_out) rec_bases_out->insert(arec);
+            continue;
+        }
+        auto blob = ctx.load_snapshot_blob(hlo, hhi);
         if (!blob) { skip(i, ptr, off, len, "has no blob in the archive"); continue; }
-        if (blob_sz != len) {
+        if (blob->size() != len) {
             skip(i, ptr, off, len, "does not match the size of its blob");
             continue;
         }
         // Earlier work on this stream may still be reading or writing the buffer.
         if (!synced) { (void)hipStreamSynchronize(stream); synced = true; }
         auto* dst = static_cast<uint8_t*>(live) + off;
-        if (memcmp(dst, blob, len) != 0) {
-            memcpy(dst, blob, len);
+        if (memcmp(dst, blob->data(), len) != 0) {
+            memcpy(dst, blob->data(), len);
             ctx.host_snapshots_applied.fetch_add(1, std::memory_order_relaxed);
         }
         if (rec_bases_out) rec_bases_out->insert(arec);
     }
+}
+
+// Step over the argument block of a kernel launch payload without decoding
+// it, the same way decode_kernel_args reads it, so the attribute tail and the
+// snapshot records behind it can be found first.
+static const uint8_t* skip_kernel_args(const uint8_t* p, const uint8_t* end,
+                                       uint16_t num_args) {
+    for (uint16_t i = 0; i < num_args; i++) {
+        if (p + 3 > end) return end;
+        const uint8_t kind = *p++;
+        uint16_t size; memcpy(&size, p, 2); p += 2;
+        if (p + size > end) return end;
+        p += size;
+        if (kind == 3) {
+            if (p + 2 > end) return end;
+            uint16_t n; memcpy(&n, p, 2); p += 2;
+            if (static_cast<size_t>(end - p) < static_cast<size_t>(n) * 2) return end;
+            p += static_cast<size_t>(n) * 2;
+        }
+    }
+    return p;
 }
 
 static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
@@ -1112,9 +1198,10 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0) || ctx.audit_host_args;
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_ptrs;  // (arg_idx, recorded, live)
     std::string dbg_args;
-    decode_kernel_args(ctx, p, end, num_args, kernel_name, arg_ptrs,
-                       arg_storage, &rls, dbg_dump_ptrs ? &dbg_ptrs : nullptr,
-                       dbg_dump_ptrs ? &dbg_args : nullptr);
+    // The snapshot records sit behind the arguments and the attribute tail,
+    // and decoding the arguments needs to know which allocations they name.
+    const uint8_t* args_p = p;
+    p = skip_kernel_args(p, end, num_args);
 
     // Launch-attribute tail: u32 count, u32 per-entry stride, then the
     // entries. Every launch payload carries it (count 0 for a plain launch).
@@ -1171,7 +1258,8 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         ctx.kernels_launched.load(std::memory_order_relaxed) + 1;
 
     // Pinned host memory the kernel reads, as the host left it before the
-    // launch at capture time. Written back now, stream-ordered.
+    // launch at capture time. Written back now: replay waits on the host for
+    // the stream to drain, then copies the bytes in (not stream-ordered).
     std::set<uint64_t> refilled;
     if (num_snapshots) {
         if (!tail_ok)
@@ -1185,6 +1273,10 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                                    kernel_name, &refilled);
     }
 
+    decode_kernel_args(ctx, args_p, end, num_args, kernel_name, arg_ptrs,
+                       arg_storage, &rls, dbg_dump_ptrs ? &dbg_ptrs : nullptr,
+                       dbg_dump_ptrs ? &dbg_args : nullptr, &refilled);
+
     if (ctx.audit_host_args) {
         for (auto& [idx, rec, live] : dbg_ptrs) {
             void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
@@ -1192,7 +1284,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             if (!live || !ctx.live_alloc_of(live, &abase, &asize, &arec, &akind))
                 continue;
             if (akind == AllocKind::Device) continue;
-            if (refilled.count(arec)) continue;  // restored from a snapshot above
+            if (refilled.count(arec)) continue;  // named by a snapshot record above
             static std::mutex mu;
             static std::set<std::string> seen;
             std::string key = kernel_name + "#" + std::to_string(idx);
