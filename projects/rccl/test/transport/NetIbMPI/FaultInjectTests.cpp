@@ -103,7 +103,8 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
                     result = WorkerPostRecv(pair.recvComm, buffer, size, 301, mhandle, &request);
                     if (!result.ok) return result;
                     if (WorkerDrainRecv(request, 100)) return result;
-                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request, &bufferGuard);
+                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request, &mhandleGuard,
+                                                         &bufferGuard);
                 }
 
                 int liveNqps = 0;
@@ -123,9 +124,7 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
                 }
                 if (!outcome.retired) {
                     // Completion was not observed: retain both buffer and MR until this isolated test process exits.
-                    mhandleGuard.release();
-                    bufferGuard.release();
-                    g_workerRetainedResources.fetch_add(1, std::memory_order_relaxed);
+                    RetainWorkerResources(&mhandleGuard, &bufferGuard);
                     if (!outcome.quiesced) {
                         result.ok = false;
                         result.msg = "the injected-fault send left work on queue pairs that could not all be "
@@ -729,7 +728,8 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
                                             &request);
                     if (!result.ok) return result;
                     if (!WorkerDrainRecv(request, 100)) {
-                        result = WorkerCastFlushAbandonedRecv(faulted.recvComm, request, &bufferGuard);
+                        result = WorkerCastFlushAbandonedRecv(faulted.recvComm, request,
+                                                              &faultedGuard, &bufferGuard);
                         if (!result.ok) return result;
                     }
                 } else {
@@ -749,9 +749,7 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
                     }
                     if (!outcome.retired) {
                         // Completion was not observed: retain both buffer and MR until this isolated test process exits.
-                        faultedGuard.release();
-                        bufferGuard.release();
-                        g_workerRetainedResources.fetch_add(1, std::memory_order_relaxed);
+                        RetainWorkerResources(&faultedGuard, &bufferGuard);
                         if (!outcome.quiesced) {
                             result.ok = false;
                             result.msg = "the injected-fault send left work on queue pairs that could not all be "
@@ -771,19 +769,20 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
                     }
                 }
 
-                // Phase 2: the fresh connection must be unaffected.
-                void* freshComm = (rank == 0) ? fresh.recvComm : fresh.sendComm;
-                void* freshMh = nullptr;
-                result = WorkerRegister(freshComm, buffer, size, NCCL_PTR_HOST, &freshMh);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard freshGuard(freshMh,
-                                                 NetMHandleWorkerDeleter(net_, freshComm));
+                // Phase 2 must not reuse phase 1's buffer, which may be held
+                // by an abandoned faulted request.
+                WorkerHostBuffer freshHost = WorkerSetupHostBuffer(rank, fresh, size);
+                if (!freshHost.result.ok) return freshHost.result;
+                void* freshBuffer = freshHost.buffer;
+                void* freshMh = freshHost.mhandle;
+                auto& freshBufferGuard = freshHost.bufferGuard;
+                auto& freshGuard = freshHost.mhandleGuard;
 
-                result = WorkerSendRecvPattern(rank, fresh, buffer, size, 502, freshMh,
+                result = WorkerSendRecvPattern(rank, fresh, freshBuffer, size, 502, freshMh,
                                                WorkerSeed(threadIdx, 7));
                 if (!result.ok)
                     return WorkerRetainAfterAbandonedRequest(result, fresh, rank, &freshGuard,
-                                                             &bufferGuard);
+                                                             &freshBufferGuard);
 
                 if (rank == 1) {
                     const int fatalCount = WorkerCastFatalCount(fresh.sendComm);
@@ -4006,7 +4005,8 @@ TEST_F(NetIbMPITest, FaultIsolationAcrossWorkers) {
                     if (!result.ok) return result;
                     faultArmed.store(true, std::memory_order_release);
                     if (WorkerDrainRecv(request, 100)) return result;
-                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request, &bufferGuard);
+                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request, &mhandleGuard,
+                                                         &bufferGuard);
                 }
 
                 int liveNqps = 0;
@@ -4026,9 +4026,7 @@ TEST_F(NetIbMPITest, FaultIsolationAcrossWorkers) {
                 }
                 if (!outcome.retired) {
                     // Completion was not observed: retain both buffer and MR until this isolated test process exits.
-                    mhandleGuard.release();
-                    bufferGuard.release();
-                    g_workerRetainedResources.fetch_add(1, std::memory_order_relaxed);
+                    RetainWorkerResources(&mhandleGuard, &bufferGuard);
                     if (!outcome.quiesced) {
                         result.ok = false;
                         result.msg = "the injected-fault send left work on queue pairs that could not all be "

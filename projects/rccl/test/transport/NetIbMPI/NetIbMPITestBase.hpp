@@ -250,6 +250,18 @@ public:
 using NetMHandleGuard = RCCLTestGuards::ResourceGuard<void*, NetMHandleDeleter>;
 using NetMHandleWorkerGuard = RCCLTestGuards::ResourceGuard<void*, NetMHandleWorkerDeleter>;
 
+inline void RetainWorkerResources(NetMHandleWorkerGuard* registration,
+                                  HostBufferAutoGuard* allocation) {
+    bool retainedRegistration = false;
+    if (registration && registration->get()) {
+        registration->release();
+        retainedRegistration = true;
+    }
+    if (allocation && allocation->get()) allocation->release();
+    if (retainedRegistration)
+        g_workerRetainedResources.fetch_add(1, std::memory_order_relaxed);
+}
+
 // Test fixture for NET IB tests
 class NetIbMPITest : public MPITestBase {
 protected:
@@ -1502,8 +1514,7 @@ protected:
             firstFailure.msg += "; " + std::to_string(outstanding)
                                 + " slot(s) were still outstanding, so the buffer and its "
                                   "registration are retained";
-            if (registration) registration->release();
-            if (allocation) allocation->release();
+            RetainWorkerResources(registration, allocation);
         }
         return firstFailure;
     }
@@ -1551,8 +1562,7 @@ protected:
     ThreadResult WorkerRetainHostBuffer(ThreadResult failure, WorkerHostBuffer& held) {
         failure.msg += "; the buffer and its registration are retained, since the request may "
                        "still reference them";
-        held.mhandleGuard.release();
-        held.bufferGuard.release();
+        RetainWorkerResources(&held.mhandleGuard, &held.bufferGuard);
         return failure;
     }
 
@@ -2150,8 +2160,7 @@ protected:
         if (!flushed.ok) failure.msg += "; " + flushed.msg;
         failure.msg += "; the buffer and its registration are retained, since a request may "
                        "still reference them";
-        if (registration) registration->release();
-        if (allocation) allocation->release();
+        RetainWorkerResources(registration, allocation);
         return failure;
     }
 
@@ -2197,8 +2206,7 @@ protected:
                     }
                     failure.msg += "; the buffer and its registration are retained rather "
                                    "than released";
-                    if (registration) registration->release();
-                    if (allocation) allocation->release();
+                    RetainWorkerResources(registration, allocation);
                 }
             }
             return failure;
@@ -2345,6 +2353,7 @@ protected:
 
     // Releases a receive the injected send will never satisfy by driving this side to error.
     ThreadResult WorkerCastFlushAbandonedRecv(void* recvComm, void* request,
+                                              NetMHandleWorkerGuard* registration = nullptr,
                                               HostBufferAutoGuard* allocation = nullptr) {
         ThreadResult result;
         if (!request) return result;
@@ -2364,7 +2373,7 @@ protected:
             result.ok = false;
             result.msg = "driving the receive queue pairs to error stopped short of the end "
                          "of the range, so the abandoned receive cannot be assumed retired";
-            if (allocation) allocation->release();
+            RetainWorkerResources(registration, allocation);
             return result;
         }
         static constexpr int kFlushPolls = 500;  // 500 * 10ms = 5s
@@ -2373,7 +2382,7 @@ protected:
             int sizes[1] = {0};
             // An error may come from the fatal-count check or the first flush CQE, neither of which retires it.
             if (TestRequest(request, &done, sizes) != ncclSuccess) {
-                if (allocation) allocation->release();
+                RetainWorkerResources(registration, allocation);
                 return result;
             }
             if (done) return result;
@@ -2382,7 +2391,7 @@ protected:
         result.ok = false;
         result.msg = "the abandoned receive was still outstanding after its queue pairs were "
                      "driven to error";
-        if (allocation) allocation->release();
+        RetainWorkerResources(registration, allocation);
         return result;
     }
 
