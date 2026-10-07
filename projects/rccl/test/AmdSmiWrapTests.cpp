@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <string>
 #include <thread>
@@ -264,12 +265,16 @@ TEST_F(AmdSmiWrapTest, PciBusIdRoundTripsToDeviceIndex)
 // The RAS diagnostics name a GPU by its busIdToInt64() value, which amd_smi_diag* decode back into a BDF, so
 // every device's bus ID has to reach a GPU that AMD SMI knows. A partition (non-zero PCI function) may be known
 // only through its physical GPU on function 0, which is what the diagnostics fall back to. ECC counters and XGMI
-// links depend on the GPU, so only the values they return when they answer are checked.
+// links depend on the GPU, so only the values they return when they answer are checked. AMD SMI reads the amdgpu
+// driver version from /sys/module/amdgpu/version, which an in-tree amdgpu does not provide.
 TEST_F(AmdSmiWrapTest, DiagnosticsQueriesResolveEveryDeviceBusId)
 {
     requireDevices(1);
     if(amd_smi_diagInit() != ncclSuccess)
         GTEST_SKIP() << "amd_smi_diagInit() failed: no AMD SMI library";
+
+    std::string sysfsDriverVersion;
+    std::ifstream("/sys/module/amdgpu/version") >> sysfsDriverVersion;
 
     uint32_t nGpus = 0;
     ASSERT_EQ(amd_smi_diagGpuCount(&nGpus), ncclSuccess);
@@ -288,6 +293,16 @@ TEST_F(AmdSmiWrapTest, DiagnosticsQueriesResolveEveryDeviceBusId)
         model[0] = '\0';
         EXPECT_EQ(amd_smi_diagGpuModel(busId, model, sizeof(model)), ncclSuccess) << "bus ID " << busIdString;
         EXPECT_GT(strlen(model), 0u) << "bus ID " << busIdString;
+
+        char driverVersion[80] = {0};
+        if(!sysfsDriverVersion.empty())
+        {
+            EXPECT_EQ(amd_smi_diagDriverVersion(busId, driverVersion, sizeof(driverVersion)), ncclSuccess)
+                << "bus ID " << busIdString;
+            EXPECT_EQ(std::string(driverVersion), sysfsDriverVersion) << "bus ID " << busIdString;
+        }
+        else if(amd_smi_diagDriverVersion(busId, driverVersion, sizeof(driverVersion)) == ncclSuccess)
+            EXPECT_GT(strlen(driverVersion), 0u) << "bus ID " << busIdString;
 
         amdsmiDiagEccCounts ecc = {UINT64_MAX, UINT64_MAX, UINT64_MAX};
         if(amd_smi_diagEccCounts(busId, &ecc) == ncclSuccess)

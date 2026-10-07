@@ -872,6 +872,11 @@ ncclResult_t amd_smi_diagGpuCount(uint32_t* count);
 ncclResult_t amd_smi_diagGpuModel(int64_t busId, char* model, size_t len);
 
 /**
+ * @brief Version of the amdgpu kernel driver that serves the GPU, e.g. "6.19.14.31400000"
+ */
+ncclResult_t amd_smi_diagDriverVersion(int64_t busId, char* version, size_t len);
+
+/**
  * @brief Accumulated ECC error counts of the GPU, summed over all memory blocks
  */
 ncclResult_t amd_smi_diagEccCounts(int64_t busId, struct amdsmiDiagEccCounts* counts);

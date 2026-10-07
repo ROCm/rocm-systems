@@ -34,6 +34,7 @@ struct amdsmiDiagXgmiLinks;
 extern int g_amdSmiDiagInitCalls;
 extern std::function<ncclResult_t(uint32_t*)> g_amdSmiDiagGpuCount;
 extern std::function<ncclResult_t(int64_t, char*, size_t)> g_amdSmiDiagGpuModel;
+extern std::function<ncclResult_t(int64_t, char*, size_t)> g_amdSmiDiagDriverVersion;
 extern std::function<ncclResult_t(int64_t, struct amdsmiDiagEccCounts*)> g_amdSmiDiagEccCounts;
 extern std::function<ncclResult_t(int64_t, struct amdsmiDiagXgmiLinks*)> g_amdSmiDiagXgmiLinks;
 

@@ -93,10 +93,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     failures, rank ordering and formatting, and reporter output.
   - `ras/diagnostics_gpu.cc` (`RAS_DIAGNOSTICS_GPU_CC_PATH`, from
     `ras-diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`.
-    Runs the GPU inventory, driver version, ECC, and XGMI checks end to end
-    (local collection on each simulated node, then summary) against the
-    `amd_smi_diag*` fakes in `fakes/amdsmi_fakes.cc`: count and model
-    mismatch, driver mismatch, uncorrectable / deferred ECC errors, the
+    Runs the GPU inventory, HIP and AMD GPU driver version, ECC, and XGMI
+    checks end to end (local collection on each simulated node, then summary)
+    against the `amd_smi_diag*` fakes in `fakes/amdsmi_fakes.cc`: count and
+    model mismatch, driver mismatch, uncorrectable / deferred ECC errors, the
     corrected-error threshold, down and missing XGMI links, AMD SMI
     unavailable on some or all nodes, and partition bus IDs (CPX, DPX) that
     fall back to the physical GPU. Also checks that `rasDiagnosticsGpuInit`

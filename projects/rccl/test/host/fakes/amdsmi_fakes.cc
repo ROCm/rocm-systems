@@ -13,6 +13,7 @@
 
 ASSERT_HOOK_MATCHES_PROD(g_amdSmiDiagGpuCount, amd_smi_diagGpuCount);
 ASSERT_HOOK_MATCHES_PROD(g_amdSmiDiagGpuModel, amd_smi_diagGpuModel);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiDiagDriverVersion, amd_smi_diagDriverVersion);
 ASSERT_HOOK_MATCHES_PROD(g_amdSmiDiagEccCounts, amd_smi_diagEccCounts);
 ASSERT_HOOK_MATCHES_PROD(g_amdSmiDiagXgmiLinks, amd_smi_diagXgmiLinks);
 
@@ -60,6 +61,12 @@ ncclResult_t amd_smi_diagGpuModel(int64_t busId, char* model, size_t len) {
   return g_amdSmiDiagGpuModel(busId, model, len);
 }
 
+std::function<ncclResult_t(int64_t, char*, size_t)> g_amdSmiDiagDriverVersion =
+    AmdSmiDiagUnavailable<int64_t, char*, size_t>;
+ncclResult_t amd_smi_diagDriverVersion(int64_t busId, char* version, size_t len) {
+  return g_amdSmiDiagDriverVersion(busId, version, len);
+}
+
 std::function<ncclResult_t(int64_t, struct amdsmiDiagEccCounts*)> g_amdSmiDiagEccCounts =
     AmdSmiDiagUnavailable<int64_t, struct amdsmiDiagEccCounts*>;
 ncclResult_t amd_smi_diagEccCounts(int64_t busId, struct amdsmiDiagEccCounts* counts) {
@@ -79,6 +86,7 @@ void ResetAmdSmiFakes() {
   g_amdSmiDiagInitCalls = 0;
   g_amdSmiDiagGpuCount = AmdSmiDiagUnavailable<uint32_t*>;
   g_amdSmiDiagGpuModel = AmdSmiDiagUnavailable<int64_t, char*, size_t>;
+  g_amdSmiDiagDriverVersion = AmdSmiDiagUnavailable<int64_t, char*, size_t>;
   g_amdSmiDiagEccCounts = AmdSmiDiagUnavailable<int64_t, struct amdsmiDiagEccCounts*>;
   g_amdSmiDiagXgmiLinks = AmdSmiDiagUnavailable<int64_t, struct amdsmiDiagXgmiLinks*>;
 }

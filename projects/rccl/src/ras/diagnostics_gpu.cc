@@ -26,12 +26,14 @@
 #define RAS_DIAG_AMD_SMI 1
 #define RAS_DIAG_GPU_SOURCE "AMD SMI"
 #define RAS_DIAG_DRIVER_LABEL "HIP driver version"
+#define RAS_DIAG_GPU_DRIVER_LABEL "AMD GPU driver version"
 #define RAS_DIAG_LINK_LABEL "XGMI"
 #define RAS_DIAG_LINK_SPEED_OK ""
 #else
 #define RAS_DIAG_AMD_SMI 0
 #define RAS_DIAG_GPU_SOURCE "NVML"
 #define RAS_DIAG_DRIVER_LABEL "CUDA driver version"
+#define RAS_DIAG_GPU_DRIVER_LABEL "NVIDIA graphics driver version"
 #define RAS_DIAG_LINK_LABEL "NVLink"
 #define RAS_DIAG_LINK_SPEED_OK " at consistent speed"
 #endif
@@ -363,7 +365,7 @@ ncclResult_t rasDiagnosticsCudaDriverVersionSummarize(
                                         rasDiagnosticsCudaDriverVersionFormat);
 }
 
-// NVIDIA graphics driver version.
+// GPU kernel driver version: the NVIDIA graphics driver, or amdgpu on AMD builds.
 struct rasDiagnosticsNvidiaDriverVersionData {
   char version[NVML_SYSTEM_DRIVER_VERSION_BUFFER_SIZE];
 };
@@ -371,7 +373,7 @@ struct rasDiagnosticsNvidiaDriverVersionData {
 static bool rasDiagnosticsNvidiaDriverVersionFormat(const void* data, char* buf, size_t bufLen) {
   const struct rasDiagnosticsNvidiaDriverVersionData* versionData =
     (const struct rasDiagnosticsNvidiaDriverVersionData*)data;
-  if (versionData->version[0] == '\0') snprintf(buf, bufLen, "unavailable via NVML");
+  if (versionData->version[0] == '\0') snprintf(buf, bufLen, "unavailable via " RAS_DIAG_GPU_SOURCE);
   else snprintf(buf, bufLen, "%.*s", NVML_SYSTEM_DRIVER_VERSION_BUFFER_SIZE, versionData->version);
   return versionData->version[0] != '\0';
 }
@@ -380,10 +382,17 @@ static ncclResult_t rasDiagnosticsNvidiaDriverVersionFillLocalData(const struct 
                                                                    void* checkData) {
   struct rasDiagnosticsNvidiaDriverVersionData* versionData = (struct rasDiagnosticsNvidiaDriverVersionData*)checkData;
 
-  (void)comm;
   memset(versionData, 0, sizeof(*versionData));
+#if RAS_DIAG_AMD_SMI
+  auto queryVersion = [&](int64_t busId) {
+    return amd_smi_diagDriverVersion(busId, versionData->version, sizeof(versionData->version));
+  };
+  if (rasDiagnosticsAmdSmiQuery(comm->busId, queryVersion) != ncclSuccess) memset(versionData, 0, sizeof(*versionData));
+#else
+  (void)comm;
   if (ncclNvmlSystemGetDriverVersion(versionData->version, sizeof(versionData->version)) != ncclSuccess)
     memset(versionData, 0, sizeof(*versionData));
+#endif
   versionData->version[sizeof(versionData->version) - 1] = '\0';
   return ncclSuccess;
 }
@@ -398,7 +407,7 @@ ncclResult_t rasDiagnosticsNvidiaDriverVersionCollectLocal(const struct rasDiagn
 ncclResult_t rasDiagnosticsNvidiaDriverVersionSummarize(
   const struct rasDiagnosticsContext* ctx, const struct rasDiagnosticsReporter* reporter, const char* data, int nData) {
   (void)ctx;
-  return rasDiagnosticsVersionSummarize(reporter, data, nData, "NVIDIA graphics driver version",
+  return rasDiagnosticsVersionSummarize(reporter, data, nData, RAS_DIAG_GPU_DRIVER_LABEL,
                                         sizeof(struct rasDiagnosticsNvidiaDriverVersionData),
                                         rasDiagnosticsNvidiaDriverVersionFormat);
 }

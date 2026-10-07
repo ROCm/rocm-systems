@@ -40,6 +40,7 @@ constexpr int kRanksPerNode = 2;
 constexpr int kNodes = kRanks / kRanksPerNode;
 constexpr char kModel[] = "AMD Instinct MI355X";
 constexpr int kDriverVersion = 70253211;
+constexpr char kGpuDriverVersion[] = "6.19.14.31400000";
 constexpr int kXgmiLinks = 7;
 
 int64_t BusIdOfRank(int rank) { return int64_t(0x05 + 0x20 * rank) << 12; }
@@ -65,6 +66,7 @@ struct FakeNode {
   bool amdSmiAvailable = true;
   uint32_t nGpus = 8;
   int driverVersion = kDriverVersion;
+  std::string gpuDriverVersion = kGpuDriverVersion;  // amdgpu; empty makes the query fail
 };
 
 // One rank of the communicator under test, registered the way ncclCommInit leaves it in ncclComms.
@@ -149,6 +151,12 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
       snprintf(model, len, "%s", gpu->model.c_str());
       return ncclSuccess;
     };
+    g_amdSmiDiagDriverVersion = [gpuOf, node](int64_t busId, char* version, size_t len) {
+      FakeGpu* gpu = gpuOf(busId);
+      if (gpu == nullptr || node.gpuDriverVersion.empty()) return ncclSystemError;
+      snprintf(version, len, "%s", node.gpuDriverVersion.c_str());
+      return ncclSuccess;
+    };
     g_amdSmiDiagEccCounts = [gpuOf](int64_t busId, amdsmiDiagEccCounts* counts) {
       FakeGpu* gpu = gpuOf(busId);
       if (gpu == nullptr) return ncclSystemError;
@@ -201,6 +209,9 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
   std::vector<std::string> RunDriverVersion() {
     return Run(rasDiagnosticsCudaDriverVersionCollectLocal, rasDiagnosticsCudaDriverVersionSummarize);
   }
+  std::vector<std::string> RunGpuDriverVersion() {
+    return Run(rasDiagnosticsNvidiaDriverVersionCollectLocal, rasDiagnosticsNvidiaDriverVersionSummarize);
+  }
   std::vector<std::string> RunEcc() { return Run(rasDiagnosticsEccCollectLocal, rasDiagnosticsEccSummarize); }
   std::vector<std::string> RunXgmi() { return Run(rasDiagnosticsNvLinkCollectLocal, rasDiagnosticsNvLinkSummarize); }
 
@@ -224,6 +235,9 @@ TEST_F(RasDiagnosticsGpuMicrotest, HealthyNodesReportOkForEveryCheck) {
             RunGpuInventory());
   EXPECT_EQ(Lines{"[OK]   HIP driver version: 70253211 consistent across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
             RunDriverVersion());
+  EXPECT_EQ(Lines{"[OK]   AMD GPU driver version: 6.19.14.31400000 consistent across 4 ranks in comm "
+                  "0x5fa31c27a9e0d1b4"},
+            RunGpuDriverVersion());
   EXPECT_EQ(Lines{"[OK]   ECC: no uncorrected volatile errors across 4 ranks in comm 0x5fa31c27a9e0d1b4"}, RunEcc());
   EXPECT_EQ(Lines{"[OK]   XGMI: 7 links per GPU, all active across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
             RunXgmi());
@@ -255,6 +269,13 @@ TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionMismatchAcrossNodes) {
   EXPECT_EQ(Lines{"[INFO] HIP driver version: mismatch across 4 ranks in comm 0x5fa31c27a9e0d1b4, rank(s) {2,3} "
                   "differ from rank 0 (70253211)"},
             RunDriverVersion());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, GpuDriverVersionMismatchAcrossNodes) {
+  nodes[1].gpuDriverVersion = "6.16.13.30300000";
+  EXPECT_EQ(Lines{"[INFO] AMD GPU driver version: mismatch across 4 ranks in comm 0x5fa31c27a9e0d1b4, rank(s) {2,3} "
+                  "differ from rank 0 (6.19.14.31400000)"},
+            RunGpuDriverVersion());
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, EccUncorrectableErrorsOnOneRank) {
@@ -322,7 +343,10 @@ TEST_F(RasDiagnosticsGpuMicrotest, PartitionAliasReadsThePhysicalGpu) {
             RunEcc());
   EXPECT_EQ(Lines{"[INFO] XGMI: inactive link(s) on rank(s) {1} across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
             RunXgmi());
-  EXPECT_EQ(3 * kRanks, aliasQueries);
+  EXPECT_EQ(Lines{"[OK]   AMD GPU driver version: 6.19.14.31400000 consistent across 4 ranks in comm "
+                  "0x5fa31c27a9e0d1b4"},
+            RunGpuDriverVersion());
+  EXPECT_EQ(4 * kRanks, aliasQueries);
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, PhysicalGpuUnknownToAmdSmiIsNotRetried) {
@@ -339,6 +363,8 @@ TEST_F(RasDiagnosticsGpuMicrotest, AmdSmiUnavailableOnEveryNode) {
             RunGpuInventory());
   EXPECT_EQ(Lines{"[OK]   HIP driver version: 70253211 consistent across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
             RunDriverVersion());
+  EXPECT_EQ(Lines{"[INFO] AMD GPU driver version: unavailable via AMD SMI across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
+            RunGpuDriverVersion());
   EXPECT_EQ(Lines{"[INFO] ECC: unavailable via AMD SMI across 4 ranks in comm 0x5fa31c27a9e0d1b4"}, RunEcc());
   EXPECT_EQ(Lines{}, RunXgmi());
 }

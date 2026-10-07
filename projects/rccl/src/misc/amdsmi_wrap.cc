@@ -885,6 +885,7 @@ struct AmdSmiDiagFns {
   amdsmi_status_t (*getProcessorType)(amdsmi_processor_handle processorHandle, processor_type_t* processorType);
   amdsmi_status_t (*getProcessorHandleFromBdf)(amdsmi_bdf_t bdf, amdsmi_processor_handle* processorHandle);
   amdsmi_status_t (*getGpuAsicInfo)(amdsmi_processor_handle processorHandle, amdsmi_asic_info_t* info);
+  amdsmi_status_t (*getGpuDriverInfo)(amdsmi_processor_handle processorHandle, amdsmi_driver_info_t* info);
   amdsmi_status_t (*getGpuTotalEccCount)(amdsmi_processor_handle processorHandle, amdsmi_error_count_t* ec);
   amdsmi_status_t (*getGpuXgmiLinkStatus)(amdsmi_processor_handle processorHandle,
                                           amdsmi_xgmi_link_status_t* linkStatus);
@@ -929,6 +930,7 @@ static ncclResult_t amd_smi_diagLoadImpl() {
     {(void**)&amdSmiDiag.getProcessorType, "amdsmi_get_processor_type"},
     {(void**)&amdSmiDiag.getProcessorHandleFromBdf, "amdsmi_get_processor_handle_from_bdf"},
     {(void**)&amdSmiDiag.getGpuAsicInfo, "amdsmi_get_gpu_asic_info"},
+    {(void**)&amdSmiDiag.getGpuDriverInfo, "amdsmi_get_gpu_driver_info"},
     {(void**)&amdSmiDiag.getGpuTotalEccCount, "amdsmi_get_gpu_total_ecc_count"},
     {(void**)&amdSmiDiag.getGpuXgmiLinkStatus, "amdsmi_get_gpu_xgmi_link_status"},
   };
@@ -1008,6 +1010,24 @@ ncclResult_t amd_smi_diagGpuModel(int64_t busId, char* model, size_t len) {
   return ncclSuccess;
 }
 
+ncclResult_t amd_smi_diagDriverVersion(int64_t busId, char* version, size_t len) {
+  amdsmi_processor_handle handle;
+  // amdsmi_driver_info_t has grown between AMD SMI releases (3 to 7 strings), and the loaded library may be newer
+  // than the header RCCL was built with. Its first field, driver_version, is read from a buffer with room to spare.
+  struct {
+    amdsmi_driver_info_t info;
+    char spare[16 * AMDSMI_MAX_STRING_LENGTH];
+  } buf = {};
+  if (amd_smi_diagHandle(busId, &handle) != ncclSuccess) return ncclSystemError;
+  AMDSMIDIAG(getGpuDriverInfo, handle, &buf.info);
+  char* driverVersion = buf.info.driver_version;
+  driverVersion[sizeof(buf.info.driver_version) - 1] = '\0';
+  // Without /sys/module/amdgpu/version, as with an in-tree amdgpu, AMD SMI reports "N/A".
+  if (driverVersion[0] == '\0' || strcmp(driverVersion, "N/A") == 0) return ncclSystemError;
+  snprintf(version, len, "%s", driverVersion);
+  return ncclSuccess;
+}
+
 ncclResult_t amd_smi_diagEccCounts(int64_t busId, struct amdsmiDiagEccCounts* counts) {
   amdsmi_processor_handle handle;
   amdsmi_error_count_t ec = {};
@@ -1042,6 +1062,9 @@ ncclResult_t amd_smi_diagGpuCount(uint32_t*) {
   return ncclSystemError;
 }
 ncclResult_t amd_smi_diagGpuModel(int64_t, char*, size_t) {
+  return ncclSystemError;
+}
+ncclResult_t amd_smi_diagDriverVersion(int64_t, char*, size_t) {
   return ncclSystemError;
 }
 ncclResult_t amd_smi_diagEccCounts(int64_t, struct amdsmiDiagEccCounts*) {
