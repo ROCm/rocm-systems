@@ -20,9 +20,12 @@
 #include "hrr/hrr_api_args.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifndef _WIN32
@@ -441,6 +444,51 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_MappingOverlap) {
   REQUIRE(hrr::va_mapping_overlapping(m, B - P, B) == nullptr);
   REQUIRE(hrr::va_mapping_overlapping(m, B + 5 * P, B + 6 * P) == nullptr);
   REQUIRE(hrr::va_mapping_overlapping({}, B, B + P) == nullptr);
+}
+
+namespace {
+// A stand-in for hipMemUnmap that holds the unmap open until the test lets
+// it finish.
+std::atomic<bool> g_unmap_entered{false};
+std::atomic<bool> g_unmap_go{false};
+std::atomic<bool> g_unmap_done{false};
+
+hipError_t slow_unmap(void*, size_t) {
+  g_unmap_entered = true;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!g_unmap_go && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  g_unmap_done = true;
+  return hipSuccess;
+}
+hipError_t no_release(hipMemGenericAllocationHandle_t) { return hipSuccess; }
+}  // namespace
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapHoldsTheLock) {
+  // While one thread unmaps a placed allocation, the pages are still mapped.
+  // Another thread asking about them waits until the unmap is over, rather
+  // than hearing they are gone and placing over them.
+  hrr::VaPlacement pl;
+  pl.set_unmap_ops_for_test({slow_unmap, no_release});
+  pl.adopt_mapping_for_test(B, P);
+  REQUIRE(pl.is_mapped(reinterpret_cast<void*>(B)));
+
+  bool unmapped = false;  // Catch2 assertions are for the main thread only
+  std::thread a([&] { unmapped = pl.unmap(reinterpret_cast<void*>(B)); });
+  while (!g_unmap_entered) std::this_thread::yield();
+  bool done_when_answered = false;
+  bool mapped = true;
+  std::thread b([&] {
+    mapped = pl.is_mapped(reinterpret_cast<void*>(B));
+    done_when_answered = g_unmap_done;
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  g_unmap_go = true;
+  a.join();
+  b.join();
+  REQUIRE(unmapped);
+  REQUIRE(done_when_answered);
+  REQUIRE_FALSE(mapped);
 }
 
 // Placement holds its placeholders with mmap, so it is off on Windows and

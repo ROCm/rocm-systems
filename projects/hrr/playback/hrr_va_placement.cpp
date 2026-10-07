@@ -358,7 +358,7 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
 bool VaPlacement::unmap_one(uint64_t pb, const PlacedMapping& m) {
     // hipMemUnmap waits for every stream, so nothing still queued can touch
     // the pages once they are gone. The reservation stays.
-    hipError_t r = hipMemUnmap(reinterpret_cast<void*>(pb), m.end - pb);
+    hipError_t r = ops_.unmap(reinterpret_cast<void*>(pb), m.end - pb);
     if (r != hipSuccess) {
         fprintf(stderr,
                 "[HRR] Placement: hipMemUnmap of 0x%llx (%llu bytes) failed (%s); the "
@@ -366,7 +366,7 @@ bool VaPlacement::unmap_one(uint64_t pb, const PlacedMapping& m) {
                 (ull)m.rec, (ull)(m.end - pb), hipGetErrorString(r));
         return false;
     }
-    r = hipMemRelease(m.handle);
+    r = ops_.release(m.handle);
     if (r != hipSuccess)
         fprintf(stderr,
                 "[HRR] Placement: hipMemRelease for 0x%llx failed (%s); its memory is "
@@ -375,53 +375,49 @@ bool VaPlacement::unmap_one(uint64_t pb, const PlacedMapping& m) {
     return true;
 }
 
+// unmap and drain_deferred hold mu_ across unmap_one. Until hipMemUnmap
+// returns, the pages are still mapped: another thread's map_at must not place
+// over them, and is_mapped must not yet say they are gone.
 bool VaPlacement::unmap(void* live, bool defer) {
     if (!active_ || !live) return false;
     const uint64_t v = reinterpret_cast<uint64_t>(live);
-    uint64_t pb = 0;
-    PlacedMapping m{};
-    {
-        std::lock_guard<std::mutex> lk(mu_);
-        auto it = mapped_.upper_bound(v);
-        if (it == mapped_.begin()) return false;
-        --it;
-        if (it->second.rec != v) return false;
-        pb = it->first;
-        m  = it->second;
-        mapped_.erase(it);
-        if (defer) {
-            deferred_[pb] = m;
-            ++deferred_total_;
-            return true;
-        }
-    }
-    if (!unmap_one(pb, m)) {
-        // Still mapped: keep it where map_at will not place over it and the
-        // next drain tries again.
-        std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<std::mutex> lk(mu_);
+    auto it = mapped_.upper_bound(v);
+    if (it == mapped_.begin()) return false;
+    --it;
+    if (it->second.rec != v) return false;
+    const uint64_t      pb = it->first;
+    const PlacedMapping m  = it->second;
+    mapped_.erase(it);
+    if (defer) {
         deferred_[pb] = m;
+        ++deferred_total_;
+        return true;
     }
+    // Still mapped after a failed unmap: keep it where map_at will not place
+    // over it and the next drain tries again.
+    if (!unmap_one(pb, m)) deferred_[pb] = m;
     return true;
 }
 
 size_t VaPlacement::drain_deferred() {
-    PlacedMap work;
-    {
-        std::lock_guard<std::mutex> lk(mu_);
-        if (deferred_.empty()) return 0;
-        work.swap(deferred_);
-    }
+    std::lock_guard<std::mutex> lk(mu_);
     size_t n = 0;
-    PlacedMap kept;
-    for (const auto& [pb, m] : work) {
-        if (unmap_one(pb, m)) ++n;
-        else kept[pb] = m;
-    }
-    if (!kept.empty()) {
-        std::lock_guard<std::mutex> lk(mu_);
-        deferred_.insert(kept.begin(), kept.end());
+    for (auto it = deferred_.begin(); it != deferred_.end();) {
+        if (unmap_one(it->first, it->second)) {
+            it = deferred_.erase(it);
+            ++n;
+        } else {
+            ++it;
+        }
     }
     return n;
+}
+
+void VaPlacement::adopt_mapping_for_test(uint64_t rec, size_t size) {
+    std::lock_guard<std::mutex> lk(mu_);
+    active_ = true;
+    mapped_[va_floor(rec, gran_)] = {va_ceil(rec + size, gran_), rec, {}};
 }
 
 bool VaPlacement::is_mapped(void* live) {

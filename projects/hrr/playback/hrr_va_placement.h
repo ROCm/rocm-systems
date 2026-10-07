@@ -582,6 +582,13 @@ inline const PlacedMapping* va_mapping_overlapping(const PlacedMap& m, uint64_t 
     return it->second.end > pb ? &it->second : nullptr;
 }
 
+// The two VMM calls that take a placed mapping down. Tests replace them to
+// run unmap() without a GPU.
+struct UnmapOps {
+    hipError_t (*unmap)(void* base, size_t size)              = hipMemUnmap;
+    hipError_t (*release)(hipMemGenericAllocationHandle_t h) = hipMemRelease;
+};
+
 class VaPlacement {
   public:
     // Before hipInit: hold every planned range with a placeholder. Returns
@@ -626,7 +633,9 @@ class VaPlacement {
 
     // hipMemAddressReserve: give back the placeholder over [base, base+size) so
     // the reserve at that hint can take it. False when placement does not hold
-    // that range.
+    // that range. Between this call and the reserve, the range is free to any
+    // mmap in the process, and another replay thread's allocation can land
+    // there first; the reserve then misses its hint and falls back, named.
     bool release_vmm_hold(uint64_t base, size_t size);
     // hipMemAddressFree: hold the range again for a later reserve there.
     void restore_vmm_hold(uint64_t base, size_t size);
@@ -650,11 +659,17 @@ class VaPlacement {
     size_t   lost_ranges() const { return lost_ranges_; }
     std::vector<uint64_t> mapped_bases();
 
+    // Tests only: replace the unmap calls, and take [rec, rec + size) as a
+    // placed mapping, as map_at would, so unmap() runs without a GPU.
+    void set_unmap_ops_for_test(UnmapOps ops) { ops_ = ops; }
+    void adopt_mapping_for_test(uint64_t rec, size_t size);
+
   private:
     bool unmap_one(uint64_t pb, const PlacedMapping& m);
     void reserve_line(bool whole, uint64_t b, uint64_t e, const char* why);
 
     std::mutex mu_;
+    UnmapOps ops_;
     bool active_  = false;
     bool verbose_ = false;
     int  device_count_ = 0;
