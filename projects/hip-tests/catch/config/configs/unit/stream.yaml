@@ -408,6 +408,9 @@ stream:
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamSynchronize_spt_FinishWork:
     <<: *level_2
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - flaky on gfx110X (amd_windows): hangs past the 600s ctest timeout on the Windows ROCR hip-tests shard 3 lane as part of a stream/event timeout cascade; passes locally. Disabled on amd_windows pending re-triage."
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream:
     <<: *level_2
