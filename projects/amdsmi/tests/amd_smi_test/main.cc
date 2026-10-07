@@ -27,6 +27,7 @@
 #include "functional/gpu/metrics/process_list_churn_read.h"
 #include "functional/gpu/metrics/process_list_concurrent_read.h"
 #include "functional/gpu/metrics/process_list_read.h"
+#include "functional/gpu/metrics/process_memory_read.h"
 #include "functional/gpu/partition/computepartition_memallocmode_read_write.h"
 #include "functional/gpu/partition/computepartition_read_write.h"
 #include "functional/gpu/partition/memorypartition_read.h"
@@ -265,6 +266,11 @@ TEST(GpuFunctionalReadOnly, TestProcessListConcurrentRead) {
 
 TEST(GpuFunctionalReadOnly, TestProcessListChurnRead) {
   TestProcessListChurnRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadOnly, TestProcessMemoryRead) {
+  TestProcessMemoryRead tst;
   RunGenericTest(&tst);
 }
 

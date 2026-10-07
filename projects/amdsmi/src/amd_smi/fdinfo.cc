@@ -10,6 +10,7 @@
 #include <cinttypes>
 #include <cstdlib>
 #include <fstream>
+#include <unordered_set>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -128,53 +129,37 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
   if (!d) return AMDSMI_STATUS_NO_PERM;
 
   memset(&info, 0, sizeof(info));
-  /* Iterate through all fdinfos */
+  // Every fd that refers to a DRM client (dup, fork, fd passing) lists that
+  // client's usage, so count each drm-client-id once. Its sizes are in KiB.
+  constexpr uint64_t kKiB = 1024;
+  std::unordered_set<uint64_t> clients;
   while ((dir = readdir(d)) != NULL) {
-    std::string file = path + dir->d_name;
-    std::ifstream fdinfo(file.c_str());
-
-    for (std::string bdfline; getline(fdinfo, bdfline);) {
-      if (bdfline.find("drm-pdev:") != std::string::npos) {
-        char fd_bdf_str[13];
-
-        /* Only check against fdinfo files that contain a bdf */
-        if (sscanf(bdfline.c_str(), "drm-pdev:       %12s", &fd_bdf_str[0]) != 1) continue;
-
-        /* Populate amdsmi_proc_info_t struct only if the bdf in
-         * the fdinfo file matches the passed bdf */
-        if (strncmp(bdf_str, fd_bdf_str, 13) == 0) {
-          std::ifstream fdinfo(file.c_str());
-
-          for (std::string line; getline(fdinfo, line);) {
-            if (line.find("drm-memory-gtt:") != std::string::npos) {
-              unsigned long mem;
-              if (sscanf(line.c_str(), "drm-memory-gtt:  %" PRIu64, &mem) != 1) continue;
-              info.mem += mem * 1000;
-              info.memory_usage.gtt_mem += mem * 1000;
-            } else if (line.find("drm-memory-cpu:") != std::string::npos) {
-              unsigned long mem;
-              if (sscanf(line.c_str(), "drm-memory-cpu:  %" PRIu64, &mem) != 1) continue;
-              info.mem += mem * 1000;
-              info.memory_usage.cpu_mem += mem * 1000;
-            } else if (line.find("drm-memory-vram:") != std::string::npos) {
-              unsigned long mem;
-              if (sscanf(line.c_str(), "drm-memory-vram:  %" PRIu64, &mem) != 1) continue;
-              info.mem += mem * 1000;
-              info.memory_usage.vram_mem += mem * 1000;
-            } else if (line.find("drm-engine-gfx") != std::string::npos) {
-              uint64_t engine_gfx;
-              if (sscanf(line.c_str(), "drm-engine-gfx:  %" PRIu64, &engine_gfx) != 1) continue;
-              info.engine_usage.gfx = engine_gfx;
-            } else if (line.find("drm-engine-enc") != std::string::npos) {
-              uint64_t engine_enc;
-              if (sscanf(line.c_str(), "drm-engine-enc:  %" PRIu64, &engine_enc) != 1) continue;
-              info.engine_usage.enc = engine_enc;
-            }
-          }
-        }
+    std::ifstream fdinfo(path + dir->d_name);
+    char fd_bdf_str[13] = "";
+    bool has_client = false;
+    uint64_t client = 0, vram = 0, gtt = 0, cpu = 0, gfx = 0, enc = 0;
+    for (std::string line; getline(fdinfo, line);) {
+      const char* l = line.c_str();
+      if (sscanf(l, "drm-pdev: %12s", fd_bdf_str) == 1) continue;
+      if (sscanf(l, "drm-client-id: %" SCNu64, &client) == 1) {
+        has_client = true;
+        continue;
       }
+      if (sscanf(l, "drm-memory-vram: %" SCNu64, &vram) == 1) continue;
+      if (sscanf(l, "drm-memory-gtt: %" SCNu64, &gtt) == 1) continue;
+      if (sscanf(l, "drm-memory-cpu: %" SCNu64, &cpu) == 1) continue;
+      if (sscanf(l, "drm-engine-gfx: %" SCNu64, &gfx) == 1) continue;
+      if (sscanf(l, "drm-engine-enc: %" SCNu64, &enc) == 1) continue;
     }
+    if (strncmp(bdf_str, fd_bdf_str, sizeof(fd_bdf_str)) != 0) continue;
+    if (has_client && !clients.insert(client).second) continue;
+    info.memory_usage.vram_mem += vram * kKiB;
+    info.memory_usage.gtt_mem += gtt * kKiB;
+    info.memory_usage.cpu_mem += cpu * kKiB;
+    info.engine_usage.gfx += gfx;
+    info.engine_usage.enc += enc;
   }
+  info.mem = info.memory_usage.vram_mem + info.memory_usage.gtt_mem + info.memory_usage.cpu_mem;
 
   closedir(d);
 
