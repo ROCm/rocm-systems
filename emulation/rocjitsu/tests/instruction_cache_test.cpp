@@ -144,6 +144,34 @@ TEST(InstructionCacheTest, FetchMatchesBackingMemoryAtEveryAlignedOffset) {
   }
 }
 
+TEST(InstructionCacheTest, RepeatedMaintenanceAdvancesEpochAndInvalidatesRefills) {
+  GpuMemory memory("memory");
+  InstructionCache cache;
+  uint64_t epoch = cache.epoch();
+  const std::vector<uint8_t> first = fill_code(memory, InstructionCache::kCacheBytes, 0x31);
+  for (unsigned cycle = 0; cycle != 3; ++cycle) {
+    for (unsigned repeat = 0; repeat != 4; ++repeat) {
+      cache.invalidate_all();
+      EXPECT_EQ(cache.epoch(), ++epoch);
+      uint32_t word = 0;
+      EXPECT_FALSE(cache.peek_word(kCodeBase, 0, word));
+    }
+    for (uint32_t offset = 0; offset != InstructionCache::kCacheBytes;
+         offset += InstructionCache::kLineSize) {
+      const auto bytes = fetch_at(cache, memory, kCodeBase + offset);
+      EXPECT_TRUE(std::ranges::equal(bytes, std::span(first).subspan(offset, bytes.size())));
+    }
+  }
+  const std::vector<uint8_t> second = fill_code(memory, InstructionCache::kCacheBytes, 0x72);
+  cache.invalidate_all();
+  EXPECT_EQ(cache.epoch(), ++epoch);
+  for (uint32_t offset = 0; offset != InstructionCache::kCacheBytes;
+       offset += InstructionCache::kLineSize) {
+    const auto bytes = fetch_at(cache, memory, kCodeBase + offset);
+    EXPECT_TRUE(std::ranges::equal(bytes, std::span(second).subspan(offset, bytes.size())));
+  }
+}
+
 // The straddling offsets are the interesting ones: assert they are actually
 // exercised above, so the loop cannot silently stop covering them.
 TEST(InstructionCacheTest, FetchWindowStraddlesALineBoundary) {
@@ -234,6 +262,27 @@ TEST(InstructionCacheTest, LinesDoNotAliasAcrossVmids) {
 
   const auto again1 = fetch_at(icache, *access1);
   EXPECT_EQ(again1, got1) << "the vmid 1 fetch did not cache its line";
+}
+
+TEST(InstructionCacheTest, RepeatedMaintenanceInvalidatesTranslatedRefills) {
+  GpuVm gpu_vm;
+  InstructionCache cache;
+  auto backing = std::make_shared<ExecutableAddressSpace>(0x11);
+  const auto handle = gpu_vm.register_translated(7, backing, backing);
+  ASSERT_TRUE(handle);
+  const auto access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  auto cached = fetch_at(cache, *access);
+  for (uint8_t value : {0x22, 0x33, 0x44}) {
+    backing->fill(value);
+    EXPECT_EQ(fetch_at(cache, *access), cached);
+    const uint64_t epoch = cache.epoch();
+    cache.invalidate_all();
+    cache.invalidate_all();
+    EXPECT_EQ(cache.epoch(), epoch + 2);
+    cached = fetch_at(cache, *access);
+    EXPECT_TRUE(std::ranges::all_of(cached, [value](uint8_t byte) { return byte == value; }));
+  }
 }
 
 TEST(InstructionCacheTest, TranslatedLinesDoNotAliasAcrossRootReplacement) {

@@ -241,6 +241,7 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
+      - "rocrtstFunc.Heap_Reservation"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -351,6 +352,7 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
+      - "rocrtstFunc.Heap_Reservation"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:

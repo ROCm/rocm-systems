@@ -70,21 +70,21 @@ configure_processors(
         storage.rocpd_processor = std::make_shared<rocpd_processor_t>(
             _config->_metadata_registry, _config->_agent_manager, _config->_pid,
             _config->_ppid, _registry);
-        _coordinator->add_handler(*storage.rocpd_processor);
+        _coordinator->add_handler(storage.rocpd_processor);
     }
     if(_formats.is_perfetto_enabled() && _engine.has_value() && _tracks.has_value())
     {
         storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
             _config->_metadata_registry, _config->_agent_manager, _config->_pid,
             _config->_ppid, _registry, _tracks->get());
-        _coordinator->add_handler(*storage.perfetto_processor);
+        _coordinator->add_handler(storage.perfetto_processor);
     }
 
     if(_formats.is_unified_memory_enabled())
     {
         storage.unified_memory_processor = std::make_shared<unified_memory_processor_t>(
             _config->_agent_manager, _config->_pid, output_file_sink_view{ _registry });
-        _coordinator->add_handler(*storage.unified_memory_processor);
+        _coordinator->add_handler(storage.unified_memory_processor);
         LOG_DEBUG("Unified memory processor enabled for PID {}", _config->_pid);
     }
 
@@ -103,9 +103,8 @@ process_buffered_storage(
               _config->_pid);
 
     auto const _coordinator = std::make_shared<sample_processor_t>();
-    // RAII lifetime guard: configure_processors registers raw references to the
-    // returned processors as handlers on _coordinator. Holding _storage in scope
-    // keeps those processors alive until the parse + finalize is done.
+    // _storage keeps the concrete processors reachable (the coordinator shares
+    // ownership of them as sample_processor_interface).
     [[maybe_unused]] auto const _storage = configure_processors(
         _coordinator, _config, _formats, _registry, _engine, _tracks);
     storage_parser_t _parser(_storage_filename);

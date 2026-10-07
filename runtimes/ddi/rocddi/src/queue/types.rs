@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Descriptor fields describe one requested native queue. Engine-specific
 //! options stay tagged with their packet format so unrelated fields cannot be
 //! mistaken for each other. Each creation requests an independently owned

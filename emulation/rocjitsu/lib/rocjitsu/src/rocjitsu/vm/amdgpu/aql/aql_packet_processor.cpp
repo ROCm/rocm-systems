@@ -9,6 +9,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/amd_ext_aql_packet.h"
 RJ_DIAGNOSTIC_POP
 
+#include <array>
 #include <bit>
 #include <cstring>
 #include <limits>
@@ -228,10 +229,19 @@ AqlPacketProcessor::process_vendor(const Request &request,
   }
 
   if (extension.amd_format == kAmdAqlFormatPm4Ib) {
-    return admit(request, {.kind = AqlPreparedPacketKind::NonKernel,
+    // ROCr's amd_aql_pm4_ib: four-word INDIRECT_BUFFER, ten remaining words,
+    // eight reserved words, then the completion signal. Copy before ring retirement.
+    std::array<uint32_t, 16> words{};
+    std::memcpy(words.data(), &packet, sizeof(packet));
+    if (words[1] != 0xc0023f00 || (words[2] & 3) || words[3] > 0xffff ||
+        (words[4] & ~0x000fffffu) != (1u << 23) || !(words[4] & 0xfffff) || words[5] != 10)
+      return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MalformedPm4Ib);
+    return admit(request, {.kind = AqlPreparedPacketKind::Pm4Ib,
+                           .pm4_ib_address = uint64_t{words[2]} | (uint64_t{words[3]} << 32),
+                           .pm4_ib_dwords = words[4] & 0xfffff,
                            .completion_signal = extension.completion_signal.handle,
                            .barrier_bit = ((packet.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
-                           .blocks_following = false});
+                           .blocks_following = true});
   }
 
   return terminal(PacketProcessStatus::Unsupported, AqlPacketDiagnostic::UnsupportedVendorFormat);

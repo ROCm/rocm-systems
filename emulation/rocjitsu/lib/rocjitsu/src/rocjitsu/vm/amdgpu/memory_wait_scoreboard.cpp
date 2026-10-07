@@ -358,6 +358,12 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
     const auto events = WaitcheckTarget::classify_events(inst, arch);
     if (events.succeeded())
       for (const auto &event : events.value()) {
+        // FLAT may not use either memory domain. Its resolved requests apply
+        // the corresponding capacity constraint after address calculation.
+        if (inst.mnemonic().starts_with("flat_") &&
+            (event.counter == WaitCounterKind::Load || event.counter == WaitCounterKind::Store ||
+             event.counter == WaitCounterKind::Ds))
+          continue;
         if (event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst ||
             event.counter == WaitCounterKind::Depctr)
           continue;
