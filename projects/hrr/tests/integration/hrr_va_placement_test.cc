@@ -606,6 +606,60 @@ SmallFate hrr_small_fate(const ApisCapture& c) {
 }
 }  // namespace
 
+// Whether the loaded libamdhip64 logs a hinted hipMemAddressReserve only when
+// the hint was missed. Before that fix in projects/clr/hipamd/src/hip_vm.cpp,
+// every hinted reserve logged "Requested address was not allocated", so a
+// section that checks the log is quiet for a placed reservation has nothing
+// to check. The probe reserves anywhere, frees, and reserves again at that
+// address, under AMD_LOG_LEVEL=1.
+#define HRR_LOG_PROBE_MARKER "HRR_PLACE_LOGPROBE"
+
+TEST_CASE("Unit_HRR_VaPlacement_LogProbe_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipFree(nullptr));
+  hipMemAllocationProp prop{};
+  prop.type          = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id   = 0;
+  size_t gran = 0;
+  HRR_HIP_CHECK(hipMemGetAllocationGranularity(&gran, &prop,
+                                               hipMemAllocationGranularityMinimum));
+  void* first = nullptr;
+  HRR_HIP_CHECK(hipMemAddressReserve(&first, gran, 0, nullptr, 0));
+  HRR_HIP_CHECK(hipMemAddressFree(first, gran));
+  fflush(stderr);
+  printf(HRR_LOG_PROBE_MARKER " hinted\n");
+  fflush(stdout);
+  void* again = nullptr;
+  HRR_HIP_CHECK(hipMemAddressReserve(&again, gran, 0, first, 0));
+  fflush(stderr);
+  printf(HRR_LOG_PROBE_MARKER " honored=%d\n", again == first ? 1 : 0);
+  fflush(stdout);
+  HRR_HIP_CHECK(hipMemAddressFree(again, gran));
+}
+
+namespace {
+enum class HintLog { Fixed, Unfixed, Unknown };
+
+HintLog hrr_hint_log() {
+  static const HintLog verdict = [] {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("AMD_LOG_LEVEL", "1");
+    set_proc_search_path(proc);
+    if (proc.run("\"Unit_HRR_VaPlacement_LogProbe_Direct\"") != 0) return HintLog::Unknown;
+    const std::string out = proc.getOutput();
+    const size_t from = out.find(HRR_LOG_PROBE_MARKER " hinted");
+    const size_t to   = out.find(HRR_LOG_PROBE_MARKER " honored=1");
+    // A missed hint logs in every version, so it tells nothing.
+    if (from == std::string::npos || to == std::string::npos) return HintLog::Unknown;
+    return out.substr(from, to - from).find("Requested address was not allocated") ==
+                   std::string::npos
+               ? HintLog::Fixed
+               : HintLog::Unfixed;
+  }();
+  return verdict;
+}
+}  // namespace
+
 HRR_TEST_CASE(Unit_HRR_VaPlacement_Apis) {
   hrr_place_require_vmm();
   const ApisCapture& c = hrr_apis_capture();
@@ -667,6 +721,12 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Apis) {
   }
 
   SECTION("AMD_LOG_LEVEL=1: a reservation that gets its hint logs nothing") {
+    const HintLog log = hrr_hint_log();
+    if (log == HintLog::Unfixed)
+      SKIP("the loaded libamdhip64 logs every hinted hipMemAddressReserve, so a placed "
+           "reservation is not quiet; it lacks the hip_vm.cpp log fix");
+    if (log == HintLog::Unknown)
+      SKIP("the probe could not tell whether the loaded libamdhip64 logs a hint it met");
     auto [rc, out] = hrr_playback_merged(c.archive, "", {{"AMD_LOG_LEVEL", "1"}});
     INFO("Replay:\n" << out);
     CHECK(out.find("placed at capture address") != std::string::npos);
