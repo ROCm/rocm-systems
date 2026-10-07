@@ -1121,8 +1121,9 @@ under `--guard-segments` (whose tail guard needs room the recorded layout does n
 have), when `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` is above 1 (padding pushes an
 allocation past its recorded neighbour), and when a device does not support virtual
 memory management. Under `--kernel-filter`, the warm-up pass replays the whole
-archive first. What it left mapped is released and the counts start again, so the
-timed pass places its own allocations.
+archive first. What it left mapped is released, its `hipMemAddressReserve`
+reservations are unmapped and freed, and the counts start again, so the timed
+pass places its own allocations and reservations.
 
 What placement does not place, each named as a fallback where the archive has it:
 `hipMallocManaged` (no VMM equivalent), `hipExtMallocWithFlags` with a flag

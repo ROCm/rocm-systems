@@ -1533,8 +1533,11 @@ int main(int argc, char** argv) {
     // The timed pass replays every allocation again. A placed one the
     // warm-up left live would make its second allocation fall back ("shares
     // a page"), so release them here, region buffers excepted: those stay
-    // registered across the rewind.
+    // registered across the rewind. The same goes for hipMemAddressReserve
+    // reservations: one still live would take the address the timed pass
+    // asks for.
     if (ctx.placement->active()) {
+      hrr_release_vmm_state(ctx);
       for (uint64_t rec : ctx.placement->mapped_bases()) {
         if (ctx.regions.holds(rec)) continue;
         void* live = reinterpret_cast<void*>(rec);

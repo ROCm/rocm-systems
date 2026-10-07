@@ -678,8 +678,8 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Apis) {
 }
 
 // ===========================================================================
-// When a placed allocation is unmapped: frees deferred to a sync, and a
-// capture that does not end cleanly.
+// When placed memory is released: frees deferred to a sync, a capture that
+// does not end cleanly, and a reservation still live after the warm-up pass.
 // ===========================================================================
 namespace {
 #define HRR_LIFE_MARKER "HRR_PLACE_LIFE"
@@ -724,9 +724,32 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFreeAsync(a2, s));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
-  printf(HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx\n", u64(doomed), u64(again));
+  // (e) A VMM reservation whose address is stored in device memory, still
+  // reserved and mapped when the program exits.
+  hipMemAllocationProp prop{};
+  prop.type          = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id   = 0;
+  size_t gran = 0;
+  HRR_HIP_CHECK(hipMemGetAllocationGranularity(&gran, &prop,
+                                               hipMemAllocationGranularityMinimum));
+  const size_t vsz = (kBytes + gran - 1) / gran * gran;
+  void* va = nullptr;
+  HRR_HIP_CHECK(hipMemAddressReserve(&va, vsz, 0, nullptr, 0));
+  hipMemGenericAllocationHandle_t handle{};
+  HRR_HIP_CHECK(hipMemCreate(&handle, vsz, &prop, 0));
+  HRR_HIP_CHECK(hipMemMap(va, vsz, 0, handle, 0));
+  hipMemAccessDesc desc{};
+  desc.location = prop.location;
+  desc.flags    = hipMemAccessFlagsProtReadWrite;
+  HRR_HIP_CHECK(hipMemSetAccess(va, vsz, &desc, 1));
+  int** cell_va = hrr_place_check(out, static_cast<int*>(va), 100, nullptr);
+
+  printf(HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx va=0x%llx vsz=%zu\n", u64(doomed),
+         u64(again), u64(va), vsz);
   fflush(stdout);
 
+  HRR_HIP_CHECK(hipFree(cell_va));
   HRR_HIP_CHECK(hipStreamDestroy(s));
   HRR_HIP_CHECK(hipFree(cell_again));
   HRR_HIP_CHECK(hipFree(again));
@@ -735,7 +758,8 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
 
 namespace {
 struct LifeCapture {
-  uint64_t doomed = 0, again = 0;
+  uint64_t doomed = 0, again = 0, va = 0;
+  size_t vsz = 0;
   fs::path archive;
 };
 
@@ -755,9 +779,11 @@ const LifeCapture& hrr_life_capture() {
 
   const size_t at = out.find(HRR_LIFE_MARKER);
   REQUIRE(at != std::string::npos);
-  unsigned long long d = 0, a = 0;
-  REQUIRE(sscanf(out.c_str() + at, HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx", &d, &a) == 2);
-  c.doomed = d; c.again = a;
+  unsigned long long d = 0, a = 0, v = 0;
+  size_t vsz = 0;
+  REQUIRE(sscanf(out.c_str() + at, HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx va=0x%llx vsz=%zu",
+                 &d, &a, &v, &vsz) == 4);
+  c.doomed = d; c.again = a; c.va = v; c.vsz = vsz;
   c.archive = hrr_single_process_archive(cap.path);
   return c;
 }
@@ -766,7 +792,7 @@ const LifeCapture& hrr_life_capture() {
 HRR_TEST_CASE(Unit_HRR_VaPlacement_Lifetimes) {
   hrr_place_require_vmm();
   const LifeCapture& c = hrr_life_capture();
-  INFO("capture: doomed=" << hex(c.doomed) << " again=" << hex(c.again));
+  INFO("capture: doomed=" << hex(c.doomed) << " again=" << hex(c.again) << " va=" << hex(c.va));
 
   SECTION("a capture that ended badly does not hold the frees made inside it") {
     auto [rc, out] = hrr_playback_merged(c.archive, "--verbose");
@@ -795,6 +821,18 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Lifetimes) {
           std::string::npos);
     // doomed, a1 and a2.
     CHECK(hrr_place_deferred(out) == 3);
+  }
+
+  SECTION("--kernel-filter: a reservation the warm-up left live is reserved there again") {
+    // The warm-up pass replays the hipMemAddressReserve the program never
+    // freed. The timed pass replays it again and must get the same address.
+    auto [rc, out] = hrr_playback_merged(c.archive, "--kernel-filter hrr_place_deref");
+    INFO("Replay:\n" << out);
+    CHECK(rc == 0);
+    CHECK(out.find(hrr_place_named("hipMemAddressReserve", c.va, c.vsz)) == std::string::npos);
+    int placed = 0, fell = -1;
+    REQUIRE(hrr_place_counts(out, &placed, &fell));
+    CHECK(fell == 0);
   }
 }
 

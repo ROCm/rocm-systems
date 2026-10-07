@@ -5019,18 +5019,52 @@ hipError_t playback_hipMemMap(PlaybackContext& ctx, const uint8_t* pl) {
     if (!live_va) return hipSuccess;  // VA not tracked, skip
     hipMemGenericAllocationHandle_t live_handle = ctx.translate_vmm_handle(a->handle);
     if (!live_handle) return hipSuccess;  // handle not tracked, skip
-    return hipMemMap(live_va,
-                     static_cast<size_t>(a->size),
-                     static_cast<size_t>(a->offset),
-                     live_handle,
-                     static_cast<unsigned long long>(a->flags));
+    hipError_t r = hipMemMap(live_va,
+                             static_cast<size_t>(a->size),
+                             static_cast<size_t>(a->offset),
+                             live_handle,
+                             static_cast<unsigned long long>(a->flags));
+    if (r == hipSuccess) {
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.vmm_mappings[reinterpret_cast<uint64_t>(live_va)] = static_cast<size_t>(a->size);
+    }
+    return r;
 }
 
 hipError_t playback_hipMemUnmap(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemUnmap*>(pl);
     void* live_va = ctx.translate_vmm_va(a->ptr);
     if (!live_va) return hipSuccess;
-    return hipMemUnmap(live_va, static_cast<size_t>(a->size));
+    hipError_t r = hipMemUnmap(live_va, static_cast<size_t>(a->size));
+    if (r == hipSuccess) {
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.vmm_mappings.erase(reinterpret_cast<uint64_t>(live_va));
+    }
+    return r;
+}
+
+void hrr_release_vmm_state(PlaybackContext& ctx) {
+    std::map<uint64_t, size_t> mappings;
+    std::unordered_map<uint64_t, hipMemGenericAllocationHandle_t> handles;
+    std::unordered_map<uint64_t, PlaybackContext::VmmVA> reservations;
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        mappings.swap(ctx.vmm_mappings);
+        handles.swap(ctx.vmm_handle_map);
+        reservations.swap(ctx.vmm_va_map);
+    }
+    for (const auto& [va, size] : mappings)
+        (void)hipMemUnmap(reinterpret_cast<void*>(va), size);
+    for (const auto& [rec, h] : handles) (void)hipMemRelease(h);
+    hrr::VaPlacement* placing = hrr_placing(ctx);
+    for (const auto& [rec, va] : reservations) {
+        if (hipMemAddressFree(va.live, va.size) != hipSuccess) {
+            (void)hipGetLastError();
+            continue;
+        }
+        if (placing && reinterpret_cast<uint64_t>(va.live) == rec)
+            placing->restore_vmm_hold(rec, va.size);
+    }
 }
 
 // ---------------------------------------------------------------------------

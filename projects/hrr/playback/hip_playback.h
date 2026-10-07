@@ -302,6 +302,9 @@ struct PlaybackContext {
     std::unordered_map<uint64_t, hipMemGenericAllocationHandle_t> vmm_handle_map;
     struct VmmVA { void* live; size_t size; };
     std::unordered_map<uint64_t, VmmVA> vmm_va_map;
+    // Live address -> size of each mapping a replayed hipMemMap made and no
+    // hipMemUnmap has removed yet. Guarded by map_mutex.
+    std::map<uint64_t, size_t> vmm_mappings;
 
     // Translate a recorded VA (from AddressReserve) to the live replay VA.
     // Returns nullptr if not found or if rec is 0.
@@ -816,6 +819,13 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 // than a hipMalloc and hipFree cannot release it, so every teardown path has
 // to go through here.
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
+
+// Undo the VMM calls a pass replayed: unmap what replayed hipMemMap calls
+// left mapped, release the handles, and free the reservations. A reservation
+// that sat at its recorded address is held again for placement, so the next
+// pass gets it back. Called between the --kernel-filter warm-up and the timed
+// pass, which replays the same hipMemAddressReserve calls again.
+void hrr_release_vmm_state(PlaybackContext& ctx);
 
 // HIP_HRR_REPLAY_ALLOC_PAD_FACTOR as replay applies it: 1 when unset or invalid.
 size_t hrr_replay_alloc_pad_factor();
