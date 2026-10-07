@@ -11,7 +11,7 @@ from membw_analysis.engine import run_membw_analysis
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
-from utils.logger import console_error, console_log, console_warning, demarcate
+from utils.logger import console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     CallTreeNode,
