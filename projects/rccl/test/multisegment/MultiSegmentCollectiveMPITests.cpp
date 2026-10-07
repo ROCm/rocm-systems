@@ -115,12 +115,12 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowFallsBack)
 
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kAllocSegments, buf));
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
     {
         const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
             "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
         if (!why.empty()) GTEST_SKIP() << why;
     }
-    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
 
     const size_t windowBytes = buf.segmentSize * static_cast<size_t>(kWinSegments);
     const size_t recvOffset = buf.segmentSize * 3 + buf.segmentSize / 2;
@@ -164,8 +164,9 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowFallsBack)
 
 /**
  * @brief Same past-window geometry as RecvRangePastWindowFallsBack, but
- *        totalBytes larger than ceARTmpBuf. Fast path is closed, so the
- *        staging fallback must refuse rather than memcpy past the temp buffer.
+ *        totalBytes larger than the CE staging buffer. The fast path is closed
+ *        and the slow path chunks through one staging slot, so the collective
+ *        still completes.
  */
 TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowStagingOverflow)
 {
@@ -197,12 +198,12 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowStagingOverflow)
 
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kAllocSegments, buf));
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
     {
         const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
             "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
         if (!why.empty()) GTEST_SKIP() << why;
     }
-    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
 
     const size_t windowBytes = buf.segmentSize * static_cast<size_t>(kWinSegments);
     const size_t recvOffset = buf.segmentSize * 3;
@@ -237,9 +238,11 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_RecvRangePastWindowStagingOverflow)
     }
 
     initSendBuffer<T>(sendBuf, count, rank);
-    ASSERT_MPI_EQ(ncclInvalidUsage, ncclAllReduce(
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(
         sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
         getActiveCommunicator(), getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
 }
 
 /**
@@ -297,12 +300,12 @@ TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
 
     MultiSegmentBuffer recvSeg;
     ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, recvSeg));
+    auto recvVmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(recvSeg); });
     {
         const std::string why = skipUnlessAllRanksAllocated(recvSeg.totalSize != 0,
             "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
         if (!why.empty()) GTEST_SKIP() << why;
     }
-    auto recvVmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(recvSeg); });
 
     ASSERT_EQ(recvSeg.totalSize % sizeof(T), 0u);
     const size_t recvCount = recvSeg.totalSize / sizeof(T);
@@ -311,12 +314,12 @@ TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
     ASSERT_NO_FATAL_FAILURE(
         createMultiSegmentBuffer(dev, recvSeg.segmentSize * static_cast<size_t>(nRanks),
                                  kNumSegments, sendSeg));
+    auto sendVmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(sendSeg); });
     {
         const std::string why = skipUnlessAllRanksAllocated(sendSeg.totalSize != 0,
             "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
         if (!why.empty()) GTEST_SKIP() << why;
     }
-    auto sendVmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(sendSeg); });
 
     const size_t sendCount = recvCount * static_cast<size_t>(nRanks);
     ASSERT_GE(sendSeg.totalSize, sendCount * sizeof(T));
@@ -397,12 +400,12 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(
          createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
+     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
      {
          const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
              "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime");
          if (!why.empty()) GTEST_SKIP() << why;
      }
-     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
  
      // Split the window into send/recv halves. With kNumHostSegments=1 the recv
      // half straddles the host-backed trailing segment, exercising host access.

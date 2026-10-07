@@ -195,7 +195,7 @@
         {
           "name": "MultiSegment_HostBoundaryMath_All",
           "description": "Host-only segment selection and split arithmetic",
-          "test_filter": "NetIbMultiSeg.*:NetIbSplit.*"
+          "test_filter": "NetIbMultiSeg.*:NetIbSplit.*:NetIbCtsLayout.*"
         }
       ]
     },
