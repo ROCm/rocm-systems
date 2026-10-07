@@ -136,7 +136,7 @@ jobs:
   publish:
     name: Publish dashboard data
     needs: benchmark
-    if: ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' }}
+    if: ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' && github.ref_type == 'branch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
