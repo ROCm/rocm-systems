@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -30,8 +30,6 @@ if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
 else()
     set(IS_THREAD_SANITIZER OFF)
 endif()
-
-set(IS_DISABLED False)
 
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 if(IS_SPM_DISABLED OR IS_THREAD_SANITIZER)

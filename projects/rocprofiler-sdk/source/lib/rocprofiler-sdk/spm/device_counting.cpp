@@ -76,10 +76,6 @@ submitPacket(hsa_queue_t* queue, const void* packet)
     return write_idx;
 }
 
-namespace
-{
-constexpr auto rocprofiler_context_none = ROCPROFILER_CONTEXT_NONE;
-}
 std::atomic<bool>&
 hsa_inited()
 {
