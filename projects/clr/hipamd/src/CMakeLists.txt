@@ -175,7 +175,7 @@ target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
 target_compile_definitions(amdhip64 PRIVATE HIP_ABI_IMPL)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
-target_link_libraries(amdhip64 PRIVATE clr_warnings)
+target_link_libraries(amdhip64 PRIVATE clr::warnings)
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)

@@ -27,6 +27,9 @@ list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 #############################
 # Options
 #############################
+# Applies -Werror if CLR_ENABLE_WERROR is set
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/CLRWarnings.cmake")
+
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" OFF)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 option(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS
