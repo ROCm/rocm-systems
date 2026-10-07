@@ -1,21 +1,17 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""DS_GWS_* derives as true_nop and retires through one shared helper.
+"""DS_GWS_INIT retires; the GWS barrier and semaphore ops stay unimplemented.
 
-The nop class reports the instruction unimplemented, which halts the wave
-before the kernel can finish. The helper warns once: retiring the op is not a
-dispatch-wide barrier.
+GWS state is not modeled. Retiring INIT unblocks the runtime's initialization
+dispatch. Retiring a barrier or semaphore wait would let a kernel continue
+before the grid has synchronized.
 """
 
-from types import SimpleNamespace
-
-from amdisa.codegen import CodeGenerator
 from amdisa.semantics import derive_semantics
 
-_GWS_NAMES = (
+_SYNCHRONIZING_GWS_NAMES = (
     'DS_GWS_SEMA_RELEASE_ALL',
-    'DS_GWS_INIT',
     'DS_GWS_SEMA_V',
     'DS_GWS_SEMA_BR',
     'DS_GWS_SEMA_P',
@@ -23,29 +19,17 @@ _GWS_NAMES = (
 )
 
 
-def _body(name: str) -> str:
-    generator = CodeGenerator.__new__(CodeGenerator)
-    sem = SimpleNamespace(
-        name=name,
-        semantic_class='true_nop',
-        operation=None,
-        data_type=None,
-        sets_scc=None,
-        branch_condition=None,
-    )
-    return CodeGenerator._gws_body(generator, sem)
+class TestGwsSemantics:
+    def test_gws_init_derives_as_true_nop(self):
+        sem = derive_semantics('DS_GWS_INIT', 'ENC_DS')
+        assert sem is not None
+        assert sem.semantic_class == 'true_nop'
 
-
-class TestGwsBody:
-    def test_gws_derives_as_true_nop(self):
-        for name in _GWS_NAMES:
+    def test_gws_synchronization_stays_unimplemented(self):
+        for name in _SYNCHRONIZING_GWS_NAMES:
             sem = derive_semantics(name, 'ENC_DS')
             assert sem is not None, name
-            assert sem.semantic_class == 'true_nop', name
-
-    def test_gws_body_retires_through_the_shared_helper(self):
-        for name in _GWS_NAMES:
-            assert _body(name) == '  amdgpu::retire_global_wave_sync(wf);', name
+            assert sem.semantic_class == 'nop', name
 
     def test_ordered_count_stays_unimplemented(self):
         sem = derive_semantics('DS_ORDERED_COUNT', 'ENC_DS')
