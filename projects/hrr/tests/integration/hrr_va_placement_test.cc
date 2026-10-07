@@ -191,6 +191,12 @@ bool hrr_place_counts(const std::string& out, int* placed, int* fell) {
                 placed, fell) == 2;
 }
 
+size_t count_of(const std::string& text, const std::string& what) {
+  size_t n = 0;
+  for (size_t at = text.find(what); at != std::string::npos; at = text.find(what, at + 1)) ++n;
+  return n;
+}
+
 std::string hex(uint64_t v) {
   char b[32];
   snprintf(b, sizeof(b), "0x%llx", static_cast<unsigned long long>(v));
@@ -725,6 +731,17 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFreeAsync(a2, s));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
+  // (d) The same device address copied into 40 cells, one H2D copy each: 40
+  // payloads for the scan to find it in once that allocation has moved.
+  void* stored = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&stored, kBytes));
+  void** cells = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&cells, 40 * sizeof(void*)));
+  for (int i = 0; i < 40; ++i)
+    HRR_HIP_CHECK(hipMemcpy(cells + i, &stored, sizeof(void*), hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipFree(cells));
+  HRR_HIP_CHECK(hipFree(stored));
+
   // (e) A VMM reservation whose address is stored in device memory, still
   // reserved and mapped when the program exits.
   hipMemAllocationProp prop{};
@@ -746,8 +763,8 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemSetAccess(va, vsz, &desc, 1));
   int** cell_va = hrr_place_check(out, static_cast<int*>(va), 100, nullptr);
 
-  printf(HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx va=0x%llx vsz=%zu\n", u64(doomed),
-         u64(again), u64(va), vsz);
+  printf(HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx va=0x%llx vsz=%zu stored=0x%llx\n",
+         u64(doomed), u64(again), u64(va), vsz, u64(stored));
   fflush(stdout);
 
   HRR_HIP_CHECK(hipFree(cell_va));
@@ -759,7 +776,7 @@ TEST_CASE("Unit_HRR_VaPlacement_Lifetimes_Direct", "[.][hrr-direct]") {
 
 namespace {
 struct LifeCapture {
-  uint64_t doomed = 0, again = 0, va = 0;
+  uint64_t doomed = 0, again = 0, va = 0, stored = 0;
   size_t vsz = 0;
   fs::path archive;
 };
@@ -780,11 +797,12 @@ const LifeCapture& hrr_life_capture() {
 
   const size_t at = out.find(HRR_LIFE_MARKER);
   REQUIRE(at != std::string::npos);
-  unsigned long long d = 0, a = 0, v = 0;
+  unsigned long long d = 0, a = 0, v = 0, st = 0;
   size_t vsz = 0;
-  REQUIRE(sscanf(out.c_str() + at, HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx va=0x%llx vsz=%zu",
-                 &d, &a, &v, &vsz) == 4);
-  c.doomed = d; c.again = a; c.va = v; c.vsz = vsz;
+  REQUIRE(sscanf(out.c_str() + at,
+                 HRR_LIFE_MARKER " doomed=0x%llx again=0x%llx va=0x%llx vsz=%zu stored=0x%llx",
+                 &d, &a, &v, &vsz, &st) == 5);
+  c.doomed = d; c.again = a; c.va = v; c.vsz = vsz; c.stored = st;
   c.archive = hrr_single_process_archive(cap.path);
   return c;
 }
@@ -826,6 +844,23 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Lifetimes) {
           std::string::npos);
     // doomed, a1 and a2.
     CHECK(hrr_place_deferred(out) == 3);
+  }
+
+  SECTION("the H2D scan names the first 16 payloads, says why it runs, and counts the rest") {
+    auto [rc, out] = hrr_playback_merged(c.archive, "",
+                                         {{"HIP_HRR_REPLAY_PLACE_DENY", hex(c.stored)}});
+    INFO("Replay:\n" << out);
+    // The scan says once that it is on, and which allocation turned it on.
+    CHECK(count_of(out, "replay scans the payload of each host-to-device hipMemcpy,") == 1);
+    // The workload may reuse the address of an earlier allocation; the line
+    // then names that one, at the same address.
+    CHECK(out.find(" " + hex(c.stored) + " did not land at its recorded address") !=
+          std::string::npos);
+    // The fallback line itself no longer claims the scan.
+    CHECK(out.find("now scans") == std::string::npos);
+    CHECK(count_of(out, "recorded addresses in 8 bytes") == 16);
+    CHECK(count_of(out, "further payloads holding recorded addresses are only counted") == 1);
+    CHECK(out.find("H2D scan       : 40 payload(s) held a recorded address") != std::string::npos);
   }
 
   SECTION("--kernel-filter: a reservation the warm-up left live is reserved there again") {

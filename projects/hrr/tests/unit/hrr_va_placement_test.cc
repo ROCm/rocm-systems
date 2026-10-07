@@ -567,6 +567,33 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FallbackLinesCapped) {
     REQUIRE(count_of(err, named) == 40);
     REQUIRE(count_of(err, more) == 0);
   }
+  SECTION("the first fallback says once that the H2D scan is on, and why") {
+    hrr::VaPlacement pl;
+    const std::string err = stderr_of([&] {
+      pl.fell_back(B, 64, "hipMallocAsync", "a test");
+      pl.fell_back(B + P, 64, "hipMalloc", "a test");
+    });
+    const std::string scan = "replay scans the payload of each host-to-device hipMemcpy,";
+    REQUIRE(count_of(err, scan) == 1);
+    char why[96];
+    snprintf(why, sizeof(why), "because hipMallocAsync 0x%llx did not land",
+             static_cast<unsigned long long>(B));
+    REQUIRE(count_of(err, why) == 1);
+    // The per-fallback line no longer repeats it.
+    REQUIRE(count_of(err, "now scans") == 0);
+  }
+  SECTION("the timed pass after a warm-up names its own fallbacks again") {
+    hrr::VaPlacement pl;
+    (void)stderr_of([&] {
+      for (int i = 0; i < 40; ++i) pl.fell_back(B + i * P, 64, "hipMalloc", "a test");
+    });
+    pl.reset_counts();
+    const std::string err = stderr_of([&] {
+      for (int i = 0; i < 3; ++i) pl.fell_back(B + i * P, 64, "hipMalloc", "a test");
+    });
+    REQUIRE(pl.fallbacks() == 3);
+    REQUIRE(count_of(err, named) == 3);
+  }
 }
 
 /**

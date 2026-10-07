@@ -299,7 +299,7 @@ class RecordedCaptureTests(unittest.TestCase):
             "[HRR] Placement: hipMalloc 0x7f0000200000 (4096 bytes) not placed at "
             "its recorded address: its range could not be held. It replays "
             "elsewhere, so a copy of its address stored in device memory is "
-            "stale; replay now scans H2D payloads for such copies\n"
+            "stale\n"
             "[HRR] Placement: hipMallocManaged 0x7f0000400000 (64 bytes) not "
             "placed at its recorded address: managed memory has no VMM "
             "equivalent. It replays elsewhere, so a copy\n"

@@ -1114,9 +1114,16 @@ not be held, when it shares a granule with an allocation still live, or when it 
 stream-ordered inside a graph capture. It also falls back when the recording
 exports it with `hipIpcGetMemHandle` or `hipMemPoolExportPointer`, because neither
 accepts VMM memory. Every fallback is named on stderr, the first 16 always and the
-rest under `--verbose`. The summary counts both kinds. Once anything has fallen
-back, replay scans each H2D payload for an address of an allocation that moved,
-and names it; `HIP_HRR_REPLAY_SCAN_H2D=1` forces the scan on from the start.
+rest under `--verbose`. The summary counts placed allocations and fallbacks. Once
+anything has fallen back, `replay_memcpy_impl` scans the payload of each 1-D
+host-to-device `hipMemcpy`, `hipMemcpyAsync`, `hipMemcpyHtoD`, `hipMemcpyHtoDAsync`
+and `hipMemcpyWithStream` for an address of an allocation that moved. 2D, 3D,
+batch, driver-API and graph-node copies are not scanned. The first fallback says
+once that the scan is on and which allocation turned it on. The scan names the
+first 16 payloads that hold such an address, counts the rest, and the summary
+gives the total. The address ranges it matches against are sorted once and cached
+until an allocation or reservation changes them. `HIP_HRR_REPLAY_SCAN_H2D=1` forces
+the scan on from the start.
 
 Placement turns itself off, with one line saying why, under `--no-placement`,
 under `--guard-segments` (whose tail guard needs room the recorded layout does not

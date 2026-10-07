@@ -194,6 +194,9 @@ struct PlaybackContext {
     // bytes are restored verbatim, so a pointer among them reaches the GPU
     // untranslated no matter how well kernel arguments are handled.
     bool scan_h2d = false;
+    // Payloads the scan found a recorded address in. The first 16 are named
+    // on stderr, the rest only counted unless --verbose.
+    std::atomic<uint64_t> h2d_scan_payloads{0};
     // Report every kernel that takes a pointer into host memory. Replay
     // reallocates those buffers but cannot refill them: the application writes
     // them with ordinary CPU stores, which no HIP call reports. A kernel
@@ -511,22 +514,41 @@ struct PlaybackContext {
     // snapshot once and binary searching turns a scan of a multi-gigabyte
     // payload from hours into seconds. `moved_only` leaves out the ones that
     // replay at their recorded address, where a stored pointer is still true.
-    std::vector<std::pair<uint64_t, uint64_t>> recorded_ranges(
-        bool moved_only = false) const {
-        std::vector<std::pair<uint64_t, uint64_t>> r;
+    // The snapshot is kept until an allocation or reservation is added or
+    // removed, so a run of copies between two allocations sorts once.
+    using RangeList = std::vector<std::pair<uint64_t, uint64_t>>;
+    std::shared_ptr<const RangeList> recorded_ranges(bool moved_only = false) const {
+        std::lock_guard<std::mutex> cl(ranges_cache_mu_);
+        RangesCache& slot = ranges_cache_[moved_only ? 1 : 0];
+        if (slot.list && slot.gen == ranges_gen.load(std::memory_order_acquire))
+            return slot.list;
+        auto r = std::make_shared<RangeList>();
+        uint64_t gen = 0;
         {
             std::shared_lock lk(map_mutex);
-            r.reserve(alloc_map.size() + vmm_va_map.size());
+            gen = ranges_gen.load(std::memory_order_relaxed);
+            r->reserve(alloc_map.size() + vmm_va_map.size());
             for (auto& [base, e] : alloc_map)
                 if (!moved_only || reinterpret_cast<uint64_t>(e.live_ptr) != base)
-                    r.emplace_back(base, base + e.size);
+                    r->emplace_back(base, base + e.size);
             for (auto& [base, va] : vmm_va_map)
                 if (!moved_only || reinterpret_cast<uint64_t>(va.live) != base)
-                    r.emplace_back(base, base + va.size);
+                    r->emplace_back(base, base + va.size);
         }
-        std::sort(r.begin(), r.end());
+        std::sort(r->begin(), r->end());
+        slot.list = r;
+        slot.gen  = gen;
         return r;
     }
+    // Bumped, under map_mutex held exclusively, by every change to alloc_map
+    // or vmm_va_map; recorded_ranges() rebuilds its snapshot when it moves.
+    std::atomic<uint64_t> ranges_gen{0};
+    struct RangesCache {
+        std::shared_ptr<const RangeList> list;
+        uint64_t gen = 0;
+    };
+    mutable std::mutex ranges_cache_mu_;
+    mutable RangesCache ranges_cache_[2];
 
     static bool range_contains(
         const std::vector<std::pair<uint64_t, uint64_t>>& ranges, uint64_t v,
@@ -698,10 +720,11 @@ struct PlaybackContext {
                       AllocKind kind = AllocKind::Device) {
         std::unique_lock lk(map_mutex);
         alloc_map[rec] = {rec, live, sz, kind};
+        ++ranges_gen;
     }
     void remove_alloc(uint64_t rec) {
         std::unique_lock lk(map_mutex);
-        alloc_map.erase(rec);
+        if (alloc_map.erase(rec)) ++ranges_gen;
     }
     // True if an allocation is already tracked under this recorded address.
     bool has_alloc(uint64_t rec) const {

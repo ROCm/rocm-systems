@@ -1173,11 +1173,14 @@ static void print_usage(const char* argv0) {
     "  pointer the program stored in memory, and that reaches the GPU through an\n"
     "  H2D copy, still points at the right buffer. An allocation whose range is\n"
     "  taken falls back to a new address and is named on stderr (the first 16;\n"
-    "  --verbose names every one). From the first fallback on, replay scans H2D\n"
-    "  payloads for stored copies of moved addresses; HIP_HRR_REPLAY_SCAN_H2D=1\n"
-    "  scans from the start. Managed, fine-grained, pitched and array memory and\n"
-    "  graph memory nodes are never placed. Placement is off when a device lacks\n"
-    "  virtual memory management or HIP_HRR_REPLAY_ALLOC_PAD_FACTOR is above 1.\n"
+    "  --verbose names every one). From the first fallback on, replay scans the\n"
+    "  payloads of 1-D host-to-device hipMemcpy, hipMemcpyAsync, hipMemcpyHtoD,\n"
+    "  hipMemcpyHtoDAsync and hipMemcpyWithStream copies for stored copies of\n"
+    "  moved addresses; 2D, 3D, batch, driver and graph copies are not scanned.\n"
+    "  HIP_HRR_REPLAY_SCAN_H2D=1 scans from the start. Managed, fine-grained,\n"
+    "  pitched and array memory and graph memory nodes are never placed. Placement\n"
+    "  is off when a device lacks virtual memory management or\n"
+    "  HIP_HRR_REPLAY_ALLOC_PAD_FACTOR is above 1.\n"
     "  --no-placement        Allocate at whatever address the runtime returns\n"
     "\n"
     "Guard pages (diagnostic, off by default):\n"
@@ -1554,6 +1557,7 @@ int main(int argc, char** argv) {
     ctx.total_kernel_ms  = 0.0;
     ctx.events_failed.store(0, std::memory_order_relaxed);
     ctx.code_objects_failed.store(0, std::memory_order_relaxed);
+    ctx.h2d_scan_payloads.store(0, std::memory_order_relaxed);
     // Warm-up drained the region cursor. advance_to is monotonic and would
     // leave the timed pass classifying against an empty live-set (--regions-strict
     // phantom failures, --guard-blocks guarding nothing).
@@ -1723,6 +1727,9 @@ int main(int argc, char** argv) {
              (unsigned long long)deferred);
     printf("\n");
   }
+  if (const uint64_t n = ctx.h2d_scan_payloads.load())
+    printf("[HRR]   H2D scan       : %llu payload(s) held a recorded address\n",
+           (unsigned long long)n);
 
   {
     // Printed unconditionally under the flag, zero included: "no pointer was

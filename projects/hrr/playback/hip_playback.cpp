@@ -1151,7 +1151,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             for (size_t off = 0; off + 8 <= n; off += 8) {
                 uint64_t w; memcpy(&w, host.data() + off, 8);
                 uint64_t base = 0; size_t sz = 0;
-                if (!PlaybackContext::range_contains(ranges, w, &base, &sz)) continue;
+                if (!PlaybackContext::range_contains(*ranges, w, &base, &sz)) continue;
                 if (++hits <= 8)
                     fprintf(stderr, "[HRR arg-scan]   arg[%u] allocation 0x%llx "
                             "+%zu holds 0x%llx — recorded allocation 0x%llx+%zu\n",
@@ -3404,21 +3404,35 @@ static void scan_h2d_payload(PlaybackContext& ctx, const void* blob, size_t n,
     // A placed allocation is at its recorded address, so an address of it in
     // the payload is still right. Only the ones that moved are worth naming.
     const auto ranges = ctx.recorded_ranges(/*moved_only=*/hrr_placing(ctx) != nullptr);
+    if (ranges->empty()) return;
+    // Name the first payloads with hits; past that the lines stop helping
+    // and only cost time on stderr.
+    constexpr uint64_t kNamedPayloads = 16;
+    bool named = ctx.verbose ||
+                 ctx.h2d_scan_payloads.load(std::memory_order_relaxed) < kNamedPayloads;
     size_t hits = 0;
     for (size_t off = 0; off + 8 <= n; off += 8) {
         uint64_t w;
         memcpy(&w, p + off, 8);
         uint64_t base = 0;
         size_t   sz   = 0;
-        if (!PlaybackContext::range_contains(ranges, w, &base, &sz)) continue;
-        if (++hits <= 4)
+        if (!PlaybackContext::range_contains(*ranges, w, &base, &sz)) continue;
+        if (++hits == 1) {
+            const uint64_t k = ++ctx.h2d_scan_payloads;
+            named = ctx.verbose || k <= kNamedPayloads;
+            if (k == kNamedPayloads + 1 && !ctx.verbose)
+                fprintf(stderr,
+                        "[HRR h2d-scan] further payloads holding recorded addresses "
+                        "are only counted; --verbose names every one\n");
+        }
+        if (named && hits <= 4)
             fprintf(stderr,
                     "[HRR h2d-scan] payload for 0x%llx +%zu holds 0x%llx — a "
                     "recorded address in allocation 0x%llx+%zu\n",
                     (unsigned long long)dst_rec, off, (unsigned long long)w,
                     (unsigned long long)base, sz);
     }
-    if (hits)
+    if (hits && named)
         fprintf(stderr,
                 "[HRR h2d-scan] payload for 0x%llx: %zu recorded addresses in "
                 "%zu bytes\n",
@@ -4922,6 +4936,7 @@ hipError_t playback_hipMemAddressReserve(PlaybackContext& ctx, const uint8_t* pl
             placing->vmm_reserved(rec_ptr, size, held, reinterpret_cast<uint64_t>(live_va));
         std::unique_lock lk(ctx.map_mutex);
         ctx.vmm_va_map[rec_ptr] = {live_va, size};
+        ++ctx.ranges_gen;
     } else if (held) {
         placing->restore_vmm_hold(rec_ptr, size);
     }
@@ -4937,6 +4952,7 @@ hipError_t playback_hipMemAddressFree(PlaybackContext& ctx, const uint8_t* pl) {
         {
             std::unique_lock lk(ctx.map_mutex);
             ctx.vmm_va_map.erase(a->devPtr);
+            ++ctx.ranges_gen;
         }
         // Hold the range again for a later reservation recorded there.
         hrr::VaPlacement* placing = hrr_placing(ctx);
@@ -5035,6 +5051,7 @@ void hrr_release_vmm_state(PlaybackContext& ctx) {
         mappings.swap(ctx.vmm_mappings);
         handles.swap(ctx.vmm_handle_map);
         reservations.swap(ctx.vmm_va_map);
+        ++ctx.ranges_gen;
     }
     for (const auto& [va, size] : mappings)
         (void)hipMemUnmap(reinterpret_cast<void*>(va), size);

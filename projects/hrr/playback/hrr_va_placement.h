@@ -638,8 +638,9 @@ class VaPlacement {
     // and drop every placeholder.
     void release_all();
 
-    // Between the warm-up pass and the timed pass.
-    void reset_counts() { placed_ = 0; fallbacks_ = 0; deferred_total_ = 0; }
+    // Between the warm-up pass and the timed pass. The line budget starts
+    // again too, so the timed pass names its own fallbacks.
+    void reset_counts() { placed_ = 0; fallbacks_ = 0; lines_ = 0; deferred_total_ = 0; }
 
     uint64_t placed() const { return placed_.load(); }
     uint64_t fallbacks() const { return fallbacks_.load(); }

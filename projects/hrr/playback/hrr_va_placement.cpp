@@ -266,23 +266,32 @@ bool VaPlacement::reserve(int device_count, bool peer_access) {
 
 void VaPlacement::fell_back(uint64_t rec, size_t size, const char* api,
                             const char* why) {
-    ++fallbacks_;
+    const bool first = fallbacks_++ == 0;
     const uint64_t n = ++lines_;
+    char where[40] = "";
+    if (rec) snprintf(where, sizeof(where), " 0x%llx", (ull)rec);
     if (n <= kFallbackLines || verbose_) {
-        char where[40] = "";
-        if (rec) snprintf(where, sizeof(where), " 0x%llx", (ull)rec);
         char bytes[40] = "";
         if (size) snprintf(bytes, sizeof(bytes), " (%zu bytes)", size);
         fprintf(stderr,
                 "[HRR] Placement: %s%s%s not placed at its recorded address: %s. It "
                 "replays elsewhere, so a copy of its address stored in device memory "
-                "is stale; replay now scans H2D payloads for such copies\n",
+                "is stale\n",
                 api, where, bytes, why);
     } else if (n == kFallbackLines + 1) {
         fprintf(stderr,
                 "[HRR] Placement: further fallbacks are only counted; --verbose "
                 "names every one\n");
     }
+    // The first fallback is what turns the H2D scan on (replay_memcpy_impl),
+    // so say so once, and name it, rather than on every fallback line.
+    if (first)
+        fprintf(stderr,
+                "[HRR] Placement: from here on, replay scans the payload of each "
+                "host-to-device hipMemcpy, hipMemcpyAsync, hipMemcpyHtoD, "
+                "hipMemcpyHtoDAsync and hipMemcpyWithStream for addresses of allocations that moved, "
+                "because %s%s did not land at its recorded address\n",
+                api, where);
 }
 
 bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
