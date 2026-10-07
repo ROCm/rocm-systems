@@ -283,7 +283,13 @@ release(bool, HIP_HRR_HOST_SNAPSHOTS, true,                                   \
         "launch. 0 = off (the archive then holds no pinned host contents)")   \
 release(uint, HIP_HRR_HOST_SNAPSHOT_MAX_MB, 64,                               \
         "HRR capture: largest pinned host allocation snapshotted, in MiB; "   \
-        "a larger one is skipped and listed in manifest unreplayable_apis")   \
+        "a larger one is skipped and listed in manifest unreplayable_apis. "  \
+        "0 = none is snapshotted")                                            \
+release(uint, HIP_HRR_HOST_SNAPSHOT_TOTAL_MB, 1024,                           \
+        "HRR capture: host memory for the shadow copies of all snapshotted "  \
+        "pinned allocations together, in MiB; an allocation that would go "  \
+        "over it is skipped and listed in manifest unreplayable_apis. "       \
+        "0 = none is snapshotted")                                            \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
         "Number of consecutive dispatches that may skip the doorbell flush.") \
 release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
