@@ -1073,6 +1073,64 @@ TEST_CASE("Unit_HRR_PinnedHost_PolledNull_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(h));
 }
 
+// ===========================================================================
+// A read whose launch stream waits for a null-stream hipStreamBatchMemOp wait
+// that a later call releases, all on one host thread.
+//
+//   -  hipStreamBatchMemOp on the null stream: wait for a device flag to be 1
+//   0  read      on a hipStreamCreate stream, host filled pattern 1; the launch
+//                waits on the GPU for the null stream
+//   -  hipStreamWriteValue32 on a non-blocking stream sets the flag to 1
+// Replay of hipStreamBatchMemOp waits for real. A restore that waited on the
+// host for the null stream before the write was replayed would never return.
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_BatchWait_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int can_wait = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&can_wait, hipDeviceAttributeCanUseStreamWaitValue, 0));
+  REQUIRE(can_wait != 0);
+
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                              hipHostMallocDefault));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+  uint32_t* flag = nullptr;
+  HRR_HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&flag), sizeof(uint32_t)));
+  HRR_HIP_CHECK(hipMemset(flag, 0, sizeof(uint32_t)));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  hipStream_t s = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+  hipStream_t release = nullptr;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&release, hipStreamNonBlocking));
+
+  fill(h, 1);
+  hipStreamBatchMemOpParams op{};
+  op.operation = hipStreamMemOpWaitValue32;
+  op.waitValue.operation = hipStreamMemOpWaitValue32;
+  op.waitValue.address = reinterpret_cast<hipDeviceptr_t>(flag);
+  op.waitValue.value = 1;
+  op.waitValue.flags = hipStreamWaitValueEq;
+  const hipError_t wait_err = hipStreamBatchMemOp(nullptr, 1, &op, 0);
+
+  // 0
+  hipLaunchKernelGGL(hrr_pinned_read, dim3(kBlocks), dim3(kThreads), 0, s, h, out,
+                     kPinnedInts);
+  const hipError_t read_err = hipGetLastError();
+
+  const hipError_t release_err = hipStreamWriteValue32(release, flag, 1, 0);
+  HRR_HIP_CHECK(wait_err);
+  HRR_HIP_CHECK(read_err);
+  HRR_HIP_CHECK(release_err);
+  check_out(out, [](int i) { return pattern(1, i) * 3 + 1; });
+
+  HRR_HIP_CHECK(hipStreamDestroy(release));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  HRR_HIP_CHECK(hipFree(flag));
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(h));
+}
+
 namespace {
 constexpr const char* kDirect = "Unit_HRR_PinnedHost_Direct";
 // A capture or replay that takes longer than this has hung.
@@ -1767,8 +1825,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_WaitsForOtherStream) {
 }
 
 // ---------------------------------------------------------------------------
-// Replay drains the null stream before it restores a launch into a blocking
-// stream.
+// The restore of a launch into a blocking stream waits for the null stream.
 //
 // The host waited for the null-stream kernel by polling a flag, which records
 // nothing, so replay reaches launch 2 while that kernel still spins. Launch 2
@@ -1800,6 +1857,52 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_NullStreamDrainedFirst) {
   int d2h_pass = 0, d2h_fail = 0;
   REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
   CHECK(d2h_pass >= 2);
+  CHECK(d2h_fail == 0);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// The restore waits on the launch stream, not on the host.
+//
+// The launch stream is held on the GPU by a null-stream hipStreamBatchMemOp
+// wait that only a later replayed hipStreamWriteValue32 releases. A restore
+// that waited on the host for the null stream to drain would hang the replay
+// before it reached the release; the deadline turns that into a failure.
+// Capture saw the stream busy and the bytes new, so both chunks are recorded
+// for restore, and the read must see them.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_RestoreWaitsOnStream) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_batch_wait.hrr");
+  capture_case("Unit_HRR_PinnedHost_BatchWait_Direct", cap.path);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  const std::string manifest = read_text_file(archive / "manifest.json");
+  INFO("manifest:\n" << manifest);
+  CHECK(manifest_count(manifest, "host_snapshots_unordered") == 1);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() == 1);
+  REQUIRE(kls[0]->snapshots.size() == 2);
+  CHECK(kls[0]->snapshots[0].direction == 0);
+  CHECK(kls[0]->snapshots[1].direction == 0);
+
+  auto [rc, out] = replay(archive);
+  INFO("Replay exit: " << rc
+       << (rc == hrr::test::SpawnProc::kKilledOnTimeout ? " (hung, killed)" : "")
+       << "\nReplay:\n" << out);
+  REQUIRE(rc == 0);
+  // The wait was replayed, so the launch stream really was held.
+  CHECK(out.find("hipStreamBatchMemOp: op address") == std::string::npos);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(restored == 2);
+  CHECK(rejected == 0);
+#ifndef _WIN32
+  int d2h_pass = 0, d2h_fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+  CHECK(d2h_pass >= 1);
   CHECK(d2h_fail == 0);
 #endif
 }

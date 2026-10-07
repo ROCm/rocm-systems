@@ -666,12 +666,21 @@ rejected; nothing is written for it. When the count runs past the end of the
 event or the tail is malformed, every record the launch claims is counted. A
 valid direction 0 record of a launch replayed into a graph capture is not
 applied either, but it is not rejected: it is counted apart and printed on its
-own summary line. The restore is not stream-ordered: replay
-waits on the host for the launch's stream to drain, and for the null stream too
-when the launch stream is a blocking one, then copies a chunk with `memcpy` only
-when the buffer holds different bytes. The summary prints the
-chunks restored and the records rejected. Snapshot blobs are held in a cache of
-at most 256 MiB, oldest out first, rather than the unbounded blob cache.
+own summary line.
+
+The restore is ordered on the launch stream. Replay queues one host function
+per launch with `hipLaunchHostFunc`, just before the kernel. The host function
+waits for the work the kernel waits for: the launch stream's earlier work, the
+null stream's when the launch stream is a blocking one (the per-thread stream
+is one), and every blocking stream's when the launch stream is the null stream
+or `hipStreamLegacy`. It copies a chunk with `memcpy` only when the buffer holds
+different bytes, and calls no HIP API. The kernel waits for it. Replay never
+blocks on the host for the restore, so a launch stream held back by a wait that
+later replayed work releases does not hang the replay. When the host function
+cannot be queued, replay warns once and restores at once, without waiting. The
+summary prints the chunks restored and the records rejected. Snapshot blobs are
+held in a cache of at most 256 MiB, oldest out first, rather than the unbounded
+blob cache.
 
 `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` reports host memory a kernel reads that no
 snapshot record names: a pointer argument into such a pinned allocation, and a
@@ -737,13 +746,16 @@ exists to put chosen bytes in front of those kernels.
 
 **Residual risks.**
 
-- A launch on a busy stream records the bytes as they were when it was queued,
-  not when it ran. Device work queued ahead of it that writes the buffer, or a
-  host thread that writes it in between, makes the replayed input differ.
-- Replay waits for the stream, and for a blocking stream the null stream, to
-  drain before it restores a direction 0 record. Capture did not wait, so a stream blocked on a value that only a
-  later replayed call releases would hang the replay there. Replay of
-  `hipStreamWaitValue*` does not wait today, so no such stream exists yet.
+- A launch whose earlier work is still queued, on its own stream or on a stream
+  it waits for, records the bytes as they were when it was queued, not when it
+  ran. Device work queued ahead of it that writes the buffer, or a host thread
+  that writes it in between, makes the replayed input differ.
+- Replay orders a direction 0 restore on the launch stream only. Replayed work
+  on a stream the launch does not wait for, reading the buffer before the
+  kernel runs, sees the bytes from before the restore. The application raced
+  there too. Replay of `hipStreamBatchMemOp` waits for real, so a launch stream
+  can stay blocked until later replayed work releases it; the restore waits
+  with the kernel rather than hanging the replay.
 - A by-value scalar whose value happens to fall inside a pinned allocation the
   launch recorded, at an aligned word, is rewritten on replay as if it were a
   pointer. So is one inside a pinned allocation the launch did not record,
