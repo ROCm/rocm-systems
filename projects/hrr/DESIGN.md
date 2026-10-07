@@ -797,11 +797,15 @@ capture-side code runs, and a producer needs neither `dlopen` nor a symbol.
 `HIP_HRR_CAPTURE_OUTPUT` is a plain environment variable and the writer's layout
 is `$HIP_HRR_CAPTURE_OUTPUT/pid-<getpid()>/`, so a producer computes the path
 itself; "is capture active" reduces to whether that directory's `active` file
-exists. `writer::open()` removes a stale one before any step that can fail and
-creates it as its last step, and `flush()` removes it at shutdown. Neither the
-directory nor `events.bin` can carry the signal: a refused archive keeps its
-directory, and a same-pid resume that fails after opening `events.bin` keeps the
-earlier run's file.
+exists and names this process. `writer::open()` removes a stale one before any
+step that can fail and creates it as its last step, and `flush()` removes it at
+shutdown. Neither the directory nor `events.bin` can carry the signal: a refused
+archive keeps its directory, and a same-pid resume that fails after opening
+`events.bin` keeps the earlier run's file. Existence alone is not enough either.
+A process killed with `SIGKILL` leaves its marker, and a later process with the
+same pid can find it before its own HIP init. So the marker holds the boot id and
+the start time from `/proc/self/stat` (the creation time on Windows), and a
+producer compares that line with its own.
 
 A sidecar is an ordinary HRR record stream — `hrr_file_header` + repeated
 `hrr_event_header` + payload — carrying its own magic (`HRR_REGION_MAGIC`,

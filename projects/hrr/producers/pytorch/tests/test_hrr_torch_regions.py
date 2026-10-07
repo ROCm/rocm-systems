@@ -27,12 +27,15 @@ import hrr_torch_regions as regions  # noqa: E402
 
 RECORD = (regions._ADD, regions._BLOCK, 0, 0x1000, 256, 1)
 VICTIM_CONTENTS = b"must survive the producer\n"
+# What the tests take this process to be, so they do not depend on /proc.
+INSTANCE = "00000000-0000-0000-0000-000000000000 4242"
 
 
 class _ArchiveCase(unittest.TestCase):
     """A capture root in a temporary directory with this process's pid-<pid>,
     its events.bin and its active marker in it, as the capture writer leaves
-    them while it runs, and HIP_HRR_CAPTURE_OUTPUT pointing at the root."""
+    them while it runs, and HIP_HRR_CAPTURE_OUTPUT pointing at the root. The
+    marker names INSTANCE, which _process_instance() returns."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="hrr_regions_test_"))
@@ -42,7 +45,10 @@ class _ArchiveCase(unittest.TestCase):
         self.archive.mkdir(mode=0o700)
         (self.archive / "events.bin").write_bytes(b"")
         self.marker = self.archive / "active"
-        self.marker.write_bytes(b"")
+        self.marker.write_bytes(INSTANCE.encode() + b"\n")
+        instance = mock.patch.object(regions, "_process_instance", return_value=INSTANCE)
+        instance.start()
+        self.addCleanup(instance.stop)
         self.victim = self.tmp / "victim"
         self.victim.write_bytes(VICTIM_CONTENTS)
         env = mock.patch.dict(os.environ, {"HIP_HRR_CAPTURE_OUTPUT": str(self.root)})
@@ -96,6 +102,48 @@ class ArchiveDirTest(_ArchiveCase):
         self.marker.unlink()
         self.marker.mkdir()
         self.assertIsNone(regions._archive_dir())
+
+    def test_marker_of_an_earlier_process(self):
+        # What a process killed with SIGKILL leaves for a later one with its pid.
+        self.marker.write_bytes(b"00000000-0000-0000-0000-000000000000 4241\n")
+        self.assertIsNone(regions._archive_dir())
+
+    def test_marker_not_yet_written(self):
+        # The writer has created the marker and not yet written the line.
+        self.marker.write_bytes(b"")
+        self.assertIsNone(regions._archive_dir())
+
+    def test_process_unnamed(self):
+        with mock.patch.object(regions, "_process_instance", return_value=None):
+            self.assertIsNone(regions._archive_dir())
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "/proc/self/stat")
+class ProcessInstanceTest(unittest.TestCase):
+    """_process_instance: the boot id and field 22 of /proc/self/stat, also
+    when the command name holds spaces and parentheses."""
+
+    def setUp(self):
+        with open("/proc/self/comm") as f:
+            name = f.read().rstrip("\n")
+        self.addCleanup(self.set_comm, name)
+
+    @staticmethod
+    def set_comm(name):
+        with open("/proc/self/comm", "w") as f:
+            f.write(name)
+
+    def test_names_this_process(self):
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            boot = f.read().strip()
+        for name in ("python3", "a) b (c) 1 2"):
+            with self.subTest(comm=name):
+                self.set_comm(name)
+                with open("/proc/self/stat") as f:
+                    line = f.read()
+                self.assertIn(name, line)
+                start = line.rsplit(") ", 1)[1].split(" ")[19]
+                self.assertEqual(regions._process_instance(), "%s %s" % (boot, start))
 
 
 @unittest.skipIf(os.name == "nt", "POSIX permission bits and links")

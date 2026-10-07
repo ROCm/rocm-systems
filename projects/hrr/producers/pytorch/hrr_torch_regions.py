@@ -75,14 +75,71 @@ def _archive_dir():
     is: both stay when the writer refuses an archive or fails to resume one, and
     capture is then off. Re-checked on every poll because capture starts at HIP
     init, which is normally after this module loads.
+
+    The marker must name this process. A process killed with SIGKILL leaves its
+    marker behind, and a later process with the same pid finds it before HIP
+    starts.
     """
     root = os.environ.get("HIP_HRR_CAPTURE_OUTPUT")
     if not root:
         return None
     d = os.path.join(root, "pid-%d" % os.getpid())
-    if not _private_dir(d) or not _private_file(os.path.join(d, "active")):
+    marker = os.path.join(d, "active")
+    if not _private_dir(d) or not _private_file(marker):
+        return None
+    instance = _process_instance()
+    if instance is None or _read_marker(marker) != instance:
         return None
     return d
+
+
+def _process_instance():
+    """This process as the capture writer names it in the active marker, or None.
+
+    On Linux the boot id and the start time from /proc/self/stat, in clock ticks
+    since boot. On Windows the creation time as a FILETIME.
+    """
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32")
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.GetProcessTimes.argtypes = ([wintypes.HANDLE]
+                                        + [ctypes.POINTER(wintypes.FILETIME)] * 4)
+        k32.GetProcessTimes.restype = wintypes.BOOL
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not k32.GetProcessTimes(k32.GetCurrentProcess(), *map(ctypes.byref, times)):
+            return None
+        return str(times[0].dwHighDateTime << 32 | times[0].dwLowDateTime)
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            boot = f.readline().strip()
+        with open("/proc/self/stat") as f:
+            line = f.readline()
+    except OSError:
+        return None
+    # Field 2, the command name, may hold spaces and parentheses. The fields
+    # after the last ')' start at field 3, so field 22 is the 20th of them.
+    fields = line[line.rfind(")") + 1:].split()
+    if not boot or len(fields) < 20 or not fields[19].isdigit():
+        return None
+    return "%s %s" % (boot, fields[19])
+
+
+def _read_marker(path):
+    """The marker's first line, or None if it cannot be read."""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return None
+    try:
+        data = os.read(fd, 256)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    return data.decode("ascii", "replace").split("\n", 1)[0]
 
 
 def _private_dir(path):

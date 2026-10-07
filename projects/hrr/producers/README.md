@@ -40,28 +40,50 @@ Create `regions/` with mode 0700 and the files in it with 0600 so the archive
 stays private.
 
 **Checking whether capture is active** reduces to checking that the archive's
-`active` file is there and is one the writer created: a regular file of this
-user with one name, reached through no link. The writer creates it as the last
-step of a successful open and removes it at shutdown, or when capture stops
-early for lack of space. There is no symbol to
-resolve and nothing to `dlopen`:
+`active` file is there, is one the writer created, and names this process. The
+writer creates it as a regular file of this user with one name, reached through
+no link, as the last step of a successful open. It removes it at shutdown, or
+when capture stops early for lack of space. There is no symbol to resolve and
+nothing to `dlopen`.
+
+A process killed with `SIGKILL` cannot remove its marker, and a later process
+can get the same pid. So the marker holds one line that names the process
+instance, and a producer compares it with its own. On Linux the line is the boot
+id, a space, and the start time from `/proc/self/stat` (field 22, in clock ticks
+since boot). On Windows it is the creation time from `GetProcessTimes`, as a
+decimal FILETIME. The line is empty when the writer cannot read these, and then
+no producer should write.
 
 ```python
 import os, stat
+
+def process_instance():
+    with open("/proc/sys/kernel/random/boot_id") as f:
+        boot = f.readline().strip()
+    with open("/proc/self/stat") as f:
+        line = f.readline()
+    # The command name may hold spaces and ")"; field 22 is the 20th after it.
+    return f"{boot} {line[line.rfind(')') + 1:].split()[19]}"
 
 def capture_active():
     root = os.environ.get("HIP_HRR_CAPTURE_OUTPUT")
     if not root:
         return False
     d = os.path.join(root, f"pid-{os.getpid()}")
+    marker = os.path.join(d, "active")
     try:
         ds = os.lstat(d)
-        fs = os.lstat(os.path.join(d, "active"))
+        fs = os.lstat(marker)
+        fd = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
         return False
+    try:
+        line = os.read(fd, 256).decode("ascii", "replace").split("\n", 1)[0]
+    finally:
+        os.close(fd)
     return (stat.S_ISDIR(ds.st_mode) and ds.st_uid == os.geteuid()
             and stat.S_ISREG(fs.st_mode) and fs.st_uid == os.geteuid()
-            and fs.st_nlink == 1)
+            and fs.st_nlink == 1 and line == process_instance())
 ```
 
 Neither the directory nor its `events.bin` is enough: both stay when the

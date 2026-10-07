@@ -909,7 +909,10 @@ static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total,
 // creates it as its last step. flush() removes it at shutdown, and
 // stop_for_space() when the capture stops early. events.bin cannot carry that
 // signal: a resume that fails after opening it leaves the earlier run's file in
-// place.
+// place. The marker holds one line naming the process instance (see
+// process_instance()). A killed process cannot remove its marker, and a producer
+// in a later process with the same pid checks before HIP starts, so it must find
+// its own instance in the marker.
 static constexpr const char* kActiveMarker = "/active";
 
 // Flush what is buffered, close events.bin and mark the archive incomplete.
@@ -1052,11 +1055,63 @@ static bool open_failed(bool created_pid_dir) {
   return false;
 }
 
+// Names this process instance, so a producer can tell the marker its own writer
+// created from one that a killed process with the same pid left behind. On Linux
+// it is the boot id and the start time from /proc/self/stat, in clock ticks since
+// boot; on Windows the creation time as a FILETIME. Empty when it cannot be read.
+static std::string process_instance() {
+#if defined(_WIN32)
+  FILETIME created{}, exited{}, kernel{}, user{};
+  if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return {};
+  return std::to_string((static_cast<uint64_t>(created.dwHighDateTime) << 32) |
+                        created.dwLowDateTime);
+#elif defined(__linux__)
+  auto first_line = [](const char* path) {
+    std::string line;
+    if (FILE* f = fopen(path, "r")) {
+      char buf[1024];
+      if (fgets(buf, sizeof(buf), f) != nullptr) line = buf;
+      fclose(f);
+    }
+    return line;
+  };
+  std::string boot = first_line("/proc/sys/kernel/random/boot_id");
+  while (!boot.empty() && boot.back() == '\n') boot.pop_back();
+  const std::string stat_line = first_line("/proc/self/stat");
+  // Field 2, the command name, may hold spaces and parentheses. Every field
+  // after the last ')' is one word with one space before it.
+  const size_t name_end = stat_line.rfind(')');
+  if (boot.empty() || name_end == std::string::npos) return {};
+  const char* p = stat_line.c_str() + name_end;
+  for (int field = 3; field <= 22; ++field) {
+    p = strchr(p, ' ');
+    if (p == nullptr) return {};
+    ++p;
+  }
+  const size_t digits = strspn(p, "0123456789");
+  if (digits == 0) return {};
+  return boot + " " + std::string(p, digits);
+#else
+  return {};
+#endif
+}
+
 static bool publish_active_marker() {
-  const int fd = HRR_OPEN((g_output_dir + kActiveMarker).c_str());
+  const std::string marker = g_output_dir + kActiveMarker;
+  const std::string instance = process_instance();
+  if (instance.empty())
+    LogPrintfWarning("[HRR capture] Cannot name this process in %s, so producers will not "
+                     "take the capture for active", marker.c_str());
+  const int fd = HRR_OPEN(marker.c_str());
   if (fd < 0) return false;
+  const std::string line = instance + "\n";
+  const bool written = write_all_fd(fd, line.data(), line.size());
+  const int err = errno;
   HRR_CLOSE(fd);
-  return true;
+  if (written) return true;
+  (void)remove(marker.c_str());
+  errno = err;
+  return false;
 }
 
 bool open(const char* output_dir) {

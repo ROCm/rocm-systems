@@ -55,11 +55,11 @@
  *
  *   Unit_HRR_CaptureActiveMarker:
  *     pid-<pid>/active, the file producers read as "capture is on", exists
- *     while the capture runs and is gone after a clean exit; a stale one is
- *     removed when the archive is refused; and a resume that cannot create it,
- *     or cannot cut the trailer off the earlier events.bin, disables the
- *     capture and leaves that events.bin as it was (POSIX; the trailer case
- *     on Linux).
+ *     while the capture runs, names the process instance on Linux, and is
+ *     gone after a clean exit; a stale one is removed when the archive is
+ *     refused; and a resume that cannot create it, or cannot cut the trailer
+ *     off the earlier events.bin, disables the capture and leaves that
+ *     events.bin as it was (POSIX; the trailer case on Linux).
  */
 
 #include "hrr_test_common.hh"
@@ -289,9 +289,16 @@ TEST_CASE("Unit_HRR_CaptureForkWithoutFds_Direct", "[.][hrr-direct]") {
 
 // ---------------------------------------------------------------------------
 // Hidden ([.]) workload for Unit_HRR_CaptureActiveMarker: once HIP is up, and
-// with it the capture, its pid-<pid>/active is a private regular file.
+// with it the capture, its pid-<pid>/active is a private regular file. On Linux
+// it holds one line, the boot id and the start time from /proc/self/stat, so a
+// later process with the same pid cannot take it for its own. The command name
+// is set first to one with spaces and parentheses, which the writer has to read
+// past.
 // ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_CaptureActiveMarker_Direct", "[.][hrr-direct]") {
+#ifdef __linux__
+  std::ofstream("/proc/self/comm") << "hrr) a (b) 1 2";
+#endif
   HRR_HIP_CHECK(hipSetDevice(0));
   void* d = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d, 256));
@@ -307,6 +314,17 @@ TEST_CASE("Unit_HRR_CaptureActiveMarker_Direct", "[.][hrr-direct]") {
   CHECK(S_ISREG(st.st_mode));
   CHECK((st.st_mode & 07777) == 0600);
   CHECK(st.st_nlink == 1);
+#ifdef __linux__
+  std::string boot = read_text_file("/proc/sys/kernel/random/boot_id");
+  REQUIRE_FALSE(boot.empty());
+  boot.pop_back();  // the newline
+  const std::string stat_line = read_text_file("/proc/self/stat");
+  INFO("/proc/self/stat: " << stat_line);
+  std::istringstream fields(stat_line.substr(stat_line.rfind(") ") + 2));
+  std::string start;
+  for (int field = 3; field <= 22; ++field) fields >> start;
+  CHECK(read_text_file(marker) == boot + " " + start + "\n");
+#endif
   HRR_HIP_CHECK(hipFree(d));
 }
 
@@ -839,7 +857,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
  * Test Description
  * ----------------
  *   - Runs Unit_HRR_CaptureActiveMarker_Direct, which finds its
- *     pid-<pid>/active while the capture runs; after a clean exit it is gone.
+ *     pid-<pid>/active while the capture runs, holding its boot id and start
+ *     time on Linux; after a clean exit it is gone.
  *   - Plants a stale pid-<pid>/active next to a symbolic link at
  *     pid-<pid>/events.bin: the capture is refused and the stale marker is
  *     removed, so producers do not take the refused archive for a live one.
