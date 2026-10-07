@@ -312,6 +312,7 @@ nm -CD "${librccl}" 2>/dev/null | grep -E " U .*${sym}" || echo "  not undefined
   printf 'export RCCL_TESTS_BIN_DIR=%q\n' "${rccl_tests_build}"
   printf 'export RCCL_TESTS_DIR=%q\n' "${rccl_tests_src}"
   printf 'export RCCL_FIXTURES_BIN_DIR=%q\n' "$(dirname "${rccl_fixtures_bin}")"
+  printf 'export RCCL_BUILD_LIB_DIR=%q\n' "${rccl_build}"
 } > "${workdir}/.ci-out/rccl.env"
 ) > "${build_out}" 2> "${build_err}" || build_rc=$?
 echo "==> build phase logs: ${build_out} / ${build_err}"

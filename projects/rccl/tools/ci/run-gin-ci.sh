@@ -60,6 +60,7 @@ done
 : "${RCCL_INSTALL_PREFIX:?run-gin-ci.sh: RCCL_INSTALL_PREFIX unset (set by gin.sbatch)}"
 : "${RCCL_TESTS_BIN_DIR:?run-gin-ci.sh: RCCL_TESTS_BIN_DIR unset (set by gin.sbatch)}"
 : "${RCCL_FIXTURES_BIN_DIR:?run-gin-ci.sh: RCCL_FIXTURES_BIN_DIR unset (set by gin.sbatch)}"
+: "${RCCL_BUILD_LIB_DIR:?run-gin-ci.sh: RCCL_BUILD_LIB_DIR unset (set by gin.sbatch)}"
 # build-rocshmem.sh records where the test binary landed (bin/ vs share/rocshmem/);
 # fall back to bin/ for older env fragments.
 ROCSHMEM_TESTS_BIN_DIR="${ROCSHMEM_TESTS_BIN_DIR:-${ROCSHMEM_INSTALL_DIR}/bin}"
@@ -258,6 +259,13 @@ run_test() {
   elif [[ "${kind}" == "fixtures" ]]; then
     timeout --kill-after="${BENCH_KILL_AFTER}" "${bench_timeout}" \
       env LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+        "${bin_path}" ${args}
+  elif [[ "${kind}" == "mpi-fixtures" ]]; then
+    # rccl-UnitTestsMPI links librccl internals, which only the build tree's
+    # ENABLE_MPI_TESTS librccl exports; the installed copy hides them.
+    timeout --kill-after="${BENCH_KILL_AFTER}" "${bench_timeout}" \
+      mpirun -np "${nranks}" ${MCA} ${env_flags} \
+        -x LD_LIBRARY_PATH="${RCCL_BUILD_LIB_DIR}:${LD_LIBRARY_PATH}" \
         "${bin_path}" ${args}
   else
     timeout --kill-after="${BENCH_KILL_AFTER}" "${bench_timeout}" \

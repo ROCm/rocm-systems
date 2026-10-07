@@ -16,13 +16,6 @@
 #include "sdma/anvil_device.hpp"
 #include "sdma/sdma_opcodes.h"
 
-// Test seam for the agent-scope release on the ipcAgentFence!=0 arms, the
-// counterpart of NCCL_GIN_THREADFENCE_SYSTEM. Override before including this
-// header to observe which scope a signal path emitted.
-#ifndef NCCL_GIN_ANVIL_IPC_AGENT_RELEASE
-#define NCCL_GIN_ANVIL_IPC_AGENT_RELEASE() __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent")
-#endif
-
 namespace nccl {
 namespace gin {
 namespace anvil {
@@ -152,38 +145,22 @@ NCCL_DEVICE_INLINE void signalPeer(ncclGinAnvilSdmaGPUContext* rsCtx, int peer, 
                                    uint64_t value) {
   uint64_t* remoteSig = remoteSignalAddr(rsCtx, peer, signalId);
   if (remoteSig == nullptr) return;
-  // The remote add is relaxed, so the release fence must run *before* it or
-  // ipcPut stores can pass the signal cell. Default ipcAgentFence==0 uses one
-  // system fence, which is the only release on the clean-queue IPC SignalInc
-  // path (skipFenceBeforeSignal drops the one in fenceBeforeSignal).
-  //
-  // ipcAgentFence!=0 is a debug/measurement knob only: agent scope does not
-  // make this GPU's stores visible to a peer GPU, so a peer can observe the
-  // signal before the payload. It exists to A/B the fence cost against the
-  // atomic cost and must not be enabled in production.
-  if (rsCtx != nullptr && loadConst(&rsCtx->ipcAgentFence) != 0) {
-    NCCL_GIN_ANVIL_IPC_AGENT_RELEASE();
-    ipcFlatAtomicAddSys64(remoteSig, value);
-    NCCL_GIN_ANVIL_IPC_AGENT_RELEASE();
-  } else {
-    NCCL_GIN_THREADFENCE_SYSTEM();
-    ipcFlatAtomicAddSys64(remoteSig, value);
-  }
+  // The remote add is relaxed, so the system release must run *before* it or
+  // ipcPut stores can pass the signal cell. It is the only release on the
+  // clean-queue IPC SignalInc path (skipFenceBeforeSignal drops the one in
+  // fenceBeforeSignal).
+  NCCL_GIN_THREADFENCE_SYSTEM();
+  ipcFlatAtomicAddSys64(remoteSig, value);
 }
 
 NCCL_DEVICE_INLINE void fenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx, bool needSdmaQuiet,
                                           ::sdma_anvil::SdmaQueueDeviceHandle* handle, bool hasCounter) {
+  (void)rsCtx;
   (void)hasCounter;
-  if (needSdmaQuiet && handle != nullptr) {
-    ::sdma_anvil::quiet(*handle);
-    // quiet() drains this peer/channel queue. Sub-threshold IPC stores are not
-    // on that queue, so a system fence still orders them ahead of the signal.
-    NCCL_GIN_THREADFENCE_SYSTEM();
-  } else if (rsCtx != nullptr && loadConst(&rsCtx->ipcAgentFence) != 0) {
-    NCCL_GIN_ANVIL_IPC_AGENT_RELEASE();
-  } else {
-    NCCL_GIN_THREADFENCE_SYSTEM();
-  }
+  // quiet() drains this peer/channel queue. Sub-threshold IPC stores are not
+  // on that queue, so a system fence still orders them ahead of the signal.
+  if (needSdmaQuiet && handle != nullptr) ::sdma_anvil::quiet(*handle);
+  NCCL_GIN_THREADFENCE_SYSTEM();
 }
 
 // True when fenceBeforeSignal would only duplicate signalPeer's pre-atomic

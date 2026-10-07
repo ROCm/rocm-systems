@@ -225,17 +225,6 @@ static uint32_t ginAnvilFusedSignalFromEnv() {
   return atoi(e) != 0 ? 1u : 0u;
 }
 
-// Debug/measurement only. Nonzero downgrades the IPC signal release to agent
-// scope, which does not order this GPU's payload stores ahead of the signal as
-// seen by the peer GPU. Used to A/B fence cost vs atomic cost; never set in
-// production.
-static uint32_t ginAnvilIpcAgentFenceFromEnv() {
-  const char* e = getenv("NCCL_GIN_ANVIL_SDMA_IPC_AGENT_FENCE");
-  if (!e || !e[0]) return 0;
-  if (e[0] == '0' && e[1] == '\0') return 0;
-  return atoi(e) != 0 ? 1u : 0u;
-}
-
 static uint32_t ginAnvilIpcSignalPeerFromEnv() {
   const char* e = getenv("NCCL_GIN_ANVIL_SDMA_SIGNAL_IPC");
   if (!e || !e[0]) return 0;
@@ -904,7 +893,6 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
                                                              : (uint32_t)thr;
   }
   ctx->gpuCtxHost.fusedSdmaSignal = ginAnvilFusedSignalFromEnv();
-  ctx->gpuCtxHost.ipcAgentFence = ginAnvilIpcAgentFenceFromEnv();
   ctx->gpuCtxHost.ipcSignalPeer = ginAnvilIpcSignalPeerFromEnv();
   ctx->gpuCtxHost.signals = nullptr;
   ctx->gpuCtxHost.signal_remote_addrs = nullptr;
