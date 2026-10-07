@@ -1811,12 +1811,24 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    if upper == 'S_ATOMIC_DEC':
-        return InstructionSemantics(
-            name, 'smem_atomic', operation='dec', elem_size=4, num_elems=1
-        )
-    # Other scalar atomics are not currently simulated.
     if '_ATOMIC_' in upper:
+        for prefix in ('S_ATOMIC_', 'S_BUFFER_ATOMIC_'):
+            if upper.startswith(prefix):
+                suffix = upper[len(prefix) :]
+                is_x2 = suffix.endswith('_X2')
+                if is_x2:
+                    suffix = suffix[:-3]
+                info = _derive_flat_atomic_info(suffix, is_x2)
+                if info and upper in ('S_ATOMIC_DEC',):
+                    op, elem_size, data_dw_actual = info
+                    return InstructionSemantics(
+                        name,
+                        'smem_atomic',
+                        operation=op,
+                        elem_size=elem_size,
+                        num_elems=data_dw_actual,
+                    )
+        # Other scalar atomics are not currently simulated.
         return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper

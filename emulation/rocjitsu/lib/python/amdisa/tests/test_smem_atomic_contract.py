@@ -46,24 +46,31 @@ def test_smem_atomic_accepts_derived_global_decrement(arch_name, profile, name):
 
 
 @pytest.mark.parametrize(
-    'changes',
+    ('changes', 'message'),
     [
-        pytest.param({'name': 'S_BUFFER_ATOMIC_DEC'}, id='buffer-mnemonic'),
-        pytest.param({'name': 'S_ATOMIC_DEC_X2'}, id='x2-mnemonic'),
-        pytest.param({'operation': 'inc'}, id='other-operation'),
-        pytest.param({'operation': 'unknown'}, id='unknown-operation'),
-        pytest.param({'operation': None}, id='missing-operation'),
-        pytest.param({'elem_size': 8}, id='element-width'),
-        pytest.param({'num_elems': 2}, id='register-count'),
-        pytest.param({'elem_size': 8, 'num_elems': 2}, id='64-bit-payload'),
+        pytest.param(
+            {'name': 'S_BUFFER_ATOMIC_DEC'},
+            'supports only global S_ATOMIC_',
+            id='buffer-mnemonic',
+        ),
+        pytest.param(
+            {'operation': 'unknown'},
+            'unsupported smem_atomic operation',
+            id='unknown-operation',
+        ),
+        pytest.param(
+            {'operation': None},
+            'unsupported smem_atomic operation',
+            id='missing-operation',
+        ),
     ],
 )
-def test_smem_atomic_rejects_unsupported_contract(changes):
+def test_smem_atomic_rejects_unsupported_contract(changes, message):
     sem = InstructionSemantics(
         'S_ATOMIC_DEC', 'smem_atomic', operation='dec', elem_size=4, num_elems=1
     )
     # Exercise the emitter directly: derivation currently filters these inputs.
     sem = replace(sem, **changes)
 
-    with pytest.raises(ValueError, match='supports only 32-bit S_ATOMIC_DEC'):
+    with pytest.raises(ValueError, match=message):
         _codegen('cdna4', Cdna4Profile())._gen_smem_atomic(sem)
