@@ -1,11 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""How the memory chart displays a metric value, by the metric's unit.
+"""How the memory chart displays each panel 300 metric unit.
 
-Units come from the `unit` field of each metric in the memory chart panel config
-(0300_memory_chart.yaml), never from a layout. A unit test fails if a metric shown
-on a chart has a unit with no rule here.
+Units come from the metric config, never from a layout. A test checks that
+every unit the shipped configs use has a rule here.
 """
 
 import math
@@ -28,10 +27,9 @@ class DisplayUnit:
 
 # For values whose unit has no display rule
 PLAIN = DisplayUnit("value")
-PERCENT = DisplayUnit("percent", "%")
 
 _DISPLAY_UNITS: dict[str, DisplayUnit] = {
-    "Percent": PERCENT,
+    "Percent": DisplayUnit("percent", "%"),
     "Bytes/s": DisplayUnit("bandwidth", " GB/s", 3, 1e-9),
     "KB per Wave": DisplayUnit("value", " KB", 3),
     "Bytes per Workgroup": DisplayUnit("value", " KB", 1, 1 / 1024),
