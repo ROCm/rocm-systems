@@ -1912,6 +1912,33 @@ HRR_TEST_CASE(Unit_HRR_RecordAfterCaptureShutdown) {
   CHECK(arc.complete);
   check_ends_in_trailer(archive, arc);
 }
+
+/**
+ * Unit_HRR_ForkBetweenCaptureFlushAndClose
+ * ----------------------------------------
+ *   - A child forked after the capture shutdown has written the trailer, and
+ *     before it closes events.bin, leaves no archive, even though it records
+ *     before it exits. The parent's archive is still complete.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkBetweenCaptureFlushAndClose) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_between_capture_flush_and_close"};
+
+  {
+    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  REQUIRE(hrr_process_archives(cap.path).size() == 1);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  CHECK(arc.complete);
+  check_ends_in_trailer(archive, arc);
+}
 #endif  // !_WIN32
 
 // ---------------------------------------------------------------------------

@@ -46,6 +46,7 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
@@ -4198,6 +4199,101 @@ TEST_CASE("Unit_HRR_RecordAfterCaptureShutdown_Direct", "[.][hrr-direct]") {
   }).detach();
   // The capture shutdown runs once this returns.
   for (int ms = 0; ms < 10000 && !g_late_in_call.load(); ++ms) hrr_sleep_1ms();
+}
+
+// ---------------------------------------------------------------------------
+// pthread_mutex_lock() for this test binary, for the same reason as fsync()
+// above: CLR's std::mutex resolves it here first. The capture shutdown's
+// close() calls it first thing, for the lock flush() has just released. With no
+// hook set it is a plain pthread_mutex_lock.
+// ---------------------------------------------------------------------------
+static std::atomic<void (*)()> g_hrr_mutex_lock_hook{nullptr};
+
+extern "C" int pthread_mutex_lock(pthread_mutex_t* mutex) noexcept {
+  if (auto hook = g_hrr_mutex_lock_hook.load(std::memory_order_acquire)) hook();
+  using Fn = int (*)(pthread_mutex_t*);
+  static std::atomic<Fn> real{nullptr};
+  Fn fn = real.load(std::memory_order_relaxed);
+  if (fn == nullptr) {
+    fn = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "pthread_mutex_lock"));
+    real.store(fn, std::memory_order_relaxed);
+  }
+  return fn(mutex);
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct
+//
+// The capture shutdown finalizes the archive in flush(), and closes events.bin
+// in close() right after. A thread that forks in between must not leave the
+// child to open an archive on its first record: the shutdown that would
+// finalize it is running on the parent's exiting thread, and is no longer
+// pending in the child. Here the shutdown is held after flush(), at the first
+// lock close() takes, while a second thread forks. The child records through
+// the compiler dispatch table and exits. The parent exits 3 if the child did
+// not exit cleanly, and 4 if the hold never came or ran out before the fork
+// returned. Unit_HRR_ForkBetweenCaptureFlushAndClose checks that only the
+// parent has an archive.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_flush_done{false};
+std::atomic<bool> g_forked_after_flush{false};
+std::atomic<bool> g_close_hold_ran_out{false};
+std::atomic<int>  g_flush_fork_status{-1};
+thread_local bool t_hold_next_lock = false;
+
+// Holds the shutdown thread before it takes close()'s lock, until the fork.
+void hold_close_lock_hook() {
+  if (!t_hold_next_lock) return;
+  t_hold_next_lock = false;
+  g_hrr_mutex_lock_hook = nullptr;
+  g_flush_done = true;
+  int ms = 0;
+  for (; ms < 10000 && !g_forked_after_flush.load(); ++ms) hrr_sleep_1ms();
+  // fork() takes the lock close() is about to take, so a fork that returned
+  // while this waited ran before close().
+  g_close_hold_ran_out = ms == 10000;
+}
+
+// flush() publishes the root manifest last, after the trailer and the
+// process manifest. Nothing after it on this thread takes a mutex until
+// close() does.
+void root_manifest_rename_hook(const char* path) {
+  static constexpr char kSuffix[] = "/manifest.json";
+  constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
+  const size_t len = strlen(path);
+  if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
+  const std::string dir = std::filesystem::path(path).parent_path().filename().string();
+  if (dir.rfind("pid-", 0) == 0) return;
+  g_hrr_rename_hook = nullptr;
+  t_hold_next_lock = true;
+  g_hrr_mutex_lock_hook = hold_close_lock_hook;
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+
+  g_hrr_after_capture_shutdown = [] {
+    if (!g_flush_done.load() || g_close_hold_ran_out.load()) _exit(4);
+    const int status = g_flush_fork_status.load();
+    if (status == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) _exit(3);
+  };
+  g_hrr_rename_hook = root_manifest_rename_hook;
+  std::thread([] {
+    for (int ms = 0; ms < 20000 && !g_flush_done.load(); ++ms) hrr_sleep_1ms();
+    if (!g_flush_done.load()) return;
+    pid_t pid = fork();
+    if (pid == 0) {
+      hrr_push_pop_launch_config();
+      _exit(0);
+    }
+    g_flush_fork_status = pid > 0 ? hrr_wait_child(pid, 30) : -1;
+    g_forked_after_flush = true;
+  }).detach();
 }
 #endif  // !_WIN32
 
