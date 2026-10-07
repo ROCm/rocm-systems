@@ -2049,7 +2049,9 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
 
     if upper in ('GLOBAL_LOAD_LDS_DWORDX3', 'GLOBAL_LOAD_LDS_DWORDX4'):
         return InstructionSemantics(
-            name, 'global_load_lds', elem_size=4,
+            name,
+            'global_load_lds',
+            elem_size=4,
             num_elems=3 if upper.endswith('X3') else 4,
         )
 

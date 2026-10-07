@@ -170,8 +170,8 @@ enum HookLogLevel : int {
 std::atomic<int> g_log_level{kLogDisabled};
 std::atomic<bool> g_signal_backtrace_enabled{false};
 std::atomic<bool> g_signal_backtrace_installed{false};
-struct sigaction g_previous_sigsegv{};
-struct sigaction g_previous_sigabrt{};
+struct sigaction g_previous_sigsegv {};
+struct sigaction g_previous_sigabrt {};
 
 /// @brief Parsed ISA target used by DBT and HSA agent matching.
 struct TargetInfo {
@@ -336,13 +336,13 @@ void maybe_install_signal_backtrace(bool enabled) {
 
   prewarm_signal_backtrace();
 
-  struct sigaction action{};
+  struct sigaction action {};
   action.sa_sigaction = signal_backtrace_handler;
   sigemptyset(&action.sa_mask);
   action.sa_flags = SA_SIGINFO;
 
-  struct sigaction previous_sigsegv{};
-  struct sigaction previous_sigabrt{};
+  struct sigaction previous_sigsegv {};
+  struct sigaction previous_sigabrt {};
   if (::sigaction(SIGSEGV, &action, &previous_sigsegv) != 0)
     return;
   if (::sigaction(SIGABRT, &action, &previous_sigabrt) != 0) {

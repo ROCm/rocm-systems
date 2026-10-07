@@ -35,8 +35,12 @@ class TensileValidationTest(unittest.TestCase):
             )
             self.assertNotIn("-P", command)
             result = subprocess.run(
-                command, cwd=root, env={**os.environ, "PYTHONPATH": str(package)},
-                capture_output=True, text=True, check=True,
+                command,
+                cwd=root,
+                env={**os.environ, "PYTHONPATH": str(package)},
+                capture_output=True,
+                text=True,
+                check=True,
             )
             self.assertEqual(result.stdout.strip(), "42")
 
@@ -213,8 +217,11 @@ class TensileValidationTest(unittest.TestCase):
         self.assertEqual(tensile_validation._nonnegative_float("250.0"), 250.0)
         self.assertEqual(tensile_validation._nonnegative_float("0"), 0.0)
         for invalid in ("-1", "nan", "inf"):
-            with self.subTest(invalid=invalid), self.assertRaisesRegex(
-                argparse.ArgumentTypeError, "nonnegative and finite"
+            with (
+                self.subTest(invalid=invalid),
+                self.assertRaisesRegex(
+                    argparse.ArgumentTypeError, "nonnegative and finite"
+                ),
             ):
                 tensile_validation._nonnegative_float(invalid)
 
@@ -222,8 +229,11 @@ class TensileValidationTest(unittest.TestCase):
         self.assertEqual(tensile_validation._gpu_target("gfx950"), "gfx950")
         self.assertEqual(tensile_validation._gpu_target("gfx1250"), "gfx1250")
         for invalid in ("950", "gfx", "gfx950:xnack-", "gfx9_50"):
-            with self.subTest(invalid=invalid), self.assertRaisesRegex(
-                argparse.ArgumentTypeError, "must name a gfx target"
+            with (
+                self.subTest(invalid=invalid),
+                self.assertRaisesRegex(
+                    argparse.ArgumentTypeError, "must name a gfx target"
+                ),
             ):
                 tensile_validation._gpu_target(invalid)
 
@@ -308,7 +318,9 @@ class TensileValidationTest(unittest.TestCase):
             )
             filtered = yaml.safe_load(selected.read_text(encoding="utf-8"))
         self.assertEqual(inventory, expected)
-        self.assertEqual(len(tensile_validation._exact_problem_size_blocks(filtered)), 2)
+        self.assertEqual(
+            len(tensile_validation._exact_problem_size_blocks(filtered)), 2
+        )
         for block in tensile_validation._exact_problem_size_blocks(filtered):
             self.assertEqual(block, [{"Exact": [16, 16, 1, 256]}])
 
@@ -414,8 +426,9 @@ class TensileValidationTest(unittest.TestCase):
             ((120, 120, 1, 1024),),
         )
         for invalid in ("[]", "[[1,0]]", "[[1],[1]]", "{}"):
-            with self.subTest(invalid=invalid), self.assertRaises(
-                argparse.ArgumentTypeError
+            with (
+                self.subTest(invalid=invalid),
+                self.assertRaises(argparse.ArgumentTypeError),
             ):
                 tensile_validation._problem_sizes_json(invalid)
 
@@ -430,8 +443,9 @@ class TensileValidationTest(unittest.TestCase):
             ),
         )
         for invalid in ("[]", "[[]]", "{}"):
-            with self.subTest(invalid=invalid), self.assertRaises(
-                argparse.ArgumentTypeError
+            with (
+                self.subTest(invalid=invalid),
+                self.assertRaises(argparse.ArgumentTypeError),
             ):
                 tensile_validation._problem_size_blocks_json(invalid)
 
@@ -533,29 +547,61 @@ class TensileValidationTest(unittest.TestCase):
                 self._install_tensile_stub(paths, "PASSED")
                 (root / "case.yaml").write_text("case\n")
                 forwarded = root / "row.json"
-                argv = self._main_argv(root) + ["--export-replay-manifest", str(root / "replay.json")]
+                argv = self._main_argv(root) + [
+                    "--export-replay-manifest",
+                    str(root / "replay.json"),
+                ]
                 if disabled:
                     argv.append("--disable-benchmark-sleep")
                 with (
-                    mock.patch.object(tensile_validation, "resolve_tensile_validation_paths", return_value=paths),
-                    mock.patch.object(tensile_validation.subprocess, "run", return_value=self._amdgpu_header()),
-                    mock.patch.object(tensile_validation, "_run_command", wraps=tensile_validation._run_command) as run,
-                    mock.patch.object(tensile_validation.replay, "freeze", return_value={}) as freeze,
+                    mock.patch.object(
+                        tensile_validation,
+                        "resolve_tensile_validation_paths",
+                        return_value=paths,
+                    ),
+                    mock.patch.object(
+                        tensile_validation.subprocess,
+                        "run",
+                        return_value=self._amdgpu_header(),
+                    ),
+                    mock.patch.object(
+                        tensile_validation,
+                        "_run_command",
+                        wraps=tensile_validation._run_command,
+                    ) as run,
+                    mock.patch.object(
+                        tensile_validation.replay, "freeze", return_value={}
+                    ) as freeze,
                     mock.patch.object(sys, "argv", argv),
-                    mock.patch.dict(os.environ, {"CONSAN_ROW_RESULT_PATH": str(forwarded)}, clear=True),
-                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
+                    mock.patch.dict(
+                        os.environ,
+                        {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
+                        clear=True,
+                    ),
+                    redirect_stdout(io.StringIO()),
+                    redirect_stderr(io.StringIO()),
                 ):
                     self.assertEqual(tensile_validation.main(), 0)
                 command = run.call_args.args[0]
                 self.assertEqual("SleepPercent=0" in command, disabled)
-                for setting in ("NumBenchmarks=1", "NumWarmups=0", "EnqueuesPerSync=1", "SyncsPerBenchmark=1"):
+                for setting in (
+                    "NumBenchmarks=1",
+                    "NumWarmups=0",
+                    "EnqueuesPerSync=1",
+                    "SyncsPerBenchmark=1",
+                ):
                     self.assertIn(setting, command)
                 contract = freeze.call_args.args[2]
-                self.assertEqual("benchmark_sleep_percent_override" in contract, disabled)
+                self.assertEqual(
+                    "benchmark_sleep_percent_override" in contract, disabled
+                )
                 result = json.loads(forwarded.read_text())
                 self.assertEqual(result["oracle"], "pass")
                 self.assertEqual(result["detail"]["numeric_rows"], 1)
-                self.assertEqual(result["detail"]["benchmark_sleep_percent_override"], 0 if disabled else None)
+                self.assertEqual(
+                    result["detail"]["benchmark_sleep_percent_override"],
+                    0 if disabled else None,
+                )
 
     def test_untimed_validation_preserves_oracle_gates_and_binds_replay(self) -> None:
         for verdict, rows, clients, exitcode, expected in (
@@ -565,13 +611,21 @@ class TensileValidationTest(unittest.TestCase):
             ("PASSED", 1, 0, 0, 1),
             ("PASSED", 1, 1, 1, 1),
         ):
-            with self.subTest(verdict=verdict, rows=rows, clients=clients, exitcode=exitcode), temporary_root() as root:
+            with (
+                self.subTest(
+                    verdict=verdict, rows=rows, clients=clients, exitcode=exitcode
+                ),
+                temporary_root() as root,
+            ):
                 paths = self._make_fake_paths(root)
                 (root / "case.yaml").write_text("case\n")
                 forwarded = root / "row.json"
                 argv = self._main_argv(root) + [
-                    "--skip-timing-dispatches", "--expect-client-passes", "1",
-                    "--export-replay-manifest", str(root / "replay.json"),
+                    "--skip-timing-dispatches",
+                    "--expect-client-passes",
+                    "1",
+                    "--export-replay-manifest",
+                    str(root / "replay.json"),
                 ]
                 argv[argv.index("--minimum-timed-ms") + 1] = "0"
                 output = "run,problem,solution,validation,time-us\n"
@@ -580,13 +634,32 @@ class TensileValidationTest(unittest.TestCase):
                 if clients:
                     output += "clientExit=0 (PASS) for ['case.yaml']\n"
                 with (
-                    mock.patch.object(tensile_validation, "resolve_tensile_validation_paths", return_value=paths),
-                    mock.patch.object(tensile_validation, "_code_object_errors", return_value=([root / "kernel.hsaco"], [])),
-                    mock.patch.object(tensile_validation, "_run_command", return_value=(exitcode, output, False)) as run,
-                    mock.patch.object(tensile_validation.replay, "freeze", return_value={}) as freeze,
+                    mock.patch.object(
+                        tensile_validation,
+                        "resolve_tensile_validation_paths",
+                        return_value=paths,
+                    ),
+                    mock.patch.object(
+                        tensile_validation,
+                        "_code_object_errors",
+                        return_value=([root / "kernel.hsaco"], []),
+                    ),
+                    mock.patch.object(
+                        tensile_validation,
+                        "_run_command",
+                        return_value=(exitcode, output, False),
+                    ) as run,
+                    mock.patch.object(
+                        tensile_validation.replay, "freeze", return_value={}
+                    ) as freeze,
                     mock.patch.object(sys, "argv", argv),
-                    mock.patch.dict(os.environ, {"CONSAN_ROW_RESULT_PATH": str(forwarded)}, clear=True),
-                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
+                    mock.patch.dict(
+                        os.environ,
+                        {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
+                        clear=True,
+                    ),
+                    redirect_stdout(io.StringIO()),
+                    redirect_stderr(io.StringIO()),
                 ):
                     self.assertEqual(tensile_validation.main(), expected)
                 self.assertIn("SyncsPerBenchmark=0", run.call_args.args[0])
@@ -600,9 +673,13 @@ class TensileValidationTest(unittest.TestCase):
                     freeze.assert_not_called()
 
     def test_untimed_validation_rejects_duration_floor(self) -> None:
-        with temporary_root() as root, mock.patch.object(
-            sys, "argv", self._main_argv(root) + ["--skip-timing-dispatches"]
-        ), redirect_stderr(io.StringIO()):
+        with (
+            temporary_root() as root,
+            mock.patch.object(
+                sys, "argv", self._main_argv(root) + ["--skip-timing-dispatches"]
+            ),
+            redirect_stderr(io.StringIO()),
+        ):
             with self.assertRaises(SystemExit) as error:
                 tensile_validation.main()
             self.assertEqual(error.exception.code, 2)
@@ -645,14 +722,19 @@ class TensileValidationTest(unittest.TestCase):
             )
         )
 
-    def test_functional_row_without_duration_floor_keeps_timing_and_oracle_gates(self) -> None:
+    def test_functional_row_without_duration_floor_keeps_timing_and_oracle_gates(
+        self,
+    ) -> None:
         for verdict, time_us, expected in (
             ("PASSED", 10.0, 0),
             ("FAILED", 10.0, 1),
             ("PASSED", 0.0, 1),
             ("PASSED", float("nan"), 1),
         ):
-            with self.subTest(verdict=verdict, time_us=time_us), temporary_root() as root:
+            with (
+                self.subTest(verdict=verdict, time_us=time_us),
+                temporary_root() as root,
+            ):
                 paths = self._make_fake_paths(root)
                 self._install_tensile_stub(paths, verdict, time_us=time_us)
                 (root / "case.yaml").write_text("case\n", encoding="utf-8")
@@ -661,13 +743,21 @@ class TensileValidationTest(unittest.TestCase):
                 argv[argv.index("--minimum-timed-ms") + 1] = "0"
                 with (
                     mock.patch.object(
-                        tensile_validation, "resolve_tensile_validation_paths", return_value=paths
+                        tensile_validation,
+                        "resolve_tensile_validation_paths",
+                        return_value=paths,
                     ),
                     mock.patch.object(
-                        tensile_validation.subprocess, "run", return_value=self._amdgpu_header()
+                        tensile_validation.subprocess,
+                        "run",
+                        return_value=self._amdgpu_header(),
                     ),
                     mock.patch.object(sys, "argv", argv),
-                    mock.patch.dict(os.environ, {"CONSAN_ROW_RESULT_PATH": str(forwarded)}, clear=True),
+                    mock.patch.dict(
+                        os.environ,
+                        {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
+                        clear=True,
+                    ),
                     redirect_stdout(io.StringIO()),
                     redirect_stderr(io.StringIO()),
                 ):
@@ -681,9 +771,10 @@ class TensileValidationTest(unittest.TestCase):
             ("PASSED", 0, "pass"),
             ("FAILED", 1, "fail"),
         ):
-            with self.subTest(
-                numeric_verdict=numeric_verdict
-            ), temporary_root() as root:
+            with (
+                self.subTest(numeric_verdict=numeric_verdict),
+                temporary_root() as root,
+            ):
                 paths = self._make_fake_paths(root)
                 self._install_tensile_stub(paths, numeric_verdict)
                 (root / "case.yaml").write_text("case\n", encoding="utf-8")
@@ -1083,9 +1174,7 @@ class TensileValidationTest(unittest.TestCase):
             "gfx1250_tensile_streamk_smoke.yaml",
         ):
             with self.subTest(name=name):
-                fixture = yaml.safe_load(
-                    (fixtures / name).read_text(encoding="utf-8")
-                )
+                fixture = yaml.safe_load((fixtures / name).read_text(encoding="utf-8"))
                 bounds_check = fixture["GlobalParameters"]["BoundsCheck"]
                 self.assertIs(type(bounds_check), int)
                 self.assertEqual(bounds_check, 0)

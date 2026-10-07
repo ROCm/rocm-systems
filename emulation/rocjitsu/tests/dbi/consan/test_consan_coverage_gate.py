@@ -709,7 +709,8 @@ class ConSanCoverageGateTest(unittest.TestCase):
             "No runtime evidence was collected under sampled coverage.",
         ):
             hint = (
-                "[rocjitsu-dbi-hooks] ConSan coverage hint: " + message
+                "[rocjitsu-dbi-hooks] ConSan coverage hint: "
+                + message
                 + " For increased coverage, retry with RJ_CONSAN_PRESET=high."
                 + " No reports does not establish race freedom."
             )
@@ -719,7 +720,9 @@ class ConSanCoverageGateTest(unittest.TestCase):
                     parse_coverage_evidence(original + "\n" + hint),
                     parse_coverage_evidence(original),
                 )
-                with self.assertRaisesRegex(CoverageParseError, "missing ConSan coverage"):
+                with self.assertRaisesRegex(
+                    CoverageParseError, "missing ConSan coverage"
+                ):
                     parse_coverage_evidence(hint + "\n" + log(verdict()))
 
     def test_rejects_duplicate_keys_and_malformed_fields(self) -> None:

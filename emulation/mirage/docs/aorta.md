@@ -1,9 +1,9 @@
 - demo simple kernel
-- run simple 
+- run simple
 - run simple aorta training recipe
-- run single, multinode, 
+- run single, multinode,
 - pip install git+https://github.com/ROCm/aorta.git
-- aorta 
+- aorta
 - run single node training job
 
 ```bash
@@ -103,4 +103,3 @@ mirage run --daemon --profile double -- torchrun --standalone --nproc_per_node=2
  ## why do you use an emulator?
  - acurate functional
  - future timing model
- 

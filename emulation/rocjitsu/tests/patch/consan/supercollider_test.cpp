@@ -986,33 +986,14 @@ TEST(ConSan, FlatCheckTrapAllSupportedPolicyIgnoresNominalPatchLimit) {
       0x00000000u, // v_mov_b32_e64 v0, s0
       0xD5810001u,
       0x00000001u, // v_mov_b32_e64 v1, s1
-      0xEC05007Cu,
-      0x00000002u,
+      0xEC05007Cu, 0x00000002u,
       0x00000000u, // flat_load_b32 v2, v[0:1]
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xEC05007Cu,
-      0x00000006u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xEC05007Cu, 0x00000006u,
       0x00000000u, // flat_load_b32
                    // v6, v[0:1]
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes =

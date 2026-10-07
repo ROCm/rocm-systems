@@ -514,8 +514,7 @@ def _exact_problem_size_block_inventories(
                 not isinstance(size, list)
                 or not size
                 or any(
-                    type(dimension) is not int or dimension <= 0
-                    for dimension in size
+                    type(dimension) is not int or dimension <= 0 for dimension in size
                 )
             ):
                 raise ValueError(
@@ -665,24 +664,31 @@ def main() -> int:
         help="Aggregate duration floor; zero requires valid positive device timings only",
     )
     parser.add_argument(
-        "--disable-benchmark-sleep", action="store_true",
+        "--disable-benchmark-sleep",
+        action="store_true",
         help="Disable host cooldown between cases; retain every validation and timing enqueue",
     )
     parser.add_argument(
-        "--skip-timing-dispatches", action="store_true",
+        "--skip-timing-dispatches",
+        action="store_true",
         help="Run numerical validation without separate timing dispatches (requires zero duration floor)",
     )
     parser.add_argument("--label", required=True)
     parser.add_argument("--export-replay-manifest", type=Path)
-    parser.add_argument("--replay-manifest", type=Path,
-                        default=os.environ.get("CONSAN_VALIDATION_TENSILE_REPLAY_MANIFEST"))
+    parser.add_argument(
+        "--replay-manifest",
+        type=Path,
+        default=os.environ.get("CONSAN_VALIDATION_TENSILE_REPLAY_MANIFEST"),
+    )
     parser.add_argument(
         "--timeout-seconds",
         type=_positive_int,
         default=DEFAULT_TIMEOUT_SECONDS,
     )
     parser.add_argument(
-        "--cpu-threads", type=_positive_int, default=2,
+        "--cpu-threads",
+        type=_positive_int,
+        default=2,
         help="Tensile generation workers per shard (bounded to avoid nested pool oversubscription)",
     )
     parser.add_argument("--streamk-fixed-grid", type=_positive_int)
@@ -829,10 +835,17 @@ def main() -> int:
     started = time.monotonic()
     try:
         if args.replay_manifest:
-            replay_manifest = replay.snapshot_manifest(args.replay_manifest, replay_snapshot)
+            replay_manifest = replay.snapshot_manifest(
+                args.replay_manifest, replay_snapshot
+            )
             returncode, output, timed_out = replay.run(
-                replay_manifest, contract, work_dir, environment,
-                args.timeout_seconds, _run_command)
+                replay_manifest,
+                contract,
+                work_dir,
+                environment,
+                args.timeout_seconds,
+                _run_command,
+            )
             artifact_dir = Path(replay_manifest["work_dir"])
         else:
             returncode, output, timed_out = _run_command(
@@ -858,10 +871,7 @@ def main() -> int:
     timed_aggregate_ms, timing_errors = (
         (None, []) if args.skip_timing_dispatches else _timed_aggregate_ms(output)
     )
-    if (
-        timed_aggregate_ms is not None
-        and timed_aggregate_ms < args.minimum_timed_ms
-    ):
+    if timed_aggregate_ms is not None and timed_aggregate_ms < args.minimum_timed_ms:
         timing_errors.append(
             "device-timed aggregate is below the required minimum: "
             f"{timed_aggregate_ms} < {args.minimum_timed_ms} ms"
@@ -933,8 +943,12 @@ def main() -> int:
         "transcript": str(transcript),
         "verified_code_objects": [str(path) for path in artifacts],
         "replay_manifest": str(args.replay_manifest) if args.replay_manifest else None,
-        "replay_manifest_snapshot": str(replay_snapshot) if args.replay_manifest else None,
-        "replay_manifest_sha256": replay.digest(replay_snapshot) if args.replay_manifest else None,
+        "replay_manifest_snapshot": (
+            str(replay_snapshot) if args.replay_manifest else None
+        ),
+        "replay_manifest_sha256": (
+            replay.digest(replay_snapshot) if args.replay_manifest else None
+        ),
         "wrapper": str(paths.wrapper),
     }
     if errors:
@@ -946,7 +960,9 @@ def main() -> int:
 
     if args.export_replay_manifest:
         try:
-            retained = replay_manifest or replay.freeze(work_dir, paths.wrapper, contract)
+            retained = replay_manifest or replay.freeze(
+                work_dir, paths.wrapper, contract
+            )
             _write_json_atomic(args.export_replay_manifest, retained)
         except (OSError, ValueError) as error:
             detail["reasons"] = [f"cannot retain replay inputs: {error}"]

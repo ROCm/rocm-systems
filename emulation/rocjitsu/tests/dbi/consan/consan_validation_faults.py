@@ -387,7 +387,9 @@ def _load_fault(
     if "RJ_CONSAN_FAULT_SITE_IDENTITY" not in environment:
         raise ValidationError("fault spec must select an exact site identity")
     companion_site = environment.get("RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY")
-    companion_sequence = environment.get("RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY")
+    companion_sequence = environment.get(
+        "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY"
+    )
     if companion_site or companion_sequence:
         if not (
             companion_site
@@ -1159,7 +1161,9 @@ def _snapshot_fault_spec(path: Path, root: Path, source_bytes: bytes) -> dict:
     snapshot = root / "fault-spec.snapshot.json"
     if snapshot.exists():
         if snapshot.read_bytes() != source_bytes:
-            raise ValidationError("fault spec differs from the artifact snapshot; use a new root")
+            raise ValidationError(
+                "fault spec differs from the artifact snapshot; use a new root"
+            )
     else:
         snapshot.write_bytes(source_bytes)
     return {
@@ -1172,7 +1176,9 @@ def _snapshot_fault_spec(path: Path, root: Path, source_bytes: bytes) -> dict:
 @contextmanager
 def _fault_preflight_lock():
     """Serialize GPU-using runtime probes without holding the trial's lock."""
-    path = Path(os.environ.get(GLOBAL_DESTRUCTIVE_LOCK_ENV, DEFAULT_GLOBAL_DESTRUCTIVE_LOCK))
+    path = Path(
+        os.environ.get(GLOBAL_DESTRUCTIVE_LOCK_ENV, DEFAULT_GLOBAL_DESTRUCTIVE_LOCK)
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -1195,7 +1201,9 @@ def _fault(args: argparse.Namespace) -> int:
         raise ValidationError("fault execution requires --allow-destructive")
     spec_path = args.spec.resolve()
     spec_bytes = spec_path.read_bytes()
-    fault = _load_fault(spec_path, target, workload, args.fault, source_bytes=spec_bytes)
+    fault = _load_fault(
+        spec_path, target, workload, args.fault, source_bytes=spec_bytes
+    )
     profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
     launcher = args.launcher
     hook = _hook_path(workspace)
@@ -1203,7 +1211,9 @@ def _fault(args: argparse.Namespace) -> int:
     fault_root.mkdir(parents=True, exist_ok=args.resume)
     spec_metadata = _snapshot_fault_spec(spec_path, fault_root, spec_bytes)
     with _fault_preflight_lock():
-        provenance = _write_provenance(workspace, target, workload, fault_root, launcher)
+        provenance = _write_provenance(
+            workspace, target, workload, fault_root, launcher
+        )
     root = fault_root / "rows"
     root.mkdir(exist_ok=args.resume)
     smoke = _health_smoke_command(

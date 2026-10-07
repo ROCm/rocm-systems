@@ -2639,8 +2639,8 @@ private:
   /// Addressability checks in the mapped-span helpers remain the final guard
   /// against host-allocation reuse that preserves identical PTE contents.
   template <typename F>
-  auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache, F &&fn) const
-      -> std::invoke_result_t<F, const LegacyPageTableEntry *> {
+  auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache,
+                   F &&fn) const -> std::invoke_result_t<F, const LegacyPageTableEntry *> {
     const uint64_t page_key = addr >> PAGE_SHIFT;
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
     size_t metadata_retries = 0;

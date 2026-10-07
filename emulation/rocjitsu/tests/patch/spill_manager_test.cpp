@@ -4,9 +4,9 @@
 #include "rocjitsu/code/patch/spill_manager.h"
 
 #include "decode_test_util.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/analysis/exec_state.h"
 #include "rocjitsu/code/analysis/liveness.h"
-#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
@@ -714,14 +714,12 @@ TEST(SpillManager, BuildsGfx1100VgprSaveRestoreSequence) {
   EXPECT_EQ(sequence->restore_words.back(), *wait);
 }
 
-
 TEST(ConSanSpill, Cdna4MatrixAccumulatorIsReadyBeforeScratchSave) {
   // Medium-M TokenSpeed GEMM places a DS read immediately after an MFMA
   // writing v[0:3]. SuperCollider borrows these live registers for readback.
   // VM/LGKM counters may both already be zero while the MFMA is pending.
   SpillManager manager(0u, kMaxCdnaAddressFreeScratchPrivateBytes);
-  const auto sequence = build_vgpr_spill_sequence(manager, 0u, 4u,
-                                                 ROCJITSU_CODE_ARCH_CDNA4);
+  const auto sequence = build_vgpr_spill_sequence(manager, 0u, 4u, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(sequence);
   unsigned elapsed_wait_states = 0;
   bool found_store = false;
@@ -744,10 +742,8 @@ TEST(ConSanSpill, Cdna4RestoredBufferDescriptorIsReadyForVmem) {
   // load. CDNA4 ISA section 4.5 requires five wait states from a VALU SGPR
   // write to VMEM; the shorter VALU-to-SALU wait is insufficient.
   SpillManager manager(0u, kMaxCdnaAddressFreeScratchPrivateBytes);
-  const auto memory = build_sgpr_spill_sequence(manager, 12u, 4u, 4u,
-                                                ROCJITSU_CODE_ARCH_CDNA4);
-  const auto lanes = build_lane_sgpr_spill_sequence(12u, 4u, 4u, 0u,
-                                                  ROCJITSU_CODE_ARCH_CDNA4);
+  const auto memory = build_sgpr_spill_sequence(manager, 12u, 4u, 4u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto lanes = build_lane_sgpr_spill_sequence(12u, 4u, 4u, 0u, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(memory && lanes);
   for (const auto *sequence : {&*memory, &*lanes}) {
     SCOPED_TRACE(sequence->lane_reservoir_vgpr ? "lane-backed" : "memory-backed");
@@ -868,7 +864,8 @@ TEST(SpillManager, BuildsLaneBackedScalarSpillAcrossEveryConSanArchitecture) {
       expected_save.insert(expected_save.end(), save->begin(), save->end());
       expected_restore.insert(expected_restore.end(), restore->begin(), restore->end());
     }
-    const auto dependency_wait = target.arch == ROCJITSU_CODE_ARCH_CDNA4
+    const auto dependency_wait =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA4
             ? std::optional<uint32_t>{build_s_nop(4, target.arch)}
             : instrumentation::build_valu_to_salu_dependency_wait(target.arch);
     ASSERT_TRUE(dependency_wait);

@@ -88,8 +88,7 @@ TEST(SysfsTopologyCompatibilityTest, DrmDevicesPublishPciDisplayClass) {
   EXPECT_EQ(read_sysfs_file(sysfs.drm_path() + "/0000:03:00.0/class"), "0x030200\n");
   EXPECT_TRUE(std::filesystem::is_directory(sysfs.drm_path() + "/pci_bus/0000:03"));
 
-  EXPECT_EQ(LinuxKfd::redirect_sysfs_root_path("/sys/class/pci_bus/0000:03", {},
-                                               sysfs.drm_path()),
+  EXPECT_EQ(LinuxKfd::redirect_sysfs_root_path("/sys/class/pci_bus/0000:03", {}, sysfs.drm_path()),
             sysfs.drm_path() + "/pci_bus/0000:03");
 }
 

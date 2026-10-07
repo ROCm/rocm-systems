@@ -513,7 +513,8 @@ class RunVfioGuestTest(unittest.TestCase):
                 with mock.patch.object(
                     RUNNER.subprocess, "Popen", side_effect=record_child
                 ), self.assertRaisesRegex(
-                    RUNNER.GuestRunError, "test probe did not complete within 0.05 seconds"
+                    RUNNER.GuestRunError,
+                    "test probe did not complete within 0.05 seconds",
                 ):
                     RUNNER.run_capability_probe([str(probe)], "test probe", 0.05)
                 self.assertIsNotNone(spawned)

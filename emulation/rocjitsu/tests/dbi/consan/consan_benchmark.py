@@ -487,10 +487,9 @@ def _coverage_summary(
             line.startswith("[rocjitsu-dbi-hooks] ConSan kernel allowlist entry ")
             for line in output.splitlines()
         )
-        if (
-            len(names) == len(set(names)) == entry_count == len(kernel_allowlist)
-            and set(names) == set(kernel_allowlist)
-        ):
+        if len(names) == len(set(names)) == entry_count == len(
+            kernel_allowlist
+        ) and set(names) == set(kernel_allowlist):
             return {
                 "accepted": False,
                 "applicable": False,
@@ -966,7 +965,8 @@ def _summarize_workload(
         mode_result = _summarize_mode(run, native_runtime)
         if mode_result.get("applicable") is not False:
             mode_result["latency_ms"] = [
-                _metric(run, workload.primary_metric, run_index) for run_index in range(2)
+                _metric(run, workload.primary_metric, run_index)
+                for run_index in range(2)
             ]
         result["modes"][mode] = mode_result
     return result

@@ -66,7 +66,9 @@ def _run(command: list[str], marker: bytes, timeout: float) -> int:
     if accepted and not timed_out:
         return 0
     if timed_out:
-        print(f"smoke timeout before success marker after {timeout:g}s", file=sys.stderr)
+        print(
+            f"smoke timeout before success marker after {timeout:g}s", file=sys.stderr
+        )
         return 124
     print("smoke process exited without the required success marker", file=sys.stderr)
     return 1

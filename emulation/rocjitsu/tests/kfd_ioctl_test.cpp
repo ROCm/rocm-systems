@@ -3506,8 +3506,8 @@ TEST_F(KfdIoctlTest, DbgTrapNotifierChildDoesNotRunApplicationSignalHandler) {
   enable.enable.exception_mask = KFD_EC_MASK(EC_PROCESS_RUNTIME);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
 
-  struct sigaction action{};
-  struct sigaction previous_action{};
+  struct sigaction action {};
+  struct sigaction previous_action {};
   action.sa_handler = record_notification_signal;
   sigemptyset(&action.sa_mask);
   ASSERT_EQ(::sigaction(SIGPIPE, &action, &previous_action), 0);
@@ -5026,8 +5026,8 @@ TEST_F(DbgTrapDaemonTest, EnableRejectsAMemFdForADifferentProcess) {
 
   const std::string other_mem = std::format("/proc/{}/mem", other);
   // Confirm the premise: procfs gives it a different inode from our own.
-  struct stat ours{};
-  struct stat theirs{};
+  struct stat ours {};
+  struct stat theirs {};
   const util::UniqueHandle self_mem{::open("/proc/self/mem", O_RDWR | O_CLOEXEC)};
   ASSERT_GE(self_mem.get(), 0);
   const util::UniqueHandle their_mem{::open(other_mem.c_str(), O_RDWR | O_CLOEXEC)};

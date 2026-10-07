@@ -165,10 +165,9 @@ protected:
     ASSERT_TRUE(vector_add->has_text_range);
     const uint64_t entry_offsets[] = {vector_add->entry_text_offset};
     const uint64_t entry_sizes[] = {vector_add->code_size};
-    auto blocks = BasicBlock::build_reachable(*co, *decoder, params_.arch, entry_offsets,
-                                              entry_sizes, params_.arch == ROCJITSU_CODE_ARCH_RDNA4
-                                                               ? 32u
-                                                               : 64u);
+    auto blocks =
+        BasicBlock::build_reachable(*co, *decoder, params_.arch, entry_offsets, entry_sizes,
+                                    params_.arch == ROCJITSU_CODE_ARCH_RDNA4 ? 32u : 64u);
     ASSERT_FALSE(co->text_sections().empty());
     const auto *text = co->text_sections().front();
     const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),

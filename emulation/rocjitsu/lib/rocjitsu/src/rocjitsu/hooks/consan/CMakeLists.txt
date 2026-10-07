@@ -14,7 +14,11 @@ target_include_directories(
     PUBLIC ${ROCJITSU_SRC_DIR}
 )
 
-add_library(rocjitsu_consan_report_snapshot STATIC rj_hsa_dbi_report_snapshot.cpp)
+add_library(
+    rocjitsu_consan_report_snapshot
+    STATIC
+    rj_hsa_dbi_report_snapshot.cpp
+)
 set_target_properties(
     rocjitsu_consan_report_snapshot
     PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -28,9 +32,9 @@ target_link_libraries(rocjitsu_consan_report_snapshot PRIVATE util)
 add_library(
     rocjitsu_consan_report_decoder
     STATIC
-        rj_hsa_dbi_report_decoder.cpp
-        rj_hsa_dbi_evidence_decoder.cpp
-        rj_hsa_dbi_publication_decoder.cpp
+    rj_hsa_dbi_report_decoder.cpp
+    rj_hsa_dbi_evidence_decoder.cpp
+    rj_hsa_dbi_publication_decoder.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_decoder
@@ -45,8 +49,8 @@ target_link_libraries(rocjitsu_consan_report_decoder PRIVATE util)
 add_library(
     rocjitsu_consan_report_analyzer
     STATIC
-        rj_hsa_dbi_conflict_analysis.cpp
-        rj_hsa_dbi_publication.cpp
+    rj_hsa_dbi_conflict_analysis.cpp
+    rj_hsa_dbi_publication.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_analyzer
@@ -61,7 +65,7 @@ target_link_libraries(rocjitsu_consan_report_analyzer PRIVATE util)
 add_library(
     rocjitsu_consan_report_renderer
     STATIC
-        rj_hsa_dbi_report_renderer.cpp
+    rj_hsa_dbi_report_renderer.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_renderer

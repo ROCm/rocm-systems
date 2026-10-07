@@ -450,15 +450,9 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             report_buffer_bytes += _integer(fields, "bytes")
             capacities = {
                 "watchpoint": _integer(fields, "watchpoint_capacity"),
-                "causal_window": _integer(
-                    fields, "causal_window_capacity"
-                ),
-                "sync_metadata": _integer(
-                    fields, "sync_metadata_capacity"
-                ),
-                "pending_acquire": _integer(
-                    fields, "pending_acquire_capacity"
-                ),
+                "causal_window": _integer(fields, "causal_window_capacity"),
+                "sync_metadata": _integer(fields, "sync_metadata_capacity"),
+                "pending_acquire": _integer(fields, "pending_acquire_capacity"),
             }
             for kind, capacity in capacities.items():
                 report_region_capacity_entries[kind] += capacity
@@ -512,22 +506,12 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             report_cleanup_failures += summary["cleanup_failures"]
         elif record.startswith("auto report reader="):
             conflicts += _integer(fields, "conflicts")
-            immediate_conflicts += _integer(
-                fields, "immediate_conflicts"
-            )
+            immediate_conflicts += _integer(fields, "immediate_conflicts")
             claimed_windows += _integer(fields, "claimed_windows")
-            snapshot_counts["stale"] += _integer(
-                fields, "stale_snapshots"
-            )
-            snapshot_counts["incomplete"] += _integer(
-                fields, "incomplete_snapshots"
-            )
-            snapshot_counts["changed"] += _integer(
-                fields, "changed_snapshots"
-            )
-            snapshot_counts["malformed"] += _integer(
-                fields, "malformed_snapshots"
-            )
+            snapshot_counts["stale"] += _integer(fields, "stale_snapshots")
+            snapshot_counts["incomplete"] += _integer(fields, "incomplete_snapshots")
+            snapshot_counts["changed"] += _integer(fields, "changed_snapshots")
+            snapshot_counts["malformed"] += _integer(fields, "malformed_snapshots")
             event_counts["access"] += _integer(fields, "visible")
             event_counts["sync"] += _integer(fields, "visible_sync")
             overflow_counts["windows"] += _integer(fields, "dropped_windows")
@@ -937,10 +921,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
     # genuine redundant-access mismatch impossible to qualify as detection.
     supercollider_diagnostics = supercollider_mismatches
     diagnostic_count = (
-        conflicts
-        + immediate_conflicts
-        + static_diagnostics
-        + supercollider_diagnostics
+        conflicts + immediate_conflicts + static_diagnostics + supercollider_diagnostics
     )
     if diagnostic_count:
         sanitizer_outcome = "detected"

@@ -4629,9 +4629,8 @@ TEST(CfgAnalysis, Gfx1250RecoversStraightLineNegativeDeltaAcrossDelayAlu) {
       cdna5::build_sop2(cdna5::kSAddCoI32Sop2,
                         {.ssrc0 = kLiteralOperand, .ssrc1 = kInlineInt4, .sdst = kTmpSreg})[0],
       // 0x0c: s_add_co_i32 s12, 0xfffffff4, 4.
-      0xfffffff4u,
-      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_CDNA5).value(),           // 0x14.
-      cdna5::build_sop1(cdna5::kSAbsI32Sop1, {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0], // 0x18.
+      0xfffffff4u, build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_CDNA5).value(), // 0x14.
+      cdna5::build_sop1(cdna5::kSAbsI32Sop1, {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0],    // 0x18.
       cdna5::build_sop2(cdna5::kSSubCoU32Sop2,
                         {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
       // 0x1c: s_sub_co_u32.

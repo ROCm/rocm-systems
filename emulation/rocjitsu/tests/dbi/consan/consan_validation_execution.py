@@ -179,7 +179,6 @@ def _run_process_batch(
             signal.signal(signum, handler)
 
 
-
 def _row_runtime_acceptance(
     returncodes: object,
     gtest_counts: object,
@@ -312,9 +311,7 @@ def _run_profile(
         if resolved_workload.tensile_exact_problem_size_shards
         else 1
     )
-    for returncode, elapsed, output in _run_process_batch(
-        process_runs, parallelism
-    ):
+    for returncode, elapsed, output in _run_process_batch(process_runs, parallelism):
         returncodes.append(returncode)
         elapsed_seconds.append(elapsed)
         logs.append(output)
@@ -419,10 +416,7 @@ def _run_profile(
     coverage = None
     coverage_runs = None
     if profile is not None and logs:
-        coverage_runs = [
-            _coverage_summary(log, profile=profile)
-            for log in logs
-        ]
+        coverage_runs = [_coverage_summary(log, profile=profile) for log in logs]
         coverage = coverage_runs[-1]
     gtest_test_counts = (
         [_gtest_test_count(log) for log in logs] if workload.kind == "gtest" else None

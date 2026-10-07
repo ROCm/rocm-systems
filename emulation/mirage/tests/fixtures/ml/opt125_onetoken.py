@@ -4,6 +4,7 @@ OPT-125M end-to-end inference on the rocjitsu simulated GPU.
 Loads OPT-125M with eager attention (no SDPA) and runs a single forward
 pass to verify correct token prediction on the simulator.
 """
+
 import os, sys, torch
 
 device = torch.device("cuda:0")
@@ -49,10 +50,10 @@ print(f"Logits shape: {next_token_logits.shape}, dtype: {next_token_logits.dtype
 
 if nan_count > 0 or inf_count > 0:
     print("FAIL: logits contain NaN or Inf!")
-    #sys.exit(1)
+    # sys.exit(1)
 if gpu_nan > 0 or gpu_inf > 0:
     print("FAIL: GPU-side isnan/isinf reports false positives!")
-    #sys.exit(1)
+    # sys.exit(1)
 
 top5 = torch.topk(next_token_logits.float(), 5)
 print(f"\nTop-5 next token predictions:")
@@ -64,4 +65,3 @@ predicted_id = top5.indices[0].item()
 predicted_token = tokenizer.decode([predicted_id])
 print(f"\nPredicted next token: {predicted_token!r}")
 print("\nPASS: Model produced valid logits on the simulated GPU.")
- 

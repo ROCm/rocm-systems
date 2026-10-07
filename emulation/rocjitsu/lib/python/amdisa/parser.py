@@ -392,8 +392,10 @@ class Parser:
         names = getattr(self.profile, 'shared_flat_global_only_instructions', ())
         if not names:
             return
-        encodings = {xs.get_node_text(xs.get_node(node, xs.ENCODING_NAME)): node
-                     for node in self.encodings_node}
+        encodings = {
+            xs.get_node_text(xs.get_node(node, xs.ENCODING_NAME)): node
+            for node in self.encodings_node
+        }
         parent = encodings['ENC_FLAT']
         source = encodings['ENC_FLAT_GLBL']
         identifiers = xs.get_node(source, xs.ENCODING_IDENTIFERS)
@@ -414,8 +416,10 @@ class Parser:
                     continue
                 opcode = int(xs.get_node_text(xs.get_node(encoding, xs.OPCODE)))
                 for identifier in identifiers:
-                    if int(identifier.text[op_range[0]:op_range[1]], 2) == opcode:
-                        if not any(item.text == identifier.text for item in parent_identifiers):
+                    if int(identifier.text[op_range[0] : op_range[1]], 2) == opcode:
+                        if not any(
+                            item.text == identifier.text for item in parent_identifiers
+                        ):
                             parent_identifiers.append(deepcopy(identifier))
                 enc_name.text = 'ENC_FLAT'
                 operands = xs.get_node(encoding, xs.OPERANDS)

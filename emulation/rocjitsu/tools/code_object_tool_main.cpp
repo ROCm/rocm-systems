@@ -708,9 +708,9 @@ void disassemble_window(const MappedLocation &mapped, rj_code_arch_t arch, uint6
         std::cerr << "decode failed at .text+" << hex_value(decode_offset) << ": " << message
                   << "\n";
       };
-      DecodeResult decoded = decoder->decode_window(
-          std::span<const uint32_t>(words).subspan(word_index), decode_offset,
-          DecodeErrorEmitter(emit_decode_error));
+      DecodeResult decoded =
+          decoder->decode_window(std::span<const uint32_t>(words).subspan(word_index),
+                                 decode_offset, DecodeErrorEmitter(emit_decode_error));
       if (decoded.failed())
         return;
       inst = std::move(decoded).value();

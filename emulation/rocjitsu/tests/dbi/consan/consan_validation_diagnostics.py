@@ -149,7 +149,10 @@ def _coverage_summary(
             if _boolean(fields, "complete") is not True:
                 reasons.append("SuperCollider report incomplete")
             for name in (
-                "mismatches", "allocation_failures", "read_failures", "cleanup_failures"
+                "mismatches",
+                "allocation_failures",
+                "read_failures",
+                "cleanup_failures",
             ):
                 value = _unsigned(fields, name)
                 if value is None:

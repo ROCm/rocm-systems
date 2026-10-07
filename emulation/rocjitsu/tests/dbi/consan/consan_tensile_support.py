@@ -69,9 +69,7 @@ def tensile_python_environment(
     for name, values in additions.items():
         previous = environment.get(name)
         entries = tuple(str(value) for value in values)
-        environment[name] = os.pathsep.join(
-            entries + ((previous,) if previous else ())
-        )
+        environment[name] = os.pathsep.join(entries + ((previous,) if previous else ()))
     return environment
 
 

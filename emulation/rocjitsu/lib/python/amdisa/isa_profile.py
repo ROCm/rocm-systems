@@ -1893,10 +1893,12 @@ class Cdna4Profile(CdnaProfile):
     # These GLOBAL-only opcodes have no FLAT counterpart. Retain their vendor
     # instruction definitions in the shared FLAT opcode table rather than
     # dropping them with the ordinary segment aliases.
-    shared_flat_global_only_instructions = frozenset({
-        'GLOBAL_LOAD_LDS_DWORDX3',
-        'GLOBAL_LOAD_LDS_DWORDX4',
-    })
+    shared_flat_global_only_instructions = frozenset(
+        {
+            'GLOBAL_LOAD_LDS_DWORDX3',
+            'GLOBAL_LOAD_LDS_DWORDX4',
+        }
+    )
 
     @property
     def mfma_scale_vop3px2_specs(self) -> tuple[MfmaScaleVop3px2Spec, ...]:

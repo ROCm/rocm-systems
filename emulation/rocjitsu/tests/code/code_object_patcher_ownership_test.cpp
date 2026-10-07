@@ -5,8 +5,8 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
-#include <gtest/gtest.h>
 #include <algorithm>
+#include <gtest/gtest.h>
 #include <utility>
 
 namespace rocjitsu {

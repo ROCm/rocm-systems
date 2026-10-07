@@ -546,7 +546,7 @@ int write_debug_notification(int fd, const std::function<void()> &before_write =
                              std::optional<int> clone3_error_for_testing = std::nullopt,
                              std::optional<int> clone_pidfd_error_for_testing = std::nullopt,
                              bool defer_reap_for_testing = false) {
-  struct stat descriptor_stat{};
+  struct stat descriptor_stat {};
   if (safe_fstat(fd, &descriptor_stat) != 0)
     return -errno;
   const size_t write_size = S_ISFIFO(descriptor_stat.st_mode) ? sizeof(uint8_t) : sizeof(uint64_t);
@@ -1236,7 +1236,7 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
 int SimulatedKfd::open() {
   static std::once_flag raise_nofile_flag;
   std::call_once(raise_nofile_flag, [] {
-    struct rlimit rl{};
+    struct rlimit rl {};
     if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur < 8192) {
       rl.rlim_cur = std::min<rlim_t>(rl.rlim_max, 65536);
       setrlimit(RLIMIT_NOFILE, &rl);
@@ -1967,7 +1967,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
 
     off_t cur_size = 0;
     {
-      struct stat st{};
+      struct stat st {};
       if (safe_fstat(doorbell_fd, &st) == 0)
         cur_size = st.st_size;
     }
@@ -3219,7 +3219,7 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   if (!find_gpu(args->gpu_id))
     return -EINVAL;
 
-  struct stat st{};
+  struct stat st {};
   if (safe_fstat(args->dmabuf_fd, &st) != 0)
     return -errno;
   uint64_t size = static_cast<uint64_t>(st.st_size);
@@ -3491,7 +3491,7 @@ int SimulatedKfd::get_dmabuf_info_ioctl(KfdProcess &proc, void *arg) {
   }
 
   if (!found) {
-    struct stat st{};
+    struct stat st {};
     if (safe_fstat(args->dmabuf_fd, &st) != 0)
       return -errno;
     size = static_cast<uint64_t>(st.st_size);
@@ -6044,8 +6044,8 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
       const int mem_fl = safe_fcntl(*target_mem_fd, F_GETFL);
       if (mem_fl == -1 || (mem_fl & O_ACCMODE) != O_RDWR)
         return -EBADF;
-      struct stat daemon_proc_stat{};
-      struct stat client_proc_stat{};
+      struct stat daemon_proc_stat {};
+      struct stat client_proc_stat {};
       if (fstat(target_procfd->get(), &daemon_proc_stat) != 0 ||
           fstat(target_proc_fd, &client_proc_stat) != 0)
         return -errno;
@@ -6059,8 +6059,8 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
       // silently redirects both at another process. procfs gives each
       // /proc/<pid>/mem its own inode, so comparing it against the pinned
       // directory's own "mem" entry settles the question.
-      struct stat expected_mem_stat{};
-      struct stat client_mem_stat{};
+      struct stat expected_mem_stat {};
+      struct stat client_mem_stat {};
       if (fstatat(target_procfd->get(), "mem", &expected_mem_stat, 0) != 0 ||
           fstat(*target_mem_fd, &client_mem_stat) != 0)
         return -errno;
@@ -6467,7 +6467,7 @@ bool SimulatedKfd::owns_fd(int fd) const {
 }
 
 void SimulatedKfd::init_reserved_fd_range() {
-  struct rlimit rl{};
+  struct rlimit rl {};
   getrlimit(RLIMIT_NOFILE, &rl);
   reserved_fd_base_ = static_cast<int>(rl.rlim_cur) - kReservedFdCount;
   next_reserved_fd_ = reserved_fd_base_;
