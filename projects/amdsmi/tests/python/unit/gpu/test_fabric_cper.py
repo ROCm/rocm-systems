@@ -41,7 +41,7 @@ def _load_source_interface():
             importlib.import_module(f"{_PKG}.amdsmi_wrapper"),
             importlib.import_module(f"{_PKG}.amdsmi_interface_utils"),
         )
-    except Exception:
+    except (ModuleNotFoundError, ImportError):
         for name in [n for n in list(sys.modules) if n == _PKG or n.startswith(_PKG + ".")]:
             del sys.modules[name]
         return None, None, None, None
@@ -248,7 +248,3 @@ class TestFabricCperInterface(unittest.TestCase):
             entries[0]["notify_type"], amdsmi_interface_utils._notifyTypeToString(bytes(16))
         )
         self.assertEqual(entries[0]["notify_type"], "Unknown")
-
-
-if __name__ == "__main__":
-    unittest.main()

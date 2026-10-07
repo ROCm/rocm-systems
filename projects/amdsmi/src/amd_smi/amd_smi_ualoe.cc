@@ -963,8 +963,17 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
 
   uint64_t ualoe_buf_size_var = ualoe_buf_size;
   uint64_t ualoe_entry_count = max_ualoe_entries;
-  int ret = ualoe_get_ifoe_cper_entries(ualoe_handle, severity_mask, ualoe_buf, &ualoe_buf_size_var,
-                                        ualoe_hdrs, &ualoe_entry_count, cursor);
+
+  // Convert "all severities" sentinel to UALoE's actual mask.
+  // That mask is passed through raw, but UALoE only defines bits 0-2.
+  uint32_t ualoe_severity_mask = severity_mask;
+  if (severity_mask == (1U << AMDSMI_CPER_SEV_NUM)) {
+    ualoe_severity_mask = (1U << AMDSMI_CPER_SEV_NUM) - 1U;
+  }
+
+  int ret =
+      ualoe_get_ifoe_cper_entries(ualoe_handle, ualoe_severity_mask, ualoe_buf, &ualoe_buf_size_var,
+                                  ualoe_hdrs, &ualoe_entry_count, cursor);
 
   if (ret != 0 && ret != ENOBUFS) {
     free(ualoe_buf);
@@ -1029,12 +1038,16 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
   *buf_size = amdsmi_offset;
   *entry_count = transformed_entries;
 
-  if (ret == ENOBUFS) {
-    return AMDSMI_STATUS_MORE_DATA;
+  if (transformed_entries == 0 && ualoe_entry_count > 0) {
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
   }
 
   if (entries_dropped) {
-    return AMDSMI_STATUS_INSUFFICIENT_SIZE;
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+
+  if (ret == ENOBUFS) {
+    return AMDSMI_STATUS_MORE_DATA;
   }
 
   return AMDSMI_STATUS_SUCCESS;

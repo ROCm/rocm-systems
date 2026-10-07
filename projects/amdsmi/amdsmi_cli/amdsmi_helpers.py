@@ -2996,7 +2996,7 @@ class AMDSMIHelpers:
 
         while True:
             try:
-                fabric_entries, new_fabric_cursor, fabric_cper_data, _fabric_status_code = (
+                fabric_entries, new_fabric_cursor, fabric_cper_data, fabric_status_code = (
                     amdsmi_interface.amdsmi_get_fabric_cper_entries(
                         device_handle, severity_mask, buffer_size, fabric_cursors[gpu_idx]
                     )
@@ -3004,17 +3004,32 @@ class AMDSMIHelpers:
                 logging.debug(f"fabric_cper_entries | entries: {fabric_entries}")
                 num_entries = num_entries + len(fabric_entries)
             except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError(
+                        "Error accessing fabric CPER. This command requires elevation"
+                    ) from e
                 if (
                     e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
                 ):
                     logging.debug("Fabric CPER not supported on this device")
                     break
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_OUT_OF_RESOURCES
+                    or e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INSUFFICIENT_SIZE
+                ):
+                    raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                        logger.format,
+                        e.get_error_code(),
+                        detail="Buffer too small for fabric CPER entries",
+                    ) from e
                 logging.debug(f"Cannot retrieve fabric CPER entries: {e}")
                 break
 
             fabric_cursors[gpu_idx] = new_fabric_cursor
-            if len(fabric_entries) == 0:
+            if len(fabric_entries) == 0 or new_fabric_cursor == 0:
                 break
 
             self._emit_cper_output(
