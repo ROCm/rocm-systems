@@ -1,3 +1,4 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
 <!-- SPDX-License-Identifier: MIT -->
 
 # Runtime API Headers
@@ -18,7 +19,7 @@ The headers are organized by API family under `include/`:
 These files are mirrors for runtime consumers; their primary sources remain:
 
 - `amdf`: `hrx-system/libamdf/include/amdf`, synchronized from
-  `hrx-system@4aa34130de44c45d68a48575cebfd0ff0610c461`;
+  `hrx-system@bd24215e6a5d1e12570c892356fd5b343ac38a6d`;
 - `hsa`: `projects/rocr-runtime/runtime/hsa-runtime/inc` in this repository;
 - DRM: `projects/rocr-runtime/libhsakmt/include/hsakmt/drm` in this repository;
 - KFD and UDMABUF: `projects/rocr-runtime/libhsakmt/include/hsakmt/linux` in

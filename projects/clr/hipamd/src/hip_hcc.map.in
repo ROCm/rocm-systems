@@ -691,7 +691,6 @@ hip_7.16 {
 global:
     hipDeviceGetLuid;
     hipInitDevice;
-    hipKernelSetAttributeForDevice;
 local:
     *;
 } hip_7.15;

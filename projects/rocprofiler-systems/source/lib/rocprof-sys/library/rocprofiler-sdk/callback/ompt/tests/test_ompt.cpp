@@ -1,0 +1,1056 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "library/rocprofiler-sdk/callback/ompt/ompt.hpp"
+#include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
+
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+
+namespace rocprofsys::domains::callback::ompt
+{
+namespace
+{
+
+using ::testing::_;
+using ::testing::Eq;
+using ::testing::Return;
+using ::testing::StrictMock;
+
+using test_support::externals_with_tracing;
+using test_support::g_buffer_storage_mock;
+using test_support::g_externals_mock;
+using test_support::g_metadata_registry_mock;
+using test_support::g_tracing_backend_mock;
+using test_support::gmock_buffer_storage;
+using test_support::gmock_externals;
+using test_support::gmock_metadata_registry;
+using test_support::gmock_tracing_backend;
+using test_support::mock_sdk_with_tracing;
+using test_support::thread_info_data_t;
+using test_support::tracing_names_t;
+
+using sdk = mock_sdk_with_tracing;
+using ext = externals_with_tracing;
+
+sdk::callback_tracing_record_t
+make_record(sdk::ompt_operation_t operation,
+            sdk::callback_phase_t phase = sdk::CALLBACK_PHASE_NONE,
+            std::uint64_t thread_id = 1, std::uint64_t correlation = 1)
+{
+    sdk::callback_tracing_record_t record{};
+    record.operation               = static_cast<std::uint32_t>(operation);
+    record.phase                   = phase;
+    record.thread_id               = thread_id;
+    record.correlation_id.internal = correlation;
+    return record;
+}
+
+// clang-tidy misclassifies GTest fixtures (SetUp/TearDown are virtual, TestBody is
+// pure-virtual in the generated subclass) as an abstract class requiring an
+// "_interface" suffix.
+// NOLINTNEXTLINE(readability-identifier-naming)
+class ompt_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        g_tracing_backend_mock = std::make_unique<StrictMock<gmock_tracing_backend>>();
+        g_externals_mock       = std::make_unique<StrictMock<gmock_externals>>();
+        g_metadata_registry_mock =
+            std::make_unique<StrictMock<gmock_metadata_registry>>();
+        g_buffer_storage_mock = std::make_unique<StrictMock<gmock_buffer_storage>>();
+        detail::open_regions<sdk>::s_standard.clear();
+        detail::open_regions<sdk>::s_parallel.clear();
+    }
+
+    void TearDown() override
+    {
+        g_tracing_backend_mock.reset();
+        g_externals_mock.reset();
+        g_metadata_registry_mock.reset();
+        g_buffer_storage_mock.reset();
+        detail::open_regions<sdk>::s_standard.clear();
+        detail::open_regions<sdk>::s_parallel.clear();
+    }
+};
+
+}  // namespace
+
+// ─── get_unified_name ───────────────────────────────────────────────────
+
+TEST_F(ompt_test, unified_name_uses_operation_table_for_non_parallel_operation)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+
+    const auto record = make_record(sdk::OMPT_ID_task_create);
+    EXPECT_EQ(detail::get_unified_name<sdk>(record), "operation");
+}
+
+TEST_F(ompt_test, unified_name_is_omp_parallel_for_parallel_begin)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+
+    const auto record = make_record(sdk::OMPT_ID_parallel_begin);
+    EXPECT_EQ(detail::get_unified_name<sdk>(record), "omp_parallel");
+}
+
+TEST_F(ompt_test, unified_name_is_omp_parallel_for_parallel_end)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+
+    const auto record = make_record(sdk::OMPT_ID_parallel_end);
+    EXPECT_EQ(detail::get_unified_name<sdk>(record), "omp_parallel");
+}
+
+// ─── should_skip ─────────────────────────────────────────────────────────────
+
+TEST(ompt_should_skip_test, null_payload_skips)
+{
+    auto record    = make_record(sdk::OMPT_ID_task_create);
+    record.payload = nullptr;
+
+    EXPECT_TRUE(detail::should_skip<sdk>(record));
+}
+
+TEST(ompt_should_skip_test, implicit_task_with_initial_flag_skips)
+{
+    auto payload                     = sdk::callback_tracing_ompt_data_t{};
+    payload.args.implicit_task.flags = 0x1;
+
+    auto record    = make_record(sdk::OMPT_ID_implicit_task);
+    record.payload = &payload;
+
+    EXPECT_TRUE(detail::should_skip<sdk>(record));
+}
+
+TEST(ompt_should_skip_test, implicit_task_without_initial_flag_does_not_skip)
+{
+    auto payload                     = sdk::callback_tracing_ompt_data_t{};
+    payload.args.implicit_task.flags = 0x2;
+
+    auto record    = make_record(sdk::OMPT_ID_implicit_task);
+    record.payload = &payload;
+
+    EXPECT_FALSE(detail::should_skip<sdk>(record));
+}
+
+TEST(ompt_should_skip_test, thread_begin_with_initial_thread_skips)
+{
+    auto payload                          = sdk::callback_tracing_ompt_data_t{};
+    payload.args.thread_begin.thread_type = sdk::ompt_thread_type_t::ompt_thread_initial;
+
+    auto record    = make_record(sdk::OMPT_ID_thread_begin);
+    record.payload = &payload;
+
+    EXPECT_TRUE(detail::should_skip<sdk>(record));
+}
+
+TEST(ompt_should_skip_test, thread_begin_with_worker_thread_does_not_skip)
+{
+    auto payload                          = sdk::callback_tracing_ompt_data_t{};
+    payload.args.thread_begin.thread_type = sdk::ompt_thread_type_t::ompt_thread_worker;
+
+    auto record    = make_record(sdk::OMPT_ID_thread_begin);
+    record.payload = &payload;
+
+    EXPECT_FALSE(detail::should_skip<sdk>(record));
+}
+
+TEST(ompt_should_skip_test, unrelated_operation_does_not_skip)
+{
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_parallel_begin);
+    record.payload = &payload;
+
+    EXPECT_FALSE(detail::should_skip<sdk>(record));
+}
+
+// ─── collect_args ────────────────────────────────────────────────────
+
+TEST_F(ompt_test, iterate_args_returns_early_for_operation_without_flags)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_dispatch);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    EXPECT_TRUE(args.empty());
+}
+
+TEST_F(ompt_test, iterate_args_returns_early_when_payload_null_for_flagged_operation)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto record    = make_record(sdk::OMPT_ID_parallel_begin);
+    record.payload = nullptr;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    EXPECT_TRUE(args.empty());
+}
+
+TEST_F(ompt_test, iterate_args_parallel_begin_program_invoker_and_league_cause)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload                      = sdk::callback_tracing_ompt_data_t{};
+    payload.args.parallel_begin.flags = 0x1 | 0x40000000;
+
+    auto record    = make_record(sdk::OMPT_ID_parallel_begin);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "invoker");
+    EXPECT_EQ(args[0].arg_value, "program");
+    EXPECT_EQ(args[1].arg_name, "invoker_cause");
+    EXPECT_EQ(args[1].arg_value, "teams_construct");
+}
+
+TEST_F(ompt_test, iterate_args_parallel_end_runtime_invoker_and_team_cause)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload                    = sdk::callback_tracing_ompt_data_t{};
+    payload.args.parallel_end.flags = 0x2 | static_cast<int>(0x80000000U);
+
+    auto record    = make_record(sdk::OMPT_ID_parallel_end);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "invoker");
+    EXPECT_EQ(args[0].arg_value, "runtime");
+    EXPECT_EQ(args[1].arg_name, "invoker_cause");
+    EXPECT_EQ(args[1].arg_value, "parallel_construct");
+}
+
+TEST_F(ompt_test, iterate_args_parallel_begin_without_flags_appends_nothing)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_parallel_begin);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    EXPECT_TRUE(args.empty());
+}
+
+TEST_F(ompt_test, iterate_args_task_create_initial_classification_with_untied_property)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload                   = sdk::callback_tracing_ompt_data_t{};
+    payload.args.task_create.flags = 0x1 | 0x10000000;
+
+    auto record    = make_record(sdk::OMPT_ID_task_create);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "classification");
+    EXPECT_EQ(args[0].arg_value, "initial");
+    EXPECT_EQ(args[1].arg_name, "properties");
+    EXPECT_EQ(args[1].arg_value, "untied");
+}
+
+TEST_F(ompt_test, iterate_args_task_create_implicit_classification_no_properties)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload                   = sdk::callback_tracing_ompt_data_t{};
+    payload.args.task_create.flags = 0x2;
+
+    auto record    = make_record(sdk::OMPT_ID_task_create);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "classification");
+    EXPECT_EQ(args[0].arg_value, "implicit");
+    EXPECT_EQ(args[1].arg_name, "properties");
+    EXPECT_EQ(args[1].arg_value, "none");
+}
+
+TEST_F(ompt_test, iterate_args_task_create_explicit_classification)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload                   = sdk::callback_tracing_ompt_data_t{};
+    payload.args.task_create.flags = 0x4;
+
+    auto record    = make_record(sdk::OMPT_ID_task_create);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "classification");
+    EXPECT_EQ(args[0].arg_value, "explicit");
+}
+
+TEST_F(ompt_test, iterate_args_task_create_target_classification)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload                   = sdk::callback_tracing_ompt_data_t{};
+    payload.args.task_create.flags = 0x8;
+
+    auto record    = make_record(sdk::OMPT_ID_task_create);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "classification");
+    EXPECT_EQ(args[0].arg_value, "target");
+}
+
+TEST_F(ompt_test, iterate_args_task_create_all_properties_and_no_classification)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    payload.args.task_create.flags =
+        0x08000000 | 0x10000000 | 0x20000000 | 0x40000000 | static_cast<int>(0x80000000U);
+
+    auto record    = make_record(sdk::OMPT_ID_task_create);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    // No classification bit set -> only the properties entry is appended.
+    ASSERT_EQ(args.size(), 1U);
+    EXPECT_EQ(args[0].arg_name, "properties");
+    EXPECT_EQ(args[0].arg_value, "undeferred, untied, final, mergeable, merged");
+}
+
+TEST_F(ompt_test, iterate_args_implicit_task_implicit_kind)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload                     = sdk::callback_tracing_ompt_data_t{};
+    payload.args.implicit_task.flags = 0x2;
+
+    auto record    = make_record(sdk::OMPT_ID_implicit_task);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    ASSERT_EQ(args.size(), 1U);
+    EXPECT_EQ(args[0].arg_name, "kind");
+    EXPECT_EQ(args[0].arg_value, "implicit");
+}
+
+TEST_F(ompt_test, iterate_args_implicit_task_neither_kind_appends_nothing)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_implicit_task);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    EXPECT_TRUE(args.empty());
+}
+
+TEST_F(ompt_test, iterate_args_cancel_parallel_construct_and_activated_state)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload              = sdk::callback_tracing_ompt_data_t{};
+    payload.args.cancel.flags = 0x01 | 0x10;
+
+    auto record    = make_record(sdk::OMPT_ID_cancel);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "construct");
+    EXPECT_EQ(args[0].arg_value, "parallel");
+    EXPECT_EQ(args[1].arg_name, "state");
+    EXPECT_EQ(args[1].arg_value, "activated");
+}
+
+TEST_F(ompt_test, iterate_args_cancel_sections_construct_and_detected_state)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload              = sdk::callback_tracing_ompt_data_t{};
+    payload.args.cancel.flags = 0x02 | 0x20;
+
+    auto record    = make_record(sdk::OMPT_ID_cancel);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "construct");
+    EXPECT_EQ(args[0].arg_value, "sections");
+    EXPECT_EQ(args[1].arg_name, "state");
+    EXPECT_EQ(args[1].arg_value, "detected");
+}
+
+TEST_F(ompt_test, iterate_args_cancel_loop_construct_and_discarded_task_state)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload              = sdk::callback_tracing_ompt_data_t{};
+    payload.args.cancel.flags = 0x04 | 0x40;
+
+    auto record    = make_record(sdk::OMPT_ID_cancel);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    ASSERT_EQ(args.size(), 2U);
+    EXPECT_EQ(args[0].arg_name, "construct");
+    EXPECT_EQ(args[0].arg_value, "loop");
+    EXPECT_EQ(args[1].arg_name, "state");
+    EXPECT_EQ(args[1].arg_value, "discarded_task");
+}
+
+TEST_F(ompt_test, iterate_args_cancel_taskgroup_construct_without_state)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload              = sdk::callback_tracing_ompt_data_t{};
+    payload.args.cancel.flags = 0x08;
+
+    auto record    = make_record(sdk::OMPT_ID_cancel);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    ASSERT_EQ(args.size(), 1U);
+    EXPECT_EQ(args[0].arg_name, "construct");
+    EXPECT_EQ(args[0].arg_value, "taskgroup");
+}
+
+TEST_F(ompt_test, iterate_args_cancel_without_flags_appends_nothing)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_cancel);
+    record.payload = &payload;
+
+    const auto args = detail::collect_args<sdk>(record);
+
+    EXPECT_TRUE(args.empty());
+}
+
+// ─── emit_region ─────────────────────────────────────────────────────────────
+
+TEST_F(ompt_test, emit_region_builds_expected_region_sample)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_))
+        .WillOnce(Return(std::uint64_t{ 55 }));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string("rocm_ompt_api"));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(2));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(3));
+    EXPECT_CALL(*g_metadata_registry_mock,
+                add_thread_info(Eq(thread_info_data_t{ 2, 3, 7, 0, 0, "{}" })));
+    EXPECT_CALL(*g_buffer_storage_mock,
+                store_region_sample(7, std::string{ "operation" }, 9, 55, 10, 20,
+                                    std::string{}, std::string{ "rocm_ompt_api" }));
+
+    auto record = make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_NONE, 7, 9);
+    auto backtrace_data  = std::optional<int>{};
+    function_args_t args = {};
+
+    detail::emit_region<sdk, ext, ompt_api_category>(record, 10, 20, backtrace_data,
+                                                     args);
+}
+
+// ─── instant_region ──────────────────────────────────────────────────────────
+
+TEST_F(ompt_test, instant_region_uses_same_begin_and_end_timestamp)
+{
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 15, 15, _, _));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_lock_init);
+    record.payload = &payload;
+
+    auto backtrace_data = std::optional<int>{};
+    detail::instant_region<sdk, ext, ompt_api_category>(record, 15, backtrace_data);
+}
+
+TEST_F(ompt_test, instant_region_pushes_and_pops_timemory_when_enabled)
+{
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(true));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .Times(2)
+        .WillRepeatedly(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_externals_mock, tracing_push_timemory("operation"));
+    EXPECT_CALL(*g_externals_mock, tracing_pop_timemory("operation"));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_lock_init);
+    record.payload = &payload;
+
+    auto backtrace_data = std::optional<int>{};
+    detail::instant_region<sdk, ext, ompt_api_category>(record, 15, backtrace_data);
+}
+
+// ─── begin_region / end_region (standard) ────────────────────────────────────
+
+TEST_F(ompt_test, begin_then_end_standard_region_uses_stored_begin_timestamp)
+{
+    EXPECT_CALL(*g_externals_mock, get_use_timemory())
+        .Times(2)
+        .WillRepeatedly(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    auto record = make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 4, 42);
+    record.payload = &payload;
+
+    detail::begin_region<sdk, ext, ompt_api_category>(record, 100);
+
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 100, 200, _, _));
+
+    auto backtrace_data = std::optional<int>{};
+    detail::end_region<sdk, ext, ompt_api_category>(record, 200, backtrace_data);
+
+    EXPECT_TRUE(detail::open_regions<sdk>::s_standard.empty());
+}
+
+TEST_F(ompt_test, end_region_without_matching_begin_emits_orphan_instant_event)
+{
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 300, 300, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    auto record = make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_EXIT, 4, 999);
+    record.payload = &payload;
+
+    auto backtrace_data = std::optional<int>{};
+    detail::end_region<sdk, ext, ompt_api_category>(record, 300, backtrace_data);
+}
+
+// ─── begin_region / end_region (parallel) ────────────────────────────────────
+
+TEST_F(ompt_test, begin_then_end_parallel_region_matches_by_parallel_data)
+{
+    int fake_parallel_data = 0;
+
+    EXPECT_CALL(*g_externals_mock, get_use_timemory())
+        .Times(2)
+        .WillRepeatedly(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto push_payload                              = sdk::callback_tracing_ompt_data_t{};
+    push_payload.args.parallel_begin.parallel_data = &fake_parallel_data;
+    auto push_record =
+        make_record(sdk::OMPT_ID_parallel_begin, sdk::CALLBACK_PHASE_NONE, 1, 1);
+    push_record.payload = &push_payload;
+
+    detail::begin_region<sdk, ext, ompt_api_category>(push_record, 10);
+
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 10, 20, _, _));
+
+    auto pop_payload                            = sdk::callback_tracing_ompt_data_t{};
+    pop_payload.args.parallel_end.parallel_data = &fake_parallel_data;
+    auto pop_record =
+        make_record(sdk::OMPT_ID_parallel_end, sdk::CALLBACK_PHASE_NONE, 1, 1);
+    pop_record.payload = &pop_payload;
+
+    auto backtrace_data = std::optional<int>{};
+    detail::end_region<sdk, ext, ompt_api_category>(pop_record, 20, backtrace_data);
+
+    EXPECT_TRUE(detail::open_regions<sdk>::s_parallel.empty());
+}
+
+TEST_F(ompt_test, end_region_parallel_without_matching_begin_emits_orphan)
+{
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 50, 50, _, _));
+
+    int  unmatched                          = 0;
+    auto payload                            = sdk::callback_tracing_ompt_data_t{};
+    payload.args.parallel_end.parallel_data = &unmatched;
+    auto record = make_record(sdk::OMPT_ID_parallel_end, sdk::CALLBACK_PHASE_NONE, 1, 1);
+    record.payload = &payload;
+
+    auto backtrace_data = std::optional<int>{};
+    detail::end_region<sdk, ext, ompt_api_category>(record, 50, backtrace_data);
+}
+
+// ─── on_ompt_finalize ────────────────────────────────────────────────────────
+
+TEST_F(ompt_test, on_ompt_finalize_emits_and_clears_both_maps)
+{
+    const auto record1 =
+        make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 1, 11);
+    detail::open_regions<sdk>::s_standard.emplace(
+        11U, detail::pending_region<sdk>{ record1, 5, function_args_t{} });
+
+    const auto record2 =
+        make_record(sdk::OMPT_ID_parallel_begin, sdk::CALLBACK_PHASE_NONE, 1, 1);
+    detail::open_regions<sdk>::s_parallel.emplace(
+        std::uint64_t{ 0x1234 },
+        detail::pending_region<sdk>{ record2, 6, function_args_t{} });
+
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .Times(2)
+        .WillRepeatedly(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_))
+        .Times(2)
+        .WillRepeatedly(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_)).Times(2);
+    EXPECT_CALL(*g_externals_mock, get_ppid()).Times(2).WillRepeatedly(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).Times(2).WillRepeatedly(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_)).Times(2);
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _))
+        .Times(2);
+
+    on_ompt_finalize<sdk, ext, ompt_api_category>();
+
+    EXPECT_TRUE(detail::open_regions<sdk>::s_standard.empty());
+    EXPECT_TRUE(detail::open_regions<sdk>::s_parallel.empty());
+}
+
+TEST_F(ompt_test, on_ompt_finalize_flushes_orphan_standard_callback)
+{
+    const auto record =
+        make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 1, 11);
+    detail::open_regions<sdk>::s_standard.emplace(
+        11U, detail::pending_region<sdk>{ record, 5, function_args_t{} });
+
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _));
+
+    on_ompt_finalize<sdk, ext, ompt_api_category>();
+
+    EXPECT_TRUE(detail::open_regions<sdk>::s_standard.empty());
+    EXPECT_TRUE(detail::open_regions<sdk>::s_parallel.empty());
+}
+
+TEST_F(ompt_test, on_ompt_finalize_is_noop_when_no_pending_events)
+{
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+
+    on_ompt_finalize<sdk, ext, ompt_api_category>();
+
+    EXPECT_TRUE(detail::open_regions<sdk>::s_standard.empty());
+    EXPECT_TRUE(detail::open_regions<sdk>::s_parallel.empty());
+}
+
+// ─── begin_region / end_region timemory ──────────────────────────────────────
+
+TEST_F(ompt_test, begin_region_pushes_timemory_when_enabled)
+{
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, tracing_push_timemory("operation"));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER);
+    record.payload = &payload;
+    detail::begin_region<sdk, ext, ompt_api_category>(record, 1);
+}
+
+TEST_F(ompt_test, end_region_pops_timemory_when_enabled)
+{
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(true));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .Times(2)
+        .WillRepeatedly(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_externals_mock, tracing_pop_timemory("operation"));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_EXIT);
+    record.payload = &payload;
+
+    auto backtrace_data = std::optional<int>{};
+    detail::end_region<sdk, ext, ompt_api_category>(record, 2, backtrace_data);
+}
+
+// ─── on_ompt_enter ───────────────────────────────────────────────────────────
+
+TEST_F(ompt_test, enter_skips_when_should_skip_true)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+
+    auto payload                     = sdk::callback_tracing_ompt_data_t{};
+    payload.args.implicit_task.flags = 0x1;
+    auto record    = make_record(sdk::OMPT_ID_implicit_task, sdk::CALLBACK_PHASE_ENTER);
+    record.payload = &payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_enter<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 0);
+}
+
+TEST_F(ompt_test, enter_starts_tracing_and_pushes_standard_callback_when_not_skipped)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    auto record = make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 1, 55);
+    record.payload = &payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_enter<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 123);
+
+    EXPECT_TRUE(detail::open_regions<sdk>::s_standard.contains(55U));
+}
+
+// ─── on_ompt_exit ────────────────────────────────────────────────────────────
+
+TEST_F(ompt_test, exit_skips_when_should_skip_true)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+
+    auto payload                     = sdk::callback_tracing_ompt_data_t{};
+    payload.args.implicit_task.flags = 0x1;
+    auto record    = make_record(sdk::OMPT_ID_implicit_task, sdk::CALLBACK_PHASE_EXIT);
+    record.payload = &payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_exit<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 0);
+}
+
+TEST_F(ompt_test, exit_pops_found_standard_callback_and_emits_span)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, get_use_timemory())
+        .Times(2)
+        .WillRepeatedly(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    auto enter_record =
+        make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 1, 77);
+    enter_record.payload = &payload;
+    detail::begin_region<sdk, ext, ompt_api_category>(enter_record, 10);
+
+    EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
+        .WillOnce(Return(false));
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 10, 20, _, _));
+
+    auto exit_record =
+        make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_EXIT, 1, 77);
+    exit_record.payload = &payload;
+    sdk::user_data_t user_data{};
+    on_ompt_exit<sdk, ext, ompt_api_category>(exit_record, &user_data, nullptr, 20);
+}
+
+TEST_F(ompt_test, exit_without_matching_enter_emits_orphan_event)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
+        .WillOnce(Return(false));
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 60, 60, _, _));
+
+    auto payload = sdk::callback_tracing_ompt_data_t{};
+    auto record = make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_EXIT, 1, 321);
+    record.payload = &payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_exit<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 60);
+}
+
+// ─── on_ompt_none ────────────────────────────────────────────────────────────
+
+TEST_F(ompt_test, none_skips_when_should_skip_true)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+
+    auto payload                     = sdk::callback_tracing_ompt_data_t{};
+    payload.args.implicit_task.flags = 0x1;
+    auto record                      = make_record(sdk::OMPT_ID_implicit_task);
+    record.payload                   = &payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_none<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 0);
+}
+
+TEST_F(ompt_test, none_ignores_callback_functions_marker)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_callback_functions);
+    record.payload = &payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_none<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 0);
+}
+
+TEST_F(ompt_test, none_ignores_thread_end)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_thread_end);
+    record.payload = &payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_none<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 0);
+}
+
+TEST_F(ompt_test, none_dispatches_parallel_begin_and_pushes_parallel_callback)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
+        .WillOnce(Return(false));
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+
+    int  fake_parallel_data                   = 0;
+    auto payload                              = sdk::callback_tracing_ompt_data_t{};
+    payload.args.parallel_begin.parallel_data = &fake_parallel_data;
+    auto record                               = make_record(sdk::OMPT_ID_parallel_begin);
+    record.payload                            = &payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_none<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 40);
+
+    EXPECT_TRUE(detail::open_regions<sdk>::s_parallel.contains(
+        reinterpret_cast<uintptr_t>(&fake_parallel_data)));
+}
+
+TEST_F(ompt_test, none_dispatches_parallel_end_and_pops_parallel_callback)
+{
+    int fake_parallel_data = 0;
+
+    EXPECT_CALL(*g_externals_mock, get_use_timemory())
+        .Times(2)
+        .WillRepeatedly(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+    auto push_payload                              = sdk::callback_tracing_ompt_data_t{};
+    push_payload.args.parallel_begin.parallel_data = &fake_parallel_data;
+    auto push_record    = make_record(sdk::OMPT_ID_parallel_begin);
+    push_record.payload = &push_payload;
+    detail::begin_region<sdk, ext, ompt_api_category>(push_record, 5);
+
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
+        .WillOnce(Return(false));
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 5, 15, _, _));
+
+    auto pop_payload                            = sdk::callback_tracing_ompt_data_t{};
+    pop_payload.args.parallel_end.parallel_data = &fake_parallel_data;
+    auto pop_record                             = make_record(sdk::OMPT_ID_parallel_end);
+    pop_record.payload                          = &pop_payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_none<sdk, ext, ompt_api_category>(pop_record, &user_data, nullptr, 15);
+}
+
+TEST_F(ompt_test, none_dispatches_instant_event_for_lock_init)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
+        .WillOnce(Return(false));
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 30, 30, _, _));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(sdk::OMPT_ID_lock_init);
+    record.payload = &payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_none<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 30);
+}
+
+TEST_F(ompt_test, none_dispatches_instant_event_for_thread_begin)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
+        .WillOnce(Return(false));
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 12, 12, _, _));
+
+    auto payload                          = sdk::callback_tracing_ompt_data_t{};
+    payload.args.thread_begin.thread_type = sdk::ompt_thread_type_t::ompt_thread_worker;
+    auto record                           = make_record(sdk::OMPT_ID_thread_begin);
+    record.payload                        = &payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_none<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 12);
+}
+
+TEST_F(ompt_test, none_logs_warning_for_unhandled_operation)
+{
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
+        .WillOnce(Return(false));
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+
+    auto payload   = sdk::callback_tracing_ompt_data_t{};
+    auto record    = make_record(9999);
+    record.payload = &payload;
+
+    sdk::user_data_t user_data{};
+    on_ompt_none<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 0);
+}
+
+// ─── k_ompt_api domain descriptor ────────────────────────────────────────────
+
+TEST(ompt_domain_test, metadata_matches_ompt_domain)
+{
+    constexpr const auto& domain = k_ompt_api<sdk, ext>;
+
+    EXPECT_EQ(domain.meta.name, "ompt");
+    EXPECT_EQ(domain.meta.id, sdk::CALLBACK_TRACING_OMPT);
+    EXPECT_EQ(domain.meta.mode, collection_mode::callback);
+    EXPECT_FALSE(domain.meta.group.has_value());
+}
+
+TEST(ompt_domain_test, on_finalize_is_wired_to_orphan_event_flush)
+{
+    constexpr const auto& domain = k_ompt_api<sdk, ext>;
+
+    const finalize_cb_t expected_finalize =
+        &on_ompt_finalize<sdk, ext, ompt_api_category>;
+
+    ASSERT_NE(domain.on_finalize, nullptr);
+    EXPECT_EQ(domain.on_finalize, expected_finalize);
+}
+
+}  // namespace rocprofsys::domains::callback::ompt
