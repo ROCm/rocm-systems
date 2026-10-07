@@ -23,6 +23,7 @@
 
 #include "hrr/hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 #include "hrr_region_map.h"    // external region annotations (regions/*.hrrr)
+#include "hrr_va_placement.h"  // allocations at their capture-time address
 
 // Whether a replayed H2D blob restore must be drained before subsequent
 // replay work. Draining is skipped while a stream graph capture is active,
@@ -314,10 +315,18 @@ struct PlaybackContext {
     bool warn_untranslated_args = false;
     std::atomic<uint64_t> untranslated_ptr_args{0};
 
+    // ---- Capture-address placement ----
+    // Device allocations land at the address the recording had, so a device
+    // pointer the program stored in memory is still true at replay. Active
+    // once hold() succeeded; --no-placement and --guard-segments leave it off.
+    // See hrr_va_placement.h.
+    hrr::VaPlacement placement;
+
     // ---- Guard pages ----
-    // Both off by default: they trade the exact memory layout the replay
-    // otherwise reproduces for the ability to make an out-of-bounds access
-    // fault. See the guard section of hip_playback.cpp.
+    // Both off by default. --guard-segments puts a gap after every allocation,
+    // which placement cannot do, so it turns placement off. --guard-blocks
+    // relocates one block per launch and leaves placement alone. See the guard
+    // section of hip_playback.cpp.
     bool   guard_segments = false;  // VMM-back every allocation, guard its tail
     bool   guard_blocks   = false;  // relocate annotated blocks behind a guard
     size_t guard_min_bytes = 0;     // skip blocks smaller than this
@@ -463,14 +472,20 @@ struct PlaybackContext {
     // Recorded allocation ranges, sorted by base, for scans that test many
     // words against them. Testing one word walks every allocation; taking a
     // snapshot once and binary searching turns a scan of a multi-gigabyte
-    // payload from hours into seconds.
-    std::vector<std::pair<uint64_t, uint64_t>> recorded_ranges() const {
+    // payload from hours into seconds. `moved_only` leaves out the ones that
+    // replay at their recorded address, where a stored pointer is still true.
+    std::vector<std::pair<uint64_t, uint64_t>> recorded_ranges(
+        bool moved_only = false) const {
         std::vector<std::pair<uint64_t, uint64_t>> r;
         {
             std::shared_lock lk(map_mutex);
             r.reserve(alloc_map.size() + vmm_va_map.size());
-            for (auto& [base, e] : alloc_map) r.emplace_back(base, base + e.size);
-            for (auto& [base, va] : vmm_va_map) r.emplace_back(base, base + va.size);
+            for (auto& [base, e] : alloc_map)
+                if (!moved_only || reinterpret_cast<uint64_t>(e.live_ptr) != base)
+                    r.emplace_back(base, base + e.size);
+            for (auto& [base, va] : vmm_va_map)
+                if (!moved_only || reinterpret_cast<uint64_t>(va.live) != base)
+                    r.emplace_back(base, base + va.size);
         }
         std::sort(r.begin(), r.end());
         return r;
@@ -766,8 +781,9 @@ hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
 void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 
 // Release a device allocation the replay created, whichever way it was created.
-// Under --guard-segments an allocation is a VMM mapping rather than a hipMalloc
-// and hipFree cannot release it, so every teardown path has to go through here.
+// A placed allocation, and one under --guard-segments, is a VMM mapping rather
+// than a hipMalloc and hipFree cannot release it, so every teardown path has
+// to go through here.
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
 
 // ---------------------------------------------------------------------------

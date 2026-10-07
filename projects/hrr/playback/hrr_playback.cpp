@@ -1242,17 +1242,28 @@ static void print_usage(const char* argv0) {
     "  --regions-strict      Count intra-segment out-of-bounds findings toward the\n"
     "                        exit code (default: report only)\n"
     "\n"
-    "Guard pages (diagnostic; both move memory the replay otherwise places exactly\n"
-    "where the recording had it, so they are off by default):\n"
+    "Capture-address placement (on by default):\n"
+    "  Device allocations replay at the address the recording had, so a device\n"
+    "  pointer the program stored in memory, and that reaches the GPU through an\n"
+    "  H2D copy, still points at the right buffer. An allocation whose range is\n"
+    "  taken falls back to a new address and is named on stderr; set\n"
+    "  HIP_HRR_REPLAY_SCAN_H2D=1 to find stored copies of its address. Managed\n"
+    "  and fine-grained memory always fall back.\n"
+    "  --no-placement        Allocate at whatever address the runtime returns\n"
+    "\n"
+    "Guard pages (diagnostic, off by default):\n"
     "  --guard-segments      Back every device allocation with VMM and leave an\n"
     "                        unmapped span after it. Catches a run off the end of a\n"
     "                        whole segment; layout inside the segment is untouched.\n"
+    "                        The span needs room the recorded layout does not have,\n"
+    "                        so this turns placement off.\n"
     "  --guard-blocks        Needs region annotations. For the duration of one\n"
     "                        launch, hand each argument that resolves into a live\n"
     "                        block a copy of that block placed against an unmapped\n"
     "                        guard, so an overrun past the object itself faults.\n"
     "                        Results are written back and the copy released before\n"
-    "                        the next event. Narrow it with --kernel-filter.\n"
+    "                        the next event. Narrow it with --kernel-filter. Only\n"
+    "                        the copy moves; placement stays on.\n"
     "  --guard-min-bytes N   Skip blocks smaller than N bytes (default 0)\n"
     "  --guard-max-bytes N   Skip blocks larger than N bytes (default: no limit)\n"
     "  --guard-budget-mb N   Cap guarded memory per launch (default 4096)\n"
@@ -1274,6 +1285,12 @@ static void print_usage(const char* argv0) {
     "  HIP_HRR_REPLAY_PROGRESS_SECONDS=S    same as --progress-seconds S\n"
     "  HIP_HRR_REPLAY_SYNC_WATCHDOG_MS=N    same as --sync-watchdog-ms N\n"
     "\n"
+    "Environment (placement diagnostics):\n"
+    "  HIP_HRR_REPLAY_PLACE_DENY=A[,B...]   treat the range of each recorded\n"
+    "                                       allocation containing address A as\n"
+    "                                       taken: it is held so nothing lands\n"
+    "                                       there, which exercises the fallback\n"
+    "\n"
     "Default mode: single-threaded, serialize GPU after pass, abort on first error.\n"
     "Use --sync-after-event to pinpoint the exact event causing a GPU fault or hang.\n",
     argv0);
@@ -1290,6 +1307,7 @@ int main(int argc, char** argv) {
   bool show_events   = false;
   bool do_repair     = false;
   bool no_regions    = false;
+  bool no_placement  = false;
 
   for (int i = 1; i < argc; i++) {
     if      (!strcmp(argv[i], "--info"))              show_info              = true;
@@ -1317,6 +1335,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--regions-strict"))    ctx.regions_strict     = true;
     else if (!strcmp(argv[i], "--warn-untranslated-args"))
       ctx.warn_untranslated_args = true;
+    else if (!strcmp(argv[i], "--no-placement"))      no_placement           = true;
     else if (!strcmp(argv[i], "--guard-segments"))    ctx.guard_segments     = true;
     else if (!strcmp(argv[i], "--guard-blocks"))      ctx.guard_blocks       = true;
     else if (!strcmp(argv[i], "--guard-exact-align")) ctx.guard_exact_align  = true;
@@ -1436,30 +1455,13 @@ int main(int argc, char** argv) {
          archive.blob_count, archive.code_object_count);
   printf("[HRR] Threads : %zu captured\n", archive.threads.size());
 
-  HIP_CHECK(hipInit(0));
-
-  int device_count = 0;
-  HIP_CHECK(hipGetDeviceCount(&device_count));
-  if (device_count == 0) { fprintf(stderr, "[HRR] No GPU devices found\n"); return 1; }
-
-  hipDeviceProp_t props{};
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
-  printf("[HRR] Device  : %s (%s)\n", props.name, props.gcnArchName);
-  print_loaded_rocm_libs();
-
-  // Partition events by thread_id — O(n), no re-scan needed at replay time
-  std::unordered_map<uint64_t, std::vector<const hrr::Event*>> thread_events;
-  for (uint64_t tid : archive.threads) thread_events[tid];
-  for (const auto& ev : archive.events)
-    thread_events[ev.header().thread_id].push_back(&ev);
-
   const bool use_mt = !single_thread && archive.threads.size() > 1;
-  printf("[HRR] Mode    : %s\n", use_mt ? "multi-threaded" : "single-threaded");
 
   // External region annotations. Loaded up front, whole: a producer records a
   // batch after the events it describes, and the batches of several producers
   // interleave, so the live set at a given instant only exists once every
-  // stream has been merged.
+  // stream has been merged. Loaded before hipInit because placement holds the
+  // declared segments too.
   if (!no_regions) {
     const size_t n = ctx.regions.load(archive.path);
     if (n > 0) {
@@ -1485,6 +1487,59 @@ int main(int argc, char** argv) {
       }
     }
   }
+  // Capture-address placement. Every range the replay will want at its
+  // recorded address is held before hipInit, because the runtime reserves
+  // address space of its own during init and could land on one.
+  if (no_placement) {
+    printf("[HRR] Placement : off (--no-placement)\n");
+  } else if (ctx.guard_segments) {
+    printf("[HRR] Placement : off (--guard-segments needs a gap after every "
+           "allocation, and the recorded layout has none)\n");
+  } else {
+    std::vector<hrr::VaRange> segments;
+    if (ctx.regions_enabled)
+      ctx.regions.for_each_declared_segment(
+          [&](uint64_t b, uint64_t n) { segments.push_back({b, b + n}); });
+    hrr::PlacementPlan plan = hrr::plan_placement(
+        archive.events, segments,
+        hrr::parse_place_deny(std::getenv("HIP_HRR_REPLAY_PLACE_DENY")));
+    if (!plan.denied.empty())
+      printf("[HRR] Placement : %zu range(s) treated as taken "
+             "(HIP_HRR_REPLAY_PLACE_DENY)\n", plan.denied.size());
+    if (!ctx.placement.hold(std::move(plan)))
+      printf("[HRR] Placement : off (not supported on this platform)\n");
+  }
+
+  HIP_CHECK(hipInit(0));
+
+  int device_count = 0;
+  HIP_CHECK(hipGetDeviceCount(&device_count));
+  if (device_count == 0) { fprintf(stderr, "[HRR] No GPU devices found\n"); return 1; }
+
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  printf("[HRR] Device  : %s (%s)\n", props.name, props.gcnArchName);
+  print_loaded_rocm_libs();
+
+  // Before anything is replayed, code-object preload included: a module load
+  // allocates device memory too.
+  if (ctx.placement.active()) {
+    ctx.placement.reserve(0);
+    printf("[HRR] Placement : %zu range(s), %.1f MiB reserved at recorded "
+           "addresses, %zu could not be\n",
+           ctx.placement.held_ranges(),
+           static_cast<double>(ctx.placement.held_bytes()) / (1024.0 * 1024.0),
+           ctx.placement.lost_ranges());
+  }
+
+  // Partition events by thread_id — O(n), no re-scan needed at replay time
+  std::unordered_map<uint64_t, std::vector<const hrr::Event*>> thread_events;
+  for (uint64_t tid : archive.threads) thread_events[tid];
+  for (const auto& ev : archive.events)
+    thread_events[ev.header().thread_id].push_back(&ev);
+
+  printf("[HRR] Mode    : %s\n", use_mt ? "multi-threaded" : "single-threaded");
+
   if (ctx.guard_blocks && !ctx.regions_enabled) {
     fprintf(stderr,
             "[HRR] --guard-blocks needs region annotations to know where one "
@@ -1585,6 +1640,7 @@ int main(int argc, char** argv) {
         case AllocKind::DevicePtrAlias:                                   break;
       }
     }
+    ctx.placement.release_all();
     // Captures routinely end mid-stream with hipHostRegister'd buffers still live;
     // playback_hipHostUnregister never ran for them, so unregister + free each
     // remaining backing buffer here to avoid leaking both the pinned registration
@@ -1698,6 +1754,11 @@ int main(int argc, char** argv) {
            (unsigned long long)ctx.guard_blocks_relocated.load(),
            (unsigned long long)ctx.guard_blind_max.load());
   }
+
+  if (ctx.placement.active())
+    printf("[HRR]   Placement      : %llu placed at capture address, %llu fell back\n",
+           (unsigned long long)ctx.placement.placed(),
+           (unsigned long long)ctx.placement.fallbacks());
 
   {
     // Printed unconditionally under the flag, zero included: "no pointer was
