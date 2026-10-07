@@ -536,8 +536,6 @@ add_test(
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_consan_allowlist.py -v
 )
-include(consan/python_tests.cmake)
-
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(
         NAME VfioGuestRunUnitTest

@@ -77,11 +77,13 @@ Python environment and configure CMake to use that interpreter. CPU-only
 PyTorch is sufficient for these unit tests:
 
 ```bash
-python3 -m pip install PyYAML
-python3 -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python3 -m pip install -r tests/consan/requirements.txt
 cmake -B build -DPython3_EXECUTABLE="$(command -v python3)"
 ctest --test-dir build
 ```
+
+To run only the ConSan Python suites, use
+`ctest --test-dir build -L '^consan-python$' --output-on-failure`.
 
 HIP kernel tests and RCCL daemon tests require an ROCm installation.
 They are disabled automatically when `hipcc` or `libhsa-runtime64` is

@@ -23,6 +23,7 @@ add_test(
         "${_rj_consan_independent_workgroups_witness_regex_file}"
         --ctest-directory "${CMAKE_BINARY_DIR}"
 )
+include("${CMAKE_CURRENT_LIST_DIR}/python_tests.cmake")
 
 set(RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR
     ""

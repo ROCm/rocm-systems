@@ -263,10 +263,8 @@ jobs:
 
       - name: Install Python unit test dependencies
         run: |
-          uv pip install --system --python "${{ steps.python.outputs.python-path }}" PyYAML
-          # The ConSan Aorta oracle tests only use CPU tensors.
           uv pip install --system --python "${{ steps.python.outputs.python-path }}" \
-            --index-url https://download.pytorch.org/whl/cpu torch
+            -r "${ROCJITSU_SOURCE_DIR}/tests/consan/requirements.txt"
 
       - name: Build rocjitsu
         id: build_rocjitsu
