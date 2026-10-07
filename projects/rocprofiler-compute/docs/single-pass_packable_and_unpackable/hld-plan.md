@@ -208,7 +208,7 @@ Rollback via those environment variables stays available until this change lands
 | Decision | Why | Alternative |
 |----------|-----|-------------|
 | SPP packing is the default allocator | The shipping pack minimizes passes for all 274 counters, so 75 metrics whose sets fit one pass stay split | Priority-list coalesce. It steers a few metric ids and does not cover the rest |
-| Copy a counter into another pass when two PMC sets cannot share a bucket | Unique assignment cannot place all 358 SPP sets. An additive model that kept today’s passes and added one pass per split metric was estimated around **+55** passes on gfx942 | One dedicated pass per metric |
+| Copy a counter into another pass when two PMC sets cannot share a bucket | Unique assignment cannot place all 358 single-pass packable sets, and gfx942 stays near 14 passes | One dedicated pass per metric |
 | Same-pass bind ships with packing | A copied counter has several values. Merging them evaluates the ratio on different replays. `CPC Utilization` averages can sit far above 100% | Packing alone, or bind alone |
 | Phase 2 only for the 16 SPU parents | Those sets do not fit one pass after placement. None of them include GRBM | `WEIGHTED_AVG` for the 75 POLICY_GAP metrics |
 | `WEIGHTED_AVG` only for a split-weight ratio | \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\) rebuilds one ratio | One composite operator for every parent |
