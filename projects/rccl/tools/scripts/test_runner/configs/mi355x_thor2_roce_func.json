@@ -1325,6 +1325,11 @@
           "name": "SubnetMatchesAny",
           "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set",
           "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
+        },
+        {
+          "name": "SignalingRateTable",
+          "description": "ibvSpeeds[] maps every IB signaling rate, including FDR10, to its Mb/s value",
+          "test_filter": "NetIbCastSpeed.SignalingRateTable"
         }
       ]
     },

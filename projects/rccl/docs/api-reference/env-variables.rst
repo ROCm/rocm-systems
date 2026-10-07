@@ -320,12 +320,13 @@ in the following table.
           ``ibv_query_port_speed`` (``IBVERBS_1.16``) when it initializes
           devices. Applies to both the ``IB`` and ``IB-CAST`` transports. If
           the installed ``libibverbs`` does not export this function, or the
-          query fails, RCCL computes the speed from the port's
-          ``active_speed``/``active_width`` instead. Disabling it also turns
-          off runtime speed-change detection, which only the ``IB``
-          transport supports.
+          query fails, RCCL falls back to the port's ``active_speed_ex``
+          (for ``XDR`` or newer rates) or ``active_speed``, combined with
+          ``active_width``. Disabling it also turns off runtime speed-change
+          detection, which only the ``IB`` transport supports.
       - | ``1``: Query the port speed (default).
-        | ``0``: Use ``active_speed``/``active_width`` only.
+        | ``0``: Use ``active_speed_ex``/``active_speed`` and
+          ``active_width`` only.
 
     * - | ``NCCL_IB_SUBNET_AWARE_ROUTING``
         | Enables subnet-aware device selection.

@@ -1432,6 +1432,11 @@
           "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
         },
         {
+          "name": "SignalingRateTable",
+          "description": "ibvSpeeds[] maps every IB signaling rate, including FDR10, to its Mb/s value",
+          "test_filter": "NetIbCastSpeed.SignalingRateTable"
+        },
+        {
           "name": "MemManager_FixturesDebug_CuMem0",
           "description": "MemManager pure-state, real-HIP, stats and allocator-wiring tests with NCCL_CUMEM_ENABLE=0 (CUMEM-gated subtests self-skip via GTEST_SKIP)",
           "test_filter": "MemManagerTest.*:MemManagerRealMem.*:MemManagerStatsTest.*:MemManagerAllocator.*",
