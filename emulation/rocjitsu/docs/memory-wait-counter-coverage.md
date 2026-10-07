@@ -111,7 +111,7 @@ wait requirements on untested architectures or under all schedules.
 | Global, scratch, buffer, typed buffer, image loads and returning atomics | Load queue; track returned registers |
 | Stores and atomics without return | Store queue, or the shared legacy VMEM queue; no destination register |
 | Generic FLAT loads, stores and atomics | Only the VMEM/DS queues used by resolved requests; returned lanes depend on DS for the shared aperture and VMEM for global/scratch |
-| LDS/GDS, including permutation, swizzle and DS no-op | DS/legacy LGKM queue; returning forms track registers. GDS also contributes to EXP |
+| LDS/GDS, including permutation, swizzle and DS no-op | DS/legacy LGKM queue; returning forms track registers. GDS also contributes to EXP on legacy targets other than CDNA4 |
 | Scalar loads, atomics, cache operations, timestamps, barrier-state and wave-ID queries | KM/legacy LGKM queue; returned scalar registers are tracked |
 | Messages, including message returns | KM/legacy LGKM queue. Return forms contribute two units, with the result pending through the return unit |
 | Barrier signal with an `isfirst` result | KM queue and pending SCC result |
@@ -171,3 +171,27 @@ with real instruction execution for scalar/vector loads, inline DS results, coun
 producers, zero EXEC, message return units, and FLAT's lane-specific dependencies and
 both counter positions. Real-kernel checks supplement these tests; they do not prove
 complete recall across all kernel families.
+
+### Returning-atomic completion on gfx942 and gfx1151
+
+The CDNA4 EXPCNT correction leaves an open dynamic race-detector follow-up for
+gfx942 (CDNA3) and gfx1151 (RDNA3.5), tracked in the
+[PR #12583 review discussion](https://github.com/ROCm/rocm-systems/pull/12583#discussion_r4150892377).
+The review reports that compiler-generated HIP code for
+`o[i] = atomicAdd(p + i, 1u) * 3u` produces a VGPR read race on those targets
+despite an emitted `s_waitcnt vmcnt(0)` before the use; the gfx950 run is clean.
+
+`EventRegistry::allWaitCountersSatisfied` makes destination retirement depend on
+every obligation attached to the event. On these earlier targets, that includes
+the EXP obligation for source-register release. The follow-up must separate
+source-VGPR release from result and memory completion, while preserving required
+source-register and EXEC protection. The legacy generator profile tests preserve
+the existing metadata shape; they do not establish that returning-atomic
+retirement is architecturally correct.
+
+Validation should cover the compiler-generated probe on gfx942, gfx1151 and
+gfx950: consuming the atomic result after its required VM wait should be clean,
+and a missing-VM-wait control must still report the result dependency. Separate
+source-overwrite controls must retain the required source-release protection on
+targets that use EXP. This completion-model work remains separate from the
+CDNA4-only correction.
