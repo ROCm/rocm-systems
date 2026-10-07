@@ -41,8 +41,12 @@ class _FreqData(ctypes.Structure):
     ]
 
 
-def _od_volt_info_with(**ranges) -> dict:
-    """Return the public dict with a stub library that writes *ranges* (lower, upper)."""
+def _od_volt_info_with(vc_points=(), num_regions=0, **ranges) -> dict:
+    """Return the public dict from a stub library that writes the given fields.
+
+    *ranges* maps range names to (lower, upper); *vc_points* holds the three
+    (frequency, voltage) curve points as six values.
+    """
     handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
 
     def _stub(_handle, data_ptr):
@@ -52,6 +56,9 @@ def _od_volt_info_with(**ranges) -> dict:
         for name, (lower, upper) in ranges.items():
             getattr(data, name).lower_bound = lower
             getattr(data, name).upper_bound = upper
+        for i, value in enumerate(vc_points):
+            data.vc_points[i] = value
+        data.num_regions = num_regions
         return 0
 
     with mock.patch.object(amdsmi.amdsmi_wrapper, "amdsmi_get_gpu_od_volt_info", _stub):
@@ -101,6 +108,16 @@ class TestOdVoltInfo(unittest.TestCase):
         self.assertEqual(
             info["mclk_freq_limits"], {"lower_bound": 674 * _MHZ, "upper_bound": 1200 * _MHZ}
         )
+
+    def test_curve_and_region_count(self):
+        # The curve and region count follow the six ranges, so they move with the range size.
+        points = (1000 * _MHZ, 700, 1500 * _MHZ, 800, 2000 * _MHZ, 900)
+        info = _od_volt_info_with(vc_points=points, num_regions=3)
+        self.assertEqual(
+            info["curve.vc_points"],
+            [{"frequency": points[i], "voltage": points[i + 1]} for i in (0, 2, 4)],
+        )
+        self.assertEqual(info["num_regions"], 3)
 
 
 class TestOdVoltCurveRegions(unittest.TestCase):
