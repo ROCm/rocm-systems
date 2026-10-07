@@ -112,21 +112,20 @@ TEST(memory_copy_test, on_memory_copy_forwards_record_fields_to_dependencies)
                                                 k_mock_logical_node_id, record.thread_id),
                       .thread_id  = record.thread_id,
                       .extdata    = "{}" };
-    const auto expected_sample = memory_copy_sample_data_t{
-        .start_timestamp         = record.start_timestamp,
-        .end_timestamp           = record.end_timestamp,
-        .thread_id               = record.thread_id,
-        .dst_agent_id_handle     = record.dst_agent_id.handle,
-        .src_agent_id_handle     = record.src_agent_id.handle,
-        .kind                    = static_cast<std::int32_t>(record.kind),
-        .operation               = static_cast<std::int32_t>(record.operation),
-        .bytes                   = record.bytes,
-        .correlation_id_internal = record.correlation_id.internal,
-        .correlation_id_ancestor = k_mock_parent_stack_id,
-        .dst_address_value       = k_mock_address,
-        .src_address_value       = k_mock_address,
-        .stream_handle           = k_mock_stream_id
-    };
+    const auto expected_sample =
+        memory_copy_sample_data_t{ .start_timestamp     = record.start_timestamp,
+                                   .end_timestamp       = record.end_timestamp,
+                                   .thread_id           = record.thread_id,
+                                   .dst_agent_id_handle = record.dst_agent_id.handle,
+                                   .src_agent_id_handle = record.src_agent_id.handle,
+                                   .name                = "operation",
+                                   .bytes               = record.bytes,
+                                   .correlation_id_internal =
+                                       record.correlation_id.internal,
+                                   .correlation_id_ancestor = k_mock_parent_stack_id,
+                                   .dst_address_value       = k_mock_address,
+                                   .src_address_value       = k_mock_address,
+                                   .stream_handle           = k_mock_stream_id };
 
     EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(Eq(expected_thread_info)))
         .Times(1);

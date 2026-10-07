@@ -511,6 +511,74 @@ struct mock_sdk
     static constexpr callback_tracing_kind CALLBACK_TRACING_MARKER_CORE_API      = 8;
     static constexpr callback_tracing_kind CALLBACK_TRACING_RCCL_API             = 9;
 
+    // ── RCCL / NCCL types and constants ───────────────────────────────────────
+    // Minimal stand-ins so backend<Sdk>'s unconditional RCCL forwarding aliases and
+    // rccl_type_size() type-check; no test in this TU exercises RCCL behavior.
+    struct rccl_api_data
+    {};
+    using rccl_api_id_t    = int;
+    using nccl_data_type_t = int;
+    using nccl_comm_t      = void*;
+    using nccl_result_t    = int;
+
+    static constexpr nccl_result_t NCCL_SUCCESS = 0;
+
+    static constexpr nccl_data_type_t NCCL_INT8     = 0;
+    static constexpr nccl_data_type_t NCCL_UINT8    = 1;
+    static constexpr nccl_data_type_t NCCL_FLOAT16  = 2;
+    static constexpr nccl_data_type_t NCCL_BFLOAT16 = 3;
+    static constexpr nccl_data_type_t NCCL_INT32    = 4;
+    static constexpr nccl_data_type_t NCCL_UINT32   = 5;
+    static constexpr nccl_data_type_t NCCL_FLOAT32  = 6;
+    static constexpr nccl_data_type_t NCCL_INT64    = 7;
+    static constexpr nccl_data_type_t NCCL_UINT64   = 8;
+    static constexpr nccl_data_type_t NCCL_FLOAT64  = 9;
+
+    static constexpr bool k_are_nccl_fp8_types_available = false;
+
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather     = 0;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllToAll      = 1;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllReduce     = 2;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclGather        = 3;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclRecv          = 4;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduce        = 5;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclBroadcast     = 6;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduceScatter = 7;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclSend          = 8;
+
+    // ── OMPT types and constants ──────────────────────────────────────────────
+    // Minimal stand-ins so backend<Sdk>'s unconditional OMPT forwarding aliases
+    // type-check; no test in this TU exercises OMPT behavior.
+    struct ompt_data_t
+    {};
+    using ompt_operation_t = int;
+    using ompt_thread_t    = int;
+
+    static constexpr ompt_thread_t    OMPT_THREAD_INITIAL        = 1;
+    static constexpr ompt_operation_t OMPT_ID_thread_begin       = 0;
+    static constexpr ompt_operation_t OMPT_ID_thread_end         = 1;
+    static constexpr ompt_operation_t OMPT_ID_parallel_begin     = 2;
+    static constexpr ompt_operation_t OMPT_ID_parallel_end       = 3;
+    static constexpr ompt_operation_t OMPT_ID_task_create        = 4;
+    static constexpr ompt_operation_t OMPT_ID_task_schedule      = 5;
+    static constexpr ompt_operation_t OMPT_ID_implicit_task      = 6;
+    static constexpr ompt_operation_t OMPT_ID_device_initialize  = 7;
+    static constexpr ompt_operation_t OMPT_ID_device_finalize    = 8;
+    static constexpr ompt_operation_t OMPT_ID_device_load        = 9;
+    static constexpr ompt_operation_t OMPT_ID_mutex_released     = 10;
+    static constexpr ompt_operation_t OMPT_ID_dependences        = 11;
+    static constexpr ompt_operation_t OMPT_ID_task_dependence    = 12;
+    static constexpr ompt_operation_t OMPT_ID_lock_init          = 13;
+    static constexpr ompt_operation_t OMPT_ID_lock_destroy       = 14;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquire      = 15;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquired     = 16;
+    static constexpr ompt_operation_t OMPT_ID_nest_lock          = 17;
+    static constexpr ompt_operation_t OMPT_ID_flush              = 18;
+    static constexpr ompt_operation_t OMPT_ID_cancel             = 19;
+    static constexpr ompt_operation_t OMPT_ID_dispatch           = 20;
+    static constexpr ompt_operation_t OMPT_ID_error              = 21;
+    static constexpr ompt_operation_t OMPT_ID_callback_functions = 22;
+
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API         = 1;
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_AMD_EXT_API      = 2;
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_IMAGE_EXT_API    = 3;

@@ -1,11 +1,13 @@
+// SPDX-License-Identifier: MIT
+
 //! Rust implementation of the pinned AMDF native C ABI.
 //!
 //! This frontend is early-access runtime software. The imported AMDF headers
 //! define its C contract, but packaging, deployment, platform qualification,
 //! and the underlying private rocddi integration may still change.
 //!
-//! Negotiation returns immutable tables without creating provider state. Native
-//! connections belong to explicit instances, and each resource follows the
+//! Negotiation returns immutable tables without creating provider state.
+//! PROCESS instances share a KFD connection; resources still follow the
 //! borrowing and output-publication contracts in the imported headers.
 
 #![allow(clippy::wildcard_imports)]
@@ -16,6 +18,7 @@ mod generated;
 mod instance;
 mod kernel_queue;
 mod memory;
+mod platform;
 mod queue;
 mod support;
 
@@ -46,7 +49,6 @@ pub unsafe extern "C" fn amdf_query_api(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn query_extension(
     extension: u32,
     minimum: u32,
