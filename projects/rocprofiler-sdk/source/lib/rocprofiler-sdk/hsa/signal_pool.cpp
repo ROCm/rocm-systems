@@ -26,6 +26,8 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
+#include <rocprofiler-sdk/cxx/operators.hpp>
+
 namespace rocprofiler
 {
 namespace hsa
@@ -53,6 +55,14 @@ destroy_hsa_signal(signal_t& signal)
     if(get_core_table() && get_core_table()->hsa_signal_destroy_fn)
         get_core_table()->hsa_signal_destroy_fn(signal.value);
 }
+
+signal_t&
+reset_hsa_signal(signal_t& signal, hsa_signal_value_t initial_value)
+{
+    if(get_core_table() && get_core_table()->hsa_signal_store_screlease_fn)
+        get_core_table()->hsa_signal_store_screlease_fn(signal.value, initial_value);
+    return signal;
+}
 }  // namespace
 
 signal_t&
@@ -71,8 +81,11 @@ construct_hsa_signal(signal_t&          signal,
     // silently. Reuse the handle instead. A null handle still takes the create path: it is the
     // pool's batch constructor that skips creating once finalization has started, and this call
     // is the lazy-creation path those objects depend on.
-    if(signal.value.handle != 0)
+    if(signal.value != hsa_signal_t{})
     {
+        ROCP_WARNING_IF(num_consumers != 0 || consumers != nullptr || attributes != 0)
+            << "Ignoring HSA signal creation arguments when reusing an existing signal";
+
         // the handle is reused, the value is not. Nothing else resets it: the pooled branch of
         // a completion handler releases the object without touching the value, so a reused
         // signal arrives holding whatever its last user left - routinely -1, because the paths
@@ -80,10 +93,7 @@ construct_hsa_signal(signal_t&          signal,
         // here without this store is what made initial_value a documented parameter that the
         // common path ignores, and it left every caller performing a relative operation
         // depending on a base value it did not set.
-        if(get_core_table() && get_core_table()->hsa_signal_store_screlease_fn)
-            get_core_table()->hsa_signal_store_screlease_fn(signal.value, initial_value);
-
-        return signal;
+        return reset_hsa_signal(signal, initial_value);
     }
 
     auto status = HSA_STATUS_SUCCESS;

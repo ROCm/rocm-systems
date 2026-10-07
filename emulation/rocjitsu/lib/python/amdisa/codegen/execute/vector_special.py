@@ -1204,10 +1204,11 @@ def gen_vector_permlane_swap(dst: list[str], src: list[str], stride: int) -> str
     So for the 16-lane form on a wave64 this swaps lanes 0-15<->16-31 AND
     32-47<->48-63 (all four groups); for the 32-lane form it swaps 0-31<->32-63.
     src0[base+stride..] and vdst[base..base+stride-1] within each block are
-    UNCHANGED. EXEC mask is IGNORED. Both vdst and src0 are outputs (LLVM:
-    returns {vdst_new, src0_new}).
+    UNCHANGED. Each output write is masked by its destination lane's EXEC bit.
+    Both vdst and src0 are outputs (LLVM: returns {vdst_new, src0_new}).
     """
     L = []
+    L.append('  uint64_t exec = wf.exec();')
     L.append('  uint32_t tmp_dst[64] = {}, tmp_src[64] = {};')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append(
@@ -1221,11 +1222,13 @@ def gen_vector_permlane_swap(dst: list[str], src: list[str], stride: int) -> str
         f'  for (uint32_t base = 0; base + {stride} < wf.wf_size(); base += 2u * {stride}) {{'
     )
     L.append(f'    for (uint32_t i = 0; i < {stride}; ++i) {{')
+    L.append('      if (exec & (1ULL << (base + i)))')
     L.append(
-        f'      amdgpu::RegisterAccess(wf).write_lane({dst[1]}, base + i, tmp_dst[base + {stride} + i]);'
+        f'        amdgpu::RegisterAccess(wf).write_lane({dst[1]}, base + i, tmp_dst[base + {stride} + i]);'
     )
+    L.append(f'      if (exec & (1ULL << (base + {stride} + i)))')
     L.append(
-        f'      amdgpu::RegisterAccess(wf).write_lane({dst[0]}, base + {stride} + i, tmp_src[base + i]);'
+        f'        amdgpu::RegisterAccess(wf).write_lane({dst[0]}, base + {stride} + i, tmp_src[base + i]);'
     )
     L.append('    }')
     L.append('  }')

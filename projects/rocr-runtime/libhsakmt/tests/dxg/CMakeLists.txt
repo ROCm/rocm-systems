@@ -1,6 +1,10 @@
-# Tests for the DXG (WSL) thunk. The export check needs no GPU, DXCore adapter
-# or open thunk; the lifecycle test needs all three and skips without them, so
-# either runs on any machine that can build the library.
+# Tests for the DXG (WSL) thunk.
+#
+# The export check needs no GPU, DXCore adapter or open thunk, so it runs
+# anywhere the library can be built. The lifecycle test needs all three and
+# skips without them. Runtime-level tests that need a live adapter live in
+# rocrtst, which already has the WSL detection to gate them
+# (rocrtstFunc.Heap_Reservation).
 
 # What the built artifact's dynamic symbol table actually offers. A symbol can
 # be lost to mangling or to local visibility while the header and the version
