@@ -26,6 +26,19 @@ set(RJ_HOOKS_LINK_LIBS
     ${CMAKE_DL_LIBS}
 )
 
+# ROCR's hsa_api_trace.h selects flat extension-header includes only when
+# AMD_INTERNAL_BUILD is defined. The shared runtime header target supplies
+# that flat layout, so every HSA tools hook and its unit tests use this target.
+add_library(rocjitsu_hsa_tools_headers INTERFACE)
+target_link_libraries(
+    rocjitsu_hsa_tools_headers
+    INTERFACE rocm_runtime::runtime_headers
+)
+target_compile_definitions(
+    rocjitsu_hsa_tools_headers
+    INTERFACE AMD_INTERNAL_BUILD
+)
+
 add_library(
     rocjitsu_hooks_objects
     OBJECT
@@ -50,9 +63,8 @@ target_include_directories(
 
 target_link_libraries(
     rocjitsu_hooks_objects
-    PRIVATE rocm_runtime::runtime_headers ${RJ_HOOKS_LINK_LIBS}
+    PRIVATE rocjitsu_hsa_tools_headers ${RJ_HOOKS_LINK_LIBS}
 )
-target_compile_definitions(rocjitsu_hooks_objects PRIVATE AMD_INTERNAL_BUILD)
 
 if(MSVC)
     target_compile_options(rocjitsu_hooks_objects PRIVATE /W4 /WX)
@@ -141,8 +153,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${_target}
             PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR}
         )
-        target_link_libraries(${_target} PRIVATE rocm_runtime::runtime_headers)
-        target_compile_definitions(${_target} PRIVATE AMD_INTERNAL_BUILD)
+        target_link_libraries(${_target} PRIVATE rocjitsu_hsa_tools_headers)
         rj_configure_target(${_target} WARNINGS HIDDEN)
         target_compile_options(
             ${_target}

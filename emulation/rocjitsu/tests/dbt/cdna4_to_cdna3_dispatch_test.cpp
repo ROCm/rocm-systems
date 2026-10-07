@@ -7,7 +7,6 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
@@ -20,6 +19,7 @@ RJ_DIAGNOSTIC_POP
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/code/rj_code.h"
@@ -949,9 +949,9 @@ void translate_cvt_pk_bf16_spill_fixture(uint32_t mach, std::vector<uint8_t> &el
   ASSERT_LE(*descriptor_offset + sizeof(TestKernelDescriptor), source_bytes.size());
   auto *descriptor =
       reinterpret_cast<TestKernelDescriptor *>(source_bytes.data() + *descriptor_offset);
-  AMDHSA_BITS_SET(descriptor->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  1);
-  AMDHSA_BITS_SET(descriptor->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3);
+  RJ_AMDHSA_BITS_SET(descriptor->compute_pgm_rsrc1,
+                     COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 1);
+  RJ_AMDHSA_BITS_SET(descriptor->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3);
 
   AmdGpuCodeObject widened_source(source_bytes.data(), source_bytes.size());
   ASSERT_TRUE(widened_source.is_valid());
@@ -1882,8 +1882,8 @@ TEST(Cdna4ToCdna3DispatchTest, VCvtPkBf16F32Translates) {
       test_support::read_loaded_value<TestKernelDescriptor>(translated, descriptor_vaddr);
   ASSERT_TRUE(descriptor.has_value());
   EXPECT_GE(descriptor->private_segment_fixed_size, sizeof(uint32_t));
-  EXPECT_EQ(AMDHSA_BITS_GET(descriptor->compute_pgm_rsrc2,
-                            rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(descriptor->compute_pgm_rsrc2,
+                               rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
             1u);
 }
 

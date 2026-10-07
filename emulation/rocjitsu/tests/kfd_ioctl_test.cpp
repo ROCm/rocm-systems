@@ -4,6 +4,7 @@
 #include "aql_queue.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
@@ -30,9 +31,7 @@ RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/amd_hsa_queue.h"
 #include "hsa/hsa.h"
-#include "rocjitsu/code/kernel_descriptor_abi.h"
 RJ_DIAGNOSTIC_POP
-#include <hsa/amd_hsa_queue.h>
 
 #include <gtest/gtest.h>
 
@@ -666,7 +665,9 @@ TEST_F(KfdIoctlTest, ReportsImplementedKfdUapiVersion) {
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_GET_VERSION, &version), 0);
   EXPECT_EQ(version.major_version, 1u);
   EXPECT_EQ(version.minor_version, 18u);
-  EXPECT_EQ(KFD_IOCTL_MINOR_VERSION, 19);
+  EXPECT_EQ(KFD_IOCTL_MINOR_VERSION, 19)
+      << "Shared KFD header changed; audit new fields and ioctls before updating the simulator's "
+         "reported UAPI version";
 }
 
 TEST_F(KfdIoctlTest, RejectsUnsupportedMetadataRingQueueCreation) {
@@ -1047,8 +1048,8 @@ TEST_P(KfdCuMaskPlacementTest, CuMaskSelectsOnlyTheRequestedPhysicalUnits) {
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kd);
   kd.group_segment_fixed_size = 128 * 1024;
-  AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, rdna);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, rdna);
+  RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, rdna);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, rdna);
   std::memcpy(code.data(), &kd, sizeof(kd));
   const uint32_t endpgm = rocjitsu::build_s_endpgm(soc_->arch());
   std::memcpy(code.data() + sizeof(kd), &endpgm, sizeof(endpgm));

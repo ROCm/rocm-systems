@@ -19,13 +19,8 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/code_object.h"
-#include "rocjitsu/code/kernel_descriptor_scan.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "rocjitsu/code/kernel_descriptor_abi.h"
-RJ_DIAGNOSTIC_POP
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 
 #include <array>
 #include <cstdint>
@@ -239,17 +234,18 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
   desc.private_segment_fixed_size = private_bytes;
   desc.kernel_code_entry_byte_offset =
       static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  granulated_sgpr_count);
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  granulated_vgpr_count);
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, accum_offset);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     granulated_sgpr_count);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     granulated_vgpr_count);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                     accum_offset);
   // RDNA opts into Wave32 through this bit; a clear bit is Wave64. CDNA has no
   // such field, so setting it there would describe a kernel that cannot exist.
   // RDNA uses this bit only for Wave32 descriptors.
   if (wave32) {
-    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
-                    1);
+    RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
+                       kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
   }
   std::memcpy(image.data() + rodata_offset, &desc, sizeof(desc));
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
@@ -490,8 +486,9 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
     desc.private_segment_fixed_size = private_bytes;
     desc.kernel_code_entry_byte_offset =
         static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(kd_vaddr);
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    granulated_sgpr_count);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1,
+                       kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                       granulated_sgpr_count);
     std::memcpy(image.data() + rodata_offset + i * sizeof(KD), &desc, sizeof(desc));
   }
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());

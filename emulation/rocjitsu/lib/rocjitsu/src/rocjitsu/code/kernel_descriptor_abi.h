@@ -101,8 +101,8 @@ inline constexpr uint8_t FLOAT_DENORM_MODE_FLUSH_NONE = 3;
 
 } // namespace rocjitsu::amdhsa
 
-// Keep the existing field access spelling while moving descriptor ownership
-// from ROCR's private loader header into rocjitsu.
-#define AMDHSA_BITS_GET(src, mask) (((src) & (mask)) >> mask##_SHIFT)
-#define AMDHSA_BITS_SET(dst, mask, value)                                                          \
+// Prefix field access macros so this private header can coexist with ROCR's
+// loader/AMDHSAKernelDescriptor.h in the same translation unit.
+#define RJ_AMDHSA_BITS_GET(src, mask) (((src) & (mask)) >> mask##_SHIFT)
+#define RJ_AMDHSA_BITS_SET(dst, mask, value)                                                       \
   (dst) = ((dst) & ~(mask)) | (((value) << mask##_SHIFT) & (mask))

@@ -5,6 +5,7 @@
 #include "rocjitsu/code/dbt/virtual_lds.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
@@ -20,12 +21,6 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bit.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "rocjitsu/code/kernel_descriptor_abi.h"
-RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <cstddef>
@@ -187,14 +182,14 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 }
 
 [[nodiscard]] bool has_dispatch_ptr(const KD &desc) {
-  return AMDHSA_BITS_GET(desc.kernel_code_properties,
-                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR) != 0;
+  return RJ_AMDHSA_BITS_GET(desc.kernel_code_properties,
+                            kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR) != 0;
 }
 
 [[nodiscard]] std::optional<uint16_t> dispatch_ptr_sgpr(const KD &desc) {
   uint32_t sgpr = 0;
-  if (AMDHSA_BITS_GET(desc.kernel_code_properties,
-                      kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
+  if (RJ_AMDHSA_BITS_GET(desc.kernel_code_properties,
+                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
     sgpr += 4;
   }
   if (!has_dispatch_ptr(desc))
@@ -233,9 +228,9 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 [[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension, rj_code_arch_t arch) {
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
   const bool enabled[3] = {
-      AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) != 0,
-      AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y) != 0,
-      AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z) != 0,
+      RJ_AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) != 0,
+      RJ_AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y) != 0,
+      RJ_AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z) != 0,
   };
 
   // Workgroup-id SGPRs are system SGPRs allocated immediately after the
@@ -293,7 +288,7 @@ descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefron
     return 0;
 
   const uint32_t encoded =
-      AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+      RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
   // The descriptor encoding is one less than the actual first AccVGPR offset:
   // field value 0 means acc0 starts at unified VGPR index 4, value 1 means 8,
   // and so on in groups of four registers.
@@ -514,8 +509,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
     return result;
   }
 
-  const uint32_t guest_vgpr_granulated =
-      AMDHSA_BITS_GET(src.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+  const uint32_t guest_vgpr_granulated = RJ_AMDHSA_BITS_GET(
+      src.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   result.guest_vgpr_allocation_count =
       granulated_count_to_registers(guest_vgpr_granulated, *guest_vgpr_granularity);
   result.guest_vgpr_count = result.guest_vgpr_allocation_count;
@@ -585,8 +580,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   uint32_t shared_vgpr_reserved = 0;
   if (rsrc3_carries_verbatim(guest_arch, host_arch) &&
       rsrc3_layout_has_shared_vgpr_count(rsrc3_layout(host_arch))) {
-    const uint32_t source_shared =
-        AMDHSA_BITS_GET(src.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT);
+    const uint32_t source_shared = RJ_AMDHSA_BITS_GET(
+        src.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT);
     if (source_shared != 0 && result.target_wave_size == 32) {
       // Shared VGPR blocks exist only for wave64; LLVM requires the field to be
       // zero otherwise. Dropping them would silently remove registers the body
@@ -641,8 +636,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   // GFX10+ targets keep SGPR allocation in RSRC1/RSRC3 fields managed by the
   // patcher, so this translator only re-encodes the legacy SGPR field when the
   // host descriptor format actually uses it.
-  const uint32_t guest_sgpr_granulated =
-      AMDHSA_BITS_GET(src.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+  const uint32_t guest_sgpr_granulated = RJ_AMDHSA_BITS_GET(
+      src.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
   result.guest_sgpr_count = granulated_count_to_registers(guest_sgpr_granulated, 8);
   result.host_sgpr_count = std::max(result.guest_sgpr_count, options.minimum_sgprs);
   result.target_sgpr_count = result.host_sgpr_count;
@@ -674,8 +669,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   if (!target_private_size)
     append_descriptor_error(result, "private segment size plus lowering addend overflows 32 bits");
   result.target_private_size = target_private_size.value_or(0);
-  result.uses_dynamic_stack =
-      AMDHSA_BITS_GET(src.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK) != 0;
+  result.uses_dynamic_stack = RJ_AMDHSA_BITS_GET(src.kernel_code_properties,
+                                                 kd::KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK) != 0;
   const auto requested_lds_size_checked =
       util::checked_add(src.group_segment_fixed_size, options.group_segment_fixed_size_addend);
   if (!requested_lds_size_checked)

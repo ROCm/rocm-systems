@@ -6,12 +6,8 @@
 
 #pragma once
 
-#include "rocjitsu/base/rj_compiler.h"
-#include "rocjitsu/code/rj_code.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "rocjitsu/code/kernel_descriptor_abi.h"
-RJ_DIAGNOSTIC_POP
+#include "rocjitsu/code/rj_code.h"
 
 #include <cstddef>
 #include <cstdint>

@@ -1741,13 +1741,13 @@ target_include_directories(
         ${CMAKE_BINARY_DIR}/include
         ${GENERATED_DIR}
 )
-target_compile_definitions(hsa_hooks_unit_test PRIVATE AMD_INTERNAL_BUILD)
 target_link_libraries(
     hsa_hooks_unit_test
     PRIVATE
         # Test-only hook variant: same objects as rocjitsu_hooks plus the
         # exported rj_hsa_dbt_set_topology_nodes_root_for_test seam.
         rocjitsu_hooks_testing
+        rocjitsu_hsa_tools_headers
         ${RJ_OBJECT_LIBS}
         util
         flatbuffers
@@ -1780,13 +1780,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
     )
-    target_compile_definitions(
-        hsa_hotswap_rocjitsu_unit_test
-        PRIVATE AMD_INTERNAL_BUILD
-    )
     target_link_libraries(
         hsa_hotswap_rocjitsu_unit_test
-        PRIVATE hsa_hotswap_rocjitsu_testable GTest::gtest_main
+        PRIVATE
+            hsa_hotswap_rocjitsu_testable
+            rocjitsu_hsa_tools_headers
+            GTest::gtest_main
     )
     if(HAS_GFX1250_DBT_FIXTURE)
         target_compile_definitions(

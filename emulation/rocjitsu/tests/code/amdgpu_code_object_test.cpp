@@ -47,8 +47,8 @@ uint64_t align_up(uint64_t value, uint64_t alignment) {
 // `granulated`; everything else zero.
 KD make_kd(uint32_t granulated) {
   KD desc{};
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  granulated);
+  RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     granulated);
   return desc;
 }
 
