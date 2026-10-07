@@ -1514,9 +1514,10 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_UnrecordedStructTranslated) {
 
 // ---------------------------------------------------------------------------
 // A word that capture did not mark, inside a by-value argument, into a pinned
-// allocation the launch recorded, is a scalar: capture compared every aligned
-// word against that allocation, and this one is unaligned. Replay passes it on
-// unchanged, and the kernel copies it out for the D2H check.
+// allocation the launch recorded, is a scalar: capture compared the
+// 8-byte-aligned words of 8-byte-aligned arguments against that allocation, and
+// this one is unaligned. Replay passes it on unchanged, and the kernel copies it
+// out for the D2H check.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_RecordedScalarKept) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_scalar.hrr");

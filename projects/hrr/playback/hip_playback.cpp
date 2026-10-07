@@ -660,10 +660,11 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
 // arguments against it and marked each one inside, so the rescan below treats
 // a word into it that capture did not mark as a scalar. A pointer capture never
 // examined (an argument at an unaligned kernarg offset, or an unaligned word
-// in a packed struct) is therefore left at its capture-time address. A pinned allocation the launch has no record for (snapshots off,
-// over a cap, under graph capture, a record replay refused) gets no such
-// verdict from capture, and any word that resolves into it is rewritten, as
-// before snapshots existed. Null or empty keeps that rule for every word.
+// in a packed struct) is therefore left at its capture-time address. A pinned
+// allocation the launch has no record for (snapshots off, over a cap, under
+// graph capture, a record replay refused) gets no such verdict from capture,
+// and any word that resolves into it is rewritten, as before snapshots existed.
+// Null or empty keeps that rule for every word.
 static void decode_kernel_args(
     PlaybackContext& ctx, const uint8_t*& p, const uint8_t* end,
     uint16_t num_args, const std::string& kernel_name,

@@ -521,9 +521,9 @@ registered range (what `hipHostGetDevicePointer` returns) differs from the host
 address, it is added too, as a second name for the same bytes; a launch through
 the alias records the host range. `hipHostFree`, `hipFreeHost`, `hipFree` and
 `hipHostUnregister` remove the entry before the memory is released, and put it
-back when the call fails. `hipDeviceReset` keeps only the entries whose memory the runtime still knows
-after the reset. `hipExtHostAlloc` has no implementation in CLR and is not
-tracked.
+back when the call fails. `hipDeviceReset` keeps only the entries whose memory
+the runtime still knows after the reset. `hipExtHostAlloc` has no implementation
+in CLR and is not tracked.
 
 A snapshot claims one allocation at a time and holds no lock while it compares,
 copies and writes that allocation's bytes. A free of the same allocation waits
@@ -572,12 +572,11 @@ host memory. On replay, a word that capture marked is rewritten when it
 resolves. The rescan of a `value_kind == 3` argument (Kernel Argument Capture
 below) also rewrites unmarked words that resolve, with one exception: a word
 into a pinned allocation the launch's snapshot records name is left alone.
-Capture compared the 8-byte-aligned words of 8-byte-aligned arguments
-against that allocation and marked those inside it, so an unmarked one is
-treated as a scalar. A word into a pinned
-allocation the launch has no record for is rewritten as before snapshots
-existed: snapshots off, over a cap, under graph capture, or a record replay
-refused.
+Capture compared the 8-byte-aligned words of 8-byte-aligned arguments against
+that allocation and marked those inside it, so an unmarked one is treated as a
+scalar. A word into a pinned allocation the launch has no record for is
+rewritten as before snapshots existed: snapshots off, over a cap, under graph
+capture, or a record replay refused.
 
 **When.** The snapshot is taken before the real launch, without waiting for the
 launch's stream. Waiting would be exact, but it can hang the application: earlier
@@ -679,12 +678,13 @@ snapshot record names: a pointer argument into such a pinned allocation, and a
 word of a plain by-value argument (`value_kind == 0`) that lands in one. An
 allocation a record names is skipped whether or not replay wrote it, including
 an unchanged (direction 1) record and a record not applied under graph capture.
-Words of an argument with an embedded device pointer that the rule above leaves
-alone are not reported.
+Words of an argument capture marked (`value_kind == 3`) that the rule above
+leaves alone are not reported.
 
-**Tests.** `hrr_pinned_host_test.cc` covers the behaviour above with a capture
-and a replay per case, including a failed launch, every launch entry point, a
-free that fails and `hipDeviceReset`. Two paths are untested by design: the
+**Tests.** `hrr_pinned_host_test.cc` covers the behaviour above, including a
+failed launch, every launch entry point, a free that fails and `hipDeviceReset`.
+Most cases capture a workload and replay it; the ones that check only what
+capture records or trusts do not replay. Two paths are untested by design: the
 fork handlers and a blob or event that cannot be written. Each needs a fault
 injected into the process under capture, which no test hook provides.
 
@@ -1389,6 +1389,8 @@ not recorded in these cases:
   kernel node;
 - the allocation is larger than `HIP_HRR_HOST_SNAPSHOT_MAX_MB`, its shadow copy
   would pass `HIP_HRR_HOST_SNAPSHOT_TOTAL_MB`, or snapshots are off.
+- the launch is the first one of a kernel handle capture does not trust yet,
+  such as a handle from `hipKernelGetFunction`.
 
 Bytes a kernel writes into host memory are not recorded either. A D2H check sees
 them only when the application copies them out with a HIP call.
