@@ -3656,13 +3656,6 @@ class CodeGenerator:
             )
 
             modifier_lines = ''
-            if enc_upper == 'ENC_SMEM' and profile.smem_direct_offset_field:
-                offset = profile.smem_direct_offset_field
-                register_offset = self._smem_register_offset_condition('inst')
-                modifier_lines += (
-                    f'if ({register_offset} && inst->{offset}) '
-                    f'modifiers_ += " offset:" + std::to_string(inst->{offset});'
-                )
             if profile.renders_gfx11_image_syntax and enc_upper == 'ENC_MIMG':
                 modifier_lines += (
                     'if (!omits_gfx11_mimg_dim_dmask()) {'
@@ -7845,13 +7838,6 @@ class CodeGenerator:
 
         return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: {cls}'
 
-    def _smem_register_offset_condition(self, encoding: str) -> str:
-        condition = f'{encoding}->soffset != OPR_SMEM_OFFSET_NULL'
-        # RDNA address helpers also accept the legacy no-offset sentinel.
-        if self.isa_spec.arch_name.startswith('rdna'):
-            condition += f' && {encoding}->soffset != 127'
-        return condition
-
     def _gen_smem_load(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
@@ -10663,12 +10649,28 @@ class CodeGenerator:
                         )
                     if inst_sem:
                         access_conditions = []
-                        if is_smem and inst.name.startswith('S_BUFFER_LOAD_'):
+                        if is_smem and inst.name.startswith(
+                            ('S_BUFFER_LOAD_', 'S_BUFFER_STORE_')
+                        ):
+                            words = (
+                                2
+                                if inst.name.startswith('S_BUFFER_STORE_')
+                                else 4 if self.isa_spec.arch_name == 'cdna5' else 3
+                            )
                             access_conditions.extend(
                                 (
                                     'modifiers.buffer_resource = &sbase;',
-                                    'modifiers.scalar_buffer_resource = true;',
+                                    f'modifiers.scalar_buffer_words = {words};',
                                 )
+                            )
+                        if inst_sem.semantic_class in (
+                            'vector_cndmask',
+                            'vector_add_co',
+                        ) and any(
+                            o.is_input and o.name == 'src2' for o in inst.operands
+                        ):
+                            access_conditions.append(
+                                'modifiers.src2_is_wave_mask = true;'
                             )
                         if inst.name in ('LDS_DIRECT_LOAD', 'DS_DIRECT_LOAD'):
                             access_conditions.append(
@@ -13846,7 +13848,11 @@ class CodeGenerator:
                         # RDNA/CDNA5 add the register and immediate offsets.
                         # As on CDNA1-4, expose the register when present and
                         # render the immediate as an offset modifier.
-                        register_offset = self._smem_register_offset_condition('enc')
+                        register_offset = (
+                            profile.smem_register_offset_condition.replace(
+                                'inst->', 'enc->'
+                            )
+                        )
                         smem_body = (
                             'namespace {\n'
                             'Operand make_smem_offset(const Smem::OpEncoding *enc) {\n'

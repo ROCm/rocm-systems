@@ -1201,7 +1201,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
             const auto *operand = inst.src_operand(i);
             if (operand && operand == modifiers.buffer_resource) {
               for (const auto reg :
-                   registers.buffer_resource_registers(*operand, modifiers.scalar_buffer_resource))
+                   registers.buffer_resource_registers(*operand, modifiers.scalar_buffer_words))
                 if (reg)
                   add_source(*reg);
             } else if (operand) {

@@ -991,9 +991,10 @@ public:
   /// @brief Resolve consumed buffer descriptor words without reading their values.
   /// @details Vector descriptors require complete backing. Scalar loads validate
   /// the base pair first, then read word 2 (and word 3 on CDNA5) independently.
+  /// Scalar stores currently consume only the base pair.
   /// Preserve backed inputs even if a later scalar word has no backing.
   [[nodiscard]] std::array<std::optional<RegisterRef>, 4>
-  buffer_resource_registers(const Operand &op, bool scalar) const;
+  buffer_resource_registers(const Operand &op, unsigned scalar_words) const;
 
   // Scalar and per-lane operand access. Instruction implementations use these
   // for value-semantic operand reads and writes; Operand remains the

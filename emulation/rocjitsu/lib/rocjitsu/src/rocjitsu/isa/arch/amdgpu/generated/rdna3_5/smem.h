@@ -70,7 +70,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.buffer_resource = &sbase;
-    modifiers.scalar_buffer_resource = true;
+    modifiers.scalar_buffer_words = 3;
   }
   Operand sdata;
   Operand sbase;
@@ -84,7 +84,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.buffer_resource = &sbase;
-    modifiers.scalar_buffer_resource = true;
+    modifiers.scalar_buffer_words = 3;
   }
   Operand sdata;
   Operand sbase;
@@ -98,7 +98,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.buffer_resource = &sbase;
-    modifiers.scalar_buffer_resource = true;
+    modifiers.scalar_buffer_words = 3;
   }
   Operand sdata;
   Operand sbase;
@@ -112,7 +112,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.buffer_resource = &sbase;
-    modifiers.scalar_buffer_resource = true;
+    modifiers.scalar_buffer_words = 3;
   }
   Operand sdata;
   Operand sbase;
@@ -126,7 +126,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.buffer_resource = &sbase;
-    modifiers.scalar_buffer_resource = true;
+    modifiers.scalar_buffer_words = 3;
   }
   Operand sdata;
   Operand sbase;

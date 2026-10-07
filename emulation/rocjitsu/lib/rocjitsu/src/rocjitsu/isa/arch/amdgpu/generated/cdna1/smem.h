@@ -100,7 +100,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.buffer_resource = &sbase;
-    modifiers.scalar_buffer_resource = true;
+    modifiers.scalar_buffer_words = 3;
   }
   Operand sdata;
   Operand sbase;
@@ -114,7 +114,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.buffer_resource = &sbase;
-    modifiers.scalar_buffer_resource = true;
+    modifiers.scalar_buffer_words = 3;
   }
   Operand sdata;
   Operand sbase;
@@ -128,7 +128,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.buffer_resource = &sbase;
-    modifiers.scalar_buffer_resource = true;
+    modifiers.scalar_buffer_words = 3;
   }
   Operand sdata;
   Operand sbase;
@@ -142,7 +142,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.buffer_resource = &sbase;
-    modifiers.scalar_buffer_resource = true;
+    modifiers.scalar_buffer_words = 3;
   }
   Operand sdata;
   Operand sbase;
@@ -156,7 +156,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.buffer_resource = &sbase;
-    modifiers.scalar_buffer_resource = true;
+    modifiers.scalar_buffer_words = 3;
   }
   Operand sdata;
   Operand sbase;
@@ -228,6 +228,10 @@ class SBufferStoreDwordSmem : public Smem {
 public:
   SBufferStoreDwordSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &sbase;
+    modifiers.scalar_buffer_words = 2;
+  }
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -238,6 +242,10 @@ class SBufferStoreDwordx2Smem : public Smem {
 public:
   SBufferStoreDwordx2Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &sbase;
+    modifiers.scalar_buffer_words = 2;
+  }
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -248,6 +256,10 @@ class SBufferStoreDwordx4Smem : public Smem {
 public:
   SBufferStoreDwordx4Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &sbase;
+    modifiers.scalar_buffer_words = 2;
+  }
   Operand sdata;
   Operand sbase;
   Operand soffset;

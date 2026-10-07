@@ -1194,8 +1194,18 @@ _FLAT_MODIFIERS_GLC = [
     EncodingModifier('slc'),
 ]
 
+# RDNA address helpers also accept 0x7f as a legacy no-offset sentinel;
+# CDNA5 reads EXEC_HI for that selector.
+_SMEM_REGISTER_OFFSET_CDNA5 = 'inst->soffset != OPR_SMEM_OFFSET_NULL'
+_SMEM_REGISTER_OFFSET_RDNA = _SMEM_REGISTER_OFFSET_CDNA5 + ' && inst->soffset != 0x7f'
+
 # GFX10/GFX11 (RDNA1/2/3/3.5): GLC+DLC+SLC; SMEM has no soffset_en/imm.
 _SMEM_MODIFIERS_GLC_DLC = [
+    EncodingModifier(
+        'offset',
+        is_offset=True,
+        condition=_SMEM_REGISTER_OFFSET_RDNA + ' && inst->offset',
+    ),
     EncodingModifier('glc'),
     EncodingModifier('dlc'),
 ]
@@ -1228,6 +1238,20 @@ _FLAT_MODIFIERS_GLC_DLC = [
 # GFX12 (RDNA4): encoding-specific modifiers beyond the data-driven SCOPE+TH
 # cache policy emitted for every encoding that carries op/scope/th fields.
 _SMEM_MODIFIERS_RDNA4 = [
+    EncodingModifier(
+        'ioffset',
+        is_offset=True,
+        condition=_SMEM_REGISTER_OFFSET_RDNA + ' && inst->ioffset',
+    ),
+    EncodingModifier('nv'),
+]
+
+_SMEM_MODIFIERS_CDNA5 = [
+    EncodingModifier(
+        'ioffset',
+        is_offset=True,
+        condition=_SMEM_REGISTER_OFFSET_CDNA5 + ' && inst->ioffset',
+    ),
     EncodingModifier('nv'),
 ]
 
@@ -1677,6 +1701,11 @@ class _AmdgpuProfileBase(IsaProfile):
         RDNA4/CDNA5 → ``'ioffset'``.
         """
         return None
+
+    @property
+    def smem_register_offset_condition(self) -> str:
+        """C++ predicate shared by direct-offset operands and modifier rendering."""
+        return _SMEM_REGISTER_OFFSET_RDNA
 
     @property
     def global_addtid_offset_expr(self) -> str:
@@ -2865,6 +2894,15 @@ class Cdna5Profile(Rdna4Profile):
     logical target used by parser/codegen rules while generated and handwritten
     C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
+
+    @property
+    def smem_register_offset_condition(self) -> str:
+        return _SMEM_REGISTER_OFFSET_CDNA5
+
+    def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
+        if enc_name.upper() == 'ENC_SMEM':
+            return _SMEM_MODIFIERS_CDNA5
+        return super().encoding_modifiers(enc_name)
 
     @property
     def atomic_source_nan_first(self) -> bool:

@@ -130,7 +130,8 @@ struct RegisterModifiers {
   uint8_t memory_result_last_bytes = 0xf;
   bool exec_all_if_nonzero = false;
   bool exec_whole_quads = false;
-  bool scalar_buffer_resource = false;
+  uint8_t scalar_buffer_words = 0; // Zero selects a complete vector descriptor.
+  bool src2_is_wave_mask = false;
   const Operand *wordwise_source0 = nullptr;
   const Operand *wordwise_source1 = nullptr;
   const Operand *buffer_resource = nullptr;

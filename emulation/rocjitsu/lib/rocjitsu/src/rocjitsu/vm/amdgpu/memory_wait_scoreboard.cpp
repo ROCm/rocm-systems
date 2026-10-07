@@ -83,14 +83,14 @@ std::optional<RegisterRef> RegisterAccess::source_register(const Operand &op, bo
 }
 
 std::array<std::optional<RegisterRef>, 4>
-RegisterAccess::buffer_resource_registers(const Operand &op, bool scalar) const {
+RegisterAccess::buffer_resource_registers(const Operand &op, unsigned scalar_words) const {
   std::array<std::optional<RegisterRef>, 4> result{};
   const auto &wf = wavefront();
   const auto selector = op.encoding_value();
-  if (scalar ? !resolve_scalar_register_range(wf, selector, 2)
-             : !addr_calc::buffer_resource_range_is_backed(wf, selector))
+  if (scalar_words ? !resolve_scalar_register_range(wf, selector, 2)
+                   : !addr_calc::buffer_resource_range_is_backed(wf, selector))
     return result;
-  const unsigned words = scalar && wf.cu().arch() != ROCJITSU_CODE_ARCH_CDNA5 ? 3 : 4;
+  const unsigned words = scalar_words ? scalar_words : 4;
   for (unsigned word = 0; word < words; ++word)
     if (const auto range = resolve_scalar_register_range(wf, selector + word, 1))
       result[word] = range->register_ref();
@@ -127,7 +127,7 @@ uint64_t MemoryWaitScoreboard::result_lanes(const Instruction &inst, Wavefront &
   if (modifiers.exec_whole_quads)
     lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) : 0;
   if (lanes && wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 && modifiers.buffer_resource &&
-      !modifiers.scalar_buffer_resource) {
+      !modifiers.scalar_buffer_words) {
     const auto selector = modifiers.buffer_resource->encoding_value();
     if (addr_calc::buffer_resource_range_is_backed(wf, selector))
       if (const auto word3 = RegisterAccess(wf).scalar_control_value(selector + 3))
@@ -242,7 +242,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) : 0;
   if (const auto *resource = modifiers.buffer_resource) {
     for (const auto reg :
-         registers.buffer_resource_registers(*resource, modifiers.scalar_buffer_resource))
+         registers.buffer_resource_registers(*resource, modifiers.scalar_buffer_words))
       if (reg)
         access(*reg, ~uint64_t{0}, 0xf, false);
   }
@@ -324,6 +324,14 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         reg->index += ACC_VGPR_OFFSET;
         return reg;
       }
+    // Explicit vector mask operands use the wave width before range validation:
+    // a wave32 mask may occupy VCC_HI without also accessing the next selector.
+    const bool wave_mask = vector && !op.is_vgpr() && op.size_bits() == 64 &&
+                           (write || (modifiers.src2_is_wave_mask && &op == inst.src_operand(2)));
+    if (wave_mask && op.has_register_selector() && !op.const_value()) {
+      const auto range = resolve_scalar_register_range(wf, op.encoding_value(), wf.wf_size() / 32);
+      return range ? std::optional(range->register_ref()) : std::nullopt;
+    }
     auto reg = write ? registers.destination_register(op)
                      : registers.source_register(op, &op == modifiers.wordwise_source0 ||
                                                          &op == modifiers.wordwise_source1);
@@ -341,13 +349,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     }
     if (!reg)
       return std::nullopt;
-    if (op.has_register_selector() && is_special_reg_class(reg->cls))
-      if (auto range = resolve_scalar_register_range(wf, op.encoding_value(),
-                                                     std::max(1, (op.size_bits() + 31) / 32)))
-        return range->register_ref();
-    // Vector scalar results are wave masks. Their nominal 64-bit ISA operand
-    // occupies only one scalar register in wave32, including explicit SDST.
-    if (write && vector && !op.is_vgpr() && op.size_bits() == 64)
+    if (wave_mask)
       reg->width = static_cast<uint8_t>(wf.wf_size() / 32);
     if (op.is_fieldless() && (vector || name.starts_with("s_cbranch")) &&
         (reg->cls == RegClass::EXEC || reg->cls == RegClass::VCC))

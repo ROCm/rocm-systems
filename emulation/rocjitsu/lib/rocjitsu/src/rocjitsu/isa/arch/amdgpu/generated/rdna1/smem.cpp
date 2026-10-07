@@ -14,7 +14,7 @@ namespace rdna1 {
 
 namespace {
 Operand make_smem_offset(const Smem::OpEncoding *enc) {
-  if (enc->soffset != OPR_SMEM_OFFSET_NULL && enc->soffset != 127)
+  if (enc->soffset != OPR_SMEM_OFFSET_NULL && enc->soffset != 0x7f)
     return Operand(32, OperandType::OPR_SMEM_OFFSET, static_cast<int>(enc->soffset));
   return Operand(32, OperandType::OPR_SIMM32, static_cast<int>(enc->offset));
 }
