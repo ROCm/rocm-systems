@@ -15,6 +15,8 @@
 #include <shared_mutex>
 #include <vector>
 
+#include <cstdlib>
+
 #include "hip/hip_runtime.h"
 #include "hip_internal.hpp"
 #include "hip_graph_helper.hpp"
@@ -377,6 +379,12 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       const std::vector<hip::Stream*>& streams  //!< A pool of streams to use in graph's execution
   ) {
     assert(stream_id_ != -1 && "Stream ID wasn't initialized");
+    assert(stream_id_ < static_cast<size_t>(streams.size()) && "stream_id_ out of bounds");
+    // assert is dropped from release builds. A skipped stream id still has to
+    // fail there instead of reading past the pool.
+    if (!(stream_id_ < static_cast<size_t>(streams.size()))) {
+      std::abort();
+    }
     stream_ = streams[stream_id_];
     // Reset the launch ID after the stream assignment
     launch_id_ = -1;
