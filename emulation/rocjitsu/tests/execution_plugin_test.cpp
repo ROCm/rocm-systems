@@ -1670,7 +1670,6 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
                {RegClass::SCC, 0, 1},
                WaitCounterKind::Km,
                0xf});
-    amdgpu::ScopedMemoryWaitCheck scope(&state);
     switch (hook) {
     case 0:
       (void)regs.read_sgpr(sbase);
@@ -1694,7 +1693,12 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
     EXPECT_EQ(snapshots->snapshots, 1u);
     EXPECT_EQ(hazards, 0u);
     EXPECT_FALSE(state.empty());
-    (void)wf->read_scc();
+    const auto words = cdna5::build_sopp(cdna5::kSCbranchScc1Sopp);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    state.check_instruction(*decoded.value(), *wf);
     EXPECT_EQ(hazards, 1u); // The instruction's actual SCC use still diagnoses.
   }
 }
@@ -6407,7 +6411,14 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           access.request_lane_mask = access.active_lane_mask = 3;
           access.flat_local_lane_mask = shared_lanes;
           f.plugin_group_->onAmdgpuMemoryAccessRouted(access, *load, *wf);
-          cu->track_memory_wait(*load, *wf, shared_lanes);
+          constexpr uint64_t shared_base = uint64_t{1} << 32;
+          cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+          for (unsigned lane = 0; lane < 2; ++lane) {
+            cu->write_vgpr(wf->vgpr_alloc().base, lane, 0x100);
+            cu->write_vgpr(wf->vgpr_alloc().base + 1, lane,
+                           shared_lanes & (uint64_t{1} << lane) ? 1 : 2);
+          }
+          cu->track_memory_wait(*load, *wf);
           auto &core = wf->ensure_memory_wait_scoreboard();
           unsigned core_reports = 0;
           core.bind(0x200, &core_reports,
@@ -6551,6 +6562,8 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
                   width == 1 ? cdna5::kFlatLoadB32Vflat : cdna5::kFlatLoadB128Vflat,
                   {.saddr = amdgpu::kModernNullSelector, .vdst = 8, .vaddr = 0}));
             ASSERT_NE(load, nullptr);
+            wf->ensure_memory_wait_scoreboard().check_instruction(*load, *wf);
+            cu->track_memory_wait(*load, *wf);
             ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
             test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wf);
             // Inspect eager values without making these assertions instruction consumers.
@@ -6756,7 +6769,15 @@ TEST(RaceDetectorPluginTest, FlatCounterCapacityRequiresResolvedDomain) {
             access.request_lane_mask = requests ? 1 : 0;
             access.flat_local_lane_mask = flat_lds && requests ? 1 : 0;
             f.plugin_group_->onAmdgpuMemoryAccessRouted(access, *flat, *wf);
-            f.cu()->track_memory_wait(*flat, *wf, access.flat_local_lane_mask);
+            constexpr uint64_t shared_base = uint64_t{1} << 32;
+            f.cu()->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+            f.cu()->write_vgpr(wf->vgpr_alloc().base, 0, 0x100);
+            f.cu()->write_vgpr(wf->vgpr_alloc().base + 1, 0, flat_lds ? 1 : 2);
+            // The core derives requests from architectural state before execution.
+            // Empty EXEC exercises the same no-admission case as a rejected
+            // request in the plugin's synthetic routing observation.
+            wf->set_exec(requests ? 1 : 0);
+            f.cu()->track_memory_wait(*flat, *wf);
           }
 
           // Before routing, FLAT proves neither domain completed an old request.

@@ -2231,6 +2231,11 @@ class Rdna3Profile(_AmdgpuProfileBase):
     - Reserved field omissions (version 1.0.0): synthesized by the parser.
     """
 
+    def saddr_null_selector_expr(self, enc_name: str) -> str | None:
+        if enc_name.upper() == 'ENC_FLAT':
+            return '0x7C'
+        return super().saddr_null_selector_expr(enc_name)
+
     _FLAT_SEGMENTS = frozenset({'GLOBAL', 'SCRATCH'})
 
     _SKIP_DPP_SDWA = True
@@ -2911,10 +2916,6 @@ class Cdna5Profile(Rdna4Profile):
     def semantic_class_overrides(self) -> dict[str, str]:
         return {
             'DS_STORE_ADDTID_B32': 'ds_write_addtid',
-            'DS_STOREXCHG_2ADDR_RTN_B32': 'ds_atomic2',
-            'DS_STOREXCHG_2ADDR_RTN_B64': 'ds_atomic2',
-            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32': 'ds_atomic2',
-            'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64': 'ds_atomic2',
         }
 
     @property

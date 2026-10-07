@@ -419,6 +419,26 @@ public:
   bool has_encoded_dpp() const;
   bool has_encoded_dpp8() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = true;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (has_encoded_dpp8()) {
+      modifiers.dpp8 = true;
+      modifiers.control = dpp8_lane_sel_;
+      modifiers.fi = dpp_fi_;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+  }
   bool has_encoded_literal32() const;
   void build_modifiers(std::string &out) const override {
     if (has_encoded_dpp())
@@ -463,6 +483,26 @@ public:
   bool has_encoded_dpp() const;
   bool has_encoded_dpp8() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = true;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (has_encoded_dpp8()) {
+      modifiers.dpp8 = true;
+      modifiers.control = dpp8_lane_sel_;
+      modifiers.fi = dpp_fi_;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+  }
   bool has_encoded_literal32() const;
   void build_modifiers(std::string &out) const override {
     if (has_encoded_dpp())
@@ -505,6 +545,26 @@ public:
   bool has_encoded_dpp() const;
   bool has_encoded_dpp8() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = true;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (has_encoded_dpp8()) {
+      modifiers.dpp8 = true;
+      modifiers.control = dpp8_lane_sel_;
+      modifiers.fi = dpp_fi_;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+  }
   bool has_encoded_literal32() const;
   void build_modifiers(std::string &out) const override {
     if (has_encoded_dpp())
@@ -551,6 +611,26 @@ public:
   bool has_encoded_dpp() const;
   bool has_encoded_dpp8() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = true;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (has_encoded_dpp8()) {
+      modifiers.dpp8 = true;
+      modifiers.control = dpp8_lane_sel_;
+      modifiers.fi = dpp_fi_;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+  }
   bool displays_vop3_op_sel() const;
   uint32_t vop3_encoded_source_count() const;
   int32_t vop3_encoded_source_index(uint8_t operand_index) const;
@@ -625,6 +705,26 @@ public:
   bool has_encoded_dpp() const;
   bool has_encoded_dpp8() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = true;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (has_encoded_dpp8()) {
+      modifiers.dpp8 = true;
+      modifiers.control = dpp8_lane_sel_;
+      modifiers.fi = dpp_fi_;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+  }
   uint32_t vop3p_encoded_source_count() const;
   bool has_encoded_literal32() const;
   static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
@@ -801,6 +901,26 @@ public:
   bool has_encoded_dpp() const;
   bool has_encoded_dpp8() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = true;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (has_encoded_dpp8()) {
+      modifiers.dpp8 = true;
+      modifiers.control = dpp8_lane_sel_;
+      modifiers.fi = dpp_fi_;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+  }
   uint32_t vop3_encoded_source_count() const;
   int32_t vop3_encoded_source_index(uint8_t operand_index) const;
   bool has_encoded_literal32() const;

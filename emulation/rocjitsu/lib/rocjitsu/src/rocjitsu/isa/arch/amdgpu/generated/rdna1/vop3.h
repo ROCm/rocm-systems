@@ -2063,6 +2063,11 @@ class VPermlane16B32Vop3 : public Vop3 {
 public:
   VPermlane16B32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.valu_permutation = amdgpu::ValuPermutation::Perm16;
+    modifiers.fi = inst_.op_sel & 1;
+    modifiers.bound_ctrl = (inst_.op_sel >> 1) & 1;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2073,6 +2078,11 @@ class VPermlanex16B32Vop3 : public Vop3 {
 public:
   VPermlanex16B32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.valu_permutation = amdgpu::ValuPermutation::X16;
+    modifiers.fi = inst_.op_sel & 1;
+    modifiers.bound_ctrl = (inst_.op_sel >> 1) & 1;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;

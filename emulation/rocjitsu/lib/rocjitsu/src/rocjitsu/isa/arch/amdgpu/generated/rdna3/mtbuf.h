@@ -18,6 +18,11 @@ class TbufferLoadFormatXMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -29,6 +34,11 @@ class TbufferLoadFormatXyMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXyMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -40,6 +50,11 @@ class TbufferLoadFormatXyzMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXyzMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -51,6 +66,11 @@ class TbufferLoadFormatXyzwMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXyzwMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -62,6 +82,12 @@ class TbufferStoreFormatXMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.wordwise_source0 = &vdata;
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -73,6 +99,12 @@ class TbufferStoreFormatXyMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXyMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.wordwise_source0 = &vdata;
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -84,6 +116,12 @@ class TbufferStoreFormatXyzMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXyzMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.wordwise_source0 = &vdata;
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -95,6 +133,12 @@ class TbufferStoreFormatXyzwMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXyzwMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.wordwise_source0 = &vdata;
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -106,6 +150,12 @@ class TbufferLoadD16FormatXMtbuf : public Mtbuf {
 public:
   TbufferLoadD16FormatXMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+    modifiers.memory_result_last_bytes = 0x3;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
@@ -118,6 +168,11 @@ class TbufferLoadD16FormatXyMtbuf : public Mtbuf {
 public:
   TbufferLoadD16FormatXyMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -129,6 +184,12 @@ class TbufferLoadD16FormatXyzMtbuf : public Mtbuf {
 public:
   TbufferLoadD16FormatXyzMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+    modifiers.memory_result_last_bytes = 0x3;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
@@ -141,6 +202,11 @@ class TbufferLoadD16FormatXyzwMtbuf : public Mtbuf {
 public:
   TbufferLoadD16FormatXyzwMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -152,6 +218,11 @@ class TbufferStoreD16FormatXMtbuf : public Mtbuf {
 public:
   TbufferStoreD16FormatXMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -163,6 +234,11 @@ class TbufferStoreD16FormatXyMtbuf : public Mtbuf {
 public:
   TbufferStoreD16FormatXyMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -174,6 +250,11 @@ class TbufferStoreD16FormatXyzMtbuf : public Mtbuf {
 public:
   TbufferStoreD16FormatXyzMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -185,6 +266,11 @@ class TbufferStoreD16FormatXyzwMtbuf : public Mtbuf {
 public:
   TbufferStoreD16FormatXyzwMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.buffer_resource = &srsrc;
+    modifiers.buffer_address = &vaddr;
+    modifiers.buffer_offset = &soffset;
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
