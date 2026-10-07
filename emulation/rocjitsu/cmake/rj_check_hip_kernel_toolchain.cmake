@@ -16,6 +16,6 @@ if(_rj_hip_probe_result EQUAL 0)
 else()
     message(
         STATUS
-        "HIP kernel compilation probe failed - device kernel tests will be disabled:\n${_rj_hip_probe_output}"
+        "HIP kernel compilation probe failed - device kernel and HIP tests will be disabled:\n${_rj_hip_probe_output}"
     )
 endif()

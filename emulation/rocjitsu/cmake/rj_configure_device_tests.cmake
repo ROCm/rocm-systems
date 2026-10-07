@@ -31,3 +31,9 @@ find_program(
     NO_DEFAULT_PATH
     NO_CACHE
 )
+
+# Share the capability result with kernel fixtures and host-side HIP tests.
+set(RJ_HAS_HIP_KERNEL_TOOLCHAIN FALSE)
+if(AMDCXX)
+    include(rj_check_hip_kernel_toolchain)
+endif()

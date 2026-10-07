@@ -27,7 +27,6 @@ if(DEFINED SKIP_DEVICE_KERNELS AND SKIP_DEVICE_KERNELS)
     return()
 endif()
 
-include(rj_check_hip_kernel_toolchain)
 if(NOT RJ_HAS_HIP_KERNEL_TOOLCHAIN)
     return()
 endif()
