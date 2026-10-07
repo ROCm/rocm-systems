@@ -115,10 +115,15 @@ TEST_CASE("Unit_HRR_VaPlacement_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipPointerGetAttributes(&attr, again));
   REQUIRE(attr.type == hipMemoryTypeDevice);
 
-  printf(HRR_PLACE_MARKER " buf=0x%llx freed=0x%llx again=0x%llx\n",
+  // What the capture's hipPointerGetAttributes said about buf, for replay
+  // under --verbose to be compared with.
+  HRR_HIP_CHECK(hipPointerGetAttributes(&attr, buf));
+  printf(HRR_PLACE_MARKER " buf=0x%llx freed=0x%llx again=0x%llx type=%d device=%d ptr=0x%llx\n",
          static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(buf)),
          static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(freed)),
-         static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(again)));
+         static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(again)),
+         static_cast<int>(attr.type), attr.device,
+         static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(attr.devicePointer)));
   fflush(stdout);
 
   HRR_HIP_CHECK(hipFree(cell2));
@@ -131,6 +136,8 @@ TEST_CASE("Unit_HRR_VaPlacement_Direct", "[.][hrr-direct]") {
 namespace {
 struct PlaceCapture {
   uint64_t buf = 0, freed = 0, again = 0;
+  int attr_type = -1, attr_device = -1;
+  uint64_t attr_ptr = 0;
   fs::path archive;
 };
 
@@ -152,10 +159,12 @@ const PlaceCapture& hrr_place_capture() {
 
   const size_t at = out.find(HRR_PLACE_MARKER);
   REQUIRE(at != std::string::npos);
-  unsigned long long b = 0, f = 0, a = 0;
-  REQUIRE(sscanf(out.c_str() + at, HRR_PLACE_MARKER " buf=0x%llx freed=0x%llx again=0x%llx",
-                 &b, &f, &a) == 3);
-  pc.buf = b; pc.freed = f; pc.again = a;
+  unsigned long long b = 0, f = 0, a = 0, ap = 0;
+  REQUIRE(sscanf(out.c_str() + at,
+                 HRR_PLACE_MARKER " buf=0x%llx freed=0x%llx again=0x%llx type=%d device=%d "
+                 "ptr=0x%llx",
+                 &b, &f, &a, &pc.attr_type, &pc.attr_device, &ap) == 6);
+  pc.buf = b; pc.freed = f; pc.again = a; pc.attr_ptr = ap;
   pc.archive = hrr_single_process_archive(cap.path);
   return pc;
 }
@@ -190,34 +199,66 @@ std::string hex(uint64_t v) {
 
 // A replay without placement gets the stored pointer wrong, unless the runtime
 // happened to return the recorded address anyway. The pointer dump of the
-// first launch says which, so the negative assertions are skipped only when
-// there was nothing to catch.
+// first launch says which. When it did there is nothing to catch, and the
+// section says it skipped instead of passing.
 void hrr_require_stale(int rc, const std::string& out, uint64_t buf) {
   uint64_t live = 0;
   REQUIRE(hrr_place_live_arg(out, buf, &live));
-  if (live == buf) {
-    WARN("the runtime returned the recorded address by itself; nothing to catch");
-    return;
-  }
+  if (live == buf)
+    SKIP("the runtime returned the recorded address by itself; nothing to catch");
   int pass = 0, fail = 0;
   REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
   CHECK(fail >= 1);
   CHECK(rc != 0);
 }
-}  // namespace
 
-HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
+// Placement maps every allocation through the VMM API. MI300 and MI350 have
+// it, so there a runtime that says otherwise is a failure. Elsewhere the test
+// skips, and says so.
+void hrr_place_require_vmm() {
 #ifdef _WIN32
-  HRR_SKIP("placement needs mmap(MAP_FIXED_NOREPLACE) and is off on Windows");
+  SKIP("placement needs mmap(MAP_FIXED_NOREPLACE) and is off on Windows");
 #endif
-  // Placement maps every allocation through the VMM API. Without it every
-  // allocation falls back, and there is nothing here to assert.
   int vmm = 0;
   HRR_HIP_CHECK(hipDeviceGetAttribute(
       &vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
-  if (!vmm) {
-    HRR_SKIP("the device does not support virtual memory management");
-  }
+  if (vmm) return;
+  hipDeviceProp_t props{};
+  HRR_HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  const std::string arch = props.gcnArchName;
+  if (arch.rfind("gfx942", 0) == 0 || arch.rfind("gfx950", 0) == 0)
+    FAIL(arch << " supports virtual memory management, but the runtime says it does not");
+  SKIP(arch << " does not support virtual memory management");
+}
+
+// How many frees under a graph capture the summary says were unmapped later:
+// 0 when the clause is absent, -1 when the summary line is.
+int hrr_place_deferred(const std::string& out) {
+  const size_t at = out.find("Placement      :");
+  if (at == std::string::npos) return -1;
+  int placed = 0, fell = 0, deferred = 0;
+  if (sscanf(out.c_str() + at,
+             "Placement      : %d placed at capture address, %d fell back, %d freed under "
+             "graph capture",
+             &placed, &fell, &deferred) == 3)
+    return deferred;
+  return 0;
+}
+
+// The start of the line naming an allocation that fell back.
+std::string hrr_place_named(const char* api, uint64_t rec, size_t size) {
+  return std::string("[HRR] Placement: ") + api + " " + hex(rec) + " (" +
+         std::to_string(size) + " bytes) not placed at its recorded address: ";
+}
+
+std::string hrr_place_attr_line(uint64_t rec, int type, int device, uint64_t ptr) {
+  return "[HRR] hipPointerGetAttributes " + hex(rec) + " -> type=" + std::to_string(type) +
+         " device=" + std::to_string(device) + " devicePointer=" + hex(ptr);
+}
+}  // namespace
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
+  hrr_place_require_vmm();
   const PlaceCapture& pc = hrr_place_capture();
   INFO("capture: buf=" << hex(pc.buf) << " freed=" << hex(pc.freed)
                        << " again=" << hex(pc.again));
@@ -232,6 +273,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
     REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
     CHECK(pass >= 2);
     CHECK(fail == 0);
+    CHECK(out.find(", 0 could not be") != std::string::npos);
     // out, buf, cell1, freed, again, cell2.
     int placed = 0, fell = -1;
     REQUIRE(hrr_place_counts(out, &placed, &fell));
@@ -240,6 +282,8 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
     uint64_t live = 0;
     REQUIRE(hrr_place_live_arg(out, pc.buf, &live));
     CHECK(live == pc.buf);
+    // Nothing moved, so the scan for stored addresses never ran.
+    CHECK(out.find("a recorded address in allocation") == std::string::npos);
   }
 
   SECTION("--no-placement: the stored pointer is stale") {
@@ -251,10 +295,6 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
   }
 
   SECTION("free and allocate again lands at the recorded address again") {
-    if (pc.freed != pc.again)
-      WARN("the capture's allocator did not reuse the freed address ("
-           << hex(pc.freed) << " then " << hex(pc.again)
-           << "); only the free path is exercised");
     // The second round's launch is ordinal 2. Its buffer argument is `again`.
     auto [rc, out] = hrr_playback_merged(pc.archive, "",
                                          {{"HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL", "2"}});
@@ -266,19 +306,23 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
     int placed = 0, fell = -1;
     REQUIRE(hrr_place_counts(out, &placed, &fell));
     CHECK(fell == 0);
+    if (pc.freed != pc.again)
+      SKIP("the capture's allocator did not reuse the freed address ("
+           << hex(pc.freed) << " then " << hex(pc.again)
+           << "); only the free path was exercised");
   }
 
   SECTION("a range that is taken falls back and is named") {
+    // No HIP_HRR_REPLAY_SCAN_H2D: the scan starts by itself at the first
+    // fallback.
     auto [rc, out] = hrr_playback_merged(
         pc.archive, "",
         {{"HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL", "1"},
-         {"HIP_HRR_REPLAY_PLACE_DENY", hex(pc.buf)},
-         {"HIP_HRR_REPLAY_SCAN_H2D", "1"}});
+         {"HIP_HRR_REPLAY_PLACE_DENY", hex(pc.buf)}});
     INFO("Replay:\n" << out);
     CHECK(out.find("treated as taken") != std::string::npos);
     // The allocation is named when it falls back...
-    CHECK(out.find("hipMalloc " + hex(pc.buf) + " (" + std::to_string(kBytes) +
-                   " bytes) not placed") != std::string::npos);
+    CHECK(out.find(hrr_place_named("hipMalloc", pc.buf, kBytes)) != std::string::npos);
     // ...and the payload that stored its address is named by the scan.
     CHECK(out.find("a recorded address in allocation " + hex(pc.buf)) !=
           std::string::npos);
@@ -291,14 +335,16 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
     hrr_require_stale(rc, out, pc.buf);
   }
 
-  SECTION("hipPointerGetAttributes answers on placed memory") {
+  SECTION("hipPointerGetAttributes on placed memory answers what the capture got") {
     // --continue-on-error turns a failing replayed call into a counted one,
     // so the summary says which call it was instead of the replay stopping.
-    auto [rc, out] = hrr_playback_merged(pc.archive, "--continue-on-error");
+    // --verbose prints what the replayed call answered.
+    auto [rc, out] = hrr_playback_merged(pc.archive, "--verbose --continue-on-error");
     INFO("Replay:\n" << out);
     CHECK(rc == 0);
     CHECK(out.find("Events failed") == std::string::npos);
-    CHECK(out.find("hipPointerGetAttributes") == std::string::npos);
+    CHECK(out.find(hrr_place_attr_line(pc.buf, pc.attr_type, pc.attr_device, pc.attr_ptr)) !=
+          std::string::npos);
     int placed = 0, fell = -1;
     REQUIRE(hrr_place_counts(out, &placed, &fell));
     CHECK(fell == 0);
@@ -311,6 +357,435 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
     CHECK(out.find("placed at capture address") == std::string::npos);
     hrr_require_stale(rc, out, pc.buf);
   }
+
+  SECTION("HIP_HRR_REPLAY_ALLOC_PAD_FACTOR above 1 turns placement off") {
+    auto [rc, out] = hrr_playback_merged(pc.archive, "",
+                                         {{"HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL", "1"},
+                                          {"HIP_HRR_REPLAY_ALLOC_PAD_FACTOR", "2"}});
+    INFO("Replay:\n" << out);
+    CHECK(out.find("Placement : off (HIP_HRR_REPLAY_ALLOC_PAD_FACTOR=2") != std::string::npos);
+    CHECK(out.find("placed at capture address") == std::string::npos);
+    hrr_require_stale(rc, out, pc.buf);
+  }
+
+  SECTION("--kernel-filter: the timed pass places every allocation again") {
+    // The silent warm-up pass replays everything first. What it left mapped
+    // is released and the counts start again, so the timed pass reports its
+    // own allocations and none of them collides with the warm-up's.
+    auto [rc, out] = hrr_playback_merged(pc.archive, "--kernel-filter hrr_place_deref");
+    INFO("Replay:\n" << out);
+    CHECK(out.find(", 0 could not be") != std::string::npos);
+    int placed = 0, fell = -1;
+    REQUIRE(hrr_place_counts(out, &placed, &fell));
+    CHECK(placed == 6);
+    CHECK(fell == 0);
+  }
+}
+
+// ===========================================================================
+// Every placed API, and the ones that are not placed.
+// ===========================================================================
+namespace {
+#define HRR_APIS_MARKER "HRR_PLACE_APIS"
+
+// Fill `buf`, store its address in a fresh cell with an H2D copy, and read it
+// back through the cell on `stream`. Returns the cell.
+int** hrr_place_check(int* out, int* buf, int seed, hipStream_t stream) {
+  std::vector<int> host(kElems);
+  for (int i = 0; i < kElems; ++i) host[i] = seed + i;
+  HRR_HIP_CHECK(hipMemcpy(buf, host.data(), kBytes, hipMemcpyHostToDevice));
+  int** cell = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&cell, sizeof(int*)));
+  HRR_HIP_CHECK(hipMemcpy(cell, &buf, sizeof(int*), hipMemcpyHostToDevice));
+  hipLaunchKernelGGL(hrr_place_deref, dim3(kElems / 256), dim3(256), 0, stream,
+                     out, cell, buf, kElems);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(stream ? hipStreamSynchronize(stream) : hipDeviceSynchronize());
+  std::vector<int> got(kElems);
+  HRR_HIP_CHECK(hipMemcpy(got.data(), out, kBytes, hipMemcpyDeviceToHost));
+  for (int i = 0; i < kElems; ++i) REQUIRE(got[i] == (seed + i) * 2);
+  return cell;
+}
+
+unsigned long long u64(const void* p) {
+  return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(p));
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_VaPlacement_Apis_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipFree(nullptr));
+  HRR_HIP_CHECK(hipSetDevice(0));
+  hipStream_t s = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kBytes));
+  std::vector<int**> cells;
+
+  // hipExtMallocWithFlags without a flag is an ordinary allocation.
+  int* ext = nullptr;
+  HRR_HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&ext), kBytes,
+                                      hipDeviceMallocDefault));
+  cells.push_back(hrr_place_check(out, ext, 10, nullptr));
+
+  // Stream-ordered, from the device's default pool.
+  int* async = nullptr;
+  HRR_HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&async), kBytes, s));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  cells.push_back(hrr_place_check(out, async, 20, s));
+  HRR_HIP_CHECK(hipFreeAsync(async, s));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+
+  // From a pool of its own. The two small allocations after it are likely
+  // to share a page, which replay cannot map twice.
+  hipMemPoolProps props{};
+  props.allocType     = hipMemAllocationTypePinned;
+  props.location.type = hipMemLocationTypeDevice;
+  props.location.id   = 0;
+  hipMemPool_t pool = nullptr;
+  HRR_HIP_CHECK(hipMemPoolCreate(&pool, &props));
+  int* frompool = nullptr;
+  HRR_HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&frompool), kBytes, pool, s));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  cells.push_back(hrr_place_check(out, frompool, 30, s));
+  void* small1 = nullptr;
+  void* small2 = nullptr;
+  HRR_HIP_CHECK(hipMallocFromPoolAsync(&small1, 256, pool, s));
+  HRR_HIP_CHECK(hipMallocFromPoolAsync(&small2, 256, pool, s));
+  HRR_HIP_CHECK(hipFreeAsync(small2, s));
+  HRR_HIP_CHECK(hipFreeAsync(small1, s));
+  HRR_HIP_CHECK(hipFreeAsync(frompool, s));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  HRR_HIP_CHECK(hipMemPoolDestroy(pool));
+
+  // A VMM reservation with memory mapped in it. Replay reserves at the
+  // recorded address as a hint.
+  hipMemAllocationProp prop{};
+  prop.type          = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id   = 0;
+  size_t gran = 0;
+  HRR_HIP_CHECK(hipMemGetAllocationGranularity(&gran, &prop,
+                                               hipMemAllocationGranularityMinimum));
+  const size_t vsz = (kBytes + gran - 1) / gran * gran;
+  void* va = nullptr;
+  HRR_HIP_CHECK(hipMemAddressReserve(&va, vsz, 0, nullptr, 0));
+  hipMemGenericAllocationHandle_t handle{};
+  HRR_HIP_CHECK(hipMemCreate(&handle, vsz, &prop, 0));
+  HRR_HIP_CHECK(hipMemMap(va, vsz, 0, handle, 0));
+  hipMemAccessDesc desc{};
+  desc.location = prop.location;
+  desc.flags    = hipMemAccessFlagsProtReadWrite;
+  HRR_HIP_CHECK(hipMemSetAccess(va, vsz, &desc, 1));
+  cells.push_back(hrr_place_check(out, static_cast<int*>(va), 40, nullptr));
+
+  // Never placed: managed, fine-grained, and memory exported over IPC.
+  void* managed = nullptr;
+  HRR_HIP_CHECK(hipMallocManaged(&managed, kBytes));
+  HRR_HIP_CHECK(hipMemset(managed, 0, kBytes));
+  void* fine = nullptr;
+  HRR_HIP_CHECK(hipExtMallocWithFlags(&fine, kBytes, hipDeviceMallocFinegrained));
+  void* ipc = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&ipc, kBytes));
+  hipIpcMemHandle_t ih{};
+  // Some containers refuse IPC. The test then skips that check.
+  const bool exported = hipIpcGetMemHandle(&ih, ipc) == hipSuccess;
+  if (!exported) (void)hipGetLastError();
+
+  // A free inside a relaxed-mode graph capture. Replay cannot unmap there:
+  // hipMemUnmap waits for every stream, the capturing one included.
+  void* doomed = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&doomed, kBytes));
+  hipStream_t cs = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&cs));
+  HRR_HIP_CHECK(hipStreamBeginCapture(cs, hipStreamCaptureModeRelaxed));
+  HRR_HIP_CHECK(hipMemsetAsync(out, 0, kBytes, cs));
+  HRR_HIP_CHECK(hipFree(doomed));
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipStreamEndCapture(cs, &graph));
+  hipGraphExec_t exec = nullptr;
+  HRR_HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HRR_HIP_CHECK(hipGraphLaunch(exec, cs));
+  HRR_HIP_CHECK(hipStreamSynchronize(cs));
+  HRR_HIP_CHECK(hipGraphExecDestroy(exec));
+  HRR_HIP_CHECK(hipGraphDestroy(graph));
+  HRR_HIP_CHECK(hipStreamDestroy(cs));
+  // After the capture, the same size again, with its address stored.
+  int* cell_after = nullptr;
+  int* after = hrr_place_round(out, 50, &cell_after);
+
+  printf(HRR_APIS_MARKER " ext=0x%llx async=0x%llx pool=0x%llx small1=0x%llx small2=0x%llx "
+         "va=0x%llx vsz=%zu managed=0x%llx fine=0x%llx ipc=0x%llx doomed=0x%llx\n",
+         u64(ext), u64(async), u64(frompool), u64(small1), u64(small2), u64(va), vsz,
+         u64(managed), u64(fine), exported ? u64(ipc) : 0ull, u64(doomed));
+  fflush(stdout);
+
+  HRR_HIP_CHECK(hipFree(cell_after));
+  HRR_HIP_CHECK(hipFree(after));
+  HRR_HIP_CHECK(hipFree(ipc));
+  HRR_HIP_CHECK(hipFree(fine));
+  HRR_HIP_CHECK(hipFree(managed));
+  HRR_HIP_CHECK(hipMemUnmap(va, vsz));
+  HRR_HIP_CHECK(hipMemRelease(handle));
+  HRR_HIP_CHECK(hipMemAddressFree(va, vsz));
+  for (int** c : cells) HRR_HIP_CHECK(hipFree(c));
+  HRR_HIP_CHECK(hipFree(ext));
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+}
+
+namespace {
+struct ApisCapture {
+  uint64_t ext = 0, async = 0, pool = 0, small1 = 0, small2 = 0, va = 0;
+  uint64_t managed = 0, fine = 0, ipc = 0, doomed = 0;
+  size_t vsz = 0;
+  fs::path archive;
+};
+
+const ApisCapture& hrr_apis_capture() {
+  static ScopedDir cap(fs::temp_directory_path() / "hrr_va_placement_apis.hrr");
+  static ApisCapture c;
+  if (!c.archive.empty()) return c;
+
+  std::string out;
+  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_VaPlacement_Apis_Direct\"");
+    out = proc.getOutput();
+    INFO("Capture exit: " << ret << "\n" << out);
+    REQUIRE(ret == 0); }
+
+  const size_t at = out.find(HRR_APIS_MARKER);
+  REQUIRE(at != std::string::npos);
+  unsigned long long v[10] = {};
+  size_t vsz = 0;
+  REQUIRE(sscanf(out.c_str() + at,
+                 HRR_APIS_MARKER " ext=0x%llx async=0x%llx pool=0x%llx small1=0x%llx "
+                 "small2=0x%llx va=0x%llx vsz=%zu managed=0x%llx fine=0x%llx ipc=0x%llx "
+                 "doomed=0x%llx",
+                 &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &vsz, &v[6], &v[7], &v[8],
+                 &v[9]) == 11);
+  c.ext = v[0]; c.async = v[1]; c.pool = v[2]; c.small1 = v[3]; c.small2 = v[4];
+  c.va = v[5]; c.vsz = vsz; c.managed = v[6]; c.fine = v[7]; c.ipc = v[8]; c.doomed = v[9];
+  c.archive = hrr_single_process_archive(cap.path);
+  return c;
+}
+
+// Whether two allocations touch a common unit of the mapping granularity,
+// which replay cannot map twice.
+bool hrr_share_page(uint64_t a, size_t asz, uint64_t b, size_t bsz) {
+  hipMemAllocationProp prop{};
+  prop.type          = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id   = 0;
+  size_t gran = 0;
+  HRR_HIP_CHECK(hipMemGetAllocationGranularity(&gran, &prop,
+                                               hipMemAllocationGranularityMinimum));
+  if (gran < 4096) gran = 4096;
+  return a / gran <= (b + bsz - 1) / gran && b / gran <= (a + asz - 1) / gran;
+}
+
+// Which of the two small pool allocations replay leaves to the runtime. Each
+// falls back when it shares a page with an allocation placed before it and
+// still live: the pool allocation, or small1 if small1 was placed.
+struct SmallFate {
+  bool small1_fell = false, small2_fell = false;
+  int fell() const { return (small1_fell ? 1 : 0) + (small2_fell ? 1 : 0); }
+};
+SmallFate hrr_small_fate(const ApisCapture& c) {
+  SmallFate f;
+  f.small1_fell = hrr_share_page(c.small1, 256, c.pool, kBytes);
+  f.small2_fell = hrr_share_page(c.small2, 256, c.pool, kBytes) ||
+                  (!f.small1_fell && hrr_share_page(c.small2, 256, c.small1, 256));
+  return f;
+}
+}  // namespace
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_Apis) {
+  hrr_place_require_vmm();
+  const ApisCapture& c = hrr_apis_capture();
+  INFO("capture: ext=" << hex(c.ext) << " async=" << hex(c.async) << " pool=" << hex(c.pool)
+       << " small1=" << hex(c.small1) << " small2=" << hex(c.small2) << " va=" << hex(c.va)
+       << " managed=" << hex(c.managed) << " fine=" << hex(c.fine) << " ipc=" << hex(c.ipc)
+       << " doomed=" << hex(c.doomed));
+
+  SECTION("every placed API lands where it was recorded, and the rest are named") {
+    auto [rc, out] = hrr_playback_merged(c.archive);
+    INFO("Replay:\n" << out);
+    CHECK(rc == 0);
+    // One stored-pointer check each for hipExtMallocWithFlags, hipMallocAsync,
+    // hipMallocFromPoolAsync, the VMM mapping, and the allocation after the
+    // capture. A cell read stale fails its D2H.
+    int pass = 0, fail = 0;
+    REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+    CHECK(pass >= 5);
+    CHECK(fail == 0);
+    CHECK(out.find(hrr_place_named("hipMallocManaged", c.managed, kBytes) +
+                   "managed memory has no VMM equivalent") != std::string::npos);
+    CHECK(out.find(hrr_place_named("hipExtMallocWithFlags", c.fine, kBytes) + "flags 0x1") !=
+          std::string::npos);
+    // `doomed` was freed inside the capture and unmapped after it.
+    CHECK(hrr_place_deferred(out) >= 1);
+    // out, ext and its cell, async and its cell, the pool allocation and its
+    // cell, the reservation and its cell, doomed, after and its cell: 12, and
+    // whichever small pool allocations do not share a page. Left to the
+    // runtime: managed, fine, the IPC export, and the small ones that do.
+    const SmallFate f = hrr_small_fate(c);
+    const int expect_fell = 2 + (c.ipc != 0 ? 1 : 0) + f.fell();
+    int placed = 0, fell = -1;
+    REQUIRE(hrr_place_counts(out, &placed, &fell));
+    CHECK(placed == 12 + (2 - f.fell()));
+    CHECK(fell == expect_fell);
+  }
+
+  SECTION("memory exported over IPC is left to the runtime") {
+    if (!c.ipc) SKIP("the capture could not export memory over IPC here");
+    auto [rc, out] = hrr_playback_merged(c.archive);
+    INFO("Replay:\n" << out);
+    CHECK(out.find(hrr_place_named("hipMalloc", c.ipc, kBytes) +
+                   "the recording exports it to another process") != std::string::npos);
+  }
+
+  SECTION("an allocation that shares a page with a live one falls back") {
+    const SmallFate f = hrr_small_fate(c);
+    if (f.fell() == 0)
+      SKIP("the pool put " << hex(c.small1) << " and " << hex(c.small2)
+                           << " in pages of their own");
+    auto [rc, out] = hrr_playback_merged(c.archive);
+    INFO("Replay:\n" << out);
+    const uint64_t small = f.small1_fell ? c.small1 : c.small2;
+    const std::string line =
+        hrr_place_named("hipMallocFromPoolAsync", small, 256) + "it shares a page with live allocation ";
+    const bool by_pool  = out.find(line + hex(c.pool)) != std::string::npos;
+    const bool by_small = !f.small1_fell && out.find(line + hex(c.small1)) != std::string::npos;
+    CHECK((by_pool || by_small));
+  }
+
+  SECTION("AMD_LOG_LEVEL=1: a reservation that gets its hint logs nothing") {
+    auto [rc, out] = hrr_playback_merged(c.archive, "", {{"AMD_LOG_LEVEL", "1"}});
+    INFO("Replay:\n" << out);
+    CHECK(out.find("placed at capture address") != std::string::npos);
+    CHECK(out.find("Requested address was not allocated") == std::string::npos);
+  }
+
+  SECTION("a reservation denied its address falls back, and the runtime log says so") {
+    auto [rc, out] = hrr_playback_merged(
+        c.archive, "", {{"AMD_LOG_LEVEL", "1"}, {"HIP_HRR_REPLAY_PLACE_DENY", hex(c.va)}});
+    INFO("Replay:\n" << out);
+    CHECK(out.find("Requested address was not allocated") != std::string::npos);
+    CHECK(out.find(hrr_place_named("hipMemAddressReserve", c.va, c.vsz) +
+                   "the runtime reserved ") != std::string::npos);
+  }
+}
+
+// ===========================================================================
+// Two GPUs: allocations on each, and device 0 reading device 1's memory.
+// ===========================================================================
+// Kernels run on device 0 only. Replay loads each code object for the device
+// current at load time, so a launch on device 1 is a separate limitation.
+TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipFree(nullptr));
+  int n = 0;
+  HRR_HIP_CHECK(hipGetDeviceCount(&n));
+  REQUIRE(n >= 2);
+
+  HRR_HIP_CHECK(hipSetDevice(1));
+  hipStream_t s1 = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&s1));
+  HRR_HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+  int* buf1 = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&buf1, kBytes));
+
+  HRR_HIP_CHECK(hipSetDevice(0));
+  HRR_HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+  int* out0 = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out0, kBytes));
+  int* buf0 = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&buf0, kBytes));
+  // Pool memory is not covered by hipDeviceEnablePeerAccess: device 0 gets
+  // into device 1's default pool by its own grant.
+  hipMemPool_t pool1 = nullptr;
+  HRR_HIP_CHECK(hipDeviceGetDefaultMemPool(&pool1, 1));
+  hipMemAccessDesc desc{};
+  desc.location.type = hipMemLocationTypeDevice;
+  desc.location.id   = 0;
+  desc.flags         = hipMemAccessFlagsProtReadWrite;
+  HRR_HIP_CHECK(hipMemPoolSetAccess(pool1, &desc, 1));
+  // Allocated while device 0 is current, on device 1's stream: it lives on
+  // device 1, and replay has to map it there.
+  int* async1 = nullptr;
+  HRR_HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&async1), kBytes, s1));
+  HRR_HIP_CHECK(hipStreamSynchronize(s1));
+  hipPointerAttribute_t attr{};
+  HRR_HIP_CHECK(hipPointerGetAttributes(&attr, async1));
+  REQUIRE(attr.device == 1);
+
+  // Device 0 reads its own buffer and both of device 1's through stored
+  // pointers. Without peer access in replay, the last two fault.
+  int** cell0 = hrr_place_check(out0, buf0, 60, nullptr);
+  int** cell1 = hrr_place_check(out0, buf1, 70, nullptr);
+  int** cella = hrr_place_check(out0, async1, 80, nullptr);
+  // And a peer copy from device 1 back to device 0.
+  HRR_HIP_CHECK(hipMemcpyPeer(buf0, 0, async1, 1, kBytes));
+  std::vector<int> got(kElems);
+  HRR_HIP_CHECK(hipMemcpy(got.data(), buf0, kBytes, hipMemcpyDeviceToHost));
+  for (int i = 0; i < kElems; ++i) REQUIRE(got[i] == 80 + i);
+
+  printf(HRR_PLACE_MARKER " buf0=0x%llx async1=0x%llx type=%d\n", u64(buf0), u64(async1),
+         static_cast<int>(attr.type));
+  fflush(stdout);
+
+  HRR_HIP_CHECK(hipFree(cella));
+  HRR_HIP_CHECK(hipFree(cell1));
+  HRR_HIP_CHECK(hipFree(cell0));
+  HRR_HIP_CHECK(hipFreeAsync(async1, s1));
+  HRR_HIP_CHECK(hipStreamSynchronize(s1));
+  HRR_HIP_CHECK(hipFree(buf0));
+  HRR_HIP_CHECK(hipFree(out0));
+  HRR_HIP_CHECK(hipFree(buf1));
+  HRR_HIP_CHECK(hipStreamDestroy(s1));
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_MultiGpu) {
+  int n = 0;
+  HRR_HIP_CHECK(hipGetDeviceCount(&n));
+  if (n < 2) SKIP("needs at least 2 GPUs; " << n << " visible");
+  int can01 = 0, can10 = 0;
+  HRR_HIP_CHECK(hipDeviceCanAccessPeer(&can01, 0, 1));
+  HRR_HIP_CHECK(hipDeviceCanAccessPeer(&can10, 1, 0));
+  if (!can01 || !can10) SKIP("devices 0 and 1 cannot reach each other's memory");
+  hrr_place_require_vmm();
+
+  ScopedDir cap(fs::temp_directory_path() / "hrr_va_placement_multigpu.hrr");
+  std::string cout_;
+  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_VaPlacement_MultiGpu_Direct\"");
+    cout_ = proc.getOutput();
+    INFO("Capture exit: " << ret << "\n" << cout_);
+    REQUIRE(ret == 0); }
+  const size_t at = cout_.find(HRR_PLACE_MARKER);
+  REQUIRE(at != std::string::npos);
+  unsigned long long buf0 = 0, async1 = 0;
+  int type = -1;
+  REQUIRE(sscanf(cout_.c_str() + at, HRR_PLACE_MARKER " buf0=0x%llx async1=0x%llx type=%d",
+                 &buf0, &async1, &type) == 3);
+
+  auto [rc, out] = hrr_playback_merged(hrr_single_process_archive(cap.path), "--verbose");
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  int pass = 0, fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+  CHECK(pass >= 4);
+  CHECK(fail == 0);
+  // buf1, out0, buf0, async1 and three cells.
+  int placed = 0, fell = -1;
+  REQUIRE(hrr_place_counts(out, &placed, &fell));
+  CHECK(placed >= 7);
+  CHECK(fell == 0);
+  // The async allocation was mapped on its stream's device, not the current one.
+  CHECK(out.find(hrr_place_attr_line(async1, type, 1, async1)) != std::string::npos);
 }
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
