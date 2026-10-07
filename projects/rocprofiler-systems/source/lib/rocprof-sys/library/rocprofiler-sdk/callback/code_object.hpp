@@ -15,10 +15,10 @@ namespace rocprofsys::domains::callback
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
-
 on_code_object_enter(typename SdkBackend::callback_tracing_record_t     record,
                      [[maybe_unused]] typename SdkBackend::user_data_t* user_data,
-                     [[maybe_unused]] void*                             callback_data)
+                     [[maybe_unused]] void*                             callback_data,
+                     [[maybe_unused]] typename SdkBackend::timestamp_t  timestamp)
 {
     if(record.operation == SdkBackend::CODE_OBJECT_LOAD)
     {

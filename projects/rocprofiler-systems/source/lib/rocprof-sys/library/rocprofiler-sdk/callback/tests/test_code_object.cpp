@@ -58,7 +58,8 @@ TEST(code_object_test, on_code_object_enter_registers_loaded_code_object)
         *g_metadata_registry_mock,
         add_code_object(Field(&mock_sdk::code_object_load_data_t::code_object_id, 42)));
 
-    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr);
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr,
+                                              mock_sdk::get_timestamp());
 
     g_metadata_registry_mock.reset();
 }
@@ -77,7 +78,8 @@ TEST(code_object_test, on_code_object_enter_registers_kernel_symbol)
                 add_kernel_symbol(Field(
                     &mock_sdk::code_object_kernel_symbol_register_data_t::kernel_id, 7)));
 
-    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr);
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr,
+                                              mock_sdk::get_timestamp());
 
     g_metadata_registry_mock.reset();
 }
@@ -91,7 +93,8 @@ TEST(code_object_test, on_code_object_enter_ignores_null_code_object_payload)
     record.payload   = nullptr;
     mock_sdk::user_data_t user_data{};
 
-    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr);
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr,
+                                              mock_sdk::get_timestamp());
 
     g_metadata_registry_mock.reset();
 }
@@ -105,7 +108,8 @@ TEST(code_object_test, on_code_object_enter_ignores_null_kernel_symbol_payload)
     record.payload   = nullptr;
     mock_sdk::user_data_t user_data{};
 
-    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr);
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr,
+                                              mock_sdk::get_timestamp());
 
     g_metadata_registry_mock.reset();
 }
