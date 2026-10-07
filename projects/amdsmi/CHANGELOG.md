@@ -46,6 +46,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed crashes and mixed-up memory usage in GPU process lists**.  
   - Listing GPU processes from several threads at once could crash or leave processes out, and a process that uses several GPUs could show another GPU's memory and engine usage.
 
+- **Fixed GPU process lists coming back empty while GPU processes start or exit**.  
+  - `amd-smi process` and the process list could briefly show no processes on a busy system. A process list that cannot be read is now reported as an error instead of an empty list.
+
 - **Setting the current memory partition now cancels a pending memory partition change**.  
   - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
 
