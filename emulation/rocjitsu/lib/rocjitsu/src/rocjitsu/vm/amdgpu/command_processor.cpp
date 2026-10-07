@@ -766,7 +766,8 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     };
     VmAccessOutcome scratch_outcome = scratch_range_outcome(false);
 
-    if (!pkt.pm4_abi && scratch_allocator_ && pkt.scratch_wave_stride_per_se == 0) {
+    if (!pkt.pm4_abi && scratch_allocator_ &&
+        (cu->arch() != ROCJITSU_CODE_ARCH_CDNA5 || pkt.scratch_wave_stride_per_se == 0)) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
       // physical XCC/SE/scoreboard address space instead of logical grid slots.
@@ -3883,7 +3884,9 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
           return admission_from_vm_outcome(outcome);
       }
 
-      if (requires_dynamic_scratch && !scratch_allocator_) {
+      // The runtime may reclaim rejected async scratch. Request replacement
+      // through its protocol instead of provisioning fallback at the expired VA.
+      if (requires_dynamic_scratch && (async_scratch || !scratch_allocator_)) {
         constexpr uint64_t kInsufficientScratchWave64 = 0x1;
         constexpr uint64_t kInsufficientScratchWave32 = 0x401;
         const uint64_t status =

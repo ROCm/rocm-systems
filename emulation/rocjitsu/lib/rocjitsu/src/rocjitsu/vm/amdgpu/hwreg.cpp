@@ -483,7 +483,7 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     raw_value = field_value(wf.wf_id() % 16, 0, 5) | field_value(simd_id, 8, 2) |
                 field_value(wf.cu().shader_array_cu_id() / cus_per_wgp, 10, 4) |
                 field_value(wf.cu().shader_array_id(), 16, 1);
-    // GFX12.5 moves SE_ID to MSG_RTN_GET_SE_HW_ID.
+    // GFX12.5 moves SE_ID to MSG_RTN_GET_SE_AID_ID.
     if (!gfx1250) {
       if (wf.shader_engine_id() > 7)
         return HwregAccessResult::Unsupported;
