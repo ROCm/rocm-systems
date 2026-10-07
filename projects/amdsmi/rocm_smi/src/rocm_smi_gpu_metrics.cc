@@ -4963,7 +4963,7 @@ auto Device::dev_read_gpu_metrics_header_data(DevInfoTypes type) -> rsmi_status_
     LOG_ERROR(ss);
     return status_code;
   }
-  ss << __PRETTY_FUNCTION__ << " | Before is_gpu_metrics_version_supported() "
+  ss << __PRETTY_FUNCTION__ << " | Header read "
      << " | Device #: " << index() << " | Type: " << Device::get_type_string(type)
      << " | Partition ID: " << m_partition_id << " | Is Partition Metrics: " << std::boolalpha
      << is_smi_expecting_partition_metrics() << " | File Path: " << gpu_metrics_path
@@ -4973,24 +4973,11 @@ auto Device::dev_read_gpu_metrics_header_data(DevInfoTypes type) -> rsmi_status_
      << " | Update Timestamp: " << m_gpu_metrics_updated_timestamp
      << " | Returning = " << getRSMIStatusString(status_code, false) << " |";
   LOG_TRACE(ss);
-  if ((status_code = is_gpu_metrics_version_supported(m_gpu_metrics_header,
-                                                      is_smi_expecting_partition_metrics())) ==
-      rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-       << " | Fail "
-       << " | Device #: " << index() << " | Type: " << Device::get_type_string(type)
-       << " | Partition ID: " << m_partition_id << " | Is Partition Metrics: " << std::boolalpha
-       << is_smi_expecting_partition_metrics() << " | File Path: " << gpu_metrics_path
-       << " | Metric Version: "
-       << stringfy_metrics_header(m_gpu_metrics_header, is_smi_expecting_partition_metrics(),
-                                  gpu_metrics_path)
-       << " | Cause: gpu metric file version is not supported: "
-       << " | Returning = " << getRSMIStatusString(status_code, false)
-       << " Could not read Metrics Header: "
-       << print_unsigned_int(m_gpu_metrics_header.m_structure_size) << " |";
-    LOG_ERROR(ss);
-    return status_code;
-  }
+  // Deliberately no version check here. The header is the only way to learn
+  // which revision a device reports, so reading it has to keep working for a
+  // revision we cannot model -- that is exactly when a caller needs to see it.
+  // Whether the revision can be read as data is decided by
+  // setup_gpu_metrics_reading() and dev_read_gpu_metrics_all_data().
   m_gpu_metrics_updated_timestamp = actual_timestamp_in_secs();
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
