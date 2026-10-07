@@ -2229,21 +2229,6 @@ static void hrr_zero_init_alloc(PlaybackContext& ctx, void* live, size_t sz) {
     (void)hipStreamSynchronize(nullptr);
 }
 
-// ---- Capture-address placement ---------------------------------------------
-
-// Map a recorded allocation at its recorded address on the current device.
-// False when placement is off or this allocation has to fall back, in which
-// case the caller allocates the way it always did. A placed allocation is
-// never padded: the recording had nothing after it but the next allocation,
-// and that one is placed too.
-static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
-                            const char* api, void** live) {
-    if (!ctx.placement.active()) return false;
-    int dev = 0;
-    (void)hipGetDevice(&dev);
-    return ctx.placement.map_at(rec, size, dev, api, live);
-}
-
 // ---- External region materialisation ----------------------------------------
 
 // Make `device` current and return the ordinal to restore afterwards, or -1 if
@@ -2290,9 +2275,7 @@ hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
     const int prev = hrr_set_region_device(device);
 
     void* live = nullptr;
-    hipError_t r = hipSuccess;
-    if (!hrr_place_alloc(ctx, rec_base, size, "region segment", &live))
-        r = HRR_HIP_CHECK(hipMalloc(&live, size));
+    hipError_t r = HRR_HIP_CHECK(hipMalloc(&live, size));
     if (r != hipSuccess) {
         if (prev >= 0) (void)hipSetDevice(prev);
         fprintf(stderr,
@@ -2322,7 +2305,7 @@ hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
 
 void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live) {
     ctx.remove_alloc(rec_base);
-    hrr_free_device_alloc(ctx, live);
+    if (live) (void)hipFree(live);
 }
 
 // ---- Guard pages ------------------------------------------------------------
@@ -2331,14 +2314,12 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live) {
 // the recording did, so an access that ran off the end of an object inside that
 // segment is in bounds as far as the hardware is concerned and lands in
 // whatever the allocator put next. Guard pages convert that silence into a
-// fault, at the cost of moving memory away from its recorded address, where
-// placement would otherwise put it. Two granularities, both opt-in:
+// fault, at the cost of moving memory the replay would otherwise place exactly
+// where the recording had it. Two granularities, both opt-in:
 //
 //   --guard-segments  every device allocation is VMM-backed with an unmapped
 //                     span after it. Layout inside the segment is untouched, so
 //                     this only catches a run off the end of a whole segment.
-//                     The span cannot exist at the recorded address, where the
-//                     next allocation begins, so this turns placement off.
 //   --guard-blocks    needs region annotations. For the duration of one launch,
 //                     each argument that resolves into a live block is handed a
 //                     copy of that block placed against an unmapped guard, so an
@@ -2374,13 +2355,37 @@ static hipError_t hrr_guard_map(size_t mapped, size_t gran, int device,
                                 void** out_va, size_t* out_reserved,
                                 hipMemGenericAllocationHandle_t* out_handle) {
     const size_t reserved = mapped + gran;
+    hipMemAllocationProp prop{};
+    prop.type          = hipMemAllocationTypePinned;
+    prop.location.type = hipMemLocationTypeDevice;
+    prop.location.id   = device;
+
     void* va = nullptr;
     hipError_t r = hipMemAddressReserve(&va, reserved, 0, nullptr, 0);
     if (r != hipSuccess || !va) return r != hipSuccess ? r : hipErrorOutOfMemory;
 
     hipMemGenericAllocationHandle_t handle{};
-    r = hrr::hrr_vmm_map_into(va, mapped, device, &handle);
+    r = hipMemCreate(&handle, mapped, &prop, 0);
     if (r != hipSuccess) { (void)hipMemAddressFree(va, reserved); return r; }
+
+    r = hipMemMap(va, mapped, 0, handle, 0);
+    if (r != hipSuccess) {
+        (void)hipMemRelease(handle);
+        (void)hipMemAddressFree(va, reserved);
+        return r;
+    }
+
+    hipMemAccessDesc desc{};
+    desc.location.type = hipMemLocationTypeDevice;
+    desc.location.id   = device;
+    desc.flags         = hipMemAccessFlagsProtReadWrite;
+    r = hipMemSetAccess(va, mapped, &desc, 1);
+    if (r != hipSuccess) {
+        (void)hipMemUnmap(va, mapped);
+        (void)hipMemRelease(handle);
+        (void)hipMemAddressFree(va, reserved);
+        return r;
+    }
 
     *out_va       = va;
     *out_reserved = reserved;
@@ -2438,7 +2443,6 @@ static bool hrr_guard_free(PlaybackContext& ctx, void* live) {
 
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live) {
     if (!live) return;
-    if (ctx.placement.unmap(live)) return;
     if (hrr_guard_free(ctx, live)) return;
     (void)hipFree(live);
 }
@@ -2687,19 +2691,13 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     void* live = nullptr;
     hipError_t r;
-    // Managed memory migrates between host and device and has no VMM
-    // equivalent, so it is never placed.
-    if (!managed && hrr_place_alloc(ctx, a->ptr, orig_sz, "hipMalloc", &live)) {
-        pad_sz = orig_sz;
-        r = hipSuccess;
-    }
     // --guard-segments: back the allocation with VMM and leave an unmapped span
     // after it, so running off the end of the segment traps here instead of
     // landing in whatever the driver placed next. Managed memory has no VMM
     // equivalent, and a failed reservation falls back to a plain allocation
     // rather than failing the replay.
-    else if (!managed && ctx.guard_segments &&
-             hrr_guard_alloc(ctx, pad_sz, &live) == hipSuccess) {
+    if (!managed && ctx.guard_segments &&
+        hrr_guard_alloc(ctx, pad_sz, &live) == hipSuccess) {
         r = hipSuccess;
     } else if (managed) {
         r = hipMallocManaged(&live, pad_sz);
@@ -2741,14 +2739,7 @@ hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* p
     size_t orig_sz = static_cast<size_t>(a->sizeBytes);
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     void* live = nullptr;
-    hipError_t r = hipSuccess;
-    // Only the default flags are placed. Fine-grained, uncached, signal and
-    // contiguous memory each have properties a VMM mapping does not reproduce.
-    if (a->flags == hipDeviceMallocDefault &&
-        hrr_place_alloc(ctx, a->ptr, orig_sz, "hipExtMallocWithFlags", &live))
-        pad_sz = orig_sz;
-    else
-        r = hipExtMallocWithFlags(&live, pad_sz, a->flags);
+    hipError_t r = hipExtMallocWithFlags(&live, pad_sz, a->flags);
     if (r == hipSuccess) {
         hrr_zero_init_alloc(ctx, live, pad_sz);
         ctx.record_alloc(a->ptr, live, pad_sz);
@@ -2771,21 +2762,6 @@ hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* p
 // usable on that stream until the recorded program itself establishes an
 // ordering edge to another stream. Replaying that edge carries the zero-init
 // with it, so it is already ordered ahead of every recorded use.
-//
-// A placed stream-ordered allocation is mapped at once rather than when the
-// stream reaches it, which only makes it available earlier. Inside a graph
-// capture the allocation is a graph node with its own address, so placement
-// cannot apply and it falls back. The pool's attributes and location are not
-// carried over to a placed allocation.
-static bool hrr_place_async_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
-                                  const char* api, void** live) {
-    if (!ctx.placement.active()) return false;
-    if (ctx.in_graph_capture) {
-        ctx.placement.fell_back(rec, size, api, "it was allocated inside a graph capture");
-        return false;
-    }
-    return hrr_place_alloc(ctx, rec, size, api, live);
-}
 
 hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
                                    const uint8_t* pl) {
@@ -2794,11 +2770,7 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     void* live = nullptr;
     size_t orig_sz = static_cast<size_t>(a->size);
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
-    hipError_t r = hipSuccess;
-    if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocAsync", &live))
-        pad_sz = orig_sz;
-    else
-        r = hipMallocAsync(&live, pad_sz, stream);
+    hipError_t r = hipMallocAsync(&live, pad_sz, stream);
     if (r == hipSuccess) {
         if (hrr_replay_zero_init() && !ctx.in_graph_capture)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
@@ -2815,11 +2787,7 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     void* live = nullptr;
     size_t orig_sz = static_cast<size_t>(a->size);
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
-    hipError_t r = hipSuccess;
-    if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocFromPoolAsync", &live))
-        pad_sz = orig_sz;
-    else
-        r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
+    hipError_t r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     if (r == hipSuccess) {
         if (hrr_replay_zero_init() && !ctx.in_graph_capture)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
@@ -3044,8 +3012,7 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFree*>(pl);
     void* live = ctx.translate_ptr(a->ptr);
     if (!live) return hipSuccess;
-    // A placed allocation or a --guard-segments one: a VMM mapping.
-    if (ctx.placement.unmap(live) || hrr_guard_free(ctx, live)) {
+    if (hrr_guard_free(ctx, live)) {  // --guard-segments: a VMM mapping
         ctx.remove_alloc(a->ptr);
         return hipSuccess;
     }
@@ -3059,17 +3026,6 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     void*       live   = ctx.translate_ptr(a->dev_ptr);
     hipStream_t stream = ctx.translate_stream(a->stream);
     if (!live) return hipSuccess;
-    // A placed allocation is a VMM mapping that the stream may still be using.
-    // Wait for the stream, then unmap. Inside a graph capture neither is legal,
-    // so the mapping stays until the same address is allocated again.
-    if (ctx.placement.is_mapped(live)) {
-        if (!ctx.in_graph_capture) {
-            (void)hipStreamSynchronize(stream);
-            (void)ctx.placement.unmap(live);
-        }
-        ctx.remove_alloc(a->dev_ptr);
-        return hipSuccess;
-    }
     hipError_t r = hipFreeAsync(live, stream);
     if (r == hipSuccess) ctx.remove_alloc(a->dev_ptr);
     return r;
@@ -3258,9 +3214,7 @@ static void* translate_or_materialize(PlaybackContext& ctx, uint64_t rec_addr) {
 static void scan_h2d_payload(PlaybackContext& ctx, const void* blob, size_t n,
                              uint64_t dst_rec) {
     const uint8_t* p = static_cast<const uint8_t*>(blob);
-    // A placed allocation is at its recorded address, so an address of it in
-    // the payload is still right. Only the ones that moved are worth naming.
-    const auto ranges = ctx.recorded_ranges(/*moved_only=*/ctx.placement.active());
+    const auto ranges = ctx.recorded_ranges();
     size_t hits = 0;
     for (size_t off = 0; off + 8 <= n; off += 8) {
         uint64_t w;
@@ -4745,28 +4699,15 @@ hipError_t playback_hipMemAddressReserve(PlaybackContext& ctx, const uint8_t* pl
     // Interpret a->ptr as the *value* of the reserved VA (stored by generator as uint64_t ptr)
     // The recorded ptr field stores the *pointer* output, which at capture time held the VA.
     // We use it as the recorded-VA key.
-    //
-    // With placement on, the hint is the address the recording got back, not
-    // the hint it passed: that is the address its pointers hold. Placement
-    // kept the range free since before hipInit and lets go of it just here.
-    // The runtime silently reserves elsewhere when the hint is taken, so the
-    // returned address is what says whether it worked.
-    const size_t size = static_cast<size_t>(a->size);
-    const bool hinted = ctx.placement.active();
-    const bool held   = hinted && ctx.placement.release_vmm_hold(rec_ptr, size);
     void* live_va = nullptr;
-    hipError_t r = hipMemAddressReserve(&live_va, size,
+    hipError_t r = hipMemAddressReserve(&live_va,
+                                        static_cast<size_t>(a->size),
                                         static_cast<size_t>(a->alignment),
-                                        hinted ? reinterpret_cast<void*>(rec_ptr) : nullptr,
+                                        nullptr,  // hint addr — don't try to match capture VA
                                         static_cast<unsigned long long>(a->flags));
     if (r == hipSuccess && live_va) {
-        if (hinted)
-            ctx.placement.note_vmm(reinterpret_cast<uint64_t>(live_va) == rec_ptr,
-                                   rec_ptr, size, reinterpret_cast<uint64_t>(live_va));
         std::unique_lock lk(ctx.map_mutex);
-        ctx.vmm_va_map[rec_ptr] = {live_va, size};
-    } else if (held) {
-        ctx.placement.restore_vmm_hold(rec_ptr, size);
+        ctx.vmm_va_map[rec_ptr] = {live_va, static_cast<size_t>(a->size)};
     }
     return r;
 }
@@ -4777,13 +4718,8 @@ hipError_t playback_hipMemAddressFree(PlaybackContext& ctx, const uint8_t* pl) {
     if (!live_va) return hipSuccess;  // already freed or not tracked
     hipError_t r = hipMemAddressFree(live_va, static_cast<size_t>(a->size));
     if (r == hipSuccess) {
-        {
-            std::unique_lock lk(ctx.map_mutex);
-            ctx.vmm_va_map.erase(a->devPtr);
-        }
-        // Hold the range again for a later reservation recorded there.
-        if (reinterpret_cast<uint64_t>(live_va) == a->devPtr)
-            ctx.placement.restore_vmm_hold(a->devPtr, static_cast<size_t>(a->size));
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.vmm_va_map.erase(a->devPtr);
     }
     return r;
 }
