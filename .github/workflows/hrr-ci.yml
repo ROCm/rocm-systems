@@ -213,6 +213,7 @@ jobs:
             projects/hrr
             projects/hip/include
             projects/clr/hipamd/include
+            projects/clr/hipamd/src
           set-safe-directory: true
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
