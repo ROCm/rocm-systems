@@ -175,9 +175,6 @@ include(cmake/CheckSymbolExistsNoWarn.cmake)
 # Include rocSHMEM build module only if enabled
 if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   include(cmake/ROCSHMEM.cmake)
-  if(RCCL_POISON_HIP_ATOMICS)
-    message(WARNING "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are incompatible with RCCL_POISON_HIP_ATOMICS")
-  endif()
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
