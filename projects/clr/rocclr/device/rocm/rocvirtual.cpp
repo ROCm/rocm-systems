@@ -5064,7 +5064,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
           percent = 100;
           break;
         case 2: // hipFuncCachePreferL1
-          percent = 1;
+          percent = 0;
           break;
         case 3: // hipFuncCachePreferEqual
           percent = 50;
