@@ -188,6 +188,28 @@ fi
 
 echo "Profiler detached successfully"
 
+# rocprofv3 exits 0 even when the detach call fails, so require the success report.
+if ! grep -Eq "Detaching from PID ${APP_PID} using library .* :: success" ${ROCPROF_LOG}; then
+    echo "Error: rocprofv3 did not report a successful detach from PID ${APP_PID}"
+    exit 1
+fi
+
+# Only the SIGINT handler reports the signal, so this shows which trigger ended the attach.
+case ${DETACH_MODE} in
+    enter)
+        if grep -q "Caught signal SIGINT" ${ROCPROF_LOG}; then
+            echo "Error: detach was triggered by SIGINT instead of Enter"
+            exit 1
+        fi
+        ;;
+    sigint)
+        if ! grep -q "Caught signal SIGINT" ${ROCPROF_LOG}; then
+            echo "Error: rocprofv3 did not report catching SIGINT"
+            exit 1
+        fi
+        ;;
+esac
+
 # The target must survive the detach; only the profiler was asked to stop.
 if ! kill -0 $APP_PID 2>/dev/null; then
     echo "Error: test application exited when the profiler detached"
