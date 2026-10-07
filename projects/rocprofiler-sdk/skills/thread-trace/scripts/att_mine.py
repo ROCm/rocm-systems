@@ -1260,7 +1260,10 @@ def main() -> int:
     elif args.command == "pipes":
         print(
             f"waves: {result['waves']}  SIMDs: {result['simds']}  resident cycles (time with a "
-            f"traced wave on the SIMD, summed over SIMDs): {result['resident_cycles']}"
+            f"traced wave on the SIMD, summed over SIMDs): {result['resident_cycles']}\n"
+            "The trace records when an instruction issues, not how long its unit works on it "
+            "afterwards, so a low busy_share does not show that the unit was idle, or that it was "
+            "less busy than a class with a higher busy_share."
         )
         print_rows(
             result["classes"],
