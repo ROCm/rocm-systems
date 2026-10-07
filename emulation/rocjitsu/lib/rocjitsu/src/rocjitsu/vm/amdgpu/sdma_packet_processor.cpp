@@ -325,7 +325,13 @@ private:
 
   bool gfx11_plus() const {
     // Extended copy counts do not opt legacy dialects into gfx11 packet layouts.
-    return dialect_ == SdmaPacketDialect::Gfx11Plus || dialect_ == SdmaPacketDialect::Gfx1250;
+    // RDNA4 keeps those layouts; only its rectangle copy uses the GFX12 placement.
+    return dialect_ == SdmaPacketDialect::Gfx11Plus || dialect_ == SdmaPacketDialect::Rdna4 ||
+           dialect_ == SdmaPacketDialect::Gfx1250;
+  }
+
+  bool gfx12_linear_rect() const {
+    return dialect_ == SdmaPacketDialect::Rdna4 || dialect_ == SdmaPacketDialect::Gfx1250;
   }
 
   PacketExtent packet_extent(std::span<const uint32_t> words) const {
@@ -612,40 +618,42 @@ private:
   }
 
   // COPY_LINEAR_RECT. Counts in the packet are stored as value-1. Pitches and the
-  // slice are in elements. Gfx1250 uses the GFX12 field placement; earlier
-  // dialects, including the CDNA4 layout hipMemcpy2D submits, use the pre-GFX12
-  // placement. A non-zero endian swap is rejected: the rectangle copy that
-  // reaches this path does not set one, and swapping would publish different
+  // slice are in elements. RDNA4 and Gfx1250 use the GFX12 field placement.
+  // Earlier dialects, including the CDNA4 layout hipMemcpy2D submits, use the
+  // pre-GFX12 placement. A non-zero endian swap is rejected: the rectangle copy
+  // that reaches this path does not set one, and swapping would publish different
   // bytes than the packet asked for.
   bool decode_linear_rect(const Frame &frame, Operation &operation) {
-    const bool gfx1250 = dialect_ == SdmaPacketDialect::Gfx1250;
+    const bool gfx12_rect = gfx12_linear_rect();
     const uint32_t element = bit_field(word(frame, 0), 29, 3);
     if (element > 4 || !has(frame, kCopyLinearRectDwords))
       return false;
     const uint64_t element_bytes = uint64_t{1} << element;
 
-    const uint32_t src_off_x = bit_field(word(frame, 3), 0, gfx1250 ? 16 : 14);
-    const uint32_t src_off_y = bit_field(word(frame, 3), 16, gfx1250 ? 16 : 14);
-    const uint32_t src_off_z = bit_field(word(frame, 4), 0, gfx1250 ? 14 : 11);
+    const uint32_t src_off_x = bit_field(word(frame, 3), 0, gfx12_rect ? 16 : 14);
+    const uint32_t src_off_y = bit_field(word(frame, 3), 16, gfx12_rect ? 16 : 14);
+    const uint32_t src_off_z = bit_field(word(frame, 4), 0, gfx12_rect ? 14 : 11);
     const uint32_t src_pitch_elements =
-        bit_field(word(frame, 4), gfx1250 ? 16 : 13, gfx1250 ? 16 : 19) + 1u;
-    const uint32_t dst_off_x = bit_field(word(frame, 8), 0, gfx1250 ? 16 : 14);
-    const uint32_t dst_off_y = bit_field(word(frame, 8), 16, gfx1250 ? 16 : 14);
-    const uint32_t dst_off_z = bit_field(word(frame, 9), 0, gfx1250 ? 14 : 11);
+        bit_field(word(frame, 4), gfx12_rect ? 16 : 13, gfx12_rect ? 16 : 19) + 1u;
+    const uint32_t dst_off_x = bit_field(word(frame, 8), 0, gfx12_rect ? 16 : 14);
+    const uint32_t dst_off_y = bit_field(word(frame, 8), 16, gfx12_rect ? 16 : 14);
+    const uint32_t dst_off_z = bit_field(word(frame, 9), 0, gfx12_rect ? 14 : 11);
     const uint32_t dst_pitch_elements =
-        bit_field(word(frame, 9), gfx1250 ? 16 : 13, gfx1250 ? 16 : 19) + 1u;
-    const uint64_t rect_x = bit_field(word(frame, 11), 0, gfx1250 ? 16 : 14) + uint64_t{1};
-    const uint64_t rect_y = bit_field(word(frame, 11), 16, gfx1250 ? 16 : 14) + uint64_t{1};
-    const uint64_t rect_z = bit_field(word(frame, 12), 0, gfx1250 ? 14 : 11) + uint64_t{1};
-    if (!gfx1250 && (bit_field(word(frame, 12), 16, 2) != 0 || bit_field(word(frame, 12), 24, 2) != 0))
+        bit_field(word(frame, 9), gfx12_rect ? 16 : 13, gfx12_rect ? 16 : 19) + 1u;
+    const uint64_t rect_x = bit_field(word(frame, 11), 0, gfx12_rect ? 16 : 14) + uint64_t{1};
+    const uint64_t rect_y = bit_field(word(frame, 11), 16, gfx12_rect ? 16 : 14) + uint64_t{1};
+    const uint64_t rect_z = bit_field(word(frame, 12), 0, gfx12_rect ? 14 : 11) + uint64_t{1};
+    if (!gfx12_rect && (bit_field(word(frame, 12), 16, 2) != 0 ||
+                        bit_field(word(frame, 12), 24, 2) != 0))
       return false;
 
     uint64_t src_slice_elements = 0;
     uint64_t dst_slice_elements = 0;
     if (rect_z > 1) {
-      src_slice_elements = (gfx1250 ? word(frame, 5) : bit_field(word(frame, 5), 0, 28)) + uint64_t{1};
-      dst_slice_elements = (gfx1250 ? word(frame, 10) : bit_field(word(frame, 10), 0, 28)) +
-                           uint64_t{1};
+      src_slice_elements =
+          (gfx12_rect ? word(frame, 5) : bit_field(word(frame, 5), 0, 28)) + uint64_t{1};
+      dst_slice_elements =
+          (gfx12_rect ? word(frame, 10) : bit_field(word(frame, 10), 0, 28)) + uint64_t{1};
     }
 
     uint64_t src_pitch = 0;
@@ -761,9 +769,10 @@ private:
             static_cast<std::size_t>(std::min<uint64_t>(kTransferBytes, room));
       }
       const auto address_at = [&](uint64_t base, uint64_t pitch, uint64_t slice) {
-        return operation.rectangular ? rectangular_address(base, pitch, slice, operation.rect_row_bytes,
-                                                           operation.rect_rows, operation.completed)
-                                     : base + operation.completed;
+        if (!operation.rectangular)
+          return base + operation.completed;
+        return rectangular_address(base, pitch, slice, operation.rect_row_bytes,
+                                   operation.rect_rows, operation.completed);
       };
       if (operation.destination_index == 0) {
         const VmAccessOutcome read = access_->read(

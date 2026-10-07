@@ -20,10 +20,10 @@ namespace {
 amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return amdgpu::SdmaPacketDialect::Gfx1250;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return amdgpu::SdmaPacketDialect::Rdna4;
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
     return amdgpu::SdmaPacketDialect::Gfx11Plus;
-  }
   if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
       arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
     return amdgpu::SdmaPacketDialect::LegacyExtendedCount;
