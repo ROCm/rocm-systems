@@ -48,7 +48,11 @@ constexpr size_t   kBaseLaunches = 7;
 // Reads among them, each followed by a D2H copy.
 constexpr int      kBaseReads    = 5;
 
+// The scalar keeps the struct a by-value argument: a struct holding only a
+// pointer is passed as a plain pointer argument, which is not the path under
+// test. The pointer lands at byte offset 8.
 struct PinnedView {
+  int        scale;
   const int* p;
 };
 
@@ -67,7 +71,7 @@ __global__ void hrr_pinned_read(const int* in, int* out, int n) {
 
 __global__ void hrr_pinned_read_view(PinnedView v, int* out, int n) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) out[i] = v.p[i] * 5 - 2;
+  if (i < n) out[i] = v.p[i] * v.scale - 2;
 }
 
 __global__ void hrr_pinned_write(int* buf, int n, int seed) {
@@ -125,7 +129,7 @@ TEST_CASE("Unit_HRR_PinnedHost_Direct", "[.][hrr-direct]") {
   for (int i = 0; i < kPinnedInts; ++i) h[i] = pattern(2, i);
   const std::vector<int> saved(h, h + kPinnedInts);
   hipLaunchKernelGGL(hrr_pinned_read_view, dim3(kBlocks), dim3(kThreads), 0,
-                     nullptr, PinnedView{h}, out, kPinnedInts);
+                     nullptr, PinnedView{5, h}, out, kPinnedInts);
   HRR_HIP_CHECK(hipGetLastError());
   read_back([](int i) { return pattern(2, i) * 5 - 2; });
 
@@ -244,6 +248,10 @@ void patch_snapshot(std::vector<uint8_t>& f,
                     const std::vector<std::pair<size_t, size_t>>& spans,
                     const std::vector<const hrr::KernelLaunchEvent*>& kls,
                     size_t launch, size_t rec, int field, uint64_t value) {
+  INFO("launch " << launch << " record " << rec);
+  REQUIRE(launch < kls.size());
+  REQUIRE(launch < spans.size());
+  REQUIRE(rec < kls[launch]->snapshots.size());
   const hrr::BufferSnapshot& s = kls[launch]->snapshots[rec];
   uint64_t needle[5] = {s.ptr_handle, s.offset, s.length, s.hash_lo, s.hash_hi};
   const auto* nb = reinterpret_cast<const uint8_t*>(needle);
@@ -288,11 +296,11 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_Restored) {
   CHECK(same_hashes(kls[1], kls[4]));        // the host put pattern 2 back
   CHECK_FALSE(same_hashes(kls[4], kls[6]));  // kernel A rewrote the buffer
 
-  // The struct argument is marked as holding a pointer at offset 0, so replay
+  // The struct argument is marked as holding a pointer at offset 8, so replay
   // translates it rather than passing the capture-time host address.
   REQUIRE(!kls[1]->args.empty());
   CHECK(kls[1]->args[0].value_kind == 3);
-  CHECK(kls[1]->args[0].ptr_offsets == std::vector<uint16_t>{0});
+  CHECK(kls[1]->args[0].ptr_offsets == std::vector<uint16_t>{8});
 
   auto [rc, out] = hrr_playback_merged(archive);
   INFO("Replay:\n" << out);
