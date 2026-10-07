@@ -743,7 +743,7 @@ TEST_F(domain_service_test,
             record, /*begin_timestamp=*/1, function_args_t{} });
 
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_)).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_)).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_)).Times(1);
 
     service.finalize();
 

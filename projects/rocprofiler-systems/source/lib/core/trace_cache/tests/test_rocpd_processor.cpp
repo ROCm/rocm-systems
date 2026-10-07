@@ -391,9 +391,11 @@ protected:
     static void add_process_scoped_track(
         const std::shared_ptr<metadata_registry>& metadata, const std::string& track_name)
     {
-        metadata->add_track(track{ .track_name = track_name,
-                                   .thread_id  = std::nullopt,
-                                   .extdata    = std::string{} });
+        metadata->ensure_track(track_name, [&] {
+            return track{ .track_name = track_name,
+                          .thread_id  = std::nullopt,
+                          .extdata    = std::string{} };
+        });
     }
 
     static void seed_gpu_smi_pmc_row(const std::shared_ptr<metadata_registry>& metadata,
@@ -1051,7 +1053,7 @@ protected:
         thread_info.thread_id         = k_thread_id;
         thread_info.start             = k_process_start;
         thread_info.end               = k_process_end;
-        metadata->add_thread_info(thread_info);
+        metadata->ensure_thread(thread_info.thread_id, [&] { return thread_info; });
     }
 
     static void seed_nic_pmc_catalog(const std::shared_ptr<metadata_registry>& metadata)
@@ -1757,9 +1759,11 @@ TEST_F(rocpd_write_read_test_interface, handle_backtrace_region_pathway)
     run_processor_and_open_reader(
         {},
         [](const std::shared_ptr<metadata_registry>& metadata) {
-            metadata->add_track(track{ .track_name = "Sampling [CPU 0]",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("Sampling [CPU 0]", [&] {
+                return track{ .track_name = "Sampling [CPU 0]",
+                              .thread_id  = k_thread_id,
+                              .extdata    = std::string{} };
+            });
         },
         [](rocpd_processor_t& processor) {
             const backtrace_region_sample bts{
@@ -1833,9 +1837,11 @@ TEST_F(rocpd_write_read_test_interface, handle_pmc_event_with_sample_pathway)
                                      .name        = "SQ_WAVES",
                                      .target_arch = "GPU",
                                      .description = "Shader wavefronts" }));
-            metadata->add_track(track{ .track_name = "SQ_WAVES [GPU 0]",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("SQ_WAVES [GPU 0]", [&] {
+                return track{ .track_name = "SQ_WAVES [GPU 0]",
+                              .thread_id  = k_thread_id,
+                              .extdata    = std::string{} };
+            });
         },
         [](rocpd_processor_t& processor) {
             constexpr std::uint64_t     k_timestamp = 10000;
@@ -1945,9 +1951,11 @@ TEST_F(rocpd_write_read_test_interface, handle_gpu_perf_counter_sample_pathway)
                                      .target_arch = "GPU",
                                      .description = "Shader wavefronts" }));
             // gpu_perf_counter handle() emits process-scoped tracks (no thread_id).
-            metadata->add_track(track{ .track_name = k_track_name,
-                                       .thread_id  = std::nullopt,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track(k_track_name, [&] {
+                return track{ .track_name = k_track_name,
+                              .thread_id  = std::nullopt,
+                              .extdata    = std::string{} };
+            });
             gpu_perf_counter_name_entry name_entry{};
             name_entry.counter_id    = k_counter_id;
             name_entry.pmc_info_name = k_pmc_name;
@@ -2080,9 +2088,11 @@ TEST_F(rocpd_write_read_test_interface, handle_kfd_sample_pathway)
                                      .name        = "kfd_page_fault",
                                      .target_arch = "GPU",
                                      .description = "KFD page fault counter" }));
-            metadata->add_track(track{ .track_name = "KFD Events [GPU 0]",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("KFD Events [GPU 0]", [&] {
+                return track{ .track_name = "KFD Events [GPU 0]",
+                              .thread_id  = k_thread_id,
+                              .extdata    = std::string{} };
+            });
         },
         [&](rocpd_processor_t& processor) {
             const kfd_sample sample{ k_thread_id,
@@ -2406,9 +2416,11 @@ TEST_F(rocpd_write_read_test_interface, multiple_event_types_in_single_db)
         [](const std::shared_ptr<metadata_registry>& metadata) {
             seed_gpu_queue_stream(metadata);
             seed_kernel_symbol(metadata, 1, "test_kernel");
-            metadata->add_track(track{ .track_name = "Sampling",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("Sampling", [&] {
+                return track{ .track_name = "Sampling",
+                              .thread_id  = k_thread_id,
+                              .extdata    = std::string{} };
+            });
         },
         [&timestamps](rocpd_processor_t& processor) {
             insert_multiple_event_type_samples(processor, timestamps);
