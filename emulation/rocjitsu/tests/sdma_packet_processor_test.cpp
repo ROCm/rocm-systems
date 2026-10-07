@@ -464,9 +464,9 @@ std::array<uint32_t, 13> linear_rect_packet(bool gfx12_rect, uint64_t source, ui
                                             uint32_t element, uint32_t rect_x, uint32_t rect_y,
                                             uint32_t rect_z, uint32_t src_pitch_bytes,
                                             uint32_t dst_pitch_bytes, uint32_t src_slice_bytes = 0,
-                                           uint32_t dst_slice_bytes = 0, uint32_t src_off_x = 0,
-                                           uint32_t dst_off_x = 0, uint32_t src_off_z = 0,
-                                           uint32_t dst_off_z = 0) {
+                                            uint32_t dst_slice_bytes = 0, uint32_t src_off_x = 0,
+                                            uint32_t dst_off_x = 0, uint32_t src_off_z = 0,
+                                            uint32_t dst_off_z = 0) {
   const uint32_t element_bytes = 1u << element;
   const uint32_t src_pitch_elements = src_pitch_bytes / element_bytes;
   const uint32_t dst_pitch_elements = dst_pitch_bytes / element_bytes;
