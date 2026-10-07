@@ -1650,7 +1650,7 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
 }
 
 #[test]
-fn registered_uncached_host_pages_reach_kfd_without_coherent_caching() {
+fn registered_uncached_host_pages_keep_coherent_gpu_access() {
     let fixture = Fixture::with_flags(
         [
             Reply::Allocate(17, None),
@@ -1658,7 +1658,7 @@ fn registered_uncached_host_pages_reach_kfd_without_coherent_caching() {
             Reply::Unmap(0, 1, None),
             Reply::Free(None),
         ],
-        uapi::USERPTR | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        uapi::USERPTR | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
     );
     let mut allocation = fixture
         .allocate(
