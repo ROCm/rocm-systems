@@ -206,14 +206,14 @@ jobs:
           # nodes can only be read by someone with cluster access: the job log
           # shows that SLURM failed, not why.
           path: |
-            ${{ env.WORK_DIR }}/perf.csv
-            ${{ env.WORK_DIR }}/perf_entry_super.csv
-            ${{ env.WORK_DIR }}/perf_entry_super.json
-            ${{ env.WORK_DIR }}/perf_super.csv
             ${{ env.WORK_DIR }}/madengine_summary.txt
-            ${{ env.WORK_DIR }}/manifest.json
-            ${{ env.WORK_DIR }}/slurm_output/*.out
-            ${{ env.WORK_DIR }}/slurm_output/*.err
+            ${{ env.WORK_DIR }}/ab/*/perf.csv
+            ${{ env.WORK_DIR }}/ab/*/perf_entry_super.csv
+            ${{ env.WORK_DIR }}/ab/*/perf_entry_super.json
+            ${{ env.WORK_DIR }}/ab/*/perf_super.csv
+            ${{ env.WORK_DIR }}/ab/*/manifest.json
+            ${{ env.WORK_DIR }}/ab/*/slurm_output/*.out
+            ${{ env.WORK_DIR }}/ab/*/slurm_output/*.err
           retention-days: 30
 
       - name: Cleanup work directory
