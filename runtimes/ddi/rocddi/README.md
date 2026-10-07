@@ -162,12 +162,14 @@ multiple cooperative callers must share that queue. A failed GWS allocation
 destroys the unpublished queue before releasing its ring and control backing;
 an uncertain cleanup retains those owners through process teardown.
 
-The `ring_memory` field on `QueueParameters::Aql` selects a system ring or a
-host-visible local ring. The Linux backend admits local placement on GFX1201
-when public VRAM can hold the page-rounded ring. It maps that VRAM into the
-process, requests uncached GPU pages with execute permission, and owns the
-mapping through native queue teardown. Producers using the host mapping must
-order packet stores before advancing the write index and ringing the doorbell.
+The `ring_memory` field on `QueueParameters::Aql` and
+`QueueParameters::SdmaByEngine` selects a system ring or a host-visible local
+ring. The Linux backend admits local placement on GFX1201 when public VRAM
+can hold the page-rounded ring. It maps that VRAM into the process, requests
+uncached GPU pages with execute permission, and owns the mapping through
+native queue teardown. Producers using the host mapping must publish complete
+packets and advance the write index before calling `ring_doorbell`. That helper
+drains write-combined CPU stores before the native doorbell write.
 
 ### Ambiguous queue creation
 
@@ -243,7 +245,9 @@ queue scheduling against KFD 1.20 or newer and the GFX1201 scratch aperture
 against the reported XCC count. The GWS AQL case runs the same retirement
 check with native GWS allocated before queue publication.
 The local-ring AQL case runs the barrier through a host-visible VRAM ring and
-requires a GPU with sufficient public VRAM.
+requires a GPU with sufficient public VRAM. The GWS variant combines that ring
+with cooperative synchronization. The local-ring SDMA case copies through a
+host-visible VRAM ring and verifies native retirement.
 The AIS case reads a file into private VRAM and writes it back. Run it with
 `ROCDDI_CTS_AIS_DIR` set to a writable directory on P2P-capable block or NFS
 storage:

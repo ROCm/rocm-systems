@@ -31,7 +31,7 @@ pub enum QueueProducerMode {
     Multiple,
 }
 
-/// Placement of an AQL packet ring. Both choices retain a host mapping for
+/// Placement of a native packet ring. Both choices retain a host mapping for
 /// producers; local memory requires CPU-visible VRAM on the selected GPU.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum QueueRingMemory {
@@ -81,6 +81,9 @@ pub enum QueueParameters {
     SdmaByEngine {
         /// Explicit engine ID or round-robin selection within one device VM.
         selection: SdmaEngineSelection,
+        /// Native packet-ring placement. Producers order packet stores before
+        /// advancing the write index and ringing the doorbell.
+        ring_memory: QueueRingMemory,
     },
 }
 

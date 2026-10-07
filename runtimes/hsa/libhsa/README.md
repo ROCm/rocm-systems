@@ -26,6 +26,17 @@ rocddi queue owner until destruction succeeds. A failed native teardown keeps
 the public handle and backing available for retry, and final shutdown retains
 an unresolved owner for process teardown.
 
+An AMD queue descriptor can place either ring in host-visible local memory on
+GFX1201 by setting `HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF`. rocddi owns the
+uncached, executable VRAM allocation and its CPU mapping. The queue descriptor
+remains in system memory; `HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR`
+is rejected. Ordinary `hsa_queue_create` calls allocate system rings for new
+queues. HSA signal doorbell stores use rocddi's queue notification helper to
+drain write-combined packet stores before notifying the GPU. Callers publish a
+complete packet and advance the write index before ringing the doorbell.
+Callers that write the doorbell mapping directly must provide the same
+write-combined store ordering.
+
 Cooperative queue creation uses one 16 KiB AQL queue per GPU agent. rocddi
 allocates KFD GWS before the queue becomes visible. Repeated creates for that
 agent return the same public queue and increase its reference count; only the
@@ -33,7 +44,9 @@ final matching destroy tears down the native queue. A create during final
 teardown or after explicit inactivation returns out of resources and can be
 retried after the final destroy. The shared queue has
 no caller error callback or fixed scratch backing. AMD queue descriptors can
-adjust its priority and CU mask.
+adjust its priority and CU mask. A local-ring descriptor can create the shared
+queue in local memory. Later cooperative requests must use the same ring
+placement because the existing queue cannot change its backing.
 
 SDMA descriptors select a native engine ID or round-robin selection through
 rocddi. Their public ring size and monotonic indices count bytes. The ring is

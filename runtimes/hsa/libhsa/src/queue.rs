@@ -170,6 +170,7 @@ pub(crate) struct Queue {
     hardware_id: u32,
     counted_pool_key: Option<(u64, u32)>,
     cooperative_refs: u32,
+    ring_memory: QueueRingMemory,
     inactivated: bool,
     cu_mask: Vec<u32>,
     callback: QueueErrorCallback,
@@ -753,6 +754,7 @@ unsafe fn create_hardware_queue(
     callback: QueueErrorCallback,
     data: CallbackArg,
     private_segment_size: u32,
+    ring_memory: QueueRingMemory,
     cu_mask: Option<Vec<u32>>,
     queue: *mut *mut HsaQueue,
     created_log: &mut Option<(u64, usize)>,
@@ -778,6 +780,9 @@ unsafe fn create_hardware_queue(
                 || !record.event_alive.load(Ordering::Acquire)
             {
                 return OUT_OF_RESOURCES;
+            }
+            if ring_memory != record.ring_memory {
+                return INVALID_QUEUE_CREATION;
             }
             let Some(refs) = record.cooperative_refs.checked_add(1) else {
                 return OUT_OF_RESOURCES;
@@ -870,7 +875,7 @@ unsafe fn create_hardware_queue(
                             } else {
                                 QueueProducerMode::Multiple
                             },
-                            ring_memory: QueueRingMemory::System,
+                            ring_memory,
                             global_work_sync: cooperative,
                             inactive_signal: Some(inactive_signal.handle()),
                             error_event: Some(inactive_signal.error_event()),
@@ -887,6 +892,8 @@ unsafe fn create_hardware_queue(
             Err(error) => {
                 return if cooperative && error.kind() == rocddi::ErrorKind::Busy {
                     OUT_OF_RESOURCES
+                } else if error.kind() == rocddi::ErrorKind::Unsupported {
+                    INVALID_QUEUE_CREATION
                 } else {
                     map_error(error)
                 };
@@ -953,6 +960,7 @@ unsafe fn create_hardware_queue(
             hardware_id,
             counted_pool_key: None,
             cooperative_refs: u32::from(cooperative),
+            ring_memory,
             inactivated: false,
             cu_mask: saved_cu_mask,
             callback,
@@ -1018,6 +1026,7 @@ unsafe fn create_sdma_queue(
     agent: HsaAgent,
     size_bytes: u32,
     selection: SdmaEngineSelection,
+    ring_memory: QueueRingMemory,
     queue: *mut *mut HsaQueue,
     created_log: &mut Option<(u64, usize, u32)>,
 ) -> Status {
@@ -1044,7 +1053,10 @@ unsafe fn create_sdma_queue(
         unsafe {
             gpu.create_queue(QueueRequest {
                 ring_size_bytes: u64::from(size_bytes),
-                parameters: QueueParameters::SdmaByEngine { selection },
+                parameters: QueueParameters::SdmaByEngine {
+                    selection,
+                    ring_memory,
+                },
                 priority: QueuePriority::Normal,
                 device_producer: true,
             })
@@ -1145,6 +1157,7 @@ pub unsafe extern "C" fn hsa_queue_create(
                 // through queue destruction and the last event callback.
                 CallbackArg::new(data),
                 private_segment_size,
+                QueueRingMemory::System,
                 None,
                 queue,
                 &mut created_log,
@@ -1238,6 +1251,7 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
                     // through queue destruction and the last event callback.
                     CallbackArg::new(data),
                     0,
+                    QueueRingMemory::System,
                     None,
                     &raw mut created,
                     &mut created_log,
@@ -1576,10 +1590,15 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
                 fail(INVALID_ARGUMENT);
                 continue;
             }
-            if input.flags != 0 {
+            if input.flags & AMD_QUEUE_CREATE_DEVICE_MEM_DESCRIPTOR != 0 {
                 fail(INVALID_QUEUE_CREATION);
                 continue;
             }
+            let ring_memory = if input.flags & AMD_QUEUE_CREATE_DEVICE_MEM_RING != 0 {
+                QueueRingMemory::HostVisibleLocal
+            } else {
+                QueueRingMemory::System
+            };
             if input.engine_type == AMD_QUEUE_ENGINE_SDMA {
                 if input.priority != AMD_QUEUE_PRIORITY_NORMAL || input.callback.is_some() {
                     fail(INVALID_QUEUE_CREATION);
@@ -1607,6 +1626,7 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
                         agent,
                         input.queue_size_bytes,
                         selection,
+                        ring_memory,
                         output,
                         &mut created_log,
                     )
@@ -1680,6 +1700,7 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
                     // through queue destruction and the last event callback.
                     CallbackArg::new(input.callback_data),
                     compute.private_segment_size,
+                    ring_memory,
                     cu_mask,
                     output,
                     &mut created_log,

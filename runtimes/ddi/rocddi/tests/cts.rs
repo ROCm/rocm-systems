@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use rocddi::gpu::queue::{
     QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
-    QueueRingMemory, SdmaEngineSelection,
+    QueueRingMemory, SdmaEngineSelection, ring_doorbell,
 };
 use rocddi::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::interop::linux::{AisFileOperation, ais_transfer};
@@ -535,11 +535,21 @@ fn gfx1201_gpu_capability_contract() -> Result<(), Box<dyn Error>> {
 
 #[test]
 #[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
+fn gfx1201_user_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
+    gfx1201_user_sdma_queue(QueueRingMemory::System)
+}
+
+#[test]
+#[ignore = "requires GFX1201 with CPU-visible VRAM, KFD, and a bound DRM render node"]
+fn gfx1201_local_ring_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
+    gfx1201_user_sdma_queue(QueueRingMemory::HostVisibleLocal)
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "one native queue lifetime covers packet publication, retirement, and cleanup"
 )]
-fn gfx1201_user_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
+fn gfx1201_user_sdma_queue(ring_memory: QueueRingMemory) -> Result<(), Box<dyn Error>> {
     const COPY_BYTES: usize = 256;
     const PACKET_BYTES: usize = 68;
     const GCR: u32 = 0x11 | (1 << 8);
@@ -558,6 +568,9 @@ fn gfx1201_user_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
         Ok(())
     })?;
     let endpoint = selected.ok_or_else(|| io::Error::other("GFX1201 endpoint is unavailable"))?;
+    if ring_memory == QueueRingMemory::HostVisibleLocal {
+        assert!(endpoint.host_visible_local_memory_bytes >= 4096);
+    }
     let device = session.activate(&endpoint)?;
     let access = DeviceAccess::READ | DeviceAccess::WRITE;
     let mut source = device.allocate(MemoryKind::System, 4096, 4096, access)?;
@@ -589,6 +602,7 @@ fn gfx1201_user_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
             ring_size_bytes: 4096,
             parameters: QueueParameters::SdmaByEngine {
                 selection: SdmaEngineSelection::Id(0),
+                ring_memory,
             },
             priority: QueuePriority::Normal,
             device_producer: true,
@@ -633,17 +647,12 @@ fn gfx1201_user_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
             PACKET_BYTES,
         );
     }
-    fence(Ordering::SeqCst);
     // SAFETY: The live queue exposes aligned 64-bit write and doorbell words.
-    // Packet stores precede the release write index and the MMIO doorbell.
+    // The doorbell operation drains packet and index stores before notifying SDMA.
     unsafe {
         (&*(transport.write_index_host_address as *const AtomicU64))
             .store(PACKET_BYTES as u64, Ordering::Release);
-        fence(Ordering::SeqCst);
-        std::ptr::write_volatile(
-            transport.doorbell_host_address as *mut u64,
-            PACKET_BYTES as u64,
-        );
+        ring_doorbell(transport.doorbell_host_address, PACKET_BYTES as u64);
     }
 
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -706,6 +715,12 @@ fn gfx1201_gws_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
 #[ignore = "requires GFX1201 with CPU-visible VRAM, KFD, and a bound DRM render node"]
 fn gfx1201_local_ring_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
     gfx1201_aql_barrier(false, QueueRingMemory::HostVisibleLocal)
+}
+
+#[test]
+#[ignore = "requires GFX1201 with CPU-visible VRAM, KFD GWS, and a DRM render node"]
+fn gfx1201_local_ring_gws_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
+    gfx1201_aql_barrier(true, QueueRingMemory::HostVisibleLocal)
 }
 
 #[allow(
@@ -796,7 +811,8 @@ fn gfx1201_aql_barrier(
     packet[56..64].copy_from_slice(&signal_info.device_address.to_ne_bytes());
     // SAFETY: The queue owns a writable AQL ring and 64-bit index and doorbell
     // words. The release header publishes the initialized packet, the release
-    // write index publishes slot 0, and the MMIO doorbell notifies firmware.
+    // write index publishes slot 0, and the doorbell drains CPU stores before
+    // notifying firmware.
     unsafe {
         std::ptr::copy_nonoverlapping(
             packet.as_ptr(),
@@ -806,8 +822,7 @@ fn gfx1201_aql_barrier(
         (&*(transport.ring_host_address as *const AtomicU16))
             .store(BARRIER_HEADER, Ordering::Release);
         (&*(transport.write_index_host_address as *const AtomicU64)).store(1, Ordering::Release);
-        fence(Ordering::SeqCst);
-        std::ptr::write_volatile(transport.doorbell_host_address as *mut u64, 0);
+        ring_doorbell(transport.doorbell_host_address, 0);
     }
 
     let deadline = Instant::now() + Duration::from_secs(10);
