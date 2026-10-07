@@ -1842,6 +1842,13 @@ protected:
     mem.ginSegmentInfos = nullptr;
     ResetDevRuntimeMicroFakes();
   }
+
+  // The host fake defaults NCCL_MULTI_SEGMENT_REGISTER to 0; production defaults to 1.
+  static std::function<int64_t(const char*, int64_t)> MultiSegRegisterOn() {
+    return [](const char* env, int64_t deftVal) -> int64_t {
+      return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
+    };
+  }
 };
 
 // Branch: no sysmem segment anywhere, so one device window covers the whole
@@ -1874,6 +1881,7 @@ TEST_F(SymMemoryRegisterGinTest, NoSysmemSegment_RegistersOneDeviceWindow) {
 // count, not this rank's.
 TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSegment) {
   mem.maxGlobalNumSegments = 2;
+  ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
   bool registeredMultiSegment = false;
   ScopedHook reg(g_devrGinRegister,
                  [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool multi, int) {
@@ -1883,6 +1891,22 @@ TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSe
 
   ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_TRUE(registeredMultiSegment);
+}
+
+// NCCL_MULTI_SEGMENT_REGISTER=0: a multi-segment window is rejected before any
+// GIN registration; a single-segment window still registers.
+TEST_F(SymMemoryRegisterGinTest, MultiSegmentRegisterOff_RejectsMultiSegmentWindow) {
+  ScopedHook reg(g_devrGinRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+
+  mem.maxGlobalNumSegments = 2;
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(reg.calls, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+
+  mem.maxGlobalNumSegments = 1;
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
 }
 
 // Branch: the GIN registration fails, so the segment infos built for it are
@@ -1930,6 +1954,7 @@ protected:
     mem.globalHasSysmemSegment = true;
     mem.numSegments = 2;
     mem.maxGlobalNumSegments = 2;
+    g_loadParam = MultiSegRegisterOn();
     segmentSizes.assign({4096, 8192});
     memHandles.assign(2, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
     mem.segmentSizes = segmentSizes.data();
