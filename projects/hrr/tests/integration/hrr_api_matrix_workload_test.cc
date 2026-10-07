@@ -2611,11 +2611,10 @@ TEST_CASE("Unit_HRR_ApiMatrix_Deprioritised_Direct", "[.][hrr-direct]") {
   }
 
   // ---- Driver-flavoured array creation ------------------------------------
-  // Deliberately outside the image-support guard below. gfx950 reports no
-  // image support and both of these return hipErrorNotSupported, but unlike
-  // their runtime counterparts the capture shim records the call before the
-  // runtime rejects it, so they are the only two members of the array family
-  // that reach an archive at all.
+  // Deliberately outside the image-support guard below, so they run on every
+  // device. Capture records them only when they succeed; gfx950 reports no
+  // image support and returns hipErrorNotSupported for both, so there they
+  // reach no archive and the T5 floor does not count them.
   {
     HIP_ARRAY_DESCRIPTOR desc{};
     desc.Width = 64;

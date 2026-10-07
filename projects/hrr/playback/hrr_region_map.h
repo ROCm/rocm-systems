@@ -100,6 +100,15 @@ class RegionMap {
     // an empty span disables the check.
     void check_clock_against(uint64_t first_event_ns, uint64_t last_event_ns);
 
+    // Every segment the producers declared, as recorded. Replay holds these
+    // ranges before hipInit, so a segment HIP never saw can still be
+    // materialised at its recorded address.
+    template <class F> void for_each_declared_segment(F&& f) const {
+        for (const auto& r : records_)
+            if (r.op == HRR_REGION_ADD && r.kind == HRR_REGION_SEGMENT && r.size)
+                f(r.base, r.size);
+    }
+
     // ---- Reporting ----
     size_t blocks_live()   const { return blocks_.size(); }
     size_t segments_live() const { return segments_.size(); }

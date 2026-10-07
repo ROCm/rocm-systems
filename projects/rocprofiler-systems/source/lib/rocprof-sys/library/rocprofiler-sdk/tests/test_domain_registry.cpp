@@ -7,7 +7,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <stdexcept>
+#include <string_view>
 
 namespace rocprofsys::domains
 {
@@ -80,6 +82,59 @@ TEST(domain_registry_test, get_callback_throws_runtime_error_for_unknown_domain_
 
     EXPECT_THROW(
         { static_cast<void>(sut_t::get_callback(k_unknown_id)); }, std::runtime_error);
+}
+
+// compile_time_version uses the formatted scheme: major * 10000 + minor * 100 + patch.
+template <std::size_t FormattedVersion>
+struct mock_sdk_at_version : mock_sdk
+{
+    // Mirrors the SDK member name that the registry reads.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::size_t compile_time_version = FormattedVersion;
+};
+
+template <std::size_t FormattedVersion>
+bool
+is_domain_registered_at(std::string_view name)
+{
+    return registry<mock_sdk_at_version<FormattedVersion>, externals>::find_descriptor(
+               name) != nullptr;
+}
+
+constexpr std::size_t k_version_0_5_9 = 509;
+constexpr std::size_t k_version_0_6_0 = 600;
+constexpr std::size_t k_version_0_6_1 = 601;
+
+TEST(domain_registry_test, ompt_and_rocdecode_are_gated_on_sdk_0_6_0)
+{
+    for(const std::string_view name : { "ompt", "rocdecode_api" })
+    {
+        EXPECT_FALSE(is_domain_registered_at<k_version_0_5_9>(name)) << name;
+        EXPECT_TRUE(is_domain_registered_at<k_version_0_6_0>(name)) << name;
+        EXPECT_TRUE(is_domain_registered_at<k_version_0_6_1>(name)) << name;
+    }
+}
+
+TEST(domain_registry_test, get_callback_throws_for_ompt_below_sdk_0_6_0)
+{
+    using sut_below_0_6_t = registry<mock_sdk_at_version<k_version_0_5_9>, externals>;
+
+    EXPECT_THROW(
+        {
+            static_cast<void>(
+                sut_below_0_6_t::get_callback(mock_sdk::CALLBACK_TRACING_OMPT));
+        },
+        std::runtime_error);
+}
+
+TEST(domain_registry_test, get_callback_returns_ompt_definition_at_sdk_0_6_0)
+{
+    using sut_at_0_6_t = registry<mock_sdk_at_version<k_version_0_6_0>, externals>;
+
+    const auto& definition = sut_at_0_6_t::get_callback(mock_sdk::CALLBACK_TRACING_OMPT);
+
+    EXPECT_EQ(definition.meta.name, "ompt");
+    EXPECT_EQ(definition.meta.mode, collection_mode::callback);
 }
 
 }  // namespace

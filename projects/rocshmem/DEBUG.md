@@ -20,7 +20,7 @@ Refer to [General documentation for ASAN on AMD GPUs][1].
 Add `-DASAN=ON` to the `cmake` invocation, whether configuring a fresh build directory or reconfiguring an existing one.
   `cmake . <...> -DASAN=ON`
 
-`xnack-` targets are silently invalid under ASAN (the compiler skips instrumenting device code for them without a hard error), so rocSHMEM automatically drops any `:xnack-` entries from `GPU_TARGETS` when `ASAN=ON`, and re-derives HIP's offload targets from the result on every configure. Simply toggling `-DASAN=ON`/`-DASAN=OFF` on an existing build directory is enough; no manual CMake cache surgery is required.
+Device ASAN needs xnack, and the compiler skips instrumenting device code for a target without it rather than failing. So with `ASAN=ON`, rocSHMEM builds gfx9 targets as `:xnack+` (keeping other features such as `:sramecc+`), builds gfx1250 as is since xnack is always on there, and drops every other target. It re-derives HIP's offload targets from the result on every configure. Simply toggling `-DASAN=ON`/`-DASAN=OFF` on an existing build directory is enough; no manual CMake cache surgery is required.
 
 ### Running with ASAN
 

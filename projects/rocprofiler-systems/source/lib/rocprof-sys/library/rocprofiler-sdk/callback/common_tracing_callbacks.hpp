@@ -48,8 +48,10 @@ template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category>
 inline void
-on_tracing_api_enter(typename SdkBackend::callback_tracing_record_t record,
-                     typename SdkBackend::user_data_t* user_data, void* callback_data)
+on_tracing_api_enter(
+    typename SdkBackend::callback_tracing_record_t record,
+    typename SdkBackend::user_data_t* user_data, void* callback_data,
+    typename SdkBackend::timestamp_t timestamp = SdkBackend::get_timestamp())
 {
     (void) callback_data;
 
@@ -57,8 +59,6 @@ on_tracing_api_enter(typename SdkBackend::callback_tracing_record_t record,
     {
         return;
     }
-
-    typename SdkBackend::timestamp_t const timestamp = SdkBackend::get_timestamp();
 
     if(user_data)
     {
@@ -78,12 +78,12 @@ template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category>
 inline void
-on_tracing_api_exit(typename SdkBackend::callback_tracing_record_t record,
-                    typename SdkBackend::user_data_t* user_data, void* callback_data)
+on_tracing_api_exit(
+    typename SdkBackend::callback_tracing_record_t record,
+    typename SdkBackend::user_data_t* user_data, void* callback_data,
+    typename SdkBackend::timestamp_t timestamp = SdkBackend::get_timestamp())
 {
     (void) callback_data;
-
-    typename SdkBackend::timestamp_t const timestamp = SdkBackend::get_timestamp();
 
     if(!Externals::is_active() || !user_data)
     {

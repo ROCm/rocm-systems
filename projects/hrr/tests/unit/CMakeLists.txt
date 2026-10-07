@@ -13,6 +13,7 @@ add_executable(hrr-unit-tests
   hrr_format_test.cc
   hrr_recovery_test.cc
   hrr_playback_test.cc
+  hrr_va_placement_test.cc
 )
 set_target_properties(hrr-unit-tests PROPERTIES
   CXX_STANDARD 17

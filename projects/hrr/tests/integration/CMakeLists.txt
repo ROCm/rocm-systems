@@ -15,6 +15,12 @@
 # [.][hrr-direct] workload that carves blocks out of a single hipMalloc by
 # pointer arithmetic and is replayed against a synthetic sidecar.
 #
+# hrr_pitched_d2h_test.cc covers device-to-host copies with a pitched host side
+# (hipMemcpy2D, hipMemcpy3D and the driver copies) and pitched hipMemcpy3D
+# host-to-device copies: its own hidden workloads plus the roundtrips that
+# replay them and edit their blobs. The workloads call only host APIs, so the
+# file stays a plain C++ translation unit.
+#
 # hrr_api_matrix_test.cc is the per-API replay matrix: Unit_HRR_ApiMatrix_T*_Roundtrip
 # captures each tier's workloads from hrr_api_matrix_workload_test.cc — one call
 # site per API family, including APIs whose replay is known to be wrong, because
@@ -30,13 +36,24 @@
 # argument no allocation explains: a sentinel keeps its value, an
 # address-shaped lost pointer becomes null. Contains its own hidden
 # [.][hrr-direct] workload.
+#
+# hrr_va_placement_test.cc covers capture-address placement: a device pointer
+# stored in device memory by an H2D copy is right at replay only when its
+# allocation lands where it was recorded (ROCM-31827). Contains its own hidden
+# [.][hrr-direct] workload.
+#
+# hrr_disk_space_test.cc covers how capture stops before the file system
+# holding the archive fills. The binary defines statvfs, statvfs64 and fsync to
+# fake a small file system under HIP_HRR_CAPTURE_OUTPUT when the test sets
+# HRR_TEST_FAKE_FS_TOTAL; every other call goes on to libc. Contains its own
+# hidden [.][hrr-direct] workloads. POSIX only.
 
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
 # be compiled with the HIP device toolchain rather than a plain C++ compiler.
-# hrr_roundtrip_test.cc and hrr_api_matrix_test.cc are host-only drivers
-# (subprocess orchestration + hipRTC host calls) and stay plain C++ translation
-# units.
+# hrr_roundtrip_test.cc, hrr_api_matrix_test.cc and hrr_secure_exec_test.cc are
+# host-only drivers (subprocess orchestration + hipRTC host calls) and stay plain
+# C++ translation units.
 set(HRR_GPU_WORKLOAD_SOURCES
   hrr_workload_test.cc
   hrr_repro_workload_test.cc
@@ -44,6 +61,8 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_regions_test.cc
   hrr_api_matrix_workload_test.cc
   hrr_kernel_args_test.cc
+  hrr_va_placement_test.cc
+  hrr_disk_space_test.cc
 )
 
 if(NOT DEFINED HIP_PLATFORM)
@@ -57,8 +76,10 @@ endif()
 
 add_executable(hrr-integration-tests
   ${HRR_GPU_WORKLOAD_SOURCES}
+  hrr_pitched_d2h_test.cc
   hrr_roundtrip_test.cc
   hrr_api_matrix_test.cc
+  hrr_secure_exec_test.cc
 )
 set_target_properties(hrr-integration-tests PROPERTIES
   CXX_STANDARD 17
@@ -111,6 +132,15 @@ if(NOT WIN32)
   # Unit_HRR_Regions_MemcpyFirstTouchMaterialization went missing from a green
   # 106/106 run. tests/expected_cases_integration.txt is the backstop.
   target_compile_definitions(hrr-integration-tests PRIVATE HRR_HAVE_HSA)
+
+  # hrr_disk_space_test.cc defines these for the HIP runtime to bind to. An
+  # executable exports only what its link-time libraries reference, and the
+  # runtime may name either statvfs or statvfs64, so export all three.
+  set(_hrr_disk_space_exports "${CMAKE_CURRENT_BINARY_DIR}/hrr_disk_space_exports.list")
+  file(WRITE "${_hrr_disk_space_exports}" "{ statvfs; statvfs64; fsync; };\n")
+  target_link_options(hrr-integration-tests PRIVATE
+                      "LINKER:--dynamic-list=${_hrr_disk_space_exports}")
+  target_link_libraries(hrr-integration-tests PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 # Optional: hip_raw_trace, a genuine multi-threaded capture workload used only by

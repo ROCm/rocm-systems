@@ -4,7 +4,6 @@
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
-#include "rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -24,6 +23,10 @@ amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
       arch == ROCJITSU_CODE_ARCH_RDNA4) {
     return amdgpu::SdmaPacketDialect::Gfx11Plus;
+  }
+  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+      arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
+    return amdgpu::SdmaPacketDialect::LegacyExtendedCount;
   }
   return amdgpu::SdmaPacketDialect::Legacy;
 }
@@ -242,7 +245,7 @@ std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_or
   if (owner == nullptr)
     return std::nullopt;
   return amdgpu::ComputeQueueBindingPlan{
-      .factory = amdgpu::make_pm4_queue_binding_factory(*owner, std::move(callbacks)),
+      .factory = amdgpu::make_compute_queue_binding_factory(*owner, std::move(callbacks)),
       .xcd_fanout = false};
 }
 

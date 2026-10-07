@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Minimal DRM calls needed for KFD-bound VM mappings and command submission.
 //!
 //! This is a deliberately narrow raw-ioctl boundary, not a general libdrm
@@ -47,6 +49,7 @@ const AMDGPU_VM_MTYPE_UC: u32 = 4 << 5;
 const AMDGPU_GEM_USERPTR_VALIDATE: u32 = 1 << 2;
 const AMDGPU_GEM_USERPTR_REGISTER: u32 = 1 << 3;
 const AMDGPU_GEM_OP_GET_GEM_CREATE_INFO: u32 = 0;
+const AMDGPU_INFO_DEV_INFO: u32 = 0x16;
 pub(super) const GEM_DOMAIN_GTT: u64 = 1 << 1;
 pub(super) const GEM_CREATE_NO_CPU_ACCESS: u64 = 1 << 1;
 pub(super) const GEM_CREATE_CPU_GTT_USWC: u64 = 1 << 2;
@@ -57,8 +60,6 @@ pub(super) const GEM_CREATE_DISCARDABLE: u64 = 1 << 12;
 pub(super) const GEM_CREATE_GFX12_DCC: u64 = 1 << 16;
 pub(super) const GEM_CREATE_SPARSE: u64 = 1 << 29;
 const GEM_LIST_HANDLES_IS_IMPORT: u32 = 1;
-const AMDGPU_INFO_DEV_INFO: u32 = 0x16;
-const AMDGPU_DEVICE_INFO_PREFIX_SIZE: u32 = 20;
 const DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT: u32 = 1 << 1;
 const CLOCK_MONOTONIC: c_int = 1;
 const VM_UPDATE_WAIT_NANOSECONDS: i64 = 5_000_000_000;
@@ -104,21 +105,35 @@ struct GemUserptr {
 
 #[repr(C)]
 #[derive(Default)]
-struct AmdgpuInfo {
+struct AmdgpuInfoQuery {
     return_pointer: u64,
     return_size: u32,
     query: u32,
-    query_data: [u32; 4],
+    payload: [u32; 4],
 }
 
+/// Stable prefix of `drm_amdgpu_info_device` from the DRM UAPI.
 #[repr(C)]
-#[derive(Default)]
-struct AmdgpuDeviceInfoPrefix {
-    device_id: u32,
+#[derive(Clone, Copy, Default)]
+pub(super) struct DeviceInfoPrefix {
+    pub(super) device_id: u32,
     chip_revision: u32,
     external_revision: u32,
     pci_revision: u32,
-    family_id: u32,
+    pub(super) family_id: u32,
+}
+
+pub(super) fn device_info_prefix(file: &File) -> io::Result<DeviceInfoPrefix> {
+    let mut info = DeviceInfoPrefix::default();
+    let mut query = AmdgpuInfoQuery {
+        return_pointer: (&raw mut info) as u64,
+        return_size: u32::try_from(std::mem::size_of::<DeviceInfoPrefix>())
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?,
+        query: AMDGPU_INFO_DEV_INFO,
+        ..AmdgpuInfoQuery::default()
+    };
+    call(file, AMDGPU_INFO, &mut query)?;
+    Ok(info)
 }
 
 #[repr(C)]
@@ -287,7 +302,177 @@ union CommandWait {
     busy: u64,
 }
 
-fn call<T>(file: &File, request: u64, body: &mut T) -> io::Result<()> {
+#[cfg(test)]
+#[derive(Debug)]
+pub(super) enum TestCall {
+    CreateSyncobj(u32),
+    DestroySyncobj,
+    FailDestroySyncobj(i32),
+    CreateContext(u32),
+    FailCreateContext(i32),
+    DestroyContext,
+    FailDestroyContext(i32),
+    Submit(Result<u64, i32>),
+    WaitSubmission(Result<bool, i32>),
+    WaitTimeline(Result<bool, i32>),
+    ImportGem(u32),
+    CloseGem(Result<(), i32>),
+    Map(Result<(), i32>),
+    Unmap(Result<(), i32>),
+    Wait(Result<(), i32>),
+}
+
+#[cfg(test)]
+thread_local! {
+    static SCRIPT: std::cell::RefCell<Option<std::collections::VecDeque<TestCall>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run a native-owner test with a typed, ordered DRM reply script. Every
+/// expected ioctl must be consumed before the test returns.
+#[cfg(test)]
+#[allow(clippy::panic, reason = "a mismatched test ioctl is a test failure")]
+pub(super) fn with_script<R>(
+    steps: impl IntoIterator<Item = TestCall>,
+    run: impl FnOnce() -> R,
+) -> R {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            SCRIPT.with(|script| {
+                script.replace(None);
+            });
+        }
+    }
+    SCRIPT.with(|script| {
+        assert!(script.replace(Some(steps.into_iter().collect())).is_none());
+    });
+    let reset = Reset;
+    let result = run();
+    SCRIPT.with(|script| {
+        let remaining = script.borrow();
+        assert!(
+            remaining
+                .as_ref()
+                .is_some_and(std::collections::VecDeque::is_empty),
+            "unconsumed DRM test calls: {remaining:?}"
+        );
+    });
+    drop(reset);
+    result
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::panic,
+    clippy::expect_used,
+    reason = "a mismatched test ioctl is a test failure"
+)]
+fn scripted_call<T: 'static>(request: u64, body: &mut T) -> Option<io::Result<()>> {
+    use std::any::Any;
+    SCRIPT.with(|script| {
+        let mut script = script.borrow_mut();
+        let steps = script.as_mut()?;
+        let step = steps
+            .pop_front()
+            .expect("unexpected DRM ioctl after script");
+        let body = body as &mut dyn Any;
+        let reply = match (request, step) {
+            (SYNCOBJ_CREATE, TestCall::CreateSyncobj(handle)) => {
+                body.downcast_mut::<SyncobjCreate>()
+                    .expect("DRM syncobj create body")
+                    .handle = handle;
+                Ok(())
+            }
+            (SYNCOBJ_DESTROY, TestCall::DestroySyncobj) => Ok(()),
+            (SYNCOBJ_DESTROY, TestCall::FailDestroySyncobj(errno)) => {
+                Err(io::Error::from_raw_os_error(errno))
+            }
+            (AMDGPU_CTX, TestCall::CreateContext(context_id))
+                if body
+                    .downcast_ref::<Context>()
+                    .is_some_and(|record| unsafe { record.input.operation == CTX_ALLOC }) =>
+            {
+                body.downcast_mut::<Context>()
+                    .expect("DRM context create body")
+                    .output = ContextOutput { context_id, pad: 0 };
+                Ok(())
+            }
+            (AMDGPU_CTX, TestCall::FailCreateContext(errno))
+                if body
+                    .downcast_ref::<Context>()
+                    .is_some_and(|record| unsafe { record.input.operation == CTX_ALLOC }) =>
+            {
+                Err(io::Error::from_raw_os_error(errno))
+            }
+            (AMDGPU_CTX, TestCall::FailDestroyContext(errno))
+                if body
+                    .downcast_ref::<Context>()
+                    .is_some_and(|record| unsafe { record.input.operation == CTX_FREE }) =>
+            {
+                Err(io::Error::from_raw_os_error(errno))
+            }
+            (AMDGPU_CTX, TestCall::DestroyContext)
+                if body
+                    .downcast_ref::<Context>()
+                    .is_some_and(|record| unsafe { record.input.operation == CTX_FREE }) =>
+            {
+                Ok(())
+            }
+            (AMDGPU_CS, TestCall::Submit(reply)) => match reply {
+                Ok(sequence) => {
+                    body.downcast_mut::<CommandStream>()
+                        .expect("DRM command submission body")
+                        .sequence = sequence;
+                    Ok(())
+                }
+                Err(errno) => Err(io::Error::from_raw_os_error(errno)),
+            },
+            (AMDGPU_WAIT_CS, TestCall::WaitSubmission(reply)) => match reply {
+                Ok(retired) => {
+                    body.downcast_mut::<CommandWait>()
+                        .expect("DRM command wait body")
+                        .busy = u64::from(!retired);
+                    Ok(())
+                }
+                Err(errno) => Err(io::Error::from_raw_os_error(errno)),
+            },
+            (SYNCOBJ_TIMELINE_WAIT, TestCall::WaitTimeline(reply)) => {
+                reply.map(|_| ()).map_err(io::Error::from_raw_os_error)
+            }
+            (PRIME_FD_TO_HANDLE, TestCall::ImportGem(handle)) => {
+                body.downcast_mut::<PrimeHandle>()
+                    .expect("DRM import body")
+                    .handle = handle;
+                Ok(())
+            }
+            (AMDGPU_GEM_VA, TestCall::Map(reply))
+                if body
+                    .downcast_ref::<GemVa>()
+                    .is_some_and(|record| record.operation == AMDGPU_VA_OP_MAP) =>
+            {
+                reply.map_err(io::Error::from_raw_os_error)
+            }
+            (AMDGPU_GEM_VA, TestCall::Unmap(reply))
+                if body
+                    .downcast_ref::<GemVa>()
+                    .is_some_and(|record| record.operation == AMDGPU_VA_OP_UNMAP) =>
+            {
+                reply.map_err(io::Error::from_raw_os_error)
+            }
+            (SYNCOBJ_TIMELINE_WAIT, TestCall::Wait(reply))
+            | (GEM_CLOSE, TestCall::CloseGem(reply)) => reply.map_err(io::Error::from_raw_os_error),
+            (request, step) => panic!("unexpected DRM ioctl {request:#x} for {step:?}"),
+        };
+        Some(reply)
+    })
+}
+
+fn call<T: 'static>(file: &File, request: u64, body: &mut T) -> io::Result<()> {
+    #[cfg(test)]
+    if let Some(reply) = scripted_call(request, body) {
+        return reply;
+    }
     // SAFETY: Every caller supplies the exact repr(C) body for this request and
     // keeps it writable for the duration of the synchronous ioctl.
     let result = unsafe {
@@ -302,22 +487,6 @@ fn call<T>(file: &File, request: u64, body: &mut T) -> io::Result<()> {
     } else {
         Ok(())
     }
-}
-
-/// Reads the ASIC family from the render node already bound to this KFD VM.
-pub(super) fn asic_family_id(file: &File) -> io::Result<u32> {
-    let mut result = AmdgpuDeviceInfoPrefix::default();
-    let mut body = AmdgpuInfo {
-        return_pointer: ptr::from_mut(&mut result) as u64,
-        return_size: AMDGPU_DEVICE_INFO_PREFIX_SIZE,
-        query: AMDGPU_INFO_DEV_INFO,
-        ..AmdgpuInfo::default()
-    };
-    call(file, AMDGPU_INFO, &mut body)?;
-    if result.device_id == 0 || result.family_id == 0 {
-        return Err(io::Error::from(io::ErrorKind::InvalidData));
-    }
-    Ok(result.family_id)
 }
 
 /// Allocates one private DRM context on the render file bound to the KFD VM.
@@ -569,7 +738,12 @@ pub(super) fn supports_system_dma_buf_import(file: &File) -> bool {
 
 /// Registers a borrowed, page-aligned host extent in this render VM. The
 /// caller retains the pages through GEM close and owns the returned handle.
-pub(super) fn register_userptr(
+///
+/// # Safety
+/// The complete host page range must remain mapped and accessible until GEM
+/// close or final closure of the render file.
+#[allow(unsafe_code)]
+pub(super) unsafe fn register_userptr(
     file: &File,
     address: u64,
     size: u64,
@@ -732,11 +906,6 @@ pub(super) fn wait(file: &File, handle: u32, point: u64) -> io::Result<()> {
 
 const _: () = {
     assert!(std::mem::size_of::<GemClose>() == 8);
-    assert!(std::mem::size_of::<AmdgpuInfo>() == 32);
-    assert!(
-        std::mem::size_of::<AmdgpuDeviceInfoPrefix>() == AMDGPU_DEVICE_INFO_PREFIX_SIZE as usize
-    );
-    assert!(std::mem::offset_of!(AmdgpuDeviceInfoPrefix, family_id) == 16);
     assert!(std::mem::size_of::<PrimeHandle>() == 12);
     assert!(std::mem::size_of::<GemCreateInfo>() == 32);
     assert!(std::mem::size_of::<GemOp>() == 24);
@@ -755,7 +924,6 @@ const _: () = {
     assert!(std::mem::size_of::<IndirectBuffer>() == 32);
     assert!(std::mem::size_of::<TimelineSignal>() == 16);
     assert!(GEM_CLOSE == 0x4008_6409);
-    assert!(AMDGPU_INFO == 0x4020_6445);
     assert!(PRIME_FD_TO_HANDLE == 0xc00c_642e);
     assert!(AMDGPU_GEM_OP == 0xc018_6450);
     assert!(AMDGPU_GEM_LIST_HANDLES == 0xc010_6459);
