@@ -858,9 +858,16 @@ TEST_CASE("Unit_HRR_PinnedHost_Enumerate_Direct", "[.][hrr-direct]") {
   unsigned int count = 0;
   HRR_HIP_CHECK(hipModuleGetFunctionCount(&count, mod));
   REQUIRE(count == 1);
+  // The SDK this suite builds against may neither declare nor export it; the
+  // runtime it runs on does.
+  using EnumerateFn = hipError_t (*)(hipFunction_t*, unsigned int, hipModule_t);
+  void* sym = nullptr;
+  HRR_HIP_CHECK(hipGetProcAddress("hipModuleEnumerateFunctions", &sym, HIP_VERSION, 0, nullptr));
+  REQUIRE(sym != nullptr);
+  const auto enumerate = reinterpret_cast<EnumerateFn>(sym);
   hipFunction_t fns[4];
   for (uintptr_t k = 0; k < 4; ++k) fns[k] = reinterpret_cast<hipFunction_t>(0x10 * (k + 1));
-  HRR_HIP_CHECK(hipModuleEnumerateFunctions(fns, 4, mod));
+  HRR_HIP_CHECK(enumerate(fns, 4, mod));
   REQUIRE(fns[0] != reinterpret_cast<hipFunction_t>(0x10));
 
   // 0
