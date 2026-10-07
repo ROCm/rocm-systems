@@ -888,6 +888,20 @@ protected:
     return nullptr;
   }
 
+  // One data submission per round. Each round launches data, then signal, so
+  // the data round is every other kBatch entry. Chunking is recomputed per
+  // round; DataBatch() only returns the first.
+  std::vector<const Submission*> DataRounds() const {
+    std::vector<const Submission*> out;
+    int batchIdx = 0;
+    for (const auto& s : log_) {
+      if (s.kind != Submission::kBatch) continue;
+      if ((batchIdx % 2) == 0) out.push_back(&s);
+      batchIdx++;
+    }
+    return out;
+  }
+
   // Self resolves to the local window base. That base is the PeerData(4) image
   // (LSA slot 0), not the IPC image of world rank 0.
   void* SelfData() const { return dataWin_.userPtr; }
@@ -1073,6 +1087,29 @@ TEST_F(RmaCeNonPersistTest, NonPersist_DenseUnequalIncludingSelf_IssuesSelfLast)
   EXPECT_EQ(data->ops[3].dst, PeerData(1));
   EXPECT_EQ(data->ops[4].dst, SelfData());
   EXPECT_EQ(data->ops[4].size, 8u);
+}
+
+// Chunking is cleared and decided again each round. A dense unequal first
+// round must not leave the flag set once only one peer still has work.
+TEST_F(RmaCeNonPersistTest, NonPersist_SecondRound_DropsChunking) {
+  PushTask(/*peer=*/4, /*bytes=*/16, /*signal=*/false);
+  PushTask(/*peer=*/3, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/1, /*bytes=*/48, /*signal=*/false);
+  PushTask(/*peer=*/2, /*bytes=*/64, /*signal=*/false);
+  // Peer 2's second task is the only work left, so the next round is not dense.
+  PushTask(/*peer=*/2, /*bytes=*/8, /*signal=*/false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto rounds = DataRounds();
+  ASSERT_EQ(rounds.size(), 2u);
+  EXPECT_TRUE(rounds[0]->chunking);
+  ASSERT_EQ(rounds[0]->ops.size(), 4u);
+  EXPECT_EQ(rounds[0]->ops[0].size, 64u);
+  EXPECT_FALSE(rounds[1]->chunking);
+  ASSERT_EQ(rounds[1]->ops.size(), 1u);
+  EXPECT_EQ(rounds[1]->ops[0].dst, PeerData(2));
+  EXPECT_EQ(rounds[1]->ops[0].size, 8u);
 }
 
 // Two tasks for the same peer cannot share a batch, because a batched copy does

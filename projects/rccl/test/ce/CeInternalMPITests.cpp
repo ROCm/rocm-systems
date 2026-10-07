@@ -21,6 +21,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -644,11 +645,13 @@ TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
 // op's own size. The pattern mixes the high bits of the byte index so a wave
 // that dropped its source offset cannot match.
 //
+// Those finished bytes are also what a single unchunked batch would write, so
+// the round-robin log line is the witness that the wave split ran.
+//
 // ASSERT_* here returns from this helper. Nothing in the test follows the call.
 static void CheckChunkedBatch(ncclComm* comm, hipStream_t stream)
 {
     using namespace RCCLTestGuards;
-    const int64_t chunkParam = ncclParamCeChunkSize();
     const int64_t chunkParam = ncclParamCeChunkSize();
     if(chunkParam <= 100 || chunkParam > 64 * 1024 * 1024)
     {
@@ -697,9 +700,25 @@ static void CheckChunkedBatch(ncclComm* comm, hipStream_t stream)
     params.numOps   = kOps;
     params.chunking = true;
 
+    // Isolate this launch. The single-batch fallthrough logs a different line
+    // and never mentions round-robin chunking.
+    MPIHelpers::TestLogAssertionContext logCtx(
+        MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+
     ncclCeCollArgs collArgs{};
     ASSERT_EQ(ncclCeLaunchBatchOps(comm, &params, stream, &collArgs), ncclSuccess);
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+
+    const std::string log = logCtx.readNcclDebugLog() + logCtx.readPerRankStderrLog();
+    const std::string chunkMarker =
+        "Batch path with round-robin chunking (chunkSize=" + std::to_string(kChunk) +
+        "), numOps=" + std::to_string(kOps);
+    EXPECT_NE(log.find(chunkMarker), std::string::npos)
+        << "chunked launch did not take the round-robin wave path; log:\n"
+        << log;
+    EXPECT_EQ(log.find("Batch path without intraBatchSync"), std::string::npos)
+        << "chunked launch fell through to one batch; log:\n"
+        << log;
 
     for(int i = 0; i < kOps; ++i)
     {
