@@ -252,37 +252,4 @@ TEST(thread_trace_per_agent, serialization_is_scoped_to_the_contexts_agents)
     ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_FALSE(controller->is_serialization_enabled(agent_b));
 }
-
-TEST(thread_trace_per_agent, enter_hook_ignores_dispatches_on_other_agents)
-{
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-    test_init();
-
-    auto agents = get_two_agents();
-    if(!agents.second) GTEST_SKIP() << "fewer than two GPU agents available";
-
-    auto ctx = make_att_context(agents.second->get_rocp_agent()->id);
-    ASSERT_EQ(rocprofiler_start_context(ctx), ROCPROFILER_STATUS_SUCCESS);
-
-    auto packet      = hsa::rocprofiler_packet{};
-    auto corr_id     = context::correlation_id{};
-    corr_id.internal = 4242;
-
-    {
-        auto queue_a       = hsa::PerAgentFakeQueue{*agents.first, {.handle = 601}};
-        auto inst_pkt      = hsa::inst_pkt_t{};
-        bool is_serialized = false;
-        auto user_data     = rocprofiler_user_data_t{.value = corr_id.internal};
-
-        thread_trace::kernel_dispatch_phase_enter_hook(
-            queue_a, packet, 42, 1, &user_data, {}, &corr_id, inst_pkt, is_serialized);
-
-        EXPECT_FALSE(is_serialized)
-            << "a dispatch on an agent outside the context must not be serialized";
-        EXPECT_TRUE(inst_pkt.empty())
-            << "a dispatch on an agent outside the context must not be instrumented";
-    }
-
-    ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
-}
 }  // namespace

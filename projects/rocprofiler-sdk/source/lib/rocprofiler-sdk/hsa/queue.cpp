@@ -893,8 +893,7 @@ WriteInterceptor(const void* packets,
                 }
             });
 
-            // SPM is migrated off the per-queue callback registry: call its hook explicitly
-            // (the other services still flow through signal_callback above).
+            // SPM is migrated off the per-queue callback registry: call its hook explicitly.
             spm::kernel_dispatch_phase_enter_hook(
                 &queue,
                 kernel_packet,
@@ -907,7 +906,7 @@ WriteInterceptor(const void* packets,
                 _packet_data.is_serialized);
 
             // Counter collection is migrated off the per-queue callback registry: call its hook
-            // explicitly (the other services still flow through signal_callback above).
+            // explicitly.
             counters::kernel_dispatch_phase_enter_hook(
                 queue,
                 kernel_packet,
@@ -920,7 +919,7 @@ WriteInterceptor(const void* packets,
                 _packet_data.is_serialized);
 
             // Thread trace is migrated off the per-queue callback registry: call its hook
-            // explicitly (the other services still flow through signal_callback above).
+            // explicitly.
             thread_trace::kernel_dispatch_phase_enter_hook(
                 queue,
                 kernel_packet,

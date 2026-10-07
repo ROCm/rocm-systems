@@ -295,9 +295,9 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
     context::pop_client(1);
 }
 
-// resource_deinit() clears the agent map, so a completion arriving after it must be serviced
-// through the reference the packet carries. Routing it through a map lookup instead both loses
-// the trace and leaves post_move_data permanently above zero.
+// resource_deinit() clears the agent map while a dispatch can still be in flight. Its completion
+// has no agent left to deliver into, so the trace is dropped, but it must still drain
+// post_move_data.
 TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -367,9 +367,9 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
     context::pop_client(1);
 }
 
-// stop_context() clears enabled before it drops the serialization reference. A dispatch that
+// stop_context() clears enabled before it drops the serialization reference, so a dispatch that
 // reaches pre_kernel_call() in between must keep the SERIALIZE_ALL request, like any untraced
-// dispatch, or it skips the serializer barriers and overlaps a traced dispatch still in flight.
+// dispatch. This asserts the request a disabled tracer returns.
 TEST(ThreadTraceQueueHooks, StoppingContextKeepsSerializeAllRequest)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
