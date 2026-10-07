@@ -1266,11 +1266,11 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             details.append(f"#### {stage}\n\n" + _fenced(content))
             print(f"FAILED: {stage}")
 
-    # 2. amd-smi command test logs -- logged but non-fatal. The workflow
-    # appends "Error code: <rc>" (space + digit, same line) only on a real
-    # non-zero exit. The CLI's debug logging also prints an unsupported-feature
-    # status code, but wrapped onto the next line ("Error code:\n\t2 | ..."),
-    # so restrict the match to a same-line digit to skip that benign noise.
+    # 2. amd-smi command test logs. The workflow appends "Error code: <rc>"
+    # (space + digit, same line) only on a real non-zero exit. The CLI's debug
+    # logging also prints an unsupported-feature status code, but wrapped onto
+    # the next line ("Error code:\n\t2 | ..."), so restrict the match to a
+    # same-line digit to skip that benign noise.
     import re as _re
 
     err_code_re = _re.compile(r"Error code:[ \t]*\d")
@@ -1281,23 +1281,35 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             cmd_fails.append(log.stem.replace("amd-smi_", ""))
     if cmd_fails:
         joined = " ".join(cmd_fails)
-        details.append(f"#### Command Tests (non-fatal)\n\nFailed: `{joined}`")
+        failures.append(f"Command Tests ({len(cmd_fails)})")
+        details.append(f"#### Command Tests\n\nFailed: `{joined}`")
+
+    # The workflow appends "Exit code: <rc>" to a suite log when the suite exits
+    # non-zero, which also catches a crash that prints no test result.
+    exit_code_re = _re.compile(r"^Exit code: (\d+)$", _re.MULTILINE)
+
+    def _exit_code(text: str) -> int:
+        match = exit_code_re.search(text)
+        return int(match.group(1)) if match else 0
 
     # 3. AMDSMI gtest output
     gtest_log = results_dir / "amdsmi_tests.log"
     if gtest_log.exists():
         text = gtest_log.read_text(encoding="utf-8", errors="replace")
         gtest_fails = text.count("[  FAILED  ]")
-        if gtest_fails > 0:
-            failures.append(f"AMDSMI Tests ({gtest_fails})")
-            details.append(f"#### AMDSMI Tests \u2014 {gtest_fails} failure(s)\n\n" + _fenced(text))
+        rc = _exit_code(text)
+        if gtest_fails > 0 or rc:
+            count = gtest_fails if gtest_fails else f"exit {rc}"
+            title = f"{gtest_fails} failure(s)" if gtest_fails else f"exit {rc}"
+            failures.append(f"AMDSMI Tests ({count})")
+            details.append(f"#### AMDSMI Tests \u2014 {title}\n\n" + _fenced(text))
 
     # 4. Python test outputs
     fail_re = _re.compile(r"^(FAIL|ERROR):", _re.MULTILINE)
     for test_file in (
         "integration_test_output.txt",
         "unit_test_output.txt",
-        "perf_test_output.txt",
+        "cli_test_output.txt",
         "abi_compat_output.txt",
     ):
         full = results_dir / test_file
@@ -1305,10 +1317,13 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             continue
         text = full.read_text(encoding="utf-8", errors="replace")
         py_fails = len(fail_re.findall(text))
-        if py_fails > 0:
+        rc = _exit_code(text)
+        if py_fails > 0 or rc:
             name = test_file.replace("_output.txt", "").replace("_", " ")
-            failures.append(f"{name} ({py_fails})")
-            details.append(f"#### {name} \u2014 {py_fails} failure(s)\n\n" + _fenced(text))
+            count = py_fails if py_fails else f"exit {rc}"
+            title = f"{py_fails} failure(s)" if py_fails else f"exit {rc}"
+            failures.append(f"{name} ({count})")
+            details.append(f"#### {name} \u2014 {title}\n\n" + _fenced(text))
 
     # 5. example test results (segfault detection)
     crash_re = _re.compile(r"segfault|SIGSEGV|abort", _re.IGNORECASE)
@@ -1317,18 +1332,12 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
         if not full.exists():
             continue
         text = full.read_text(encoding="utf-8", errors="replace")
-        if crash_re.search(text):
+        if crash_re.search(text) or _exit_code(text):
             name = ex_log.replace(".log", "")
             failures.append(f"Example {name}")
             details.append(f"#### Example {name}\n\n" + _fenced(text))
 
-    # Render. Hard failures (build/install/verify/gtest/python/examples) drive
-    # the exit status; command-test failures are surfaced only as a warning so
-    # transient amd-smi CLI flakes do not fail the whole job.
-    cmd_summary = ""
-    if cmd_fails:
-        cmd_summary = f"\n\n:warning: Command tests (non-fatal): `{' '.join(cmd_fails)}`\n"
-
+    # Render. Every failure above drives the exit status.
     if failures:
         header = [
             f"## :x: CI Failed \u2014 {os_label}",
@@ -1337,14 +1346,12 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             "",
         ]
         header += [f"- :red_circle: {f}" for f in failures]
-        body = "\n".join(header) + cmd_summary + "\n\n" + "\n\n".join(details) + "\n"
+        body = "\n".join(header) + "\n\n" + "\n\n".join(details) + "\n"
     else:
         body = (
             f"## :white_check_mark: CI Passed \u2014 {os_label}\n\n"
             "All stages and tests passed successfully.\n"
         )
-        if cmd_fails:
-            body += cmd_summary + "\n" + "\n\n".join(details) + "\n"
 
     if summary_file is not None:
         with summary_file.open("a", encoding="utf-8") as fh:
@@ -1359,9 +1366,6 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
     if failures:
         joined = ", ".join(failures)
         print(f"::error::{len(failures)} failure(s) for {os_label}: {joined}")
-    elif cmd_fails:
-        print(f"::warning::Command tests failed (non-fatal) for {os_label}: {' '.join(cmd_fails)}")
-        print(f"All hard stages PASSED for {os_label}")
     else:
         print(f"All stages and tests PASSED for {os_label}")
     return len(failures)

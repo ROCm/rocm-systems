@@ -196,6 +196,41 @@ class SummarizeTests(unittest.TestCase):
             self.assertGreater(n, 0)
             self.assertIn(":x: CI Failed", summary.read_text())
 
+    def test_command_failure_fails_the_summary(self):
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            (results / "amd-smi_list.log").write_text("...\nError code: 2\n")
+            summary = results / "summary.md"
+            n = rab.summarize_results(results, "TestOS", summary)
+            self.assertEqual(n, 1)
+            self.assertIn("Command Tests (1)", summary.read_text())
+
+    def test_wrapped_status_code_is_not_a_command_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            (results / "amd-smi_xgmi.log").write_text("Error code:\n\t2 | not supported\n")
+            self.assertEqual(rab.summarize_results(results, "TestOS", None), 0)
+
+    def test_exit_code_line_fails_a_suite_without_failed_tests(self):
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            (results / "amdsmi_tests.log").write_text("[ RUN      ] A.B\nExit code: 139\n")
+            (results / "cli_test_output.txt").write_text("Ran 3 tests\nExit code: 1\n")
+            (results / "amd_smi_nodrm_ex.log").write_text("no device\nExit code: 1\n")
+            summary = results / "summary.md"
+            n = rab.summarize_results(results, "TestOS", summary)
+            text = summary.read_text()
+            self.assertEqual(n, 3)
+            self.assertIn("AMDSMI Tests (exit 139)", text)
+            self.assertIn("cli test (exit 1)", text)
+            self.assertIn("Example amd_smi_nodrm_ex", text)
+
+    def test_cli_test_failures_are_counted(self):
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            (results / "cli_test_output.txt").write_text("FAIL: test_command\n")
+            self.assertEqual(rab.summarize_results(results, "TestOS", None), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
