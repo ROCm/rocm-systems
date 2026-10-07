@@ -563,6 +563,7 @@ set(SRC_FILES
   transport/multicast.cc
   transport/net.cc
   transport/net_telemetry.cc
+  transport/rccl_ib_multiseg.h
   transport/net_ib/common.cc
   transport/net_ib/common.h
   transport/net_ib/connect.cc
@@ -572,6 +573,7 @@ set(SRC_FILES
   transport/net_ib/gin.cc
   transport/net_ib/gin.h
   transport/net_ib/init.cc
+  transport/net_ib/multiseg.h
   transport/net_ib/net_ib_gid_inspect.cc
   transport/net_ib/p2p.cc
   transport/net_ib/p2p.h
