@@ -29,8 +29,7 @@ ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -64,8 +63,7 @@ ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -99,8 +97,7 @@ ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -134,8 +131,7 @@ ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -169,8 +165,7 @@ ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -204,8 +199,7 @@ ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -239,8 +233,7 @@ ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -274,8 +267,7 @@ ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -780,8 +772,7 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;

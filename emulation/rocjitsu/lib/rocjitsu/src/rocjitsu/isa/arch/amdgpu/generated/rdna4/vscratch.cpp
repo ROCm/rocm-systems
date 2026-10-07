@@ -27,8 +27,7 @@ ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -60,8 +59,7 @@ ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -93,8 +91,7 @@ ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -126,8 +123,7 @@ ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -159,8 +155,7 @@ ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -192,8 +187,7 @@ ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -225,8 +219,7 @@ ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -258,8 +251,7 @@ ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -770,8 +762,7 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;

@@ -2822,8 +2822,7 @@ GlobalLoadAddtidB32Flat::GlobalLoadAddtidB32Flat(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;

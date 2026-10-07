@@ -12110,10 +12110,13 @@ class CodeGenerator:
                             for field in ('lds', 'tfe', 'gds')
                             if field in inst_field_names
                         ]
-                        guard = ' && '.join(result_guards) or 'true'
-                        ctor_body_parts.append(
-                            f'if ({guard}) flags_ |= SIMPLE_MEMORY_RESULT;'
-                        )
+                        if result_guards:
+                            guard = ' && '.join(result_guards)
+                            ctor_body_parts.append(
+                                f'if ({guard}) flags_ |= SIMPLE_MEMORY_RESULT;'
+                            )
+                        else:
+                            ctor_body_parts.append('flags_ |= SIMPLE_MEMORY_RESULT;')
 
                     if inst.name in ('LDS_DIRECT_LOAD', 'DS_DIRECT_LOAD'):
                         ctor_body_parts.append('flags_ |= CONDITIONAL_MEMORY_LANES;')

@@ -1355,8 +1355,7 @@ DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1443,8 +1442,7 @@ DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1473,8 +1471,7 @@ DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1503,8 +1500,7 @@ DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1533,8 +1529,7 @@ DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2819,8 +2814,7 @@ DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3782,8 +3776,7 @@ DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3812,8 +3805,7 @@ DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  if (true)
-    flags_ |= SIMPLE_MEMORY_RESULT;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
