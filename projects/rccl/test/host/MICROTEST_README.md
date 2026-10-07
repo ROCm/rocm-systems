@@ -217,8 +217,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 
 - **`rccl-UnitTestsMicroCeColl`** covers `src/ce_coll.cc` (via `CE_COLL_CC_PATH`,
   suite `LaunchPaths/CeAlltoAllvSyncMicrotest.*`). It is its own binary because
-  every other micro target links `fakes/ce_fakes.cc`, which defines the symbols
-  this unit defines. See `test_categories_micro_cecoll.yaml`.
+  `rccl-UnitTestsMicro`, `-WarpSpeed`, `-Enqueue` and `-TaskPrep` link
+  `fakes/ce_fakes.cc`, which defines the symbols this unit defines, and the
+  `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
+  in `fakes/nccl_stubs.cc`, which this target drops via
+  `RCCL_STUBS_OMIT_ncclCeFinalize`. See `test_categories_micro_cecoll.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.

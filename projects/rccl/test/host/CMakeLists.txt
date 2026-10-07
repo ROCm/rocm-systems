@@ -300,7 +300,7 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroCeColl: REAL src/ce_coll.cc, own binary since every other target links fakes/ce_fakes.cc.
+  # rccl-UnitTestsMicroCeColl: REAL src/ce_coll.cc; 4 targets link fakes/ce_fakes.cc, Init needs nccl_stubs.cc's ncclCeFinalize.
   set(TEST_MICRO_CE_COLL_SOURCE_FILES
     ce-coll-test.cc
     fakes/dev_runtime_fakes.cc
@@ -946,9 +946,11 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
 set(_MICRO_CE_BATCH_DEF "")
 if(NOT BUILD_TESTS)
   include(CheckCXXSymbolExists)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
   set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
   check_cxx_symbol_exists(hipMemcpyBatchAsync "hip/hip_runtime_api.h" _MICRO_HIP_MEMCPY_BATCH_ASYNC)
   unset(CMAKE_REQUIRED_DEFINITIONS)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
   if(_MICRO_HIP_MEMCPY_BATCH_ASYNC)
     set(_MICRO_CE_BATCH_DEF CE_BATCH_ASYNC_SUPPORTED)
   endif()
