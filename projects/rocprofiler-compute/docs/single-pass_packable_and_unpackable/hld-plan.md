@@ -20,14 +20,14 @@ Full historical plan drafts are preserved on branch
 
 ## 1. Terminology
 
-| Term | Meaning |
-|------|---------|
-| **Single-pass packable(SPP)** | Metric whose PMC set fits one hardware bucket. **Collection:** guarantee counter collection within a single pass (PMC duplication across passes allowed). **Analyze:** same-pass bind — each expression uses counters from one co-located pass (shadow columns `{counter}@pass:{key}`), so ratios are not evaluated on values merged across disjoint replays. |
-| **Single-pass unpackable(SPU)** | Cannot fit one bucket even with global repack → decompose into collectables and recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO`. (Slot-budget limited under `perfmon_config`.) |
-| **[Collectable](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-problem-decompose.html)** | A single-pass fragment (formula + PMC set) that must be collected together, then composed into a display metric ([Layer 1.5](../design/analysis-config-redesign/hld-analysis-config-redesign.md#layer-details) on today’s panel YAML). Used to solve **SPU** parents. |
-| **POLICY_GAP** | Shipping-layout diagnosis: multi-bucket today but **is** SPP under the new packer (will be fixed by Phase 1 below). |
-| **WEIGHTED_AVG** | Analyze composite: recombine single-pass submetrics as \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). |
-| **COLLECT_SUM / COLLECT_RATIO** | Analyze composites for sum-of-subcollectables and ratio-of-collectables parents. |
+| Term | Meaning | Example |
+|------|---------|---------|
+| **Single-pass packable(SPP)** | Metric whose PMC set fits one hardware bucket. **Collection:** guarantee counter collection within a single pass (PMC duplication across passes allowed). **Analyze:** same-pass bind — each expression uses counters from one co-located pass (shadow columns `{counter}@pass:{key}`), so ratios are not evaluated on values merged across disjoint replays. | `CPC Utilization` (one replay; same-pass bind) |
+| **Single-pass unpackable(SPU)** | Cannot fit one bucket even with global repack → decompose into collectables and recompose with `WEIGHTED_AVG` / `COLLECT_SUM` / `COLLECT_RATIO`. (Slot-budget limited under `perfmon_config`.) | `VALU FLOPs` (F16/F32/F64 rates) |
+| **[Collectable](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-problem-decompose.html)** | A single-pass fragment (formula + PMC set) that must be collected together, then composed into a display metric ([Layer 1.5](../design/analysis-config-redesign/hld-analysis-config-redesign.md#layer-details) on today’s panel YAML). Used to solve **SPU** parents. | `hbm_read_sub` (HBM Bandwidth read fragment) |
+| **POLICY_GAP** | Shipping-layout diagnosis: multi-bucket today but **is** SPP under the new packer (will be fixed by Phase 1 below). | `CPC Utilization` (shipping layout splits it across passes; SPP places it in one bucket) |
+| **WEIGHTED_AVG** | Analyze composite: recombine single-pass submetrics as \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). | `WEIGHTED_AVG(read_ratio_sub, write_ratio_sub)` with `TCC_EA0_RDREQ_sum` and `TCC_EA0_WRREQ_sum` |
+| **COLLECT_SUM / COLLECT_RATIO** | Analyze composites for sum-of-subcollectables and ratio-of-collectables parents. | HBM Bandwidth `COLLECT_SUM(hbm_read_sub, hbm_write_sub)`; AI HBM `COLLECT_RATIO`(FLOP pieces, bytes) |
 
 ---
 
