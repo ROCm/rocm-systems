@@ -32,6 +32,7 @@ test_categories:
       - "MappingStages/P2pImportMapStageFails.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      - "ConnStepAcquireMicrotest.*"
       # ras/ras.cc
       - "RasMicrotest.*"
       # ras/diagnostics_checks_common.cc
@@ -41,6 +42,8 @@ test_categories:
       - "DiagnosticsP2pReport/DiagnosticsP2pReportMicrotest.*"
       # ras/collectives.cc
       - "RasCollectivesMicrotest.*"
+      # ras/diagnostics.cc
+      - "RasDiagnosticsMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
       # rma/rma_proxy_launch.cc
