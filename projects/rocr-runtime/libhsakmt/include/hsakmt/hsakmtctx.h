@@ -883,20 +883,15 @@ hsaKmtDebugTrapIoctlCtx(
     );
 
 /**
-  Gets GPU and CPU clock counters for particular Node.
-
-  When precise_timestamps is true, GPU nodes are queried several times and the
-  shortest complete sample is returned. CPU-only nodes are read once.
-  When precise_timestamps is false, a single query is performed.
+  Gets GPU and CPU clock counters for particular Node
 */
 
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtGetClockCountersCtx(
-    HsaKFDContext     *ctx,                  //IN
-    HSAuint32         NodeId,                //IN
-    HsaClockCounters  *Counters,             //OUT
-    bool              precise_timestamps);   //IN
+    HsaKFDContext     *ctx,           //IN
+    HSAuint32         NodeId,         //IN
+    HsaClockCounters  *Counters);     //OUT
 
 /**
   Retrieves information on the available HSA counters

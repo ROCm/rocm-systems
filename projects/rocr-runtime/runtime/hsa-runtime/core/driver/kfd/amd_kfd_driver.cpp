@@ -1007,8 +1007,10 @@ hsa_status_t KfdDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clo
       core::Runtime::runtime_singleton_ != nullptr &&
       core::Runtime::runtime_singleton_->flag().enable_high_precision_timestamps();
 
-  if (HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter, precise_timestamps)) !=
-      HSAKMT_STATUS_SUCCESS)
+  HSAKMT_STATUS err = precise_timestamps
+      ? HSAKMT_CALL(hsaKmtGetClockCountersPrecise(node_id, clock_counter))
+      : HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter));
+  if (err != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
