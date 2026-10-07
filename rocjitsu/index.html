@@ -1817,6 +1817,23 @@ and formatting setup.</p>
 <p>HIP kernel tests and RCCL daemon tests require an ROCm installation.
 They are disabled automatically when <code>hipcc</code> or <code>libhsa-runtime64</code> is
 not found.</p>
+<p>Floating-point mode tests run in 16 batches to share process startup and
+GoogleTest registration. Per-case fixtures and assertions are unchanged.
+Run all batches with:</p>
+<div class="highlight"><pre><span></span><code>ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>-L<span class="w"> </span><span class="s1">'^fp-mode$'</span><span class="w"> </span>--output-on-failure
+</code></pre></div>
+<p>Each batch writes per-case GoogleTest results under <code>build/tests/gtest-results/</code>.
+Installed tests use the same batches and write results under <code>gtest-results/</code>
+in the installed test directory. The launcher removes each batch's previous XML
+before starting GoogleTest to avoid stale results after a crash or timeout.
+Cleanup errors fail the batch before GoogleTest starts.
+If the launcher cannot start or finish cleanup, an older report may remain;
+use CTest's status alongside the XML.
+CTest batches ignore an inherited <code>GTEST_FILTER</code> and suppress passing-case output;
+failure diagnostics and per-case XML are retained. To select individual cases or
+a family, run the dedicated executable with a GoogleTest filter:</p>
+<div class="highlight"><pre><span></span><code>build/tests/rocjitsu_fp_mode_tests<span class="w"> </span>--gtest_filter<span class="o">=</span><span class="s1">'BinaryF32/ValuFpModeTest.*'</span>
+</code></pre></div>
 <h2 id="running-hip-workloads">Running HIP workloads<a class="headerlink" href="#running-hip-workloads" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="c1"># Local mode (in-process simulation)</span>
 rocjitsu<span class="w"> </span>--config<span class="w"> </span>configs/gfx950_mi355x_kmd.json<span class="w"> </span>--<span class="w"> </span>./my_hip_app
