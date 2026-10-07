@@ -7,6 +7,7 @@
 
 #include "hrr_va_placement.h"
 
+#include <cerrno>
 #include <cstdio>
 
 #ifndef _WIN32
@@ -28,25 +29,31 @@ constexpr uint64_t kFallbackLines = 16;
 using ull = unsigned long long;
 
 #ifndef _WIN32
+enum class Hold { Held, Taken, Failed };
+
 // Hold [b, e) with an inaccessible placeholder. MAP_FIXED_NOREPLACE fails
 // instead of moving, and a kernel too old to know the flag treats the address
-// as a hint, so the returned address is checked either way.
-bool hold_exact(uint64_t b, uint64_t e) {
+// as a hint, so the returned address is checked either way. Taken means
+// something is mapped in the range; Failed is any other refusal, such as
+// ENOMEM under RLIMIT_AS, which a smaller piece would meet too.
+Hold hold_exact(uint64_t b, uint64_t e) {
     void* want = reinterpret_cast<void*>(b);
     void* p = mmap(want, e - b, PROT_NONE,
                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE,
                    -1, 0);
-    if (p == MAP_FAILED) return false;
-    if (p != want) { munmap(p, e - b); return false; }
-    return true;
+    if (p == MAP_FAILED) return errno == EEXIST ? Hold::Taken : Hold::Failed;
+    if (p != want) { munmap(p, e - b); return Hold::Taken; }
+    return Hold::Held;
 }
 
 // Hold what can be held of [b, e). A range that collides with something
-// mapped is split in half until the free pieces are found.
+// mapped is split in half until the free pieces are found. Any other failure
+// stops there: splitting would repeat it once per page.
 void hold_pieces(uint64_t b, uint64_t e, std::vector<VaRange>* out) {
     if (b >= e) return;
-    if (hold_exact(b, e)) { out->push_back({b, e}); return; }
-    if (e - b <= kPlacePage) return;
+    const Hold h = hold_exact(b, e);
+    if (h == Hold::Held) { out->push_back({b, e}); return; }
+    if (h == Hold::Failed || e - b <= kPlacePage) return;
     const uint64_t mid = va_floor(b + (e - b) / 2, kPlacePage);
     hold_pieces(b, mid, out);
     hold_pieces(mid, e, out);
@@ -243,7 +250,7 @@ bool VaPlacement::reserve(int device_count, bool peer_access) {
             reserve_line(false, p.base, p.end,
                          pr == hipSuccess ? "the runtime returned another address"
                                           : hipGetErrorString(pr));
-            if (!hold_exact(p.base, p.end)) re = va_subtract(re, {p});
+            if (hold_exact(p.base, p.end) != Hold::Held) re = va_subtract(re, {p});
         }
         holds.insert(holds.end(), re.begin(), re.end());
     }

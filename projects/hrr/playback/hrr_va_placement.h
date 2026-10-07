@@ -106,7 +106,14 @@ inline std::vector<VaRange> va_round_merge(std::vector<VaRange> in, uint64_t pag
 inline std::vector<VaRange> va_subtract(const std::vector<VaRange>& from,
                                         const std::vector<VaRange>& minus) {
     std::vector<VaRange> out;
-    size_t j = 0;
+    if (from.empty()) return out;
+    // Both lists are sorted and their ranges disjoint, so ends ascend too.
+    // Start at the first range of `minus` that ends past `from`, rather than
+    // walking up to it: one range taken from a long list is called once per
+    // range to hold.
+    size_t j = std::partition_point(minus.begin(), minus.end(),
+                                    [&](const VaRange& r) { return r.end <= from.front().base; }) -
+               minus.begin();
     for (const auto& f : from) {
         uint64_t cur = f.base;
         while (j < minus.size() && minus[j].end <= cur) ++j;

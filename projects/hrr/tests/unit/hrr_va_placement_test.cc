@@ -31,6 +31,8 @@
 #ifndef _WIN32
 // The placeholder and stderr tests below use mmap and dup2.
 #include <sys/mman.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -446,6 +448,27 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_MappingOverlap) {
   REQUIRE(hrr::va_mapping_overlapping({}, B, B + P) == nullptr);
 }
 
+HRR_TEST_CASE(Unit_HRR_VaPlacement_SubtractScalesWithTheAnswer) {
+  // Startup holds each planned range minus what /proc/self/maps lists, one
+  // range at a time. With a million mappings and five thousand ranges, a walk
+  // from the first mapping on every call is billions of steps.
+  constexpr size_t M = 1000000, R = 5000;
+  std::vector<VaRange> maps;
+  maps.reserve(M);
+  for (size_t i = 0; i < M; ++i) maps.push_back({B + 2 * i * P, B + (2 * i + 1) * P});
+  const auto t0 = std::chrono::steady_clock::now();
+  size_t pieces = 0;
+  for (size_t r = 0; r < R; ++r) {
+    // A range over the last mappings: two of them, and the gap between.
+    const uint64_t b = B + 2 * (M - 2 - r % 100) * P;
+    pieces += hrr::va_subtract({{b, b + 4 * P}}, maps).size();
+  }
+  const double secs =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  REQUIRE(pieces == 2 * R);
+  REQUIRE(secs < 1.0);
+}
+
 namespace {
 // A stand-in for hipMemUnmap that holds the unmap open until the test lets
 // it finish.
@@ -537,6 +560,38 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldFreePieces) {
     for (const auto& r : held) munmap(reinterpret_cast<void*>(r.base), r.end - r.base);
   }
   munmap(other, P);
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldStopsOnARefusal) {
+  // Under RLIMIT_AS every mmap fails with ENOMEM. Nothing is mapped in the
+  // range, so splitting it would only fail again for each of its 16M pages.
+  // In a child, since the limit cannot be lifted again by an unprivileged
+  // process. The alarm turns a hang into a failure.
+  constexpr uint64_t kRange = 64ull << 30;
+  const uint64_t b = free_range(kRange / P);
+  const pid_t pid = fork();
+  REQUIRE(pid >= 0);
+  if (pid == 0) {
+    alarm(60);
+    rlimit lim{};
+    getrlimit(RLIMIT_AS, &lim);
+    // What the process maps now, so the next mapping is over the limit.
+    size_t vm = 0;
+    for (const auto& r : hrr::read_proc_maps()) vm += r.end - r.base;
+    lim.rlim_cur = vm;
+    if (setrlimit(RLIMIT_AS, &lim) != 0) _exit(3);
+    const auto t0 = std::chrono::steady_clock::now();
+    std::vector<VaRange> held;
+    hrr::hold_free_pieces(b, b + kRange, {}, &held);
+    const double secs =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    _exit(!held.empty() ? 1 : secs >= 1.0 ? 2 : 0);
+  }
+  int status = 0;
+  REQUIRE(waitpid(pid, &status, 0) == pid);
+  INFO("child status " << status << " (exit 1: something was held, 2: over 1 s, 3: no limit)");
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
 }
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_VmmHoldRestoredAfterMiss) {
