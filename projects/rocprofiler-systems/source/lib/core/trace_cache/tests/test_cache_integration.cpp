@@ -50,7 +50,7 @@ struct sample_3_hash
     size_t operator()(const test_sample_3& s) const
     {
         size_t h = 0;
-        for(auto byte : s.payload)
+        for(auto const byte : s.payload)
         {
             h ^= std::hash<std::uint8_t>{}(byte) + 0x9e3779b9 + (h << 6) + (h >> 2);
         }
@@ -63,7 +63,7 @@ struct sample_4_hash
     size_t operator()(const test_sample_4& s) const
     {
         size_t h = 0;
-        for(auto val : s.data)
+        for(auto const val : s.data)
         {
             h ^= std::hash<std::uint32_t>{}(val) + 0x9e3779b9 + (h << 6) + (h >> 2);
         }
@@ -205,7 +205,7 @@ public:
 private:
     void check_sample_1(const test_sample_1& sample)
     {
-        auto it = m_expected_samples_1.find(sample);
+        auto const it = m_expected_samples_1.find(sample);
         EXPECT_NE(it, m_expected_samples_1.end());
         if(it != m_expected_samples_1.end())
         {
@@ -219,7 +219,7 @@ private:
 
     void check_sample_2(const test_sample_2& sample)
     {
-        auto it = m_expected_samples_2.find(sample);
+        auto const it = m_expected_samples_2.find(sample);
         EXPECT_NE(it, m_expected_samples_2.end());
         if(it != m_expected_samples_2.end())
         {
@@ -233,7 +233,7 @@ private:
 
     void check_sample_3(const test_sample_3& sample)
     {
-        auto it = m_expected_samples_3.find(sample);
+        auto const it = m_expected_samples_3.find(sample);
         EXPECT_NE(it, m_expected_samples_3.end());
         if(it != m_expected_samples_3.end())
         {
@@ -247,7 +247,7 @@ private:
 
     void check_sample_4(const test_sample_4& sample)
     {
-        auto it = m_expected_samples_4.find(sample);
+        auto const it = m_expected_samples_4.find(sample);
         EXPECT_NE(it, m_expected_samples_4.end());
         if(it != m_expected_samples_4.end())
         {
@@ -261,7 +261,7 @@ private:
 
     void check_sample_5(const test_sample_5& sample)
     {
-        auto it = m_expected_samples_5.find(sample);
+        auto const it = m_expected_samples_5.find(sample);
         EXPECT_NE(it, m_expected_samples_5.end());
         if(it != m_expected_samples_5.end())
         {
@@ -347,7 +347,7 @@ TEST_F(trace_cache_module_integration_test, buffer_fragmentation_handling)
         storage.shutdown();
     }
 
-    auto processor = std::make_shared<integration_sample_processor_t>();
+    auto const processor = std::make_shared<integration_sample_processor_t>();
     processor->set_expected_samples_1(expected_1);
     processor->set_expected_samples_3(expected_3);
 
@@ -428,7 +428,7 @@ TEST_F(trace_cache_module_integration_test, content_validation_edge_cases)
         storage.shutdown();
     }
 
-    auto processor = std::make_shared<integration_sample_processor_t>();
+    auto const processor = std::make_shared<integration_sample_processor_t>();
     processor->set_expected_samples_1(expected_1);
     processor->set_expected_samples_2(expected_2);
     processor->set_expected_samples_3(expected_3);
@@ -480,7 +480,7 @@ TEST_F(trace_cache_module_integration_test, stress_test_multiple_fragmentations)
         storage.shutdown();
     }
 
-    auto processor = std::make_shared<integration_sample_processor_t>();
+    auto const processor = std::make_shared<integration_sample_processor_t>();
     processor->set_expected_samples_1(expected_1);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -506,7 +506,7 @@ TEST_F(trace_cache_module_integration_test, performance_write_test)
         samples.push_back({ i, payloads[i] });
     }
 
-    auto start_time = std::chrono::high_resolution_clock::now();
+    auto const start_time = std::chrono::high_resolution_clock::now();
 
     {
         rocprofsys::trace_cache::buffer_storage<
@@ -524,10 +524,10 @@ TEST_F(trace_cache_module_integration_test, performance_write_test)
 
     using unit = std::chrono::microseconds;
 
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration_in_microseconds =
+    auto const end_time = std::chrono::high_resolution_clock::now();
+    auto const duration_in_microseconds =
         std::chrono::duration_cast<unit>(end_time - start_time);
-    auto period = static_cast<double>(unit::period().den);
+    auto const period = static_cast<double>(unit::period().den);
 
     const double avg_write_time =
         static_cast<double>(duration_in_microseconds.count()) / sample_count;
@@ -537,7 +537,7 @@ TEST_F(trace_cache_module_integration_test, performance_write_test)
     EXPECT_LT(avg_write_time, 50.0);
     EXPECT_GT(throughput, 10 * 1024.0);
 
-    auto processor = std::make_shared<integration_sample_processor_t>();
+    auto const processor = std::make_shared<integration_sample_processor_t>();
     processor->set_expected_samples_1(samples);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -619,7 +619,7 @@ TEST_F(trace_cache_module_integration_test, concurrent_write_read_validation)
     }
     EXPECT_EQ(total_written, total_samples);
 
-    auto processor = std::make_shared<integration_sample_processor_t>();
+    auto const processor = std::make_shared<integration_sample_processor_t>();
     processor->set_expected_samples_1(expected_1);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -658,7 +658,7 @@ TEST_F(trace_cache_module_integration_test, uint32_vector_element_size_handling)
         storage.shutdown();
     }
 
-    auto processor = std::make_shared<integration_sample_processor_t>();
+    auto const processor = std::make_shared<integration_sample_processor_t>();
     processor->set_expected_samples_4(expected_4);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -709,7 +709,7 @@ TEST_F(trace_cache_module_integration_test, mixed_vector_element_sizes)
         storage.shutdown();
     }
 
-    auto processor = std::make_shared<integration_sample_processor_t>();
+    auto const processor = std::make_shared<integration_sample_processor_t>();
     processor->set_expected_samples_3(expected_3);
     processor->set_expected_samples_4(expected_4);
 
@@ -750,7 +750,7 @@ TEST_F(trace_cache_module_integration_test, optional_field_roundtrip)
         storage.shutdown();
     }
 
-    auto processor = std::make_shared<integration_sample_processor_t>();
+    auto const processor = std::make_shared<integration_sample_processor_t>();
     processor->set_expected_samples_1(expected_1);
     processor->set_expected_samples_2(expected_2);
     processor->set_expected_samples_5(expected_5);

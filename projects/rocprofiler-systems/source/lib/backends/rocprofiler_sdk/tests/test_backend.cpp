@@ -159,10 +159,14 @@ TEST_F(backend_test, query_counter_details_returns_metadata_with_one_instance_an
 {
     const counter_id cid{ 7 };
 
-    dim_info      dim{ .dimension_name = "index", .index = 0 };
-    dim_info*     dims_arr[] = { &dim };
-    dim_instance  inst{ .instance_id = 1, .dimensions_count = 1, .dimensions = dims_arr };
-    dim_instance* insts_arr[] = { &inst };
+    dim_info dim{ .dimension_name = "index", .index = 0 };
+    // NOLINTNEXTLINE(misc-const-correctness) - dim_instance::dimensions is a non-const
+    // dim_info**
+    dim_info*    dims_arr[] = { &dim };
+    dim_instance inst{ .instance_id = 1, .dimensions_count = 1, .dimensions = dims_arr };
+    // NOLINTNEXTLINE(misc-const-correctness) - counter_info_v1_t::dimensions_instances is
+    // non-const
+    dim_instance*     insts_arr[] = { &inst };
     counter_info_v1_t fill{ .name                       = "SQ_WAVES",
                             .description                = "Wave count",
                             .block                      = "SQ",
@@ -194,8 +198,10 @@ TEST_F(backend_test, query_counter_details_returns_empty_dims_when_instance_has_
 {
     const counter_id cid{ 8 };
 
-    dim_instance  inst{ .instance_id = 2, .dimensions_count = 0, .dimensions = nullptr };
-    dim_instance* insts_arr[] = { &inst };
+    dim_instance inst{ .instance_id = 2, .dimensions_count = 0, .dimensions = nullptr };
+    // NOLINTNEXTLINE(misc-const-correctness) - counter_info_v1_t::dimensions_instances is
+    // non-const
+    dim_instance*     insts_arr[] = { &inst };
     counter_info_v1_t fill{ .name                       = "SQ_BUSY",
                             .description                = nullptr,
                             .block                      = nullptr,

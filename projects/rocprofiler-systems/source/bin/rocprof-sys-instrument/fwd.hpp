@@ -352,19 +352,19 @@ symtab_func_t*
 get_symtab_function(procedure_t*);
 
 size_t
-get_object_procedure_count_lb(object_t*);
+get_object_procedure_count_lb(object_t const*);
 
 std::vector<object_t*>
-filter_objects(std::vector<object_t*>* app_objects);
+filter_objects(std::vector<object_t*> const* app_objects);
 
 std::vector<module_t*>
-filter_modules(std::vector<module_t*>* app_modules);
+filter_modules(std::vector<module_t*> const* app_modules);
 
 std::unique_ptr<std::vector<module_t*>>
-get_modules(std::vector<object_t*>* app_objects);
+get_modules(std::vector<object_t*> const* app_objects);
 
 std::unique_ptr<std::vector<procedure_t*>>
-get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable);
+get_procedures(std::vector<module_t*> const* app_modules, bool include_uninstrumentable);
 
 namespace std
 {

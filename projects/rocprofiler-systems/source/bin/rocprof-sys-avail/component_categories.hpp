@@ -26,7 +26,7 @@ struct component_categories
     void operator()(std::set<std::string>& _v, type_list<Tp...>) const
     {
         //
-        auto _cleanup = [](std::string _type, const std::string& _pattern) {
+        auto const _cleanup = [](std::string _type, const std::string& _pattern) {
             auto _pos = std::string::npos;
             while((_pos = _type.find(_pattern)) != std::string::npos)
             {

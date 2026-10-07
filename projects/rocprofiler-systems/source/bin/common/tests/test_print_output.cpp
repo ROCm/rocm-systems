@@ -35,7 +35,7 @@ TEST_F(PrintOutputTest, PrintCommand_HasOutput)
 {
     const std::vector<std::string> command_args = { "./test", "arg1" };
     print_command(command_args);
-    auto output = get_cerr();
+    auto const output = get_cerr();
     EXPECT_NE(output.find("Executing"), std::string::npos);
     EXPECT_NE(output.find("./test"), std::string::npos);
     EXPECT_NE(output.find("arg1"), std::string::npos);
@@ -81,11 +81,11 @@ TEST_F(PrintOutputTest, PrintEnvironment_SortsOutput)
                                                            "ROCPROFSYS_M" };
 
     print_environment(env, updated);
-    auto output = get_cerr();
+    auto const output = get_cerr();
 
-    auto pos_a = output.find("ROCPROFSYS_A");
-    auto pos_m = output.find("ROCPROFSYS_M");
-    auto pos_z = output.find("ROCPROFSYS_Z");
+    auto const pos_a = output.find("ROCPROFSYS_A");
+    auto const pos_m = output.find("ROCPROFSYS_M");
+    auto const pos_z = output.find("ROCPROFSYS_Z");
 
     EXPECT_NE(pos_a, std::string::npos);
     EXPECT_NE(pos_m, std::string::npos);
@@ -110,7 +110,7 @@ TEST_F(PrintOutputTest, PrintEnvironment_GeneralVarsIncluded)
     const std::unordered_set<std::string_view> updated = { "ROCPROFSYS_UPDATED" };
 
     print_environment(env, updated, true);
-    auto output = get_cerr();
+    auto const output = get_cerr();
     EXPECT_NE(output.find("ROCPROFSYS_UPDATED"), std::string::npos);
     EXPECT_NE(output.find("ROCPROFSYS_GENERAL"), std::string::npos);
 }
@@ -122,7 +122,7 @@ TEST_F(PrintOutputTest, PrintEnvironment_GeneralVarsExcluded)
     const std::unordered_set<std::string_view> updated = { "ROCPROFSYS_UPDATED" };
 
     print_environment(env, updated, false);
-    auto output = get_cerr();
+    auto const output = get_cerr();
     EXPECT_NE(output.find("ROCPROFSYS_UPDATED"), std::string::npos);
     EXPECT_TRUE(does_not_contain(output, "ROCPROFSYS_GENERAL"));
 }

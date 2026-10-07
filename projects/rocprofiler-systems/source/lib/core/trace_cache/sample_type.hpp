@@ -30,6 +30,7 @@ enum class type_identifier_t : std::uint32_t
     ainic_pmc_sample        = 0x000A,
     kfd_sample              = 0x000B,
     gpu_perf_counter_sample = 0x000C,
+    hipfile_pmc_sample      = 0x000D,
     fragmented_space        = 0xFFFF
 };
 
@@ -140,7 +141,7 @@ struct scratch_memory_sample : cacheable_t
     scratch_memory_sample() = default;
     scratch_memory_sample(std::uint64_t _start_timestamp, std::uint64_t _end_timestamp,
                           std::uint64_t _thread_id, std::uint64_t _agent_id_handle,
-                          std::uint64_t _queue_id_handle, std::int32_t _kind,
+                          std::uint64_t _queue_id_handle, std::string_view _name,
                           std::int32_t _operation, std::int32_t _flags,
                           std::uint64_t _allocation_size,
                           std::uint64_t _correlation_id_internal,
@@ -150,7 +151,7 @@ struct scratch_memory_sample : cacheable_t
     , thread_id(_thread_id)
     , agent_id_handle(_agent_id_handle)
     , queue_id_handle(_queue_id_handle)
-    , kind(_kind)
+    , name(_name)
     , operation(_operation)
     , flags(_flags)
     , allocation_size(_allocation_size)
@@ -159,18 +160,18 @@ struct scratch_memory_sample : cacheable_t
     , stream_handle(_stream_handle)
     {}
 
-    std::uint64_t start_timestamp;
-    std::uint64_t end_timestamp;
-    std::uint64_t thread_id;
-    std::uint64_t agent_id_handle;
-    std::uint64_t queue_id_handle;
-    std::int32_t  kind;
-    std::int32_t  operation;
-    std::int32_t  flags;
-    std::uint64_t allocation_size;
-    std::uint64_t correlation_id_internal;
-    std::uint64_t correlation_id_ancestor;
-    size_t        stream_handle;
+    std::uint64_t    start_timestamp;
+    std::uint64_t    end_timestamp;
+    std::uint64_t    thread_id;
+    std::uint64_t    agent_id_handle;
+    std::uint64_t    queue_id_handle;
+    std::string_view name;
+    std::int32_t     operation;
+    std::int32_t     flags;
+    std::uint64_t    allocation_size;
+    std::uint64_t    correlation_id_internal;
+    std::uint64_t    correlation_id_ancestor;
+    size_t           stream_handle;
 };
 
 template <>
@@ -178,7 +179,7 @@ inline void
 serialize(std::uint8_t* buffer, const scratch_memory_sample& item)
 {
     utility::store_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.agent_id_handle, item.queue_id_handle, item.kind,
+                         item.agent_id_handle, item.queue_id_handle, item.name,
                          item.operation, item.flags, item.allocation_size,
                          item.correlation_id_internal, item.correlation_id_ancestor,
                          static_cast<std::uint64_t>(item.stream_handle));
@@ -191,7 +192,7 @@ deserialize(std::uint8_t*& buffer)
     scratch_memory_sample item;
     std::uint64_t         stream_handle;
     utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.agent_id_handle, item.queue_id_handle, item.kind,
+                         item.agent_id_handle, item.queue_id_handle, item.name,
                          item.operation, item.flags, item.allocation_size,
                          item.correlation_id_internal, item.correlation_id_ancestor,
                          stream_handle);
@@ -204,7 +205,7 @@ inline size_t
 get_size(const scratch_memory_sample& item)
 {
     return utility::get_size(item.start_timestamp, item.end_timestamp, item.thread_id,
-                             item.agent_id_handle, item.queue_id_handle, item.kind,
+                             item.agent_id_handle, item.queue_id_handle, item.name,
                              item.operation, item.flags, item.allocation_size,
                              item.correlation_id_internal, item.correlation_id_ancestor,
                              static_cast<std::uint64_t>(item.stream_handle));
@@ -217,9 +218,8 @@ struct memory_copy_sample : cacheable_t
     memory_copy_sample() = default;
     memory_copy_sample(std::uint64_t _start_timestamp, std::uint64_t _end_timestamp,
                        std::uint64_t _thread_id, std::uint64_t _dst_agent_id_handle,
-                       std::uint64_t _src_agent_id_handle, std::int32_t _kind,
-                       std::int32_t _operation, std::uint64_t _bytes,
-                       std::uint64_t _correlation_id_internal,
+                       std::uint64_t _src_agent_id_handle, std::string_view _name,
+                       std::uint64_t _bytes, std::uint64_t _correlation_id_internal,
                        std::uint64_t _correlation_id_ancestor,
                        std::uint64_t _dst_address_value, std::uint64_t _src_address_value,
                        size_t _stream_handle)
@@ -228,8 +228,7 @@ struct memory_copy_sample : cacheable_t
     , thread_id(_thread_id)
     , dst_agent_id_handle(_dst_agent_id_handle)
     , src_agent_id_handle(_src_agent_id_handle)
-    , kind(_kind)
-    , operation(_operation)
+    , name(_name)
     , bytes(_bytes)
     , correlation_id_internal(_correlation_id_internal)
     , correlation_id_ancestor(_correlation_id_ancestor)
@@ -238,19 +237,18 @@ struct memory_copy_sample : cacheable_t
     , stream_handle(_stream_handle)
     {}
 
-    std::uint64_t start_timestamp;
-    std::uint64_t end_timestamp;
-    std::uint64_t thread_id;
-    std::uint64_t dst_agent_id_handle;
-    std::uint64_t src_agent_id_handle;
-    std::int32_t  kind;
-    std::int32_t  operation;
-    std::uint64_t bytes;
-    std::uint64_t correlation_id_internal;
-    std::uint64_t correlation_id_ancestor;
-    std::uint64_t dst_address_value;
-    std::uint64_t src_address_value;
-    size_t        stream_handle;
+    std::uint64_t    start_timestamp;
+    std::uint64_t    end_timestamp;
+    std::uint64_t    thread_id;
+    std::uint64_t    dst_agent_id_handle;
+    std::uint64_t    src_agent_id_handle;
+    std::string_view name;
+    std::uint64_t    bytes;
+    std::uint64_t    correlation_id_internal;
+    std::uint64_t    correlation_id_ancestor;
+    std::uint64_t    dst_address_value;
+    std::uint64_t    src_address_value;
+    size_t           stream_handle;
 };
 
 template <>
@@ -258,8 +256,8 @@ inline void
 serialize(std::uint8_t* buffer, const memory_copy_sample& item)
 {
     utility::store_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.dst_agent_id_handle, item.src_agent_id_handle, item.kind,
-                         item.operation, item.bytes, item.correlation_id_internal,
+                         item.dst_agent_id_handle, item.src_agent_id_handle, item.name,
+                         item.bytes, item.correlation_id_internal,
                          item.correlation_id_ancestor, item.dst_address_value,
                          item.src_address_value,
                          static_cast<std::uint64_t>(item.stream_handle));
@@ -272,8 +270,8 @@ deserialize(std::uint8_t*& buffer)
     memory_copy_sample item;
     std::uint64_t      stream_handle;
     utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.dst_agent_id_handle, item.src_agent_id_handle, item.kind,
-                         item.operation, item.bytes, item.correlation_id_internal,
+                         item.dst_agent_id_handle, item.src_agent_id_handle, item.name,
+                         item.bytes, item.correlation_id_internal,
                          item.correlation_id_ancestor, item.dst_address_value,
                          item.src_address_value, stream_handle);
     item.stream_handle = stream_handle;
@@ -286,9 +284,9 @@ get_size(const memory_copy_sample& item)
 {
     return utility::get_size(item.start_timestamp, item.end_timestamp, item.thread_id,
                              item.dst_agent_id_handle, item.src_agent_id_handle,
-                             item.kind, item.operation, item.bytes,
-                             item.correlation_id_internal, item.correlation_id_ancestor,
-                             item.dst_address_value, item.src_address_value,
+                             item.name, item.bytes, item.correlation_id_internal,
+                             item.correlation_id_ancestor, item.dst_address_value,
+                             item.src_address_value,
                              static_cast<std::uint64_t>(item.stream_handle));
 }
 
@@ -299,7 +297,7 @@ struct memory_allocate_sample : cacheable_t
     memory_allocate_sample() = default;
     memory_allocate_sample(std::uint64_t _start_timestamp, std::uint64_t _end_timestamp,
                            std::uint64_t _thread_id, std::uint64_t _agent_id_handle,
-                           std::int32_t _kind, std::int32_t _operation,
+                           std::string_view _name, std::int32_t _operation,
                            std::uint64_t _allocation_size,
                            std::uint64_t _correlation_id_internal,
                            std::uint64_t _correlation_id_ancestor,
@@ -308,7 +306,7 @@ struct memory_allocate_sample : cacheable_t
     , end_timestamp(_end_timestamp)
     , thread_id(_thread_id)
     , agent_id_handle(_agent_id_handle)
-    , kind(_kind)
+    , name(_name)
     , operation(_operation)
     , allocation_size(_allocation_size)
     , correlation_id_internal(_correlation_id_internal)
@@ -317,17 +315,17 @@ struct memory_allocate_sample : cacheable_t
     , stream_handle(_stream_handle)
     {}
 
-    std::uint64_t start_timestamp;
-    std::uint64_t end_timestamp;
-    std::uint64_t thread_id;
-    std::uint64_t agent_id_handle;
-    std::int32_t  kind;
-    std::int32_t  operation;
-    std::uint64_t allocation_size;
-    std::uint64_t correlation_id_internal;
-    std::uint64_t correlation_id_ancestor;
-    std::uint64_t address_value;
-    size_t        stream_handle;
+    std::uint64_t    start_timestamp;
+    std::uint64_t    end_timestamp;
+    std::uint64_t    thread_id;
+    std::uint64_t    agent_id_handle;
+    std::string_view name;
+    std::int32_t     operation;
+    std::uint64_t    allocation_size;
+    std::uint64_t    correlation_id_internal;
+    std::uint64_t    correlation_id_ancestor;
+    std::uint64_t    address_value;
+    size_t           stream_handle;
 };
 
 template <>
@@ -335,7 +333,7 @@ inline void
 serialize(std::uint8_t* buffer, const memory_allocate_sample& item)
 {
     utility::store_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.agent_id_handle, item.kind, item.operation,
+                         item.agent_id_handle, item.name, item.operation,
                          item.allocation_size, item.correlation_id_internal,
                          item.correlation_id_ancestor, item.address_value,
                          static_cast<std::uint64_t>(item.stream_handle));
@@ -348,7 +346,7 @@ deserialize(std::uint8_t*& buffer)
     memory_allocate_sample item;
     std::uint64_t          stream_handle;
     utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.agent_id_handle, item.kind, item.operation,
+                         item.agent_id_handle, item.name, item.operation,
                          item.allocation_size, item.correlation_id_internal,
                          item.correlation_id_ancestor, item.address_value, stream_handle);
     item.stream_handle = stream_handle;
@@ -360,7 +358,7 @@ inline size_t
 get_size(const memory_allocate_sample& item)
 {
     return utility::get_size(item.start_timestamp, item.end_timestamp, item.thread_id,
-                             item.agent_id_handle, item.kind, item.operation,
+                             item.agent_id_handle, item.name, item.operation,
                              item.allocation_size, item.correlation_id_internal,
                              item.correlation_id_ancestor, item.address_value,
                              static_cast<std::uint64_t>(item.stream_handle));

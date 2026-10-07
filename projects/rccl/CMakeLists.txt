@@ -175,9 +175,6 @@ include(cmake/CheckSymbolExistsNoWarn.cmake)
 # Include rocSHMEM build module only if enabled
 if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   include(cmake/ROCSHMEM.cmake)
-  if(RCCL_POISON_HIP_ATOMICS)
-    message(WARNING "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are incompatible with RCCL_POISON_HIP_ATOMICS")
-  endif()
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -199,8 +196,10 @@ endif()
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
 
-# Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
+# Adjust GPU architectures for Address Sanitizer builds; per-family rules are
+# in cmake/AsanGpuTargets.cmake.
 if (BUILD_ADDRESS_SANITIZER)
+  include(cmake/AsanGpuTargets.cmake)
   set(_suffix "asan")
   set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
   foreach(_clang_rt_name ${_clang_rt_names})
@@ -220,18 +219,13 @@ if (BUILD_ADDRESS_SANITIZER)
   endif()
   message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
 
-  SET(amdgpu_targets "")
-  foreach(amdgpu_target IN LISTS GPU_TARGETS)
-    if(NOT amdgpu_target STREQUAL "")
-      string(FIND "${amdgpu_target}" ":xnack+" HAS_XNACK_SUFFIX)
-      if(HAS_XNACK_SUFFIX EQUAL -1)
-        list(APPEND amdgpu_targets "${amdgpu_target}:xnack+")
-      else()
-        list(APPEND amdgpu_targets "${amdgpu_target}")
-      endif()
-    endif()
-  endforeach()
-  SET(GPU_TARGETS "${amdgpu_targets}")
+  # Guarded so that "no targets at all" still reaches the curated diagnostic
+  # below. rocm_local_targets() reports failure as the literal "NOTFOUND",
+  # which if() treats as false along with the empty case.
+  if(GPU_TARGETS)
+    rccl_asan_adjust_gpu_targets(GPU_TARGETS ${GPU_TARGETS})
+    message(STATUS "ASAN: GPU targets = ${GPU_TARGETS}")
+  endif()
 endif()
 
 # Check if clang compiler can offload to GPU_TARGETS
@@ -242,6 +236,10 @@ else()
   message(WARNING "Unable to check for supported GPU targets. Falling back to default GPUs.")
   set(SUPPORTED_GPUS ${DEFAULT_GPUS})
 endif()
+
+# TLS backend for socket encryption (empty = disabled; OPENSSL3 = headers only, libssl is dlopen'd at runtime)
+set(TLS_BACKEND "$ENV{TLS_BACKEND}" CACHE STRING "TLS backend (empty or OPENSSL3)")
+set_property(CACHE TLS_BACKEND PROPERTY STRINGS "" OPENSSL3)
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}")
 
@@ -630,6 +628,17 @@ set(USE_AMDSMI ON CACHE INTERNAL "Force enable AMD SMI path since we use lazy lo
 #   endif ()
 # endif()
 
+## Check for TLS backend (socket encryption, see src/misc/crypt.cc)
+set(NCCL_TLS_INCLUDE_DIRS)
+if(TLS_BACKEND STREQUAL "OPENSSL3")
+  find_package(OpenSSL 3.0 REQUIRED COMPONENTS SSL Crypto)
+  add_compile_definitions(NCCL_TLS_BACKEND_OPENSSL3=1)
+  list(APPEND NCCL_TLS_INCLUDE_DIRS ${OPENSSL_INCLUDE_DIR})
+  include_directories(${NCCL_TLS_INCLUDE_DIRS})
+elseif(NOT TLS_BACKEND STREQUAL "")
+  message(FATAL_ERROR "Unsupported TLS_BACKEND '${TLS_BACKEND}'; expected OPENSSL3 or empty")
+endif()
+
 ## Check for BFD library if custom backtrace is requested
 if(BUILD_BFD)
   enable_language(C)
@@ -942,6 +951,7 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/env/json)
     add_subdirectory(plugins/gin/example)
     add_subdirectory(plugins/mixed/example)
+    add_subdirectory(plugins/rma/example)
   endif()
   add_subdirectory(test)
 
