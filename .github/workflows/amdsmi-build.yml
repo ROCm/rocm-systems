@@ -319,7 +319,8 @@ jobs:
             shift
             "$@" > "$log" 2>&1 || rc=$?
             if [ "$rc" -ne 0 ]; then
-              echo "Exit code: $rc" >> "$log"
+              # On its own line even when the output lacks a final newline.
+              printf '\nExit code: %s\n' "$rc" >> "$log"
               failed+=("$(basename "$log") (exit $rc)")
             fi
           }
