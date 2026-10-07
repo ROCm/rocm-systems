@@ -1261,8 +1261,11 @@ class db_analysis(OmniAnalyze_Base):
             for panel_config in arch_config.panel_configs.values():
                 table_names_map[panel_config["id"]] = panel_config["title"]
                 for source in panel_config["data source"]:
-                    for table in source.values():
-                        table_names_map[table["id"]] = table["title"]
+                    # Raw tables used by --list-stats do not require titles.
+                    if "metric_table" not in source:
+                        continue
+                    table = source["metric_table"]
+                    table_names_map[table["id"]] = table["title"]
 
             # Collect metric tables with table-level fields (table_name,
             # sub_table_name, value_columns) and rows computed once per table.

@@ -19,6 +19,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. Both formats now export kernel statistics successfully.
+
 ### Upcoming changes
 
 ### Known issues
