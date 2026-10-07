@@ -83,6 +83,7 @@ pub(super) enum Call<'a> {
     IpcExportHandle(&'a mut uapi::IpcExportHandle),
     Svm(&'a mut uapi::SvmArgs, &'a mut [uapi::SvmAttribute]),
     Spm(&'a mut uapi::Spm),
+    Ais(&'a mut uapi::AisArgs),
     CreateEvent(&'a mut uapi::CreateEvent),
     DestroyEvent(&'a mut uapi::DestroyEvent),
     Wait(&'a mut uapi::WaitEvents, &'a mut uapi::EventData),
@@ -255,6 +256,7 @@ impl Kfd {
             Call::IpcExportHandle(args) => (uapi::IPC_EXPORT_HANDLE, ptr::from_mut(*args).cast()),
             Call::Svm(_, _) => return Err(invalid_data("SVM dispatch path was not selected")),
             Call::Spm(args) => (uapi::SPM, ptr::from_mut(*args).cast()),
+            Call::Ais(args) => (uapi::AIS, ptr::from_mut(*args).cast()),
             Call::CreateEvent(args) => (uapi::CREATE_EVENT, ptr::from_mut(*args).cast()),
             Call::DestroyEvent(args) => (uapi::DESTROY_EVENT, ptr::from_mut(*args).cast()),
             Call::SetScratchBackingVa(args) => {
@@ -724,6 +726,31 @@ impl Kfd {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         self.call(Call::Spm(args))
+    }
+
+    /// A successful ioctl replaces the first 16 input bytes with its output.
+    /// An error leaves progress unknown because those bytes may still be input.
+    pub(super) fn ais(&self, input: uapi::AisInput) -> io::Result<uapi::AisOutput> {
+        if input.handle == 0
+            || input.size == 0
+            || input.size > crate::memory::interop::linux::AIS_MAX_TRANSFER_BYTES
+            || input.descriptor < 0
+            || input.file_offset < 0
+            || input
+                .file_offset
+                .checked_add(i64::try_from(input.size).map_err(invalid_data)?)
+                .is_none()
+            || !matches!(input.operation, uapi::AIS_READ | uapi::AIS_WRITE)
+        {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+        let mut args = uapi::AisArgs::new(input);
+        self.call(Call::Ais(&mut args))?;
+        let output = args.completed_output();
+        if output.size_copied > input.size || output.status > 0 {
+            return Err(invalid_data("KFD returned invalid AIS progress or status"));
+        }
+        Ok(output)
     }
 
     pub(super) fn create_queue(&self, args: &mut uapi::CreateQueue) -> io::Result<()> {

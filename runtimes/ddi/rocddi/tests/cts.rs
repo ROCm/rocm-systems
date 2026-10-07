@@ -8,7 +8,11 @@
 )]
 
 use std::error::Error;
+use std::fs::OpenOptions;
 use std::io;
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::FileExt;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU16, AtomicU64, Ordering, fence};
 use std::time::{Duration, Instant};
 
@@ -17,8 +21,98 @@ use rocddi::gpu::queue::{
     SdmaEngineSelection,
 };
 use rocddi::gpu::{CopyRect, GpuCopySequence};
+use rocddi::memory::interop::linux::{AisFileOperation, ais_transfer};
 use rocddi::memory::{DeviceAccess, MemoryKind};
 use rocddi::session::{Session, SessionLifetime};
+
+#[test]
+#[ignore = "requires GFX1201, KFD AIS, and ROCDDI_CTS_AIS_DIR on P2P-capable storage"]
+fn gfx1201_ais_vram_file_contract() -> Result<(), Box<dyn Error>> {
+    const BYTES: usize = 4096;
+
+    struct RemoveFile(PathBuf);
+    impl Drop for RemoveFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    let directory = std::env::var_os("ROCDDI_CTS_AIS_DIR")
+        .ok_or_else(|| io::Error::other("ROCDDI_CTS_AIS_DIR is required for AIS CTS"))?;
+    let mut path = PathBuf::from(directory);
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    path.push(format!("rocddi-ais-{}-{nonce}", std::process::id()));
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    let _cleanup = RemoveFile(path);
+
+    let mut expected = [0_u8; BYTES];
+    for (index, byte) in expected.iter_mut().enumerate() {
+        *byte = (index as u8).wrapping_mul(7).wrapping_add(3);
+    }
+    file.write_all_at(&expected, 0)?;
+    file.write_all_at(&[0_u8; BYTES], BYTES as u64)?;
+    file.sync_all()?;
+
+    let mut session = Session::new(SessionLifetime::Process)?;
+    let mut selected = None;
+    session.enumerate(&mut |endpoint| {
+        if endpoint
+            .gpu()
+            .is_some_and(|gpu| (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping) == (12, 0, 1))
+        {
+            selected = Some(endpoint);
+        }
+        Ok(())
+    })?;
+    let endpoint = selected.ok_or_else(|| io::Error::other("GFX1201 endpoint is unavailable"))?;
+    let device = session.activate(&endpoint)?;
+    let mut allocation = device.allocate(
+        MemoryKind::DeviceLocal {
+            host_visible: false,
+            coherent: false,
+            uncached: false,
+            contiguous: false,
+        },
+        BYTES as u64,
+        BYTES as u64,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+    )?;
+    assert_eq!(allocation.info().host_address, None);
+
+    let read = ais_transfer(
+        &allocation,
+        file.as_raw_fd(),
+        0,
+        BYTES as u64,
+        0,
+        AisFileOperation::Read,
+    )?;
+    assert_eq!((read.size_copied, read.status), (BYTES as u64, 0));
+    let write = ais_transfer(
+        &allocation,
+        file.as_raw_fd(),
+        0,
+        BYTES as u64,
+        i64::try_from(BYTES)?,
+        AisFileOperation::Write,
+    )?;
+    assert_eq!((write.size_copied, write.status), (BYTES as u64, 0));
+    let mut actual = [0_u8; BYTES];
+    file.read_exact_at(&mut actual, BYTES as u64)?;
+    assert_eq!(actual, expected);
+
+    allocation.free()?;
+    drop(allocation);
+    drop(device);
+    session.destroy()?;
+    Ok(())
+}
 
 #[test]
 #[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]

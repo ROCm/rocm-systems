@@ -30,7 +30,8 @@ use crate::event::GpuMemoryFault;
 use crate::host_storage::{Allocator, Owned, Shared};
 use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
 use crate::memory::interop::linux::{
-    DmaBuf, KfdIpcMemoryHandle, KfdSvmAccess, KfdSvmAttribute, KfdSvmLocation,
+    AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle, KfdSvmAccess, KfdSvmAttribute,
+    KfdSvmLocation,
 };
 use crate::memory::{
     AllocationDesc, AllocationLimits, DeviceAccess, HostRegistration, MemoryKind, OwnedMemoryKind,
@@ -1252,6 +1253,17 @@ impl LinuxMemoryInteropDriver for LinuxKfdDriver {
 
     fn write_descriptor_at(descriptor: RawFd, buffer: &[u8], offset: i64) -> io::Result<usize> {
         util::write_descriptor_at(descriptor, buffer, offset)
+    }
+
+    fn ais_transfer(
+        allocation: &Self::Allocation,
+        descriptor: RawFd,
+        allocation_offset: u64,
+        size: u64,
+        file_offset: i64,
+        operation: AisFileOperation,
+    ) -> Result<AisFileResult, Error> {
+        allocation.ais_transfer(descriptor, allocation_offset, size, file_offset, operation)
     }
 
     fn supports_system_dma_buf_import(device: &DeviceState) -> bool {

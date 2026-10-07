@@ -62,8 +62,9 @@ The core source is organized by ownership domain:
   and kind-neutral introspection. `gpu/` is the checked GPU capability view and
   exposes GPU queues and profiling, with KFD events below `gpu::event::linux`;
 - `memory/` owns provider-generic allocation, address-reservation, and
-  mapping owners. `memory::interop::linux` contains DMA-BUF, KFD IPC, and KFD
-  SVM contracts used to exchange backing with Linux APIs and other processes;
+  mapping owners. `memory::interop::linux` contains DMA-BUF, KFD IPC, KFD
+  SVM, and AIS file-transfer contracts used with Linux APIs and other
+  processes;
 - `driver/` is the private downward-facing platform contract, with the current
   Linux KFD and DRM implementation under `driver/builtin/linux_kfd/`. Linux
   memory and event interop have separate driver contracts so future platform
@@ -114,6 +115,17 @@ rocddi-owned system staging, so the host slice is read before native work or
 written after retirement. An uncertain copy keeps staging live for process
 teardown. `supports_linear_copy` reports whether the native path is enabled
 for the activated GPU.
+
+`memory::interop::linux::ais_transfer` borrows a descriptor and a live mapped
+VRAM allocation for one synchronous KFD AIS read or write. The allocation
+owner checks the logical and native backing ranges and supplies its KFD handle;
+the Linux call boundary submits at most `AIS_MAX_TRANSFER_BYTES` in one ioctl.
+The operation uses a positioned file offset and does not change the shared
+file position. A successful ioctl returns its copied-byte count and operation
+status. On an ioctl error, the input and output fields overlap in the UAPI, so
+the byte count is unknown and rocddi preserves the native errno without
+replaying the operation. Linux storage and PCI P2P capability determine whether
+KFD can execute a particular transfer.
 
 Direct SDMA queues use byte-addressed rings and monotonic 64-bit read and
 write indices. `QueueParameters::Sdma` keeps the KFD-selected engine route.
@@ -183,14 +195,27 @@ cmake --build /tmp/rocddi-cmake
 ```
 
 On a GFX1201 system with KFD and its DRM render node, run the opt-in native
-Rust contract tests with `cargo test -p rocddi --test cts --locked -- --ignored`.
+Rust contract tests with:
+
+```sh
+cargo test -p rocddi --test cts --locked -- --ignored --skip gfx1201_ais_vram_file_contract
+```
+
 It copies and fills through ordinary allocations, copies through rocddi-owned
 host staging and a device virtual-memory mapping, and submits a packet through
 a targeted user SDMA ring with device-producer mappings, byte-index, and
-doorbell progress checks. The capability case checks expert queue scheduling
-against KFD 1.20 or newer and the GFX1201 scratch aperture against the
-reported XCC count. The AQL case submits a barrier through a compute queue
-and checks GPU signal completion and queue retirement.
+doorbell progress checks. It also submits an AQL barrier through a compute
+queue and checks GPU signal completion and queue retirement. The capability
+case checks expert queue scheduling against KFD 1.20 or newer and the GFX1201
+scratch aperture against the reported XCC count.
+The AIS case reads a file into private VRAM and writes it back. Run it with
+`ROCDDI_CTS_AIS_DIR` set to a writable directory on P2P-capable block or NFS
+storage:
+
+```sh
+ROCDDI_CTS_AIS_DIR=/path/to/p2p-storage \
+  cargo test -p rocddi --test cts --locked gfx1201_ais_vram_file_contract -- --ignored
+```
 
 The CMake build from `runtimes/` stages the same combined shared image and
 AMDF static archive. Native allocations, virtual mappings, and frontend pools

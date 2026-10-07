@@ -2022,6 +2022,84 @@ impl KfdAllocation {
 }
 
 impl KfdAllocation {
+    pub(super) fn ais_transfer(
+        &self,
+        descriptor: i32,
+        offset: u64,
+        size: u64,
+        file_offset: i64,
+        operation: u32,
+    ) -> Result<uapi::AisOutput, Error> {
+        self.check_address()?;
+        if self.native_flags & (uapi::VRAM | uapi::GTT | uapi::USERPTR) != uapi::VRAM {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "AIS requires a mapped VRAM allocation",
+            ));
+        }
+        if operation == uapi::AIS_READ && self.native_flags & uapi::WRITABLE == 0 {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "AIS file read requires writable VRAM",
+            ));
+        }
+        let size = size.min(crate::memory::interop::linux::AIS_MAX_TRANSFER_BYTES);
+        let signed_size = i64::try_from(size).map_err(|_| {
+            error(
+                ErrorKind::InvalidArgument,
+                "AIS transfer exceeds the file offset range",
+            )
+        })?;
+        if descriptor < 0
+            || file_offset < 0
+            || file_offset.checked_add(signed_size).is_none()
+            || size == 0
+            || offset
+                .checked_add(size)
+                .is_none_or(|end| end > self.logical_size)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "invalid AIS descriptor, offset, or logical range",
+            ));
+        }
+        let handle_offset = (self.device_byte_offset as u64)
+            .checked_add(offset)
+            .ok_or_else(|| error(ErrorKind::InvalidArgument, "AIS backing offset overflows"))?;
+        let native_size = self
+            .reservation
+            .as_ref()
+            .ok_or_else(|| error(ErrorKind::Internal, "AIS allocation lost its reservation"))?
+            .usable_size() as u64;
+        if handle_offset
+            .checked_add(size)
+            .is_none_or(|end| end > native_size)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "AIS range exceeds the native backing",
+            ));
+        }
+        let handle = self.handle.ok_or_else(|| {
+            error(
+                ErrorKind::DriverContract,
+                "AIS allocation has no KFD handle",
+            )
+        })?;
+        self.vm
+            .loss
+            .kfd
+            .ais(uapi::AisInput {
+                handle,
+                handle_offset,
+                file_offset,
+                size,
+                operation,
+                descriptor,
+            })
+            .map_err(|source| native_error("AMDKFD_IOC_AIS_OP", source))
+    }
+
     pub(super) fn peer_mapping_source(
         &self,
         device: &Shared<DeviceVm>,
