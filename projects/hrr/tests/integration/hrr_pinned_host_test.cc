@@ -32,9 +32,17 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
+
+#ifndef _WIN32
+#include <sys/mman.h>
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
+#endif
 
 #if defined(HRR_PLAYBACK_EXE) && defined(HRR_TEST_EXE)
 
@@ -724,8 +732,16 @@ TEST_CASE("Unit_HRR_PinnedHost_EntryPoints_Direct", "[.][hrr-direct]") {
 //      unmapped bytes, or records whatever is mapped there now.
 // Captured only: events after a reset replay against a reset device (see
 // Unit_HRR_ApiMatrix_Reset_Direct).
+//
+// On POSIX the workload maps A's addresses with no access as soon as the
+// reset frees them, so B and the runtime cannot reuse them, and a capture
+// that still reads A crashes. Where the reset leaves A mapped, it looks for
+// an address in A the runtime does not know and B does not cover, and skips
+// the case if there is none.
 // ===========================================================================
 constexpr size_t kResetABytes = 8 * kPinnedBytes;
+// Addresses in A the workload tries as the stale pointer.
+constexpr size_t kResetProbes = 16;
 
 TEST_CASE("Unit_HRR_PinnedHost_Reset_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -740,6 +756,15 @@ TEST_CASE("Unit_HRR_PinnedHost_Reset_Direct", "[.][hrr-direct]") {
   read_pinned(a, out, 30);
 
   HRR_HIP_CHECK(hipDeviceReset());
+  bool held = false;
+#ifndef _WIN32
+  // MAP_FIXED_NOREPLACE fails if any of A is still mapped. A kernel that
+  // does not know the flag treats the address as a hint instead.
+  void* hold = mmap(a, kResetABytes, PROT_NONE,
+                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+  held = hold == a;
+  if (hold != MAP_FAILED && !held) munmap(hold, kResetABytes);
+#endif
   HRR_HIP_CHECK(hipSetDevice(0));
 
   // 1
@@ -753,26 +778,35 @@ TEST_CASE("Unit_HRR_PinnedHost_Reset_Direct", "[.][hrr-direct]") {
   // 2
   const auto lo = reinterpret_cast<uintptr_t>(b);
   int* probe = nullptr;
-  for (size_t off : {size_t{0}, kResetABytes / 2, kResetABytes - 4096}) {
+  std::ostringstream probes;
+  probes << "A " << a << ", B " << b << ", A held after reset: " << held;
+  for (size_t k = 0; k < kResetProbes; ++k) {
+    const size_t off = k * (kResetABytes / kResetProbes);
     int* p = a + off / sizeof(int);
     const auto at = reinterpret_cast<uintptr_t>(p);
     hipPointerAttribute_t attr{};
     const bool known = hipPointerGetAttributes(&attr, p) == hipSuccess &&
                        attr.type != hipMemoryTypeUnregistered;
     (void)hipGetLastError();
-    INFO("A+" << off << " known after reset: " << known);
-    if (!known && !(at >= lo && at < lo + kPinnedBytes)) {
-      probe = p;
-      break;
-    }
+    const bool in_b = at >= lo && at < lo + kPinnedBytes;
+    probes << "\n  A+" << off << ": known " << known << ", in B " << in_b;
+    if (probe == nullptr && !known && !in_b) probe = p;
   }
-  REQUIRE(probe != nullptr);
-  hipLaunchKernelGGL(hrr_pinned_read, dim3(1), dim3(kThreads), 0, nullptr, probe, out, 0);
-  HRR_HIP_CHECK(hipGetLastError());
-  HRR_HIP_CHECK(hipDeviceSynchronize());
+  std::printf("%s\n", probes.str().c_str());
+  if (probe == nullptr) {
+    skip_direct("after hipDeviceReset every probed address in the old buffer is known "
+                "to the runtime or inside the new one:\n" + probes.str());
+  } else {
+    hipLaunchKernelGGL(hrr_pinned_read, dim3(1), dim3(kThreads), 0, nullptr, probe, out, 0);
+    HRR_HIP_CHECK(hipGetLastError());
+    HRR_HIP_CHECK(hipDeviceSynchronize());
+  }
 
   HRR_HIP_CHECK(hipFree(out));
   HRR_HIP_CHECK(hipHostFree(b));
+#ifndef _WIN32
+  if (held) munmap(a, kResetABytes);
+#endif
 }
 
 namespace {
@@ -2439,7 +2473,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_EntryPoints) {
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_DeviceReset) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_reset.hrr");
-  capture_case("Unit_HRR_PinnedHost_Reset_Direct", cap.path);
+  const std::string skipped = capture_case("Unit_HRR_PinnedHost_Reset_Direct", cap.path);
+  if (!skipped.empty()) HRR_SKIP(skipped);
   hrr::Archive arc;
   REQUIRE(hrr::load_archive(hrr_single_process_archive(cap.path).string(), arc));
   const auto kls = launches_of(arc);
