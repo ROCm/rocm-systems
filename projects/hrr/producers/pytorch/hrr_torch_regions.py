@@ -44,10 +44,11 @@ _BATCH_PREFIX = struct.calcsize(_EVENT_HEADER) + 8  # + u32 n, u32 flags
 
 _INTERVAL_S = float(os.environ.get("HRR_REGIONS_INTERVAL_S", "2.0"))
 _VERBOSE = os.environ.get("HRR_REGIONS_VERBOSE", "") not in ("", "0")
-# PyTorch's trace ring depth, which bounds how much allocator history the
-# process holds. Must exceed the number of alloc/free events between two polls,
-# or events are overwritten before we read them. A workload that allocates more
-# than that in HRR_REGIONS_INTERVAL_S needs a larger value or a shorter interval.
+# PyTorch's trace ring depth, per device, which bounds how much allocator
+# history the process holds. Must exceed the number of alloc/free events between
+# two polls, or events are overwritten before we read them. A workload that
+# allocates more than that in HRR_REGIONS_INTERVAL_S needs a larger value or a
+# shorter interval.
 _MAX_ENTRIES = int(os.environ.get("HRR_REGIONS_MAX_ENTRIES", "100000"))
 
 # PyTorch device_trace actions that change what is live. free_requested and

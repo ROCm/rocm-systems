@@ -43,13 +43,15 @@ os.close(fd)
 
 sys.path.insert(0, sys.argv[1])
 import hrr_torch_regions
+if sys.argv[3] == "start":
+    hrr_torch_regions.start()
 
 deadline = time.monotonic() + float(sys.argv[2])
 while not calls and time.monotonic() < deadline:
     time.sleep(0.05)
 print(json.dumps({
     "calls": calls,
-    "thread": any(t.name == "hrr-regions" for t in threading.enumerate()),
+    "threads": sum(t.name == "hrr-regions" for t in threading.enumerate()),
 }))
 """
 
@@ -60,16 +62,20 @@ class AutostartTest(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp(prefix="hrr_regions_autostart_"))
         self.addCleanup(shutil.rmtree, self.root, True)
 
-    def import_producer(self, env, wait_s):
+    def import_producer(self, env, wait_s, call_start=False):
         """Import the producer in a child with only `env` set among the
-        HRR_REGIONS_* variables; return what it did within `wait_s`."""
+        HRR_REGIONS_* variables, then call start() if `call_start`; return what
+        it did within `wait_s`."""
         child_env = {
             k: v for k, v in os.environ.items() if not k.startswith("HRR_REGIONS_")
         }
         child_env["HIP_HRR_CAPTURE_OUTPUT"] = str(self.root)
         child_env.update(env)
         proc = subprocess.run(
-            [sys.executable, "-c", CHILD, str(PRODUCER_DIR), str(wait_s)],
+            # -I keeps a sitecustomize on the parent's PYTHONPATH from importing
+            # some other copy of the producer first.
+            [sys.executable, "-I", "-c", CHILD, str(PRODUCER_DIR), str(wait_s),
+             "start" if call_start else "import"],
             env=child_env,
             capture_output=True,
             text=True,
@@ -82,19 +88,30 @@ class AutostartTest(unittest.TestCase):
         # A started producer enables history within milliseconds here, so a
         # second without it is a clear negative.
         got = self.import_producer({}, wait_s=1.0)
-        self.assertFalse(got["thread"])
+        self.assertEqual(got["threads"], 0)
         self.assertEqual(got["calls"], [])
 
     def test_autostart_zero_records_nothing(self):
         got = self.import_producer({"HRR_REGIONS_AUTOSTART": "0"}, wait_s=1.0)
-        self.assertFalse(got["thread"])
+        self.assertEqual(got["threads"], 0)
         self.assertEqual(got["calls"], [])
 
     def test_autostart_enables_bounded_history(self):
         got = self.import_producer({"HRR_REGIONS_AUTOSTART": "1"}, wait_s=20.0)
-        self.assertTrue(got["thread"])
+        self.assertEqual(got["threads"], 1)
         self.assertEqual(len(got["calls"]), 1)
         self.assertEqual(got["calls"][0]["max_entries"], 100000)
+
+    def test_start_without_autostart_enables_history(self):
+        got = self.import_producer({}, wait_s=20.0, call_start=True)
+        self.assertEqual(got["threads"], 1)
+        self.assertEqual([c["max_entries"] for c in got["calls"]], [100000])
+
+    def test_start_after_autostart_runs_once(self):
+        got = self.import_producer(
+            {"HRR_REGIONS_AUTOSTART": "1"}, wait_s=20.0, call_start=True)
+        self.assertEqual(got["threads"], 1)
+        self.assertEqual(len(got["calls"]), 1)
 
     def test_max_entries_override(self):
         got = self.import_producer(
