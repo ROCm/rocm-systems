@@ -89,7 +89,7 @@
                     "description": "Agent extdata must be valid JSON",
                     "error_message": "Found rocpd_info_agent rows with invalid extdata JSON",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent WHERE json_valid(extdata) = 0"
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent WHERE COALESCE(json_valid(extdata), 0) = 0"
                 }
             ]
         },
@@ -106,7 +106,7 @@
                     "description": "Process extdata/environment must be valid JSON",
                     "error_message": "Found rocpd_info_process rows with invalid extdata or environment JSON",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM rocpd_info_process WHERE json_valid(extdata) = 0 OR json_valid(environment) = 0"
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_process WHERE COALESCE(json_valid(extdata), 0) = 0 OR COALESCE(json_valid(environment), 0) = 0"
                 }
             ]
         }
