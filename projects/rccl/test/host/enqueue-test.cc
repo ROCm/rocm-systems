@@ -1205,6 +1205,14 @@ TEST_F(EnqueueMicrotest, PackedChannels_CapsToCommNChannels) {
     EXPECT_EQ(8, plain);
     EXPECT_EQ(plain, limited);
   }
+  }
+  // nChannels == 1 is the first value where the cap bites; a > 1 guard would return 5.
+  {
+    RankComm rc(8);
+    rc.get()->nChannels = 1;
+    EXPECT_EQ(1, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
 }
 
 TEST_F(EnqueueMicrotest, PackedChannels_LargeTransfer_SaturatesToMaxChannels) {
