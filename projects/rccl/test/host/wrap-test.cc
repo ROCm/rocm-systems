@@ -4873,11 +4873,19 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        // nullptr buffers yield ncclSymSendNonregRecvNonreg by default; override to
+        // ncclSymSendNonregRecvReg so rcclAllGatherCeRegisteredWindowTab passes the
+        // recv-registered check (Branch #3 now requires both CTAPolicy=ZERO and a
+        // registered recv window after the OR->AND change in this PR).
+        ScopedHook regType(g_getSymRegType,
+            [](struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t* out) {
+              *out = ncclSymSendNonregRecvReg;
+              return ncclSuccess;
+            });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
         comm->nNodes = 1;
-        // Branch #3 requires CTA_POLICY_ZERO as of #11389, matching the
-        // AllReduce CE-registered gate.
+        // Branch #3 requires both CTAPolicy=ZERO and a registered recv window.
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
