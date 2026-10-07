@@ -814,6 +814,127 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+#[ignore = "requires GFX1201, KFD secondary contexts, and a bound DRM render node"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one native session verifies both copy directions and uncertain ownership"
+)]
+fn gfx1201_secondary_extended_host_contract() -> Result<(), Box<dyn Error>> {
+    const BYTES: usize = 4096;
+    let mut session = Session::new(SessionLifetime::Session)?;
+    let mut selected = None;
+    session.enumerate(&mut |endpoint| {
+        if endpoint
+            .gpu()
+            .is_some_and(|gpu| (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping) == (12, 0, 1))
+        {
+            selected = Some(endpoint);
+        }
+        Ok(())
+    })?;
+    let endpoint = selected.ok_or_else(|| io::Error::other("GFX1201 endpoint is unavailable"))?;
+    let device = session.activate(&endpoint)?;
+    let gpu = device.gpu()?;
+    let access = DeviceAccess::READ | DeviceAccess::WRITE;
+    let mut source = device.allocate(MemoryKind::System, BYTES as u64, BYTES as u64, access)?;
+    let mut destination =
+        device.allocate(MemoryKind::System, BYTES as u64, BYTES as u64, access)?;
+    let source_info = source.info();
+    let destination_info = destination.info();
+    let source_host = source_info
+        .host_address
+        .ok_or_else(|| io::Error::other("system source has no host mapping"))?;
+    let destination_host = destination_info
+        .host_address
+        .ok_or_else(|| io::Error::other("system destination has no host mapping"))?;
+    // SAFETY: The allocations own writable BYTES-sized host mappings.
+    let source_bytes = unsafe { std::slice::from_raw_parts_mut(source_host as *mut u8, BYTES) };
+    let destination_bytes =
+        unsafe { std::slice::from_raw_parts_mut(destination_host as *mut u8, BYTES) };
+    source_bytes.fill(0x5c);
+    destination_bytes.fill(0);
+
+    let mut host_pages = Box::new([0_u8; BYTES * 2]);
+    let host_base = host_pages.as_mut_ptr() as usize;
+    let host_address = (host_base + BYTES - 1) & !(BYTES - 1);
+    let host_offset = host_address - host_base;
+    host_pages[host_offset..host_offset + BYTES].fill(0x3c);
+    // SAFETY: The aligned page lies inside host_pages, which stays live
+    // through native deregistration or is retained on uncertain cleanup.
+    let mut registered = match unsafe {
+        device.register_host(
+            host_address,
+            HostCachePolicy::Extended,
+            BYTES as u64,
+            BYTES as u64,
+            access,
+        )
+    } {
+        Ok(registered) => registered,
+        Err(error) => {
+            std::mem::forget(host_pages);
+            std::mem::forget(source);
+            std::mem::forget(destination);
+            std::mem::forget(device);
+            std::mem::forget(session);
+            return Err(Box::new(error));
+        }
+    };
+    let registered_info = registered.info();
+    let cancel = AtomicBool::new(false);
+    // SAFETY: All three mappings stay live until the copies retire.
+    if let Err(failure) = unsafe {
+        gpu.copy_linear(
+            destination_info.device_address,
+            registered_info.device_address,
+            BYTES as u64,
+            &cancel,
+        )
+        .and_then(|()| {
+            gpu.copy_linear(
+                registered_info.device_address,
+                source_info.device_address,
+                BYTES as u64,
+                &cancel,
+            )
+        })
+    } {
+        std::mem::forget(registered);
+        std::mem::forget(host_pages);
+        std::mem::forget(source);
+        std::mem::forget(destination);
+        std::mem::forget(device);
+        std::mem::forget(session);
+        return Err(Box::new(failure.error));
+    }
+    let read_matches = destination_bytes.iter().all(|byte| *byte == 0x3c);
+    let write_matches = host_pages[host_offset..host_offset + BYTES]
+        .iter()
+        .all(|byte| *byte == 0x5c);
+    if let Err(error) = registered.free() {
+        std::mem::forget(registered);
+        std::mem::forget(host_pages);
+        std::mem::forget(source);
+        std::mem::forget(destination);
+        std::mem::forget(device);
+        std::mem::forget(session);
+        return Err(Box::new(error));
+    }
+    assert_eq!(registered_info.host_address, Some(host_address));
+    assert!(read_matches);
+    assert!(write_matches);
+    drop(registered);
+
+    source.free()?;
+    destination.free()?;
+    drop(source);
+    drop(destination);
+    drop(device);
+    session.destroy()?;
+    Ok(())
+}
+
+#[test]
 #[ignore = "requires a GFX1201 GPU, KFD 1.20+, and a bound DRM render node"]
 fn gfx1201_gpu_capability_contract() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new(SessionLifetime::Process)?;

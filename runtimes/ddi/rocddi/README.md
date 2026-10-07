@@ -79,8 +79,10 @@ uncached flag while retaining coherent access. The caller keeps registered
 pages mapped until native teardown succeeds or process teardown resolves
 uncertain ownership. In a secondary KFD context, borrowed pages use DRM GEM
 USERPTR. Coarse and fine use its default mapping; uncached selects an
-uncached VM mapping. Extended coherency is unavailable there, and owned host
-pages use `System` backing.
+uncached VM mapping. On GFX1201, extended also uses the default mapping: that
+GPU's KFD extended USERPTR and DRM USERPTR mappings have the same effective
+page type. Other GPU targets reject extended registration in a secondary
+context. Owned host pages use `System` backing there.
 
 A topology endpoint is passive metadata. It is not an activated `Device` and
 does not authorize native execution or memory operations. The current backend
