@@ -194,14 +194,6 @@ find_package(profiler-hub REQUIRED)
 target_link_libraries(your_target PRIVATE profiler-hub::profiler-hub)
 ```
 
-`examples/installed-client` is a small program that uses that pattern to write one region and read it back. From that directory, after installing profiler-hub:
-
-```cmd
-cmake -S . -B build -DCMAKE_PREFIX_PATH=C:\opt\profiler-hub
-cmake --build build --config Release
-build\Release\writer-reader-example.exe
-```
-
 Point the consumer at the package with `-DCMAKE_PREFIX_PATH=C:\opt\profiler-hub` or
 `-Dprofiler-hub_DIR=<build-tree>` to use the build tree directly. Ensure
 `profiler-hub.dll` and, when SQLite was fetched, `profiler-hub-sqlite3.dll` are next
