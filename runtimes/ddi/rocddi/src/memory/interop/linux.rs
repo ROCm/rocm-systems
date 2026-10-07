@@ -105,6 +105,56 @@ pub fn write_descriptor_at(descriptor: RawFd, buffer: &[u8], offset: i64) -> io:
     crate::driver::PlatformDriver::write_descriptor_at(descriptor, buffer, offset)
 }
 
+/// Maximum bytes submitted in one AIS operation, matching Linux `MAX_RW_COUNT`.
+pub const AIS_MAX_TRANSFER_BYTES: u64 = 0x7fff_f000;
+
+/// Direction of a Linux AIS transfer between a file and device VRAM.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AisFileOperation {
+    /// Read file bytes into the allocation.
+    Read,
+    /// Write allocation bytes into the file.
+    Write,
+}
+
+/// Completed KFD AIS transfer. A nonzero status is a negative Linux errno.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AisFileResult {
+    /// Bytes KFD reports as copied, bounded by the submitted transfer size.
+    pub size_copied: u64,
+    /// Operation status returned by KFD, zero on success.
+    pub status: i32,
+}
+
+/// Transfers between a borrowed file descriptor and live mapped VRAM.
+///
+/// `allocation_offset` is relative to the allocation's logical device address.
+/// One native operation transfers at most Linux's `MAX_RW_COUNT` bytes. The
+/// caller retains the descriptor through this synchronous call; neither its
+/// ownership nor its shared file position changes. If the ioctl fails, the
+/// copied-byte count is unknown and the operation is never replayed here.
+///
+/// # Errors
+/// Rejects invalid ranges, descriptors, offsets, and unsupported backing.
+/// Preserves the native errno if KFD reports an ioctl failure.
+pub fn ais_transfer(
+    allocation: &Allocation,
+    descriptor: RawFd,
+    allocation_offset: u64,
+    size: u64,
+    file_offset: i64,
+    operation: AisFileOperation,
+) -> Result<AisFileResult, Error> {
+    crate::driver::PlatformDriver::ais_transfer(
+        allocation.inner.native(),
+        descriptor,
+        allocation_offset,
+        size,
+        file_offset,
+        operation,
+    )
+}
+
 /// Opaque 256-bit KFD IPC identifier for one shareable allocation.
 ///
 /// This layout belongs to the Linux KFD userspace contract. It deliberately

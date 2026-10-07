@@ -27,6 +27,7 @@ enum Reply {
     ExportDmaBuf(i32, Option<i32>),
     IpcImport(u64, u64, u32, Option<i32>),
     IpcExport([u32; 4], Option<i32>),
+    Ais(uapi::AisInput, uapi::AisOutput, Option<i32>),
     Map(u32, u32, Option<i32>),
     Unmap(u32, u32, Option<i32>),
     MapDevices(&'static [u32], u32, u32, Option<i32>),
@@ -268,6 +269,11 @@ impl Fixture {
                         args.share_handle = handle;
                         errno
                     }
+                    (sys::Call::Ais(args), Reply::Ais(expected, output, errno)) => {
+                        assert_eq!(args.requested_input(), expected);
+                        args.set_completed_output(output);
+                        errno
+                    }
                     (sys::Call::Map(args, devices), Reply::Map(before, after, errno))
                     | (sys::Call::Unmap(args, devices), Reply::Unmap(before, after, errno)) => {
                         assert_eq!(*devices, expected_devices.as_slice());
@@ -477,6 +483,141 @@ impl Fixture {
             "native cleanup stopped early"
         );
     }
+}
+
+#[test]
+fn ais_uses_the_mapped_vram_handle_and_preserves_native_failure() {
+    let fixture = Fixture::new([
+        Reply::Allocate(17, None),
+        Reply::Map(0, 1, None),
+        Reply::Ais(
+            uapi::AisInput {
+                handle: 17,
+                handle_offset: 4096 + 32,
+                file_offset: 8192,
+                size: 128,
+                operation: uapi::AIS_READ,
+                descriptor: 3,
+            },
+            uapi::AisOutput {
+                size_copied: 96,
+                status: 0,
+                pad: 0,
+            },
+            None,
+        ),
+        Reply::Ais(
+            uapi::AisInput {
+                handle: 17,
+                handle_offset: 4096 + 256,
+                file_offset: 16384,
+                size: 512,
+                operation: uapi::AIS_WRITE,
+                descriptor: 4,
+            },
+            uapi::AisOutput {
+                size_copied: 64,
+                status: -5,
+                pad: 0,
+            },
+            Some(5),
+        ),
+        Reply::Unmap(0, 1, None),
+        Reply::Free(None),
+    ]);
+    let mut allocation = fixture.create().unwrap();
+    // Model a logical slice of a larger KFD handle, as with imported VRAM.
+    allocation.device_byte_offset = 4096;
+    allocation.logical_size = 8192;
+    let result = allocation
+        .ais_transfer(3, 32, 128, 8192, uapi::AIS_READ)
+        .unwrap();
+    assert_eq!(result.size_copied, 96);
+    assert_eq!(result.status, 0);
+
+    assert_eq!(
+        allocation
+            .ais_transfer(3, 8191, 2, 0, uapi::AIS_READ)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidArgument
+    );
+    assert_eq!(
+        allocation
+            .ais_transfer(-1, 32, 128, 0, uapi::AIS_READ)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidArgument
+    );
+    let failure = allocation
+        .ais_transfer(4, 256, 512, 16384, uapi::AIS_WRITE)
+        .unwrap_err();
+    assert_eq!(failure.native_error_code(), Some(5));
+    allocation.free().unwrap();
+    drop(allocation);
+    fixture.exhausted();
+}
+
+#[test]
+fn ais_rejects_non_vram_backing_without_a_native_transfer() {
+    let fixture = Fixture::with_devices(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::Unmap(0, 1, None),
+            Reply::Free(None),
+        ],
+        uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        &[42],
+        backing_file(desc().size),
+    );
+    let mut allocation = fixture
+        .allocate(MemoryKind::System, DeviceAccess::READ | DeviceAccess::WRITE)
+        .unwrap();
+    assert_eq!(
+        allocation
+            .ais_transfer(3, 0, 4096, 0, uapi::AIS_READ)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Unsupported
+    );
+    allocation.free().unwrap();
+    drop(allocation);
+    fixture.exhausted();
+}
+
+#[test]
+fn ais_file_read_rejects_read_only_vram_before_native_transfer() {
+    let fixture = Fixture::with_flags(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::Unmap(0, 1, None),
+            Reply::Free(None),
+        ],
+        uapi::VRAM | uapi::NO_SUBSTITUTE,
+    );
+    let mut allocation = fixture
+        .allocate(
+            MemoryKind::DeviceLocal {
+                host_visible: false,
+                coherent: false,
+                uncached: false,
+                contiguous: false,
+            },
+            DeviceAccess::READ,
+        )
+        .unwrap();
+    assert_eq!(
+        allocation
+            .ais_transfer(3, 0, 4096, 0, uapi::AIS_READ)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Unsupported
+    );
+    allocation.free().unwrap();
+    drop(allocation);
+    fixture.exhausted();
 }
 
 #[test]

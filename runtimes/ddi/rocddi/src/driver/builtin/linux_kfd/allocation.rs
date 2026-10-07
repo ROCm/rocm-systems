@@ -10,7 +10,7 @@ use super::imported_system::DrmImportedSystem;
 use super::memory::{self, DeviceVm, KfdAllocation, error};
 use super::registered_host::DrmRegisteredHost;
 use crate::host_storage::{Owned, Shared};
-use crate::memory::interop::linux::{DmaBuf, KfdIpcMemoryHandle};
+use crate::memory::interop::linux::{AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle};
 use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
 use crate::{Error, ErrorKind};
 
@@ -219,6 +219,31 @@ impl NativeAllocation {
                 "DRM-imported storage has no KFD IPC export",
             )),
         }
+    }
+
+    pub(super) fn ais_transfer(
+        &self,
+        descriptor: i32,
+        offset: u64,
+        size: u64,
+        file_offset: i64,
+        operation: AisFileOperation,
+    ) -> Result<AisFileResult, Error> {
+        let Self::Kfd(allocation) = self else {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "AIS requires a KFD VRAM allocation",
+            ));
+        };
+        let operation = match operation {
+            AisFileOperation::Read => super::uapi::AIS_READ,
+            AisFileOperation::Write => super::uapi::AIS_WRITE,
+        };
+        let output = allocation.ais_transfer(descriptor, offset, size, file_offset, operation)?;
+        Ok(AisFileResult {
+            size_copied: output.size_copied,
+            status: output.status,
+        })
     }
 
     pub(super) fn signal_event_page_handle(&self, device: &Shared<DeviceVm>) -> Result<u64, Error> {
