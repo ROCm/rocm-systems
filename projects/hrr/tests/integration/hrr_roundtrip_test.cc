@@ -652,7 +652,9 @@ HRR_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
  * ----------------
  *   - Capture Unit_HRR_UncapturedHostWrite_Direct: a mapped host flag is set by
  *     an uncaptured CPU store, then kDivergeIters kernels each write the flag
- *     value out and read it back.  Every replay D2H diverges (fresh zero flag).
+ *     value out and read it back.  Capture runs with HIP_HRR_HOST_SNAPSHOTS=0,
+ *     so the flag is not recorded and every replay D2H diverges (fresh zero
+ *     flag).
  *   - Section 1 (guard ON): replay with a low divergence-abort threshold,
  *     exact D2H validation, and a small min-samples count.  REQUIRE clean exit
  *     code 2 (replay diverged) — the guard stops the replay deterministically.
@@ -671,7 +673,10 @@ HRR_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
  */
 HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_divergence"};
-  hrr_capture_direct("Unit_HRR_UncapturedHostWrite_Direct", cap.path);
+  // Pinned host snapshots would record the flag and replay would restore it,
+  // so capture without them to keep the host write invisible.
+  hrr_capture_direct("Unit_HRR_UncapturedHostWrite_Direct", cap.path, 5,
+                     {{"HIP_HRR_HOST_SNAPSHOTS", "0"}});
 
   SECTION("guard ON -> clean exit 2") {
     auto [ret, out] = hrr_playback_env(
@@ -721,7 +726,10 @@ HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
  */
 TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_nulloptional"};
-  hrr_capture_direct("Unit_HRR_NullOptionalPtr_Direct", cap.path);
+  // Without HIP_HRR_HOST_SNAPSHOTS=0 replay would restore the flag, nothing
+  // would diverge, and the null optional output would be skipped as at capture.
+  hrr_capture_direct("Unit_HRR_NullOptionalPtr_Direct", cap.path, 5,
+                     {{"HIP_HRR_HOST_SNAPSHOTS", "0"}});
 
   auto [ret, out] = hrr_playback_env(
       cap.path,
