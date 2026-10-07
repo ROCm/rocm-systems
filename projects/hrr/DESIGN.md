@@ -1078,8 +1078,8 @@ reservation fails as a whole, replay holds the range again and reserves it piece
 piece, one recorded allocation at a time.
 
 Each recorded allocation is then a VMM mapping at exactly its recorded base, so
-translation is the identity. A mapping covers whole units of `gran_`: the coarsest
-minimum VMM granularity of the visible devices, at least 4 KB. Two allocations
+translation is the identity. A mapping covers whole units of the placement granule:
+the coarsest minimum VMM granularity of the visible devices, at least 4 KB. Two allocations
 inside one unit cannot both be mapped, so the second falls back. Freeing an
 allocation unmaps it and keeps the reservation. An unmap that fails keeps the
 mapping tracked, logs it, and is tried again later. A recorded

@@ -5,9 +5,10 @@
 # HRR unit tests.
 #
 # These exercise the archive wire format, crash-truncation recovery in the
-# reader, and CPU-side playback invariants. They do not issue HIP runtime calls,
-# but their sources include <hip/hip_runtime.h> (via the local test harness and
-# the playback helper header), so HIP headers are required to build them.
+# reader, CPU-side playback invariants, and the placement planner and range
+# holds. They need no GPU. The placement source they link calls the HIP VMM API
+# (hipMemUnmap, hipMemAddressReserve and others), so the target links the HIP
+# runtime, and on Linux the placement tests make mmap calls of their own.
 
 add_executable(hrr-unit-tests
   hrr_format_test.cc

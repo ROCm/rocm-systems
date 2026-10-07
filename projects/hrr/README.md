@@ -155,8 +155,10 @@ A program can store a device pointer in device memory, as vLLM's block table
 does. That pointer reaches the GPU inside an H2D payload, which replay restores
 byte for byte, so translation cannot fix it. Replay therefore maps each device
 allocation at the address it had in the recording, and the stored copy stays
-true. The summary line `Placement : N placed at capture address, M fell back`
-counts the result.
+true. The summary line `Placement      : N placed at capture address, M fell
+back, K frees deferred to a later sync` counts the result; the last clause
+appears only when a free had to wait, for example under a graph capture or for
+a `hipFreeAsync`.
 
 An allocation that cannot be placed replays at a new address, and a line on
 stderr names it: `[HRR] Placement: <api> <address> (<size> bytes) not placed at
@@ -171,8 +173,9 @@ and graph memory nodes are never placed. `__device__` globals are outside it
 altogether. See `DESIGN.md` for the full list.
 
 Placement is off, with a line saying why, under `--no-placement`, under
-`--guard-segments`, when `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` is above 1, and on a
-device without virtual memory management. A D2H mismatch in a replay that
+`--guard-segments`, when `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` is above 1, on a
+device without virtual memory management, and on Windows (`Placement : off
+(not supported on this platform)`). A D2H mismatch in a replay that
 printed a "not placed" line may be the stale pointer, not a bug in the
 recorded program.
 
