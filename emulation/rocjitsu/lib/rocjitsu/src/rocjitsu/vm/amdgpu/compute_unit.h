@@ -61,18 +61,6 @@ class ComputeUnitTestAccess;
 }
 namespace amdgpu {
 
-/// @brief Retire a Global Wave Sync op without a dispatch-wide wait.
-/// @details The command processor does not keep an arrival count for the
-/// dispatch. Waiting on only this compute unit's waves deadlocks a grid that
-/// spans compute units. The first call in the process is logged: a kernel that
-/// reads another workgroup's data at this op can observe it early.
-inline void retire_global_wave_sync(Wavefront &) {
-  static std::atomic_flag warned;
-  if (warned.test_and_set(std::memory_order_relaxed))
-    return;
-  util::Logger::warn("ds_gws_* retired without a dispatch-wide barrier");
-}
-
 /// @brief Reporting policy for pending memory-result register accesses.
 enum class MemoryWaitDiagnostics { Off, Warn };
 

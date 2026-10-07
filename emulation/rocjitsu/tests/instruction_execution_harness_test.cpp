@@ -9280,7 +9280,7 @@ TEST(SdwaOutputScalingTest, FloatingConversionsUseDestinationFormat) {
   }
 }
 
-TEST(InstructionExecution, Cdna2GwsInstructionsRetire) {
+TEST(InstructionExecution, Cdna2GwsInitRetiresAndSynchronizationStaysUnimplemented) {
   amdgpu::GpuMemory gpu_mem("gws_mem");
   amdgpu::L2Cache l2("gws_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
@@ -9294,7 +9294,8 @@ TEST(InstructionExecution, Cdna2GwsInstructionsRetire) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
   ASSERT_NE(decoder, nullptr);
 
-  // Encodings from the CDNA2 test table. Each one used to halt the wave.
+  // Encodings from the CDNA2 test table: SEMA_RELEASE_ALL, INIT, SEMA_V,
+  // SEMA_BR, SEMA_P, and BARRIER. Only INIT retires.
   const std::array<std::array<uint32_t, 2>, 6> encodings = {{
       {{0xD9300000U, 0}},
       {{0xD9320000U, 0}},
@@ -9308,8 +9309,15 @@ TEST(InstructionExecution, Cdna2GwsInstructionsRetire) {
     ASSERT_NE(wf, nullptr);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
-    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded()) << inst->mnemonic();
-    EXPECT_FALSE(wf->instruction_execution_failed()) << inst->mnemonic();
+    SCOPED_TRACE(inst->mnemonic());
+    if (inst->mnemonic() == "ds_gws_init") {
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
+    } else {
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
+      EXPECT_EQ(wf->instruction_execution_error(),
+                amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    }
     if (!wf->is_halted())
       wf->halt();
   }

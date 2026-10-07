@@ -2549,11 +2549,14 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     # DS_ADD_GS_REG_RTN / DS_SUB_GS_REG_RTN contain _ADD / _SUB.
     if upper in ('DS_ADD_GS_REG_RTN', 'DS_SUB_GS_REG_RTN'):
         return InstructionSemantics(name, 'nop')
-    # GWS (Global Wave Sync) is a hardware scheduling primitive. true_nop
-    # retires it. The nop class reports the op unimplemented, which halts
-    # the wave before the kernel can finish.
-    if upper.startswith('DS_GWS_'):
+    # GWS (Global Wave Sync). INIT programs a resource's arrival count; the
+    # runtime issues it before any kernel that synchronizes. GWS state is not
+    # modeled, so INIT retires and the barrier and semaphore ops stay
+    # unimplemented rather than returning before the grid has synchronized.
+    if upper == 'DS_GWS_INIT':
         return InstructionSemantics(name, 'true_nop')
+    if upper.startswith('DS_GWS_'):
+        return InstructionSemantics(name, 'nop')
     # GDS ordered count.
     if upper == 'DS_ORDERED_COUNT':
         return InstructionSemantics(name, 'nop')
