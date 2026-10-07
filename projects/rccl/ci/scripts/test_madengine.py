@@ -409,6 +409,17 @@ def _split_rccl_version(version: str) -> tuple[str, str, bool]:
     return m.group(1), (m.group(2) or "").lower(), m.group(3) == "+"
 
 
+def runtime_rccl_versions(work_dir: Path) -> list[str]:
+    """Distinct ``RCCL version :`` banners across one phase's node logs."""
+    log_dir = work_dir / "slurm_output"
+    versions: list[str] = []
+    for log_file in sorted(log_dir.glob("*node_*.out")) if log_dir.is_dir() else []:
+        for v in re.findall(r"RCCL version\s*:\s*(\S+)", log_file.read_text(errors="replace")):
+            if v not in versions:
+                versions.append(v)
+    return versions
+
+
 def verify_rccl_replacement(
     work_dir: Path,
     expected: dict,
@@ -1295,9 +1306,11 @@ def generate_summary_report(
     comparisons: list[dict] | None = None,
     nodelist: str = "",
     job_id: str = "",
+    phase_rccl: dict[str, str] | None = None,
 ) -> str:
     """Generate a plain-text summary report."""
     status = "PASSED" if exit_code == 0 else "FAILED"
+    phase_rccl = phase_rccl or {}
     lines = [
         "RCCL MADEngine Workload Test Report",
         "=" * 40,
@@ -1307,7 +1320,8 @@ def generate_summary_report(
         f"Workload:   {workload_name}",
         f"Scale:      {scale}",
         f"Cluster:    {cluster}",
-        f"RCCL:       {rccl_commit}",
+        f"Baseline:   RCCL {phase_rccl.get(BASELINE) or 'unknown'}",
+        f"Candidate:  RCCL {phase_rccl.get(CANDIDATE) or 'unknown'} (CI build {rccl_commit})",
         f"Nodes:      {nodelist or 'unknown'} (job {job_id or 'unknown'})",
         "",
         "Both numbers below were measured on those same nodes, back to back,",
@@ -1658,6 +1672,10 @@ def main() -> None:
         comparisons=comparisons,
         nodelist=allocation["nodelist"],
         job_id=allocation["job_id"],
+        phase_rccl={
+            phase: ", ".join(runtime_rccl_versions(run_dir))
+            for phase, run_dir in phases
+        },
     )
     log.info("\n%s", report)
     write_github_summary(report)
