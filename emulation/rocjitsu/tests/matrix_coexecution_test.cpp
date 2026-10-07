@@ -30,7 +30,9 @@
 #include <bit>
 #include <memory>
 #include <semaphore>
+#include <set>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -520,6 +522,99 @@ TEST(MatrixCoexecutionTest, SharedPoolHandlesConcurrentIssuersAndZeroCapacity) {
     for (auto &issuer : issuers)
       issuer.join();
     EXPECT_TRUE(matched.load());
+  }
+}
+
+TEST(MatrixCoexecutionTest, SharedPoolScalesPreferredStartToCapacity) {
+  struct Case {
+    uint32_t hash;
+    std::size_t capacity;
+    unsigned expected;
+  };
+  // Include bucket boundaries: masking an unscaled hash would concentrate
+  // small-pool issuers on slot zero instead of reaching these four preferences.
+  for (const Case c : {Case{0, 0, 0},
+                       {0xffffffffu, 1, 0},
+                       {0, 4, 0},
+                       {0x3fffffffu, 4, 0},
+                       {0x40000000u, 4, 1},
+                       {0x7fffffffu, 4, 1},
+                       {0x80000000u, 4, 2},
+                       {0xffffffffu, 4, 3},
+                       {0xffffffffu, 8, 7},
+                       {0xffffffffu, 63, 62},
+                       {0xffffffffu, 64, 63},
+                       {0x80000000u, 65, 32},
+                       {0xffffffffu, 65, 0},
+                       {0x40000000u, 128, 32},
+                       {0x80000000u, 128, 0},
+                       {0xffffffffu, 128, 63}}) {
+    SCOPED_TRACE(c.capacity);
+    SCOPED_TRACE(c.hash);
+    EXPECT_EQ(mc::preferred_helper_start(c.hash, c.capacity), c.expected);
+  }
+}
+
+TEST(MatrixCoexecutionTest, SharedPoolIssuersReusePreferredHelpers) {
+  mc::SharedPool pool(4);
+  Instruction record("record", [](Instruction &, void *opaque) {
+    *static_cast<std::thread::id *>(opaque) = std::this_thread::get_id();
+  });
+  auto helpers = [&](unsigned width, unsigned batches) {
+    std::set<std::thread::id> used;
+    for (unsigned batch = 0; batch != batches; ++batch) {
+      std::array<std::thread::id, 4> ids;
+      std::array<mc::SharedPool::Ticket, 4> tickets{};
+      for (unsigned i = 0; i != width; ++i) {
+        tickets[i] = pool.submit(record, &ids[i]);
+        EXPECT_TRUE(tickets[i]);
+      }
+      for (unsigned i = 0; i != width; ++i)
+        if (tickets[i]) {
+          EXPECT_FALSE(pool.finish(tickets[i]));
+          used.insert(ids[i]);
+        }
+    }
+    return used;
+  };
+  EXPECT_EQ(helpers(4, 1).size(), 4u);
+  EXPECT_EQ(helpers(1, 16).size(), 1u);
+  // While the preferred helper's ticket is held, the same next helper takes the job.
+  EXPECT_EQ(helpers(2, 8).size(), 2u);
+  std::thread([&] { EXPECT_EQ(helpers(1, 16).size(), 1u); }).join();
+}
+
+TEST(MatrixCoexecutionTest, SharedPoolClaimsAndReclaimsCapacityAcrossBitmapWords) {
+  Instruction record("record", [](Instruction &, void *opaque) {
+    *static_cast<std::thread::id *>(opaque) = std::this_thread::get_id();
+  });
+  for (unsigned capacity : {0u, 1u, 4u, 64u, 65u, 128u}) {
+    SCOPED_TRACE(capacity);
+    mc::SharedPool pool(capacity);
+    for (unsigned batch = 0; batch != 3; ++batch) {
+      std::vector<std::thread::id> ids(capacity);
+      std::vector<mc::SharedPool::Ticket> tickets(capacity);
+      for (unsigned i = 0; i != capacity; ++i) {
+        tickets[i] = pool.submit(record, &ids[i]);
+        EXPECT_TRUE(tickets[i]);
+      }
+      // Claims remain held until finish(), even if a helper has completed.
+      EXPECT_FALSE(pool.available());
+      std::thread::id extra_id;
+      const auto extra = pool.submit(record, &extra_id);
+      EXPECT_FALSE(extra);
+      if (extra) {
+        EXPECT_FALSE(pool.finish(extra));
+      }
+      std::set<std::thread::id> used;
+      for (unsigned i = 0; i != capacity; ++i)
+        if (tickets[i]) {
+          EXPECT_FALSE(pool.finish(tickets[i]));
+          used.insert(ids[i]);
+        }
+      EXPECT_EQ(used.size(), capacity);
+      EXPECT_EQ(pool.available(), capacity != 0);
+    }
   }
 }
 

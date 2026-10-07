@@ -282,9 +282,9 @@ static const uint32_t SdmaCounterBlockNumInstances          = 2;
 static const uint32_t SpiCounterBlockNumInstances           = 1;
 static const uint32_t SqcCounterBlockNumInstances           = 1;
 static const uint32_t SqgCounterBlockNumInstances           = 1;
-static const uint32_t TaCounterBlockNumInstances            = 2;
-static const uint32_t TcpCounterBlockNumInstances           = 2;
-static const uint32_t TdCounterBlockNumInstances            = 2;
+static const uint32_t TaCounterBlockNumInstances            = 1;
+static const uint32_t TcpCounterBlockNumInstances           = 1;
+static const uint32_t TdCounterBlockNumInstances            = 1;
 static const uint32_t Utcl1CounterBlockNumInstances         = 6;
 static const uint32_t SpCounterBlockNumInstances            = 1;
 
