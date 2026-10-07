@@ -198,6 +198,12 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 // still running, the bytes are read anyway: a piece that changed is recorded
 // for replay to restore, and a piece that did not is recorded as unchanged and
 // left alone. The manifest counts such launches as host_snapshots_unordered.
+//
+// The snapshot runs before the launch, so it updates the shadow before it
+// knows whether the launch will be recorded. When the launch fails, the chunks
+// it wrote lose their hashes and the next launch records them again; without
+// that, a busy-stream launch would call them unchanged and replay would never
+// restore them. Only recorded launches are counted in the manifest.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -234,10 +240,28 @@ struct PinnedRange {
   uintptr_t lo, hi;
 };
 
+// A chunk whose shadow and hash a snapshot updated, named by the allocation's
+// base and generation so a later free and reallocation is told apart.
+struct TouchedChunk {
+  uintptr_t base;
+  uint64_t  gen;
+  size_t    chunk;
+};
+
+// What one launch recorded. The shadow and hash updates it made hold only if
+// the launch event is written: a launch that fails, or an event that cannot
+// be serialized, leaves no record for replay to restore from. Its destructor
+// settles the updates either way.
 struct LaunchSnapshots {
   std::vector<HostSnapRecord> records;
   std::vector<PinnedRange>    ranges;
-  void clear() { records.clear(); ranges.clear(); }
+  std::vector<TouchedChunk>   touched;
+  bool         busy     = false;  // read while earlier work was still running
+  mutable bool recorded = false;  // the launch event naming the records was written
+  LaunchSnapshots() = default;
+  LaunchSnapshots(const LaunchSnapshots&) = delete;
+  LaunchSnapshots& operator=(const LaunchSnapshots&) = delete;
+  ~LaunchSnapshots();
 };
 
 std::mutex                       g_pinned_mu;
@@ -352,6 +376,25 @@ static void pinned_retrack(void* p, const PinnedHeld& h) {
   pinned_track(p, h.size, h.alias_of);
   if (h.alias) pinned_track(reinterpret_cast<void*>(h.alias), h.size,
                             reinterpret_cast<uintptr_t>(p));
+}
+
+// Settle a launch's snapshot. When its event was written, the chunks it wrote
+// are counted. When it was not, their hashes are cleared: the shadow already
+// holds the new bytes, so without this the next launch would find them
+// unchanged and point replay at a blob that no recorded event restores.
+LaunchSnapshots::~LaunchSnapshots() {
+  if (recorded) {
+    for (size_t i = 0; i < touched.size(); i++) hrr_cap::writer::count_host_snapshot_chunk();
+    if (busy && !records.empty()) hrr_cap::writer::count_host_snapshot_unordered();
+    return;
+  }
+  if (touched.empty()) return;
+  std::unique_lock<std::mutex> lk(g_pinned_mu);
+  for (const TouchedChunk& t : touched) {
+    auto it = pinned_find_unclaimed(lk, t.base);
+    if (it == g_pinned.end() || it->second.gen != t.gen) continue;
+    if (t.chunk < it->second.hashes.size()) it->second.hashes[t.chunk] = hrr_cap::Hash128{0, 0};
+  }
 }
 
 // Base of the allocation whose bytes v names, or 0. For a word inside a device
@@ -483,7 +526,6 @@ static void pinned_snapshot_before_launch(hipStream_t stream,
                                           void** kernel_params,
                                           const void* kbuf, size_t ksz,
                                           LaunchSnapshots& out) {
-  out.clear();
   if (!HIP_HRR_HOST_SNAPSHOTS) return;
   if (g_pinned_count.load(std::memory_order_relaxed) == 0) return;
   if (!hrr_cap::writer::is_open()) return;
@@ -566,6 +608,8 @@ static void pinned_snapshot_before_launch(hipStream_t stream,
     // The claim gives this thread the shadow and hashes, and keeps the bytes
     // mapped: a free of this allocation waits for the claim to end.
     const size_t first = recs.size();
+    const uint64_t gen = a->gen;
+    std::vector<size_t> written;  // chunks whose shadow and hash changed below
     bool failed = false;
     if (fresh) {
       try {
@@ -600,11 +644,17 @@ static void pinned_snapshot_before_launch(hipStream_t stream,
         failed = true;  // the writer closed or the disk refused the blob
         break;
       }
-      hrr_cap::writer::count_host_snapshot_chunk();
+      written.push_back(c);
       recs.push_back(HostSnapRecord{hit.base, off, len, a->hashes[c], kSnapRestore});
     }
-    // An allocation that could not be read whole is left out of this launch.
-    if (failed) recs.resize(first);
+    if (failed) {
+      // An allocation that could not be read whole is left out of this
+      // launch, and the chunks it did write are compared afresh next time.
+      recs.resize(first);
+      for (size_t c : written) a->hashes[c] = hrr_cap::Hash128{0, 0};
+    } else {
+      for (size_t c : written) out.touched.push_back(TouchedChunk{hit.base, gen, c});
+    }
 
     {
       std::lock_guard<std::mutex> lk(g_pinned_mu);
@@ -627,7 +677,7 @@ static void pinned_snapshot_before_launch(hipStream_t stream,
         out.ranges.push_back(PinnedRange{hit.arg_base, hit.arg_base + it->second.size});
     }
   }
-  if (busy) hrr_cap::writer::count_host_snapshot_unordered();
+  out.busy = busy;
 }
 
 // Fork hooks, run by the writer's pthread_atfork handlers. A forked child
@@ -1037,6 +1087,7 @@ static void serialize_kernel_launch(
     hrr_cap::writer::mark_incomplete(reason);
     return;
   }
+  if (snaps) snaps->recorded = true;
   hrr_cap::writer::write_event_raw(api_id,
                                    reinterpret_cast<hrr_event_header*>(payload.data()),
                                    static_cast<uint32_t>(payload.size()));
@@ -1198,7 +1249,6 @@ static void record_launch(
 static void snapshot_launch(hipFunction_t f, hipStream_t stream,
                             void** kernel_params, void** extra,
                             LaunchSnapshots& out, bool from_runtime = false) {
-  out.clear();
   if (!HIP_HRR_HOST_SNAPSHOTS || g_pinned_count.load(std::memory_order_relaxed) == 0) return;
   if (!f || (!from_runtime && !known_fn(f))) return;
   amd::Kernel* kernel = hip::asKernel(f);
