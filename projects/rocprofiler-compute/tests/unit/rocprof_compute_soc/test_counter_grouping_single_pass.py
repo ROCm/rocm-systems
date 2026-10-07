@@ -9,12 +9,18 @@ from rocprof_compute_soc.counter_grouping_single_pass import (
     _ensure_packable_union,
     _first_fit_unplaced,
     _reduce_passes,
+    collect_unique_packable_unions,
     fill_slot_limit_into_existing_passes,
     legacy_heuristic_enabled_from_env,
     single_pass_packable_enabled_from_env,
     try_allocate_single_pass_packable,
 )
 from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
+
+ITER_METRIC_GROUPS = (
+    "rocprof_compute_soc.counter_grouping_single_pass.iter_metric_groups"
+)
+TCC_BUDGET_CONFIG = {"TCC": 4, "SQ": 8}
 
 
 class MinimalSoC:
@@ -25,6 +31,27 @@ class MinimalSoC:
 
     def _iter_arch_analysis_yaml_metrics(self):
         return []
+
+
+def metric_rows(*groups):
+    """iter_metric_groups rows in the given order, one per PMC set."""
+    return [
+        ((1, -len(group), "x", "", index), frozenset(group), f"metric {index}")
+        for index, group in enumerate(groups)
+    ]
+
+
+def channels(base, count=2):
+    return {f"{base}[{index}]" for index in range(count)}
+
+
+def bucket_holding(files, group):
+    homes = [
+        bucket
+        for bucket in files
+        if set(group) <= set(flat_counters_in_perfmon_file(bucket))
+    ]
+    return homes[0] if homes else None
 
 
 def test_env_gate_default_on(monkeypatch):
@@ -227,3 +254,119 @@ def test_allocator_integrates_slot_limit_fill(monkeypatch):
     placed = {c for f in files for c in flat_counters_in_perfmon_file(f)}
     assert slot <= placed
     assert work_set == set()
+
+
+def test_ensure_extends_the_bucket_holding_most_of_the_set():
+    cfg = {"SQ": 4}
+    one_shared = rebuild_counter_file("0", cfg, {"SQ_A"})
+    two_shared = rebuild_counter_file("1", cfg, {"SQ_B", "SQ_C"})
+    assert one_shared is not None and two_shared is not None
+    group = frozenset({"SQ_A", "SQ_B", "SQ_C"})
+
+    files, file_count = _ensure_packable_union([one_shared, two_shared], group, cfg, 2)
+
+    assert file_count == 2
+    assert len(files) == 2
+    assert set(flat_counters_in_perfmon_file(files[0])) == {"SQ_A"}
+    assert set(flat_counters_in_perfmon_file(files[1])) == set(group)
+
+
+def test_ensure_rejects_a_bucket_with_one_block_over_budget():
+    cfg = {"SQ": 2, "GRBM": 2}
+    sq_full = rebuild_counter_file("0", cfg, {"SQ_A", "SQ_B"})
+    assert sq_full is not None
+    group = frozenset({"GRBM_COUNT", "SQ_C"})
+
+    files, file_count = _ensure_packable_union([sq_full], group, cfg, 1)
+
+    assert file_count == 2
+    assert len(files) == 2
+    assert set(flat_counters_in_perfmon_file(files[0])) == {"SQ_A", "SQ_B"}
+    assert set(flat_counters_in_perfmon_file(files[1])) == set(group)
+
+
+def test_ensure_keeps_bucket_count_when_an_existing_bucket_fits():
+    cfg = {"SQ": 4, "GRBM": 2}
+    room = rebuild_counter_file("0", cfg, {"SQ_A"})
+    assert room is not None
+    group = frozenset({"GRBM_COUNT", "SQ_B"})
+
+    files, file_count = _ensure_packable_union([room], group, cfg, 1)
+
+    assert file_count == 1
+    assert len(files) == 1
+    assert set(group) <= set(flat_counters_in_perfmon_file(files[0]))
+
+
+def test_collect_orders_larger_sets_first(monkeypatch):
+    small = {"SQ_A"}
+    large = {"SQ_B", "SQ_C", "SQ_D"}
+    middle = {"SQ_E", "SQ_F"}
+    monkeypatch.setattr(
+        ITER_METRIC_GROUPS,
+        lambda soc, counters: metric_rows(small, large, middle),
+    )
+
+    groups, packable_count = collect_unique_packable_unions(
+        MinimalSoC(), small | large | middle, {"SQ": 4}
+    )
+
+    assert packable_count == 3
+    assert [len(group) for group in groups] == [3, 2, 1]
+
+
+def test_collect_leaves_sets_without_tcc_series_unchanged(monkeypatch):
+    sets = [{"SQ_A", "GRBM_COUNT"}, {"SQ_B"}]
+    monkeypatch.setattr(ITER_METRIC_GROUPS, lambda soc, counters: metric_rows(*sets))
+    profile = {"SQ_A", "SQ_B", "GRBM_COUNT", "TCC_EA0_RDREQ[0]"}
+
+    groups, _count = collect_unique_packable_unions(
+        MinimalSoC(), profile, {"SQ": 4, "GRBM": 2, "TCC": 4}
+    )
+
+    assert set(groups) == {frozenset(group) for group in sets}
+
+
+def test_collect_adds_request_channels_to_a_level_set(monkeypatch):
+    level = channels("TCC_EA0_RDREQ_LEVEL")
+    request = channels("TCC_EA0_RDREQ")
+    monkeypatch.setattr(ITER_METRIC_GROUPS, lambda soc, counters: metric_rows(level))
+
+    groups, _count = collect_unique_packable_unions(
+        MinimalSoC(), level | request, TCC_BUDGET_CONFIG
+    )
+
+    assert groups == [frozenset(level | request)]
+
+
+def test_allocator_keeps_tcc_request_row_and_level_pairs(monkeypatch):
+    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
+    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", raising=False)
+    read = channels("TCC_EA0_RDREQ")
+    write = channels("TCC_EA0_WRREQ")
+    atomic = channels("TCC_EA0_ATOMIC")
+    read_level = channels("TCC_EA0_RDREQ_LEVEL")
+    write_level = channels("TCC_EA0_WRREQ_LEVEL")
+    atomic_level = channels("TCC_EA0_ATOMIC_LEVEL")
+    request_row = read | write | atomic
+    latency_sets = [read_level | read, write_level | write, atomic_level | atomic]
+    monkeypatch.setattr(
+        ITER_METRIC_GROUPS,
+        lambda soc, counters: metric_rows(request_row, *latency_sets),
+    )
+    work_set = request_row | read_level | write_level | atomic_level
+
+    result = try_allocate_single_pass_packable(
+        MinimalSoC(), work_set, TCC_BUDGET_CONFIG
+    )
+
+    assert result is not None
+    files, _file_count, stats = result
+    assert stats.packable_multi_after == 0
+    assert len(files) == 2
+    row_home = bucket_holding(files, request_row)
+    assert row_home is not None
+    for latency in latency_sets:
+        assert bucket_holding(files, latency) is not None
+    read_home = bucket_holding(files, read_level | read)
+    assert read_home is not row_home
