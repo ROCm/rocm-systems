@@ -60,6 +60,16 @@ def is_gfx1250(gpu_arch: Optional[str]) -> bool:
     return gpu_arch == "gfx1250"
 
 
+def table_index(table_id: int) -> str:
+    """The dotted id of a metric table, e.g. 301 -> "3.1"."""
+    return f"{table_id // 100}.{table_id % 100}"
+
+
+def format_metric_id(table_id: int, position: int) -> str:
+    """The id of the metric at *position* in a table, e.g. (301, 5) -> "3.1.5"."""
+    return f"{table_index(table_id)}.{position}"
+
+
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
     """Map GPU architectures to the shared analysis-config directory name."""
     if gpu_arch is None:
@@ -768,11 +778,10 @@ def build_metric_list(
                     if data_source_idx != "0":
                         metric_list[data_source_idx] = panel["title"]
 
-                    table_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-                    metric_list[table_idx] = data_config["title"]
+                    metric_list[table_index(data_config["id"])] = data_config["title"]
 
                     for i, (key, entries) in enumerate(data_config["metric"].items()):
-                        metric_idx = f"{table_idx}.{i}"
+                        metric_idx = format_metric_id(data_config["id"], i)
                         if _metric_has_valid_expr(entries, data_config):
                             metric_list[metric_idx] = key
 
