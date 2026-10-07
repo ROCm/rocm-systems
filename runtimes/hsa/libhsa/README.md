@@ -159,6 +159,13 @@ matching the current KFD contract. Fabric virtual-memory handles are also
 unavailable; their native export and import path requires UALink support.
 
 Direct GPU copies require both operands to be mapped to the selected GPU.
+GPU memory-pool allocations use private VRAM when the CPU-visible aperture
+does not cover the device's local memory. These allocations return a GPU
+address and report no host address or host-access flag in pointer info. CPU
+agent access to that pool is unavailable. When the full local memory is
+CPU-visible, pool allocations retain a host mapping. The AMD uncached pool
+flag requests coherent and uncached native VRAM placement for pool
+allocations and virtual-memory handles.
 For linear asynchronous CPU-to-GPU and GPU-to-CPU copies, rocddi stages a
 CPU-accessible operand that is not mapped to that GPU. The HSA worker reads
 the source after dependency signals complete, copies a staged destination

@@ -477,6 +477,74 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     assert!(!failure.operands_may_be_live);
     drop(sequence);
 
+    let mut private = device.allocate(
+        MemoryKind::DeviceLocal {
+            host_visible: false,
+            coherent: false,
+            uncached: false,
+            contiguous: false,
+        },
+        4096,
+        4096,
+        access,
+    )?;
+    let private_info = private.info();
+    assert_eq!(private_info.host_address, None);
+    let mut uncached = device.allocate(
+        MemoryKind::DeviceLocal {
+            host_visible: false,
+            coherent: true,
+            uncached: true,
+            contiguous: false,
+        },
+        4096,
+        4096,
+        access,
+    )?;
+    let uncached_info = uncached.info();
+    assert_eq!(uncached_info.host_address, None);
+    destination_bytes.fill(0xa5);
+    // SAFETY: All allocations remain mapped through the native submissions.
+    // Neither private VRAM address has a CPU mapping to fall back to.
+    let private_copy = unsafe {
+        gpu.copy_linear(
+            private_info.device_address,
+            source_info.device_address,
+            4096,
+            &cancel,
+        )
+        .and_then(|()| {
+            gpu.copy_linear(
+                uncached_info.device_address,
+                private_info.device_address,
+                4096,
+                &cancel,
+            )
+        })
+        .and_then(|()| {
+            gpu.copy_linear(
+                destination_info.device_address,
+                uncached_info.device_address,
+                4096,
+                &cancel,
+            )
+        })
+    };
+    if let Err(failure) = private_copy {
+        if failure.operands_may_be_live {
+            std::mem::forget(private);
+            std::mem::forget(uncached);
+            std::mem::forget(source);
+            std::mem::forget(destination);
+            std::mem::forget(device);
+            std::mem::forget(session);
+        }
+        return Err(Box::new(failure.error));
+    }
+    assert_eq!(destination_bytes, source_bytes);
+    private.free()?;
+    uncached.free()?;
+
     let mut virtual_memory =
         device.create_virtual_memory(MemoryKind::System, 4096, false, false)?;
     let mut reservation = session.reserve_virtual_address(&[&device], 4096, 4096, 0)?;
@@ -519,6 +587,58 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     mapping.free()?;
     virtual_memory.free()?;
     reservation.free()?;
+
+    let mut uncached_memory = device.create_virtual_memory(
+        MemoryKind::DeviceLocal {
+            host_visible: false,
+            coherent: true,
+            uncached: true,
+            contiguous: false,
+        },
+        4096,
+        false,
+        true,
+    )?;
+    let mut uncached_reservation = session.reserve_virtual_address(&[&device], 4096, 4096, 0)?;
+    let uncached_address = uncached_reservation.info().address;
+    let mut uncached_mapping = device.map_virtual_memory(
+        &uncached_memory,
+        &uncached_reservation,
+        uncached_address,
+        0,
+        4096,
+        access,
+    )?;
+    destination_bytes.fill(0xa5);
+    // SAFETY: The coherent, uncached VRAM mapping and both operands remain
+    // live through the native copies or are retained on uncertain retirement.
+    let uncached_copy = unsafe {
+        gpu.copy_linear(uncached_address, source_info.device_address, 4096, &cancel)
+            .and_then(|()| {
+                gpu.copy_linear(
+                    destination_info.device_address,
+                    uncached_address,
+                    4096,
+                    &cancel,
+                )
+            })
+    };
+    if let Err(failure) = uncached_copy {
+        if failure.operands_may_be_live {
+            std::mem::forget(uncached_mapping);
+            std::mem::forget(uncached_memory);
+            std::mem::forget(uncached_reservation);
+            std::mem::forget(source);
+            std::mem::forget(destination);
+            std::mem::forget(device);
+            std::mem::forget(session);
+        }
+        return Err(Box::new(failure.error));
+    }
+    assert_eq!(destination_bytes, source_bytes);
+    uncached_mapping.free()?;
+    uncached_memory.free()?;
+    uncached_reservation.free()?;
 
     source.free()?;
     destination.free()?;
