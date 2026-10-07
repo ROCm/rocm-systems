@@ -850,11 +850,14 @@ This detector is a value-based heuristic with three deliberate properties:
   previously caused occasional replay faults on ATen elementwise kernels.
   `HIP_HRR_PTR_RELAX=1` disables the replay-side guard for debugging.
 
-**Scope:** this scan flags only `hipMemoryTypeDevice`/`Unified` words. Words that
-point into a pinned allocation the launch's snapshot recorded are added
-separately (see Pinned Host Snapshots), so replay translates them too.
-Any other host pointer embedded by value keeps its capture-time host VA at replay,
-which is invalid in the replay process.
+**Scope:** this scan flags only `hipMemoryTypeDevice`/`Unified` words. Words
+that point into a pinned allocation the launch's snapshot recorded, at an
+8-byte-aligned offset of an 8-byte-aligned argument, are added separately (see
+Pinned Host Snapshots), so replay translates them too. In an argument capture
+marked (`value_kind == 3`), replay's rescan also rewrites an unmarked word that
+resolves into a pinned allocation the launch has no record for. Any other host
+pointer embedded by value keeps its capture-time host VA at replay, which is
+invalid in the replay process.
 
 A per-launch `co_hash` (the FNV-1a-128 hash of the owning code object) **is** recorded
 in kernel launch events. Playback resolves kernels by `(co_hash, name)`: it first looks
