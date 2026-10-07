@@ -47,6 +47,7 @@
 #include <cinttypes>
 #include <climits>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -988,14 +989,7 @@ void GpuAgent::InitDma() {
 
   // Decide which engine to use for blits.
   auto blit_lambda = [this](bool prefer_xgmi, lazy_ptr<core::Queue>& queue, bool isHostToDev, uint32_t rec_eng) {
-    Flag::SDMA_OVERRIDE sdma_override = core::Runtime::runtime_singleton_->flag().enable_sdma();
-
-    // User SDMA queues are unstable on gfx8 and unsupported on gfx1013.
-    bool use_sdma =
-        ((supported_isas()[0]->GetMajorVersion() != 8) && (supported_isas()[0]->GetVersion() != std::make_tuple(10, 1, 3)));
-    if (sdma_override != Flag::SDMA_DEFAULT) use_sdma = (sdma_override == Flag::SDMA_ENABLE);
-
-    if (use_sdma && (HSA_PROFILE_BASE == profile_)) {
+    if (PrefersSdmaBlit()) {
       // On gfx90a ensure that HostToDevice queue is created first and so is placed on SDMA0.
       if ((!prefer_xgmi) && (!isHostToDev) && (supported_isas()[0]->GetMajorVersion() == 9) &&
           (supported_isas()[0]->GetMinorVersion() == 0) && (supported_isas()[0]->GetStepping() == 10)) {
@@ -1938,6 +1932,51 @@ static std::string FormatDstList(void* const* dsts, uint32_t num) {
   return out;
 }
 
+bool GpuAgent::PrefersSdmaBlit() const {
+  // User SDMA queues are unstable on gfx8 and unsupported on gfx1013.
+  bool use_sdma = (supported_isas()[0]->GetMajorVersion() != 8) &&
+                  (supported_isas()[0]->GetVersion() != std::make_tuple(10, 1, 3));
+
+  const Flag::SDMA_OVERRIDE sdma_override =
+      core::Runtime::runtime_singleton_->flag().enable_sdma();
+  if (sdma_override != Flag::SDMA_DEFAULT) use_sdma = (sdma_override == Flag::SDMA_ENABLE);
+
+  return use_sdma && (HSA_PROFILE_BASE == profile_);
+}
+
+uint32_t GpuAgent::MaxBroadcastDestinations() const {
+  // Only the SDMA engines carry a broadcast. When SDMA is unavailable
+  // DmaCopyBatchFallback has no shader equivalent for broadcast and rejects the
+  // op, so nothing can service it and the agent accepts no destinations at all.
+  // Answered from the SDMA preference rather than from a blit object so that
+  // querying this attribute does not force a blit - and its queue - to be
+  // created as a side effect.
+  //
+  // The preference is what the agent is configured for, which is not identical
+  // to what DmaCopyBroadcast finds at submit time: it tests the H2D blit's
+  // isSDMA(), and blit creation falls back to a kernel blit if CreateBlitSdma
+  // fails to initialise an SDMA queue. An agent in that state reports a ceiling
+  // it will not honour. That is deliberate - this attribute describes the
+  // agent's configuration, not the momentary availability of DMA resources, so
+  // it stays stable across queries and cannot be perturbed by asking. The
+  // header documents that a copy within the ceiling may still be rejected.
+  if (!PrefersSdmaBlit()) return 0;
+
+  // No routing inside DmaCopyBroadcast caps the destination count below the
+  // API's own. The dedicated multicast packet describes at most
+  // BlitSdmaBase::kMaxMulticastDsts destinations, but a request exceeding that
+  // is sent to per-entry fan-out rather than refused, so the count an agent
+  // accepts does not depend on which engine happens to service the copy - or,
+  // equivalently, on the transfer size that selects between them. That matters
+  // because this query carries no size and so could not describe a
+  // size-dependent ceiling honestly.
+  //
+  // What remains is the limit of the request itself:
+  // hsa_amd_memory_copy_op_t::num_entries is a uint16_t, so no larger count
+  // can even be expressed.
+  return std::numeric_limits<decltype(hsa_amd_memory_copy_op_t::num_entries)>::max();
+}
+
 hsa_status_t GpuAgent::DmaCopyBroadcast(
     const hsa_amd_memory_copy_op_t& op,
     std::vector<core::Signal*>& dep_signals) {
@@ -1980,9 +2019,18 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
         // serialised writes become the bottleneck, so fan-out across multiple
         // SDMA engines wins on aggregate bandwidth.
         // HSA_SDMA_MULTICAST: 1=force on, 0=force off, unset=auto (threshold).
+        //
+        // The multicast packet addresses at most kMaxMulticastDsts
+        // destinations, so a broadcast with more than that takes fan-out
+        // instead of being rejected for a request the agent can still
+        // complete. Without this guard the accepted destination count would
+        // depend on the transfer size, since only copies at or under the
+        // threshold take the multicast route at all.
         const auto mc_flag = core::Runtime::runtime_singleton_->flag().sdma_multicast();
-        const bool use_multicast = (mc_flag == Flag::SDMA_ENABLE) ||
-            (mc_flag == Flag::SDMA_DEFAULT && op.size <= kMulticastMaxSize);
+        const bool use_multicast =
+            (num_entries <= BlitSdmaBase::kMaxMulticastDsts) &&
+            ((mc_flag == Flag::SDMA_ENABLE) ||
+             (mc_flag == Flag::SDMA_DEFAULT && op.size <= kMulticastMaxSize));
         if (use_multicast) {
           // SubmitLinearCopyMulticastCommand picks the WaitSignal packet
           // when profiling is off and the timestamp-capable plain packet when on.
@@ -2777,6 +2825,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       break;
     case HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED:
       *static_cast<bool*>(value) = SignalHintsSupported();
+      break;
+    case HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS:
+      *static_cast<uint32_t*>(value) = MaxBroadcastDestinations();
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
