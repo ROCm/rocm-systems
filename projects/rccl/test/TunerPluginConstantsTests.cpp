@@ -81,6 +81,8 @@ TEST(TunerPluginConstants, TestTunerIsLoaded) {
 TEST(TunerPluginConstants, InitSeesCoreConstantsAndKeepsItsWrites) {
   RUN_ISOLATED_TEST("TunerPluginConstants.InitSeesCoreConstantsAndKeepsItsWrites", []() {
     withTestTunerComm([] {
+      // The comparison below would also hold if the constants were never populated at all.
+      EXPECT_GT(seenAtInit.baseLatencies[NCCL_ALGO_TREE][NCCL_PROTO_LL], 0.0) << "init() saw unpopulated constants";
       ncclTunerConstants_v6_t core = *coreConstants;
       double& written = core.baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE];
       EXPECT_EQ(written, kOverride) << "the cost model overwrote the constants init() set";
