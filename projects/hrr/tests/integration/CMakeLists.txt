@@ -37,6 +37,12 @@
 # address-shaped lost pointer becomes null. Contains its own hidden
 # [.][hrr-direct] workload.
 #
+# hrr_pinned_host_test.cc covers pinned host buffers a kernel reads directly,
+# with no copy for capture to see: capture snapshots them before each launch
+# and replay writes them back. Contains its own hidden [.][hrr-direct]
+# workload, and edits a captured archive to check that replay refuses
+# snapshot records that do not fit their allocation.
+#
 # hrr_disk_space_test.cc covers how capture stops before the file system
 # holding the archive fills. The binary defines statvfs, statvfs64 and fsync to
 # fake a small file system under HIP_HRR_CAPTURE_OUTPUT when the test sets
@@ -56,6 +62,7 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_regions_test.cc
   hrr_api_matrix_workload_test.cc
   hrr_kernel_args_test.cc
+  hrr_pinned_host_test.cc
   hrr_disk_space_test.cc
 )
 
