@@ -670,6 +670,105 @@ bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
   return barrier.member_count == 0;
 }
 
+uint32_t ComputeUnitCore::release_gws_waiters(uint32_t dispatch_id, uint32_t wg_id, uint32_t rid,
+                                              uint32_t max_wake) {
+  uint32_t woke = 0;
+  for (auto &w : wfs_) {
+    if (woke >= max_wake)
+      break;
+    if (!w || w->state() != WfState::GWS_WAIT)
+      continue;
+    if (w->dispatch_id() == dispatch_id && w->wg_id() == wg_id && w->gws_wait_rid_ == rid) {
+      w->gws_wait_rid_ = Wavefront::kNoGwsWait;
+      w->set_state(WfState::RUNNING);
+      w->set_ready_cycle(cycle_counter_);
+      ++woke;
+    }
+  }
+  return woke;
+}
+
+void ComputeUnitCore::gws_init(Wavefront &wf, uint32_t rid, uint32_t count) {
+  if (rid >= kGwsResourcesPerWg)
+    return;
+  auto &res = gws_resources_[wg_key(wf.dispatch_id(), wf.wg_id())][rid];
+  res.init_count = count;
+  res.pending = count;
+  res.credits = count;
+  res.phase = 0;
+}
+
+void ComputeUnitCore::gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count) {
+  if (rid >= kGwsResourcesPerWg)
+    return;
+  const uint64_t key = wg_key(wf.dispatch_id(), wf.wg_id());
+  uint32_t resident = 0;
+  if (auto it = active_wgs_.find(key); it != active_wgs_.end())
+    resident = it->second;
+  // Co-residency gate: park only when the whole participant set is provably
+  // resident in this workgroup's scope (its waves are all-or-nothing co-resident
+  // on one CU, like s_barrier). A count that exceeds the resident set would
+  // reference waves that are not -- and may never be -- admitted, so fall back to
+  // a non-blocking structural no-op instead of risking a deadlock.
+  if (count == 0 || count > resident)
+    return;
+  auto &res = gws_resources_[key][rid];
+  if (res.pending == 0) {
+    res.init_count = count;
+    res.pending = count;
+  }
+  --res.pending;
+  if (res.pending == 0) {
+    // Final arrival closes this phase: reset for reuse and release the peers.
+    res.pending = res.init_count;
+    ++res.phase;
+    release_gws_waiters(wf.dispatch_id(), wf.wg_id(), rid, std::numeric_limits<uint32_t>::max());
+    return;
+  }
+  wf.gws_wait_rid_ = rid;
+  wf.set_state(WfState::GWS_WAIT);
+}
+
+void ComputeUnitCore::gws_sema_v(Wavefront &wf, uint32_t rid) {
+  if (rid >= kGwsResourcesPerWg)
+    return;
+  auto &res = gws_resources_[wg_key(wf.dispatch_id(), wf.wg_id())][rid];
+  ++res.credits;
+  if (release_gws_waiters(wf.dispatch_id(), wf.wg_id(), rid, 1) == 1)
+    --res.credits; // the released waiter consumes the credit it was waiting on
+}
+
+void ComputeUnitCore::gws_sema_p(Wavefront &wf, uint32_t rid) {
+  if (rid >= kGwsResourcesPerWg)
+    return;
+  auto &res = gws_resources_[wg_key(wf.dispatch_id(), wf.wg_id())][rid];
+  if (res.credits > 0) {
+    --res.credits;
+    return;
+  }
+  // No credit: park within the co-resident scope. If no sibling ever signals,
+  // update_wf_states()'s deadlock-escape scan releases the wave non-blockingly.
+  wf.gws_wait_rid_ = rid;
+  wf.set_state(WfState::GWS_WAIT);
+}
+
+void ComputeUnitCore::gws_sema_br(Wavefront &wf, uint32_t rid, uint32_t count) {
+  if (rid >= kGwsResourcesPerWg || count == 0)
+    return;
+  auto &res = gws_resources_[wg_key(wf.dispatch_id(), wf.wg_id())][rid];
+  res.credits += count;
+  uint32_t woke = release_gws_waiters(wf.dispatch_id(), wf.wg_id(), rid, count);
+  res.credits -= woke; // released waiters consume credits
+}
+
+void ComputeUnitCore::gws_sema_release_all(Wavefront &wf, uint32_t rid) {
+  if (rid >= kGwsResourcesPerWg)
+    return;
+  auto &res = gws_resources_[wg_key(wf.dispatch_id(), wf.wg_id())][rid];
+  release_gws_waiters(wf.dispatch_id(), wf.wg_id(), rid, std::numeric_limits<uint32_t>::max());
+  res.credits = 0;
+}
+
 void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
                                  Wavefront::CpCompletionNotice notice) {
   auto key = wg_key(dispatch_id, wg_id);
@@ -695,6 +794,7 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
   if (it != active_wgs_.end() && --it->second == 0) {
     active_wgs_.erase(it);
     barrier_wgs_.erase(key);
+    gws_resources_.erase(key);
     // Queued rather than sent: notify_wg_complete() takes the CP's
     // hw_queue_mutex_, and this runs under the wave-state lock, which the CP
     // takes in the other order when it dispatches. WaveStateGuard delivers it
@@ -720,6 +820,7 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
   }
   active_wgs_.erase(wg_key(dispatch_id, wg_id));
   barrier_wgs_.erase(wg_key(dispatch_id, wg_id));
+  gws_resources_.erase(wg_key(dispatch_id, wg_id));
   maybe_reset_lds_alloc();
 }
 
@@ -734,6 +835,9 @@ void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
     return static_cast<uint32_t>(entry.first >> 32) == dispatch_id;
   });
   std::erase_if(barrier_wgs_, [dispatch_id](const auto &entry) {
+    return static_cast<uint32_t>(entry.first >> 32) == dispatch_id;
+  });
+  std::erase_if(gws_resources_, [dispatch_id](const auto &entry) {
     return static_cast<uint32_t>(entry.first >> 32) == dispatch_id;
   });
   std::erase_if(pending_wg_completions_,
@@ -1416,6 +1520,34 @@ void ComputeUnitCore::update_wf_states() {
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
+      }
+    }
+  }
+
+  // GWS deadlock-escape: a wave parked in GWS_WAIT is only released when a
+  // co-resident peer arrives/signals the same resource. If every non-halted wave
+  // of a workgroup is already parked in GWS_WAIT, no peer can ever make progress,
+  // so release them all non-blockingly (the structural-fallback semantics).
+  for (auto &w : wfs_) {
+    if (!w || w->state() != WfState::GWS_WAIT)
+      continue;
+    uint32_t did = w->dispatch_id();
+    uint32_t wg = w->wg_id();
+    bool all_parked = true;
+    for (auto &w2 : wfs_) {
+      if (w2 && w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() != WfState::HALTED &&
+          w2->state() != WfState::GWS_WAIT) {
+        all_parked = false;
+        break;
+      }
+    }
+    if (!all_parked)
+      continue;
+    for (auto &w2 : wfs_) {
+      if (w2 && w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() == WfState::GWS_WAIT) {
+        w2->gws_wait_rid_ = Wavefront::kNoGwsWait;
+        w2->set_state(WfState::RUNNING);
+        w2->set_ready_cycle(cycle_counter_);
       }
     }
   }

@@ -8995,20 +8995,68 @@ class CodeGenerator:
         takes the ordinary completion path rather than the producer-without-op
         diagnostic.
 
-        Upgrade path (stateful "Option B"): add a per-resource GWS counter table
-        and branch per operation here (init seeds from M0/ADDR, sema_v/br/
-        release_all adjust credits, sema_p consumes, barrier rendezvous). To stay
-        deadlock-free, the safe way to build the parking flavor is to park only
-        when all participants are provably co-resident (e.g. single-workgroup
-        GWS, whose waves are all-or-nothing co-resident on one CU like
-        s_barrier), and fall back to non-blocking otherwise. That co-residency
-        gate is forward-compatible: as rocjitsu widens residency it covers more
-        cases automatically, and only a true cooperative-launch guarantee (full
+        Stateful "Option B" (tier B1, implemented here): a per-resource GWS
+        counter table lives CU-local and workgroup-private (keyed by the resident
+        workgroup and the 6-bit resource id). The resource id is decoded as
+        M0[21:16] + offset0[5:0] (the hardware convention; it is not spelled out
+        in the ISA XML), and the barrier/semaphore count comes from the ADDR
+        VGPR's first active lane (init/barrier/sema_br carry one source VGPR;
+        sema_v/p/release_all carry none). Operations route to the CU hooks:
+        init seeds the count/credits, barrier rendezvous (co-residency gated),
+        sema_v/br add credits and release waiters, sema_p consumes or parks, and
+        release_all wakes every waiter.
+
+        To stay deadlock-free, the parking flavor only blocks when all
+        participants are provably co-resident (single-workgroup GWS, whose waves
+        are all-or-nothing co-resident on one CU like s_barrier) and falls back
+        to a non-blocking no-op otherwise. That co-residency gate is
+        forward-compatible: as rocjitsu widens residency it covers more cases
+        automatically, and only a true cooperative-launch guarantee (full
         participant set resident, oversized grids rejected at launch) makes
         unconditional parking safe.
+
+        The structural memory op is preserved regardless of parking: a
+        zero-payload VectorMemState is still published via set_data so the DS
+        pipeline increments and retires the lgkmcnt/GDS wait counter and plugins
+        observe the instruction. When EXEC is zero the wave contributes no active
+        lane, so the operation is a pure structural no-op (no rid decode, no
+        count read, no rendezvous) -- this keeps GWS EXEC-independent.
         """
+        op = sem.operation
+        has_count = op in ('init', 'barrier', 'sema_br')
         L = []
-        L.append(f'  (void)wf; // {sem.operation} is a structural no-op')
+        L.append('  uint64_t exec = wf.exec();')
+        L.append('  if (exec) {')
+        L.append(
+            '    uint32_t rid = ((wf.m0() >> 16) & 0x3fu) + '
+            '(static_cast<uint32_t>(inst_.offset0) & 0x3fu);'
+        )
+        if has_count:
+            L.append(
+                '    uint32_t lane = static_cast<uint32_t>(std::countr_zero(exec));'
+            )
+            L.append('    auto &cu = wf.cu();')
+            L.append(
+                f'    uint32_t gws_base = {self._vgpr_base_expr("addr", use_acc=False)};'
+            )
+            L.append(
+                '    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);'
+            )
+        if op == 'init':
+            L.append('    wf.gws_init(rid, gws_count);')
+        elif op == 'barrier':
+            L.append('    wf.gws_barrier_arrive(rid, gws_count);')
+        elif op == 'sema_br':
+            L.append('    wf.gws_sema_br(rid, gws_count);')
+        elif op == 'sema_v':
+            L.append('    wf.gws_sema_v(rid);')
+        elif op == 'sema_p':
+            L.append('    wf.gws_sema_p(rid);')
+        elif op == 'sema_release_all':
+            L.append('    wf.gws_sema_release_all(rid);')
+        else:
+            L.append(f'    (void)rid; // {op} has no stateful effect')
+        L.append('  }')
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )

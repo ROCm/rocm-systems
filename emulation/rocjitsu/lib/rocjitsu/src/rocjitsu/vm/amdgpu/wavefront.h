@@ -45,6 +45,7 @@ enum class WfState : uint8_t {
   WAITCNT,  ///< Stalled at a waitcnt.
   VM_RETRY, ///< A prepared memory operation is waiting for backing availability.
   BARRIER,  ///< Stalled at a barrier.
+  GWS_WAIT, ///< Parked at a Global Wave Sync rendezvous (co-resident scope).
   ENDING,   ///< s_endpgm executed but outstanding memory ops are draining.
 };
 
@@ -314,6 +315,24 @@ public:
 
   /// @brief Leave the currently joined named barrier.
   bool barrier_leave();
+
+  /// @brief Seed a Global Wave Sync resource (init count / credits).
+  void gws_init(uint32_t rid, uint32_t count);
+
+  /// @brief Arrive at a GWS barrier; may park this wave in the co-resident scope.
+  void gws_barrier_arrive(uint32_t rid, uint32_t count);
+
+  /// @brief Signal (V) a GWS semaphore, releasing one waiter if present.
+  void gws_sema_v(uint32_t rid);
+
+  /// @brief Wait (P) on a GWS semaphore; may park this wave when no credit.
+  void gws_sema_p(uint32_t rid);
+
+  /// @brief Bulk-signal (BR) a GWS semaphore, releasing up to @p count waiters.
+  void gws_sema_br(uint32_t rid, uint32_t count);
+
+  /// @brief Release all waiters parked on a GWS resource.
+  void gws_sema_release_all(uint32_t rid);
 
   /// @brief Return the aligned LDS allocation size for this workgroup.
   uint32_t lds_size() const { return lds_size_; }
@@ -1017,6 +1036,7 @@ public:
     named_barrier_id_ = 0;
     barrier_complete_.fill(false);
     waiting_barrier_bit_ = kNoBarrierWait;
+    gws_wait_rid_ = kNoGwsWait;
     if (memory_wait_scoreboard_)
       memory_wait_scoreboard_->clear();
     wait_counters_ = {};
@@ -1136,7 +1156,9 @@ private:
   /// Completion bits: named, workgroup, workgroup trap, cluster, cluster trap.
   std::array<bool, 5> barrier_complete_{};
   uint8_t waiting_barrier_bit_ = kNoBarrierWait; ///< Completion bit awaited by split wait.
-  WfState state_ = WfState::HALTED;              ///< Current execution state.
+  static constexpr uint32_t kNoGwsWait = 0xffffffff;
+  uint32_t gws_wait_rid_ = kNoGwsWait; ///< GWS resource id this wave is parked on.
+  WfState state_ = WfState::HALTED;    ///< Current execution state.
   MemoryWaitShadow memory_wait_shadow_;
   std::unique_ptr<MemoryWaitScoreboard> memory_wait_scoreboard_;
   WaitCounters wait_counters_; ///< Outstanding memory operation counters.

@@ -438,6 +438,28 @@ public:
   /// @brief Leave the wave's currently joined named barrier.
   bool named_barrier_leave(Wavefront &wf);
 
+  /// @brief Seed a GWS resource's barrier count / semaphore credits.
+  void gws_init(Wavefront &wf, uint32_t rid, uint32_t count);
+
+  /// @brief Arrive at a GWS barrier. Parks the wave when the participant set is
+  /// provably co-resident and more arrivals are pending; the final arrival
+  /// releases the parked peers. Non-resident/degenerate counts fall back to a
+  /// non-blocking structural no-op.
+  void gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count);
+
+  /// @brief Signal (V) a GWS semaphore: add one credit, release one waiter.
+  void gws_sema_v(Wavefront &wf, uint32_t rid);
+
+  /// @brief Wait (P) on a GWS semaphore: consume a credit, else park the wave.
+  void gws_sema_p(Wavefront &wf, uint32_t rid);
+
+  /// @brief Bulk-signal (BR) a GWS semaphore: add @p count credits and release
+  /// up to that many waiters.
+  void gws_sema_br(Wavefront &wf, uint32_t rid, uint32_t count);
+
+  /// @brief Release every wave parked on a GWS resource.
+  void gws_sema_release_all(Wavefront &wf, uint32_t rid);
+
   /// @brief Called by Wavefront::halt() to decrement the WG refcount.
   /// @details When the refcount reaches zero, all WFs in the WG have halted
   /// and the CP is notified via notify_wg_complete.
@@ -1388,6 +1410,25 @@ protected:
                                             uint8_t completion_bit, uint32_t named_barrier_id = 0);
   void notify_barrier_complete(std::span<Wavefront *> members);
   std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
+
+  /// @brief Per-resource state for a Global Wave Sync (GWS) barrier/semaphore.
+  /// @details One array of kGwsResourcesPerWg entries is kept per co-resident
+  /// workgroup (keyed by wg_key), indexed by the 6-bit resource id. GWS state
+  /// lives CU-local and workgroup-private so a rendezvous can only ever involve
+  /// waves that are provably co-resident -- the same deadlock-free scope as an
+  /// ordinary s_barrier.
+  static constexpr uint32_t kGwsResourcesPerWg = 64;
+  struct GwsResource {
+    uint32_t init_count = 0; ///< Seeded barrier member count / initial credits.
+    uint32_t pending = 0;    ///< Remaining arrivals before the barrier releases.
+    uint32_t credits = 0;    ///< Available semaphore credits (V/BR add, P consumes).
+    uint32_t phase = 0;      ///< Monotonic barrier generation counter.
+  };
+  std::unordered_map<uint64_t, std::array<GwsResource, kGwsResourcesPerWg>> gws_resources_;
+  /// @brief Wake up to @p max_wake waves parked on one GWS resource.
+  /// @returns Number of waves released.
+  uint32_t release_gws_waiters(uint32_t dispatch_id, uint32_t wg_id, uint32_t rid,
+                               uint32_t max_wake);
 
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
