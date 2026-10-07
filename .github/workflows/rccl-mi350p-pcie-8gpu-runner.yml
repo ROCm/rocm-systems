@@ -6,7 +6,6 @@
 #
 # This job is not a required merge check. It does not run on an ordinary PR.
 # It runs when one of these is true:
-#   - schedule: nightly, both plans, on the default branch
 #   - workflow_dispatch: manual, plan selected in the Actions UI (func, perf, or both)
 #   - pull_request: the PR is from this repo and carries the "mi350p-test" label
 #     (labeled, and later pushes while the label stays on). A labeled PR runs
@@ -42,9 +41,6 @@ on:
         required: false
         default: ''
         type: string
-  schedule:
-    # 06:00 UTC, offset from the 02:00 AINIC nightly. This host is not that cluster.
-    - cron: '0 6 * * *'
   pull_request:
     types: [labeled, synchronize]
     paths:
@@ -97,7 +93,7 @@ jobs:
         env:
           ROCM_PATH: ${{ github.event.inputs.rocm_path || '/opt/rocm' }}
           MPI_PATH: ${{ github.event.inputs.mpi_path || '/opt/ompi' }}
-          # A labeled PR runs correctness only. Nightly runs both. Manual uses the input.
+          # A labeled PR runs correctness only. Manual uses the input.
           PLAN: ${{ github.event_name == 'pull_request' && 'func' || github.event.inputs.plan || 'both' }}
         run: |
           set -o pipefail
