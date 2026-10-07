@@ -144,8 +144,8 @@ NCCL_DEVICE_INLINE void* ncclGetLocalPointer(ncclWindow_t w, size_t offset) {
 
 #ifdef __CUDACC__
 NCCL_DEVICE_INLINE void* ncclGetLsaPointer(ncclWindow_t w, size_t offset, int peer) {
-  char* base = nccl::utility::loadConst(&w->lsaFlatBase);
-  uint32_t stride4G = nccl::utility::loadConst(&w->stride4G);
+  char* base = nccl::utility::loadConst</*Invariant=*/true>(&w->lsaFlatBase);
+  uint32_t stride4G = nccl::utility::loadConst</*Invariant=*/true>(&w->stride4G);
   int i = peer;
   return (void*)(nccl::utility::add4G(base, i * stride4G) + offset);
 }
