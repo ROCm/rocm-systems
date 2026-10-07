@@ -215,6 +215,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
   compiles for real. See `test_categories_micro_diagnostics.yaml`.
 
+- **`rccl-UnitTestsMicroGinHost`**: `src/gin/gin_host.cc` (via
+  `GIN_HOST_CC_PATH`, suite `GinHostFinalizeTest.*`): host finalize, connect
+  failure / retry, and the register, deregister and DevCommSetup walks over
+  closed backends, against a fake `ncclGin_t` vtable. Its own binary: it
+  compiles the real GIN host entry points that `rccl-UnitTestsMicro` fakes in
+  `fakes/dev_runtime_micro_fakes.cc`. See `test_categories_micro_gin_host.yaml`.
+
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
 

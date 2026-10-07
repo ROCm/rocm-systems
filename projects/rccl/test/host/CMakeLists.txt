@@ -303,12 +303,10 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroGinHost -- host-only microtests for src/gin/gin_host.cc.
   # Its own binary, not rccl-UnitTestsMicro: that target defines the GIN host
   # entry points in fakes/dev_runtime_micro_fakes.cc for dev-runtime-test.cc.
-  # os_fakes.cc for ncclOsCpuCount / ncclOsSetAffinity. The suite only calls
-  # HostFinalize / Register / Deregister, which never reach ncclGinProgress, but
-  # -fprofile-instr-generate / -fcoverage-mapping keep Progress live against
-  # --gc-sections (host CI linked with exactly those two undefined). The rest of
-  # the ConnectOnce / DevCommSetup chain is either GC'd or covered by the test
-  # TU's param_redirect.h (ncclParamGinType).
+  # os_fakes.cc for ncclOsCpuCount / ncclOsSetAffinity: no test starts a progress
+  # thread, but -fprofile-instr-generate / -fcoverage-mapping keep ncclGinProgress
+  # live against --gc-sections. The test TU defines the ConnectOnce / DevCommSetup
+  # link seams (topology, bootstrap, team and thread-name helpers, ncclParamGinType).
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
     gin-host-finalize-test.cc
     fakes/os_fakes.cc

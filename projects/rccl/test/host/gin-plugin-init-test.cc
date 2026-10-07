@@ -261,6 +261,42 @@ TEST_F(GinFinalizeTest, NeverConnected_NoBackendsIsANoOp) {
   EXPECT_EQ(pluginLibs[0].refCount, kInitialRefCount);
 }
 
+// A new shared split after a sibling's host finalize must not re-arm supported
+// (that would let it reconnect through a ginInstance whose owning comm may be
+// freed), nor finalize the records early: ncclGinFinalize owns that.
+TEST_F(GinFinalizeTest, FinalizedBackends_SetDefaultBackendLeavesThemForGinFinalize) {
+  void* ctx = std::malloc(8);
+  fake_.lastCtx = ctx;
+  addActiveBackend(ctx);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  ginState->finalized = true;
+  ginState->supported = false;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_PROXY)), ncclSuccess);
+  EXPECT_FALSE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 1);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+
+  EXPECT_EQ(ncclGinFinalize(&comm_), ncclSuccess);
+  EXPECT_EQ(fake_.finalizeCalls, 1);
+  EXPECT_EQ(pluginLibs[0].refCount, kInitialRefCount - 1);
+}
+
+// Control for the case above: a live backend in the global mask re-arms supported.
+TEST_F(GinFinalizeTest, LiveBackend_SetDefaultBackendArmsSupported) {
+  void* ctx = std::malloc(8);
+  fake_.lastCtx = ctx;
+  addActiveBackend(ctx);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_PROXY)), ncclSuccess);
+  EXPECT_TRUE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 1);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+}
+
 // Success path: keep the context, mark the plugin enabled, do not finalize.
 TEST_F(GinPluginInitTest, KeepsContextWhenDevicesSucceed) {
   fake_.ndev = 2;

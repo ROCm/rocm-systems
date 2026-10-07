@@ -2535,7 +2535,7 @@ ncclResult_t ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* prop
     memset(props->ginSupport, 0, sizeof(props->ginSupport));
     if (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE) {
       struct ncclGinState* ginState = &comm->sharedRes->ginState;
-      for (int i = 0; i < ginState->numActiveBackends; i++) {
+      for (int i = 0; !ginState->finalized && i < ginState->numActiveBackends; i++) {
         int t = (int)ginState->backends[i].ginType;
         if (t >= 0 && t < NCCL_GIN_MAX_TYPES) props->ginSupport[t] = true;
       }

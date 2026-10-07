@@ -55,9 +55,12 @@ extern std::function<ncclResult_t(void*, int*, int, int, int)> g_devrBootstrapIn
 extern std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_devrBootstrapIntraNodeAllGather;
 
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
-                                  ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int)>
+                                  ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
+                                  uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int)>
     g_devrGinRegister;
-extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_devrGinDeregister;
+extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
+                                  uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS])>
+    g_devrGinDeregister;
 
 extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t, int, int64_t*)> g_devrSpaceAlloc;
 extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t)> g_devrSpaceFree;

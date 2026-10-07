@@ -36,12 +36,10 @@ struct ncclGinBackendState {
   ncclNetProperties_t ginProps[NCCL_GIN_MAX_CONNECTIONS];
   bool supportsStrongSignals;
   bool supportsVASignals;
-  // False exactly while ginComms[] hold live handles. ncclGinHostFinalize sets it
-  // before closeColl: surviving splitShare siblings keep numActiveBackends and
-  // ginInstance for ncclGinFinalize, but register / deregister / DevCommSetup must
-  // not walk ginComms[] once they are NULLed. ncclGinConnectOnce clears it when it
-  // repopulates them, so a sibling that reconnects GIN on a shared sharedRes is
-  // usable again, and sets it on its failure path for the same reason.
+  // False exactly while ginComms[] hold live handles. Set before closeColl by
+  // ncclGinHostFinalize and by ncclGinConnectOnce's failure path: register /
+  // deregister / DevCommSetup must not walk ginComms[] once they are NULLed.
+  // ncclGinConnectOnce clears it when a retry repopulates them.
   bool closed;
   // Bumped on each successful connect, so a window records which generation of
   // ginComms[] it was registered against. ginComms[] is shared through sharedRes
@@ -70,6 +68,11 @@ struct ncclGinState {
   struct ncclGinStateDevComm* devComms;
   ncclGinConnectionType_t ginConnectionType;
 
+  // Set by ncclGinHostFinalize and never cleared. backends[] then survives only
+  // for ncclGinFinalize on the last sharedRes reference: each ginInstance still
+  // points at the comm that ran ncclGinInit, which may already be freed, so no
+  // comm on this sharedRes may advertise, select or reconnect these backends.
+  bool finalized;
   int numActiveBackends;
   struct ncclGinBackendState backends[NCCL_GIN_MAX_ACTIVE_BACKENDS];
 };
