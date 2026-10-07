@@ -677,19 +677,22 @@ TEST_CASE("Unit_HRR_PinnedHost_EntryPoints_Direct", "[.][hrr-direct]") {
 // ===========================================================================
 // hipDeviceReset in the middle of a capture.
 //
-//   0  read      pinned buffer A, pattern 30
-//   -  hipDeviceReset
+//   0  read      pinned buffer A, eight times the usual size, pattern 30
+//   -  hipDeviceReset, which releases A
 //   1  read      a new pinned buffer B, pattern 31
-//   2  only when the runtime no longer knows A: a launch whose pointer
-//      argument still holds A's old address, with nothing to read. Capture
-//      must have forgotten A rather than read its unmapped bytes.
+//   2  a launch whose pointer argument still holds an address inside A that
+//      neither B nor anything else the runtime knows covers, with nothing
+//      to read. Capture must have forgotten A: otherwise it reads the
+//      unmapped bytes, or records whatever is mapped there now.
 // Captured only: events after a reset replay against a reset device (see
 // Unit_HRR_ApiMatrix_Reset_Direct).
 // ===========================================================================
+constexpr size_t kResetABytes = 8 * kPinnedBytes;
+
 TEST_CASE("Unit_HRR_PinnedHost_Reset_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   int* a = nullptr;
-  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&a), kPinnedBytes,
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&a), kResetABytes,
                               hipHostMallocDefault));
   int* out = nullptr;
   HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
@@ -710,23 +713,28 @@ TEST_CASE("Unit_HRR_PinnedHost_Reset_Direct", "[.][hrr-direct]") {
   read_pinned(b, out, 31);
 
   // 2
-  hipPointerAttribute_t attr{};
-  const bool a_known = hipPointerGetAttributes(&attr, a) == hipSuccess &&
-                       attr.type != hipMemoryTypeUnregistered;
-  (void)hipGetLastError();
   const auto lo = reinterpret_cast<uintptr_t>(b);
-  const auto at = reinterpret_cast<uintptr_t>(a);
-  const bool reused = at >= lo && at < lo + kPinnedBytes;
-  INFO("A known after reset: " << a_known << ", inside B: " << reused);
-  if (!a_known && !reused) {
-    hipLaunchKernelGGL(hrr_pinned_read, dim3(1), dim3(kThreads), 0, nullptr, a, out, 0);
-    HRR_HIP_CHECK(hipGetLastError());
-    HRR_HIP_CHECK(hipDeviceSynchronize());
+  int* probe = nullptr;
+  for (size_t off : {size_t{0}, kResetABytes / 2, kResetABytes - 4096}) {
+    int* p = a + off / sizeof(int);
+    const auto at = reinterpret_cast<uintptr_t>(p);
+    hipPointerAttribute_t attr{};
+    const bool known = hipPointerGetAttributes(&attr, p) == hipSuccess &&
+                       attr.type != hipMemoryTypeUnregistered;
+    (void)hipGetLastError();
+    INFO("A+" << off << " known after reset: " << known);
+    if (!known && !(at >= lo && at < lo + kPinnedBytes)) {
+      probe = p;
+      break;
+    }
   }
+  REQUIRE(probe != nullptr);
+  hipLaunchKernelGGL(hrr_pinned_read, dim3(1), dim3(kThreads), 0, nullptr, probe, out, 0);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipDeviceSynchronize());
 
   HRR_HIP_CHECK(hipFree(out));
   HRR_HIP_CHECK(hipHostFree(b));
-  if (a_known) HRR_HIP_CHECK(hipHostFree(a));
 }
 
 namespace {
@@ -1562,13 +1570,12 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_DeviceReset) {
   hrr::Archive arc;
   REQUIRE(hrr::load_archive(hrr_single_process_archive(cap.path).string(), arc));
   const auto kls = launches_of(arc);
-  REQUIRE(kls.size() >= 2);
-  REQUIRE(kls[0]->snapshots.size() == 2);
+  REQUIRE(kls.size() == 3);
+  CHECK(kls[0]->snapshots.size() == kResetABytes / kChunk);
   REQUIRE(kls[1]->snapshots.size() == 2);
   CHECK(kls[1]->snapshots[0].direction == 0);
   CHECK(kls[1]->snapshots[1].direction == 0);
-  // Launch 2 ran only when A was gone; capture would have crashed reading it.
-  if (kls.size() == 3) CHECK(kls[2]->snapshots.empty());
+  CHECK(kls[2]->snapshots.empty());
 }
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
