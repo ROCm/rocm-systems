@@ -299,7 +299,57 @@ Panel Config:
           value: ROUND(100 * SUM(GC_EA_SE_SARB_STALLED_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum), 0)
           unit: Percent
 
+  - metric_table:
+      id: 309
+      title: Workgroup Processors (WGPs)
+      cli_style: mem_chart
+      comparable: false
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        Wavefront Occupancy:
+          value: ROUND(100 * SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu * $max_waves_per_cu), 1)
+          unit: Percent
+        VGPR:
+          value: ROUND(AVG(Arch_VGPR), 0)
+          unit: Registers
+        SGPR:
+          value: ROUND(AVG(SGPR), 0)
+          unit: Registers
+        LDS Allocation:
+          value: ROUND(AVG(LDS_Per_Workgroup), 0)
+          unit: Bytes per Workgroup
+        Scratch Allocation:
+          value: ROUND(AVG(Scratch_Per_Workitem) * $wave_size / 1024, 3)
+          unit: KB per Wave
+        Workgroups:
+          value: ROUND(AVG(Grid_Size / Workgroup_Size) / $cu_per_gpu, 1)
+          unit: Workgroups per WGP
+
   metrics_description:
+    Wavefront Occupancy: >-
+      Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the
+      maximum wavefronts per WGP.
+    VGPR: >-
+      The number of architected vector general-purpose registers allocated
+      for the kernel. Note: this may not exactly match the number of VGPRs
+      requested by the compiler due to allocation granularity.
+    SGPR: >-
+      The number of scalar general-purpose registers allocated for the kernel.
+      Note: this may not exactly match the number of SGPRs requested by
+      the compiler due to allocation granularity.
+    LDS Allocation: >-
+      The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note:
+      This may also be larger than what was requested at compile time due to both allocation
+      granularity and dynamic per-dispatch LDS allocations.
+    Scratch Allocation: >-
+      The amount of scratch memory requested per wavefront, in KB: the scratch bytes
+      requested per work-item multiplied by the wavefront size. Scratch memory is used for
+      stack memory on the accelerator, as well as for register spills and restores.
+    Workgroups: >-
+      The number of workgroups in the launch divided by the number of WGPs.
     ICache Requests: >-
       Total Instruction Cache fetch requests.
 

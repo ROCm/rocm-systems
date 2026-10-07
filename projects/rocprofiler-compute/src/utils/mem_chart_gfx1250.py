@@ -4,12 +4,12 @@
 """gfx1250 (CDNA5) memory chart renderer.
 
 Renders the Instinct gfx1250 memory hierarchy as a Rich terminal diagram.
-Layout: Kernel -> TCP(LDS+GL0)/SQC -> GL1 -> GLARB -> GL2 -> EA/DF -> HBM/IO/HDM/GMI
+Layout: WGP -> TCP(LDS+GL0)/SQC -> GL1 -> GLARB -> GL2 -> EA/DF -> HBM/IO/HDM/GMI
 
 Architecture regions::
 
     |<--------- XCD (Compute Die) -------->|<---- AID (I/O Die) --->|
-    Kernel -> SQC/TCP -> GL1 -> GLARB -> GL2 -> EA/DF -> HBM (DRAM)
+    WGP    -> SQC/TCP -> GL1 -> GLARB -> GL2 -> EA/DF -> HBM (DRAM)
                                                        -> IO  (PCIe)
                                                        -> HDM (CXL)
                                                        -> GMI (Multi-GPU)
@@ -26,6 +26,8 @@ from utils.mem_chart_common import (
     COLORS,
     build_bw_edges,
     build_cache_panel,
+    build_cu_panel,
+    build_cu_stats,
     build_legend,
     colored,
     format_edge,
@@ -38,7 +40,7 @@ from utils.mem_chart_common import (
 )
 
 # ---------------------------------------------------------------------------
-# Metric keys — match 0300_Memory_Chart.yaml for gfx1250 (tables 301-308)
+# Metric keys — match 0300_Memory_Chart.yaml for gfx1250 (tables 301-309)
 # ---------------------------------------------------------------------------
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     # Table 301: Instruction Cache
@@ -114,6 +116,13 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("GMI Read Bandwidth", 256e9),
     ("GMI Write Bandwidth", 192e9),
     ("EA Stall Rate", 15.2),
+    # Table 309: Workgroup Processors (WGPs)
+    ("Wavefront Occupancy", 50.0),
+    ("VGPR", 64),
+    ("SGPR", 32),
+    ("LDS Allocation", 32768),
+    ("Scratch Allocation", 0),
+    ("Workgroups", 2.0),
 )
 
 MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
@@ -127,7 +136,6 @@ DEFAULT_SAMPLE_METRICS: dict[str, Union[int, float]] = dict(_MEM_CHART_DEFAULT_R
 # ---------------------------------------------------------------------------
 _CONSOLE_WIDTH = 220
 
-_KERNEL_W = 14
 _TCP_W = 27
 _SQC_W = 27
 _GL1_W = 15
@@ -137,7 +145,7 @@ _EA_DF_W = 15
 _HBM_W = 16
 _EXT_BLOCK_W = 16
 
-_KERNEL_H = 65
+_CU_PANEL_H = 65
 _TCP_H = 43
 _SQC_H = 17
 _GL1_H = 65
@@ -148,14 +156,14 @@ _HBM_H = 37
 _EXT_BLOCK_H = 8
 
 _ARROW_LEN = 10
-_KERNEL_ARROW_LEN = 18
+_CU_ARROW_LEN = 18
 
 
-def _build_kernel_edge_column(
+def _build_cu_edge_column(
     entries: list[tuple[str, Union[int, float, None], str, str]],
     arrows: dict[str, str],
 ) -> Text:
-    """Kernel -> TCP/SQC edge column with request-count labels."""
+    """WGPs -> TCP/SQC edge column with request-count labels."""
     lines: list[str] = []
     for label, value, arrow_key, color in entries:
         lines.append(colored(format_edge(label, value, width=8), color))
@@ -461,27 +469,18 @@ def create_mem_chart_diagram(
     console.print()
 
     # --- Arrows ---
-    kernel_arrows = make_arrows(_KERNEL_ARROW_LEN)
+    cu_arrows = make_arrows(_CU_ARROW_LEN)
     std_arrows = make_arrows(_ARROW_LEN)
 
-    # --- Kernel panel ---
-    kernel_panel = Panel(
-        "\n" * (_KERNEL_H // 2 - 4)
-        + "[dim]Shader Core[/dim]\n"
-        + "[dim]Wave[/dim]\n"
-        + "[dim]Execution[/dim]",
-        title=(f"[bold {COLORS['kernel']}]Kernel[/bold {COLORS['kernel']}]"),
-        border_style=COLORS["kernel"],
-        width=_KERNEL_W,
-        height=_KERNEL_H,
-    )
+    # --- WGPs panel ---
+    cu_panel = build_cu_panel(_CU_PANEL_H, stats=build_cu_stats(m, "WGP"), title="WGPs")
 
-    # --- Kernel -> TCP/SQC edges ---
+    # --- WGPs -> TCP/SQC edges ---
     color_read = COLORS["read"]
     color_write = COLORS["write"]
     color_atomic = COLORS["atomic"]
 
-    lds_edges = _build_kernel_edge_column(
+    lds_edges = _build_cu_edge_column(
         [
             ("Load", m.get("LDS Load Requests"), "left", color_read),
             ("Store", m.get("LDS Store Requests"), "right", color_write),
@@ -491,29 +490,29 @@ def create_mem_chart_diagram(
             ("TDM Ld", m.get("TDM Load Requests"), "left", color_read),
             ("TDM St", m.get("TDM Store Requests"), "right", color_write),
         ],
-        kernel_arrows,
+        cu_arrows,
     )
 
-    gl0_edges = _build_kernel_edge_column(
+    gl0_edges = _build_cu_edge_column(
         [
             ("Read", m.get("GL0 Read Requests"), "left", color_read),
             ("Write", m.get("GL0 Write Requests"), "right", color_write),
             ("Atomic", m.get("GL0 Atomic Requests"), "both", color_atomic),
         ],
-        kernel_arrows,
+        cu_arrows,
     )
 
-    icache_edge = _build_kernel_edge_column(
+    icache_edge = _build_cu_edge_column(
         [("ICACHE", m.get("ICache Requests"), "left", color_read)],
-        kernel_arrows,
+        cu_arrows,
     )
 
-    smem_edge = _build_kernel_edge_column(
+    smem_edge = _build_cu_edge_column(
         [("SMEM", m.get("Dcache Requests"), "left", color_read)],
-        kernel_arrows,
+        cu_arrows,
     )
 
-    edge_col_width = _KERNEL_ARROW_LEN + 1
+    edge_col_width = _CU_ARROW_LEN + 1
     edges_col = Table.grid()
     edges_col.add_column(width=edge_col_width)
     edges_col.add_row("")
@@ -719,7 +718,7 @@ def create_mem_chart_diagram(
         layout.add_column()
 
     layout.add_row(
-        kernel_panel,
+        cu_panel,
         edges_col,
         blocks_col,
         edges_to_gl1,
