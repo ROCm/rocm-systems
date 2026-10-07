@@ -561,7 +561,8 @@ __global__ void kernelGdaSignalContextSelection(ncclGinRocshmemGdaGPUContext* co
   ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
       ginCtx, ncclGinSignalDescriptor{NCCL_GIN_SIGNAL_TYPE_INDEXED, {.indexedSignal = {.signalId = 0}}});
   ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0);
-  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 0).ptr[0] = 202;
+  // Write a sibling cell so ResetCounter's clear of index 0 stays observable.
+  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ginCtx, 1).ptr[0] = 202;
 }
 
 TEST_F(GinRocshmemGdaTemplateTest, SignalApis_SelectLogicalContext) {
@@ -588,7 +589,10 @@ TEST_F(GinRocshmemGdaTemplateTest, SignalApis_SelectLogicalContext) {
   EXPECT_EQ(signals[GdaEnv::kNSignals], 0ULL)
       << "ResetSignal on contextId=1 must clear context 1 signal cell";
   EXPECT_EQ(counters[0], 101ULL);
-  EXPECT_EQ(counters[GdaEnv::kNCounters], 202ULL);
+  EXPECT_EQ(counters[GdaEnv::kNCounters], 0ULL)
+      << "ResetCounter on contextId=1 must clear context 1 counter index 0";
+  EXPECT_EQ(counters[GdaEnv::kNCounters + 1], 202ULL)
+      << "GetCounterPtr on contextId=1 must address the context-1 stripe";
 }
 
 // G14: Put with an indexed signal must resolve signal_raddrs from the GPU
@@ -620,6 +624,43 @@ TEST_F(GinRocshmemGdaTemplateTest, Put_SelectLogicalContextSignalStripe) {
   EXPECT_EQ(sigs[0], 0ULL) << "contextId=1 Put must not write the context-0 signal stripe";
   EXPECT_EQ(sigs[GdaEnv::kNSignals], 5ULL)
       << "contextId=1 Put must deliver the signal into the context-1 stripe";
+}
+
+// G15: PutValue has its own signal_raddrs resolution path; cover contextId=1
+// the same way G14 covers Put.
+__global__ void kernelPutValueSignalSelectContext(GdaHarness* h, ncclGinRocshmemGdaGPUContext* contexts,
+                                                  int contextId, uint32_t val) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = contexts;
+  ginCtx.contextId = contextId;
+  ginCtx.nRanks = 2;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 0;
+  ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, val, sig, ncclGinSignalAdd, 5,
+      false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, PutValue_SelectLogicalContextSignalStripe) {
+  GdaEnv env(/*bytes=*/sizeof(uint32_t), /*nContexts=*/2);
+  env.dst.zero();
+  env.build();
+  resetPutValCount();
+  resetSignalCount();
+  const uint32_t kVal = 0xA5A5A5A5u;
+  kernelPutValueSignalSelectContext<<<1, 1>>>(env.dHarness.ptr, env.dContexts.ptr, /*contextId=*/1, kVal);
+  syncAndCheck();
+  EXPECT_EQ(readPutValCount(), 1ULL);
+  EXPECT_EQ(readSignalCount(), 1ULL);
+  auto got = env.dst.copyTo();
+  uint32_t observed = 0;
+  std::memcpy(&observed, got.data(), sizeof(observed));
+  EXPECT_EQ(observed, kVal);
+  auto sigs = env.signals.copyTo();
+  EXPECT_EQ(sigs[0], 0ULL) << "contextId=1 PutValue must not write the context-0 signal stripe";
+  EXPECT_EQ(sigs[GdaEnv::kNSignals], 5ULL)
+      << "contextId=1 PutValue must deliver the signal into the context-1 stripe";
 }
 
 }  // namespace RcclUnitTesting
