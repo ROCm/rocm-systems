@@ -570,9 +570,11 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
 //                       replays the first token's parameters (section 8.4a).
 //   stream value ops    XLA's VMM allocator waits on a value the no-op never
 //                       writes; replay hangs (section 7, H2).
-//   hipHostAlloc        allocates nothing. cudaHostAlloc hipifies here while
-//                       cudaMallocHost hipifies to the working spelling
-//                       (section 8.6).
+//   hipHostAlloc        used to allocate nothing at replay. cudaHostAlloc
+//                       hipifies here and cudaMallocHost to hipMallocHost
+//                       (section 8.6). Both, with hipMemAllocHost and
+//                       hipFreeHost, now replay for real and stay here as
+//                       call sites.
 //   __device__ symbols  MoRI's globalGpuStates arrives through
 //                       hipModuleGetGlobal / hipMemcpyToSymbol, both no-ops,
 //                       so replayed kernels dereference zeros.

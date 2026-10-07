@@ -590,11 +590,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMalloc3DArray",
     # hipMalloc3D — pitchedDevPtr output (stale), hipExtent non-castable; output not needed for D2H — noop
     "hipMalloc3D",
-    # hipMemAllocHost / hipMallocHost / hipHostAlloc / hipFreeHost — host ptr alloc/free; not device allocations — noop
-    "hipMemAllocHost",
-    "hipMallocHost",
-    "hipHostAlloc",
-    "hipFreeHost",
     # hipMemAllocPitch — hipDeviceptr_t* output (type mismatch) + output not in alloc_map — noop
     "hipMemAllocPitch",
     # hipHostGetFlags — output flag ptr (stale) — noop
@@ -2837,18 +2832,25 @@ _ALLOC_CREATE_APIS: Dict[str, Tuple[str, str]] = {
     'hipMallocPitch':        ('ptr', 'width'),  # approximate; width used as proxy
     'hipHostMalloc':         ('ptr', 'size'),
     'hipHostAlloc':          ('ptr', 'size'),
+    'hipMallocHost':         ('ptr', 'size'),
+    'hipMemAllocHost':       ('ptr', 'size'),
 }
 
 # Subset of _ALLOC_CREATE_APIS whose output is *host* (pinned) memory and must be
 # released with hipHostFree, not hipFree. The teardown loop dispatches on the
 # AllocKind tag recorded here. APIs not listed default to AllocKind::Device.
-_HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc'}
+# Pinned host memory is backed at replay like any other allocation: a kernel
+# that reads it gets the replay's buffer, and the pinned host snapshots of the
+# launch refill it.
+_HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc', 'hipMallocHost',
+                           'hipMemAllocHost'}
 
 # APIs that free device allocations: API name -> rec_ptr_param name in struct
 _ALLOC_FREE_APIS: Dict[str, str] = {
     'hipFree':         'ptr',
     'hipFreeAsync':    'dev_ptr',
     'hipHostFree':     'ptr',
+    'hipFreeHost':     'ptr',
 }
 
 # APIs that destroy handles: API name -> (handle param name in struct, handle type)
