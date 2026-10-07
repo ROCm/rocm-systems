@@ -1142,6 +1142,7 @@ std::string NextTokenAcrossConcurrentParse(const std::function<void()>& parse) {
     EXPECT_STREQ("a", strtok(buf, ","));
     std::thread(parse).join();
     next = strtok(nullptr, ",");
+    EXPECT_GT(microFree.calls, 0) << "the parser's free() bypassed the deferral, so a clobbered pointer would dangle";
   }
   std::string result = next ? next : "(null)";
   for (void* p : deferred) std::free(p);
@@ -1166,6 +1167,7 @@ TEST_F(InitMicrotest, StrToCpuset_ConcurrentParse_KeepsCallerStrtokState) {
 TEST_F(InitMicrotest, StrListToCpuset_ConcurrentParse_KeepsCallerStrtokState) {
   ncclAffinity set;
   EXPECT_EQ("b", NextTokenAcrossConcurrentParse([&] { EXPECT_EQ(ncclSuccess, ncclStrListToCpuset("1,3", &set)); }));
+  // A decimal CPU list, not a mask: the same "1,3" ncclStrToCpuset reads as a bitmask is just CPUs 1 and 3.
   EXPECT_EQ(2, CPU_COUNT(&set));
   EXPECT_TRUE(CPU_ISSET(1, &set) && CPU_ISSET(3, &set));
 }
