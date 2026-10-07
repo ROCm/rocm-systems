@@ -233,8 +233,9 @@ class ThunkLoader {
                                       HSAuint32 *entry_size, \
                                       bool suspend_queues);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetClockCounters))(HSAuint32 NodeId, \
-                                      HsaClockCounters* Counters, \
-                                      bool precise_timestamps);
+                                      HsaClockCounters* Counters);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetClockCountersPrecise))(HSAuint32 NodeId, \
+                                      HsaClockCounters* Counters);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtPmcGetCounterProperties))(HSAuint32 NodeId, \
                                       HsaCounterProperties** CounterProperties);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtPmcRegisterTrace))(HSAuint32 NodeId, \
@@ -512,6 +513,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtDbgGetDeviceData)* HSAKMT_PFN(hsaKmtDbgGetDeviceData);
     HSAKMT_DEF(hsaKmtDbgGetQueueData)* HSAKMT_PFN(hsaKmtDbgGetQueueData);
     HSAKMT_DEF(hsaKmtGetClockCounters)* HSAKMT_PFN(hsaKmtGetClockCounters);
+    HSAKMT_DEF(hsaKmtGetClockCountersPrecise)* HSAKMT_PFN(hsaKmtGetClockCountersPrecise);
     HSAKMT_DEF(hsaKmtPmcGetCounterProperties)* HSAKMT_PFN(hsaKmtPmcGetCounterProperties);
     HSAKMT_DEF(hsaKmtPmcRegisterTrace)* HSAKMT_PFN(hsaKmtPmcRegisterTrace);
     HSAKMT_DEF(hsaKmtPmcUnregisterTrace)* HSAKMT_PFN(hsaKmtPmcUnregisterTrace);

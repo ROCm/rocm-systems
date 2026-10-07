@@ -29,9 +29,7 @@
 #include "impl/wddm/device.h"
 #include "util/os.h"
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
-                                               HsaClockCounters *Counters,
-                                               bool /*precise_timestamps*/) {
+static HSAKMT_STATUS read_clock_counters(HSAuint32 NodeId, HsaClockCounters *Counters) {
   HSAKMT_STATUS result = HSAKMT_STATUS_SUCCESS;
 
   CHECK_DXG_OPEN();
@@ -46,4 +44,33 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
   Counters->SystemClockFrequencyHz = 1000000000;
 
   return result;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
+                                               HsaClockCounters *Counters) {
+  return read_clock_counters(NodeId, Counters);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCountersPrecise(HSAuint32 NodeId,
+                                                     HsaClockCounters *Counters) {
+  HsaClockCounters best{};
+  uint64_t best_elapsed = UINT64_MAX;
+
+  for (unsigned int i = 0; i < 4; i++) {
+    HsaClockCounters sample;
+    uint64_t before = rocr::os::TimeNanos();
+    HSAKMT_STATUS result = read_clock_counters(NodeId, &sample);
+    uint64_t after = rocr::os::TimeNanos();
+    if (result != HSAKMT_STATUS_SUCCESS)
+      return result;
+
+    uint64_t elapsed = after - before;
+    if (elapsed < best_elapsed) {
+      best_elapsed = elapsed;
+      best = sample;
+    }
+  }
+
+  *Counters = best;
+  return HSAKMT_STATUS_SUCCESS;
 }
