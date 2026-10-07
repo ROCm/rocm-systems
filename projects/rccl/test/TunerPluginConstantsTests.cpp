@@ -15,6 +15,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "plugin/nccl_tuner.h"
@@ -42,12 +43,20 @@ ncclResult_t tunerInit(void** context, uint64_t, size_t, size_t, ncclDebugLogger
 ncclResult_t tunerGetCollInfo(void*, ncclFunc_t, size_t, int, float**, int, int, int, int*) { return ncclSuccess; }
 ncclResult_t tunerFinalize(void*) { return ncclSuccess; }
 
+// Returns the reason this host cannot run the test, or "" when it can.
+// GTEST_SKIP() must be issued by the caller: it expands to a bare return and
+// would otherwise only leave this helper, letting the test body run on.
+std::string gpuSkipReason() {
+  int deviceCount = 0;
+  if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1) return "requires at least one GPU";
+  return "";
+}
+
 // Runs `check` while a one-rank communicator that loaded the test tuner is alive.
-// Callers must be isolated: the tuner load outcome is latched in a process global.
+// Callers must be isolated, since the tuner load outcome is latched in a process global,
+// and must skip on gpuSkipReason() first.
 template <typename Check>
 void withTestTunerComm(Check check) {
-  int deviceCount = 0;
-  if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1) GTEST_SKIP() << "requires at least one GPU";
   ASSERT_EQ(hipSetDevice(0), hipSuccess);
   ASSERT_EQ(setenv("NCCL_TUNER_PLUGIN", "STATIC_PLUGIN", 1), 0);
   ncclUniqueId id;
@@ -75,11 +84,15 @@ namespace RcclUnitTesting {
 
 // Control: the plugin loads and initializes on any tree, so a failure below is about the constants.
 TEST(TunerPluginConstants, TestTunerIsLoaded) {
-  RUN_ISOLATED_TEST("TunerPluginConstants.TestTunerIsLoaded", []() { withTestTunerComm([] {}); });
+  RUN_ISOLATED_TEST("TunerPluginConstants.TestTunerIsLoaded", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    withTestTunerComm([] {});
+  });
 }
 
 TEST(TunerPluginConstants, InitSeesCoreConstantsAndKeepsItsWrites) {
   RUN_ISOLATED_TEST("TunerPluginConstants.InitSeesCoreConstantsAndKeepsItsWrites", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
     withTestTunerComm([] {
       // The comparison below would also hold if the constants were never populated at all.
       EXPECT_GT(seenAtInit.baseLatencies[NCCL_ALGO_TREE][NCCL_PROTO_LL], 0.0) << "init() saw unpopulated constants";
