@@ -14,6 +14,9 @@ add_executable(hrr-unit-tests
   hrr_recovery_test.cc
   hrr_playback_test.cc
   hrr_va_placement_test.cc
+  # The placement logic itself, so its range planning, holds and mapping
+  # bookkeeping are tested without a GPU.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../playback/hrr_va_placement.cpp
 )
 set_target_properties(hrr-unit-tests PROPERTIES
   CXX_STANDARD 17

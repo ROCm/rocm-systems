@@ -8,10 +8,10 @@
  * @addtogroup HRR HRR capture-address placement
  * @{
  * @ingroup HRRTest
- * CPU-only tests for the range arithmetic behind capture-address placement:
- * which recorded calls claim a range, how the ranges are rounded and merged,
- * and what is left out. The GPU half is covered by
- * tests/integration/hrr_va_placement_test.cc.
+ * CPU-only tests for capture-address placement: which recorded calls claim a
+ * range, how the ranges are rounded and merged, what is left out, how the
+ * placeholders are held, and the bookkeeping that needs no GPU. The GPU half
+ * is covered by tests/integration/hrr_va_placement_test.cc.
  */
 
 #include "hrr_test_common.hh"
@@ -19,8 +19,14 @@
 #include "hrr_event_order.h"
 #include "hrr/hrr_api_args.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
+
+#include <sys/mman.h>
+#include <unistd.h>
 
 using hrr::VaRange;
 
@@ -297,6 +303,270 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_AllocsRunInCaptureOrder) {
     REQUIRE(hrr_needs_ordering(api));
   }
   REQUIRE_FALSE(hrr_needs_ordering(HRR_API_HIPLAUNCHKERNEL));
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_PlanSegmentsMinusReservations) {
+  // The region sidecar declares a segment for every allocation it saw, so a
+  // hipMemAddressReserve range comes back as a segment too. It belongs to the
+  // replayed reserve: the segment loses it, not the reservation.
+  std::vector<hrr::Event> events;
+  events.push_back(ev_malloc(B, P));
+  events.push_back(ev_reserve(B + 32 * P, 8 * P));
+  const std::vector<VaRange> segments = {{B, B + P},
+                                         {B + 32 * P, B + 40 * P},
+                                         {B + 64 * P, B + 66 * P}};
+  const hrr::PlacementPlan p = hrr::plan_placement(events, segments, {});
+  REQUIRE(p.vmm == Ranges{{B + 32 * P, B + 40 * P}});
+  REQUIRE(p.alloc == Ranges{{B, B + P}, {B + 64 * P, B + 66 * P}});
+  // Each allocation and segment keeps its own range for reserve() to fall
+  // back on; the reservation's segment is not one of them.
+  REQUIRE(p.pieces == Ranges{{B, B + P}, {B, B + P}, {B + 64 * P, B + 66 * P}});
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_ReservePieces) {
+  const uint64_t G = 16 * P;
+  const Ranges pieces = {{B, B + P},              // granule 0
+                         {B + 2 * P, B + 3 * P},  // granule 0 too: shares it
+                         {B + G, B + G + P},      // granule 1: touches, stays apart
+                         {B + 4 * G, B + 5 * G}}; // outside [b, e)
+  SECTION("pieces in one granule share it, touching ones stay apart") {
+    REQUIRE(hrr::va_reserve_pieces(pieces, B, B + 2 * G, G) ==
+            Ranges{{B, B + G}, {B + G, B + 2 * G}});
+  }
+  SECTION("a piece is clipped to the range that failed") {
+    REQUIRE(hrr::va_reserve_pieces(pieces, B, B + G + 4 * P, G) ==
+            Ranges{{B, B + G}, {B + G, B + G + 4 * P}});
+  }
+  SECTION("nothing in the range, nothing to reserve") {
+    REQUIRE(hrr::va_reserve_pieces(pieces, B + 2 * G, B + 3 * G, G).empty());
+  }
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_ParseProcMaps) {
+  const std::string maps =
+      "7f0000003000-7f0000004000 r--p 00000000 00:00 0\n"
+      "55d0a0000000-55d0a0021000 rw-p 00000000 00:00 0   [heap]\n"
+      "7f0000001000-7f0000003000 r-xp 00001000 08:01 42  /usr/lib/libx.so\n"
+      "garbage line\n"
+      "ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0 [vsyscall]";
+  REQUIRE(hrr::parse_proc_maps(maps) ==
+          Ranges{{0x55d0a0000000ull, 0x55d0a0021000ull},
+                 {0x7f0000001000ull, 0x7f0000004000ull},
+                 {0xffffffffff600000ull, 0xffffffffff601000ull}});
+  REQUIRE(hrr::parse_proc_maps("").empty());
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_Unplaced) {
+  hrr::Unplaced u;
+  SECTION("managed memory is reported with its range") {
+    hrr_args_hipMallocManaged a{};
+    a.dev_ptr = B; a.size = 3 * P;
+    REQUIRE(hrr::placement_unplaced(place_event(HRR_API_HIPMALLOCMANAGED, a), &u));
+    REQUIRE(u.rec == B);
+    REQUIRE(u.size == 3 * P);
+    REQUIRE(std::string(u.api) == "hipMallocManaged");
+    REQUIRE(u.why.find("managed") != std::string::npos);
+    a.ret = 2;  // a failed call allocated nothing
+    REQUIRE_FALSE(hrr::placement_unplaced(place_event(HRR_API_HIPMALLOCMANAGED, a), &u));
+  }
+  SECTION("hipExtMallocWithFlags only with a flag set") {
+    REQUIRE(hrr::placement_unplaced(ev_ext_malloc(B, P, 1), &u));
+    REQUIRE(u.why.find("0x1") != std::string::npos);
+    REQUIRE_FALSE(hrr::placement_unplaced(ev_ext_malloc(B, P, 0), &u));
+  }
+  SECTION("pitched memory") {
+    hrr_args_hipMallocPitch a{};
+    a.ptr = B; a.pitch = 512; a.width = 500; a.height = 8;
+    REQUIRE(hrr::placement_unplaced(place_event(HRR_API_HIPMALLOCPITCH, a), &u));
+    REQUIRE(u.rec == B);
+    REQUIRE(u.size == 512 * 8);
+  }
+  SECTION("graph memory nodes") {
+    hrr_args_hipGraphAddMemAllocNode a{};
+    hipMemAllocNodeParams np{};
+    np.dptr = reinterpret_cast<void*>(B);
+    np.bytesize = 2 * P;
+    std::memcpy(a.pNodeParams_bytes, &np, std::min(sizeof(np), sizeof(a.pNodeParams_bytes)));
+    a.pNodeParams_present = 1;
+    REQUIRE(hrr::placement_unplaced(place_event(HRR_API_HIPGRAPHADDMEMALLOCNODE, a), &u));
+    REQUIRE(u.rec == B);
+    REQUIRE(u.size == 2 * P);
+  }
+  SECTION("placed and unrelated calls are not reported") {
+    REQUIRE_FALSE(hrr::placement_unplaced(ev_malloc(B, P), &u));
+    REQUIRE_FALSE(hrr::placement_unplaced(ev_reserve(B, P), &u));
+    hrr::Event cut = ev_malloc(B, P);
+    cut.raw_payload.resize(4);
+    REQUIRE_FALSE(hrr::placement_unplaced(cut, &u));
+  }
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_NeedsPeerAccess) {
+  auto set_device = [](int32_t d, int32_t ret = 0) {
+    hrr_args_hipSetDevice a{};
+    a.deviceId = d; a.ret = ret;
+    return place_event(HRR_API_HIPSETDEVICE, a);
+  };
+  std::vector<hrr::Event> ev;
+  ev.push_back(set_device(0));
+  ev.push_back(set_device(0));
+  ev.push_back(ev_malloc(B, P));
+  REQUIRE_FALSE(hrr::placement_needs_peer_access(ev));
+  ev.push_back(set_device(1, /*ret=*/101));  // failed: still one device
+  REQUIRE_FALSE(hrr::placement_needs_peer_access(ev));
+  ev.push_back(set_device(1));
+  REQUIRE(hrr::placement_needs_peer_access(ev));
+
+  std::vector<hrr::Event> peer;
+  hrr_args_hipMemcpyPeer c{};
+  peer.push_back(place_event(HRR_API_HIPMEMCPYPEER, c));
+  REQUIRE(hrr::placement_needs_peer_access(peer));
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_MappingOverlap) {
+  hrr::PlacedMap m;
+  m[B] = {B + 2 * P, B + 16, {}};
+  m[B + 4 * P] = {B + 5 * P, B + 4 * P, {}};
+  const auto* hit = hrr::va_mapping_overlapping(m, B + P, B + P + 1);
+  REQUIRE(hit != nullptr);
+  REQUIRE(hit->rec == B + 16);
+  hit = hrr::va_mapping_overlapping(m, B + 3 * P, B + 4 * P + 1);
+  REQUIRE(hit != nullptr);
+  REQUIRE(hit->rec == B + 4 * P);
+  // The gap between them, and the edges, touch nothing.
+  REQUIRE(hrr::va_mapping_overlapping(m, B + 2 * P, B + 4 * P) == nullptr);
+  REQUIRE(hrr::va_mapping_overlapping(m, B - P, B) == nullptr);
+  REQUIRE(hrr::va_mapping_overlapping(m, B + 5 * P, B + 6 * P) == nullptr);
+  REQUIRE(hrr::va_mapping_overlapping({}, B, B + P) == nullptr);
+}
+
+namespace {
+// A range of `pages` pages that nothing in this process maps right now.
+uint64_t free_range(size_t pages) {
+  void* p = mmap(nullptr, pages * P, PROT_NONE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  REQUIRE(p != MAP_FAILED);
+  munmap(p, pages * P);
+  return reinterpret_cast<uint64_t>(p);
+}
+
+// Whether something already maps the page at `va`.
+bool page_taken(uint64_t va) {
+  void* want = reinterpret_cast<void*>(va);
+  void* p = mmap(want, P, PROT_NONE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | 0x100000 /*NOREPLACE*/, -1, 0);
+  if (p == MAP_FAILED) return true;
+  munmap(p, P);
+  return p != want;
+}
+}  // namespace
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_HoldFreePieces) {
+  const uint64_t R = free_range(8);
+  // Something else takes page 3.
+  void* other = mmap(reinterpret_cast<void*>(R + 3 * P), P, PROT_READ,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+  REQUIRE(other == reinterpret_cast<void*>(R + 3 * P));
+
+  SECTION("the occupied page is skipped and the rest is held") {
+    std::vector<VaRange> held;
+    hrr::hold_free_pieces(R, R + 8 * P, hrr::read_proc_maps(), &held);
+    REQUIRE(hrr::va_round_merge(held, P) == Ranges{{R, R + 3 * P}, {R + 4 * P, R + 8 * P}});
+    REQUIRE(page_taken(R));
+    REQUIRE(page_taken(R + 7 * P));
+    for (const auto& r : held) munmap(reinterpret_cast<void*>(r.base), r.end - r.base);
+  }
+  SECTION("a stale address map still finds the free pieces") {
+    std::vector<VaRange> held;
+    hrr::hold_free_pieces(R, R + 8 * P, {}, &held);
+    REQUIRE(hrr::va_round_merge(held, P) == Ranges{{R, R + 3 * P}, {R + 4 * P, R + 8 * P}});
+    for (const auto& r : held) munmap(reinterpret_cast<void*>(r.base), r.end - r.base);
+  }
+  munmap(other, P);
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_VmmHoldRestoredAfterMiss) {
+  // A recorded hipMemAddressReserve range is held until the replayed reserve
+  // asks for it. If the runtime then reserves somewhere else, the recorded
+  // range must be held again, or a later allocation can land in it.
+  const uint64_t R = free_range(4);
+  hrr::PlacementPlan plan;
+  plan.vmm = {{R, R + 4 * P}};
+  hrr::VaPlacement pl;
+  REQUIRE(pl.hold(plan));
+  REQUIRE(page_taken(R));
+
+  REQUIRE(pl.release_vmm_hold(R, 4 * P));
+  REQUIRE_FALSE(page_taken(R));
+  REQUIRE_FALSE(page_taken(R + 3 * P));
+
+  pl.vmm_reserved(R, 4 * P, /*held=*/true, /*live=*/R + (1ull << 32));
+  REQUIRE(pl.fallbacks() == 1);
+  REQUIRE(pl.placed() == 0);
+  REQUIRE(page_taken(R));
+  REQUIRE(page_taken(R + 3 * P));
+
+  // A reserve that lands where it was recorded is counted as placed.
+  REQUIRE(pl.release_vmm_hold(R, 4 * P));
+  pl.vmm_reserved(R, 4 * P, true, R);
+  REQUIRE(pl.placed() == 1);
+
+  pl.release_all();
+  REQUIRE_FALSE(pl.active());
+  REQUIRE_FALSE(page_taken(R));
+}
+
+namespace {
+// What `fn` writes to stderr.
+template <class Fn>
+std::string stderr_of(Fn fn) {
+  fflush(stderr);
+  FILE* tmp = tmpfile();
+  REQUIRE(tmp != nullptr);
+  const int saved = dup(2);
+  dup2(fileno(tmp), 2);
+  fn();
+  fflush(stderr);
+  dup2(saved, 2);
+  close(saved);
+  std::string text;
+  rewind(tmp);
+  char buf[4096];
+  size_t n = 0;
+  while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) text.append(buf, n);
+  fclose(tmp);
+  return text;
+}
+
+size_t count_of(const std::string& text, const std::string& what) {
+  size_t n = 0;
+  for (size_t at = text.find(what); at != std::string::npos; at = text.find(what, at + 1)) ++n;
+  return n;
+}
+}  // namespace
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_FallbackLinesCapped) {
+  const std::string named = "not placed at its recorded address";
+  const std::string more  = "further fallbacks are only counted; --verbose names every one";
+  SECTION("16 lines, then one saying the rest are counted") {
+    hrr::VaPlacement pl;
+    const std::string err = stderr_of([&] {
+      for (int i = 0; i < 40; ++i) pl.fell_back(B + i * P, 64, "hipMalloc", "a test");
+    });
+    REQUIRE(pl.fallbacks() == 40);
+    REQUIRE(count_of(err, named) == 16);
+    REQUIRE(count_of(err, more) == 1);
+  }
+  SECTION("--verbose names every one") {
+    hrr::VaPlacement pl;
+    pl.set_verbose(true);
+    const std::string err = stderr_of([&] {
+      for (int i = 0; i < 40; ++i) pl.fell_back(B + i * P, 64, "hipMalloc", "a test");
+    });
+    REQUIRE(pl.fallbacks() == 40);
+    REQUIRE(count_of(err, named) == 40);
+    REQUIRE(count_of(err, more) == 0);
+  }
 }
 
 /**
