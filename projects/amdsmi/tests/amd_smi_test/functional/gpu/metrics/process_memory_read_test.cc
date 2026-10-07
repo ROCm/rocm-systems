@@ -222,7 +222,7 @@ void TestProcessMemoryRead::Run(void) {
   // KFD names processes by host PID. Under another PID namespace the library
   // cannot open the helper's fdinfo, so there is nothing to compare.
   if (KfdVram(helper, kfd_gpu_id) != vram) {
-    GTEST_SKIP() << "KFD does not list the helper under its own PID";
+    GTEST_SKIP() << "KFD lists the helper by another PID; its fdinfo is not readable here";
   }
   DrmMemoryKiB expected;
   ASSERT_TRUE(ReadDrmMemory(helper, report.drm_fd, &expected)) << "No DRM memory in fdinfo";
@@ -235,7 +235,13 @@ void TestProcessMemoryRead::Run(void) {
   for (const auto give_up = Clock::now() + std::chrono::seconds(10);
        !listed && Clock::now() < give_up;) {
     uint32_t count = static_cast<uint32_t>(procs.size());
-    if (amdsmi_get_gpu_process_list(gpu, &count, procs.data()) == AMDSMI_STATUS_SUCCESS) {
+    amdsmi_status_t list_status = amdsmi_get_gpu_process_list(gpu, &count, procs.data());
+    if (list_status == AMDSMI_STATUS_OUT_OF_RESOURCES) {
+      procs.resize(count + 64);
+      count = static_cast<uint32_t>(procs.size());
+      list_status = amdsmi_get_gpu_process_list(gpu, &count, procs.data());
+    }
+    if (list_status == AMDSMI_STATUS_SUCCESS) {
       for (uint32_t i = 0; i < count && i < procs.size(); ++i) {
         if (procs[i].pid == static_cast<uint32_t>(helper)) {
           found = procs[i];
