@@ -236,7 +236,7 @@ jobs:
               --trigger-kind "${TRIGGER_KIND}" \
               -o "${COCO_OUTPUT}" \
               "$@" \
-              ${COCO_ARGS} > "${log}" 2>&1
+              ${COCO_ARGS} 2>&1 | tee "${log}"
             assert_built "${log}"
           }
 
@@ -261,7 +261,7 @@ jobs:
             "${COCO_VENV}/bin/coco" run \
               --job "${JOB}" \
               --trigger-kind "${TRIGGER_KIND}" \
-              ${COCO_ARGS} > "${LOG_FILE}" 2>&1
+              ${COCO_ARGS} 2>&1 | tee "${LOG_FILE}"
           else
             echo "::error::mode must be run or pr, got: ${MODE}"
             exit 1
