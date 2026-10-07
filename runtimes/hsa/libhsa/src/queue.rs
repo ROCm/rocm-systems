@@ -169,6 +169,8 @@ pub(crate) struct Queue {
     pub(crate) agent: HsaAgent,
     hardware_id: u32,
     counted_pool_key: Option<(u64, u32)>,
+    cooperative_refs: u32,
+    inactivated: bool,
     cu_mask: Vec<u32>,
     callback: QueueErrorCallback,
     callback_data: CallbackArg,
@@ -758,6 +760,60 @@ unsafe fn create_hardware_queue(
     let Some(index) = runtime.gpu_index(agent) else {
         return INVALID_AGENT;
     };
+    let cooperative = queue_type == QUEUE_TYPE_COOPERATIVE;
+    if cooperative {
+        if runtime.gpus[index].info.gws_count == 0 {
+            return INVALID_QUEUE_CREATION;
+        }
+        if runtime.cooperative_teardown.contains(&agent.handle) {
+            return OUT_OF_RESOURCES;
+        }
+        if let Some((public, record)) = runtime
+            .queues
+            .iter_mut()
+            .find(|(_, record)| record.agent == agent && record.cooperative_refs != 0)
+        {
+            if record.inactivated
+                || record.teardown_started
+                || !record.event_alive.load(Ordering::Acquire)
+            {
+                return OUT_OF_RESOURCES;
+            }
+            let Some(refs) = record.cooperative_refs.checked_add(1) else {
+                return OUT_OF_RESOURCES;
+            };
+            if priority != QueuePriority::Normal {
+                if let Err(error) = record.native.set_priority(priority) {
+                    return map_error(error);
+                }
+            }
+            if let Some(mask) = cu_mask {
+                if let Err(error) = record.native.set_cu_mask(&mask) {
+                    return map_error(error);
+                }
+                record.cu_mask = mask;
+            }
+            record.cooperative_refs = refs;
+            // SAFETY: This queue is still registered and the caller supplied
+            // writable output for the returned shared public handle.
+            unsafe { queue.write(*public as *mut HsaQueue) };
+            return SUCCESS;
+        }
+    }
+    // ROCr's cooperative queue uses one internal 16 KiB AQL ring without
+    // caller-specific scratch or callback state. AMD queue descriptors can
+    // still adjust its priority and CU mask.
+    let (size, callback, data, private_segment_size) = if cooperative {
+        (
+            16_384 / AQL_PACKET_BYTES as u32,
+            None,
+            // SAFETY: A null callback argument has no referent to retain.
+            unsafe { CallbackArg::new(std::ptr::null_mut()) },
+            0,
+        )
+    } else {
+        (size, callback, data, private_segment_size)
+    };
     let ring_size_bytes = match u64::from(size).checked_mul(AQL_PACKET_BYTES as u64) {
         Some(size) => size,
         None => return INVALID_QUEUE_CREATION,
@@ -814,7 +870,7 @@ unsafe fn create_hardware_queue(
                             } else {
                                 QueueProducerMode::Multiple
                             },
-                            global_work_sync: false,
+                            global_work_sync: cooperative,
                             inactive_signal: Some(inactive_signal.handle()),
                             error_event: Some(inactive_signal.error_event()),
                             scratch,
@@ -827,7 +883,13 @@ unsafe fn create_hardware_queue(
             }
         }) {
             Ok(created) => created,
-            Err(error) => return map_error(error),
+            Err(error) => {
+                return if cooperative && error.kind() == rocddi::ErrorKind::Busy {
+                    OUT_OF_RESOURCES
+                } else {
+                    map_error(error)
+                };
+            }
         };
     // An unwind in frontend setup must not drop backing still reachable by
     // this unpublished native queue. Explicit rejection uses the native
@@ -889,6 +951,8 @@ unsafe fn create_hardware_queue(
             agent,
             hardware_id,
             counted_pool_key: None,
+            cooperative_refs: u32::from(cooperative),
+            inactivated: false,
             cu_mask: saved_cu_mask,
             callback,
             callback_data: data,
@@ -1797,6 +1861,9 @@ pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
         };
         if let Some(hardware_key) = hardware_queue_key(runtime, queue) {
             if let Some(record) = runtime.queues.get_mut(&hardware_key) {
+                // A shared cooperative queue must not be returned by a later
+                // create once any holder starts inactivating it.
+                record.inactivated = true;
                 return record
                     .native
                     .inactivate()
@@ -1836,7 +1903,7 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
             return INVALID_RUNTIME_STATE;
         }
         let key = queue as usize;
-        let mut record = {
+        let (mut record, cooperative_agent) = {
             let mut guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
@@ -1845,14 +1912,25 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                 Ok(runtime) => runtime,
                 Err(status) => return status,
             };
-            if runtime
-                .queues
-                .get(&key)
-                .is_some_and(|record| record.counted_pool_key.is_some())
-            {
-                return INVALID_QUEUE;
+            let cooperative_agent = if let Some(record) = runtime.queues.get_mut(&key) {
+                if record.counted_pool_key.is_some() {
+                    return INVALID_QUEUE;
+                }
+                if record.cooperative_refs > 1 {
+                    record.cooperative_refs -= 1;
+                    return SUCCESS;
+                }
+                (record.cooperative_refs == 1).then_some(record.agent.handle)
+            } else {
+                None
+            };
+            if let Some(agent) = cooperative_agent {
+                if runtime.cooperative_teardown.try_reserve(1).is_err() {
+                    return OUT_OF_RESOURCES;
+                }
+                runtime.cooperative_teardown.insert(agent);
             }
-            if let Some(record) = runtime.queues.remove(&key) {
+            let record = if let Some(record) = runtime.queues.remove(&key) {
                 RemovedQueue::Aql(record)
             } else if let Some(record) = runtime.sdma_queues.remove(&key) {
                 RemovedQueue::Sdma(record)
@@ -1863,7 +1941,8 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                 } else {
                     INVALID_QUEUE
                 };
-            }
+            };
+            (record, cooperative_agent)
         };
         let result = match &mut record {
             RemovedQueue::Aql(queue) => destroy_runtime_queue(queue),
@@ -1875,8 +1954,11 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                     RemovedQueue::Aql(_) => "AQL",
                     RemovedQueue::Sdma(_) => "SDMA",
                 };
-                let log = lock().ok().and_then(|guard| {
-                    guard.as_ref().and_then(|runtime| {
+                let log = lock().ok().and_then(|mut guard| {
+                    guard.as_mut().and_then(|runtime| {
+                        if let Some(agent) = cooperative_agent {
+                            runtime.cooperative_teardown.remove(&agent);
+                        }
                         runtime.prepare_log(
                             AMD_LOG_FLAG_INFO,
                             format_args!("destroyed {engine} queue address=0x{key:x}"),
@@ -1898,6 +1980,9 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                     std::mem::forget(record);
                     return status;
                 };
+                if let Some(agent) = cooperative_agent {
+                    runtime.cooperative_teardown.remove(&agent);
+                }
                 match record {
                     RemovedQueue::Aql(record) => {
                         runtime.queues.insert(key, record);

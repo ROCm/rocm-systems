@@ -26,6 +26,15 @@ rocddi queue owner until destruction succeeds. A failed native teardown keeps
 the public handle and backing available for retry, and final shutdown retains
 an unresolved owner for process teardown.
 
+Cooperative queue creation uses one 16 KiB AQL queue per GPU agent. rocddi
+allocates KFD GWS before the queue becomes visible. Repeated creates for that
+agent return the same public queue and increase its reference count; only the
+final matching destroy tears down the native queue. A create during final
+teardown or after explicit inactivation returns out of resources and can be
+retried after the final destroy. The shared queue has
+no caller error callback or fixed scratch backing. AMD queue descriptors can
+adjust its priority and CU mask.
+
 SDMA descriptors select a native engine ID or round-robin selection through
 rocddi. Their public ring size and monotonic indices count bytes. The ring is
 host-visible, while the read and write pointer info queries return addresses
