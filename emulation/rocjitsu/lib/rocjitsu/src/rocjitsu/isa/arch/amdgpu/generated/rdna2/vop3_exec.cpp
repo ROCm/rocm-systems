@@ -822,13 +822,11 @@ void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtPknormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  amdgpu::execute_v_cvt_pknorm_i16_f16_vop3(*this, wf);
 }
 
 void VCvtPknormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  amdgpu::execute_v_cvt_pknorm_u16_f16_vop3(*this, wf);
 }
 
 void VLshlrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {

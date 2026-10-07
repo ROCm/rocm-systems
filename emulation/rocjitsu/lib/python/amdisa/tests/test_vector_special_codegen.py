@@ -38,6 +38,7 @@ from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
+from amdisa.semantics import derive_semantics
 
 
 def test_cls_i32_codegen():
@@ -557,6 +558,26 @@ def test_vop3_pack_and_pknorm_f16_use_true16_source_halves():
     assert 'util::rndne_scalar(std::clamp(static_cast<double>(f) * 32767.0' in pknorm
 
 
+@pytest.mark.parametrize('op', ['i16', 'u16'])
+def test_gfx9_pknorm_f16_spelling_matches_rdna3_pk_norm(op):
+    # GFX9 and RDNA1/2 spell V_CVT_PK_NORM_*_F16 as V_CVT_PKNORM_*_F16.
+    gfx9 = derive_semantics(f'V_CVT_PKNORM_{op.upper()}_F16', 'ENC_VOP3')
+    rdna3 = derive_semantics(f'V_CVT_PK_NORM_{op.upper()}_F16', 'ENC_VOP3')
+    assert (gfx9.semantic_class, gfx9.operation, gfx9.data_type) == (
+        'vector_cvt_pknorm',
+        op,
+        'f16',
+    )
+    assert (gfx9.semantic_class, gfx9.operation, gfx9.data_type) == (
+        rdna3.semantic_class,
+        rdna3.operation,
+        rdna3.data_type,
+    )
+    assert simd_probe_line(f'v_cvt_pknorm_{op}_f16_vop3') == simd_probe_line(
+        f'v_cvt_pk_norm_{op}_f16_vop3'
+    )
+
+
 def test_true16_special_vop3_simd_routes_use_true16_glue():
     assert simd_probe_line('v_mad_u32_u16_vop3').startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01'
@@ -636,7 +657,7 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
         assert negation < cpp.index('util::rndne_scalar')
         if has_abs:
             assert cpp.index(f'std::fabs(s{source})') < negation
-    for prefix in (['pk_norm', 'pknorm'] if dtype == 'f32' else ['pk_norm']):
+    for prefix in ('pk_norm', 'pknorm'):
         probe = simd_probe_line(f'v_cvt_{prefix}_{op}_{dtype}_vop3')
         assert not probe.startswith('  if (!(inst.inst_.abs | inst.inst_.neg))')
         sign = '0x80000000u' if dtype == 'f32' else '0x8000u'

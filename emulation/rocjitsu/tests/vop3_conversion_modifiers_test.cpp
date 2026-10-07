@@ -425,18 +425,18 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetr
     for (bool half : {false, true}) {
       const bool early_rdna =
           GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
-      if (half && (gfx9() || early_rdna))
-        continue;
       std::vector<Case> cases(std::begin(exact_half_cases), std::end(exact_half_cases));
       if (!half)
         cases.insert(cases.end(), std::begin(f32_only_cases), std::end(f32_only_cases));
       for (bool signed_result : {false, true}) {
-        // F16 uses opcode 786; F32 uses 660 on GFX9, 872 on RDNA1/2,
-        // and 801 on later targets. The unsigned opcode follows the signed one.
-        const uint32_t opcode = (half         ? 786
-                                 : gfx9()     ? 660
-                                 : early_rdna ? 872
-                                              : 801) +
+        // F16 uses opcode 665 on GFX9 and 786 elsewhere; F32 uses 660 on GFX9,
+        // 872 on RDNA1/2, and 801 on later targets. The unsigned opcode follows
+        // the signed one.
+        const uint32_t opcode = (half && gfx9() ? 665
+                                 : half         ? 786
+                                 : gfx9()       ? 660
+                                 : early_rdna   ? 872
+                                                : 801) +
                                 !signed_result;
         for (uint32_t abs_mask = 0; abs_mask < 4; ++abs_mask) {
           for (uint32_t neg_mask = 0; neg_mask < 4; ++neg_mask) {
@@ -488,6 +488,55 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetr
             }
           }
         }
+      }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfReadsOpSelSelectedHalves) {
+  // Each source holds 0.5 in one half and -1.0 in the other; OP_SEL[0] and
+  // OP_SEL[1] pick the high half of src0 and src1 independently.
+  constexpr uint16_t kHalf = 0x3800, kMinusOne = 0xbc00;
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("packed_normalized_opsel_memory");
+    amdgpu::L2Cache l2("packed_normalized_opsel_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("packed_normalized_opsel", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (bool signed_result : {false, true}) {
+      const uint32_t opcode = (gfx9() ? 665u : 786u) + !signed_result;
+      for (uint32_t opsel = 0; opsel < 4; ++opsel) {
+        SCOPED_TRACE(testing::Message() << "scalar=" << force_scalar << " signed=" << signed_result
+                                        << " opsel=" << opsel);
+        const uint32_t words[] = {(gfx9() ? 0xd0000002u : 0xd4000002u) | (opcode << 16) |
+                                      (opsel << 11),
+                                  256u | (257u << 9)};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+        ASSERT_NE(inst, nullptr);
+        wf->set_exec(wf->wf_size() == 64 ? ~0ull : 0xffffffffull);
+        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+          cu->write_vgpr(vb, lane,
+                         opsel & 1u ? (uint32_t{kHalf} << 16) | kMinusOne
+                                    : (uint32_t{kMinusOne} << 16) | kHalf);
+          cu->write_vgpr(vb + 1, lane,
+                         opsel & 2u ? (uint32_t{kHalf} << 16) | kMinusOne
+                                    : (uint32_t{kMinusOne} << 16) | kHalf);
+          cu->write_vgpr(vb + 2, lane, 0xdeadbeef);
+        }
+        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+        const uint32_t expected = signed_result ? 0x40004000u : 0x80008000u;
+        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+          EXPECT_EQ(cu->read_vgpr(vb + 2, lane), expected) << "lane=" << lane;
       }
     }
     wf->halt();

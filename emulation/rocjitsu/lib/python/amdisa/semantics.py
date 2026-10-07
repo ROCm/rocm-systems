@@ -1237,6 +1237,14 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'vector_cvt_pknorm', operation='u16', data_type='f32'
         )
+    if name == 'V_CVT_PKNORM_I16_F16':
+        return InstructionSemantics(
+            name, 'vector_cvt_pknorm', operation='i16', data_type='f16'
+        )
+    if name == 'V_CVT_PKNORM_U16_F16':
+        return InstructionSemantics(
+            name, 'vector_cvt_pknorm', operation='u16', data_type='f16'
+        )
     if name == 'V_CVT_PKRTZ_F16_F32':
         return InstructionSemantics(name, 'vector_cvt_pkrtz_f16_f32')
     if name == 'V_CVT_PK_U16_U32':
@@ -1490,9 +1498,6 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     }
     if name in _CVT_FP8_MAP:
         return InstructionSemantics(name, 'cvt_fp8', operation=_CVT_FP8_MAP[name])
-
-    if name in ('V_CVT_PKNORM_I16_F16', 'V_CVT_PKNORM_U16_F16'):
-        return InstructionSemantics(name, 'nop')
 
     # Scaled FP8/BF8/FP6/FP4 conversions not covered by the exact gfx1250
     # mappings above still need per-encoding validation.
