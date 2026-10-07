@@ -1,8 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <rocprofiler-sdk/version.h>
-
 #include "core/agent.hpp"
 #include "core/agent_info.hpp"
 #include "core/agent_manager.hpp"
@@ -23,10 +21,11 @@
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/thread_info.hpp"
 
-#include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
 #include <profiler-hub/reader.hpp>
 #include <profiler-hub/reader_types.hpp>
 #include <profiler-hub/storage.hpp>
+#include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/version.h>
@@ -346,10 +345,11 @@ struct agent_pmc_spec
     const char* description = nullptr;
 };
 
+constexpr std::size_t k_max_json_length = 128;
 void
 expect_stored_json_matches(const std::string& stored, const std::string& expected)
 {
-    ASSERT_TRUE(nlohmann::json::accept(stored)) << stored.substr(0, 128);
+    ASSERT_TRUE(nlohmann::json::accept(stored)) << stored.substr(0, k_max_json_length);
     EXPECT_EQ(nlohmann::json::parse(stored), nlohmann::json::parse(expected));
 }
 }  // namespace

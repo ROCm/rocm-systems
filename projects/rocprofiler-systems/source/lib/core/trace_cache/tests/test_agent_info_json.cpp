@@ -1,14 +1,17 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <rocprofiler-sdk/version.h>
-
 #include "core/agent_info.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
 #include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/fwd.h>
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -18,6 +21,8 @@
 
 namespace
 {
+constexpr std::size_t k_max_json_length = 128;
+
 rocprofiler_agent_v0_t
 make_gpu_agent_data()
 {
@@ -37,7 +42,8 @@ TEST(agent_info_json_test, to_json_string_is_valid_json)
     auto const agent_data = make_gpu_agent_data();
     auto const json_str   = rocprofsys::agent_info::to_json_string(agent_data);
 
-    ASSERT_TRUE(nlohmann::json::accept(json_str)) << json_str.substr(0, 128);
+    ASSERT_TRUE(nlohmann::json::accept(json_str))
+        << json_str.substr(0, k_max_json_length);
 
     auto const parsed = nlohmann::json::parse(json_str);
     EXPECT_TRUE(parsed.is_object());
@@ -54,34 +60,39 @@ TEST(agent_info_json_test, to_json_string_is_valid_json)
 
 TEST(agent_info_json_test, to_json_string_with_arrays_is_valid_json)
 {
-    rocprofiler_agent_cache_t    caches[2]{};
-    rocprofiler_agent_mem_bank_t mem_banks[1]{};
-    rocprofiler_agent_io_link_t  io_links[1]{};
-    caches[0].size             = 32;
+    constexpr std::uint64_t k_l1_cache_size = 32;
+    constexpr std::uint64_t k_l2_cache_size = 4096;
+    constexpr std::uint64_t k_mem_bank_size = 1ULL << 34;
+
+    std::array<rocprofiler_agent_cache_t, 2>    caches{};
+    std::array<rocprofiler_agent_mem_bank_t, 1> mem_banks{};
+    std::array<rocprofiler_agent_io_link_t, 1>  io_links{};
+    caches[0].size             = k_l1_cache_size;
     caches[0].level            = 1;
-    caches[1].size             = 4096;
+    caches[1].size             = k_l2_cache_size;
     caches[1].level            = 2;
-    mem_banks[0].size_in_bytes = 1ULL << 34;
+    mem_banks[0].size_in_bytes = k_mem_bank_size;
     io_links[0].node_to        = 1;
 
     auto agent_data            = make_gpu_agent_data();
-    agent_data.caches          = caches;
-    agent_data.caches_count    = 2;
-    agent_data.mem_banks       = mem_banks;
-    agent_data.mem_banks_count = 1;
-    agent_data.io_links        = io_links;
-    agent_data.io_links_count  = 1;
+    agent_data.caches          = caches.data();
+    agent_data.caches_count    = static_cast<std::uint32_t>(caches.size());
+    agent_data.mem_banks       = mem_banks.data();
+    agent_data.mem_banks_count = static_cast<std::uint32_t>(mem_banks.size());
+    agent_data.io_links        = io_links.data();
+    agent_data.io_links_count  = static_cast<std::uint32_t>(io_links.size());
 
     auto const json_str = rocprofsys::agent_info::to_json_string(agent_data);
 
-    ASSERT_TRUE(nlohmann::json::accept(json_str)) << json_str.substr(0, 128);
+    ASSERT_TRUE(nlohmann::json::accept(json_str))
+        << json_str.substr(0, k_max_json_length);
 
     auto const parsed = nlohmann::json::parse(json_str);
     ASSERT_EQ(parsed.at("caches").size(), 2U);
-    EXPECT_EQ(parsed.at("caches")[1].at("size"), 4096);
+    EXPECT_EQ(parsed.at("caches")[1].at("size"), k_l2_cache_size);
     EXPECT_EQ(parsed.at("caches")[1].at("level"), 2);
     ASSERT_EQ(parsed.at("mem_banks").size(), 1U);
-    EXPECT_EQ(parsed.at("mem_banks")[0].at("size_in_bytes"), 1ULL << 34);
+    EXPECT_EQ(parsed.at("mem_banks")[0].at("size_in_bytes"), k_mem_bank_size);
     ASSERT_EQ(parsed.at("io_links").size(), 1U);
     EXPECT_EQ(parsed.at("io_links")[0].at("node_to"), 1);
 }
@@ -93,7 +104,8 @@ TEST(agent_info_json_test, to_json_string_escapes_quotes_as_json)
 
     auto const json_str = rocprofsys::agent_info::to_json_string(agent_data);
 
-    ASSERT_TRUE(nlohmann::json::accept(json_str)) << json_str.substr(0, 128);
+    ASSERT_TRUE(nlohmann::json::accept(json_str))
+        << json_str.substr(0, k_max_json_length);
     EXPECT_NE(json_str.find(R"("Instinct \"MI300X\"")"), std::string::npos);
     EXPECT_EQ(nlohmann::json::parse(json_str).at("product_name"), "Instinct \"MI300X\"");
 }
