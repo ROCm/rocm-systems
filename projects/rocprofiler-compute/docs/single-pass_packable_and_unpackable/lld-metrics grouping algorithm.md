@@ -1,8 +1,10 @@
 # Metric grouping (SPP / SPU)
 
-**Parent:** [Overall plan](hld-plan.md)
+**Parent:** [High-level design](hld-plan.md)
 
-This note is the packing algorithm. Same-pass bind and SPU composite operators stay in the overall plan.
+This note is the collection algorithm for Phase 1 in the high-level design (requirement FR-1). Same-pass bind and Single-pass unpackable (SPU) composite operators stay there.
+
+A **PMC set** is the counters of one metric that must share one perfmon pass. A **bucket** is one perfmon pass. A block's slot budget is that block's capacity in `perfmon_config` (`CounterFile` in `soc_base.py`). GRBM and SQ are charged separately.
 
 ---
 
@@ -11,17 +13,19 @@ This note is the packing algorithm. Same-pass bind and SPU composite operators s
 **Replace** the shipping heuristic + priority coalesce as the default allocator in
 `_allocate_perfmon_counter_files`.
 
-1. Collect each **Single-pass packable(SPP)** metric's PMC set — the counters that must share one perfmon pass — and keep the unique sets (skip **Single-pass unpackable(SPU)** parents).
-2. Largest-first: place each PMC set with the existing-bucket and per-block slot checks in §2 (duplicate PMCs across passes when needed).
-3. Run **SPU residual fill** so residual SPU PMC pieces appear somewhere (+0 extra passes on gfx942).
+Why this allocator: the shipping pack minimizes passes for the whole counter list, so metrics whose PMC sets fit one pass stay split. Largest-first gives a large set a bucket before smaller sets fragment the open passes.
+
+1. Collect each **Single-pass packable (SPP)** metric's PMC set and keep the unique sets (skip **Single-pass unpackable (SPU)** parents).
+2. Largest-first: place each PMC set with the existing-bucket and per-block slot checks in §2 (copy a PMC into another pass when two sets cannot share a bucket).
+3. Run **SPU residual fill** so leftover SPU counters appear somewhere. Open a new bucket only for a counter that fits in none of the open buckets (+0 extra passes on gfx942).
 4. Harden **TCC series affinity + coverage** (and ACCUM slot charging where required). See §3.
 
-**Locked decisions:**
+**Locked decisions** (from the high-level design):
 
-- Default path is SPP packing; optional `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1` during migration.
-- Do **not** use `WEIGHTED_AVG` for former POLICY_GAP metrics — packing covers them (they are SPP).
+- Default path is SPP packing. During migration, `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1` or `ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0` restores the shipping allocator.
+- Do **not** use `WEIGHTED_AVG` for former POLICY_GAP metrics (shipping multi-pass layouts that are SPP). Packing covers them.
 - Priority policy YAML is not required for the packable guarantee.
-- gfx942 offline packing gates: `packable_multi == 0`, passes ≈ **14**, SPU count == **16**, SPU extra passes == **0**. The `packable_multi == 0` gate is the SPP allocator before the panel-1805 grouping follow-up in §3.
+- gfx942 offline packing gates: `packable_multi == 0`, passes ≈ **14**, SPU count == **16**, SPU extra passes == **0**. `packable_multi` counts SPP metrics whose PMC set is not fully inside one bucket. The `packable_multi == 0` gate is the SPP allocator before the panel-1805 grouping follow-up in §3.
 
 **Primary packing code:** `counter_grouping_single_pass.py`, `counter_grouping_buckets.py`, `soc_base.py`.
 
@@ -29,12 +33,14 @@ This note is the packing algorithm. Same-pass bind and SPU composite operators s
 
 ## 2. Flowchart
 
-A **bucket** is one perfmon pass. Flow — single-pass packable + SPU residual fill (default). TCC series affinity is **not** in this chart; it is the layout harden in §3.
+A **bucket** is one perfmon pass. Flow — Single-pass packable (SPP) placement plus Single-pass unpackable (SPU) residual fill (default). TCC series affinity is **not** in this chart; it is the layout harden in §3.
 
 **How an SPP PMC set is placed.** Candidates are the unique sets, visited largest first. For each set the allocator tries buckets already opened before it opens a new one:
 
-1. **Fit an existing bucket.** If some bucket already holds the whole PMC set, leave it. Otherwise extend the opened bucket that already contains the most of those counters, and add only the missing ones there.
-2. **Fit each hardware block's slot limit.** That extend is allowed only when every hardware block the new counters touch still has room in that bucket (GRBM budget, SQ budget, and so on). Each counter is charged to its own block. If any block is full, that bucket is skipped. A new bucket is opened only when no existing bucket can hold the set under those block limits. The same counter may still be copied into another pass when two PMC sets cannot share one bucket.
+1. **Fit an existing bucket.** If a bucket already holds the whole PMC set, leave it. Otherwise extend the opened bucket that already contains the most of those counters, and add only the missing ones.
+2. **Fit each hardware block's slot limit.** Extend only when every block the new counters touch still has room (GRBM, SQ, and so on). Each counter is charged to its own block. If any block is full, skip that bucket. Open a new bucket only when no existing bucket can hold the set. The same counter may be copied into another pass when two PMC sets cannot share one bucket.
+
+Overlap-first keeps the new counters in a pass that already has the rest of the set, so another pass does not replay them unless two PMC sets cannot share a bucket. The per-block check is why a mixed GRBM and SQ set is still one pass: a full SQ budget skips that bucket even when GRBM still has room. None of the 16 SPU metrics on gfx942 include GRBM.
 
 ```mermaid
 flowchart TD
@@ -87,11 +93,13 @@ Visit order: largest PMC sets first (M1, then HBM-like, M2, M3).
 
 ## 3. TCC series affinity + coverage
 
-TCC channel series need packing rules beyond co-locating one SPP metric's PMC set in a single pass. On gfx942, TCC allows **4 event bases per pass** (channel instances `[i]` are dimensions of one base, not extra slots). Full policy: [TCC series affinity + coverage](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-tcc-series-affinity-coverage.md).
+TCC channel series need packing rules beyond co-locating one Single-pass packable (SPP) metric's PMC set in a single pass. Why: an L2 channel map can change between replays, so a latency ratio that joins a request counter and its level counter from different passes is not one execution.
+
+On gfx942, TCC allows **4 event bases per pass** (channel instances `[i]` are dimensions of one base, not extra slots). Full policy: [TCC series affinity + coverage](https://github.com/ROCm/rocm-systems/blob/users/feizheng10/aiprofcomp-865-docs-backup/projects/rocprofiler-compute/docs/plans/aiprofcomp-865-tcc-series-affinity-coverage.md).
 
 1. Pack by **series base**; when a TCC series is selected, expand **all collectable channel instances** in that pass.
 2. Keep affinity pairs in the **same pass** (e.g. `TCC_EA0_RDREQ_LEVEL` with `TCC_EA0_RDREQ`, and WR/ATOMIC analogues) so latency ratios are not joined across replays — L2 channel maps can remap between passes.
 3. Cover every selected series from the profile/YAML set; do **not** prune to runtime-nonzero channels.
 4. Do **not** duplicate the same per-channel REQ series into a second pass with a different channel map (orphan REQ copies invite wrong same-pass bind / cross-pass joins).
 
-**Impact:** Enforcing this on gfx942 default SPP is a **layout** harden and does **not** add passes (**14 → 14**). It is not a Phase 2 / SPU concern. Dropping orphan `RDREQ` / `WRREQ` copies means panel **1805** (an SPP metric whose PMC set is the read, write, and atomic columns together) no longer fits one bucket, so offline `packable_multi` would read **1** unless those columns are separate packing groups.
+**Impact:** Enforcing this on gfx942 default SPP is a **layout** harden and does **not** add passes (**14 → 14**). It is not a Phase 2 / Single-pass unpackable (SPU) concern. Dropping orphan `RDREQ` / `WRREQ` copies means panel **1805** (an SPP metric whose PMC set is the read, write, and atomic columns together) no longer fits one bucket, so offline `packable_multi` would read **1** unless those columns are separate packing groups.
