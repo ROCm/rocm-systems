@@ -234,6 +234,30 @@ public:
   }
 };
 
+// Routing tests supply a synthetic execution result, but wait tracking needs
+// decoded operands and the pre-execution address registers, as in the issuer.
+std::unique_ptr<Instruction>
+prepare_cdna4_flat_load_for_routing(ComputeUnitCore &cu, Wavefront &wave,
+                                    std::unique_ptr<VectorMemState> state) {
+  for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
+    cu.write_vgpr(wave.vgpr_alloc().base, lane, state->per_lane_addr[lane]);
+    cu.write_vgpr(wave.vgpr_alloc().base + 1, lane, state->per_lane_addr[lane] >> 32);
+  }
+  const auto words = cdna4::build_flat(
+      cdna4::kFlatLoadDwordFlat,
+      {.seg = 0,
+       .addr = 0,
+       .saddr = 0x7F,
+       .vdst = static_cast<uint8_t>(state->dst_reg_base - wave.vgpr_alloc().base)});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
+  if (!load)
+    return nullptr;
+  cu.track_memory_wait(*load, wave);
+  load->set_data(std::move(state));
+  return load;
+}
+
 class CounterObservingPipeline : public MemoryPipeline {
 public:
   CounterObservingPipeline() : MemoryPipeline(WaitCounterType::VMCNT) {}
@@ -8557,8 +8581,9 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   state->per_lane_addr[0] = kDdsAddress;
   state->per_lane_addr[1] = kLdsAddress;
   state->per_lane_addr[2] = 0x2000;
-  test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32", std::nullopt, true), *wave);
+  auto load = prepare_cdna4_flat_load_for_routing(*cu, *wave, std::move(state));
+  ASSERT_NE(load, nullptr);
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -8607,8 +8632,9 @@ TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLa
   state->per_lane_addr[0] = 0x2000;
   state->per_lane_addr[1] = kSharedBase + 0x20;
   state->per_lane_addr[2] = kSharedBase + 0x28;
-  test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32", std::nullopt, true), *wave);
+  auto load = prepare_cdna4_flat_load_for_routing(*cu, *wave, std::move(state));
+  ASSERT_NE(load, nullptr);
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();

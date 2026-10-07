@@ -1103,8 +1103,9 @@ TEST(MemoryWaitExecutionTest, ReusedInstructionResolvesCurrentSourceAndDestinati
                      0xf});
           state.check_instruction(*decoded.value(), *wf);
           EXPECT_EQ(hazards.size(), pending_bank == bank ? 1u : 0u);
-          if (!hazards.empty())
+          if (!hazards.empty()) {
             EXPECT_EQ(hazards.front().write, destination);
+          }
         }
       }
     }
@@ -3002,8 +3003,9 @@ TEST(MemoryWaitShadowTest, RangeQueriesMatchIndividualBitsAtWordAndBankBoundarie
               EXPECT_EQ(shadow.pending({cls, static_cast<uint16_t>(start), width}, write), expected)
                   << static_cast<unsigned>(cls) << " pending=" << pending << " start=" << start
                   << " width=" << unsigned(width) << " write=" << write;
-              if (write && cls == RegClass::VGPR && start + width <= REGISTER_SET_MAX_VGPRS)
+              if (write && cls == RegClass::VGPR && start + width <= REGISTER_SET_MAX_VGPRS) {
                 EXPECT_EQ(shadow.pending_vgpr(static_cast<uint16_t>(start), width), expected);
+              }
             }
           }
         }
@@ -3080,8 +3082,9 @@ TEST(MemoryWaitExecutionTest, WaterfallKeepsPendingResultsInTheirIssuingLanesAnd
           const auto &snapshot = sim.snapshot->snapshots().front();
           for (unsigned lane = 0; lane < 32; ++lane) {
             EXPECT_EQ(snapshot.vgpr(bank * 256 + 2, lane), 0x12345678u);
-            if (!rmw && (consume_mask & (uint32_t{1} << lane)))
+            if (!rmw && (consume_mask & (uint32_t{1} << lane))) {
               EXPECT_EQ(snapshot.vgpr(3, lane), 0x12345678u);
+            }
           }
           const unsigned expected = wait == 0
                                         ? 0
@@ -4196,7 +4199,7 @@ TEST(MemoryWaitFootprintTest, PermutationControlsShareExecutionSelectorValues) {
   for (unsigned lane = 0; lane < 32; ++lane)
     cu->write_vgpr(wf->vgpr_alloc().base + 8, lane, lane);
   auto decoder = Decoder::create(config.arch);
-  for (const auto [selector, expected] :
+  for (const auto &[selector, expected] :
        {std::pair{131u, 3u}, {193u, 15u}, {235u, 3u}, {236u, 4u}, {237u, 5u}, {238u, 6u}}) {
     const auto words =
         rdna3::build_vop3(rdna3::kVPermlane16B32Vop3, {.vdst = 4,
