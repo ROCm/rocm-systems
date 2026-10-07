@@ -159,7 +159,9 @@ target_compile_definitions(hrr-integration-tests PRIVATE
 add_dependencies(hrr-integration-tests hrr-playback)
 
 # The rocprofiler-register tool library hrr_dispatch_swap_test.cc loads into its
-# workloads. libamdhip64 registers with rocprofiler-register on Linux only.
+# workloads. libamdhip64 registers with rocprofiler-register on Linux only, and
+# not in every Linux build: a test that needs the table checks at run time and
+# skips when the runtime did not register.
 if(NOT WIN32)
   add_library(hrr-test-dispatch-tool MODULE hrr_dispatch_tool.cc)
   set_target_properties(hrr-test-dispatch-tool PROPERTIES

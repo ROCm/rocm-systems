@@ -39,7 +39,9 @@
  * profiler reaches it: hrr_dispatch_tool.cc is loaded as the tool library.
  * Preloading the same library lets a workload act as the capture opens its
  * manifest, after the trailer is written.
- * Linux only, like the rocprofiler-register integration in libamdhip64.
+ * Linux only, like the rocprofiler-register integration in libamdhip64. A
+ * runtime built without that integration has no table to reach, so the tests
+ * that need it skip.
  */
 
 #include "hrr_test_common.hh"
@@ -79,6 +81,7 @@ namespace {
 #define HRR_FORK_MARKER "HRR_FORK_CHILD"
 #define HRR_LATE_MARKER "HRR_LATE_UNREPLAYABLE"
 #define HRR_CLOSE_MARKER "HRR_BLOB_CLOSE"
+#define HRR_NO_TABLE_MARKER "HRR_NO_HIP_TABLE"
 
 // Big enough that the failing write is cut off by the file size limit, which
 // is set well below it and well above anything else the capture writes then.
@@ -94,6 +97,42 @@ HipDispatchTable* tool_hip_table() {
   using Fn = void* (*)();
   auto fn = reinterpret_cast<Fn>(dlsym(RTLD_DEFAULT, "hrr_dispatch_tool_hip_table"));
   return fn ? static_cast<HipDispatchTable*>(fn()) : nullptr;
+}
+
+// The leading fields of rocprofiler_register_registration_info_t.
+struct RegistrationInfo {
+  size_t size;
+  const char* common_name;
+};
+
+// Whether libamdhip64 passed its tables to rocprofiler-register. A static build
+// or one with HIP_ENABLE_ROCPROFILER_REGISTER=OFF does not. Read through dlsym
+// so the tests do not need the rocprofiler-register headers.
+bool hip_registered() {
+  if (!dlsym(RTLD_DEFAULT, "rocprofiler_register_library_api_table")) return false;
+  using Cb = int (*)(const RegistrationInfo*, void*);
+  using IterateFn = int (*)(Cb, void*);
+  auto iterate = reinterpret_cast<IterateFn>(
+      dlsym(RTLD_DEFAULT, "rocprofiler_register_iterate_registration_info"));
+  if (!iterate) return true;  // cannot tell, so expect the table
+  bool hip = false;
+  iterate(
+      [](const RegistrationInfo* info, void* data) {
+        if (info->common_name && std::strcmp(info->common_name, "hip") == 0)
+          *static_cast<bool*>(data) = true;
+        return 0;
+      },
+      &hip);
+  return hip;
+}
+
+// True, after telling the driver, when no tool can get the HIP table because
+// the runtime never registered it. Call after hip::init().
+bool runtime_has_no_table() {
+  if (tool_hip_table() || hip_registered()) return false;
+  printf(HRR_NO_TABLE_MARKER "\n");
+  fflush(stdout);
+  return true;
 }
 
 bool tool_set_fopen_hook(void (*hook)(const char*)) {
@@ -196,6 +235,7 @@ void swap_late_check() {
 
 TEST_CASE("Unit_HRR_DispatchSwap_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));  // hip::init() installs the shims
+  if (runtime_has_no_table()) return;
 
   HipDispatchTable* t = tool_hip_table();
   INFO("rocprofiler-register did not pass the HIP table to " HRR_DISPATCH_TOOL);
@@ -284,6 +324,7 @@ void before_own_manifest(const char* path) {
 
 TEST_CASE("Unit_HRR_DispatchSwap_Unreplayable_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));  // hip::init() installs the shims
+  if (runtime_has_no_table()) return;
   HipDispatchTable* t = tool_hip_table();
   INFO("rocprofiler-register did not pass the HIP table to " HRR_DISPATCH_TOOL);
   REQUIRE(t != nullptr);
@@ -321,6 +362,8 @@ hipError_t add_node_with_too_many_deps(hipGraph_t graph, const hipGraphNode_t* d
 
 TEST_CASE("Unit_HRR_Fork_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
+  // The tool arms the late hook only once it has the table.
+  if (runtime_has_no_table()) return;
   INFO("rocprofiler-register did not pass the HIP table to " HRR_DISPATCH_TOOL);
   REQUIRE(tool_hip_table() != nullptr);
 
@@ -402,6 +445,13 @@ std::string capture_workload(const fs::path& cap, const char* direct_case, bool 
   return out;
 }
 
+// True when the workload found no HIP table to use; the caller skips.
+bool skipped_without_table(const std::string& out) {
+  if (out.find(HRR_NO_TABLE_MARKER) == std::string::npos) return false;
+  SUCCEED("libamdhip64 does not register with rocprofiler-register - skipping");
+  return true;
+}
+
 // The token after "key": in a manifest.json, or "" if the key is absent.
 std::string manifest_value(const fs::path& archive, const std::string& key) {
   const std::string text = read_text_file(archive / "manifest.json");
@@ -461,6 +511,7 @@ HRR_TEST_CASE(Unit_HRR_DispatchSwap_WrapperOutlivesCapture) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_dispatch_swap.hrr");
   const std::string out = capture_workload(cap.path, "Unit_HRR_DispatchSwap_Direct", true);
   INFO("Workload output:\n" << out);
+  if (skipped_without_table(out)) return;
 
   const size_t at = out.find(HRR_SWAP_MARKER " kept=");
   REQUIRE(at != std::string::npos);
@@ -552,6 +603,7 @@ HRR_TEST_CASE(Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer) {
   const std::string out =
       capture_workload(cap.path, "Unit_HRR_DispatchSwap_Unreplayable_Direct", true, true);
   INFO("Workload output:\n" << out);
+  if (skipped_without_table(out)) return;
 
   // The shim ran between the trailer and the manifest, and the call succeeded.
   const size_t at = out.find(HRR_LATE_MARKER " err=");
@@ -584,6 +636,7 @@ HRR_TEST_CASE(Unit_HRR_Fork_ChildArchiveCompleteAfterParentFailure) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_fork_incomplete.hrr");
   const std::string out = capture_workload(cap.path, "Unit_HRR_Fork_Direct", true);
   INFO("Workload output:\n" << out);
+  if (skipped_without_table(out)) return;
 
   const size_t at = out.find(HRR_FORK_MARKER " ");
   REQUIRE(at != std::string::npos);
@@ -615,6 +668,7 @@ HRR_TEST_CASE(Unit_HRR_Fork_ChildListsOnlyItsOwnUnreplayableApis) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_fork_unreplayable.hrr");
   const std::string out = capture_workload(cap.path, "Unit_HRR_Fork_Direct", true);
   INFO("Workload output:\n" << out);
+  if (skipped_without_table(out)) return;
 
   const size_t at = out.find(HRR_FORK_MARKER " ");
   REQUIRE(at != std::string::npos);
