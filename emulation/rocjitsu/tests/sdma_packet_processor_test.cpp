@@ -478,25 +478,15 @@ std::array<uint32_t, 13> linear_rect_packet(bool gfx12_rect, uint64_t source, ui
   packet[6] = static_cast<uint32_t>(destination);
   packet[7] = static_cast<uint32_t>(destination >> 32);
   packet[8] = dst_off_x;
-  if (gfx12_rect) {
-    packet[4] = src_off_z | ((src_pitch_elements - 1u) << 16);
-    packet[9] = dst_off_z | ((dst_pitch_elements - 1u) << 16);
-    if (src_slice_bytes != 0 || dst_slice_bytes != 0) {
-      packet[5] = src_slice_bytes / element_bytes - 1u;
-      packet[10] = dst_slice_bytes / element_bytes - 1u;
-    }
-    packet[11] = (rect_x - 1u) | ((rect_y - 1u) << 16);
-    packet[12] = rect_z - 1u;
-  } else {
-    packet[4] = src_off_z | ((src_pitch_elements - 1u) << 13);
-    packet[9] = dst_off_z | ((dst_pitch_elements - 1u) << 13);
-    if (src_slice_bytes != 0 || dst_slice_bytes != 0) {
-      packet[5] = src_slice_bytes / element_bytes - 1u;
-      packet[10] = dst_slice_bytes / element_bytes - 1u;
-    }
-    packet[11] = (rect_x - 1u) | ((rect_y - 1u) << 16);
-    packet[12] = rect_z - 1u;
+  const uint32_t pitch_shift = gfx12_rect ? 16u : 13u;
+  packet[4] = src_off_z | ((src_pitch_elements - 1u) << pitch_shift);
+  packet[9] = dst_off_z | ((dst_pitch_elements - 1u) << pitch_shift);
+  if (src_slice_bytes != 0 || dst_slice_bytes != 0) {
+    packet[5] = src_slice_bytes / element_bytes - 1u;
+    packet[10] = dst_slice_bytes / element_bytes - 1u;
   }
+  packet[11] = (rect_x - 1u) | ((rect_y - 1u) << 16);
+  packet[12] = rect_z - 1u;
   return packet;
 }
 
@@ -574,6 +564,7 @@ TEST(SdmaPacketProcessorTest, LinearRectUsesZOriginWhenTheCopyIsOneSlice) {
   } cases[] = {
       {false, SdmaPacketDialect::LegacyExtendedCount},
       {true, SdmaPacketDialect::Gfx1250},
+      {true, SdmaPacketDialect::Rdna4},
   };
   for (const auto &test_case : cases) {
     PacketProcessorFixture fixture;
@@ -600,6 +591,37 @@ TEST(SdmaPacketProcessorTest, LinearRectUsesZOriginWhenTheCopyIsOneSlice) {
     EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0x22222222u)
         << static_cast<int>(test_case.dialect);
   }
+}
+
+TEST(SdmaPacketProcessorTest, LinearRectAcceptsTheGfx1250RuntimeFields) {
+  PacketProcessorFixture fixture;
+  ASSERT_TRUE(fixture.access);
+  constexpr uint64_t kSource = 0x1000;
+  constexpr uint64_t kDestination = 0x1800;
+  fixture.memory->store<uint64_t>(kSource, 0x1122334455667788ull);
+  fixture.memory->store<uint64_t>(kSource + 8, 0xaabbccddeeff0011ull);
+  for (uint32_t i = 0; i < 16; ++i)
+    fixture.memory->store<uint8_t>(kDestination + i, 0x5a);
+
+  std::array<uint32_t, 13> packet = linear_rect_packet(
+      true, kSource, kDestination, /*element=*/0, /*rect_x=*/4, /*rect_y=*/1, /*rect_z=*/1,
+      /*src_pitch_bytes=*/16, /*dst_pitch_bytes=*/16, /*src_slice_bytes=*/0,
+      /*dst_slice_bytes=*/0, /*src_off_x=*/8, /*dst_off_x=*/4);
+  // ROCr sets HEADER.npd and system scope for both sides on gfx1250. The scope
+  // fields share bit positions with the pre-GFX12 endian swap.
+  constexpr uint32_t kSystemScope = 3;
+  packet[0] |= 1u << 28;
+  packet[12] |= (kSystemScope << 18) | (kSystemScope << 26);
+
+  SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250);
+  const SdmaPacketProcessResult result = processor.process({.available_dwords = packet,
+                                                            .access = *fixture.access,
+                                                            .continuation = fixture.continuation});
+
+  EXPECT_EQ(result.packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination + 4), 0xeeff0011u);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0x5a5a5a5au);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination + 8), 0x5a5a5a5au);
 }
 
 TEST(SdmaPacketProcessorTest, LinearRectRejectsEndianSwap) {

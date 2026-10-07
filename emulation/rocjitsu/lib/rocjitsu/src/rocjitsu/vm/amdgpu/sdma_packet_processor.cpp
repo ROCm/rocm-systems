@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/sdma_packet_processor.h"
 
+#include "util/bit.h"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -100,24 +102,6 @@ bool compare(uint32_t function, uint64_t value, uint64_t reference) {
 
 bool valid_range(uint64_t address, uint64_t size) {
   return size != 0 && size - 1 <= std::numeric_limits<uint64_t>::max() - address;
-}
-
-uint32_t bit_field(uint32_t word, uint32_t shift, uint32_t bits) {
-  return (word >> shift) & ((1u << bits) - 1u);
-}
-
-bool checked_mul(uint64_t left, uint64_t right, uint64_t &product) {
-  if (left != 0 && right > std::numeric_limits<uint64_t>::max() / left)
-    return false;
-  product = left * right;
-  return true;
-}
-
-bool checked_add(uint64_t left, uint64_t right, uint64_t &sum) {
-  if (left > std::numeric_limits<uint64_t>::max() - right)
-    return false;
-  sum = left + right;
-  return true;
 }
 
 SdmaPacketExecutionOutcome map_outcome(VmAccessOutcome outcome) {
@@ -625,92 +609,94 @@ private:
   // bytes than the packet asked for.
   bool decode_linear_rect(const Frame &frame, Operation &operation) {
     const bool gfx12_rect = gfx12_linear_rect();
-    const uint32_t element = bit_field(word(frame, 0), 29, 3);
+    const uint32_t element = util::bits(word(frame, 0), 29, 31);
     if (element > 4 || !has(frame, kCopyLinearRectDwords))
       return false;
     const uint64_t element_bytes = uint64_t{1} << element;
+    // Highest bit of each field: GFX12 widens the offsets, pitches, and rectangle size.
+    const int xy_last = gfx12_rect ? 15 : 13;
+    const int z_last = gfx12_rect ? 13 : 10;
+    const int pitch_first = gfx12_rect ? 16 : 13;
 
-    const uint32_t src_off_x = bit_field(word(frame, 3), 0, gfx12_rect ? 16 : 14);
-    const uint32_t src_off_y = bit_field(word(frame, 3), 16, gfx12_rect ? 16 : 14);
-    const uint32_t src_off_z = bit_field(word(frame, 4), 0, gfx12_rect ? 14 : 11);
-    const uint32_t src_pitch_elements =
-        bit_field(word(frame, 4), gfx12_rect ? 16 : 13, gfx12_rect ? 16 : 19) + 1u;
-    const uint32_t dst_off_x = bit_field(word(frame, 8), 0, gfx12_rect ? 16 : 14);
-    const uint32_t dst_off_y = bit_field(word(frame, 8), 16, gfx12_rect ? 16 : 14);
-    const uint32_t dst_off_z = bit_field(word(frame, 9), 0, gfx12_rect ? 14 : 11);
-    const uint32_t dst_pitch_elements =
-        bit_field(word(frame, 9), gfx12_rect ? 16 : 13, gfx12_rect ? 16 : 19) + 1u;
-    const uint64_t rect_x = bit_field(word(frame, 11), 0, gfx12_rect ? 16 : 14) + uint64_t{1};
-    const uint64_t rect_y = bit_field(word(frame, 11), 16, gfx12_rect ? 16 : 14) + uint64_t{1};
-    const uint64_t rect_z = bit_field(word(frame, 12), 0, gfx12_rect ? 14 : 11) + uint64_t{1};
+    const uint32_t src_off_x = util::bits(word(frame, 3), 0, xy_last);
+    const uint32_t src_off_y = util::bits(word(frame, 3), 16, 16 + xy_last);
+    const uint32_t src_off_z = util::bits(word(frame, 4), 0, z_last);
+    const uint64_t src_pitch_elements = util::bits(word(frame, 4), pitch_first, 31) + uint64_t{1};
+    const uint32_t dst_off_x = util::bits(word(frame, 8), 0, xy_last);
+    const uint32_t dst_off_y = util::bits(word(frame, 8), 16, 16 + xy_last);
+    const uint32_t dst_off_z = util::bits(word(frame, 9), 0, z_last);
+    const uint64_t dst_pitch_elements = util::bits(word(frame, 9), pitch_first, 31) + uint64_t{1};
+    const uint64_t rect_x = util::bits(word(frame, 11), 0, xy_last) + uint64_t{1};
+    const uint64_t rect_y = util::bits(word(frame, 11), 16, 16 + xy_last) + uint64_t{1};
+    const uint64_t rect_z = util::bits(word(frame, 12), 0, z_last) + uint64_t{1};
     if (!gfx12_rect &&
-        (bit_field(word(frame, 12), 16, 2) != 0 || bit_field(word(frame, 12), 24, 2) != 0))
+        (util::bits(word(frame, 12), 16, 17) != 0 || util::bits(word(frame, 12), 24, 25) != 0))
       return false;
 
     // A one-slice copy can still name a nonzero Z origin. The slice field is
     // stored as value-minus-one, including when the copy itself has one slice.
     const uint64_t src_slice_elements =
-        (gfx12_rect ? word(frame, 5) : bit_field(word(frame, 5), 0, 28)) + uint64_t{1};
+        (gfx12_rect ? word(frame, 5) : util::bits(word(frame, 5), 0, 27)) + uint64_t{1};
     const uint64_t dst_slice_elements =
-        (gfx12_rect ? word(frame, 10) : bit_field(word(frame, 10), 0, 28)) + uint64_t{1};
+        (gfx12_rect ? word(frame, 10) : util::bits(word(frame, 10), 0, 27)) + uint64_t{1};
 
-    uint64_t src_pitch = 0;
-    uint64_t dst_pitch = 0;
-    uint64_t src_slice = 0;
-    uint64_t dst_slice = 0;
-    uint64_t row_bytes = 0;
-    uint64_t row_count = 0;
-    uint64_t total_bytes = 0;
-    if (!checked_mul(src_pitch_elements, element_bytes, src_pitch) ||
-        !checked_mul(dst_pitch_elements, element_bytes, dst_pitch) ||
-        !checked_mul(src_slice_elements, element_bytes, src_slice) ||
-        !checked_mul(dst_slice_elements, element_bytes, dst_slice) ||
-        !checked_mul(rect_x, element_bytes, row_bytes) || !checked_mul(rect_y, rect_z, row_count) ||
-        !checked_mul(row_bytes, row_count, total_bytes) ||
-        row_bytes > std::numeric_limits<uint32_t>::max() ||
+    const std::optional<uint64_t> src_pitch = util::checked_mul(src_pitch_elements, element_bytes);
+    const std::optional<uint64_t> dst_pitch = util::checked_mul(dst_pitch_elements, element_bytes);
+    const std::optional<uint64_t> src_slice = util::checked_mul(src_slice_elements, element_bytes);
+    const std::optional<uint64_t> dst_slice = util::checked_mul(dst_slice_elements, element_bytes);
+    const std::optional<uint64_t> row_bytes = util::checked_mul(rect_x, element_bytes);
+    const std::optional<uint64_t> row_count = util::checked_mul(rect_y, rect_z);
+    if (!src_pitch || !dst_pitch || !src_slice || !dst_slice || !row_bytes || !row_count ||
+        *row_bytes > std::numeric_limits<uint32_t>::max() ||
         rect_y > std::numeric_limits<uint32_t>::max())
       return false;
+    const std::optional<uint64_t> total_bytes = util::checked_mul(*row_bytes, *row_count);
+    if (!total_bytes)
+      return false;
 
-    const auto origin_address = [&](uint32_t low, uint32_t high, uint32_t off_x, uint32_t off_y,
-                                    uint32_t off_z, uint64_t pitch, uint64_t slice,
-                                    uint64_t &address) {
-      uint64_t x_bytes = 0;
-      uint64_t y_bytes = 0;
-      uint64_t z_bytes = 0;
-      uint64_t origin = 0;
-      if (!checked_mul(off_x, element_bytes, x_bytes) || !checked_mul(off_y, pitch, y_bytes) ||
-          !checked_mul(off_z, slice, z_bytes) || !checked_add(x_bytes, y_bytes, origin) ||
-          !checked_add(origin, z_bytes, origin) || !checked_add(join(low, high), origin, address))
-        return false;
-      uint64_t y_span = 0;
-      uint64_t z_span = 0;
-      uint64_t span = 0;
-      if ((rect_y > 1 && !checked_mul(rect_y - 1, pitch, y_span)) ||
-          (rect_z > 1 && !checked_mul(rect_z - 1, slice, z_span)) ||
-          !checked_add(y_span, z_span, span) || !checked_add(span, row_bytes, span))
-        return false;
-      return valid_range(address, span);
+    const auto origin_address = [&](uint32_t low, uint32_t high, uint64_t off_x, uint64_t off_y,
+                                    uint64_t off_z, uint64_t pitch,
+                                    uint64_t slice) -> std::optional<uint64_t> {
+      const std::optional<uint64_t> x_bytes = util::checked_mul(off_x, element_bytes);
+      const std::optional<uint64_t> y_bytes = util::checked_mul(off_y, pitch);
+      const std::optional<uint64_t> z_bytes = util::checked_mul(off_z, slice);
+      if (!x_bytes || !y_bytes || !z_bytes)
+        return std::nullopt;
+      std::optional<uint64_t> address = util::checked_add(*x_bytes, *y_bytes);
+      if (address)
+        address = util::checked_add(*address, *z_bytes);
+      if (address)
+        address = util::checked_add(join(low, high), *address);
+      const std::optional<uint64_t> y_span = util::checked_mul(rect_y - 1, pitch);
+      const std::optional<uint64_t> z_span = util::checked_mul(rect_z - 1, slice);
+      if (!address || !y_span || !z_span)
+        return std::nullopt;
+      std::optional<uint64_t> span = util::checked_add(*y_span, *z_span);
+      if (span)
+        span = util::checked_add(*span, *row_bytes);
+      if (!span || !valid_range(*address, *span))
+        return std::nullopt;
+      return address;
     };
 
-    uint64_t source = 0;
-    uint64_t destination = 0;
-    if (!origin_address(word(frame, 1), word(frame, 2), src_off_x, src_off_y, src_off_z, src_pitch,
-                        src_slice, source) ||
-        !origin_address(word(frame, 6), word(frame, 7), dst_off_x, dst_off_y, dst_off_z, dst_pitch,
-                        dst_slice, destination))
+    const std::optional<uint64_t> source = origin_address(
+        word(frame, 1), word(frame, 2), src_off_x, src_off_y, src_off_z, *src_pitch, *src_slice);
+    const std::optional<uint64_t> destination = origin_address(
+        word(frame, 6), word(frame, 7), dst_off_x, dst_off_y, dst_off_z, *dst_pitch, *dst_slice);
+    if (!source || !destination)
       return false;
 
     operation.rectangular = true;
-    operation.source = source;
-    operation.destinations[0] = destination;
+    operation.source = *source;
+    operation.destinations[0] = *destination;
     operation.destination_count = 1;
-    operation.count = total_bytes;
-    operation.rect_row_bytes = static_cast<uint32_t>(row_bytes);
+    operation.count = *total_bytes;
+    operation.rect_row_bytes = static_cast<uint32_t>(*row_bytes);
     operation.rect_rows = static_cast<uint32_t>(rect_y);
-    operation.src_pitch = src_pitch;
-    operation.dst_pitch = dst_pitch;
-    operation.src_slice = src_slice;
-    operation.dst_slice = dst_slice;
+    operation.src_pitch = *src_pitch;
+    operation.dst_pitch = *dst_pitch;
+    operation.src_slice = *src_slice;
+    operation.dst_slice = *dst_slice;
     return true;
   }
 
