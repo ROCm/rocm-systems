@@ -21,17 +21,189 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/kernel_replay/blit-copy-kernel.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/blit-copy.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/snapshot-plan.hpp"
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <utility>
 #include <vector>
 
 namespace
 {
-namespace abi = rocprofiler::kernel_replay::blit::kernel_abi;
+namespace abi  = rocprofiler::kernel_replay::blit::kernel_abi;
+namespace ms   = rocprofiler::kernel_replay::memory_snapshot;
+namespace plan = rocprofiler::kernel_replay::memory_snapshot::planning;
+
+TEST(kernel_replay_snapshot_plan, variadic_fallback_uses_gpu_cpu_then_null)
+{
+    auto allocator =
+        plan::snapshot_allocator{plan::gpu_allocator{10}, plan::pinned_allocator{20}, {}};
+    auto requests = std::vector<plan::request_t>{
+        {6, 0, 100},
+        {7, 1, 200},
+        {4, 2, 300},
+    };
+
+    const auto result = plan::build(std::move(requests), allocator, 1);
+    ASSERT_TRUE(result.complete());
+    ASSERT_EQ(result.placements.size(), 3);
+    EXPECT_EQ(result.placements[0].tier, ms::storage_kind::gpu_local);
+    EXPECT_EQ(result.placements[0].backing_offset, 0);
+    EXPECT_EQ(result.placements[1].tier, ms::storage_kind::pinned_host);
+    EXPECT_EQ(result.placements[1].backing_offset, 0);
+    // Fallback is non-sticky: this later smaller region still consumes the remaining GPU budget.
+    EXPECT_EQ(result.placements[2].tier, ms::storage_kind::gpu_local);
+    EXPECT_EQ(result.placements[2].backing_offset, 6);
+    EXPECT_EQ(result.gpu_bytes, 10);
+    EXPECT_EQ(result.host_bytes, 7);
+}
+
+TEST(kernel_replay_snapshot_plan, null_allocator_reports_terminal_region)
+{
+    auto allocator =
+        plan::snapshot_allocator{plan::gpu_allocator{4}, plan::pinned_allocator{4}, {}};
+    auto requests = std::vector<plan::request_t>{{5, 17, 0}};
+
+    const auto result = plan::build(std::move(requests), allocator, 1);
+    EXPECT_FALSE(result.complete());
+    EXPECT_EQ(result.error.code, plan::error_code::no_backing_capacity);
+    EXPECT_EQ(result.error.requested, 5);
+    EXPECT_EQ(result.error.region_index, 17);
+}
+
+TEST(kernel_replay_snapshot_plan, planning_is_deterministic_and_accounts_for_alignment)
+{
+    auto allocator =
+        plan::snapshot_allocator{plan::gpu_allocator{64}, plan::pinned_allocator{0}, {}};
+    auto requests = std::vector<plan::request_t>{
+        {1, 2, 300},
+        {17, 0, 100},
+        {1, 1, 200},
+    };
+
+    const auto result = plan::build(std::move(requests), allocator, 16);
+    ASSERT_TRUE(result.complete());
+    ASSERT_EQ(result.placements.size(), 3);
+    EXPECT_EQ(result.placements[0].region_index, 0);
+    EXPECT_EQ(result.placements[0].backing_offset, 0);
+    EXPECT_EQ(result.placements[1].region_index, 1);
+    EXPECT_EQ(result.placements[1].backing_offset, 32);
+    EXPECT_EQ(result.placements[2].region_index, 2);
+    EXPECT_EQ(result.placements[2].backing_offset, 48);
+    EXPECT_EQ(result.gpu_bytes, 49);
+}
+
+TEST(kernel_replay_snapshot_plan, overflow_is_terminal_and_does_not_fall_through)
+{
+    auto allocator = plan::snapshot_allocator{
+        plan::gpu_allocator{std::numeric_limits<size_t>::max()},
+        plan::pinned_allocator{1024},
+        {},
+    };
+
+    ASSERT_TRUE(allocator.allocate(std::numeric_limits<size_t>::max() - 7, 1));
+    const auto overflow = allocator.allocate(16, 16);
+    EXPECT_FALSE(overflow);
+    EXPECT_EQ(overflow.error.code, plan::error_code::overflow);
+    EXPECT_EQ(allocator.get<1>().used(), 0);
+
+    const auto zero_alignment = allocator.allocate(1, 0);
+    EXPECT_FALSE(zero_alignment);
+    EXPECT_EQ(zero_alignment.error.code, plan::error_code::overflow);
+    EXPECT_EQ(allocator.get<1>().used(), 0);
+}
+
+TEST(kernel_replay_blit_copy, descriptors_use_size_source_dest_order)
+{
+    EXPECT_EQ(offsetof(rocprofiler::kernel_replay::blit::copy_region_t, size), 0);
+    EXPECT_LT(offsetof(rocprofiler::kernel_replay::blit::copy_region_t, size),
+              offsetof(rocprofiler::kernel_replay::blit::copy_region_t, source));
+    EXPECT_LT(offsetof(rocprofiler::kernel_replay::blit::copy_region_t, source),
+              offsetof(rocprofiler::kernel_replay::blit::copy_region_t, dest));
+
+    EXPECT_EQ(offsetof(abi::copy_descriptor_t, size), 0);
+    EXPECT_EQ(offsetof(abi::copy_descriptor_t, source_address), sizeof(std::uint64_t));
+    EXPECT_EQ(offsetof(abi::copy_descriptor_t, dest_address), 2 * sizeof(std::uint64_t));
+}
+
+TEST(kernel_replay_blit_copy, regions_pack_into_one_aligned_segment)
+{
+    auto regions = std::vector<ms::snapshot_region_t>{
+        {1, nullptr, 0, ms::liveness_kind::tracked_allocation},
+        {16, nullptr, 0, ms::liveness_kind::tracked_allocation},
+        {17, nullptr, 0, ms::liveness_kind::module_variable},
+    };
+
+    const auto required = ms::assign_logical_offsets(regions);
+    ASSERT_TRUE(required.has_value());
+    EXPECT_EQ(*required, 49);
+    EXPECT_EQ(regions[0].logical_offset, 0);
+    EXPECT_EQ(regions[1].logical_offset, 16);
+    EXPECT_EQ(regions[2].logical_offset, 32);
+
+    auto segments = std::vector<ms::storage_segment_t>{};
+    segments.emplace_back(ms::storage_segment_t{*required, 0, {}});
+    const auto extents = ms::map_regions_to_storage(regions, segments);
+    ASSERT_TRUE(extents.has_value());
+    ASSERT_EQ(extents->size(), regions.size());
+    for(size_t i = 0; i < regions.size(); ++i)
+    {
+        EXPECT_EQ(extents->at(i).size, regions[i].size);
+        EXPECT_EQ(extents->at(i).region_index, i);
+        EXPECT_EQ(extents->at(i).region_offset, 0);
+        EXPECT_EQ(extents->at(i).segment_index, 0);
+        EXPECT_EQ(extents->at(i).segment_offset, regions[i].logical_offset);
+    }
+}
+
+TEST(kernel_replay_blit_copy, generic_mapping_can_cross_future_segment_boundary)
+{
+    auto regions = std::vector<ms::snapshot_region_t>{
+        {30, nullptr, 0, ms::liveness_kind::tracked_allocation},
+    };
+    ASSERT_EQ(ms::assign_logical_offsets(regions), std::optional<size_t>{30});
+
+    auto segments = std::vector<ms::storage_segment_t>{};
+    segments.emplace_back(ms::storage_segment_t{16, 0, {}});
+    segments.emplace_back(ms::storage_segment_t{14, 16, {}});
+
+    const auto extents = ms::map_regions_to_storage(regions, segments);
+    ASSERT_TRUE(extents.has_value());
+    ASSERT_EQ(extents->size(), 2);
+    EXPECT_EQ(extents->at(0).size, 16);
+    EXPECT_EQ(extents->at(0).region_offset, 0);
+    EXPECT_EQ(extents->at(0).segment_index, 0);
+    EXPECT_EQ(extents->at(1).size, 14);
+    EXPECT_EQ(extents->at(1).region_offset, 16);
+    EXPECT_EQ(extents->at(1).segment_index, 1);
+}
+
+TEST(kernel_replay_blit_copy, generic_mapping_rejects_overlaps_and_gaps)
+{
+    auto regions = std::vector<ms::snapshot_region_t>{
+        {30, nullptr, 0, ms::liveness_kind::tracked_allocation},
+    };
+    ASSERT_EQ(ms::assign_logical_offsets(regions), std::optional<size_t>{30});
+
+    {
+        auto overlapping = std::vector<ms::storage_segment_t>{};
+        overlapping.emplace_back(ms::storage_segment_t{20, 0, {}});
+        overlapping.emplace_back(ms::storage_segment_t{20, 10, {}});
+        EXPECT_FALSE(ms::map_regions_to_storage(regions, overlapping).has_value());
+    }
+    {
+        auto gapped = std::vector<ms::storage_segment_t>{};
+        gapped.emplace_back(ms::storage_segment_t{10, 0, {}});
+        gapped.emplace_back(ms::storage_segment_t{10, 20, {}});
+        EXPECT_FALSE(ms::map_regions_to_storage(regions, gapped).has_value());
+    }
+}
 
 TEST(kernel_replay_blit_copy, compact_tid_assignment_crosses_descriptor_boundaries)
 {
