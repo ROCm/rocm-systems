@@ -63,6 +63,7 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
     306: "Memory chart - GLARB (GL1-GL2 Arbiter)",
     307: "Memory chart - GL2 Cache (L2)",
     308: "Memory chart - EA to HBM",
+    309: "Memory chart - Workgroup Processors (WGPs)",
     401: "Roofline Performance Rates",
     402: "Roofline Plot Points",
     501: "CPC Utilizations",
@@ -200,6 +201,7 @@ def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
 # All CDNA architectures share the same panel ID mapping.
 CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
     201: "System Speed-of-Light",
+    301: "Memory chart",
     401: "Roofline Performance Rates",
     402: "Roofline Plot Points",
     501: "Command processor fetcher (CPF)",
@@ -252,6 +254,7 @@ RDNA35_PANEL_ID_TO_SECTION_BY_ARCH: dict[int, str] = {
     307: "Memory chart - GL1-GL2 Interface",
     308: "Memory chart - GL2 Cache (L2)",
     309: "Memory chart - GCEA to System Memory",
+    310: "Memory chart - Workgroup Processors (WGPs)",
     401: "Roofline Performance Rates",
     402: "Roofline Plot Points",
     501: "CPC Utilization",

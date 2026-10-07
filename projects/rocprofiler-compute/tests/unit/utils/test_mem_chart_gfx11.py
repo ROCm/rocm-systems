@@ -85,9 +85,9 @@ class TestZeroVersusMissingMetrics:
 
     GUARDED_LINES = [
         ("LDS Utilization", "Util 0.0%"),
-        ("LDS Estimated Bandwidth", "BW 0.0 B/s"),
+        ("LDS Estimated Bandwidth", "BW 0.000 GB/s"),
         ("LDS Bank Conflict Rate", "Bank Conflict"),
-        ("GL0 Cache BW (TCP Cache)", "BW 0.0 B/s"),
+        ("GL0 Cache BW (TCP Cache)", "BW 0.000 GB/s"),
     ]
 
     @pytest.mark.parametrize(("metric", "expected"), GUARDED_LINES)
@@ -161,3 +161,15 @@ def test_chart_title_appears_as_first_line():
     )
     assert output.strip().splitlines()[0] == chart_title
     assert "3. Memory Chart" not in output
+
+
+def test_left_panel_uses_wgp_terminology():
+    """RDNA3.5 schedules waves onto WGPs, so the left panel is labelled per WGP."""
+    output = strip_ansi(
+        mem_chart_gfx11.plot_mem_chart(
+            mem_chart_gfx11.get_sample_metrics(), chart_title=DEFAULT_TITLE
+        )
+    )
+    assert "WGPs" in output
+    assert "Workgroups/WGP" in output
+    assert "Compute Units" not in output
