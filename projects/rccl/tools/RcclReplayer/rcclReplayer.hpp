@@ -56,6 +56,7 @@ struct DeviceMemAllocation
   void*                 base = NULL;
   size_t                size = 0;
   bool                  ncclMemAllocated = false; // owned by ncclMemAlloc/ncclMemFree, never hipFree'd here
+  int                   ncclMemFreeLine = -1; // line of the last ncclMemFree of this address
 };
 
 struct DeviceGraphInfo

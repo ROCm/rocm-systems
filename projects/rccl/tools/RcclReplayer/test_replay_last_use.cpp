@@ -126,6 +126,21 @@ void EndOfLogInsideGroup() {
   ExpectDepth("end of log inside group", t, 1);
 }
 
+void ExpectFrees(const char* what, bool ncclMemAllocated, int ncclMemFreeLine, int lastUseLine, bool want) {
+  if (ReplayerFrees(ncclMemAllocated, ncclMemFreeLine, lastUseLine) != want) {
+    printf("FAIL: %s: ReplayerFrees is %d, want %d\n", what, !want, want);
+    failures++;
+  }
+}
+
+void FreeOwnership() {
+  ExpectFrees("hipMalloc buffer", false, -1, 5, true);
+  ExpectFrees("live ncclMemAlloc buffer", true, -1, 5, false);
+  ExpectFrees("ncclMemAlloc buffer used before its ncclMemFree", false, 7, 5, false);
+  ExpectFrees("address reused after ncclMemFree", false, 7, 9, true);
+  ExpectFrees("address ncclMemAlloc'd again after reuse", true, 7, 9, false);
+}
+
 }  // namespace
 
 int main() {
@@ -137,6 +152,7 @@ int main() {
   GroupStateResets();
   UnmatchedGroupEnd();
   EndOfLogInsideGroup();
+  FreeOwnership();
   if (failures != 0) {
     printf("%d LastUseTracker check(s) failed\n", failures);
     return 1;

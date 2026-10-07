@@ -5,6 +5,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
+// hipFree at the last use unless ncclMemFree owns that use: the address is still ncclMemAlloc'd, or unused since its ncclMemFree.
+inline bool ReplayerFrees(bool ncclMemAllocated, int ncclMemFreeLine, int lastUseLine) {
+  return !ncclMemAllocated && lastUseLine > ncclMemFreeLine;
+}
+
 // Last log line using each buffer and stream; a use inside ncclGroupStart/End counts at the outermost GroupEnd, where it launches.
 class LastUseTracker {
  public:

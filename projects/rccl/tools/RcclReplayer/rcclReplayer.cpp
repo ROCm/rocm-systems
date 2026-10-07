@@ -102,7 +102,6 @@ void Replayer::parse()
     case rrCommAbort:
     case rrCommRegister:
     case rrCommDeregister: // I think commDeregister is not affected by handle in both way?
-    case rrMemFree:
     case rrRedOpCreatePreMulSum:
     case rrRedOpDestroy:
     case rrOtherCall:
@@ -138,6 +137,12 @@ void Replayer::parse()
       // Replayer will not free this without explicit ncclMemFree
       dMemMap[call.recvbuff].size = call.count;
       dMemMap[call.recvbuff].ncclMemAllocated = true;
+      break;
+    }
+    case rrMemFree:
+    {
+      dMemMap[call.recvbuff].ncclMemAllocated = false;
+      dMemMap[call.recvbuff].ncclMemFreeLine = lineNum;
       break;
     }
 
@@ -189,7 +194,8 @@ void Replayer::parse()
            myRank);
   }
   for (const auto& [base, lastLine] : lastUse.buffers()) {
-    if (!dMemMap.at(base).ncclMemAllocated) {
+    const DeviceMemAllocation& mem = dMemMap.at(base);
+    if (ReplayerFrees(mem.ncclMemAllocated, mem.ncclMemFreeLine, lastLine)) {
       buffersToFree[lastLine].push_back(base);
     }
   }
