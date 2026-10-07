@@ -1,0 +1,104 @@
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
+#include "dev_runtime_internal.h"
+#include "alloc.h"
+#include "bootstrap.h"
+#include "comm.h"
+#include "rocmwrap.h"
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags) {
+  // Skip the probe when cuMem is off on any rank: ROCm 7.0.2.2 faults in hipMemRetainAllocationHandle.
+  if (!comm->cuMemSupport) return ncclSuccess;
+
+  // Classify the pointer before ncclCuMemGetAddressRange. hipMalloc is not
+  // cuMem; retaining it WARNs on every registration and can fault on HIP 7.0.
+  // A failed probe must still allgather: returning here hangs peers in it.
+  ncclResult_t probeRet = ncclSuccess;
+  CUmemorytype memType = CU_MEMORYTYPE_DEVICE;
+  bool hasSysmemSegment = false;
+  struct ncclDevrState* devr = &comm->devrState;
+  // No rank-local allocation here: lsaSize is team-uniform, so this bound
+  // fails on every rank alike and none is left waiting in the allgather.
+  if (devr->lsaSize > NCCL_MAX_LOCAL_RANKS) {
+    WARN("LSA team of %d exceeds %d local ranks", devr->lsaSize, NCCL_MAX_LOCAL_RANKS);
+    return ncclInternalError;
+  }
+  int kinds[NCCL_MAX_LOCAL_RANKS] = {};
+  auto noteProbeFailure = [&](hipError_t err) {
+    if (err == hipSuccess || probeRet != ncclSuccess) return;
+    WARN("HIP failure '%s' while classifying window %p", hipGetErrorString(err), userPtr);
+    (void)hipGetLastError();
+    probeRet = ncclUnhandledCudaError;
+  };
+  noteProbeFailure(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)userPtr));
+  if (probeRet == ncclSuccess && memType == CU_MEMORYTYPE_HOST) {
+    hasSysmemSegment = true;
+  } else if (probeRet == ncclSuccess) {
+#if NCCL_VER_GE(HIP_VERSION, ROCM_VER_7_12_60540)
+    int legacyIpcCap = 0;
+    CUdeviceptr base = 0;
+    size_t baseSize = 0;
+    noteProbeFailure(cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr)userPtr));
+    if (probeRet == ncclSuccess) {
+      noteProbeFailure(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
+                                             (CUdeviceptr)base));
+    }
+    if (probeRet == ncclSuccess && !legacyIpcCap) {
+      CUdeviceptr memAddr = 0;
+      size_t memSize = 0;
+      int numSegments = 0;
+      probeRet = ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize,
+                                          &numSegments, &hasSysmemSegment);
+    }
+#else
+    // 7.0.2.x cannot retain the allocation. Walk every mapping: a device
+    // first page must not hide a later host page.
+    uintptr_t cursor = reinterpret_cast<uintptr_t>(userPtr);
+    uintptr_t end = cursor + userSize;
+    while (probeRet == ncclSuccess && !hasSysmemSegment && cursor < end) {
+      CUdeviceptr base = 0;
+      size_t baseSize = 0;
+      noteProbeFailure(cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr)cursor));
+      if (probeRet != ncclSuccess || baseSize == 0) break;
+      CUmemorytype segType = CU_MEMORYTYPE_DEVICE;
+      uintptr_t attrAt = base != 0 ? (uintptr_t)base : cursor;
+      noteProbeFailure(cuPointerGetAttribute(&segType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)attrAt));
+      if (probeRet != ncclSuccess) break;
+      if (segType != CU_MEMORYTYPE_DEVICE) hasSysmemSegment = true;
+      uintptr_t next = attrAt + baseSize;
+      if (next <= cursor) break;
+      cursor = next;
+    }
+#endif
+  }
+  // Host VMM cannot cudaIpcGetMemHandle. Allgather the classify result so a
+  // host rank cannot return while a device peer still enters the IPC exchange.
+  if (devr->lsaSize > 1) {
+    // 0 = device, 1 = host, 2 = probe failed.
+    int localKind = (probeRet != ncclSuccess) ? 2 : (hasSysmemSegment ? 1 : 0);
+    kinds[devr->lsaSelf] = localKind;
+    NCCLCHECK(bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, kinds,
+                                          sizeof(int)));
+    int anyHost = 0, anyFail = 0;
+    for (int r = 0; r < devr->lsaSize; r++) {
+      if (kinds[r] == 2) anyFail = 1;
+      if (kinds[r] == 1) anyHost = 1;
+    }
+    if (anyFail) return (probeRet != ncclSuccess) ? probeRet : ncclInternalError;
+    if (anyHost) {
+      WARN("Host-backed VMM cannot be exported via IPC for an LSA team of %d", comm->localRanks);
+      return ncclInvalidArgument;
+    }
+    return ncclSuccess;
+  }
+  if (probeRet != ncclSuccess) return probeRet;
+  if (hasSysmemSegment) NCCLCHECK(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment, winFlags));
+  return ncclSuccess;
+}
+#endif
