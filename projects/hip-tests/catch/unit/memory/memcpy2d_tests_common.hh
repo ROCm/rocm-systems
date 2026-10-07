@@ -10,6 +10,7 @@
 
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
+#include <memcpy1d_tests_common.hh>
 #include <utils.hh>
 #include <resource_guards.hh>
 #include <hip/driver_types.h>
@@ -161,20 +162,6 @@ void Memcpy2DHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = nu
   }
 
   PitchedMemoryVerify(dst_host.ptr(), cols * sizeof(int), cols, rows, 1, f);
-}
-
-// Synchronization behavior checks
-template <typename F>
-void MemcpySyncBehaviorCheck(F memcpy_func, const bool should_sync,
-                             const hipStream_t kernel_stream) {
-  LaunchDelayKernel(std::chrono::milliseconds{300}, kernel_stream);
-  HIP_CHECK(memcpy_func());
-  if (should_sync) {
-    HIP_CHECK(hipStreamSynchronize(kernel_stream));
-    HIP_CHECK(hipStreamQuery(kernel_stream));
-  } else {
-    HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
-  }
 }
 
 template <bool unaligned = false, typename F>
