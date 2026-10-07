@@ -1048,7 +1048,7 @@ static void checkMultiSegmentSplit(bool fused) {
     size_t bytes;
     unsigned nSeg;
   };
-  for (const SegCase& c : {SegCase{kSeg, 1}, SegCase{kSeg + 1, 2}, SegCase{2 * kSeg, 2}}) {
+  for (const SegCase& c : {SegCase{kSeg, 1}, SegCase{kSeg + 1, 2}, SegCase{2 * kSeg, 2}, SegCase{2 * kSeg + 1, 3}}) {
     SCOPED_TRACE(::testing::Message() << "fused=" << fused << " bytes=" << c.bytes);
     env.signals.zero();
     resetQuietCount();

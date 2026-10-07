@@ -303,6 +303,19 @@ TEST_F(GinBackendMaskDispatchTest, OneBitMaskDispatchesToItsBackend) {
   expectOnlyCalled(d_records_.copyTo(), kEfaSlot);
 }
 
+// ginConnectionStride 2 maps world rank 3 to gin rank 3 / 2 = 1 through idivFast32.
+TEST_F(GinBackendMaskDispatchTest, ConnectionStrideDividesPeerRank) {
+  ncclDevComm comm = makeComm(NCCL_NET_DEVICE_GIN_GPI);
+  comm.nRanks = 4;
+  comm.ginConnectionStride = 2;
+  comm.ginConnectionStride_rcp32 = nccl::utility::idivRcp32(2);
+  PutArgs args = defaultArgs();
+  args.peer = 3;
+  const std::vector<PutRecord> records = runPut<ncclGin_SegmentDevice>(comm, args, ncclGin_None{}, ncclGin_None{});
+  expectOnlyCalled(records, kGpiSlot);
+  EXPECT_EQ(records[kGpiSlot].peer, 1);
+}
+
 // Device-only put forwards peer, 4K-scaled offsets, windows, SignalAdd, counter, flags and release scopes unchanged.
 TEST_F(GinBackendMaskDispatchTest, DevicePutForwardsArguments) {
   const PutArgs args = defaultArgs();

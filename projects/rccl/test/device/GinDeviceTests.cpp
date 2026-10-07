@@ -1618,6 +1618,8 @@ struct ProxyPutArgs {
   uint64_t signalVal;
   bool hasCounter;
   ncclGinCounter_t counterId;
+  uint64_t srcVal;
+  bool hasInline;
 };
 
 struct ExpectedGfd {
@@ -1649,7 +1651,7 @@ __global__ void kernelProxyPut(ncclGinProxyGpuCtx_t* ctx, ProxyPutArgs args) {
   // Matching system scopes skip the release fence; the fake windows are never dereferenced.
   nccl::gin::proxy::put<ncclCoopCta, uint64_t>(ncclCoopCta{}, &gfd, ctx, static_cast<int>(args.peer),
                                                reinterpret_cast<ncclGinWindow_t>(args.dstWnd), args.dstOff,
-                                               /*srcVal=*/0ULL, /*hasInline=*/false,
+                                               args.srcVal, args.hasInline,
                                                reinterpret_cast<ncclGinWindow_t>(args.srcWnd), args.srcOff, args.bytes,
                                                signal, args.signalOp, args.signalVal, args.hasCounter, args.counterId,
                                                cuda::thread_scope_system, cuda::thread_scope_system);
@@ -1662,6 +1664,7 @@ protected:
   static constexpr uint32_t kQueueSize = 8;
 
   // Posts one proxy::put on a zeroed 2-rank ring and reads back PIs and both peers' queues.
+  // cis stay 0, so kQueueSize caps GFDs per peer; posting more hangs in postGfd's credit wait until the run times out.
   void runProxyPut(const ProxyPutArgs& args, std::vector<uint32_t>* pis, std::vector<ncclGinProxyGfd_t>* queues) {
     DeviceBuffer<ncclGinProxyGfd_t> d_queues(kNranks * kQueueSize);
     DeviceBuffer<uint32_t> d_pis(kNranks);
@@ -1681,7 +1684,9 @@ protected:
     *queues = d_queues.copyTo();
   }
 
-  static void expectGfd(const ncclGinProxyGfd_t& gfd, const ExpectedGfd& expected, uint32_t slot) {
+  // inlineVal reads qwords 1-2 as the inline value (expected.srcOff) instead of srcOff/srcHandle.
+  static void expectGfd(const ncclGinProxyGfd_t& gfd, const ExpectedGfd& expected, uint32_t slot,
+                        bool inlineVal = false) {
     SCOPED_TRACE(::testing::Message() << "GFD slot " << slot);
     for (int i = 0; i < ncclGinProxyGfdQwords; i++) {
       EXPECT_EQ(static_cast<uint64_t>(gfd.qword[i].flag.v), 1ULL) << "qword " << i << " flag must be set";
@@ -1690,10 +1695,17 @@ protected:
               static_cast<uint64_t>(NCCL_GIN_PROXY_GFD_VERSION));
     EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op), expected.op) << "op";
     EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.size), expected.size) << "size";
-    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSrcOff].srcOff.srcOff), expected.srcOff)
-      << "qword 1 offset";
-    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSrcHandle].srcHandle.srcHandle), expected.srcHandle)
-      << "qword 2 handle";
+    if (inlineVal) {
+      const uint64_t low = gfd.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow;
+      const uint64_t low2 = gfd.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow2;
+      const uint64_t high = gfd.qword[ncclGinProxyGfdInlineHigh].inlineHigh.inlineValHigh;
+      EXPECT_EQ(low | (low2 << 32) | (high << 48), expected.srcOff) << "inline value";
+    } else {
+      EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSrcOff].srcOff.srcOff), expected.srcOff)
+        << "qword 1 offset";
+      EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSrcHandle].srcHandle.srcHandle), expected.srcHandle)
+        << "qword 2 handle";
+    }
     EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdDstOff].dstOff.dstOff), expected.dstOff) << "dstOff";
     EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdDstHandle].dstHandle.dstHandle), expected.dstHandle)
       << "dstHandle";
@@ -1795,6 +1807,27 @@ TEST_F(GinProxyPutTest, ExactChunkMultipleWithVASignal) {
   expectGfd(queues[kQueueSize + 1], plainChunk(args, 1, 1), 1);
   // The VA signal GFD has no put bit, no size and no destination; qwords 1-2 carry the signal VA.
   expectGfd(queues[kQueueSize + 2], {kVaOp, 0, args.signalOffset, args.signalWindow, 0, 0, 0, 0, kSigVal, 1}, 2);
+}
+
+// putValue's shape (inline, no source window, no counter or signal): hasInline alone must keep the final put GFD.
+TEST_F(GinProxyPutTest, InlinePutValuePostsOneInlineGfd) {
+  ProxyPutArgs args{};
+  args.peer = 1;
+  args.dstWnd = 0x0000D5D500002000ULL;
+  args.dstOff = 0x180;
+  args.bytes = sizeof(uint64_t);
+  args.srcVal = 0x0123456789ABCDEFULL;
+  args.hasInline = true;
+
+  std::vector<uint32_t> pis;
+  std::vector<ncclGinProxyGfd_t> queues;
+  ASSERT_NO_FATAL_FAILURE(runProxyPut(args, &pis, &queues));
+
+  expectOnlyPeer1Posted(pis, queues, 1);
+  expectGfd(queues[kQueueSize],
+            {ncclGinProxyOpPut | ncclGinProxyOpWithInline, sizeof(uint64_t), args.srcVal, 0, args.dstOff, args.dstWnd,
+             0, 0, 0, 0},
+            0, /*inlineVal=*/true);
 }
 
 // A standalone VA signal (no source window, no bytes, no counter) posts only the VA GFD, with no empty put first.
