@@ -29,7 +29,9 @@ from __future__ import annotations
 
 from amdisa.codegen.execute import float_compare, float_minmax
 from amdisa.codegen.execute.floating_policy import (
+    F16_FLUSHED_SOURCE_CALLS,
     FLUSH_NEAREST_F32_OPS,
+    INPUT_FLUSHED_ROUNDING,
     ROUNDED_F16_OPS,
 )
 
@@ -364,11 +366,6 @@ def _flush_input_then(fmt: str, functor: str) -> str:
     mode = 'f32' if fmt == 'F32' else 'f16_f64'
     policy = f'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_{mode}())'
     return f'amdgpu::flush_input_then<amdgpu::fp_format::{fmt}>({policy}, {functor})'
-
-
-# Integral rounding operations whose source honors MODE input flushing.
-# F16 transcendental functors also receive a flushed source.
-_INPUT_FLUSHED_ROUNDING = frozenset({'ceil', 'floor'})
 
 
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
@@ -2020,7 +2017,7 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
 # VOP3 f16 unary operations widen to f32 for modifiers and narrow the result.
 # Input policy per entry:
 # - CEIL and FLOOR receive a source half flushed under MODE input denormals
-#   (_INPUT_FLUSHED_ROUNDING).
+#   (INPUT_FLUSHED_ROUNDING).
 # - TRUNC and RNDNE keep the source unflushed; a subnormal gives a signed zero
 #   either way.
 # - FRACT keeps the source unflushed; its input flush is not implemented yet.
@@ -3052,7 +3049,8 @@ def _simd_probe_line(
         )
         transcendental = template_name.rsplit('_', 1)[0].upper() in ROUNDED_F16_OPS
         fp16_args = ', true' if transcendental else ''
-        if transcendental or template_name.split('_')[1] in _INPUT_FLUSHED_ROUNDING:
+        operation = template_name.split('_')[1]
+        if operation in F16_FLUSHED_SOURCE_CALLS or operation in INPUT_FLUSHED_ROUNDING:
             # The glue flushes the raw half before widening it for the functor.
             policy = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
             fp16_args = f', {"true" if transcendental else "false"}, {policy}'

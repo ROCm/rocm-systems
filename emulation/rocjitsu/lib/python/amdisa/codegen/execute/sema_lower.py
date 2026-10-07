@@ -9,7 +9,11 @@ C++ code implementing the instruction's behavior in the simulator.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
+from amdisa.codegen.execute.floating_policy import (
+    F16_FLUSHED_SOURCE_CALLS,
+    F16_TRANSCENDENTAL_CALLS,
+    FLUSH_NEAREST_F32_OPS,
+)
 
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
@@ -1884,12 +1888,6 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
 }
 
 
-# Helpers whose single F16 source the caller flushes before widening.
-_F16_FLUSHED_SOURCE_CALLS = frozenset(
-    {'rcp', 'rsq', 'sqrt', 'sin', 'cos', 'log', 'log2', 'exp', 'exp2'}
-)
-
-
 def _takes_flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> bool:
     """Whether a call lowers to an F16 helper that expects a flushed source."""
     callee = node.call_name or ''
@@ -1902,7 +1900,7 @@ def _takes_flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> bool:
         return False
     if callee == 'cvt_f32_f16_valu':
         return True
-    return callee in _F16_FLUSHED_SOURCE_CALLS and node.ty == SemaType.F16
+    return callee in F16_FLUSHED_SOURCE_CALLS and node.ty == SemaType.F16
 
 
 def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
@@ -2239,20 +2237,6 @@ def _is_integral_rounding(node: SemaNode) -> bool:
     )
 
 
-# F16 operations evaluated by the transcendental unit.
-_F16_TRANSCENDENTAL_CALLS = (
-    'log',
-    'log2',
-    'exp',
-    'exp2',
-    'rcp',
-    'rsq',
-    'sqrt',
-    'sin',
-    'cos',
-)
-
-
 def _destination_result(
     node: SemaNode, ctx: LoweringContext
 ) -> tuple[str, str, bool] | None:
@@ -2293,7 +2277,7 @@ def _destination_result(
         )
     else:
         transcendental = any(
-            _contains_call(node, call) for call in _F16_TRANSCENDENTAL_CALLS
+            _contains_call(node, call) for call in sorted(F16_TRANSCENDENTAL_CALLS)
         )
         half = (
             f'util::f32_to_f16_mode({value}, wf.fp16_ovfl())'
