@@ -126,6 +126,8 @@ int64_t ncclParamEnqueueRearchEnable() { return 0; }
 int64_t ncclParamWinEnable() { return 1; }
 // Emitted by rocmwrap.cc; NCCL_PARAM default, so host VMM GIN is not failed closed.
 int64_t ncclParamDmaBufEnable() { return 1; }
+// Emitted by transport/generic.cc; NCCL_PARAM default, so multi-segment GIN windows register.
+int64_t ncclParamMultiSegmentRegister() { return 1; }
 
 // ---------------------------------------------------------------------------
 // Proxy / mgmt task enqueue.
