@@ -336,12 +336,18 @@ TEST_CASE("Unit_HRR_DiskSpace_StopsBeforeReserve_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&dev, 1u << 20));
   // Larger than the interval, so it is checked and the count starts from zero.
   copy_to_device(dev, 100, 1u << 20);
+  const fs::path active =
+      fs::path(fake_root()) / ("pid-" + std::to_string(getpid())) / "active";
+  REQUIRE(fs::exists(active));
 
   const int64_t headroom = 2 << 20;
   arm_shrinking(headroom);
   for (int i = 0; i < kStepCount; ++i) copy_to_device(dev, 200 + i, kStepCopy);
   const uint64_t used = used_bytes() - g_used_base.load();
   disarm();
+
+  // Stopped while the program runs on, so producers must stop writing sidecars.
+  CHECK_FALSE(fs::exists(active));
 
   // The capture went no further into the reserve than one check interval.
   INFO("used " << used << " headroom " << headroom << " interval " << interval);

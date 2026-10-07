@@ -42,7 +42,8 @@ stays private.
 **Checking whether capture is active** reduces to checking that the archive's
 `active` file is there and is one the writer created: a regular file of this
 user with one name, reached through no link. The writer creates it as the last
-step of a successful open and removes it at shutdown. There is no symbol to
+step of a successful open and removes it at shutdown, or when capture stops
+early for lack of space. There is no symbol to
 resolve and nothing to `dlopen`:
 
 ```python

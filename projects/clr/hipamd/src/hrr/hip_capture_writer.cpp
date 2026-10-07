@@ -904,6 +904,14 @@ static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total,
   return true;
 }
 
+// pid-<pid>/active tells producers outside the runtime that this process's
+// capture is on. open() removes a stale one before any step that can fail and
+// creates it as its last step. flush() removes it at shutdown, and
+// stop_for_space() when the capture stops early. events.bin cannot carry that
+// signal: a resume that fails after opening it leaves the earlier run's file in
+// place.
+static constexpr const char* kActiveMarker = "/active";
+
 // Flush what is buffered, close events.bin and mark the archive incomplete.
 // Every write path already treats a closed events fd as "capture off". Both flags
 // are raised under g_file_mu, so a writer that sees the stop flag and then takes
@@ -923,6 +931,9 @@ static void stop_for_space(uint64_t keep_free) {
     HRR_CLOSE(g_events_fd);
     g_events_fd = -1;
   }
+  // The application runs on, and producers would keep writing sidecars to an
+  // archive that records nothing, on a file system already short of space.
+  (void)remove((g_output_dir + kActiveMarker).c_str());
   mark_incomplete(reason);
   // Not gated on AMD_LOG_LEVEL, like the refusal in open().
   fprintf(stderr,
@@ -1040,13 +1051,6 @@ static bool open_failed(bool created_pid_dir) {
   clear_archive_paths();
   return false;
 }
-
-// pid-<pid>/active tells producers outside the runtime that this process's
-// capture is on. open() removes a stale one before any step that can fail and
-// creates it as its last step, and flush() removes it at shutdown. events.bin
-// cannot carry that signal: a resume that fails after opening it leaves the
-// earlier run's file in place.
-static constexpr const char* kActiveMarker = "/active";
 
 static bool publish_active_marker() {
   const int fd = HRR_OPEN((g_output_dir + kActiveMarker).c_str());

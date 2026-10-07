@@ -378,7 +378,8 @@ Version history, so an archive written by an older runtime can be placed:
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
                        size); present only mid-capture, removed on clean shutdown
     active             empty file created as the last step of a successful
-                       writer::open(), removed on clean shutdown
+                       writer::open(), removed on clean shutdown and when
+                       capture stops for lack of space
     events.bin         8-byte hrr_file_header, then repeated records
     blobs/<2hex>/      FNV-1a-128 content-addressed raw buffers (.blob ext)
     code_objects/      .hsaco ELFs keyed by hash
