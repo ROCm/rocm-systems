@@ -24,7 +24,8 @@ namespace {
 using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
 
-class ScalarAtomicBacking final : public PhysicalMemoryAccess {
+// Match translated vector atomics: this backing intentionally has no atomic_modify override.
+class ScalarAtomicBacking : public PhysicalMemoryAccess {
 public:
   explicit ScalarAtomicBacking(GpuMemory &memory) : backing_(memory) {}
 
@@ -36,9 +37,43 @@ public:
                         std::span<const std::byte> bytes) override {
     return backing_.write(domain, address, bytes);
   }
+  AtomicLoadResult atomic_load(VmMemoryDomain domain, uint64_t address, uint32_t width) override {
+    ++load_attempts;
+    if (outcome != VmAccessOutcome::Complete)
+      return {.outcome = outcome};
+    return backing_.atomic_load(domain, address, width);
+  }
+  AtomicCompareExchangeResult compare_exchange(VmMemoryDomain domain, uint64_t address,
+                                               uint32_t width, uint64_t expected,
+                                               uint64_t desired) override {
+    ++update_attempts;
+    if (outcome != VmAccessOutcome::Complete)
+      return {.outcome = outcome};
+    if (exchange_outcome != VmAccessOutcome::Complete)
+      return {.outcome = exchange_outcome};
+    const auto result = backing_.compare_exchange(domain, address, width, expected, desired);
+    if (result.outcome == VmAccessOutcome::Complete && result.exchanged)
+      ++mutations;
+    return result;
+  }
+
+  VmAccessOutcome outcome = VmAccessOutcome::Complete;
+  VmAccessOutcome exchange_outcome = VmAccessOutcome::Complete;
+  unsigned load_attempts = 0;
+  unsigned update_attempts = 0;
+  unsigned mutations = 0;
+
+protected:
+  GpuMemoryPhysicalAccess backing_;
+};
+
+class CachedScalarAtomicBacking final : public ScalarAtomicBacking {
+public:
+  using ScalarAtomicBacking::ScalarAtomicBacking;
+
   VmAccessOutcome atomic_modify(VmMemoryDomain domain, uint64_t address, uint32_t width,
                                 const AtomicMutation &mutation) override {
-    ++attempts;
+    ++update_attempts;
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
     return backing_.atomic_modify(domain, address, width, [&](std::span<std::byte> bytes) {
@@ -46,16 +81,11 @@ public:
       mutation(bytes);
     });
   }
-
-  VmAccessOutcome outcome = VmAccessOutcome::Complete;
-  unsigned attempts = 0;
-  unsigned mutations = 0;
-
-private:
-  GpuMemoryPhysicalAccess backing_;
 };
 
-class ScalarAtomicTest : public ::testing::TestWithParam<std::tuple<rj_code_arch_t, unsigned>> {
+enum class MemoryMode { Direct, CachedVm, TranslatedVm };
+
+class ScalarAtomicTest : public ::testing::TestWithParam<std::tuple<rj_code_arch_t, MemoryMode>> {
 protected:
   static constexpr uint64_t kAddress = 0x1000;
   static constexpr uint64_t kProgram = 0x100000;
@@ -78,19 +108,22 @@ protected:
     ASSERT_NE(wf, nullptr);
     wf->set_exec(0);
     pipeline = std::make_unique<ScalarMemPipeline>(&cu->l1_scalar());
-    if (std::get<1>(GetParam()) != 0) {
-      backing = std::make_shared<ScalarAtomicBacking>(memory);
+    if (memory_mode() != MemoryMode::Direct) {
+      if (memory_mode() == MemoryMode::CachedVm)
+        backing = std::make_shared<CachedScalarAtomicBacking>(memory);
+      else
+        backing = std::make_shared<ScalarAtomicBacking>(memory);
       const auto space =
           vm.register_address_space(7, std::make_shared<IdentityAddressSpaceTranslator>(), backing,
-                                    {}, std::get<1>(GetParam()) == 1);
+                                    {}, memory_mode() == MemoryMode::CachedVm);
       ASSERT_TRUE(space);
       l2.set_gpu_vm(&vm);
       cu->set_gpu_vm(&vm);
       wf->set_process_id(7);
       wf->set_address_space(space);
     }
-    write(0, kAddress);
-    write(1, 0);
+    write_sgpr(0, kAddress);
+    write_sgpr(1, 0);
   }
 
   void TearDown() override {
@@ -98,8 +131,12 @@ protected:
       wf->halt();
   }
 
-  void write(unsigned reg, uint32_t value) { cu->write_sgpr(wf->sgpr_alloc().base + reg, value); }
-  uint32_t read(unsigned reg) { return cu->read_sgpr(wf->sgpr_alloc().base + reg); }
+  MemoryMode memory_mode() const { return std::get<1>(GetParam()); }
+
+  void write_sgpr(unsigned reg, uint32_t value) {
+    cu->write_sgpr(wf->sgpr_alloc().base + reg, value);
+  }
+  uint32_t read_sgpr(unsigned reg) { return cu->read_sgpr(wf->sgpr_alloc().base + reg); }
 
   std::unique_ptr<Instruction> prepare(cdna3::SmemBuilderFields fields = {
                                            .sdata = 4, .glc = 1, .imm = 1}) {
@@ -129,7 +166,8 @@ INSTANTIATE_TEST_SUITE_P(
     Cdna, ScalarAtomicTest,
     ::testing::Combine(::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
                                          ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4),
-                       ::testing::Values(0u, 1u, 2u)));
+                       ::testing::Values(MemoryMode::Direct, MemoryMode::CachedVm,
+                                         MemoryMode::TranslatedVm)));
 
 TEST_P(ScalarAtomicTest, DecrementWrapAndOptionalReturn) {
   // MI300 ISA, S_ATOMIC_DEC: zero and values above DATA wrap to DATA.
@@ -148,18 +186,18 @@ TEST_P(ScalarAtomicTest, DecrementWrapAndOptionalReturn) {
       SCOPED_TRACE(testing::Message() << "old=" << old << " limit=" << limit << " glc=" << +glc);
       memory.write32(kAddress, old);
       memory.write32(kAddress + 4, 0xdeadbeef);
-      write(4, limit);
-      write(5, 0x12345678);
+      write_sgpr(4, limit);
+      write_sgpr(5, 0x12345678);
       wf->write_scc(1);
       auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1});
       ASSERT_NE(inst, nullptr);
       EXPECT_EQ(memory.read32(kAddress), old);
-      EXPECT_EQ(read(4), limit);
+      EXPECT_EQ(read_sgpr(4), limit);
       ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);
       EXPECT_EQ(memory.read32(kAddress), expected);
-      EXPECT_EQ(read(4), glc ? old : limit);
+      EXPECT_EQ(read_sgpr(4), glc ? old : limit);
       EXPECT_EQ(memory.read32(kAddress + 4), 0xdeadbeef);
-      EXPECT_EQ(read(5), 0x12345678);
+      EXPECT_EQ(read_sgpr(5), 0x12345678);
       EXPECT_EQ(wf->read_scc(), 1u);
       EXPECT_EQ(wf->exec(), 0u);
       EXPECT_TRUE(wf->wait_counters().empty());
@@ -188,25 +226,25 @@ TEST_P(ScalarAtomicTest, ImmediateRegisterAndCombinedOffsets) {
   for (size_t form = 0; form < fields.size(); ++form) {
     SCOPED_TRACE(form);
     // Low address bits are ignored separately for base and each offset.
-    write(6, kAddress + 3);
-    write(7, 1);
-    write(8, form == 2 ? 19 : 15);
+    write_sgpr(6, kAddress + 3);
+    write_sgpr(7, 1);
+    write_sgpr(8, form == 2 ? 19 : 15);
     wf->set_m0(7);
-    write(4, 9);
+    write_sgpr(4, 9);
     const uint64_t address = (uint64_t{1} << 32) + kAddress + 12;
     memory.write32(address, 4);
     auto inst = prepare(fields[form]);
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);
     EXPECT_EQ(memory.read32(address), 3u);
-    EXPECT_EQ(read(4), 4u);
+    EXPECT_EQ(read_sgpr(4), 4u);
   }
 }
 
 TEST_P(ScalarAtomicTest, SourceAndAddressAreCapturedBeforeReturn) {
   for (bool aliases_base : {false, true}) {
-    write(0, kAddress);
-    write(4, 16);
+    write_sgpr(0, kAddress);
+    write_sgpr(4, 16);
     const uint64_t address = kAddress + (aliases_base ? 0 : 16);
     memory.write32(address, 4);
     auto inst = prepare(aliases_base ? cdna3::SmemBuilderFields{.sdata = 0, .glc = 1, .imm = 1}
@@ -214,7 +252,7 @@ TEST_P(ScalarAtomicTest, SourceAndAddressAreCapturedBeforeReturn) {
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);
     EXPECT_EQ(memory.read32(address), 3u);
-    EXPECT_EQ(read(aliases_base ? 0 : 4), 4u);
+    EXPECT_EQ(read_sgpr(aliases_base ? 0 : 4), 4u);
   }
 }
 
@@ -229,7 +267,7 @@ TEST_P(ScalarAtomicTest, NamedScalarRegisterCanSupplyAndReceiveData) {
 }
 
 TEST_P(ScalarAtomicTest, AtomicPublishesCachedWritesAndInvalidatesScalarCopies) {
-  if (std::get<1>(GetParam()) == 2)
+  if (memory_mode() == MemoryMode::TranslatedVm)
     GTEST_SKIP() << "Translated accesses bypass the legacy cache hierarchy";
   memory.write32(kAddress, 8);
   uint32_t cached = 0;
@@ -240,11 +278,11 @@ TEST_P(ScalarAtomicTest, AtomicPublishesCachedWritesAndInvalidatesScalarCopies) 
   ASSERT_EQ(l2.write(kAddress, reinterpret_cast<const uint8_t *>(dirty.data()), sizeof(dirty),
                      Mtype::RW, wf->process_id()),
             VmAccessOutcome::Complete);
-  write(4, 9);
+  write_sgpr(4, 9);
   auto inst = prepare();
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);
-  EXPECT_EQ(read(4), 4u);
+  EXPECT_EQ(read_sgpr(4), 4u);
   EXPECT_EQ(memory.read32(kAddress), 3u);
   EXPECT_EQ(memory.read32(kAddress + 4), dirty[1]);
   ASSERT_EQ(cu->l1_scalar().load(kAddress, 1, &cached, wf->process_id()),
@@ -257,8 +295,9 @@ TEST_P(ScalarAtomicTest, UnavailableAtomicRetainsCounterAndUpdatesExactlyOnce) {
     GTEST_SKIP() << "Retry injection requires a VM backing";
   for (uint8_t glc : {0, 1}) {
     memory.write32(kAddress, 4);
-    write(4, 9);
-    backing->attempts = 0;
+    write_sgpr(4, 9);
+    backing->load_attempts = 0;
+    backing->update_attempts = 0;
     backing->mutations = 0;
     backing->outcome = VmAccessOutcome::Unavailable;
     auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1});
@@ -266,7 +305,7 @@ TEST_P(ScalarAtomicTest, UnavailableAtomicRetainsCounterAndUpdatesExactlyOnce) {
     ASSERT_EQ(pipeline->issue_deferred(inst.release(), *wf), VmAccessOutcome::Complete);
     EXPECT_EQ(wf->wait_counters().lgkmcnt, 1u);
     EXPECT_EQ(wf->wait_counters().vmcnt, 0u);
-    EXPECT_EQ(read(4), 9u);
+    EXPECT_EQ(read_sgpr(4), 9u);
     EXPECT_EQ(memory.read32(kAddress), 4u);
     pipeline->tick();
     EXPECT_EQ(wf->wait_counters().lgkmcnt, 1u);
@@ -274,9 +313,14 @@ TEST_P(ScalarAtomicTest, UnavailableAtomicRetainsCounterAndUpdatesExactlyOnce) {
     backing->outcome = VmAccessOutcome::Complete;
     pipeline->tick();
     EXPECT_TRUE(wf->wait_counters().empty());
-    EXPECT_EQ(backing->attempts, 3u);
+    if (memory_mode() == MemoryMode::TranslatedVm) {
+      EXPECT_EQ(backing->load_attempts, 3u);
+      EXPECT_EQ(backing->update_attempts, 1u);
+    } else {
+      EXPECT_EQ(backing->update_attempts, 3u);
+    }
     EXPECT_EQ(backing->mutations, 1u);
-    EXPECT_EQ(read(4), glc ? 4u : 9u);
+    EXPECT_EQ(read_sgpr(4), glc ? 4u : 9u);
     EXPECT_EQ(memory.read32(kAddress), 3u);
   }
 }
@@ -285,15 +329,74 @@ TEST_P(ScalarAtomicTest, FailedAtomicDoesNotWriteBackOrLeakCounter) {
   if (!backing)
     GTEST_SKIP() << "Fault injection requires a VM backing";
   memory.write32(kAddress, 4);
-  write(4, 9);
+  write_sgpr(4, 9);
   backing->outcome = VmAccessOutcome::Faulted;
   auto inst = prepare();
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Faulted);
   EXPECT_TRUE(wf->wait_counters().empty());
   EXPECT_EQ(backing->mutations, 0u);
-  EXPECT_EQ(read(4), 9u);
+  EXPECT_EQ(read_sgpr(4), 9u);
   EXPECT_EQ(memory.read32(kAddress), 4u);
+}
+
+TEST_P(ScalarAtomicTest, UnavailableCompareExchangeRetriesWithCurrentMemoryValue) {
+  if (memory_mode() != MemoryMode::TranslatedVm)
+    GTEST_SKIP() << "Compare/exchange retries require a translated backing";
+  for (uint8_t glc : {0, 1}) {
+    memory.write32(kAddress, 4);
+    write_sgpr(4, 9);
+    backing->load_attempts = 0;
+    backing->update_attempts = 0;
+    backing->mutations = 0;
+    backing->exchange_outcome = VmAccessOutcome::Unavailable;
+    auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1});
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(pipeline->issue_deferred(inst.release(), *wf), VmAccessOutcome::Complete);
+    pipeline->tick();
+    EXPECT_EQ(wf->wait_counters().lgkmcnt, 1u);
+    EXPECT_EQ(backing->load_attempts, 1u);
+    EXPECT_EQ(backing->mutations, 0u);
+    EXPECT_EQ(read_sgpr(4), 9u);
+    EXPECT_EQ(memory.read32(kAddress), 4u);
+
+    // Another writer changes memory after our load. The resumed CAS must retry
+    // with its observed value: zero wraps to nine, and GLC must return zero.
+    memory.write32(kAddress, 0);
+    backing->exchange_outcome = VmAccessOutcome::Complete;
+    pipeline->tick();
+    EXPECT_TRUE(wf->wait_counters().empty());
+    EXPECT_EQ(backing->load_attempts, 1u);
+    EXPECT_EQ(backing->update_attempts, 4u);
+    EXPECT_EQ(backing->mutations, 1u);
+    EXPECT_EQ(read_sgpr(4), glc ? 0u : 9u);
+    EXPECT_EQ(memory.read32(kAddress), 9u);
+
+    pipeline->tick();
+    EXPECT_EQ(backing->mutations, 1u);
+    EXPECT_EQ(memory.read32(kAddress), 9u);
+  }
+}
+
+TEST_P(ScalarAtomicTest, FailedCompareExchangeDoesNotWriteBackOrLeakCounter) {
+  if (memory_mode() != MemoryMode::TranslatedVm)
+    GTEST_SKIP() << "Compare/exchange faults require a translated backing";
+  for (uint8_t glc : {0, 1}) {
+    memory.write32(kAddress, 4);
+    write_sgpr(4, 9);
+    backing->load_attempts = 0;
+    backing->update_attempts = 0;
+    backing->exchange_outcome = VmAccessOutcome::Faulted;
+    auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1});
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Faulted);
+    EXPECT_TRUE(wf->wait_counters().empty());
+    EXPECT_EQ(backing->load_attempts, 1u);
+    EXPECT_EQ(backing->update_attempts, 1u);
+    EXPECT_EQ(backing->mutations, 0u);
+    EXPECT_EQ(read_sgpr(4), 9u);
+    EXPECT_EQ(memory.read32(kAddress), 4u);
+  }
 }
 
 TEST_P(ScalarAtomicTest, ReturnedRegisterRequiresLgkmWait) {
@@ -303,7 +406,7 @@ TEST_P(ScalarAtomicTest, ReturnedRegisterRequiresLgkmWait) {
       wf->pc = program;
       wf->ensure_memory_wait_scoreboard().clear();
       const uint64_t before = cu->memory_wait_diagnostic_count();
-      write(4, 9);
+      write_sgpr(4, 9);
       memory.write32(kAddress, 4);
       const auto atomic =
           cdna3::build_smem(cdna3::kSAtomicDecSmem, {.sdata = 4, .glc = glc, .imm = 1});
@@ -318,7 +421,7 @@ TEST_P(ScalarAtomicTest, ReturnedRegisterRequiresLgkmWait) {
         (void)cu->step();
       ASSERT_FALSE(wf->is_halted());
       EXPECT_EQ(wf->pc, program + 16);
-      EXPECT_EQ(read(5), glc ? 4u : 9u);
+      EXPECT_EQ(read_sgpr(5), glc ? 4u : 9u);
       EXPECT_EQ(cu->memory_wait_diagnostic_count() - before, glc && !waited ? 1u : 0u);
     }
   }
@@ -349,7 +452,7 @@ TEST_P(ScalarAtomicTest, ReportsScalarReadModifyWriteToPlugins) {
   ASSERT_TRUE(group->add(std::move(observer)));
   cu->set_plugin_group(group);
   for (uint8_t glc : {0, 1}) {
-    write(4, 9);
+    write_sgpr(4, 9);
     memory.write32(kAddress, 4);
     const uint64_t program = kProgram + glc * 0x100;
     wf->pc = program;
