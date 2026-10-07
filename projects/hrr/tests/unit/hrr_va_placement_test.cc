@@ -498,7 +498,14 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapHoldsTheLock) {
 
   bool unmapped = false;  // Catch2 assertions are for the main thread only
   std::thread a([&] { unmapped = pl.unmap(reinterpret_cast<void*>(B)); });
-  while (!g_unmap_entered) std::this_thread::yield();
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!g_unmap_entered && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  if (!g_unmap_entered) {
+    g_unmap_go = true;
+    a.join();
+    FAIL("unmap never reached hipMemUnmap");
+  }
   bool done_when_answered = false;
   bool mapped = true;
   std::thread b([&] {
