@@ -170,6 +170,9 @@ struct PlaybackContext {
     bool audit_host_args = false;
     bool verbose           = false;
     bool validate_d2h      = false;  // perform D2H validation against captured expected data
+    // The archive header has HRR_FILE_FLAG_PACKED_HOST_RECTS: the host blobs of
+    // the pitched copies hold only the copied rows, packed end to end.
+    bool packed_host_rects = false;
     std::string kernel_filter;
 
     // Lightweight replay tracing. These are intentionally separate from

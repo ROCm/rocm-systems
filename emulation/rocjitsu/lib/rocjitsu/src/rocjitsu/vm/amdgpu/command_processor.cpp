@@ -2631,6 +2631,10 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
 
   dispatch_launch_metadata_.erase(static_cast<uint32_t>(dispatch_id));
   queue->faulted = true;
+  // A peer fault can cancel an AQL entry while its vendor PM4 stream is blocked.
+  // Release that stream and its VM snapshot along with the owning dispatch.
+  if (state.packet_format == QueuePacketFormat::Aql && !state.commands.submissions.empty())
+    fail_pm4_queue(state, state.dispatches);
   util::Logger::cp([&](auto &os) {
     os << std::format("{}: terminal VM fault pid={} qid={} dispatch={} outcome={}", name(),
                       process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
@@ -2678,8 +2682,8 @@ void CommandProcessor::on_cu_idle() {
   if (!drain_completions())
     return;
 
-  // Retire any non-kernel entries (barrier-kind packets) that are now at
-  // the head, then drain again so a dependent kernel behind them can proceed.
+  // Execute and retire eligible non-kernel entries at the head, then drain
+  // again so a dependent kernel behind them can proceed.
   for (ComputeQueueRecord &qs : compute_queues_) {
     if (qs.faulted || qs.suspended() || qs.publication_retry_pending)
       continue;
@@ -2688,6 +2692,8 @@ void CommandProcessor::on_cu_idle() {
       if (e.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
         break;
       if (!e.is_non_kernel())
+        break;
+      if (!execute_aql_pm4(qs, e, engine()->context(partition_id()).current_tick()))
         break;
       const uint32_t queue_id = e.queue_id;
       const uint32_t process_id = e.process_id;
@@ -2785,10 +2791,12 @@ void CommandProcessor::process_queues() {
         break; // Stalled on barrier bit.
 
       if (entry.is_non_kernel()) {
+        if (!execute_aql_pm4(qs, entry, engine()->context(partition_id()).current_tick()))
+          break;
         const uint32_t queue_id = entry.queue_id;
         const uint32_t process_id = entry.process_id;
         const uint32_t dispatch_id = entry.dispatch_id;
-        entry.completed_wgs = entry.total_wgs; // 0 == 0, immediately complete.
+        entry.completed_wgs = entry.total_wgs;
         const VmAccessOutcome outcome =
             completion_ ? completion_->complete_non_kernel(entry) : VmAccessOutcome::Complete;
         if (outcome == VmAccessOutcome::Unavailable) {
@@ -2975,6 +2983,9 @@ void CommandProcessor::service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick
 
 void CommandProcessor::service_command_streams(simdojo::Tick now) {
   for (auto &queue : compute_queues_) {
+    // AQL vendor streams advance only while their owning entry is eligible.
+    if (queue.packet_format == QueuePacketFormat::Aql)
+      continue;
     auto &state = queue.dispatches;
     if (queue.command_fault_pending) {
       queue.command_fault_pending = false;
@@ -3071,6 +3082,8 @@ bool CommandProcessor::submit_pm4(uint32_t queue_id, uint32_t process_id,
 
 void CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
                                     const std::array<uint32_t, 4> &dimensions) {
+  if (!queue.commands.submissions.front().allow_dispatch)
+    throw std::runtime_error("shader dispatch inside an AQL PM4 IB is unsupported");
   using namespace rocr::llvm::amdhsa;
   const auto &regs = queue.commands.sh_registers;
   const uint32_t initiator = dimensions[3];
@@ -3251,6 +3264,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
       queue, gpu_vm_,
       {
           .arch = cus_.empty() ? ROCJITSU_CODE_ARCH_INVALID : cus_[0]->config().arch,
+          .xcc_id = scratch_xcc_id_,
           .flush_caches = [this] { flush_gpu_caches(); },
           .dispatch =
               [this, &queue, &qs](const std::array<uint32_t, 4> &dimensions) {
@@ -4098,6 +4112,30 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   return {.status = AqlAdmissionStatus::Complete};
 }
 
+bool CommandProcessor::execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
+                                       simdojo::Tick now) {
+  // A peer can fault the grid before this CP drains its fault inbox. Leave
+  // cancellation to the inbox without starting or resuming the command buffer.
+  if (entry.grid_faulted())
+    return false;
+  if (!entry.aql_pm4_ib_dwords || entry.completed_wgs == entry.total_wgs)
+    return true;
+  if (!entry.execution_begun) {
+    Pm4Submission submission;
+    submission.allow_dispatch = false;
+    submission.buffers.push_back({entry.aql_pm4_ib_address, entry.aql_pm4_ib_dwords});
+    queue.commands.submissions.push_back(std::move(submission));
+    entry.execution_begun = true;
+  }
+  fetch_pm4(queue, queue.dispatches, now);
+  if (queue.faulted) {
+    notify_dispatch_vm_fault(entry.queue_id, entry.process_id, entry.dispatch_id,
+                             VmAccessOutcome::Faulted);
+    return false;
+  }
+  return queue.commands.submissions.empty();
+}
+
 AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequest &request,
                                                       AqlPreparedPacket prepared) {
   const std::vector<ComputeQueueRecord>::iterator queue = std::ranges::find(
@@ -4123,7 +4161,18 @@ AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequ
       .kind = DispatchPacketKind::NonKernel,
       .wait_for_predecessors = prepared.barrier_bit,
       .blocks_following = prepared.blocks_following,
+      .aql_pm4_ib_address = prepared.pm4_ib_address,
+      .aql_pm4_ib_dwords = prepared.pm4_ib_dwords,
   };
+  if (prepared.kind == AqlPreparedPacketKind::Pm4Ib) {
+    // One completion token per XCD prevents automatic retirement of an unexecuted
+    // non-kernel packet and keeps its successor blocked until every IB finishes.
+    entry.total_wgs = entry.dispatched_wgs = 1;
+    if (queue->xcd_fanout) {
+      entry.grid_completion = std::make_shared<GridCompletion>();
+      entry.grid_completion->grid_wgs = xcd_peers_.size();
+    }
+  }
   if (queue->xcd_fanout)
     replicate_non_kernel_entry(entry);
   queue->push_entry(std::move(entry));
@@ -4518,6 +4567,8 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   });
 
   auto complete_non_kernel = [&](ComputeQueueRecord &queue, DispatchEntry &entry) {
+    if (!execute_aql_pm4(queue, entry, now))
+      return false;
     const uint32_t queue_id = entry.queue_id;
     const uint32_t process_id = entry.process_id;
     const uint32_t dispatch_id = entry.dispatch_id;
