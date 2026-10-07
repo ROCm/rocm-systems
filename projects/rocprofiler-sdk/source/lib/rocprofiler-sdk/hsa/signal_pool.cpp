@@ -81,7 +81,7 @@ construct_hsa_signal(signal_t&          signal,
 common::container::pool<signal_t>*
 get_signal_pool()
 {
-    constexpr size_t default_signal_pool_size = (1 << 12);  // 4096 signals per pool batch
+    constexpr size_t default_signal_pool_size = (1 << 10);  // 1024 signals per pool batch
 
     static auto*& pool = common::static_object<common::container::pool<signal_t>>::construct(
         std::piecewise_construct, default_signal_pool_size, [](signal_t& signal) {
