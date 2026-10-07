@@ -63,11 +63,19 @@ namespace RcclUnitTesting {
 TEST(ProfilerOverhead, RegularKernelsEmitNoKernelPhase) {
   if (int n = 0; hipGetDeviceCount(&n) != hipSuccess || n < kRanks) GTEST_SKIP() << "requires 2 GPUs";
   RUN_ISOLATED_TEST_WITH_ENV("ProfilerOverhead.RegularKernelsEmitNoKernelPhase", []() {
-    // Wait before teardown: ncclCommDestroy drops pending events, and phase events precede KernelCh stops.
+    // Wait before teardown: ncclCommDestroy drops pending events. Each channel's phase events precede its KernelCh
+    // stop, but each comm drains on its own profiler thread, so wait until the stops have settled, not just begun.
     runTwoRanks([](ncclComm_t comm, char* buf, hipStream_t stream) {
       return ncclAllReduce(buf, buf, 1024, ncclFloat, ncclSum, comm, stream);
-    }, [](ncclComm_t*) { for (int i = 0; i < 1000 && kernelChStops == 0; ++i) usleep(10000); });
-    ASSERT_GT(kernelChStops.load(), 0) << "no KernelCh event arrived, so no KernelPhase event could";
+    }, [](ncclComm_t*) {
+      for (int i = 0, last = -1, quiet = 0; i < 1000 && quiet < 20; ++i) {
+        usleep(10000);
+        const int now = kernelChStops;
+        quiet = (now >= kRanks && now == last) ? quiet + 1 : 0;
+        last = now;
+      }
+    });
+    ASSERT_GE(kernelChStops.load(), kRanks) << "KernelCh events missing, so KernelPhase events could be too";
     EXPECT_EQ(kernelPhases.load(), 0) << "KernelPhase events reported for a non-symmetric kernel";
   }, {{"NCCL_PROFILER_PLUGIN", "STATIC_PLUGIN"}});
 }
@@ -86,10 +94,12 @@ TEST(ProfilerOverhead, NoPluginBroadcastPublishesNoKernelCh) {
       return res != ncclSuccess ? res : ncclBroadcast(send, buf + 3 * kBytes, kBytes, ncclInt8, 1, comm, stream);
     }, [](ncclComm_t* comms) {
       uint64_t published = 0;
-      for (int r = 0; r < kRanks; ++r)
-        for (int c = 0; c < MAXCHANNELS; ++c)
+      for (int r = 0; r < kRanks; ++r) {
+        for (int c = 0; c < MAXCHANNELS; ++c) {
           for (int s = 0; s < MAX_PROFILER_EVENTS_PER_CHANNEL; ++s)
             published |= comms[r]->profiler.workStarted[c].data[s].counter;
+        }
+      }
       EXPECT_EQ(published, 0u) << "KernelCh work-start counters published with no profiler plugin loaded";
     });
   }, {{"NCCL_PROFILER_PLUGIN", "none"}, {"NCCL_ALLGATHERV_ENABLE", "1"}});
