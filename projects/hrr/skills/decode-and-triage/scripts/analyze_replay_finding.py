@@ -107,10 +107,13 @@ RE_VERSION_MISMATCH = re.compile(r"\[HRR\] Version mismatch: file=(\d+) reader=(
 # program stored in device memory stays true. An allocation that could not be
 # placed replays elsewhere, and a stored copy of its address is then stale: a
 # kernel reading through it fails or faults exactly like a workload defect.
+# The API is one word, or the two of "region segment".
 RE_PLACEMENT_NOT_PLACED = re.compile(
-    r"\[HRR\] Placement: (\w+)(?: (0x[0-9a-fA-F]+))?(?: \(\d+ bytes\))? not placed at "
-    r"its recorded address: ([^\n]*?)\. It replays elsewhere"
+    r"\[HRR\] Placement: (\w+(?: segment)?)(?: (0x[0-9a-fA-F]+))?(?: \(\d+ bytes\))? "
+    r"not placed at its recorded address: ([^\n]*?)\. It replays elsewhere"
 )
+# With placement off, every allocation replays wherever the runtime puts it.
+RE_PLACEMENT_OFF = re.compile(r"\[HRR\] Placement : off \(([^\n]*)\)")
 RE_PLACEMENT_SUMMARY = re.compile(
     r"Placement\s+: (\d+) placed at capture address, (\d+) fell back"
 )
@@ -152,6 +155,7 @@ class Finding:
     capture_gcn_arch: str | None = None
     placement_fallbacks: int | None = None
     placement_named: list[str] = field(default_factory=list)
+    placement_off: str | None = None
     sources: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -378,6 +382,9 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         entry = f"{what}: {m.group(3)}"
         if entry not in finding.placement_named:
             finding.placement_named.append(entry)
+    m = RE_PLACEMENT_OFF.search(text)
+    if m:
+        finding.placement_off = m.group(1)
     m = RE_PLACEMENT_SUMMARY.search(text)
     if m:
         finding.placement_fallbacks = int(m.group(2))
@@ -511,13 +518,24 @@ def finalize(finding: Finding) -> Finding:
     # program stored in device memory is stale. A failure downstream of that is
     # a replay-fidelity problem until shown otherwise. The verdict stands, as
     # for the ATen case: the evidence still says what the GPU did.
-    if finding.placement_fallbacks and finding.fault_class in (
+    fidelity_classes = (
         "nan_inf_divergence",
         "illegal_memory_access",
         "read_only_page_fault",
         "replay_aborted",
         "replay_fatal_api",
-    ):
+    )
+    if finding.placement_off and finding.fault_class in fidelity_classes:
+        finding.notes.append(
+            f"replay fidelity: placement was off ({finding.placement_off}), so "
+            "every allocation replayed at whatever address the runtime returned. "
+            "A device pointer the program stored in device memory is stale in "
+            "replay unless the runtime happened to return the recorded address, "
+            "and a kernel reading through it fails or faults like a workload "
+            "defect. Replay again with placement on before reporting this as "
+            "the user's bug."
+        )
+    elif finding.placement_fallbacks and finding.fault_class in fidelity_classes:
         shown = "; ".join(finding.placement_named[:3])
         more = (
             f" (and {len(finding.placement_named) - 3} more named)"
@@ -605,6 +623,14 @@ def render_markdown(f: Finding) -> str:
             f"- **Last launch before fault**: `{f.last_event_kernel or 'n/a'}`",
             "",
         ]
+    if f.placement_off:
+        placement = f"off ({f.placement_off})"
+    elif f.placement_fallbacks is not None:
+        placement = f"on, {f.placement_fallbacks} fell back"
+    else:
+        placement = "n/a"
+    # Under the progress or result counts, before their closing blank line.
+    lines[-1:] = [f"- **Placement**: {placement}", ""]
     lines += [
         "## Archive / capture",
         f"- **Events**: {f.archive_events or 'n/a'}",

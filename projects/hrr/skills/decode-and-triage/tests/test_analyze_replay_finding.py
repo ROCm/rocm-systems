@@ -322,6 +322,39 @@ class RecordedCaptureTests(unittest.TestCase):
         self.assertEqual(len(notes), 1, finding.notes)
         self.assertIn("hipMalloc 0x7f0000200000", notes[0])
 
+    def test_a_region_segment_fallback_is_named(self) -> None:
+        """The API in a fallback line can be two words."""
+        text = (
+            "[HRR] Placement: region segment 0x7f0000600000 (8192 bytes) not "
+            "placed at its recorded address: its range could not be held. It "
+            "replays elsewhere, so a copy of its address stored in device memory "
+            "is stale\n"
+            "[HRR]   D2H checks   : 3 pass, 2 fail, 0 skipped\n"
+            "[HRR]   Placement      : 4 placed at capture address, 1 fell back\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        arf.finalize(finding)
+        self.assertEqual(
+            finding.placement_named,
+            ["region segment 0x7f0000600000: its range could not be held"],
+        )
+
+    def test_placement_off_is_reported(self) -> None:
+        """With placement off, every stored pointer may be stale; say so."""
+        text = (
+            "[HRR] Placement : off (--no-placement)\n"
+            "[HRR]   D2H checks   : 3 pass, 2 fail, 0 skipped\n"
+        )
+        finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
+        arf.parse_text(text, "replay.log", finding)
+        arf.finalize(finding)
+        self.assertEqual(finding.placement_off, "--no-placement")
+        notes = [n for n in finding.notes if n.startswith("replay fidelity:")]
+        self.assertEqual(len(notes), 1, finding.notes)
+        self.assertIn("placement was off (--no-placement)", notes[0])
+        self.assertIn("- **Placement**: off (--no-placement)", arf.render_markdown(finding))
+
     def test_a_fully_placed_replay_carries_no_fidelity_note(self) -> None:
         text = (
             "[HRR]   D2H checks   : 3 pass, 2 fail, 0 skipped\n"
@@ -332,6 +365,7 @@ class RecordedCaptureTests(unittest.TestCase):
         arf.finalize(finding)
         self.assertEqual(finding.placement_fallbacks, 0)
         self.assertFalse(any(n.startswith("replay fidelity:") for n in finding.notes))
+        self.assertIn("- **Placement**: on, 0 fell back", arf.render_markdown(finding))
 
     def test_last_launch_attributes_the_failing_event(self) -> None:
         """Per-event lines are the only record when no Fatal line is written."""
