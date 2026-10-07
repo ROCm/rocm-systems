@@ -6152,6 +6152,21 @@ class CodeGenerator:
     _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64', 'S_RFE_I64')
     _TRAP_SENDMSG_NAMES = ('S_SENDMSG', 'S_SENDMSGHALT')
 
+    def _gws_body(self, sem: InstructionSemantics) -> str:
+        """execute() body for ds_gws_*.
+
+        These ops are a hardware scheduling primitive. Reporting them
+        unimplemented halts the wave before the kernel finishes, so the
+        dispatch completion signal is never written. Retiring them matches a
+        kernel whose lanes do not consume another wave's result. A
+        dispatch-wide wait needs an arrival count the command processor does
+        not keep, and waiting on only this compute unit's waves deadlocks a
+        grid that spans compute units. The helper warns once so that gap stays
+        audible.
+        """
+        del sem
+        return '  amdgpu::retire_global_wave_sync(wf);'
+
     def _sleep_body(self, sem: InstructionSemantics) -> str:
         """execute() body for S_SLEEP / S_SLEEP_VAR.
 
@@ -6832,6 +6847,8 @@ class CodeGenerator:
             # progress.
             if sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
                 return self._sleep_body(sem)
+            if sem.name.upper().startswith('DS_GWS_'):
+                return self._gws_body(sem)
             return self._trap_control_body(sem) or '  (void)wf;'
 
         if cls == 'set_vskip':
@@ -9742,6 +9759,10 @@ class CodeGenerator:
         3. The current ISA is one of the ISAs that share this instruction.
         """
         if self.shared_plan is None:
+            return False
+        # A one-line retire does not benefit from a shared template, and the
+        # warning lives in one helper either way.
+        if mnemonic.upper().startswith('DS_GWS_'):
             return False
         if self._requires_arch_local_execute(inst, enc_name):
             return False

@@ -2858,34 +2858,18 @@ void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  amdgpu::retire_global_wave_sync(wf);
 }
 
-void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
-}
+void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) { amdgpu::retire_global_wave_sync(wf); }
 
-void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
-}
+void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) { amdgpu::retire_global_wave_sync(wf); }
 
-void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
-}
+void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) { amdgpu::retire_global_wave_sync(wf); }
 
-void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
-}
+void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) { amdgpu::retire_global_wave_sync(wf); }
 
-void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
-}
+void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) { amdgpu::retire_global_wave_sync(wf); }
 
 void DsReadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)

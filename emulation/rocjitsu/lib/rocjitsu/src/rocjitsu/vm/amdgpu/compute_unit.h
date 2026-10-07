@@ -61,6 +61,18 @@ class ComputeUnitTestAccess;
 }
 namespace amdgpu {
 
+/// @brief Retire a Global Wave Sync op without a dispatch-wide wait.
+/// @details The command processor does not keep an arrival count for the
+/// dispatch. Waiting on only this compute unit's waves deadlocks a grid that
+/// spans compute units. The first call in the process is logged: a kernel that
+/// reads another workgroup's data at this op can observe it early.
+inline void retire_global_wave_sync(Wavefront &) {
+  static std::atomic_flag warned;
+  if (warned.test_and_set(std::memory_order_relaxed))
+    return;
+  util::Logger::warn("ds_gws_* retired without a dispatch-wide barrier");
+}
+
 /// @brief Reporting policy for pending memory-result register accesses.
 enum class MemoryWaitDiagnostics { Off, Warn };
 
@@ -1110,16 +1122,6 @@ public:
     wf.clear_instruction_execution_error();
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
     if (drop_set_vgpr_msb && std::string_view(inst->mnemonic()) == "s_set_vgpr_msb")
-      return util::Result::success();
-    // Global Wave Sync (ds_gws_init, ds_gws_barrier, and the semaphore forms) is
-    // a real instruction. The generated bodies report it unimplemented, which
-    // halts the wave before s_endpgm, so the dispatch completion signal is never
-    // written and HIP waits forever. Retiring the op matches hardware for a
-    // kernel whose lanes do not consume another wave's result at that point.
-    // A dispatch-wide wait needs an arrival count the command processor does not
-    // keep, and waiting on only this CU's waves would deadlock a grid that spans
-    // compute units.
-    if (inst->mnemonic().starts_with("ds_gws_"))
       return util::Result::success();
     // The decoded instruction already selects its ISA execution callback.
     inst->execute(*inst, &wf);
