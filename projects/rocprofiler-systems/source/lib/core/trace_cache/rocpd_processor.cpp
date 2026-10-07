@@ -148,14 +148,10 @@ rocpd_processor_t::handle(const scratch_memory_sample& sms)
     auto const& n_info  = node_info::get_instance();
     auto const  process = m_metadata->get_process_info();
 
-    const auto* name = m_metadata->get_buffer_name_info().at(
-        static_cast<rocprofiler_buffer_tracing_kind_t>(sms.kind),
-        static_cast<rocprofiler_tracing_operation_t>(sms.operation));
-
     const auto& agent_ref = m_agent_manager->get_agent_by_handle(sms.agent_id_handle);
 
-    auto [memory_operation, memory_type_val] = parse_memory_operation_name(name);
-    auto const extdata_json_str = fmt::format("{{\"flags\": {}}}", sms.flags);
+    auto [memory_operation, memory_type_val] = parse_memory_operation_name(sms.name);
+    auto extdata_json_str = fmt::format("{{\"flags\": {}}}", sms.flags);
 
     auto const event =
         make_event(sms.correlation_id_internal, sms.correlation_id_ancestor, 0,
@@ -184,10 +180,6 @@ rocpd_processor_t::handle(const memory_copy_sample& mcs)
     auto const& n_info  = node_info::get_instance();
     auto const  process = m_metadata->get_process_info();
 
-    auto const name = std::string{ m_metadata->get_buffer_name_info().at(
-        static_cast<rocprofiler_buffer_tracing_kind_t>(mcs.kind),
-        static_cast<rocprofiler_tracing_operation_t>(mcs.operation)) };
-
     const auto& dst_agent = m_agent_manager->get_agent_by_handle(mcs.dst_agent_id_handle);
     const auto& src_agent = m_agent_manager->get_agent_by_handle(mcs.src_agent_id_handle);
 
@@ -204,8 +196,8 @@ rocpd_processor_t::handle(const memory_copy_sample& mcs)
     memory_copy.src_agent_id    = make_agent_uid(src_agent);
     memory_copy.src_address     = mcs.src_address_value;
     memory_copy.size            = mcs.bytes;
-    memory_copy.name            = name;
-    memory_copy.region_name     = name;
+    memory_copy.name            = mcs.name;
+    memory_copy.region_name     = mcs.name;
 
     auto env      = make_trace_env(n_info.id, process.pid, mcs.thread_id);
     env.stream_id = mcs.stream_handle;
@@ -226,11 +218,7 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& mas)
     {
         const auto& agent_ref = m_agent_manager->get_agent_by_handle(mas.agent_id_handle);
 
-        const auto* name = m_metadata->get_buffer_name_info().at(
-            static_cast<rocprofiler_buffer_tracing_kind_t>(mas.kind),
-            static_cast<rocprofiler_tracing_operation_t>(mas.operation));
-
-        auto [memory_operation, memory_type_val] = parse_memory_operation_name(name);
+        auto [memory_operation, memory_type_val] = parse_memory_operation_name(mas.name);
 
         auto const event =
             make_event(mas.correlation_id_internal, mas.correlation_id_ancestor, 0,
@@ -1372,26 +1360,6 @@ rocpd_processor_t::post_process_metadata()
         str_info.node_id    = n_info.id;
         str_info.process_id = process_info.pid;
         m_writer->register_stream_info(str_info);
-    }
-
-    // Register buffer info strings
-    auto const buffer_info_list = m_metadata->get_buffer_name_info();
-    for(const auto& buffer_info : buffer_info_list)
-    {
-        for(const auto& item : buffer_info.items())
-        {
-            m_writer->register_string(*item.second);
-        }
-    }
-
-    // Register callback tracing strings
-    auto const callback_info_list = m_metadata->get_callback_tracing_info();
-    for(const auto& cb_info : callback_info_list)
-    {
-        for(const auto& item : cb_info.items())
-        {
-            m_writer->register_string(*item.second);
-        }
     }
 
     // Register PMC info

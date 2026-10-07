@@ -70,6 +70,33 @@ fn available_memory_query_preserves_the_kernel_result() {
 }
 
 #[test]
+fn ais_rejects_kernel_progress_beyond_the_submitted_transfer() {
+    let kfd = endpoint(Arc::new(|call| {
+        let Call::Ais(args) = call else {
+            panic!("unexpected ioctl")
+        };
+        assert_eq!(args.requested_input().handle, 17);
+        args.set_completed_output(uapi::AisOutput {
+            size_copied: 4097,
+            status: 0,
+            pad: 0,
+        });
+        Ok(())
+    }));
+    let error = kfd
+        .ais(uapi::AisInput {
+            handle: 17,
+            handle_offset: 0,
+            file_offset: 0,
+            size: 4096,
+            operation: uapi::AIS_READ,
+            descriptor: 3,
+        })
+        .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+}
+
+#[test]
 fn mmio_allocation_requires_the_exact_native_contract() {
     let kfd = endpoint(Arc::new(|call| {
         let Call::Allocate(args) = call else {

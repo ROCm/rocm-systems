@@ -53,6 +53,8 @@ uint64_t Wavefront::realtime_timestamp() const {
 }
 
 std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
+  if (vm_access_)
+    return *vm_access_;
   GpuVm *gpu_vm = cu_.gpu_vm();
   if (gpu_vm == nullptr)
     return std::nullopt;
@@ -62,6 +64,9 @@ std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
 VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
+    if (vm_access_)
+      return vm_access_->read(
+          addr, std::span<std::byte>(reinterpret_cast<std::byte *>(dst.data()), dst.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
     if (!access)
       return VmAccessOutcome::Faulted;
@@ -75,6 +80,10 @@ VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst
 VmAccessOutcome Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8_t> src) {
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
+    if (vm_access_)
+      return vm_access_->write(
+          addr,
+          std::span<const std::byte>(reinterpret_cast<const std::byte *>(src.data()), src.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
     if (!access)
       return VmAccessOutcome::Faulted;

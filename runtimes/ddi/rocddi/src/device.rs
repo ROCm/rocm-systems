@@ -20,6 +20,7 @@ pub struct Device {
     pub(crate) driver: Shared<driver::PlatformDriver>,
     pub(crate) state: driver::DeviceState,
     pub(crate) endpoint: Endpoint,
+    pub(crate) copy_pool: Option<Shared<crate::gpu::CopyResourcePool>>,
 }
 
 impl Device {

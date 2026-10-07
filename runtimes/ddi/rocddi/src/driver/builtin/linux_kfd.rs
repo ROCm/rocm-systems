@@ -30,11 +30,12 @@ use crate::event::GpuMemoryFault;
 use crate::host_storage::{Allocator, Owned, Shared};
 use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
 use crate::memory::interop::linux::{
-    DmaBuf, KfdIpcMemoryHandle, KfdSvmAccess, KfdSvmAttribute, KfdSvmLocation,
+    AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle, KfdSvmAccess, KfdSvmAttribute,
+    KfdSvmLocation,
 };
 use crate::memory::{
-    AllocationDesc, AllocationLimits, DeviceAccess, HostRegistration, MemoryKind, OwnedMemoryKind,
-    VirtualAddressInfo, VirtualMemoryInfo,
+    AllocationDesc, AllocationLimits, DeviceAccess, HostCachePolicy, HostRegistration, MemoryKind,
+    OwnedMemoryKind, VirtualAddressInfo, VirtualMemoryInfo,
 };
 use crate::profiling::ClockCounters;
 use crate::queue::{QueuePriority, QueueRequest, QueueScratch, QueueTransport};
@@ -216,6 +217,7 @@ pub(crate) struct DeviceState {
     vm: Shared<memory::DeviceVm>,
     native: sysfs::NativeNode,
     lifetime: SessionLifetime,
+    gpu_counter_frequency_hz: u64,
 }
 
 impl DeviceState {
@@ -634,10 +636,21 @@ impl ProviderDriver for LinuxKfdDriver {
                 .map_err(|source| native_error("KFD context selection", source))?;
             connection.bindings.device(&kfd, &native)?
         };
+        let gpu_counter_frequency_hz = vm
+            .render()
+            .ok()
+            .and_then(|render| drm::device_info_prefix(render).ok())
+            .filter(|info| {
+                endpoint
+                    .pci
+                    .is_some_and(|pci| info.device_id == pci.device_id)
+            })
+            .map_or(0, |info| u64::from(info.gpu_counter_frequency_khz) * 1000);
         Ok(DeviceState {
             vm,
             native,
             lifetime,
+            gpu_counter_frequency_hz,
         })
     }
 }
@@ -647,6 +660,7 @@ impl GpuPresentationDriver for LinuxKfdDriver {
         let mut presentation = GpuPresentation {
             product_name: None,
             asic_family_id: endpoint.gpu().map_or(0, |gpu| gpu.asic_family_id),
+            gpu_counter_frequency_hz: None,
         };
         let Some(pci) = endpoint.pci else {
             return presentation;
@@ -662,6 +676,9 @@ impl GpuPresentationDriver for LinuxKfdDriver {
         if let Some(info) = device_info.filter(|info| info.family_id != 0) {
             presentation.asic_family_id = info.family_id;
         }
+        presentation.gpu_counter_frequency_hz = device_info
+            .filter(|info| info.gpu_counter_frequency_khz != 0)
+            .map(|info| u64::from(info.gpu_counter_frequency_khz) * 1000);
         presentation.product_name = std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
             .ok()
             .filter(|metadata| metadata.len() <= 1024 * 1024)
@@ -751,7 +768,9 @@ impl AllocationDriver for LinuxKfdDriver {
     ) -> Result<Owned<NativeAllocation>, Error> {
         let desc = checked_allocation_desc(size, alignment)?;
         let kind = kind.get();
-        if device.lifetime == SessionLifetime::Session && matches!(kind, MemoryKind::OwnedHost) {
+        if device.lifetime == SessionLifetime::Session
+            && matches!(kind, MemoryKind::OwnedHost { .. })
+        {
             return Err(error(
                 ErrorKind::Unsupported,
                 "secondary KFD contexts cannot bind host-owned pages",
@@ -759,7 +778,7 @@ impl AllocationDriver for LinuxKfdDriver {
         }
         let native_kind = match kind {
             MemoryKind::System => memory::BufferKind::Gtt,
-            MemoryKind::OwnedHost => memory::BufferKind::OwnedUserptr { uncached: false },
+            MemoryKind::OwnedHost { cache } => memory::BufferKind::OwnedUserptr { cache },
             MemoryKind::RegisteredHost { .. } => {
                 return Err(error(
                     ErrorKind::DriverContract,
@@ -815,13 +834,25 @@ impl AllocationDriver for LinuxKfdDriver {
     ) -> Result<Owned<NativeAllocation>, Error> {
         let HostRegistration {
             address,
-            uncached,
+            cache,
             size,
             alignment,
             permissions,
         } = request;
         let desc = checked_allocation_desc(size, alignment)?;
         if device.lifetime == SessionLifetime::Session {
+            if cache == HostCachePolicy::Extended
+                && std::iter::once(device)
+                    .chain(peers.iter().copied())
+                    .any(|peer| peer.native.queues.gfx_target != 120_001)
+            {
+                return Err(error(
+                    ErrorKind::Unsupported,
+                    "extended DRM host registration requires GFX1201 mappings",
+                ));
+            }
+            // On GFX1201 the KFD extended USERPTR allocation and a DRM
+            // USERPTR object with the default VM page type both map as NC.
             // SAFETY: The driver caller retains the page cover and access
             // synchronization required by this registration contract.
             unsafe {
@@ -831,13 +862,13 @@ impl AllocationDriver for LinuxKfdDriver {
                     desc,
                     address,
                     permissions,
-                    uncached,
+                    cache == HostCachePolicy::Uncached,
                 )
             }
         } else {
             // SAFETY: The driver caller retains these pages until cleanup or
             // process exit, including an ambiguous KFD result.
-            let pages = unsafe { memory::BorrowedHostPages::new(address, uncached) };
+            let pages = unsafe { memory::BorrowedHostPages::new(address, cache) };
             NativeAllocation::create_with_peers(
                 device.vm.clone(),
                 peers.iter().map(|peer| peer.vm.clone()),
@@ -977,6 +1008,13 @@ impl VirtualMemoryDriver for LinuxKfdDriver {
 }
 
 impl QueueDriver for LinuxKfdDriver {
+    fn supports_expert_scheduling(&self, device: &DeviceState) -> Result<bool, Error> {
+        self.ensure_open()?;
+        device.vm.check()?;
+        let version = device.vm.version;
+        Ok((version.major, version.minor) >= (1, 20))
+    }
+
     fn check_queue(queue: &NativeQueue) -> Result<(), Error> {
         queue.check()
     }
@@ -1017,6 +1055,21 @@ impl QueueDriver for LinuxKfdDriver {
 }
 
 impl KernelQueueDriver for LinuxKfdDriver {
+    fn available_sdma_rings(&self, device: &DeviceState) -> Result<u32, Error> {
+        self.ensure_open()?;
+        if !cfg!(target_arch = "x86_64")
+            || device.native.queues.gfx_target != 120_001
+            || !device.native.queues.sdma_qualified
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "SDMA kernel queue is unqualified for this GPU target",
+            ));
+        }
+        drm::sdma_available_rings(device.vm.render()?)
+            .map_err(|source| native_error("DRM SDMA ring query", source))
+    }
+
     fn create_kernel_queue(
         &self,
         device: &DeviceState,
@@ -1036,7 +1089,9 @@ impl KernelQueueDriver for LinuxKfdDriver {
                     "PM4 kernel queue is unavailable",
                 ));
             }
-            KernelQueueFormat::Sdma if !device.native.queues.sdma_qualified => {
+            KernelQueueFormat::Sdma | KernelQueueFormat::SdmaOnRing(_)
+                if !device.native.queues.sdma_qualified =>
+            {
                 return Err(error(
                     ErrorKind::Unsupported,
                     "SDMA kernel queue is unavailable",
@@ -1085,6 +1140,26 @@ impl DeviceDriver for LinuxKfdDriver {
             .available_memory(device.native.gpu_id)
             .map_err(|source| native_error("KFD available memory query", source))
     }
+
+    fn set_persisting_l2_cache_size(
+        &self,
+        device: &DeviceState,
+        size_bytes: u32,
+    ) -> Result<(), Error> {
+        self.ensure_open()?;
+        device.vm.check()?;
+        drm::set_persisting_l2_cache_size(device.vm.render()?, size_bytes).map_err(|source| {
+            if source.raw_os_error() == Some(22) {
+                Error::NativeOperation {
+                    kind: ErrorKind::InvalidArgument,
+                    operation: "DRM persisting L2 cache request",
+                    source,
+                }
+            } else {
+                native_error("DRM persisting L2 cache request", source)
+            }
+        })
+    }
 }
 
 impl GpuProfilingDriver for LinuxKfdDriver {
@@ -1100,6 +1175,7 @@ impl GpuProfilingDriver for LinuxKfdDriver {
             host: counters.cpu_clock_counter,
             system: counters.system_clock_counter,
             system_frequency: counters.system_clock_frequency,
+            gpu_frequency: device.gpu_counter_frequency_hz,
         })
     }
     #[allow(unsafe_code)]
@@ -1208,6 +1284,17 @@ impl LinuxMemoryInteropDriver for LinuxKfdDriver {
 
     fn write_descriptor_at(descriptor: RawFd, buffer: &[u8], offset: i64) -> io::Result<usize> {
         util::write_descriptor_at(descriptor, buffer, offset)
+    }
+
+    fn ais_transfer(
+        allocation: &Self::Allocation,
+        descriptor: RawFd,
+        allocation_offset: u64,
+        size: u64,
+        file_offset: i64,
+        operation: AisFileOperation,
+    ) -> Result<AisFileResult, Error> {
+        allocation.ais_transfer(descriptor, allocation_offset, size, file_offset, operation)
     }
 
     fn supports_system_dma_buf_import(device: &DeviceState) -> bool {
@@ -1414,7 +1501,7 @@ mod tests {
         );
         assert_eq!(marketing_name(ids, 0x7550, 0xc1), None);
         assert_eq!(marketing_name(ids, 0x7551, 0xc0), None);
-        assert_eq!(std::mem::size_of::<drm::DeviceInfoPrefix>(), 20);
+        assert_eq!(std::mem::size_of::<drm::DeviceInfoPrefix>(), 32);
     }
     use crate::session::{Session, SessionLifetime};
     #[test]

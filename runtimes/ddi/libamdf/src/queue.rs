@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use rocddi::gpu::queue::{
     self, QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
-    QueueScratch,
+    QueueRingMemory, QueueScratch,
 };
 use rocddi::host_storage::{Allocator, Owned};
 
@@ -207,6 +207,8 @@ fn descriptor(
         AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 => QueueParameters::Pm4,
         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL => QueueParameters::Aql {
             producer_mode: producer,
+            ring_memory: QueueRingMemory::System,
+            global_work_sync: false,
             inactive_signal: None,
             error_event: None,
             scratch,

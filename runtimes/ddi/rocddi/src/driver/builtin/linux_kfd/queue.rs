@@ -8,6 +8,7 @@
 use crate::host_storage::{Buffer, Owned, Shared};
 use std::mem::{offset_of, size_of};
 use std::sync::Mutex;
+use std::sync::atomic::{Ordering, fence};
 
 use super::memory::{BufferKind, DeviceVm, KfdAllocation, error, native_error};
 use super::{sys, sysfs, uapi, util};
@@ -15,7 +16,7 @@ use crate::memory::AllocationDesc;
 use crate::memory::DeviceAccess;
 use crate::queue::{
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
-    QueueRequest, QueueScratch, QueueTransport,
+    QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
 use crate::session::SessionLifetime;
 
@@ -593,12 +594,20 @@ struct ComputeStorage {
 /// Fully validated native queue request used by the acquisition path.
 struct Request {
     ring_size: u32,
+    ring_memory: QueueRingMemory,
     queue_type: u32,
     priority: u32,
     device_producer: bool,
     compute: Option<ComputeStorage>,
     aql: Option<AqlControl>,
     pm4: Option<Pm4Control>,
+    sdma_target: Option<SdmaTarget>,
+}
+
+#[derive(Clone, Copy)]
+struct SdmaTarget {
+    selection: SdmaEngineSelection,
+    count: u32,
 }
 
 /// A peer VM's mappings of the queue ring and control/index allocation.
@@ -737,6 +746,7 @@ struct ScratchControl {
 #[derive(Clone, Copy)]
 struct AqlControl {
     producer_mode: QueueProducerMode,
+    global_work_sync: bool,
     properties: sysfs::NativeQueueProperties,
     inactive_signal: Option<u64>,
     error_event: Option<QueueErrorEvent>,
@@ -788,9 +798,11 @@ fn validate_aql(
 ) -> Result<AqlControl, Error> {
     let QueueParameters::Aql {
         producer_mode,
+        global_work_sync,
         inactive_signal,
         error_event,
         scratch,
+        ..
     } = desc.parameters
     else {
         return Err(error(
@@ -802,6 +814,12 @@ fn validate_aql(
         return Err(error(
             ErrorKind::InvalidArgument,
             "AQL inactive signal handle is null",
+        ));
+    }
+    if global_work_sync && properties.gws_count == 0 {
+        return Err(error(
+            ErrorKind::Unsupported,
+            "native GPU does not advertise global work synchronization",
         ));
     }
     if error_event.is_some_and(|event| {
@@ -816,6 +834,7 @@ fn validate_aql(
     }
     Ok(AqlControl {
         producer_mode,
+        global_work_sync,
         properties,
         inactive_signal,
         error_event,
@@ -860,7 +879,9 @@ impl Request {
                 "KFD queue backing is supported on GFX10.1 through GFX12.0",
             ));
         }
-        if util::page_size().map_err(|source| native_error("queue page size", source))? < 4096 {
+        let page =
+            util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
+        if page < 4096 {
             return Err(error(
                 ErrorKind::Unsupported,
                 "KFD queue allocation requires host pages of at least 4 KiB",
@@ -893,19 +914,54 @@ impl Request {
                 validate_sdma(properties, desc)?;
                 (1, None, None)
             }
+            QueueParameters::SdmaByEngine { .. } => {
+                validate_sdma(properties, desc)?;
+                (4, None, None)
+            }
+        };
+        let sdma_target = if let QueueParameters::SdmaByEngine { selection, .. } = desc.parameters {
+            let count = properties
+                .sdma_engines
+                .checked_add(properties.sdma_xgmi_engines)
+                .ok_or_else(|| error(ErrorKind::InvalidData, "SDMA engine count overflows"))?;
+            if matches!(selection, SdmaEngineSelection::Id(id) if id >= count) {
+                return Err(error(
+                    ErrorKind::InvalidArgument,
+                    "selected SDMA engine ID is out of range",
+                ));
+            }
+            Some(SdmaTarget { selection, count })
+        } else {
+            None
         };
         let compute = if queue_type == 0 || queue_type == 2 {
             Some(compute_storage(properties)?)
         } else {
             None
         };
+        let ring_memory = match desc.parameters {
+            QueueParameters::Aql { ring_memory, .. }
+            | QueueParameters::SdmaByEngine { ring_memory, .. } => ring_memory,
+            QueueParameters::Pm4 | QueueParameters::Sdma => QueueRingMemory::System,
+        };
+        if ring_memory == QueueRingMemory::HostVisibleLocal
+            && (properties.gfx_target != 120_001
+                || native.public_memory_bytes < u64::from(ring_size).div_ceil(page) * page)
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "host-visible local queue ring is unavailable on this GPU",
+            ));
+        }
         Ok(Self {
             ring_size,
+            ring_memory,
             queue_type,
             device_producer: desc.device_producer,
             compute,
             aql,
             pm4,
+            sdma_target,
             priority: match desc.priority {
                 QueuePriority::Low => 0,
                 QueuePriority::Normal => 7,
@@ -1405,6 +1461,10 @@ impl KfdQueue {
         if request.aql.is_some() {
             vm.initialize_scratch()?;
         }
+        let selected_sdma_engine_id = request.sdma_target.map(|target| match target.selection {
+            SdmaEngineSelection::Any => vm.next_sdma_engine_id(target.count),
+            SdmaEngineSelection::Id(id) => id,
+        });
         let page =
             util::page_size().map_err(|source| native_error("queue page size", source))? as u64;
         let allocate = |size: u64, kind, permissions| {
@@ -1418,8 +1478,18 @@ impl KfdQueue {
                 permissions,
             )
         };
-        let ring_kind = if request.aql.is_some() && lifetime == SessionLifetime::Process {
-            BufferKind::OwnedUserptr { uncached: true }
+        let local_ring = request.ring_memory == QueueRingMemory::HostVisibleLocal;
+        let ring_kind = if local_ring {
+            BufferKind::Vram {
+                public: true,
+                coherent: false,
+                uncached: true,
+                contiguous: false,
+            }
+        } else if request.aql.is_some() && lifetime == SessionLifetime::Process {
+            BufferKind::OwnedUserptr {
+                cache: crate::memory::HostCachePolicy::Uncached,
+            }
         } else {
             // KFD USERPTR cannot be allocated in a secondary INSTANCE VM.
             // Coherent GTT provides a host view of the ring in that context.
@@ -1437,6 +1507,11 @@ impl KfdQueue {
             let mut packet = [0; 64];
             packet[0] = 1;
             ring.fill_records(&packet, request.ring_size as usize / packet.len())?;
+        }
+        if local_ring {
+            // A public VRAM CPU mapping may be write-combined. Drain ring
+            // initialization stores before KFD can schedule this queue.
+            fence(Ordering::SeqCst);
         }
         let mut pointers = allocate(
             page,
@@ -1510,6 +1585,7 @@ impl KfdQueue {
             ring_host_address,
             ring_device_address,
             ring_size_bytes: u64::from(request.ring_size),
+            sdma_engine_id: selected_sdma_engine_id,
             read_index_host_address: pointer_host_address + read_offset,
             read_index_device_address: pointer_device_address + read_offset as u64,
             write_index_host_address: pointer_host_address + write_offset,
@@ -1533,6 +1609,7 @@ impl KfdQueue {
             ring_size: request.ring_size,
             gpu_id: vm.gpu_id(),
             queue_type: request.queue_type,
+            sdma_engine_id: selected_sdma_engine_id.unwrap_or(0),
             percentage: 100,
             priority: request.priority,
             ..uapi::CreateQueue::default()
@@ -1585,6 +1662,18 @@ impl KfdQueue {
             } else {
                 native_error("AMDKFD_IOC_CREATE_QUEUE", source)
             });
+        }
+        if request.aql.is_some_and(|aql| aql.global_work_sync) {
+            if let Err(failure) = queue.vm.kfd().alloc_queue_gws(args.queue_id) {
+                if queue.destroy().is_err() {
+                    std::mem::forget(queue);
+                    return Err(Error::QueueBackingMayBeLive {
+                        operation: "KFD queue cleanup after GWS allocation",
+                        source: None,
+                    });
+                }
+                return Err(native_error("AMDKFD_IOC_ALLOC_QUEUE_GWS", failure));
+            }
         }
         let doorbell =
             queue
