@@ -114,7 +114,7 @@ test_categories:
       - "RCCL_CE_REDUCESCATTER=1"
       - "RCCL_FORCE_CE_REDUCESCATTER=1"
       - "RCCL_CE_REDUCE_PER_CHUNK=1"
-      - "RCCL_CE_REDUCE_MAX_BLOCKS=92"
+      - "RCCL_CE_REDUCE_MAX_BLOCKS=64"
   quick_env_ce_alltoall:
     description: "CE AlltoAll MPI smoke under CE dispatch env. DDA is disabled because
       ncclAlltoAll_impl takes the DDA IPC path before CE is considered, so CE never

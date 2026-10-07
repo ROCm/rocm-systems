@@ -5902,6 +5902,36 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeTwoShotPreemptsSymmetric
       });
 }
 
+// Complement of ForcedCeTwoShotPreemptsSymmetric: force off, symk eligible, CE
+// opt-in with CTA ZERO. The early arms keep CE out via !symEligible, but the
+// late registered arm still wins over symk (production comment at the late
+// arm). Dropping !symEligible from either early arm would wrongly return
+// RCCL_CE_2SHOT here; expecting RCCL_SYMMETRIC would fail on the late arm.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_NonForceSymEligibleTakesLateCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_NonForceSymEligibleTakesLateCeRegistered",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_REDUCESCATTER", int64_t(1));
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // The same force precedence applies while staging still needs to be initialized; enqueue receives
 // the registered dispatch token and allocates the internal staging buffer.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeRegisteredPreemptsSymmetric) {
@@ -6338,11 +6368,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Bfloat16AvgSelectsCeRegistered) 
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_Bfloat16AvgSelectsCeRegistered",
       []() {
-        g_loadParam = [](const char* env, int64_t defaultValue) {
-          if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return (int64_t)1;
-          if (std::strcmp(env, "RCCL_FORCE_CE_REDUCESCATTER") == 0) return (int64_t)1;
-          return defaultValue;
-        };
+        g_loadParam = ForcedCeReduceScatterParams;
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
@@ -6358,6 +6384,33 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Bfloat16AvgSelectsCeRegistered) 
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
+}
+
+// Host decisions that pick the finite per-chunk reducer and its staging-slot
+// pool. Without these, GroupedPipelinedBfloat16Average passes identically if
+// RCCL_CE_REDUCE_PER_CHUNK is ignored.
+TEST(WrapMicrotest, CeReduceScatterPerChunkHostDecisions) {
+  EXPECT_FALSE(ncclCeReduceScatterPerChunkReduce(/*totalSteps=*/1, /*perChunkParam=*/1));
+  EXPECT_FALSE(ncclCeReduceScatterPerChunkReduce(/*totalSteps=*/4, /*perChunkParam=*/0));
+  EXPECT_TRUE(ncclCeReduceScatterPerChunkReduce(/*totalSteps=*/4, /*perChunkParam=*/1));
+
+  EXPECT_EQ((size_t)NCCL_CE_NUM_SLOTS,
+            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/false, /*perChunkParam=*/1));
+  EXPECT_EQ((size_t)NCCL_CE_NUM_SLOTS,
+            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/0));
+  EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS,
+            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/1));
+}
+
+// Pins the runtime block-cap clamp at both ends. CI uses 64 (strictly inside
+// [1, NCCL_CE_REDUCE_MAX_BLOCKS]) so a body that ignored the param and returned
+// the ceiling would still fail that config plus this test.
+TEST(WrapMicrotest, CeClampReduceMaxBlocks) {
+  EXPECT_EQ(1, ncclCeClampReduceMaxBlocks(0));
+  EXPECT_EQ(1, ncclCeClampReduceMaxBlocks(-1));
+  EXPECT_EQ(64, ncclCeClampReduceMaxBlocks(64));
+  EXPECT_EQ(NCCL_CE_REDUCE_MAX_BLOCKS, ncclCeClampReduceMaxBlocks(NCCL_CE_REDUCE_MAX_BLOCKS));
+  EXPECT_EQ(NCCL_CE_REDUCE_MAX_BLOCKS, ncclCeClampReduceMaxBlocks(NCCL_CE_REDUCE_MAX_BLOCKS + 1));
 }
 
 // ncclCeAvailable does not filter datatypes, so the registered-window branch

@@ -13,6 +13,8 @@
 #include "bitops.h"
 #include "sym_kernels.h"
 
+#include <stdint.h>
+
 // Memory operations per rank for different synchronization protocols
 #define NCCL_CE_SYNC_OPS_PER_RANK_MC 2
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
@@ -92,6 +94,31 @@ inline size_t ncclCeReduceScatterSrcOffsetBytes(int dstRank, size_t shardBytes, 
 // [slot][rank] doorbell index; must match between the local array-index view and the peer byte-offset view.
 inline size_t ncclCeReduceScatterSignalIndex(int slot, int rank, int nRanks) {
   return (size_t)slot * (size_t)nRanks + (size_t)rank;
+}
+
+// Finite per-chunk ReduceScatter: only when the message needs more than one
+// staging step and RCCL_CE_REDUCE_PER_CHUNK is on. Extracted for host tests.
+inline bool ncclCeReduceScatterPerChunkReduce(size_t totalSteps, int perChunkParam) {
+  return totalSteps > 1 && perChunkParam > 0;
+}
+
+// Staging-slot count reserved at CE init. Per-chunk mode needs the larger
+// pool so more chunks land on fresh slots before reuse.
+inline size_t ncclCeReduceScatterNumStagingSlots(bool ceReduceScatterEnabled, int perChunkParam) {
+  if (ceReduceScatterEnabled && perChunkParam > 0) {
+    return NCCL_CE_REDUCE_PER_CHUNK_SLOTS > NCCL_CE_NUM_SLOTS
+             ? (size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS
+             : (size_t)NCCL_CE_NUM_SLOTS;
+  }
+  return (size_t)NCCL_CE_NUM_SLOTS;
+}
+
+// Runtime reduction-grid cap. Host and device share this clamp so a param of
+// 0 or above NCCL_CE_REDUCE_MAX_BLOCKS cannot escape the compiled range.
+inline int ncclCeClampReduceMaxBlocks(int64_t requested) {
+  if (requested < 1) return 1;
+  if (requested > (int64_t)NCCL_CE_REDUCE_MAX_BLOCKS) return NCCL_CE_REDUCE_MAX_BLOCKS;
+  return (int)requested;
 }
 
 enum ncclCeMethodId {

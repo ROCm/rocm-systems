@@ -170,9 +170,8 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 #ifdef ENABLE_FAULT_INJECTION
   NCCLCHECK(ceFaultCheck(comm, CE_FAULT_INIT, "ncclCeInit"));
 #endif
-  const size_t NUM_SLOTS = rcclParamCeReduceScatter() && rcclParamCeReducePerChunk() > 0
-      ? std::max((size_t)NCCL_CE_NUM_SLOTS, (size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS)
-      : (size_t)NCCL_CE_NUM_SLOTS;
+  const size_t NUM_SLOTS =
+      ncclCeReduceScatterNumStagingSlots(rcclParamCeReduceScatter() != 0, (int)rcclParamCeReducePerChunk());
   comm->ceColl.numStagingSlots = NUM_SLOTS;
 
   // Declare every variable that is live at a goto-target label up-front, so no
@@ -3067,8 +3066,13 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
                     ret, fail);
     }
   }
-  if (totalSteps > 1) {
-    // Phase 3: wait for NUM_SLOTS chunks to be reduced before starting allgather
+  // Phase 3: wait for the reduce kernel before allgather. The kernel clears
+  // doorbells only when slots are reused (totalSteps > NUM_SLOTS). That path
+  // waits CU_STREAM_WAIT_VALUE_EQ on 0. With one slot per step the kernel
+  // deliberately leaves readiness at 1 so every block can advance locally;
+  // join the kernel stream onto scatterStream instead, then reset the
+  // doorbells after both streams finish at exit.
+  if (totalSteps > (size_t)NUM_SLOTS) {
     // startch is chunkPerShard - NUM_SLOTS
     if (startCh < 0) {
       startCh = 0;
@@ -3087,6 +3091,9 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
       }
       CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0), ret, fail);
     }
+  } else if (totalSteps > 1) {
+    CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, stream), ret, fail);
+    CUDACHECKGOTO(cudaStreamWaitEvent(ceStream, ceColl->synceEvent, 0), ret, fail);
   }
   if (fastPath) {
     // Phase 3: allgather
@@ -3140,6 +3147,15 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   if (totalSteps > 1) {
     CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, ceStream), ret, fail);
     CUDACHECKGOTO(cudaStreamWaitEvent(stream, ceColl->synceEvent, 0), ret, fail);
+    if (totalSteps <= (size_t)NUM_SLOTS) {
+      // No-reuse kernels deliberately leave readiness at 1 so every block can
+      // advance independently. Reset only after both the reduction kernel and
+      // scatter stream have completed; the next collective is ordered behind
+      // this memset on the caller stream.
+      CUDACHECKGOTO(cudaMemsetAsync(signalBuffer, 0,
+                                    NUM_SLOTS * (size_t)comm->nRanks * sizeof(uint32_t), stream),
+                    ret, fail);
+    }
   }
 exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
@@ -3182,7 +3198,8 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     chunksPerShard++;
   }
   size_t totalSteps = chunksPerShard;
-  const bool perChunkReduce = totalSteps > 1 && rcclParamCeReducePerChunk() > 0;
+  const bool perChunkReduce =
+      ncclCeReduceScatterPerChunkReduce(totalSteps, (int)rcclParamCeReducePerChunk());
   const size_t NUM_SLOTS = perChunkReduce ? ceColl->numStagingSlots : (size_t)NCCL_CE_NUM_SLOTS;
   // ceARTmpBuf slots are spaced by slotChunkBytes (<= maxChunkBytes at init);
   // see the layout helpers in ce_coll.h for the offsets derived from it.
@@ -3331,7 +3348,7 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
       // Gate each finite reducer with stream memory operations so no reducer
       // blocks are resident while SDMA is still staging the chunk.
       for (int r = 0; r < comm->nRanks; r++) {
-        uint32_t* localSignal = &signalBuffer[slot * comm->nRanks + r];
+        uint32_t* localSignal = &signalBuffer[ncclCeReduceScatterSignalIndex(slot, r, comm->nRanks)];
         readyWaits[r].waitValue.address = localSignal;
         clears[r].writeValue.address = localSignal;
       }

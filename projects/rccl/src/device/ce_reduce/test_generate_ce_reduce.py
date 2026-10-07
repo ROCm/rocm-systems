@@ -365,11 +365,15 @@ class CeReducePersistentContractTest(unittest.TestCase):
         self.assertIn("struct CeReducePostOp<hip_bfloat16, 4>", self.impl)
         self.assertNotIn("CeReducePreOp", self.impl)
         self.assertIn("CeReducePostOp<T, RedOp>::apply(a, nRanks)", self.impl)
+        # Scalar and packed post-ops must share one reciprocal definition.
+        self.assertIn("ceReduceBfloat16AvgScale", self.impl)
+        self.assertEqual(self.impl.count("(hip_bfloat16)(1.0f / (float)nRanks)"), 1)
 
     def test_bf16_avg_uses_packed_pair_arithmetic(self) -> None:
         self.assertIn("struct CeReducePackOp<hip_bfloat16, 4>", self.impl)
         self.assertIn("__hadd2(acc2[k], value2[k])", self.impl)
         self.assertIn("__hmul2(value2[k], scale.pair)", self.impl)
+        self.assertIn("ceReduceBfloat16AvgScale(nRanks)", self.impl)
 
     def test_launch_bounds_matches_launcher_thread_count(self) -> None:
         bounds = re.search(r"__launch_bounds__\((\d+)\)", self.impl)

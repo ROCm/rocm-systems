@@ -16,6 +16,7 @@
 
 #include <hip/hip_runtime.h>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 // Returns true when compiled with CE batch API support (CE_BATCH_ASYNC_SUPPORTED).
@@ -139,6 +140,23 @@ inline bool ceLogShowsAllReducePath(const std::string& log)
 inline bool ceLogShowsReduceScatterPath(const std::string& log)
 {
     return log.find("CE ReduceScatter: rank") != std::string::npos;
+}
+
+// True when the ReduceScatter INFO line names the expected reducer mode.
+// Production emits "reducer=per-chunk" or "reducer=persistent".
+inline bool ceLogShowsReduceScatterReducer(const std::string& log, const char* reducer)
+{
+    return log.find(std::string("reducer=") + reducer) != std::string::npos;
+}
+
+// RCCL_CE_REDUCE_PER_CHUNK is the host decision that selects the finite reducer;
+// unset / "0" is persistent.
+inline const char* ceExpectedReduceScatterReducer()
+{
+    const char* env = std::getenv("RCCL_CE_REDUCE_PER_CHUNK");
+    if(env != nullptr && env[0] != '\0' && std::strcmp(env, "0") != 0)
+        return "per-chunk";
+    return "persistent";
 }
 
 // Largest chunksPerShard reported by the "CE AllReduce: rank ..." INFO line that

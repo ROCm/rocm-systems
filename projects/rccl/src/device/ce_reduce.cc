@@ -42,7 +42,7 @@ THE SOFTWARE.
 RCCL_PARAM(CeReduceMaxBlocks, "CE_REDUCE_MAX_BLOCKS", NCCL_CE_REDUCE_DEFAULT_BLOCKS);
 
 int ncclCeLocalReduceMaxBlocks() {
-  return (int)std::clamp<int64_t>(rcclParamCeReduceMaxBlocks(), 1, NCCL_CE_REDUCE_MAX_BLOCKS);
+  return ncclCeClampReduceMaxBlocks(rcclParamCeReduceMaxBlocks());
 }
 
 // Every generated launcher takes ncclCeLaunchPersistentReduce's argument list
