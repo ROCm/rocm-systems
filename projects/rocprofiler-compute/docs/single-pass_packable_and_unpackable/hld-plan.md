@@ -176,6 +176,8 @@ _weighted_avg:
     weight_counter: TCC_EA0_WRREQ_sum
 ```
 
+Two possible solutions are (1) the current explicit structured YAML and (2) dynamic runtime Python handling; this delivery keeps option 1, and option 2 will be evaluated later.
+
 gfx942 has **16** SPU parents and **10** unique PMC sets (panel mirrors share a set). All 16 become composites. Sub-collectables are single-pass. The offline residual count for parents that still cannot fit one pass is 0.
 
 | Unique set | Composite |
