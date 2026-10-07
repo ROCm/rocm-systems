@@ -738,6 +738,104 @@ TEST_CASE("Unit_HRR_PinnedHost_Reset_Direct", "[.][hrr-direct]") {
 }
 
 namespace {
+// The device pointer makes the argument value_kind 3; the pinned one is at
+// byte offset 8.
+struct PinnedPair {
+  int*       out;
+  const int* in;
+  int        scale;
+};
+
+// word, at byte offset 9, is not on an 8-byte boundary.
+struct __attribute__((packed)) PinnedPackedWord {
+  int*     out;
+  uint8_t  tag;
+  uint64_t word;
+};
+}  // namespace
+
+__global__ void hrr_pinned_read_pair(PinnedPair v, int n) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) v.out[i] = v.in[i] * v.scale - 2;
+}
+
+// Writes v.word after the n results, low half first.
+__global__ void hrr_pinned_read_packed(PinnedPackedWord v, const int* in, int n) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) v.out[i] = in[i] * 3 + 1;
+  if (i == 0) {
+    const uint64_t w = v.word;
+    v.out[n]     = static_cast<int>(static_cast<uint32_t>(w));
+    v.out[n + 1] = static_cast<int>(static_cast<uint32_t>(w >> 32));
+  }
+}
+
+// ===========================================================================
+// A pinned pointer inside a by-value struct next to a device pointer.
+//
+//   0  write     the device fills the pinned buffer, so replay's buffer gets
+//                the same bytes without a snapshot
+//   1  read_pair the struct carries the device output and the pinned input
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_StructPair_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                              hipHostMallocDefault));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+
+  // 0
+  hipLaunchKernelGGL(hrr_pinned_write, dim3(kBlocks), dim3(kThreads), 0, nullptr,
+                     h, kPinnedInts, 0x3c3c);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(h[1] == (0x3c3c ^ 1));
+
+  // 1
+  hipLaunchKernelGGL(hrr_pinned_read_pair, dim3(kBlocks), dim3(kThreads), 0, nullptr,
+                     PinnedPair{out, h, 5}, kPinnedInts);
+  HRR_HIP_CHECK(hipGetLastError());
+  check_out(out, [](int i) { return (0x3c3c ^ i) * 5 - 2; });
+
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(h));
+}
+
+// ===========================================================================
+// A scalar that equals an address inside a recorded pinned allocation.
+//
+//   0  read_packed  reads the pinned buffer through its pointer argument, so
+//                   the launch records it; the struct's unaligned word holds
+//                   an address 400 bytes into the same buffer, and the kernel
+//                   copies that word out after its results
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_PackedScalar_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                              hipHostMallocDefault));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, (kPinnedInts + 2) * sizeof(int)));
+  fill(h, 3);
+
+  const uint64_t word = reinterpret_cast<uint64_t>(h + 100);
+  hipLaunchKernelGGL(hrr_pinned_read_packed, dim3(kBlocks), dim3(kThreads), 0, nullptr,
+                     PinnedPackedWord{out, 7, word}, static_cast<const int*>(h), kPinnedInts);
+  HRR_HIP_CHECK(hipGetLastError());
+  check_out(out,
+            [word](int i) {
+              if (i < kPinnedInts) return pattern(3, i) * 3 + 1;
+              const uint64_t half = i == kPinnedInts ? word : word >> 32;
+              return static_cast<int>(static_cast<uint32_t>(half));
+            },
+            kPinnedInts + 2);
+
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(h));
+}
+
+namespace {
 constexpr const char* kDirect = "Unit_HRR_PinnedHost_Direct";
 // A capture or replay that takes longer than this has hung.
 constexpr int kCaptureTimeoutSec = 120;
@@ -854,6 +952,19 @@ size_t count_of(const std::string& out, const std::string& s) {
   size_t n = 0;
   for (size_t at = out.find(s); at != std::string::npos; at = out.find(s, at + 1)) ++n;
   return n;
+}
+
+// Whether one line of out holds both a and b.
+bool line_with(const std::string& out, const std::string& a, const std::string& b) {
+  for (size_t at = out.find(a); at != std::string::npos; at = out.find(a, at + 1)) {
+    const size_t bol = out.rfind('\n', at);
+    const size_t from = bol == std::string::npos ? 0 : bol + 1;
+    const size_t eol = out.find('\n', at);
+    if (out.substr(from, eol == std::string::npos ? std::string::npos : eol - from)
+            .find(b) != std::string::npos)
+      return true;
+  }
+  return false;
 }
 
 std::vector<uint8_t> read_bytes(const fs::path& p) {
@@ -1123,6 +1234,77 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_UnrecordedStructAudited) {
   INFO("Replay rc " << rc << ":\n" << out);
   CHECK(out.find("arg[0]+8 holds") != std::string::npos);
   CHECK(out.find("but capture did not mark it as a pointer") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// A launch with no record for a pinned allocation leaves its pointers to
+// replay's rescan, as before snapshots existed. Capture marks only the struct's
+// device pointer; the rescan finds the pinned one at offset 8 and rewrites it.
+// Snapshots off and an allocation over the cap both leave the launch without
+// records.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_UnrecordedStructTranslated) {
+  const std::vector<std::pair<std::string, std::string>> envs[] = {
+      {{"HIP_HRR_HOST_SNAPSHOTS", "0"}}, {{"HIP_HRR_HOST_SNAPSHOT_MAX_MB", "0"}}};
+  for (const auto& env : envs) {
+    INFO(env[0].first << "=" << env[0].second);
+    ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_pair.hrr");
+    capture_case("Unit_HRR_PinnedHost_StructPair_Direct", cap.path, env);
+    const fs::path archive = hrr_single_process_archive(cap.path);
+
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(archive.string(), arc));
+    const auto kls = launches_of(arc);
+    REQUIRE(kls.size() == 2);
+    CHECK(snapshot_records(kls) == 0);
+    REQUIRE(!kls[1]->args.empty());
+    CHECK(kls[1]->args[0].value_kind == 3);
+    CHECK(kls[1]->args[0].ptr_offsets == std::vector<uint16_t>{0});
+
+    auto [rc, out] = replay(archive, "--verbose");
+    INFO("Replay:\n" << out);
+    CHECK(rc == 0);
+    CHECK(line_with(out, "arg[0]: embedded ptr @+8 0x", "[rescan]"));
+#ifndef _WIN32
+    int d2h_pass = 0, d2h_fail = 0;
+    REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+    CHECK(d2h_pass >= 1);
+    CHECK(d2h_fail == 0);
+#endif
+  }
+}
+
+// ---------------------------------------------------------------------------
+// A word that capture did not mark, inside a by-value argument, into a pinned
+// allocation the launch recorded, is a scalar: capture compared every aligned
+// word against that allocation, and this one is unaligned. Replay passes it on
+// unchanged, and the kernel copies it out for the D2H check.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_RecordedScalarKept) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_scalar.hrr");
+  capture_case("Unit_HRR_PinnedHost_PackedScalar_Direct", cap.path);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() == 1);
+  CHECK(kls[0]->snapshots.size() == 2);
+  REQUIRE(!kls[0]->args.empty());
+  CHECK(kls[0]->args[0].value_kind == 3);
+  CHECK(kls[0]->args[0].ptr_offsets == std::vector<uint16_t>{0});
+
+  auto [rc, out] = replay(archive, "--verbose");
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  CHECK(line_with(out, "arg[0]: embedded ptr @+0 0x", "[captured]"));
+  CHECK(out.find("embedded ptr @+9") == std::string::npos);
+#ifndef _WIN32
+  int d2h_pass = 0, d2h_fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+  CHECK(d2h_pass >= 1);
+  CHECK(d2h_fail == 0);
+#endif
 }
 
 // ---------------------------------------------------------------------------

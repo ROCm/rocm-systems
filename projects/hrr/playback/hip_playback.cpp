@@ -655,12 +655,14 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
 // kernel-node path where a relocation could never be undone.
 //
 // `snap_bases`, on the kernel-launch path, holds the recorded bases of the
-// pinned host allocations this launch's snapshot records name. A word inside
-// a by-value argument that resolves to pinned host memory is rewritten only
-// when its allocation is in that set: capture marks such a word only for an
-// allocation it snapshotted, so any other match is a scalar that happens to
-// equal a host address. Null keeps the older rule, under which any word that
-// resolves is rewritten.
+// pinned host allocations this launch's snapshot records name. For such an
+// allocation capture compared every aligned argument word against it and
+// marked each one inside, so the rescan below leaves alone a word into it that
+// capture did not mark: an unaligned scalar that happens to equal one of its
+// addresses. A pinned allocation the launch has no record for (snapshots off,
+// over a cap, under graph capture, a record replay refused) gets no such
+// verdict from capture, and any word that resolves into it is rewritten, as
+// before snapshots existed. Null or empty keeps that rule for every word.
 static void decode_kernel_args(
     PlaybackContext& ctx, const uint8_t*& p, const uint8_t* end,
     uint16_t num_args, const std::string& kernel_name,
@@ -840,7 +842,9 @@ static void decode_kernel_args(
             // may be a genuine scalar (a large count, a double, a packed value)
             // that was mis-flagged — overwriting it with null would silently
             // corrupt it. Only rewrite the word when it actually resolves.
-            auto try_translate_word = [&](size_t off, const char* src) -> bool {
+            // `marked`: capture listed this offset as a pointer.
+            auto try_translate_word = [&](size_t off, const char* src,
+                                          bool marked) -> bool {
                 if (off + 8 > arg_size) return false;
                 uint64_t rec_ptr; memcpy(&rec_ptr, data + off, 8);
                 // null, small, or a packed-integer false positive
@@ -854,15 +858,15 @@ static void decode_kernel_args(
                 if (!live && ctx.regions_enabled)
                     live = ctx.regions.materialize_for(ctx, rec_ptr);
                 if (!live) return false;
-                // Pinned host memory counts only when this launch's snapshot
-                // records name it (see snap_bases above).
-                if (snap_bases) {
+                // A word capture did not mark, into a pinned allocation this
+                // launch's records name, is a scalar (see snap_bases above).
+                if (!marked && snap_bases && !snap_bases->empty()) {
                     void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
                     AllocKind akind = AllocKind::Device;
                     if (ctx.live_alloc_of(live, &abase, &asize, &arec, &akind) &&
                         (akind == AllocKind::HostMalloc ||
                          akind == AllocKind::HostRegister) &&
-                        !snap_bases->count(arec))
+                        snap_bases->count(arec))
                         return false;
                 }
                 // Same region check as a whole-pointer argument: a device
@@ -880,7 +884,7 @@ static void decode_kernel_args(
             // First honor the capture-recorded offsets (these may be unaligned).
             std::vector<char> handled(arg_size, 0);
             for (uint16_t off : ptr_offsets) {
-                if (try_translate_word(off, "captured"))
+                if (try_translate_word(off, "captured", true))
                     for (int b = 0; b < 8 && static_cast<size_t>(off) + b < arg_size; b++)
                         handled[off + b] = 1;
                 else if (ctx.verbose)
@@ -903,7 +907,7 @@ static void decode_kernel_args(
                 (std::getenv("HIP_HRR_REPLAY_NO_RESCAN") != nullptr);
             for (size_t off = 0; !no_rescan && off + 8 <= arg_size; ) {
                 if (handled[off]) { off += 1; continue; }
-                if (try_translate_word(off, "rescan")) off += 8;
+                if (try_translate_word(off, "rescan", false)) off += 8;
                 else off += 1;
             }
         } else {
@@ -1022,8 +1026,8 @@ static void decode_kernel_args(
 // written it before the kernel ran, so replay leaves it to the replayed work.
 //
 // rec_bases_out gets the recorded base of every allocation a valid record
-// names, applied or not: decode_kernel_args uses it to decide which pinned
-// words in by-value arguments are pointers.
+// names, applied or not: decode_kernel_args uses it to tell which unmarked
+// pinned words in by-value arguments are scalars.
 static constexpr size_t kHostSnapRecordSize = 8 * 5 + 1;
 
 static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,

@@ -566,9 +566,15 @@ launch while another stream captures in global mode
 argument's `value_kind == 3` offsets when it falls inside an allocation this
 launch recorded, so replay translates it to the replay's own buffer. The
 device-pointer scan does not flag it, because `hipPointerGetAttributes` reports
-host memory. On replay, a word in a `value_kind == 3` argument that resolves to
-pinned host memory is rewritten only when the launch's snapshot records name that
-allocation. Device words keep the rule in Kernel Argument Capture below.
+host memory. On replay, a word that capture marked is rewritten when it
+resolves. The rescan of a `value_kind == 3` argument (Kernel Argument Capture
+below) also rewrites unmarked words that resolve, with one exception: a word
+into a pinned allocation the launch's snapshot records name is left alone.
+Capture compared every aligned word against that allocation and marked those
+inside it, so an unmarked one is an unaligned scalar. A word into a pinned
+allocation the launch has no record for is rewritten as before snapshots
+existed: snapshots off, over a cap, under graph capture, or a record replay
+refused.
 
 **When.** The snapshot is taken before the real launch, without waiting for the
 launch's stream. Waiting would be exact, but it can hang the application: earlier
@@ -721,11 +727,14 @@ exists to put chosen bytes in front of those kernels.
   later replayed call releases would hang the replay there. Replay of
   `hipStreamWaitValue*` does not wait today, so no such stream exists yet.
 - A by-value scalar whose value happens to fall inside a pinned allocation the
-  launch recorded is rewritten on replay as if it were a pointer.
-- A pinned pointer inside a by-value struct is not translated when its
-  allocation was not recorded: over a cap, under graph capture, or with
-  snapshots off. The kernel then gets the capture-time host address, as before
-  snapshots existed.
+  launch recorded, at an aligned word, is rewritten on replay as if it were a
+  pointer. So is one inside a pinned allocation the launch did not record,
+  when its argument also holds a device pointer, as before snapshots existed.
+- A pinned pointer inside a by-value struct whose allocation the launch did
+  not record (over a cap, under graph capture, or with snapshots off) is
+  translated only when the struct also holds a device pointer, as before
+  snapshots existed. Otherwise the kernel gets the capture-time host address.
+  Either way the buffer is not refilled.
 - A kernel handle that never passed through the wrapped producers is not
   snapshotted on its first launch; from its second launch on it is.
 - An allocation freed through a path capture does not wrap stays in the map.
