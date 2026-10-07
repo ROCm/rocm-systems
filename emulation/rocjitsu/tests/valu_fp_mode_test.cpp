@@ -615,7 +615,8 @@ const std::vector<ArithmeticCase> kCases{
      {{6, 0x3c01u}},
      0xf4u,
      FE_TONEAREST},
-    // OMOD scales the rounded half: 65504 * 2 overflows before div:2.
+    // OMOD scales the rounded half: 65504 * 2 overflows before div:2. The
+    // expectation is derived from gfx1201 captures; CDNA4 is not measured.
     {"Gfx950MulF16RoundBeforeScale",
      ROCJITSU_CODE_ARCH_CDNA4,
      {0xd1220006u, 0x18020300u},
@@ -923,7 +924,8 @@ std::vector<ArithmeticCase> ldexp_f16_mode_cases() {
           denorm << 6);
     }
     // OMOD scales the result after rounding it to half, so div:2 cannot rescue
-    // an overflow (gfx1201 captures).
+    // an overflow (gfx1201 captures). The Gfx950 and Gfx1250 expectations are
+    // derived from gfx1201; CDNA4 and CDNA5 are not measured.
     if (encoding.words[1] != 0) {
       add("OmodAfterOverflow", 0x7bffu, 1, 0x7c00u, 0);
       cases.back().words[1] |= 3u << 27; // div:2

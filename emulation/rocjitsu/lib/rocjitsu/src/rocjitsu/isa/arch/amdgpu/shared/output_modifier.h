@@ -14,11 +14,21 @@
 /// gfx1201 captures of every min/max instruction match these rules bit for
 /// bit, in F16, F32 and F64, under every MODE setting probed. OMOD overflow
 /// was checked for both signs under all four rounding modes, with FP16_OVFL
-/// disabled and enabled.
+/// disabled and enabled. gfx1201 captures also show that F16 and F64
+/// arithmetic, F16 unary and transcendental, conversion and division results
+/// are rounded to their destination format before OMOD and CLAMP.
 ///
-/// Other uses apply the same stage without hardware verification: min/max on
-/// CDNA4 and CDNA5, and VOP3 CEIL/FLOOR/TRUNC/RNDNE F32/F64 on every target
-/// (CDNA1-5, RDNA1-4).
+/// Every target uses this stage once fp_mode::effective_omod has decided that
+/// OMOD applies; older targets apply it only under MODE.IEEE=0 with output
+/// denormals flushed. Hardware evidence for the order differs by target:
+/// - gfx1201 (RDNA4): measured, as above.
+/// - gfx1100 (RDNA3): measured with MODE.IEEE=0. Captured F16 MUL/ADD div:2
+///   lanes that overflow before scaling, or keep the sign of a halved
+///   negative normal, match gfx1201.
+/// - gfx1010/gfx1030 (RDNA1/2): hardware captures with OMOD applied match
+///   gfx1201 on every non-NaN lane; the emulator cannot yet replay them.
+/// - RDNA3.5 and CDNA1-5: no captures. The order is extrapolated from the
+///   targets above and requires hardware verification.
 ///
 /// CDNA4 V_MINIMUM3_F32/V_MAXIMUM3_F32 retain the emulator's wave-IEEE-based
 /// OMOD policy. The ISA specifies forced IEEE=1 for these instructions and
