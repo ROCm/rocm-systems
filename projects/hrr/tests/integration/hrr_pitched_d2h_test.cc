@@ -237,6 +237,10 @@ struct ScopedOverflowingPitch {
   }
 };
 
+// A v6 reader ignores the file flags and would replay a packed blob with the
+// recorded pitch, reading past its end. Only the version keeps it out.
+static_assert(HRR_VERSION >= 7, "packed host rects need HRR_VERSION 7 or later");
+
 // Clears the file flags in the header of events.bin for the lifetime of the
 // object, so replay reads the archive as one captured before packed host rects.
 struct ScopedLegacyArchive {
@@ -249,6 +253,9 @@ struct ScopedLegacyArchive {
     events = archives.front() / "events.bin";
     const std::vector<uint8_t> bytes = read_file(events);
     REQUIRE(bytes.size() >= sizeof(hrr_file_header));
+    uint16_t version = 0;
+    std::memcpy(&version, bytes.data() + offsetof(hrr_file_header, version), sizeof(version));
+    REQUIRE(version == HRR_VERSION);
     std::memcpy(&original, bytes.data() + offsetof(hrr_file_header, reserved), sizeof(original));
     REQUIRE((original & HRR_FILE_FLAG_PACKED_HOST_RECTS) != 0);
     write(0);
