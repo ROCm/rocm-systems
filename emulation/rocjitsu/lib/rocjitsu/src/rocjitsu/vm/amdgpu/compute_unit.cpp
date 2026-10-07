@@ -861,8 +861,8 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
       }
       normalized_to_local = true;
     } else if (flat_shared_lane_mask != 0) {
-      d.flat_lds_lane_mask = flat_shared_lane_mask & request_lanes;
-      d.flat_lds_aperture_base = shared_aperture_base_;
+      d.flat_shared_lane_mask = flat_shared_lane_mask & request_lanes;
+      d.flat_shared_aperture_base = shared_aperture_base_;
     }
   }
 

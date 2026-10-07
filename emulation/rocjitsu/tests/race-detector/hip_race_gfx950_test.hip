@@ -212,11 +212,9 @@ TEST_F(Gfx950RaceTest, flat_global_copy_missing_vmcnt_race) {
               .consumer = "flat_store_dword"});
 }
 
-// TODO(newling): Add mixed LDS/global HIP cases once functional routing is fixed
-// (https://github.com/ROCm/rocm-systems/issues/11456). The active C++ regression
+// TODO(newling): Add mixed LDS/global HIP cases. The active C++ regression
 // FlatLoadReadyLanesKnownFalsePositives records the remaining ready-lane false
-// reports in https://github.com/ROCm/rocm-systems/issues/12237 without relying on
-// the broken mixed-space transfers.
+// reports in https://github.com/ROCm/rocm-systems/issues/12237.
 
 // --- All-ones wait operands ---
 

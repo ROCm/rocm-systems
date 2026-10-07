@@ -980,27 +980,27 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   auto &d = *inst.data_as<VectorMemState>();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  const uint64_t local_lanes = d.flat_lds_lane_mask & d.lane_mask;
+  const uint64_t shared_lanes = d.flat_shared_lane_mask & d.lane_mask;
   const auto outcome =
-      initiate_global_access(d, wf, transpose_request_lane_mask(d, wf.wf_size()) & ~local_lanes);
-  if (outcome != VmAccessOutcome::Complete || local_lanes == 0)
+      initiate_global_access(d, wf, transpose_request_lane_mask(d, wf.wf_size()) & ~shared_lanes);
+  if (outcome != VmAccessOutcome::Complete || shared_lanes == 0)
     return outcome;
 
   // Commit LDS only after all retryable global work completes. In particular,
   // a global retry must not repeat an LDS atomic or discard either result set.
   auto addresses = d.per_lane_addr;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (local_lanes & (uint64_t{1} << lane))
-      addresses[lane] = addresses[lane] - d.flat_lds_aperture_base + wf.lds_base();
+    if (shared_lanes & (uint64_t{1} << lane))
+      addresses[lane] = d.flat_shared_address_in_lds(lane, wf.lds_base());
   }
   auto &lds = wf.lds();
   if (d.atomic_op != AtomicOp::NONE) {
-    execute_lds_atomic_rmw(d, &lds, addresses, d.store_data, d.response_data, local_lanes);
+    execute_lds_atomic_rmw(d, &lds, addresses, d.store_data, d.response_data, shared_lanes);
   } else if (d.is_load) {
-    lds.vector_load(addresses.data(), local_lanes, d.elem_size, d.num_elems,
+    lds.vector_load(addresses.data(), shared_lanes, d.elem_size, d.num_elems,
                     d.response_data.data());
   } else {
-    lds.vector_store(addresses.data(), local_lanes, d.elem_size, d.num_elems, d.store_data.data());
+    lds.vector_store(addresses.data(), shared_lanes, d.elem_size, d.num_elems, d.store_data.data());
   }
   return VmAccessOutcome::Complete;
 }

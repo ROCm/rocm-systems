@@ -1309,8 +1309,8 @@ TEST(GpuVmPipeline, MixedFlatAtomicRetryPreservesLdsAndCompletedGlobalLanes) {
   state->atomic_op = amdgpu::AtomicOp::ADD;
   state->wf_size = wf.wf_size();
   state->exec_mask = state->lane_mask = 0x7;
-  state->flat_lds_lane_mask = 0x2;
-  state->flat_lds_aperture_base = shared_base;
+  state->flat_shared_lane_mask = 0x2;
+  state->flat_shared_aperture_base = shared_base;
   state->dst_reg_base = wf.vgpr_alloc().base + 4;
   state->per_lane_addr[0] = 0x100;
   state->per_lane_addr[1] = shared_base + lds_offset;
@@ -1364,8 +1364,8 @@ TEST(GpuVmPipeline, MixedFlatLegacyAtomicRetryRefreshesVmSnapshot) {
     state->atomic_op = amdgpu::AtomicOp::ADD;
     state->wf_size = wf.wf_size();
     state->exec_mask = state->lane_mask = 0x7;
-    state->flat_lds_lane_mask = uint64_t{1} << local_lane;
-    state->flat_lds_aperture_base = shared_base;
+    state->flat_shared_lane_mask = uint64_t{1} << local_lane;
+    state->flat_shared_aperture_base = shared_base;
     state->dst_reg_base = wf.vgpr_alloc().base + 4;
     state->per_lane_addr[first_global_lane] = 0x100;
     state->per_lane_addr[local_lane] = shared_base + lds_offset;

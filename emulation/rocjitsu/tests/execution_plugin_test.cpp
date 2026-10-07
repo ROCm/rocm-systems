@@ -6410,7 +6410,7 @@ TEST(RaceDetectorPluginTest, NamedVmcntWaitRetiresMonolithicAndSplitLoadEvents) 
 }
 
 TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCounterDomains) {
-  auto reports_race_after_wait = [](MemoryRoute route, uint8_t vmcnt, uint8_t lgkmcnt) {
+  auto reports_race_after_wait = [](uint64_t shared_lanes, uint8_t vmcnt, uint8_t lgkmcnt) {
     PluginFixture f(/*num_wf_slots=*/1);
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
@@ -6429,25 +6429,33 @@ TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCou
         /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
         /*physical_sgpr_count=*/104, waves);
 
-    auto state =
-        std::make_unique<VectorMemState>(route == MemoryRoute::LOCAL ? LOCAL_MEM : GLOBAL_MEM);
+    constexpr uint64_t shared_base = uint64_t{1} << 48;
+    wf->set_lds_base(0x200);
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
     state->is_load = true;
     state->elem_size = 4;
     state->num_elems = 1;
     state->dst_reg_base = wf->vgpr_alloc().base;
     state->exec_mask = state->lane_mask = 3;
     state->wf_size = 64;
+    state->flat_shared_lane_mask = shared_lanes;
+    state->flat_shared_aperture_base = shared_lanes ? shared_base : 0;
+    for (uint32_t lane = 0; lane < 2; ++lane)
+      state->per_lane_addr[lane] =
+          (shared_lanes & (uint64_t{1} << lane) ? shared_base + 0x40 : 0x1000) + lane * 4;
     TestMemoryInstruction flat(std::move(state),
                                {{WaitCounterType::VMCNT, MemoryCompletionClass::UNORDERED},
                                 {WaitCounterType::LGKMCNT, MemoryCompletionClass::UNORDERED}});
-    // Exercise the conservative fallback without executing unsupported mixed
-    // LDS/global routing (#11456), including either choice of the first lane.
+    // Zero denotes an unresolved observation. Both mixed lane orderings retain
+    // GLOBAL routing and the original shared-aperture addresses.
     MemoryAccessObservation access;
-    if (route != MemoryRoute::UNKNOWN) {
-      access.route = route;
+    if (shared_lanes != 0) {
+      access.route = MemoryRoute::GLOBAL;
       access.decoded_space = DecodedMemorySpace::FLAT;
-      access.request_lane_mask = access.active_lane_mask = 3;
-      access.flat_local_lane_mask = route == MemoryRoute::LOCAL ? 1 : 2;
+      access.request_lane_mask = access.active_lane_mask = access.valid_lane_mask = 3;
+      access.flat_local_lane_mask = shared_lanes;
+      access.wavefront_size = wf->wf_size();
+      access.addresses = {flat.data_as<VectorMemState>()->per_lane_addr.data(), wf->wf_size()};
     }
     f.plugin_group_->onAmdgpuMemoryAccessRouted(access, flat, *wf);
 
@@ -6458,11 +6466,11 @@ TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCou
     return sink.str().find("RACE ") != std::string::npos;
   };
 
-  for (const auto route : {MemoryRoute::UNKNOWN, MemoryRoute::GLOBAL, MemoryRoute::LOCAL}) {
-    SCOPED_TRACE(static_cast<unsigned>(route));
-    EXPECT_TRUE(reports_race_after_wait(route, /*vmcnt=*/0, /*lgkmcnt=*/15));
-    EXPECT_TRUE(reports_race_after_wait(route, /*vmcnt=*/63, /*lgkmcnt=*/0));
-    EXPECT_FALSE(reports_race_after_wait(route, /*vmcnt=*/0, /*lgkmcnt=*/0));
+  for (uint64_t shared_lanes : {0u, 1u, 2u}) {
+    SCOPED_TRACE(shared_lanes);
+    EXPECT_TRUE(reports_race_after_wait(shared_lanes, /*vmcnt=*/0, /*lgkmcnt=*/15));
+    EXPECT_TRUE(reports_race_after_wait(shared_lanes, /*vmcnt=*/63, /*lgkmcnt=*/0));
+    EXPECT_FALSE(reports_race_after_wait(shared_lanes, /*vmcnt=*/0, /*lgkmcnt=*/0));
   }
 }
 
@@ -6508,11 +6516,11 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           }
           ASSERT_NE(load, nullptr);
 
-          // Feed the decoded load and resolved masks into both checkers without
-          // executing the unsupported mixed LDS/global memory path:
-          // https://github.com/ROCm/rocm-systems/issues/11456
-          // The first requesting lane still selects the whole instruction's route.
-          const bool local_route = shared_lanes & 1;
+          // Model routing after aperture resolution. Only uniform shared
+          // requests use LOCAL and have their addresses rewritten into LDS.
+          constexpr uint64_t shared_base = uint64_t{1} << 48;
+          wf->set_lds_base(0x200);
+          const bool local_route = shared_lanes == 3;
           auto data = std::make_unique<VectorMemState>(local_route ? LOCAL_MEM : GLOBAL_MEM);
           data->is_load = true;
           data->exec_mask = data->lane_mask = 3;
@@ -6520,12 +6528,26 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           data->elem_size = 4;
           data->num_elems = 1;
           data->dst_reg_base = wf->vgpr_alloc().base + 8;
+          data->flat_shared_lane_mask = local_route ? 0 : shared_lanes;
+          data->flat_shared_aperture_base = data->flat_shared_lane_mask ? shared_base : 0;
+          std::array<uint64_t, 64> original_addresses{};
+          for (uint32_t lane = 0; lane < 2; ++lane) {
+            original_addresses[lane] =
+                (shared_lanes & (uint64_t{1} << lane) ? shared_base + 0x40 : 0x1000) + lane * 4;
+            data->per_lane_addr[lane] =
+                local_route ? wf->lds_base() + 0x40 + lane * 4 : original_addresses[lane];
+          }
           load->set_data(std::move(data));
           MemoryAccessObservation access;
           access.route = local_route ? MemoryRoute::LOCAL : MemoryRoute::GLOBAL;
           access.decoded_space = DecodedMemorySpace::FLAT;
-          access.request_lane_mask = access.active_lane_mask = 3;
+          access.request_lane_mask = access.active_lane_mask = access.valid_lane_mask = 3;
           access.flat_local_lane_mask = shared_lanes;
+          access.wavefront_size = wave_size;
+          access.normalized_to_local = local_route;
+          access.addresses = {load->data_as<VectorMemState>()->per_lane_addr.data(), wave_size};
+          if (local_route)
+            access.pre_routing_addresses = {original_addresses.data(), wave_size};
           f.plugin_group_->onAmdgpuMemoryAccessRouted(access, *load, *wf);
           constexpr uint64_t shared_base = uint64_t{1} << 32;
           cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);

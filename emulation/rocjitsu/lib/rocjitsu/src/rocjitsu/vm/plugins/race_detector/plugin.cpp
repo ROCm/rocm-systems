@@ -104,8 +104,8 @@ routed_flat_issue_info(const amdgpu::MemoryAccessObservation &access,
 
   const uint64_t shared_lanes =
       (access.flat_local_lane_mask | access.flat_dds_lane_mask) & access.request_lane_mask;
-  // Mixed-space execution still routes by the first requesting lane (#11456).
-  // Narrow dependencies only when every requesting lane uses the same pipeline.
+  // Functional execution splits mixed requests by address space. The plugin's
+  // single mixed event retains both obligations until both domains are ready.
   if (shared_lanes != 0 && shared_lanes != access.request_lane_mask)
     return decoded;
   if (access.route != (shared_lanes ? amdgpu::MemoryRoute::LOCAL : amdgpu::MemoryRoute::GLOBAL))
@@ -378,8 +378,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       if (!(ldsMask & (1ULL << lane)))
         continue;
       laneAddrs[lane] = static_cast<uint32_t>(
-          mixedFlat ? d.per_lane_addr[lane] - d.flat_lds_aperture_base + wf.lds_base()
-                    : d.per_lane_addr[lane]);
+          mixedFlat ? d.flat_shared_address_in_lds(lane, wf.lds_base()) : d.per_lane_addr[lane]);
       int addr = static_cast<int>(laneAddrs[lane]);
       if (d.is_load)
         detector->validateRead(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);

@@ -475,11 +475,18 @@ instruction still carries the address space it decoded as and the addresses it
 computed. `onAmdgpuMemoryAccessRouted` fires once routing has settled and
 reports a `MemoryAccessObservation` describing the access the memory system is
 actually about to be asked for — the pipeline it was issued to, the wait
-counter it will post to, and the addresses it was issued with. The difference is
-not cosmetic: a FLAT access into the shared aperture decodes as global and is
-issued to the LDS pipeline with its addresses rewritten and its counter changed,
-so an observer using the earlier hook charges it against the wrong cache at an
-address the memory system never uses.
+counter it will post to, and the addresses it was issued with. When all requesting
+FLAT lanes use the shared aperture, routing selects the LDS pipeline, rewrites
+the addresses into the workgroup's LDS allocation, and sets
+`normalized_to_local` to `true`.
+
+Mixed FLAT requests retain `MemoryRoute::GLOBAL` and their original
+shared-aperture addresses. The global pipeline separates the lanes by backing
+store, completing retryable global/scratch work before accessing LDS. These
+observations have `normalized_to_local == false` and an empty
+`pre_routing_addresses`. Observers must inspect `flat_local_lane_mask` and
+`flat_dds_lane_mask` to account for LDS and DDS lanes; choosing a backing store
+from `route` alone misses the shared-aperture portion of a mixed request.
 
 `decoded_space` preserves the instruction's original address-space family
 independently of its effective `route`, so explicit SCRATCH remains distinct

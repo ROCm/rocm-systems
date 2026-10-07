@@ -80,7 +80,8 @@ constexpr const char *decoded_memory_space_name(DecodedMemorySpace space) {
 /// pipeline with its addresses rewritten into the workgroup's LDS allocation.
 /// Mixed-aperture FLAT uses the global pipeline, which separates the lanes for
 /// access to each backing store. Its observation retains shared-aperture
-/// addresses and identifies those lanes with the flat_local/flat_dds masks.
+/// addresses and identifies those lanes with @ref flat_local_lane_mask and
+/// @ref flat_dds_lane_mask.
 ///
 /// Everything here is a fact, not an estimate. Where a fact is missing --
 /// a lane whose address could not be resolved, a route with no pipeline --
@@ -117,7 +118,8 @@ struct MemoryAccessObservation {
   ///
   /// @details True only when all requesting FLAT lanes use the shared aperture
   /// and both the route and addresses were changed. Mixed-aperture requests
-  /// leave this false; use the per-lane aperture masks to count LDS traffic.
+  /// leave this false; use @ref flat_local_lane_mask and @ref flat_dds_lane_mask
+  /// to account for their shared-aperture traffic.
   bool normalized_to_local = false;
 
   /// @brief Whether the access returns a value to registers.

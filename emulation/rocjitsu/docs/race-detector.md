@@ -224,8 +224,9 @@ observations still attach both obligations to the whole race-plugin event, so a
 consumer restricted to an already-completed lane group can still get a false
 report. `TODO(newling)` regression cases track this remaining #12237 gap. The
 core checker's [FLAT register-readiness policy](memory-wait-counter-coverage.md#flat-register-readiness)
-tracks the groups separately. Mixed LDS/global functional execution remains
-limited by first-request-lane routing, tracked separately in #11456.
+tracks the groups separately. Functional execution splits mixed requests by
+address space, completing retryable global/scratch work before accessing LDS.
+The race plugin retains both counter obligations on its single mixed event.
 
 An all-ones wait-count field is the architectural “do not wait” value. CDNA's
 four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;
