@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Passive endpoint descriptions and explicit native device activation.
@@ -146,7 +147,7 @@ pub(crate) fn sdma_format_features(
     supports_gcr: bool,
 ) -> amdf_queue_format_features_t {
     let mut features = if supports_gcr {
-        AMDF_GPU_SDMA_FORMAT_FEATURE_GCR
+        AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR
     } else {
         0
     };

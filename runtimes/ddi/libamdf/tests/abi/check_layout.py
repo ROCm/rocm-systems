@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 """Compare the pinned AMDF C headers with the checked-in Rust ABI bindings."""
 
@@ -25,7 +26,7 @@ STRING = re.compile(rf"string ({IDENT}) .*")
 RUST_KEYWORDS = {
     "type", "self", "Self", "super", "crate", "async", "await", "move", "ref"
 }
-EXPECTED_RECORDS = 942  # Pinned C snapshot; update only with the headers.
+EXPECTED_RECORDS = 967  # Pinned C snapshot; update only with the headers.
 
 
 def run(command: list[str]) -> str:

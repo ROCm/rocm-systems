@@ -620,6 +620,8 @@ private:
   /// is returned. The caller must then fault the dispatch without retaining a
   /// reference into the queue entry container across that operation.
   [[nodiscard]] DispatchWorkgroupResult dispatch_workgroups(DispatchEntry &entry);
+  [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
+                                     simdojo::Tick now);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
   void dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
@@ -936,6 +938,9 @@ private:
 
   /// @brief Read a uint32 through the queue's lifetime-safe GPU address space.
   [[nodiscard]] AtomicLoadResult read_gpu_u32(AddressSpaceHandle address_space, uint64_t va) const;
+
+  /// @brief Read a uint32 through one already-captured address-space binding.
+  [[nodiscard]] AtomicLoadResult read_gpu_u32(const GpuVmAccess &access, uint64_t va) const;
 
   /// @brief Read a block of bytes from GPU virtual address space into a buffer.
   [[nodiscard]] VmAccessOutcome read_gpu_block(AddressSpaceHandle address_space, uint64_t va,
