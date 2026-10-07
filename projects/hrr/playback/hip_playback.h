@@ -21,7 +21,6 @@
 #include <chrono>
 #include <unordered_set>
 #include <memory>
-#include <thread>
 
 #include "hrr/hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 #include "hrr_region_map.h"    // external region annotations (regions/*.hrrr)
@@ -56,38 +55,28 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
 // PlaybackContext — central replay state
 // ---------------------------------------------------------------------------
 
-// Which replay threads are inside a stream capture. One thread's
-// hipStreamEndCapture must not clear the flag while another thread is still
-// capturing, so each thread is counted on its own. Converting to bool asks
-// whether any thread is capturing: device synchronization, hipMemUnmap and
-// event timing are illegal process-wide while one is (HIP 900/901).
-class ThreadCaptureFlag {
+// Which recorded streams are inside a stream capture. Keyed by the recorded
+// stream handle, so the hipStreamEndCapture replayed for a stream clears that
+// stream's capture and no other, whichever thread it runs on and however the
+// call ends. Converting to bool asks whether any capture is open: device
+// synchronization, hipMemUnmap and event timing are illegal process-wide while
+// one is (HIP 900/901).
+class StreamCaptureFlag {
   public:
-    void begin() {
+    void begin(uint64_t stream) {
         std::lock_guard<std::mutex> lk(mu_);
-        ++open_[std::this_thread::get_id()];
-        ++total_;
+        if (open_.insert(stream).second) ++total_;
     }
-    // A capture may end on a thread other than the one that began it.
-    void end() {
+    void end(uint64_t stream) {
         std::lock_guard<std::mutex> lk(mu_);
-        auto it = open_.find(std::this_thread::get_id());
-        if (it == open_.end()) it = open_.begin();
-        if (it == open_.end()) return;
-        if (--it->second == 0) open_.erase(it);
-        --total_;
+        if (open_.erase(stream)) --total_;
     }
     bool any() const { return total_.load(std::memory_order_acquire) > 0; }
     operator bool() const { return any(); }
-    bool this_thread() const {
-        if (!any()) return false;
-        std::lock_guard<std::mutex> lk(mu_);
-        return open_.count(std::this_thread::get_id()) != 0;
-    }
 
   private:
     mutable std::mutex mu_;
-    std::map<std::thread::id, int> open_;
+    std::set<uint64_t> open_;
     std::atomic<int> total_{0};
 };
 
@@ -236,11 +225,11 @@ struct PlaybackContext {
     std::unordered_map<std::string, hipFunction_t> replacement_funcs;
     std::vector<hipModule_t> replacement_modules;  // unloaded at teardown
 
-    // Set true between hipStreamBeginCapture and hipStreamEndCapture.
+    // Set between hipStreamBeginCapture and hipStreamEndCapture.
     // HIP event timing must be skipped during graph capture: recording an
     // event on a captured stream inserts it into the graph and invalidates
     // the capture state, causing error 901 on all subsequent operations.
-    ThreadCaptureFlag in_graph_capture;
+    StreamCaptureFlag in_graph_capture;
 
     // Global submission order for MT replay.
     // Each thread spin-waits until next_seq reaches its event's sequence_id,
@@ -834,11 +823,19 @@ size_t hrr_replay_alloc_pad_factor();
 // Called by dispatch_event after every event a handler replayed successfully.
 // Placement's bookkeeping that is not any one handler's business: reports a
 // fallback for each allocation API placement does not place, remembers which
-// device each memory pool allocates on, unmaps allocations freed during a
-// graph capture once no capture is open, and under --verbose prints what
-// hipPointerGetAttributes says about the replayed pointer.
+// device each memory pool allocates on, unmaps deferred frees at
+// hipCtxSynchronize and at the end of the last open capture, and under
+// --verbose prints what hipPointerGetAttributes says about the replayed
+// pointer.
 void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
                                const uint8_t* payload, size_t size);
+
+// A replayed synchronization point (`api` names it): unmap the placed
+// allocations whose free was deferred, and retry earlier unmaps that failed,
+// unless a capture is still open. hipDeviceSynchronize and
+// hipStreamSynchronize are special events that never reach
+// hrr_placement_after_event, so their handlers call this directly.
+void hrr_placement_at_sync(PlaybackContext& ctx, const char* api);
 
 // ---------------------------------------------------------------------------
 // hrr_note_unreplayable — this API cannot be reproduced, and here is why.

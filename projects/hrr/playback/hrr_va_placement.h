@@ -613,13 +613,15 @@ class VaPlacement {
 
     // If `live` is a placed mapping, unmap it and release its handle. The
     // reservation stays, so the next allocation recorded there lands again.
-    // With `defer` (a graph capture is open, and hipMemUnmap would wait for
-    // the capturing stream) it moves to a list drain_deferred() unmaps later;
-    // until then nothing is placed over it.
+    // With `defer` it moves to a list drain_deferred() unmaps later, and until
+    // then nothing is placed over it. Replay defers when a graph capture is
+    // open, since hipMemUnmap would wait for the capturing stream, and for
+    // every hipFreeAsync, since hipMemUnmap waits for every stream.
     bool unmap(void* live, bool defer = false);
     // Whether `live` is the base of a live placed mapping.
     bool is_mapped(void* live);
-    // Unmap everything unmap() deferred. Call only when no capture is open.
+    // Unmap everything unmap() deferred, and retry unmaps that failed. Call
+    // only when no capture is open. Returns how many were unmapped.
     size_t drain_deferred();
 
     // hipMemAddressReserve: give back the placeholder over [base, base+size) so
@@ -660,7 +662,7 @@ class VaPlacement {
     std::vector<VaRange> reserved_;        // placement-owned reservations, sorted
     std::vector<VaRange> alloc_holds_;     // allocation placeholders left after reserve()
     PlacedMap mapped_;                     // page base -> live mapping
-    PlacedMap deferred_;                   // freed under capture, still mapped
+    PlacedMap deferred_;                   // freed, unmap deferred or failed
     std::vector<std::vector<int>> peers_;  // device -> peers granted access
     std::vector<VaRange> vmm_held_;        // placeholders awaiting a reserve
     std::map<uint64_t, std::vector<VaRange>> vmm_released_;  // reserve base -> dropped

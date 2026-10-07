@@ -489,6 +489,8 @@ static hipError_t handle_special(PlaybackContext& ctx, const hrr::Event& ev) {
                   r, hipGetErrorString(r));
           return r;
         }
+        // Special events never reach hrr_placement_after_event.
+        hrr_placement_at_sync(ctx, "hipDeviceSynchronize");
       }
       return hipSuccess;
 
@@ -500,6 +502,7 @@ static hipError_t handle_special(PlaybackContext& ctx, const hrr::Event& ev) {
                   r, hipGetErrorString(r));
           return r;
         }
+        hrr_placement_at_sync(ctx, "hipStreamSynchronize");
       }
       return hipSuccess;
 
@@ -1713,7 +1716,7 @@ int main(int argc, char** argv) {
            (unsigned long long)ctx.placement->placed(),
            (unsigned long long)ctx.placement->fallbacks());
     if (deferred)
-      printf(", %llu freed under graph capture and unmapped later",
+      printf(", %llu frees deferred to a later sync",
              (unsigned long long)deferred);
     printf("\n");
   }

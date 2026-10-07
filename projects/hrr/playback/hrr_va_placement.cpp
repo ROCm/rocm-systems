@@ -332,14 +332,17 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
                 break;
             }
         }
-        // A mapping freed during a graph capture is still there. Unmap the
+        // A mapping freed there is still mapped, its unmap deferred. Unmap the
         // deferred ones now if no capture is open, then look again; never map
-        // over one, because the graph may still use it.
-        if (capturing || attempt == 1 || drain_deferred() == 0) {
-            snprintf(buf, sizeof(buf),
-                     "allocation 0x%llx, freed there during a graph capture, is still "
-                     "mapped", (ull)freed);
+        // over one, because a capture or a stream may still use it. The drain
+        // can find nothing when another thread drained first; the second look
+        // tells.
+        if (capturing || attempt == 1) {
+            snprintf(buf, sizeof(buf), "allocation 0x%llx, freed there, is still mapped (%s)",
+                     (ull)freed, capturing ? "a graph capture is open" : "its unmap failed");
             why = buf;
+        } else {
+            (void)drain_deferred();
         }
     }
     fell_back(rec, size, api, why);

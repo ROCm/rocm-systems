@@ -1087,12 +1087,18 @@ mapping tracked, logs it, and is tried again later. A recorded
 recording got back. When the runtime answers with another address, replay holds
 the recorded range again for a later reservation there.
 
-**Frees under a graph capture.** `hipMemUnmap` waits for every stream, the
-capturing one included, so replay cannot unmap while a capture is open. A free
-during a capture moves the mapping to a deferred list instead. The list is drained
-at the first event where no thread is capturing; the capture state is tracked per
-thread. Until then nothing is mapped over a deferred mapping, because the graph may
-still use it. The summary counts these frees.
+**Deferred frees.** `hipMemUnmap` waits for every stream, the capturing one
+included, so replay cannot unmap while a capture is open. A free during a capture
+moves the mapping to a deferred list instead. So does every placed
+`hipFreeAsync`: unmapping it on the spot would turn a stream-ordered free into a
+device-wide wait. The list is drained, and unmaps that failed earlier are tried
+again, at a replayed `hipDeviceSynchronize`, `hipStreamSynchronize` or
+`hipCtxSynchronize`, at the end of the last open capture, and when an allocation
+is placed over a deferred one. Nothing drains while any recorded stream is still
+capturing. A replayed `hipStreamEndCapture` closes its stream's capture even when
+the call fails, so a capture that ended badly does not hold the list forever.
+Until it drains, nothing is mapped over a deferred mapping, because the graph or
+the stream may still use it. The summary counts these frees.
 
 **Several GPUs.** A placed allocation is backed on the device it was made on: the
 current device for `hipMalloc`, the stream's device for `hipMallocAsync`, and the
