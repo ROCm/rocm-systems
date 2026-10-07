@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Descriptor fields describe one requested native queue. Engine-specific
 //! options stay tagged with their packet format so unrelated fields cannot be
 //! mistaken for each other. Each creation requests an independently owned
@@ -29,6 +31,17 @@ pub enum QueueProducerMode {
     Multiple,
 }
 
+/// Placement of a native packet ring. Both choices retain a host mapping for
+/// producers; local memory requires CPU-visible VRAM on the selected GPU.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum QueueRingMemory {
+    /// System memory owned by the native queue.
+    #[default]
+    System,
+    /// Host-visible local memory owned by the native queue.
+    HostVisibleLocal,
+}
+
 /// Packet format and its engine-specific creation parameters. PM4 and AQL use
 /// compute engines; SDMA uses a copy engine. Producer discipline is an AQL
 /// option, not a substitute for this format selection.
@@ -44,6 +57,13 @@ pub enum QueueParameters {
     Aql {
         /// Producer discipline that the caller will uphold.
         producer_mode: QueueProducerMode,
+        /// Native packet-ring placement. The caller still owns packet-store
+        /// ordering before advancing the write index and ringing the doorbell.
+        ring_memory: QueueRingMemory,
+        /// Allocate native global work synchronization for this queue before
+        /// publishing its transport. KFD permits only one such queue per
+        /// process and device; sharing it is the caller's policy.
+        global_work_sync: bool,
         /// GPU-visible signal payload used by firmware to stop and report AQL
         /// queue errors, or `None` when the frontend does not service them.
         /// The frontend retains the signal storage through queue destruction.
@@ -54,8 +74,26 @@ pub enum QueueParameters {
         /// Fixed AQL scratch backing, or `None` for a no-scratch queue.
         scratch: Option<QueueScratch>,
     },
-    /// A byte-addressed SDMA copy queue with native engine selection.
+    /// A byte-addressed SDMA copy queue with the backend's ordinary engine
+    /// selection. Existing callers need no engine-specific policy.
     Sdma,
+    /// A byte-addressed SDMA copy queue routed to a selected native engine.
+    SdmaByEngine {
+        /// Explicit engine ID or round-robin selection within one device VM.
+        selection: SdmaEngineSelection,
+        /// Native packet-ring placement. Producers order packet stores before
+        /// advancing the write index and ringing the doorbell.
+        ring_memory: QueueRingMemory,
+    },
+}
+
+/// Native SDMA engine selection for a targeted queue request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SdmaEngineSelection {
+    /// Select the next engine in the device's round-robin sequence.
+    Any,
+    /// Select this engine in the device's general-plus-XGMI ID space.
+    Id(u32),
 }
 
 /// Fixed scratch backing supplied for the lifetime of one AQL queue. The
@@ -122,6 +160,9 @@ pub struct QueueTransport {
     pub ring_device_address: u64,
     /// Usable ring capacity in bytes, independent of native index units.
     pub ring_size_bytes: u64,
+    /// Resolved engine ID for a targeted SDMA queue, or `None` for other
+    /// formats and the backend-selected generic SDMA format.
+    pub sdma_engine_id: Option<u32>,
     /// Host mapping of the device-maintained read index.
     pub read_index_host_address: usize,
     /// Queue-device address of the device-maintained read index.

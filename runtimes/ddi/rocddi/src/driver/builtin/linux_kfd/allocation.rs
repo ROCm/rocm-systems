@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Linux allocation owner selected by the native backing mechanism.
 //!
 //! The core sees one allocation contract. KFD and DRM retain separate
@@ -8,7 +10,7 @@ use super::imported_system::DrmImportedSystem;
 use super::memory::{self, DeviceVm, KfdAllocation, error};
 use super::registered_host::DrmRegisteredHost;
 use crate::host_storage::{Owned, Shared};
-use crate::memory::interop::linux::{DmaBuf, KfdIpcMemoryHandle};
+use crate::memory::interop::linux::{AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle};
 use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
 use crate::{Error, ErrorKind};
 
@@ -51,7 +53,11 @@ impl NativeAllocation {
         )?)
     }
 
-    pub(super) fn create_registered_host(
+    /// # Safety
+    /// The caller retains and synchronizes the entire borrowed host page cover
+    /// through successful cleanup or process teardown.
+    #[allow(unsafe_code)]
+    pub(super) unsafe fn create_registered_host(
         vm: Shared<DeviceVm>,
         peers: impl ExactSizeIterator<Item = Shared<DeviceVm>>,
         desc: AllocationDesc,
@@ -61,8 +67,9 @@ impl NativeAllocation {
     ) -> Result<Owned<Self>, Error> {
         let allocator = vm.allocator();
         let owner = Owned::try_new_uninit(allocator)?;
+        // SAFETY: The caller of this function owns the retained-page contract.
         let registration =
-            DrmRegisteredHost::create(vm, peers, desc, address, permissions, uncached)?;
+            unsafe { DrmRegisteredHost::create(vm, peers, desc, address, permissions, uncached)? };
         Ok(owner.write(Self::DrmRegisteredHost(registration)))
     }
 
@@ -148,6 +155,23 @@ impl NativeAllocation {
         }
     }
 
+    pub(super) fn is_device_local(&self) -> bool {
+        match self {
+            Self::Kfd(allocation) => allocation.is_device_local(),
+            Self::DrmRegisteredHost(_) | Self::DrmImportedSystem(_) => false,
+        }
+    }
+
+    pub(super) fn set_access(&mut self, devices: &[&Shared<DeviceVm>]) -> Result<(), Error> {
+        match self {
+            Self::Kfd(allocation) => allocation.set_access(devices),
+            Self::DrmRegisteredHost(_) | Self::DrmImportedSystem(_) => Err(error(
+                ErrorKind::Unsupported,
+                "this allocation cannot change its native device mappings",
+            )),
+        }
+    }
+
     pub(super) fn device_address(&self, device: &Shared<DeviceVm>) -> Result<u64, Error> {
         match self {
             Self::Kfd(allocation) => allocation.device_address(device),
@@ -195,6 +219,31 @@ impl NativeAllocation {
                 "DRM-imported storage has no KFD IPC export",
             )),
         }
+    }
+
+    pub(super) fn ais_transfer(
+        &self,
+        descriptor: i32,
+        offset: u64,
+        size: u64,
+        file_offset: i64,
+        operation: AisFileOperation,
+    ) -> Result<AisFileResult, Error> {
+        let Self::Kfd(allocation) = self else {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "AIS requires a KFD VRAM allocation",
+            ));
+        };
+        let operation = match operation {
+            AisFileOperation::Read => super::uapi::AIS_READ,
+            AisFileOperation::Write => super::uapi::AIS_WRITE,
+        };
+        let output = allocation.ais_transfer(descriptor, offset, size, file_offset, operation)?;
+        Ok(AisFileResult {
+            size_copied: output.size_copied,
+            status: output.status,
+        })
     }
 
     pub(super) fn signal_event_page_handle(&self, device: &Shared<DeviceVm>) -> Result<u64, Error> {

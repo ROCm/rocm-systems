@@ -1,13 +1,15 @@
-//! Session-owned VM bindings and independently owned KFD allocations.
+// SPDX-License-Identifier: MIT
+
+//! Native VM bindings and independently owned KFD allocations.
 //!
-//! A primary-process VM may survive session destruction in the kernel. This
-//! session retains exact render files for device recreation while it remains
-//! live; there is no process-wide registry or deferred resource collection.
+//! A primary-process VM may survive session destruction in the kernel. The
+//! Linux process connection retains its exact render files through exit for
+//! later activation; secondary bindings are released with their session.
 use super::{drm, sys, sysfs, uapi, util};
 use crate::event::GpuMemoryFault;
 use crate::host_storage::{Allocator, Buffer, Owned, Shared};
 use crate::memory::interop::linux::{DmaBuf, DmaBufInfo, KfdIpcMemoryHandle};
-use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
+use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess, HostCachePolicy};
 use crate::{Error, ErrorKind};
 use std::fs::File;
 use std::io;
@@ -18,7 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 /// Process-local set of activated device VMs and their shared loss events.
 ///
 /// `process` rejects use after `fork`, while the mutex serializes publication,
-/// reuse, and shutdown of the exact VM owners retained by this session.
+/// reuse, and shutdown of the exact VM owners retained by this connection.
 pub(super) struct VmBindings {
     process: AtomicU32,
     bindings: Mutex<Bindings>,
@@ -37,8 +39,6 @@ const IPC_APERTURE_DGPU: u32 = 1;
 const IPC_APERTURE_DGPU_ALT: u32 = 2;
 const IPC_APERTURE_GPUVM: u32 = 3;
 const IPC_FRAGMENT: u32 = 1 << 31;
-const SCRATCH_BYTES_PER_XCC: u64 = 4 << 30;
-const GFX12_SCRATCH_BYTES_PER_XCC: u64 = 8 << 30;
 
 /// One free or allocated interval in the process scratch aperture.
 #[derive(Clone, Copy)]
@@ -61,11 +61,8 @@ struct ScratchPool {
 
 impl ScratchPool {
     fn new(properties: sysfs::NativeQueueProperties, allocator: Allocator) -> Self {
-        let per_xcc = if properties.gfx_target / 10_000 >= 12 {
-            GFX12_SCRATCH_BYTES_PER_XCC
-        } else {
-            SCRATCH_BYTES_PER_XCC
-        };
+        let per_xcc =
+            crate::topology::GpuInfo::scratch_bytes_per_xcc(properties.gfx_target / 10_000);
         let capacity = per_xcc
             .checked_mul(u64::from(properties.xcc_count))
             .filter(|capacity| *capacity != 0 && usize::try_from(*capacity).is_ok())
@@ -423,6 +420,7 @@ impl VmBindings {
                 limit: aperture.gpuvm_limit,
                 lds_base: aperture.lds_base,
                 scratch_base: aperture.scratch_base,
+                sdma_next_engine: AtomicU32::new(0),
                 scratch: Mutex::new(ScratchPool::new(node.queues, kfd_allocator)),
                 vmem: Mutex::new(super::vmem::VmState::new(kfd_allocator)),
                 version,
@@ -461,6 +459,7 @@ pub(crate) struct DeviceVm {
     limit: u64,
     lds_base: u64,
     scratch_base: u64,
+    sdma_next_engine: AtomicU32,
     scratch: Mutex<ScratchPool>,
     pub(super) vmem: Mutex<super::vmem::VmState>,
     pub(super) version: uapi::Version,
@@ -523,6 +522,11 @@ impl DeviceVm {
 
     pub(super) fn gpu_id(&self) -> u32 {
         self.gpu_id
+    }
+
+    pub(super) fn next_sdma_engine_id(&self, count: u32) -> u32 {
+        debug_assert!(count != 0);
+        self.sdma_next_engine.fetch_add(1, Ordering::Relaxed) % count
     }
 
     pub(super) fn shares_kfd(&self, other: &Self) -> bool {
@@ -765,6 +769,29 @@ enum GpuMapping {
     Unmapped,
 }
 
+struct AccessChange {
+    gpu_id: u32,
+    map: bool,
+    completed: u32,
+}
+
+/// Borrowed pages that KFD may reach after allocation returns.
+#[derive(Clone, Copy)]
+pub(super) struct BorrowedHostPages {
+    address: usize,
+    cache: HostCachePolicy,
+}
+
+impl BorrowedHostPages {
+    /// # Safety
+    /// The caller retains the complete page cover and synchronizes CPU and GPU
+    /// access until successful allocation cleanup or process teardown.
+    #[allow(unsafe_code)]
+    pub(super) unsafe fn new(address: usize, cache: HostCachePolicy) -> Self {
+        Self { address, cache }
+    }
+}
+
 /// Concrete KFD buffer placement. GTT supplies SYSTEM allocations and queue
 /// backing; CPU-only allocations use separate OS mappings and acquire no GPU
 /// access as a side effect.
@@ -779,12 +806,18 @@ pub(super) enum BufferKind {
     Gtt,
     Mmio,
     OwnedUserptr {
-        uncached: bool,
+        cache: HostCachePolicy,
     },
-    Userptr {
-        address: usize,
-        uncached: bool,
-    },
+    Userptr(BorrowedHostPages),
+}
+
+fn host_cache_flags(cache: HostCachePolicy) -> u32 {
+    match cache {
+        HostCachePolicy::Coarse => 0,
+        HostCachePolicy::Fine => uapi::COHERENT,
+        HostCachePolicy::Extended => uapi::COHERENT | uapi::EXT_COHERENT,
+        HostCachePolicy::Uncached => uapi::COHERENT | uapi::UNCACHED,
+    }
 }
 
 /// One peer VM retained for the complete lifetime of its native mapping.
@@ -812,14 +845,16 @@ pub(crate) struct KfdAllocation {
     metadata: Buffer<u8>,
     scratch_range: Option<(u64, u64)>,
     mapping: GpuMapping,
+    access_change: Option<AccessChange>,
     freeing: bool,
     uncertain: bool,
 }
 
 fn allocation_source(kind: BufferKind, size: usize) -> Result<(Option<usize>, usize, u64), Error> {
-    let BufferKind::Userptr { address, .. } = kind else {
+    let BufferKind::Userptr(pages) = kind else {
         return Ok((None, 0, 0));
     };
+    let address = pages.address;
     let page =
         util::page_size().map_err(|source| native_error("registered host page size", source))?;
     let offset = address & (page - 1);
@@ -925,16 +960,41 @@ impl KfdAllocation {
                 "allocation size exceeds host width",
             )
         })?;
+        let page = util::page_size().map_err(|source| native_error("native page size", source))?;
+        if size == 0 {
+            return Err(error(ErrorKind::InvalidArgument, "allocation size is zero"));
+        }
+        let userptr_offset = match kind {
+            BufferKind::Userptr(pages) => pages.address & (page - 1),
+            _ => 0,
+        };
+        let native_size = size
+            .checked_add(userptr_offset)
+            .and_then(|size| size.checked_add(page - 1))
+            .map(|size| size & !(page - 1))
+            .ok_or_else(|| {
+                error(
+                    ErrorKind::ResourceExhausted,
+                    "native allocation size overflows",
+                )
+            })?;
+        if !desc.alignment.is_power_of_two() {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "allocation alignment must be a nonzero power of two",
+            ));
+        }
         let alignment = usize::try_from(desc.alignment)
-            .map_err(|_| error(ErrorKind::InvalidArgument, "alignment exceeds host width"))?;
+            .map_err(|_| error(ErrorKind::InvalidArgument, "alignment exceeds host width"))?
+            .max(page);
         let (mut host_address, device_byte_offset, mut mmap_offset) =
-            allocation_source(kind, size)?;
+            allocation_source(kind, native_size)?;
         vm.check()?;
         let owned_userptr = matches!(kind, BufferKind::OwnedUserptr { .. });
         let reservation = if owned_userptr {
-            sys::Reservation::new_shared_host(size, alignment, bounds)
+            sys::Reservation::new_shared_host(native_size, alignment, bounds)
         } else {
-            sys::Reservation::new(size, alignment, bounds, false)
+            sys::Reservation::new(native_size, alignment, bounds, false)
         }
         .map_err(|source| native_error("GPU address reservation", source))?;
         if owned_userptr {
@@ -961,6 +1021,7 @@ impl KfdAllocation {
                 metadata: Buffer::new(allocator),
                 scratch_range: None,
                 mapping: GpuMapping::NotStarted,
+                access_change: None,
                 freeing: false,
                 uncertain: false,
             },
@@ -968,7 +1029,7 @@ impl KfdAllocation {
         )?;
         let mut args = uapi::AllocMemory {
             va: allocation.address()? as u64,
-            size: desc.size,
+            size: native_size as u64,
             mmap_offset,
             gpu_id: allocation.vm.gpu_id,
             flags: permission_flags
@@ -990,20 +1051,11 @@ impl KfdAllocation {
                         uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE
                     }
                     BufferKind::Mmio => uapi::MMIO_REMAP | uapi::COHERENT,
-                    BufferKind::OwnedUserptr { uncached } => {
-                        uapi::USERPTR
-                            | uapi::COHERENT
-                            | uapi::NO_SUBSTITUTE
-                            | if uncached { uapi::UNCACHED } else { 0 }
+                    BufferKind::OwnedUserptr { cache } => {
+                        uapi::USERPTR | uapi::NO_SUBSTITUTE | host_cache_flags(cache)
                     }
-                    BufferKind::Userptr { uncached, .. } => {
-                        uapi::USERPTR
-                            | uapi::NO_SUBSTITUTE
-                            | if uncached {
-                                uapi::UNCACHED
-                            } else {
-                                uapi::COHERENT
-                            }
+                    BufferKind::Userptr(pages) => {
+                        uapi::USERPTR | uapi::NO_SUBSTITUTE | host_cache_flags(pages.cache)
                     }
                 },
             ..uapi::AllocMemory::default()
@@ -1089,7 +1141,8 @@ impl KfdAllocation {
                 "scratch size exceeds the host address width",
             )
         })?;
-        if desc.alignment > 4096 || size == 0 || size % 4096 != 0 {
+        let page = util::page_size().map_err(|source| native_error("scratch page size", source))?;
+        if desc.alignment > page as u64 || size == 0 || size % page != 0 {
             return Err(error(
                 ErrorKind::InvalidArgument,
                 "invalid native scratch extent or alignment",
@@ -1100,43 +1153,37 @@ impl KfdAllocation {
         let peers = Buffer::new(allocator);
         let mut gpu_ids = Buffer::try_with_capacity(1, allocator)?;
         gpu_ids.try_push(vm.gpu_id)?;
+        // Reserve owner storage before taking an aperture range. Once the
+        // range is acquired, publication of its cleanup owner cannot fail.
+        let owner = Owned::<Self>::try_new_uninit(allocator)?;
         let address = vm.allocate_scratch(desc.size)?;
-        let reservation = sys::Reservation::view(
-            usize::try_from(address).map_err(|_| {
-                error(
-                    ErrorKind::ResourceExhausted,
-                    "scratch address exceeds the host address width",
-                )
-            })?,
-            size,
-        );
-        let mut allocation = match Owned::new(
-            Self {
-                vm: vm.clone(),
-                peers,
-                gpu_ids,
-                reservation: Some(reservation),
-                handle: None,
-                host_address: None,
-                device_byte_offset: 0,
-                logical_size: desc.size,
-                origin_gpu_id,
-                native_flags: 0,
-                physical_backing_id: [0; 2],
-                metadata: Buffer::new(allocator),
-                scratch_range: Some((address, desc.size)),
-                mapping: GpuMapping::NotStarted,
-                freeing: false,
-                uncertain: false,
-            },
-            allocator,
-        ) {
-            Ok(allocation) => allocation,
-            Err(source) => {
-                vm.release_scratch(address, desc.size)?;
-                return Err(source.into());
-            }
+        let Ok(address_usize) = usize::try_from(address) else {
+            vm.release_scratch(address, desc.size)?;
+            return Err(error(
+                ErrorKind::ResourceExhausted,
+                "scratch address exceeds the host address width",
+            ));
         };
+        let reservation = sys::Reservation::view(address_usize, size);
+        let mut allocation = owner.write(Self {
+            vm: vm.clone(),
+            peers,
+            gpu_ids,
+            reservation: Some(reservation),
+            handle: None,
+            host_address: None,
+            device_byte_offset: 0,
+            logical_size: desc.size,
+            origin_gpu_id,
+            native_flags: 0,
+            physical_backing_id: [0; 2],
+            metadata: Buffer::new(allocator),
+            scratch_range: Some((address, desc.size)),
+            mapping: GpuMapping::NotStarted,
+            access_change: None,
+            freeing: false,
+            uncertain: false,
+        });
         let mut args = uapi::AllocMemory {
             va: address,
             size: desc.size,
@@ -1278,6 +1325,7 @@ impl KfdAllocation {
                 metadata: details.metadata,
                 scratch_range: None,
                 mapping: GpuMapping::NotStarted,
+                access_change: None,
                 freeing: false,
                 uncertain: false,
             },
@@ -1437,6 +1485,7 @@ impl KfdAllocation {
                 metadata: details.metadata,
                 scratch_range: None,
                 mapping: GpuMapping::NotStarted,
+                access_change: None,
                 freeing: false,
                 uncertain: false,
             },
@@ -1563,7 +1612,9 @@ impl KfdAllocation {
             }
         }
 
-        let reservation = sys::Reservation::new(native_size_usize, 4096, bounds, false)
+        let page = util::page_size()
+            .map_err(|source| native_error("IPC memory host page size", source))?;
+        let reservation = sys::Reservation::new(native_size_usize, page, bounds, false)
             .map_err(|source| native_error("IPC memory address reservation", source))?;
         let mut allocation = Owned::new(
             Self {
@@ -1581,6 +1632,7 @@ impl KfdAllocation {
                 metadata: Buffer::new(allocator),
                 scratch_range: None,
                 mapping: GpuMapping::NotStarted,
+                access_change: None,
                 freeing: false,
                 uncertain: false,
             },
@@ -1645,6 +1697,10 @@ impl KfdAllocation {
 
     pub(super) fn is_owned_by(&self, device: &Shared<DeviceVm>) -> bool {
         self.vm.shares_kfd(device) && self.origin_gpu_id == device.gpu_id
+    }
+
+    pub(super) fn is_device_local(&self) -> bool {
+        self.native_flags & uapi::VRAM != 0
     }
 
     pub(crate) fn metadata(&self) -> &[u8] {
@@ -1772,6 +1828,141 @@ impl KfdAllocation {
             })
     }
 
+    fn finish_access_change(&mut self) -> Result<(), Error> {
+        let Some(change) = self.access_change.as_mut() else {
+            return Ok(());
+        };
+        let handle = self.handle.ok_or_else(|| {
+            error(
+                ErrorKind::DriverContract,
+                "KFD access change has no allocation handle",
+            )
+        })?;
+        let result = self.vm.loss.kfd.transfer(
+            handle,
+            std::slice::from_ref(&change.gpu_id),
+            &mut change.completed,
+            change.map,
+        );
+        if result.as_ref().err().is_some_and(|source| {
+            source.kind() == io::ErrorKind::InvalidData || source.raw_os_error() == Some(14)
+        }) {
+            self.uncertain = true;
+        }
+        result.map_err(|source| {
+            native_error(
+                if change.map {
+                    "AMDKFD_IOC_MAP_MEMORY_TO_GPU"
+                } else {
+                    "AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU"
+                },
+                source,
+            )
+        })?;
+        let gpu_id = change.gpu_id;
+        if !change.map {
+            if let Some(index) = self.gpu_ids.iter().position(|id| *id == gpu_id) {
+                let last = self.gpu_ids.len() - 1;
+                self.gpu_ids.as_mut_slice().swap(index, last);
+                self.gpu_ids.pop();
+            }
+            if let Some(index) = self.peers.iter().position(|peer| peer.vm.gpu_id == gpu_id) {
+                let last = self.peers.len() - 1;
+                self.peers.as_mut_slice().swap(index, last);
+                self.peers.pop();
+            }
+        }
+        self.access_change = None;
+        Ok(())
+    }
+
+    pub(super) fn set_access(&mut self, devices: &[&Shared<DeviceVm>]) -> Result<(), Error> {
+        self.check_address()?;
+        let reservation = self.reservation.as_ref().ok_or_else(|| {
+            error(
+                ErrorKind::Internal,
+                "GPU allocation lost its address reservation",
+            )
+        })?;
+        let address = reservation.address() as u64;
+        let end = address
+            .checked_add(reservation.usable_size() as u64 - 1)
+            .ok_or_else(|| error(ErrorKind::Internal, "GPU allocation address overflow"))?;
+        for (index, device) in devices.iter().enumerate() {
+            if !self.vm.shares_kfd(device) {
+                return Err(error(
+                    ErrorKind::InvalidArgument,
+                    "access device must share the allocation's KFD session",
+                ));
+            }
+            device.check()?;
+            let (base, limit) = device.address_range();
+            if address < base || end > limit {
+                return Err(error(
+                    ErrorKind::Unsupported,
+                    "allocation is outside an access device's address range",
+                ));
+            }
+            if devices[..index]
+                .iter()
+                .any(|prior| prior.gpu_id == device.gpu_id && !Shared::ptr_eq(prior, device))
+                || (self.vm.gpu_id == device.gpu_id && !Shared::ptr_eq(&self.vm, device))
+                || self.peers.iter().any(|peer| {
+                    peer.vm.gpu_id == device.gpu_id && !Shared::ptr_eq(&peer.vm, device)
+                })
+            {
+                return Err(error(
+                    ErrorKind::InvalidArgument,
+                    "distinct VM bindings must have distinct GPU IDs",
+                ));
+            }
+        }
+        let additions = devices
+            .iter()
+            .enumerate()
+            .filter(|(index, device)| {
+                !self.gpu_ids.iter().any(|id| *id == device.gpu_id)
+                    && !devices[..*index]
+                        .iter()
+                        .any(|prior| prior.gpu_id == device.gpu_id)
+            })
+            .count();
+        self.gpu_ids.try_reserve(additions)?;
+        self.peers.try_reserve(additions)?;
+        self.finish_access_change()?;
+        for device in devices {
+            if self.gpu_ids.iter().any(|id| *id == device.gpu_id) {
+                continue;
+            }
+            self.gpu_ids.try_push(device.gpu_id)?;
+            if !Shared::ptr_eq(&self.vm, device) {
+                self.peers.try_push(PeerVm {
+                    vm: (*device).clone(),
+                })?;
+            }
+            self.access_change = Some(AccessChange {
+                gpu_id: device.gpu_id,
+                map: true,
+                completed: 0,
+            });
+            self.finish_access_change()?;
+        }
+        while let Some(gpu_id) = self
+            .gpu_ids
+            .iter()
+            .copied()
+            .find(|id| !devices.iter().any(|device| device.gpu_id == *id))
+        {
+            self.access_change = Some(AccessChange {
+                gpu_id,
+                map: false,
+                completed: 0,
+            });
+            self.finish_access_change()?;
+        }
+        self.vm.check()
+    }
+
     fn transfer(&mut self) -> Result<(), Error> {
         let handle = self.handle.ok_or_else(|| {
             error(
@@ -1819,7 +2010,7 @@ impl KfdAllocation {
 
     fn check_address(&self) -> Result<(), Error> {
         self.vm.check()?;
-        if self.freeing || !matches!(self.mapping, GpuMapping::Mapped) {
+        if self.freeing || self.uncertain || !matches!(self.mapping, GpuMapping::Mapped) {
             Err(error(
                 ErrorKind::Unsupported,
                 "GPU allocation is not available for access",
@@ -1831,6 +2022,84 @@ impl KfdAllocation {
 }
 
 impl KfdAllocation {
+    pub(super) fn ais_transfer(
+        &self,
+        descriptor: i32,
+        offset: u64,
+        size: u64,
+        file_offset: i64,
+        operation: u32,
+    ) -> Result<uapi::AisOutput, Error> {
+        self.check_address()?;
+        if self.native_flags & (uapi::VRAM | uapi::GTT | uapi::USERPTR) != uapi::VRAM {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "AIS requires a mapped VRAM allocation",
+            ));
+        }
+        if operation == uapi::AIS_READ && self.native_flags & uapi::WRITABLE == 0 {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "AIS file read requires writable VRAM",
+            ));
+        }
+        let size = size.min(crate::memory::interop::linux::AIS_MAX_TRANSFER_BYTES);
+        let signed_size = i64::try_from(size).map_err(|_| {
+            error(
+                ErrorKind::InvalidArgument,
+                "AIS transfer exceeds the file offset range",
+            )
+        })?;
+        if descriptor < 0
+            || file_offset < 0
+            || file_offset.checked_add(signed_size).is_none()
+            || size == 0
+            || offset
+                .checked_add(size)
+                .is_none_or(|end| end > self.logical_size)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "invalid AIS descriptor, offset, or logical range",
+            ));
+        }
+        let handle_offset = (self.device_byte_offset as u64)
+            .checked_add(offset)
+            .ok_or_else(|| error(ErrorKind::InvalidArgument, "AIS backing offset overflows"))?;
+        let native_size = self
+            .reservation
+            .as_ref()
+            .ok_or_else(|| error(ErrorKind::Internal, "AIS allocation lost its reservation"))?
+            .usable_size() as u64;
+        if handle_offset
+            .checked_add(size)
+            .is_none_or(|end| end > native_size)
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "AIS range exceeds the native backing",
+            ));
+        }
+        let handle = self.handle.ok_or_else(|| {
+            error(
+                ErrorKind::DriverContract,
+                "AIS allocation has no KFD handle",
+            )
+        })?;
+        self.vm
+            .loss
+            .kfd
+            .ais(uapi::AisInput {
+                handle,
+                handle_offset,
+                file_offset,
+                size,
+                operation,
+                descriptor,
+            })
+            .map_err(|source| native_error("AMDKFD_IOC_AIS_OP", source))
+    }
+
     pub(super) fn peer_mapping_source(
         &self,
         device: &Shared<DeviceVm>,
@@ -1870,7 +2139,11 @@ impl KfdAllocation {
 
     pub(super) fn device_address(&self, device: &Shared<DeviceVm>) -> Result<u64, Error> {
         self.check_address()?;
-        if !self.vm.shares_kfd(device)
+        if self
+            .access_change
+            .as_ref()
+            .is_some_and(|change| change.gpu_id == device.gpu_id)
+            || !self.vm.shares_kfd(device)
             || !self.gpu_ids.iter().any(|gpu_id| *gpu_id == device.gpu_id)
         {
             return Err(error(
@@ -2007,6 +2280,7 @@ impl KfdAllocation {
                 ),
             ));
         }
+        self.finish_access_change()?;
         if matches!(self.mapping, GpuMapping::Mapping(_)) {
             self.finish_map()?;
         }
@@ -2070,6 +2344,7 @@ pub(super) fn native_error(operation: &'static str, source: io::Error) -> Error 
         io::ErrorKind::OutOfMemory => ErrorKind::ResourceExhausted,
         io::ErrorKind::Unsupported => ErrorKind::Unsupported,
         io::ErrorKind::InvalidData => ErrorKind::DriverContract,
+        io::ErrorKind::WouldBlock => ErrorKind::Busy,
         _ => match source.raw_os_error() {
             Some(11 | 16) => ErrorKind::Busy,
             Some(12 | 28) => ErrorKind::ResourceExhausted,
@@ -2133,6 +2408,7 @@ pub(super) fn queue_fixture_with_range(
             limit: bounds.1,
             lds_base: 0x1000_0000_0000,
             scratch_base: 0x2000_0000_0000,
+            sdma_next_engine: AtomicU32::new(0),
             scratch: Mutex::new(ScratchPool::new(
                 sysfs::NativeQueueProperties {
                     gfx_target: 120_001,

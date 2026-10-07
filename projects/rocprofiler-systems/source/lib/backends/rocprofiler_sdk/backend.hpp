@@ -139,6 +139,91 @@ struct backend
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_RCCL_API =
         Wrapper::CALLBACK_TRACING_RCCL_API;
 
+    // ─── RCCL / NCCL types and constants ─────────────────────────────────────────
+    using rccl_api_data    = Wrapper::rccl_api_data;
+    using rccl_api_id_t    = Wrapper::rccl_api_id_t;
+    using nccl_data_type_t = Wrapper::nccl_data_type_t;
+    using nccl_comm_t      = Wrapper::nccl_comm_t;
+    using nccl_result_t    = Wrapper::nccl_result_t;
+
+    // NOLINTBEGIN(readability-identifier-naming) names mirror RCCL / rocprofiler-sdk
+    // headers
+    static constexpr nccl_result_t NCCL_SUCCESS = Wrapper::NCCL_SUCCESS;
+
+    static constexpr bool k_are_nccl_fp8_types_available =
+        Wrapper::k_are_nccl_fp8_types_available;
+
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather =
+        Wrapper::RCCL_API_ID_ncclAllGather;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllToAll =
+        Wrapper::RCCL_API_ID_ncclAllToAll;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllReduce =
+        Wrapper::RCCL_API_ID_ncclAllReduce;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclGather =
+        Wrapper::RCCL_API_ID_ncclGather;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclRecv = Wrapper::RCCL_API_ID_ncclRecv;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduce =
+        Wrapper::RCCL_API_ID_ncclReduce;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclBroadcast =
+        Wrapper::RCCL_API_ID_ncclBroadcast;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduceScatter =
+        Wrapper::RCCL_API_ID_ncclReduceScatter;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclSend = Wrapper::RCCL_API_ID_ncclSend;
+
+#if defined(ROCPROFILER_RCCL_API_ID_ncclAlltoAll)
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAlltoAll =
+        Wrapper::RCCL_API_ID_ncclAlltoAll;
+#endif
+    // NOLINTEND(readability-identifier-naming)
+
+#if ROCPROFILER_VERSION >= 600
+    // ─── OMPT types and constants ─────────────────────────────────────────────────
+    using ompt_operation_t             = Wrapper::ompt_operation_t;
+    using callback_tracing_ompt_data_t = Wrapper::ompt_data_t;
+    using ompt_thread_t                = Wrapper::ompt_thread_t;
+
+    // NOLINTBEGIN(readability-identifier-naming) -- names mirror OMPT / rocprofiler-sdk
+    static constexpr ompt_thread_t OMPT_THREAD_INITIAL = Wrapper::OMPT_THREAD_INITIAL;
+
+    static constexpr ompt_operation_t OMPT_ID_thread_begin =
+        Wrapper::OMPT_ID_thread_begin;
+    static constexpr ompt_operation_t OMPT_ID_thread_end = Wrapper::OMPT_ID_thread_end;
+    static constexpr ompt_operation_t OMPT_ID_parallel_begin =
+        Wrapper::OMPT_ID_parallel_begin;
+    static constexpr ompt_operation_t OMPT_ID_parallel_end =
+        Wrapper::OMPT_ID_parallel_end;
+    static constexpr ompt_operation_t OMPT_ID_task_create = Wrapper::OMPT_ID_task_create;
+    static constexpr ompt_operation_t OMPT_ID_task_schedule =
+        Wrapper::OMPT_ID_task_schedule;
+    static constexpr ompt_operation_t OMPT_ID_implicit_task =
+        Wrapper::OMPT_ID_implicit_task;
+    static constexpr ompt_operation_t OMPT_ID_device_initialize =
+        Wrapper::OMPT_ID_device_initialize;
+    static constexpr ompt_operation_t OMPT_ID_device_finalize =
+        Wrapper::OMPT_ID_device_finalize;
+    static constexpr ompt_operation_t OMPT_ID_device_load = Wrapper::OMPT_ID_device_load;
+    static constexpr ompt_operation_t OMPT_ID_mutex_released =
+        Wrapper::OMPT_ID_mutex_released;
+    static constexpr ompt_operation_t OMPT_ID_dependences = Wrapper::OMPT_ID_dependences;
+    static constexpr ompt_operation_t OMPT_ID_task_dependence =
+        Wrapper::OMPT_ID_task_dependence;
+    static constexpr ompt_operation_t OMPT_ID_lock_init = Wrapper::OMPT_ID_lock_init;
+    static constexpr ompt_operation_t OMPT_ID_lock_destroy =
+        Wrapper::OMPT_ID_lock_destroy;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquire =
+        Wrapper::OMPT_ID_mutex_acquire;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquired =
+        Wrapper::OMPT_ID_mutex_acquired;
+    static constexpr ompt_operation_t OMPT_ID_nest_lock = Wrapper::OMPT_ID_nest_lock;
+    static constexpr ompt_operation_t OMPT_ID_flush     = Wrapper::OMPT_ID_flush;
+    static constexpr ompt_operation_t OMPT_ID_cancel    = Wrapper::OMPT_ID_cancel;
+    static constexpr ompt_operation_t OMPT_ID_dispatch  = Wrapper::OMPT_ID_dispatch;
+    static constexpr ompt_operation_t OMPT_ID_error     = Wrapper::OMPT_ID_error;
+    static constexpr ompt_operation_t OMPT_ID_callback_functions =
+        Wrapper::OMPT_ID_callback_functions;
+    // NOLINTEND(readability-identifier-naming)
+#endif
+
 #if ROCPROFILER_VERSION >= 600
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_ROCDECODE_API =
         Wrapper::CALLBACK_TRACING_ROCDECODE_API;
@@ -634,6 +719,45 @@ public:
         }
 
         return 0;
+    }
+
+    [[nodiscard]] static constexpr bool is_rccl_fp8_type(
+        Wrapper::nccl_data_type_t datatype) noexcept
+    {
+        if constexpr(Wrapper::k_are_nccl_fp8_types_available)
+        {
+            return datatype == Wrapper::NCCL_FP8_E4M3 ||
+                   datatype == Wrapper::NCCL_FP8_E5M2;
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    [[nodiscard]] static constexpr size_t rccl_type_size(
+        Wrapper::nccl_data_type_t datatype) noexcept
+    {
+        constexpr size_t k_no_size     = 0;
+        constexpr size_t k_byte        = 1;
+        constexpr size_t k_two_bytes   = 2;
+        constexpr size_t k_four_bytes  = 4;
+        constexpr size_t k_eight_bytes = 8;
+
+        switch(datatype)
+        {
+            case Wrapper::NCCL_INT8:
+            case Wrapper::NCCL_UINT8: return k_byte;
+            case Wrapper::NCCL_FLOAT16:
+            case Wrapper::NCCL_BFLOAT16: return k_two_bytes;
+            case Wrapper::NCCL_INT32:
+            case Wrapper::NCCL_UINT32:
+            case Wrapper::NCCL_FLOAT32: return k_four_bytes;
+            case Wrapper::NCCL_INT64:
+            case Wrapper::NCCL_UINT64:
+            case Wrapper::NCCL_FLOAT64: return k_eight_bytes;
+            default: return is_rccl_fp8_type(datatype) ? k_byte : k_no_size;
+        }
     }
 };
 

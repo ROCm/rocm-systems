@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! One bounded DRM command stream in the KFD-bound device VM.
 //!
 //! A private context and timeline completion object are acquired at creation.
@@ -10,6 +12,7 @@ use super::{drm, util};
 use crate::host_storage::{Owned, Shared};
 use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
 use crate::{Error, ErrorKind};
+use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -22,6 +25,27 @@ const TERMINAL_LOST: u8 = 3;
 fn retire_slot(slot: &AtomicU64, retired: &AtomicU64, submission: u64) {
     retired.fetch_max(submission, Ordering::AcqRel);
     let _ = slot.compare_exchange(submission, IDLE, Ordering::AcqRel, Ordering::Acquire);
+}
+
+// A mismatched DRM sequence cannot prove retirement of this submission. The
+// preattached timeline point is the only independent completion evidence.
+fn resolve_mismatched_sequence(
+    slot: &AtomicU64,
+    retired: &AtomicU64,
+    submission: u64,
+    result: io::Result<bool>,
+) -> Result<KernelQueueWait, Error> {
+    match result {
+        Ok(true) => {
+            retire_slot(slot, retired, submission);
+            Err(error(
+                ErrorKind::DriverContract,
+                "DRM returned an unexpected command sequence",
+            ))
+        }
+        Ok(false) => Ok(KernelQueueWait::TimedOut),
+        Err(source) => Err(native_error("DRM command timeline wait", source)),
+    }
 }
 
 fn validate_command(command: KernelCommand) -> Result<u32, Error> {
@@ -50,11 +74,12 @@ pub(crate) struct KfdKernelQueue {
     process: u32,
     context_id: Option<u32>,
     completion_syncobj: Option<u32>,
-    ip_type: u32,
+    engine: drm::CommandEngine,
     slot: AtomicU64,
     accepted: AtomicU64,
     retired: AtomicU64,
     ambiguous_submission: AtomicBool,
+    sequence_mismatch: AtomicBool,
     terminal: AtomicU8,
     context_free_ambiguous: bool,
     syncobj_destroy_ambiguous: bool,
@@ -67,47 +92,84 @@ impl KfdKernelQueue {
     ) -> Result<Owned<Self>, Error> {
         vm.check()?;
         let slot = Owned::<Self>::try_new_uninit(vm.allocator())?;
-        let ip_type = match format {
-            KernelQueueFormat::Pm4 => drm::HW_IP_COMPUTE,
-            KernelQueueFormat::Sdma => drm::HW_IP_DMA,
-        };
-        let render = vm.render()?;
-        let completion_syncobj = drm::create_syncobj(render)
-            .map_err(|source| native_error("DRM completion object creation", source))?;
-        let context_id = match drm::create_context(render) {
-            Ok(context_id) => context_id,
-            Err(source) => {
-                let _ = drm::destroy_syncobj(render, completion_syncobj);
-                return Err(native_error("DRM command context creation", source));
+        let (ip_type, ring) = match format {
+            KernelQueueFormat::Pm4 => (drm::HW_IP_COMPUTE, 0),
+            KernelQueueFormat::Sdma => (drm::HW_IP_DMA, 0),
+            KernelQueueFormat::SdmaOnRing(ring) => {
+                if ring >= u32::BITS
+                    || drm::sdma_available_rings(vm.render()?)
+                        .map_err(|source| native_error("DRM SDMA ring query", source))?
+                        & (1_u32 << ring)
+                        == 0
+                {
+                    return Err(error(
+                        ErrorKind::InvalidArgument,
+                        "requested SDMA ring is unavailable",
+                    ));
+                }
+                (drm::HW_IP_DMA, ring)
             }
         };
-        // WAIT_CS creates the per-IP context entity. Sequence zero cannot be a
-        // submitted job; observing it now avoids that lazy setup on submit.
-        if !matches!(
-            drm::wait_submission(render, context_id, ip_type, 0, Some(0)),
-            Ok(true)
-        ) {
-            let _ = drm::destroy_context(render, context_id);
-            let _ = drm::destroy_syncobj(render, completion_syncobj);
-            return Err(error(
-                ErrorKind::Unsupported,
-                "DRM command context cannot initialize the requested GPU IP",
-            ));
-        }
-        Ok(slot.write(Self {
+        let engine = drm::CommandEngine { ip_type, ring };
+        // Publish the owner before the first native acquisition. Rollback and
+        // Drop then share exactly the same resumable cleanup state.
+        let mut queue = slot.write(Self {
             vm,
             process: std::process::id(),
-            context_id: Some(context_id),
-            completion_syncobj: Some(completion_syncobj),
-            ip_type,
+            context_id: None,
+            completion_syncobj: None,
+            engine,
             slot: AtomicU64::new(IDLE),
             accepted: AtomicU64::new(0),
             retired: AtomicU64::new(0),
             ambiguous_submission: AtomicBool::new(false),
+            sequence_mismatch: AtomicBool::new(false),
             terminal: AtomicU8::new(0),
             context_free_ambiguous: false,
             syncobj_destroy_ambiguous: false,
-        }))
+        });
+        let render_vm = queue.vm.clone();
+        let render = render_vm.render()?;
+        queue.completion_syncobj = Some(match drm::create_syncobj(render) {
+            Ok(handle) => handle,
+            Err(source) => {
+                if source.raw_os_error() == Some(14) {
+                    // The handle may exist without a trustworthy returned ID.
+                    std::mem::forget(queue.vm.clone());
+                }
+                return Err(native_error("DRM completion object creation", source));
+            }
+        });
+        let context_id = match drm::create_context(render) {
+            Ok(context_id) => context_id,
+            Err(source) => {
+                if source.raw_os_error() == Some(14) {
+                    std::mem::forget(queue.vm.clone());
+                }
+                let failure = native_error("DRM command context creation", source);
+                return match queue.destroy() {
+                    Ok(()) => Err(failure),
+                    Err(rollback) => Err(rollback),
+                };
+            }
+        };
+        queue.context_id = Some(context_id);
+        // WAIT_CS creates the per-IP context entity. Sequence zero cannot be a
+        // submitted job; observing it now avoids that lazy setup on submit.
+        if !matches!(
+            drm::wait_submission(render, context_id, engine, 0, Some(0)),
+            Ok(true)
+        ) {
+            let failure = error(
+                ErrorKind::Unsupported,
+                "DRM command context cannot initialize the requested GPU IP",
+            );
+            return match queue.destroy() {
+                Ok(()) => Err(failure),
+                Err(rollback) => Err(rollback),
+            };
+        }
+        Ok(queue)
     }
 
     fn observe_terminal(&self, kind: ErrorKind) {
@@ -201,7 +263,7 @@ impl KfdKernelQueue {
         match drm::submit_indirect_buffer(
             render,
             context_id,
-            self.ip_type,
+            self.engine,
             command.device_address,
             byte_length,
             syncobj,
@@ -209,6 +271,7 @@ impl KfdKernelQueue {
         ) {
             Ok(native_sequence) => {
                 if native_sequence != submission {
+                    self.sequence_mismatch.store(true, Ordering::Release);
                     self.observe_terminal(ErrorKind::DriverContract);
                 }
                 self.slot.store(submission, Ordering::Release);
@@ -270,10 +333,21 @@ impl KfdKernelQueue {
                     .saturating_sub(u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX)),
             )
         };
+        if self.sequence_mismatch.load(Ordering::Acquire) {
+            let syncobj = self
+                .completion_syncobj
+                .ok_or_else(|| error(ErrorKind::Internal, "kernel queue fence was released"))?;
+            return resolve_mismatched_sequence(
+                &self.slot,
+                &self.retired,
+                submission,
+                drm::wait_timeline_point(self.vm.render()?, syncobj, submission, remaining),
+            );
+        }
         let result = drm::wait_submission(
             self.vm.render()?,
             context_id,
-            self.ip_type,
+            self.engine,
             submission,
             remaining,
         );
@@ -328,32 +402,26 @@ impl KfdKernelQueue {
         if accepted > self.retired.load(Ordering::Acquire) {
             return Err(error(ErrorKind::Busy, "kernel submission has not retired"));
         }
+        if self.context_free_ambiguous || self.syncobj_destroy_ambiguous {
+            return Err(error(
+                ErrorKind::DriverContract,
+                "DRM handle destruction outcome is uncertain",
+            ));
+        }
         let render = self.vm.render()?;
         if let Some(context_id) = self.context_id {
-            match drm::destroy_context(render, context_id) {
-                Ok(()) => self.context_id = None,
-                Err(source) if self.context_free_ambiguous && source.raw_os_error() == Some(22) => {
-                    self.context_id = None;
-                }
-                Err(source) => {
-                    self.context_free_ambiguous |= source.raw_os_error() == Some(14);
-                    return Err(native_error("DRM command context release", source));
-                }
+            if let Err(source) = drm::destroy_context(render, context_id) {
+                self.context_free_ambiguous = source.raw_os_error() == Some(14);
+                return Err(native_error("DRM command context release", source));
             }
+            self.context_id = None;
         }
         if let Some(syncobj) = self.completion_syncobj {
-            match drm::destroy_syncobj(render, syncobj) {
-                Ok(()) => self.completion_syncobj = None,
-                Err(source)
-                    if self.syncobj_destroy_ambiguous && source.raw_os_error() == Some(22) =>
-                {
-                    self.completion_syncobj = None;
-                }
-                Err(source) => {
-                    self.syncobj_destroy_ambiguous |= source.raw_os_error() == Some(14);
-                    return Err(native_error("DRM completion object release", source));
-                }
+            if let Err(source) = drm::destroy_syncobj(render, syncobj) {
+                self.syncobj_destroy_ambiguous = source.raw_os_error() == Some(14);
+                return Err(native_error("DRM completion object release", source));
             }
+            self.completion_syncobj = None;
         }
         Ok(())
     }
@@ -371,7 +439,221 @@ impl Drop for KfdKernelQueue {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{memory, sys, sysfs, uapi};
     use super::*;
+    use crate::host_storage::Allocator;
+    use std::fs::File;
+    use std::sync::Arc;
+
+    #[allow(clippy::unwrap_used)]
+    fn scripted_vm() -> Shared<DeviceVm> {
+        let allocator = Allocator::default();
+        let kfd = Shared::new(
+            sys::Kfd::with_hook(
+                File::open("/dev/null").unwrap(),
+                Arc::new(|call| {
+                    if let sys::Call::Wait(args, _) = call {
+                        args.result = uapi::WAIT_TIMEOUT;
+                    }
+                    Ok(())
+                }),
+            ),
+            allocator,
+        )
+        .unwrap();
+        let node = sysfs::NativeNode {
+            node: 1,
+            gpu_id: 42,
+            render_minor: Some(128),
+            unique_id: Some(123),
+            identity: [0; 16],
+            queues: sysfs::NativeQueueProperties {
+                gfx_target: 120_001,
+                xcc_count: 1,
+                ..sysfs::NativeQueueProperties::default()
+            },
+            local_memory_bytes: 1 << 30,
+            public_memory_bytes: 0,
+        };
+        memory::queue_fixture(kfd, File::open("/dev/null").unwrap(), node)
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn targeted_sdma_submission_uses_the_selected_drm_ring() {
+        let vm = scripted_vm();
+        drm::with_script(
+            [
+                drm::TestCall::QuerySdmaRings(Ok(0b11)),
+                drm::TestCall::CreateSyncobj(7),
+                drm::TestCall::CreateContext(5),
+                drm::TestCall::WaitSubmissionOnRing(1, Ok(true)),
+                drm::TestCall::SubmitOnRing(1, Ok(1)),
+                drm::TestCall::WaitSubmissionOnRing(1, Ok(true)),
+                drm::TestCall::DestroyContext,
+                drm::TestCall::DestroySyncobj,
+            ],
+            || {
+                let mut queue =
+                    KfdKernelQueue::create(vm.clone(), KernelQueueFormat::SdmaOnRing(1)).unwrap();
+                let submission = queue
+                    .submit(KernelCommand {
+                        device_address: 0x1000,
+                        byte_length: 4,
+                    })
+                    .unwrap();
+                assert_eq!(
+                    queue.wait(submission, 0, 0).unwrap(),
+                    KernelQueueWait::Retired
+                );
+                queue.destroy().unwrap();
+            },
+        );
+        drm::with_script([drm::TestCall::QuerySdmaRings(Ok(0b01))], || {
+            let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::SdmaOnRing(1))
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), ErrorKind::InvalidArgument);
+        });
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn mismatched_native_sequence_cannot_release_command_storage_early() {
+        let vm = scripted_vm();
+        drm::with_script(
+            [
+                drm::TestCall::CreateSyncobj(7),
+                drm::TestCall::CreateContext(5),
+                drm::TestCall::WaitSubmission(Ok(true)),
+                drm::TestCall::Submit(Ok(42)),
+                drm::TestCall::WaitTimeline(Err(110)),
+                drm::TestCall::WaitTimeline(Err(110)),
+                drm::TestCall::WaitTimeline(Ok(true)),
+                drm::TestCall::DestroyContext,
+                drm::TestCall::DestroySyncobj,
+            ],
+            || {
+                let mut queue = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4).unwrap();
+                let submission = queue
+                    .submit(KernelCommand {
+                        device_address: 0x1000,
+                        byte_length: 4,
+                    })
+                    .unwrap();
+                assert_eq!(submission, 1);
+                assert_eq!(queue.status().terminal, Some(ErrorKind::DriverContract));
+                assert_eq!(
+                    queue.wait(submission, 0, 0).unwrap(),
+                    KernelQueueWait::TimedOut
+                );
+                assert_eq!(queue.status().retired_submission, 0);
+                assert_eq!(
+                    queue.destroy().err().map(|e| e.kind()),
+                    Some(ErrorKind::Busy)
+                );
+                assert_eq!(queue.status().retired_submission, 0);
+                assert_eq!(
+                    queue.wait(submission, 0, 0).err().map(|e| e.kind()),
+                    Some(ErrorKind::DriverContract)
+                );
+                assert_eq!(queue.status().retired_submission, submission);
+                queue.destroy().unwrap();
+            },
+        );
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn ambiguous_context_free_never_replays_a_recycled_id() {
+        let vm = scripted_vm();
+        drm::with_script(
+            [
+                drm::TestCall::CreateSyncobj(7),
+                drm::TestCall::CreateContext(5),
+                drm::TestCall::WaitSubmission(Ok(true)),
+                drm::TestCall::FailDestroyContext(14),
+                drm::TestCall::CreateSyncobj(8),
+                drm::TestCall::CreateContext(5),
+                drm::TestCall::WaitSubmission(Ok(true)),
+                drm::TestCall::DestroyContext,
+                drm::TestCall::DestroySyncobj,
+            ],
+            || {
+                let mut old = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4).unwrap();
+                assert!(old.destroy().is_err());
+                let mut next = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4).unwrap();
+                assert_eq!(old.destroy().unwrap_err().kind(), ErrorKind::DriverContract);
+                next.destroy().unwrap();
+            },
+        );
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn failed_setup_uses_owned_rollback_and_reports_cleanup_failure() {
+        let vm = scripted_vm();
+        drm::with_script(
+            [
+                drm::TestCall::CreateSyncobj(7),
+                drm::TestCall::FailCreateContext(22),
+                drm::TestCall::FailDestroySyncobj(14),
+            ],
+            || {
+                let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
+                    .err()
+                    .unwrap();
+                assert_eq!(error.native_error_code(), Some(14));
+            },
+        );
+        drm::with_script(
+            [
+                drm::TestCall::CreateSyncobj(7),
+                drm::TestCall::CreateContext(5),
+                drm::TestCall::WaitSubmission(Err(22)),
+                drm::TestCall::FailDestroyContext(16),
+                drm::TestCall::DestroyContext,
+                drm::TestCall::DestroySyncobj,
+            ],
+            || {
+                let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
+                    .err()
+                    .unwrap();
+                assert_eq!(error.native_error_code(), Some(16));
+                // Drop retries the ordinary EBUSY rollback through the owner.
+            },
+        );
+    }
+
+    #[test]
+    fn mismatched_sequence_retains_command_until_timeline_completion() {
+        let slot = AtomicU64::new(1);
+        let retired = AtomicU64::new(0);
+        assert!(matches!(
+            resolve_mismatched_sequence(&slot, &retired, 1, Ok(false)),
+            Ok(KernelQueueWait::TimedOut)
+        ));
+        assert_eq!(slot.load(Ordering::Acquire), 1);
+        assert_eq!(retired.load(Ordering::Acquire), 0);
+
+        let failed_wait = resolve_mismatched_sequence(
+            &slot,
+            &retired,
+            1,
+            Err(io::Error::from(io::ErrorKind::Other)),
+        );
+        assert!(failed_wait.is_err());
+        assert_eq!(slot.load(Ordering::Acquire), 1);
+        assert_eq!(retired.load(Ordering::Acquire), 0);
+
+        let completed = resolve_mismatched_sequence(&slot, &retired, 1, Ok(true));
+        assert_eq!(
+            completed.err().map(|failure| failure.kind()),
+            Some(ErrorKind::DriverContract)
+        );
+        assert_eq!(slot.load(Ordering::Acquire), IDLE);
+        assert_eq!(retired.load(Ordering::Acquire), 1);
+    }
 
     #[test]
     fn stale_waiter_cannot_release_a_new_submission_slot() {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Passive Linux topology discovery and validation.
 //!
 //! Discovery reads fixed-size sysfs records and opens no native execution
@@ -45,6 +47,8 @@ pub(crate) struct NativeQueueProperties {
     pub context_size: u32,
     pub control_stack_size: u32,
     pub sdma_engines: u32,
+    pub sdma_xgmi_engines: u32,
+    pub gws_count: u32,
     pub compute_queues: u32,
     pub sdma_qualified: bool,
 }
@@ -212,13 +216,15 @@ fn cache_properties(text: &str) -> Result<CacheInfo, Error> {
     }
     let properties = Properties(text);
     let _ = properties.u32("processor_id_low")?;
-    let _ = properties.u32("cache_line_size")?;
+    let line_size_bytes = properties.u32("cache_line_size")?;
     let _ = properties.u32("cache_lines_per_tag")?;
     let _ = properties.u32("association")?;
     let _ = properties.u32("latency")?;
+    // KFD reports cache capacity in KiB; provider facts use bytes.
     Ok(CacheInfo {
         level: properties.u32("level")?,
-        size: properties.u32("size")?,
+        size_bytes: u64::from(properties.u32("size")?) * 1024,
+        line_size_bytes,
         kind: properties.u32("type")?,
     })
 }
@@ -276,6 +282,75 @@ fn caches(
         .map_err(Into::into)
 }
 
+fn memory_bank_properties(text: &str) -> Result<Option<(u32, u32)>, Error> {
+    let properties = Properties::new(text)?;
+    let heap = properties.u32("heap_type")?;
+    let size = properties.required("size_in_bytes")?;
+    if size == 0 || !matches!(heap, 1 | 2) {
+        return Ok(None);
+    }
+    Ok(Some((
+        properties.optional_u32("width")?.unwrap_or(0),
+        properties.optional_u32("mem_clk_max")?.unwrap_or(0),
+    )))
+}
+
+fn memory_bus(
+    root: &str,
+    node: u32,
+    count: u32,
+    allocator: Allocator,
+) -> Result<(u32, u32), Error> {
+    if count == 0 {
+        return Ok((0, 0));
+    }
+    let capacity = usize::try_from(count).map_err(|_| {
+        error(
+            ErrorKind::ResourceExhausted,
+            "native memory-bank count overflow",
+        )
+    })?;
+    let mut records = Buffer::try_with_capacity(capacity, allocator)?;
+    let path = StackPath::new(format_args!("{root}/nodes/{node}/mem_banks"))?;
+    sys::numeric_directories(path.path(), &mut |ordinal| {
+        if ordinal >= count || records.iter().any(|(seen, _)| *seen == ordinal) {
+            return Err(error(
+                ErrorKind::InvalidData,
+                "native memory-bank ordinal is outside its declared range",
+            ));
+        }
+        let path = StackPath::new(format_args!(
+            "{root}/nodes/{node}/mem_banks/{ordinal}/properties"
+        ))?;
+        let mut bytes = [0; 4096];
+        records.try_push((
+            ordinal,
+            memory_bank_properties(read(path.path(), &mut bytes)?)?,
+        ))?;
+        Ok(())
+    })?;
+    if records.len() != capacity {
+        return Err(error(
+            ErrorKind::InvalidData,
+            "native memory-bank count does not match its directory",
+        ));
+    }
+    records.sort_unstable_by_key(|(ordinal, _)| *ordinal);
+    let mut selected = (0, 0);
+    for (expected, (ordinal, bank)) in records.iter().enumerate() {
+        if usize::try_from(*ordinal) != Ok(expected) {
+            return Err(error(
+                ErrorKind::InvalidData,
+                "native memory-bank ordinals are not contiguous",
+            ));
+        }
+        if let Some(bank) = bank {
+            selected = *bank;
+        }
+    }
+    Ok(selected)
+}
+
 pub(super) fn enumerate(
     root: &str,
     drm: &str,
@@ -301,7 +376,7 @@ pub(super) fn enumerate(
             continue;
         }
         result?;
-        records.sort_unstable_by_key(|record| record.native.node);
+        records.sort_unstable_by_key(|record| record.topology_key.group);
         for endpoint in records {
             visitor(endpoint)?;
         }
@@ -594,6 +669,12 @@ fn read_node(
     let hive_id = p.optional("hive_id")?.unwrap_or(0);
     let family_id = p.optional_u32("family_id")?.unwrap_or(0);
     let maximum_engine_clock_mhz = p.optional_u32("max_engine_clk_fcompute")?.unwrap_or(0);
+    let (memory_bus_width_bits, maximum_memory_clock_mhz) = memory_bus(
+        root,
+        node,
+        p.optional_u32("mem_banks_count")?.unwrap_or(0),
+        allocator,
+    )?;
     let sdma_xgmi_engines = p.optional_u32("num_sdma_xgmi_engines")?.unwrap_or(0);
     let gws_count = p.optional_u32("num_gws")?.unwrap_or(0);
     let io_link_count = p.optional_u32("io_links_count")?.unwrap_or(0);
@@ -666,6 +747,8 @@ fn read_node(
         context_size: context.unwrap_or(0),
         control_stack_size: stack.unwrap_or(0),
         sdma_engines: sdma.unwrap_or(0),
+        sdma_xgmi_engines,
+        gws_count,
         compute_queues: p.u32("num_cp_queues")?,
         sdma_qualified,
     };
@@ -729,6 +812,8 @@ fn read_node(
                 asic_family_id: family_id,
                 asic_revision: (capability & 0x03c0_0000) >> 22,
                 maximum_engine_clock_mhz,
+                memory_bus_width_bits,
+                maximum_memory_clock_mhz,
                 wavefront_size: wave_size,
                 compute_unit_count: simds / per_cu,
                 simd_count_per_compute_unit: per_cu,
@@ -746,6 +831,9 @@ fn read_node(
                 packet_processor_firmware_version: p.optional_u32("fw_version")?.unwrap_or(0)
                     & 0x3ff,
                 sdma_firmware_version: p.optional_u32("sdma_fw_version")?.unwrap_or(0) & 0x3ff,
+                persisting_l2_cache_size_max: p
+                    .optional_u32("persisting_cache_size_max")?
+                    .unwrap_or(0),
                 queues: GpuQueueCapabilities {
                     aql: supports_aql,
                     // System-scope AQL packet fences and a kernel-issued system
@@ -795,7 +883,7 @@ fn read_node(
             member: gpu_id,
         },
         provider_instance: 0,
-        native,
+        native: crate::driver::EndpointSelector::LinuxKfd(native),
     }))
 }
 
@@ -932,6 +1020,64 @@ mod tests {
     }
 
     #[test]
+    fn persisting_l2_limit_comes_from_the_gpu_node() {
+        let fixture = Fixture::new();
+        let properties = fixture.0.join("topology/nodes/1/properties");
+        let mut contents = std::fs::read_to_string(&properties).unwrap();
+        contents.push_str("persisting_cache_size_max 1048576\n");
+        std::fs::write(&properties, contents).unwrap();
+        let (root, drm) = fixture.roots();
+        let endpoint = open_endpoint(
+            &root,
+            &drm,
+            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
+            Allocator::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint.gpu().unwrap().persisting_l2_cache_size_max,
+            1_048_576
+        );
+    }
+
+    #[test]
+    fn memory_bus_facts_come_from_nonempty_vram_banks() {
+        let fixture = Fixture::new();
+        let properties = fixture.0.join("topology/nodes/1/properties");
+        let mut contents = std::fs::read_to_string(&properties).unwrap();
+        contents.push_str("mem_banks_count 3\n");
+        std::fs::write(&properties, contents).unwrap();
+        for (ordinal, heap, size, width, clock) in [
+            (0, 0, 16_384, 128, 2000),
+            (1, 2, 1_048_576, 384, 1400),
+            (2, 1, 0, 32, 10),
+        ] {
+            let directory = fixture
+                .0
+                .join(format!("topology/nodes/1/mem_banks/{ordinal}"));
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                directory.join("properties"),
+                format!(
+                    "heap_type {heap}\nsize_in_bytes {size}\nwidth {width}\nmem_clk_max {clock}\n"
+                ),
+            )
+            .unwrap();
+        }
+        let (root, drm) = fixture.roots();
+        let endpoint = open_endpoint(
+            &root,
+            &drm,
+            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
+            Allocator::default(),
+        )
+        .unwrap();
+        let gpu = endpoint.gpu().unwrap();
+        assert_eq!(gpu.memory_bus_width_bits, 384);
+        assert_eq!(gpu.maximum_memory_clock_mhz, 1400);
+    }
+
+    #[test]
     fn passive_records_are_complete_and_direct_open_ignores_other_nodes() {
         let fixture = Fixture::new();
         let (root, drm) = fixture.roots();
@@ -943,7 +1089,7 @@ mod tests {
         })
         .unwrap();
         let endpoint = found.unwrap();
-        let linux = endpoint.linux_kfd_drm_info();
+        let linux = endpoint.linux_kfd_drm_info().unwrap();
         assert_eq!(linux.node_id, 1);
         assert_eq!(linux.gpu_id, 42);
         let gpu = endpoint.gpu().unwrap();
@@ -1170,7 +1316,7 @@ mod tests {
     }
 
     #[test]
-    fn cache_records_preserve_topology_order_and_types() {
+    fn cache_records_convert_kib_and_preserve_order_and_types() {
         let fixture = Fixture::new();
         let properties = fixture.0.join("topology/nodes/1/properties");
         let contents = std::fs::read_to_string(&properties).unwrap();
@@ -1180,10 +1326,10 @@ mod tests {
         )
         .unwrap();
         for (ordinal, level, size, kind) in [
-            (3, 2, 262_144, 8),
-            (1, 1, 32_768, 10),
-            (0, 1, 32_768, 9),
-            (2, 3, 8_388_608, 5),
+            (3, 2, 256, 8),
+            (1, 1, 32, 10),
+            (0, 1, 32, 9),
+            (2, 3, 8192, 5),
         ] {
             let directory = fixture.0.join(format!("topology/nodes/1/caches/{ordinal}"));
             std::fs::create_dir_all(&directory).unwrap();
@@ -1205,13 +1351,14 @@ mod tests {
         .unwrap();
         assert_eq!(endpoint.caches().len(), 4);
         assert_eq!(endpoint.caches()[0].level(), 1);
-        assert_eq!(endpoint.caches()[0].size(), 32_768);
+        assert_eq!(endpoint.caches()[0].size_bytes(), 32_768);
         assert!(crate::gpu::is_compute_data_cache(&endpoint.caches()[0]));
         assert!(!crate::gpu::is_compute_data_cache(&endpoint.caches()[1]));
         assert!(!crate::gpu::is_compute_data_cache(&endpoint.caches()[2]));
         assert!(crate::gpu::is_compute_data_cache(&endpoint.caches()[3]));
         assert_eq!(endpoint.caches()[3].level(), 2);
-        assert_eq!(endpoint.caches()[3].size(), 262_144);
+        assert_eq!(endpoint.caches()[3].size_bytes(), 262_144);
+        assert_eq!(endpoint.caches()[3].line_size_bytes(), 64);
     }
 
     #[test]
@@ -1419,6 +1566,44 @@ mod tests {
             ErrorKind::ResourceExhausted
         );
         assert!(!visited);
+    }
+
+    #[test]
+    fn generated_topology_and_cache_mutations_stay_bounded() {
+        const NODE: &str = "simd_count 64\nmax_slots_scratch_cu 32\nnum_xcc 1\n";
+        const CACHE: &str = concat!(
+            "processor_id_low 0\nlevel 2\nsize 512\ncache_line_size 64\n",
+            "cache_lines_per_tag 1\nassociation 16\nlatency 1\n",
+            "type 2\nsibling_map 1,0,0,0\n"
+        );
+        assert!(Properties::new(NODE).is_ok());
+        assert!(cache_properties(CACHE).is_ok());
+        let mut seed = 0xd1b5_4a32_d192_ed03_u64;
+        for case in 0..2048 {
+            let mut bytes = if case % 2 == 0 {
+                NODE.as_bytes().to_vec()
+            } else {
+                CACHE.as_bytes().to_vec()
+            };
+            for _ in 0..=(case % 5) {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                let index = usize::try_from(seed % u64::try_from(bytes.len()).unwrap()).unwrap();
+                bytes[index] = b"0x 19\n,+-_z"[(seed >> 32) as usize % 11];
+            }
+            let length = if case % 4 == 0 {
+                usize::try_from(seed % u64::try_from(bytes.len() + 1).unwrap()).unwrap()
+            } else {
+                bytes.len()
+            };
+            let input = String::from_utf8_lossy(&bytes[..length]);
+            if let Ok(properties) = Properties::new(&input) {
+                let _ = properties.required("simd_count");
+                let _ = properties.optional_u32("num_xcc");
+            }
+            let _ = cache_properties(&input);
+        }
     }
 
     #[test]

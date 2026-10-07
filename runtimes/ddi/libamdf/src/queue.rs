@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Direct native queues with cached mappings and explicit producer borrows.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -5,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use rocddi::gpu::queue::{
     self, QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
-    QueueScratch,
+    QueueRingMemory, QueueScratch,
 };
 use rocddi::host_storage::{Allocator, Owned};
 
@@ -36,9 +38,13 @@ impl NativeQueue {
         }
     }
 
-    fn destroy(&mut self) -> Result<(), rocddi::Error> {
+    /// # Safety
+    /// The adapter must have retired public producer mappings and stopped all
+    /// producers before native backing can be released.
+    unsafe fn destroy(&mut self) -> Result<(), rocddi::Error> {
         match self {
-            Self::Provider(queue) => queue.destroy(),
+            // SAFETY: The caller upholds this method's producer contract.
+            Self::Provider(queue) => unsafe { queue.destroy() },
             #[cfg(test)]
             Self::Fixture(queue) => queue.destroy(),
         }
@@ -201,6 +207,8 @@ fn descriptor(
         AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 => QueueParameters::Pm4,
         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL => QueueParameters::Aql {
             producer_mode: producer,
+            ring_memory: QueueRingMemory::System,
+            global_work_sync: false,
             inactive_signal: None,
             error_event: None,
             scratch,
@@ -359,24 +367,16 @@ fn creation_transports(
 }
 
 fn rollback_creation(
-    mut queue: queue::Queue,
-    scratch_borrow: Option<memory::QueueScratchBorrow>,
+    queue: queue::Queue,
     device: &Device,
+    scratch_borrow: Option<memory::QueueScratchBorrow>,
     status: u64,
 ) -> u64 {
-    let status = match queue.destroy() {
-        Ok(()) => status,
-        Err(error) => {
-            // Native teardown may still leave firmware references.
-            let status = native(&error);
-            std::mem::forget(queue);
-            std::mem::forget(scratch_borrow);
-            unregister(&device.queues);
-            return status;
-        }
-    };
+    // SAFETY: No public queue was issued. The scratch child borrow retains
+    // any external address firmware could still reach after failed cleanup.
+    let result = unsafe { queue.abandon_unpublished_with_dependencies(scratch_borrow) };
     unregister(&device.queues);
-    status
+    result.err().map_or(status, |error| native(&error))
 }
 
 fn wait_consumed(
@@ -417,10 +417,9 @@ fn wait_consumed(
     }
 }
 
-#[allow(unused_unsafe)]
 #[allow(
     clippy::too_many_lines,
-    reason = "queue backing and native acquisition share one auditable rollback path"
+    reason = "queue creation and rollback retain one scratch borrow across every native outcome"
 )]
 pub(crate) unsafe extern "C" fn create(
     pointer: *mut amdf_device_t,
@@ -453,18 +452,17 @@ pub(crate) unsafe extern "C" fn create(
             unregister(&device.queues);
             return Err(UNSUPPORTED);
         };
-        // SAFETY: The queue retains the borrowed scratch allocation until
-        // successful native destruction, including rollback.
-        let native_queue = match unsafe { gpu.create_queue(desc) } {
-            Ok(queue) => queue,
-            Err(error) => {
-                if error.kind() == rocddi::ErrorKind::ResourceOwnershipUncertain {
-                    std::mem::forget(scratch_borrow);
+        // SAFETY: The optional scratch address was resolved from an accessible
+        // public memory owner, and scratch_borrow retains it through teardown.
+        // The frontend enforces the selected producer protocol at its ABI.
+        let (native_queue, scratch_borrow) =
+            match gpu.create_queue_with_dependencies(desc, scratch_borrow) {
+                Ok(created) => created,
+                Err(error) => {
+                    unregister(&device.queues);
+                    return Err(native(&error));
                 }
-                unregister(&device.queues);
-                return Err(native(&error));
-            }
-        };
+            };
         let native_info = native_queue.info();
         let capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER
             | if native_info.doorbell_device_address.is_some() {
@@ -478,8 +476,8 @@ pub(crate) unsafe extern "C" fn create(
             Err(status) => {
                 return Err(rollback_creation(
                     native_queue,
-                    scratch_borrow,
                     device,
+                    scratch_borrow,
                     status,
                 ));
             }
@@ -487,8 +485,8 @@ pub(crate) unsafe extern "C" fn create(
         if create_info.required_capabilities & !capabilities != 0 {
             return Err(rollback_creation(
                 native_queue,
-                scratch_borrow,
                 device,
+                scratch_borrow,
                 UNSUPPORTED,
             ));
         }
@@ -540,7 +538,6 @@ pub(crate) unsafe extern "C" fn create(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn info(
     pointer: *mut amdf_user_queue_t,
     out: *mut amdf_user_queue_info_t,
@@ -554,7 +551,6 @@ pub(crate) unsafe extern "C" fn info(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn map(
     pointer: *mut amdf_user_queue_t,
     producer: *mut amdf_device_t,
@@ -611,7 +607,6 @@ pub(crate) unsafe extern "C" fn map(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn mapping_info(
     pointer: *mut amdf_user_queue_mapping_t,
     out: *mut amdf_user_queue_mapping_info_t,
@@ -625,7 +620,6 @@ pub(crate) unsafe extern "C" fn mapping_info(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn unmap(pointer: *mut amdf_user_queue_mapping_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let mapping = object(pointer.cast::<Mapping>())?;
@@ -635,7 +629,6 @@ pub(crate) unsafe extern "C" fn unmap(pointer: *mut amdf_user_queue_mapping_t) -
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn status(
     pointer: *mut amdf_user_queue_t,
     out: *mut amdf_user_queue_status_t,
@@ -648,7 +641,6 @@ pub(crate) unsafe extern "C" fn status(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn wait(
     pointer: *mut amdf_user_queue_t,
     target: u64,
@@ -662,7 +654,6 @@ pub(crate) unsafe extern "C" fn wait(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 {
     crate::support::boundary(|| {
         unsafe {
@@ -687,6 +678,8 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
             // fails. Keep the owner for cleanup retries, but never republish cached
             // addresses or permit further queue use after that attempt begins.
             queue.destroying.store(true, Ordering::Release);
+            // SAFETY: Mapping preflight established that no public producer
+            // borrow remains; the caller has exclusive queue access.
             if let Err(error) = queue.native.destroy() {
                 return Err(queue.observe_error(&error));
             }

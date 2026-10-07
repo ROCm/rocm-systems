@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Queue lifecycle and publication contracts exercised without a native GPU.
 
 #![allow(clippy::unwrap_used)]
@@ -300,6 +302,7 @@ fn native_transport() -> queue::QueueTransport {
         ring_host_address: 0x1000,
         ring_device_address: 0x1000,
         ring_size_bytes: 4096,
+        sdma_engine_id: None,
         read_index_host_address: 0x2000,
         read_index_device_address: 0x4000,
         write_index_host_address: 0x2008,

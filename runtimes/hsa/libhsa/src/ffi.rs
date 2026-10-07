@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Rust representations of the HSA core and AMD-extension C ABI.
 //!
 //! Numeric constants, handle encodings, callback signatures, and `repr(C)`
@@ -206,6 +208,9 @@ pub(crate) const AMD_AGENT_INFO_CLUSTER_MAX_SIZE: u32 = 0xa121;
 pub(crate) const AMD_AGENT_INFO_KERNEL_WG_MAX_DIM: u32 = 0xa122;
 pub(crate) const AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS: u32 = 0xa123;
 pub(crate) const AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED: u32 = 0xa124;
+pub(crate) const AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE: u32 = 0xa125;
+pub(crate) const AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE: u32 = 0xa126;
+pub(crate) const AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE: u32 = 0;
 
 pub(crate) const EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS: u32 = 0x3000;
 pub(crate) const EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS: u32 = 0x3001;
@@ -374,25 +379,6 @@ pub(crate) const AMD_SIGNAL_KIND_USER: i64 = 1;
 pub(crate) const AMD_SIGNAL_KIND_DOORBELL: i64 = -1;
 pub(crate) const AMD_SIGNAL_AMD_GPU_ONLY: u64 = 1;
 pub(crate) const AMD_SIGNAL_IPC: u64 = 1 << 1;
-pub(crate) const AMD_MEMORY_COPY_OP_VERSION: u16 = 1;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR: u16 = 0;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR_BROADCAST: u16 = 1;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR_SWAP: u16 = 2;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC: u16 = 3;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST: u16 = 4;
-pub(crate) const AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST: u16 = 5;
-pub(crate) const AMD_MEMORY_COPY_WAIT_ALWAYS: u16 = 0;
-pub(crate) const AMD_MEMORY_COPY_WAIT_LT: u16 = 1;
-pub(crate) const AMD_MEMORY_COPY_WAIT_LE: u16 = 2;
-pub(crate) const AMD_MEMORY_COPY_WAIT_EQ: u16 = 3;
-pub(crate) const AMD_MEMORY_COPY_WAIT_NE: u16 = 4;
-pub(crate) const AMD_MEMORY_COPY_WAIT_GE: u16 = 5;
-pub(crate) const AMD_MEMORY_COPY_WAIT_GT: u16 = 6;
-pub(crate) const AMD_MEMORY_COPY_SIGNAL_NONE: u16 = 0;
-pub(crate) const AMD_MEMORY_COPY_SIGNAL_WRITE: u16 = 1;
-pub(crate) const AMD_MEMORY_COPY_SIGNAL_ADD: u16 = 2;
-pub(crate) const AMD_MEMORY_COPY_SIGNAL_SUB: u16 = 3;
-pub(crate) const FENCE_SCOPE_SYSTEM: u16 = 2;
 pub(crate) const AMD_QUEUE_PROPERTIES_ENABLE_PROFILING: u32 = 1 << 3;
 
 pub(crate) const AMD_QUEUE_INFO_AGENT: u32 = 0;
@@ -405,6 +391,13 @@ pub(crate) const AMD_QUEUE_INFO_PREFETCH_BARRIER_MAJOR: u32 = 6;
 pub(crate) const AMD_QUEUE_INFO_PREFETCH_BARRIER_MINOR: u32 = 7;
 pub(crate) const AMD_QUEUE_INFO_PREFETCH_RING_BUFFER: u32 = 8;
 pub(crate) const AMD_QUEUE_INFO_PROPERTIES: u32 = 9;
+pub(crate) const AMD_QUEUE_INFO_VM_FAULT_STATUS: u32 = 10;
+pub(crate) const AMD_QUEUE_INFO_VM_FAULT_ADDRESS: u32 = 11;
+pub(crate) const AMD_QUEUE_INFO_VM_FAULT_REASON: u32 = 12;
+pub(crate) const AMD_QUEUE_INFO_ENGINE_TYPE: u32 = 13;
+pub(crate) const AMD_QUEUE_INFO_SDMA_ENGINE_ID: u32 = 14;
+pub(crate) const AMD_QUEUE_INFO_READ_POINTER: u32 = 15;
+pub(crate) const AMD_QUEUE_INFO_WRITE_POINTER: u32 = 16;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
@@ -794,6 +787,20 @@ pub struct HsaAmdMemoryCopySignal {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub union HsaAmdMemoryCopyDestinationAgent {
+    pub(crate) agent: HsaAgent,
+    pub(crate) list: *const HsaAgent,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub union HsaAmdMemoryCopySize {
+    pub(crate) bytes: usize,
+    pub(crate) list: *const usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct HsaAmdMemoryCopyOp {
     pub(crate) version: u16,
     pub(crate) operation: u16,
@@ -802,9 +809,9 @@ pub struct HsaAmdMemoryCopyOp {
     pub(crate) completion_signal: HsaSignal,
     pub(crate) source: *mut c_void,
     pub(crate) source_agent: HsaAgent,
-    pub(crate) destination_agent: HsaAgent,
+    pub(crate) destination_agent: HsaAmdMemoryCopyDestinationAgent,
     pub(crate) destination: *mut c_void,
-    pub(crate) size: usize,
+    pub(crate) size: HsaAmdMemoryCopySize,
     pub(crate) secondary_size: usize,
     pub(crate) wait: HsaAmdMemoryCopyWait,
     pub(crate) signal: HsaAmdMemoryCopySignal,

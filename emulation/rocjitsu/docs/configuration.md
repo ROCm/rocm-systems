@@ -290,6 +290,28 @@ Components are defined hierarchically under `topology.root`. Range
 expansion (`xcd[0:8]`) creates multiple instances. Links connect
 component ports using pattern expressions with loop variables.
 
+gfx1250 `WAVE_HW_ID1.WGP_ID` reads require a shader-array width
+(`vm.gpu.device.num_cu_per_sh`) of 1–16. Every shader engine, including groups
+with direct CU children, must have `num_shader_arrays_per_engine * num_cu_per_sh`
+compute units. If this geometry disagrees with the component hierarchy, the
+loader warns once per GPU and leaves the shader-array width unknown. Reads
+with unknown or unrepresentable geometry issue an `s_getreg_b32` warning and
+write zero.
+
+Omitted geometry fields inherit defaults selected by `gfx_target_version`.
+For a smaller topology, set both `num_cu_per_sh` and
+`num_shader_arrays_per_engine` to match its CU groups; for example, two arrays
+of two CUs match a four-CU group. The topology need not grow to the generation's
+default size to support WGP-ID reads.
+
+The topology has no shader-array level. Within each shader engine, the first
+`num_cu_per_sh` CU children form array 0, the next form array 1, and so on.
+The WGP ID is the CU's shader-engine-local index modulo `num_cu_per_sh`.
+For gfx1250 shader engines, KFD CU-mask bit order varies XCD fastest, followed
+by shader engine, array, and WGP. Within an engine, array `a` and WGP `w` select
+CU child `a * num_cu_per_sh + w`, which reports `WGP_ID = w`. The KFD mask loop
+does not select direct-CU groups; their WGP IDs still follow CU child order.
+
 ### Memory wait diagnostics
 
 With memory wait diagnostics enabled, compute units warn when an instruction reads
@@ -317,6 +339,12 @@ The JSON config is validated against FlatBuffers schemas in `schemas/`:
 
 - `simulation_config.fbs` — topology and simulation parameters
 - `checkpoint.fbs` — simulation state checkpointing
+
+Checkpoints preserve the shader-array width used by gfx1250 `WAVE_HW_ID1.WGP_ID`
+reads. Older checkpoints lack this geometry, so WGP-ID reads after restoring
+them issue an `s_getreg_b32` warning and write zero; the simulator cannot infer a
+shader-array-local ID from the shader-engine CU count alone. Saving such a restored
+checkpoint again preserves that unknown geometry.
 
 ## Multi-GPU
 

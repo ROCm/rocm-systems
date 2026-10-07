@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Snapshot generated from the pinned AMDF headers. Do not edit by hand.
 // Compile and compare its layout values with the Rust bindings.
 #include <inttypes.h>

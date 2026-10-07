@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! HSA signals, IPC signal storage, waits, groups, and asynchronous handlers.
 //!
 //! The first 64 bytes of each native signal follow the public AMD signal layout
@@ -12,18 +14,22 @@
 
 use std::collections::hash_map::Entry;
 use std::ffi::c_void;
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering, fence};
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering, fence};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use rocddi::gpu::event::linux::{SignalEvent, create_signal_event};
-use rocddi::memory::interop::linux::{self as linux_interop, KfdIpcMemoryHandle};
+use crate::platform::event::{SignalEvent, SignalEventPage, create_signal_event};
+use crate::platform::memory::{self as linux_interop, KfdIpcMemoryHandle};
 use rocddi::memory::{Allocation, DeviceAccess, MemoryKind};
 
+use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
-use crate::runtime::{Runtime, boundary, initialized_mut, lock, map_error};
+use crate::runtime::{
+    CallbackScope, InFlightToken, Runtime, boundary, initialized_mut, lock, map_error,
+};
 
 const SIGNAL_BYTES: usize = 64;
 const SIGNALS_PER_SLAB: usize = 1024;
@@ -44,24 +50,39 @@ fn system_frequency() -> u64 {
     if cached != 0 {
         return cached;
     }
-    let frequency = lock()
-        .ok()
-        .and_then(|guard| {
-            guard.as_ref().and_then(|runtime| {
-                runtime.gpus.first().and_then(|gpu| {
-                    gpu.device
-                        .gpu()
-                        .and_then(|gpu| gpu.clock_counters())
-                        .ok()
-                        .map(|counters| counters.system_frequency)
-                })
-            })
+    let retained = lock().ok().and_then(|guard| {
+        guard.as_ref().and_then(|runtime| {
+            let gpu = runtime.gpus.first()?;
+            let token = runtime.inflight.enter()?;
+            Some((gpu.device.clone(), token))
         })
-        .unwrap_or(0);
-    if frequency != 0 {
-        SYSTEM_FREQUENCY_HZ.store(frequency, Ordering::Release);
+    });
+    let Some((device, _call)) = retained else {
+        return 0;
+    };
+    let frequency = device
+        .gpu()
+        .and_then(|gpu| gpu.clock_counters())
+        .ok()
+        .map_or(0, |counters| counters.system_frequency);
+    if frequency == 0 {
+        return 0;
     }
-    frequency
+    // Shutdown can clear the cache while the ioctl runs. Publish only for
+    // the same active native VM, while holding the registry lock.
+    let Ok(guard) = lock() else {
+        return 0;
+    };
+    if guard
+        .as_ref()
+        .and_then(|runtime| runtime.gpus.first())
+        .is_some_and(|gpu| gpu.device.shares_address_domain(&device))
+    {
+        SYSTEM_FREQUENCY_HZ.store(frequency, Ordering::Release);
+        frequency
+    } else {
+        0
+    }
 }
 
 fn timeout_elapsed(elapsed: Duration, timeout_hint: u64, frequency: u64) -> bool {
@@ -78,7 +99,9 @@ fn timeout_elapsed(elapsed: Duration, timeout_hint: u64, frequency: u64) -> bool
 /// determines whether updates are ordinary atomics, queue doorbells, or
 /// interrupt-capable event notifications.
 pub(crate) struct AmdSignal {
-    pub(crate) kind: i64,
+    // Destruction invalidates this field while lock-free readers inspect it.
+    // Keep its ABI offset and width while avoiding a host data race.
+    pub(crate) kind: AtomicI64,
     pub(crate) value: AtomicI64,
     event_mailbox_ptr: u64,
     event_id: u32,
@@ -100,7 +123,7 @@ impl AmdSignal {
 
     fn user_with_event(value: SignalValue, event_mailbox_ptr: u64, event_id: u32) -> Self {
         Self {
-            kind: AMD_SIGNAL_KIND_USER,
+            kind: AtomicI64::new(AMD_SIGNAL_KIND_USER),
             value: AtomicI64::new(value),
             event_mailbox_ptr,
             event_id,
@@ -114,7 +137,7 @@ impl AmdSignal {
 
     pub(crate) fn doorbell(address: usize, queue: usize) -> Self {
         Self {
-            kind: AMD_SIGNAL_KIND_DOORBELL,
+            kind: AtomicI64::new(AMD_SIGNAL_KIND_DOORBELL),
             value: AtomicI64::new(i64::try_from(address).unwrap_or(0)),
             event_mailbox_ptr: 0,
             event_id: 0,
@@ -127,7 +150,11 @@ impl AmdSignal {
     }
 }
 
-const _: () = assert!(size_of::<AmdSignal>() == SIGNAL_BYTES);
+const _: () = {
+    assert!(size_of::<AmdSignal>() == SIGNAL_BYTES);
+    assert!(std::mem::offset_of!(AmdSignal, kind) == 0);
+    assert!(std::mem::offset_of!(AmdSignal, value) == 8);
+};
 
 #[repr(C, align(64))]
 /// Cross-process signal record stored in shareable system memory.
@@ -178,14 +205,14 @@ pub(crate) struct ImportedIpcSignal {
 enum AsyncRequest {
     Function {
         callback: unsafe extern "C" fn(*mut c_void),
-        arg: usize,
+        arg: CallbackArg,
     },
     Signal {
         signal: HsaSignal,
         condition: u32,
         compare_value: SignalValue,
         handler: unsafe extern "C" fn(SignalValue, *mut c_void) -> bool,
-        arg: usize,
+        arg: CallbackArg,
     },
 }
 
@@ -195,7 +222,42 @@ struct AsyncSignalHandler {
     condition: u32,
     compare_value: SignalValue,
     handler: unsafe extern "C" fn(SignalValue, *mut c_void) -> bool,
-    arg: usize,
+    arg: CallbackArg,
+}
+
+/// Clock domain of a completed asynchronous copy's raw timestamps.
+#[derive(Clone, Copy)]
+pub(crate) enum AsyncCopyClock {
+    System,
+    Gpu(usize),
+}
+
+/// Timestamps and clock provenance retained outside the public signal ABI.
+#[derive(Clone, Copy)]
+pub(crate) struct AsyncCopyProfile {
+    pub(crate) clock: AsyncCopyClock,
+    pub(crate) start: u64,
+    pub(crate) end: u64,
+}
+
+/// Dispatcher and copy worker references retain signal storage after the
+/// public handle dies. A completed copy keeps its timing until this signal is
+/// reused or destroyed, even after the worker releases its reference.
+pub(crate) struct AsyncSignalRecord {
+    references: u32,
+    retired: Arc<AtomicBool>,
+    pub(crate) copy_profile: Option<AsyncCopyProfile>,
+}
+
+impl AsyncSignalRecord {
+    fn revive(&mut self) {
+        if self.retired.load(Ordering::Acquire) {
+            // Existing waiters must keep observing the prior retirement even
+            // when a new IPC attachment publishes the same numeric handle.
+            self.retired = Arc::new(AtomicBool::new(false));
+            self.copy_profile = None;
+        }
+    }
 }
 
 /// Sending half of the process-wide serialized callback worker.
@@ -223,8 +285,8 @@ impl SignalSlab {
             .device
             .allocate(
                 MemoryKind::System,
-                (SIGNAL_BYTES * SIGNALS_PER_SLAB) as u64,
-                4096,
+                (SIGNAL_BYTES * SIGNALS_PER_SLAB).max(runtime.host_page_size) as u64,
+                runtime.host_page_size as u64,
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
             .map_err(crate::runtime::map_error)?;
@@ -258,7 +320,23 @@ impl SignalSlab {
         }
         // SAFETY: The bounds and alignment checks identify an initialized slot
         // in this slab, whose allocation remains mapped for the slab lifetime.
-        unsafe { *(address as *const i64) != AMD_SIGNAL_KIND_INVALID }
+        unsafe { &*(address as *const AmdSignal) }
+            .kind
+            .load(Ordering::Acquire)
+            != AMD_SIGNAL_KIND_INVALID
+    }
+}
+
+fn retry_unconfirmed_event_page<T, E>(
+    first: Result<T, E>,
+    page_offered: bool,
+    confirmed: bool,
+    retry_without_page: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    match first {
+        Ok(event) => Ok(event),
+        Err(_) if page_offered && !confirmed => retry_without_page(),
+        Err(error) => Err(error),
     }
 }
 
@@ -294,6 +372,14 @@ impl Runtime {
     }
 
     fn allocate_signal(&mut self, signal: AmdSignal) -> Result<HsaSignal, Status> {
+        if let Some(address) = self.recycled_signals.pop() {
+            // SAFETY: The slot was invalidated after its final asynchronous
+            // registration retired. Its slab remains mapped until shutdown.
+            unsafe { (address as *mut AmdSignal).write(signal) };
+            return Ok(HsaSignal {
+                handle: address as u64,
+            });
+        }
         self.ensure_signal_slab()?;
         let slab = self.signal_slabs.last_mut().ok_or(OUT_OF_RESOURCES)?;
         // SAFETY: The selected slab has one unused aligned slot.
@@ -312,8 +398,8 @@ impl Runtime {
                     .allocate_with_peers(
                         &peers,
                         MemoryKind::System,
-                        SIGNAL_EVENT_PAGE_BYTES,
-                        4096,
+                        SIGNAL_EVENT_PAGE_BYTES.max(self.host_page_size as u64),
+                        self.host_page_size as u64,
                         DeviceAccess::READ | DeviceAccess::WRITE,
                     )
                     .map_err(map_error)?
@@ -323,39 +409,51 @@ impl Runtime {
             if info.device_address != host as u64 || info.size < SIGNAL_EVENT_PAGE_BYTES {
                 return Err(OUT_OF_RESOURCES);
             }
-            self.signal_event_page = Some(allocation);
+            self.signal_event_page = Some(SignalEventPage::new(allocation));
         }
         let host = self
             .signal_event_page
             .as_ref()
-            .and_then(|allocation| allocation.info().host_address)
+            .and_then(SignalEventPage::host_address)
             .ok_or(OUT_OF_RESOURCES)?;
         Ok((host, true))
     }
 
     pub(crate) fn create_signal_event(
         &mut self,
-    ) -> Option<(rocddi::gpu::event::linux::SignalEvent, usize, u32)> {
+    ) -> Option<(crate::platform::event::SignalEvent, usize, u32)> {
         let (page_host, install_page) = self.ensure_signal_event_page().ok()?;
         let gpu = self.gpus.first()?;
-        let event_page = if install_page {
-            Some(self.signal_event_page.as_ref()?)
+        let device = gpu.device.gpu().ok()?;
+        let first = if install_page {
+            create_signal_event(device, Some(self.signal_event_page.as_mut()?))
         } else {
-            None
+            create_signal_event(device, None)
         };
-        let mut event = gpu
-            .device
-            .gpu()
-            .and_then(|device| create_signal_event(device, event_page))
-            .ok()?;
-        if install_page
+        let page_offered = self
+            .signal_event_page
+            .as_ref()
+            .is_some_and(SignalEventPage::was_offered);
+        // An attempted CREATE_EVENT can install the page before reporting an
+        // error. Retry without its handle only after the ioctl was dispatched.
+        let created = retry_unconfirmed_event_page(
+            first,
+            install_page && page_offered,
+            self.signal_event_page_confirmed,
+            || create_signal_event(device, None),
+        );
+        if page_offered
             && PROCESS_SIGNAL_EVENT_PAGE
                 .set(page_host)
                 .is_err_and(|published| published != page_host)
         {
-            let _ = event.destroy();
+            if let Ok(mut event) = created {
+                let _ = event.destroy();
+            }
             return None;
         }
+        let event = created.ok()?;
+        self.signal_event_page_confirmed = true;
         let info = event.info();
         let offset = usize::try_from(info.event_page_slot_index)
             .ok()?
@@ -384,7 +482,6 @@ impl Runtime {
         value: SignalValue,
         interrupt: bool,
     ) -> Result<HsaSignal, Status> {
-        self.ensure_signal_slab()?;
         if !interrupt {
             return self.allocate_signal(AmdSignal::user(value));
         }
@@ -409,9 +506,63 @@ impl Runtime {
 
     pub(crate) fn owns_signal(&self, signal: HsaSignal) -> bool {
         let address = signal.handle as usize;
+        if self
+            .async_signal_refs
+            .get(&address)
+            .is_some_and(|record| record.retired.load(Ordering::Acquire))
+        {
+            return false;
+        }
         self.owned_ipc_signals.contains_key(&address)
-            || self.imported_ipc_signals.contains_key(&address)
+            || self
+                .imported_ipc_signals
+                .get(&address)
+                .is_some_and(|imported| imported.references != 0)
             || self.signal_slabs.iter().any(|slab| slab.owns_live(address))
+    }
+
+    pub(crate) fn retain_async_signal(&mut self, signal: HsaSignal) -> Result<(), Status> {
+        let address = signal.handle as usize;
+        if !self.async_signal_refs.contains_key(&address) {
+            self.async_signal_refs
+                .try_reserve(1)
+                .map_err(|_| OUT_OF_RESOURCES)?;
+        }
+        match self.async_signal_refs.entry(address) {
+            Entry::Vacant(entry) => {
+                entry.insert(AsyncSignalRecord {
+                    references: 1,
+                    retired: Arc::new(AtomicBool::new(false)),
+                    copy_profile: None,
+                });
+            }
+            Entry::Occupied(mut entry) => {
+                let record = entry.get_mut();
+                record.references = record.references.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn release_async_signal(&mut self, signal: HsaSignal) {
+        let address = signal.handle as usize;
+        let Some(record) = self.async_signal_refs.get_mut(&address) else {
+            return;
+        };
+        if record.references == 0 {
+            return;
+        }
+        record.references -= 1;
+        if record.references != 0 {
+            return;
+        }
+        if record.retired.load(Ordering::Acquire) {
+            if self.finish_signal_storage(address) == SUCCESS {
+                self.async_signal_refs.remove(&address);
+            }
+        } else if record.copy_profile.is_none() {
+            self.async_signal_refs.remove(&address);
+        }
     }
 
     fn create_ipc_signal(&mut self, value: SignalValue) -> Result<HsaSignal, Status> {
@@ -422,8 +573,8 @@ impl Runtime {
                 .allocate_with_peers(
                     &peers,
                     MemoryKind::System,
-                    IPC_SIGNAL_ALLOCATION_BYTES,
-                    IPC_SIGNAL_ALLOCATION_BYTES,
+                    IPC_SIGNAL_ALLOCATION_BYTES.max(self.host_page_size as u64),
+                    self.host_page_size as u64,
                     DeviceAccess::READ | DeviceAccess::WRITE,
                 )
                 .map_err(map_error)?
@@ -455,6 +606,9 @@ impl Runtime {
 
     fn export_ipc_signal(&self, signal: HsaSignal) -> Result<[u32; 8], Status> {
         let address = signal.handle as usize;
+        if !self.owns_signal(signal) {
+            return Err(INVALID_ARGUMENT);
+        }
         let allocation = self
             .owned_ipc_signals
             .get(&address)
@@ -477,8 +631,16 @@ impl Runtime {
             .find(|(_, signal)| signal.ipc_handle == words)
         {
             imported.references = imported.references.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
+            let address = *address;
+            if let Some(record) = self.async_signal_refs.get_mut(&address) {
+                if record.references == 0 && record.retired.load(Ordering::Acquire) {
+                    self.async_signal_refs.remove(&address);
+                } else {
+                    record.revive();
+                }
+            }
             return Ok(HsaSignal {
-                handle: *address as u64,
+                handle: address as u64,
             });
         }
 
@@ -529,14 +691,51 @@ impl Runtime {
 
     fn destroy_signal(&mut self, signal: HsaSignal) -> Status {
         let address = signal.handle as usize;
+        if !self.owns_signal(signal) {
+            if self.async_signal_refs.get(&address).is_some_and(|record| {
+                record.references == 0 && record.retired.load(Ordering::Acquire)
+            }) {
+                let status = self.finish_signal_storage(address);
+                if status == SUCCESS {
+                    self.async_signal_refs.remove(&address);
+                }
+                return status;
+            }
+            return INVALID_SIGNAL;
+        }
         if let Some(imported) = self.imported_ipc_signals.get_mut(&address) {
             if imported.references > 1 {
                 imported.references -= 1;
                 return SUCCESS;
             }
-            let Some(mut imported) = self.imported_ipc_signals.remove(&address) else {
-                return ERROR;
-            };
+        }
+        if self
+            .async_signal_refs
+            .get(&address)
+            .is_some_and(|record| record.references == 0)
+        {
+            let status = self.finish_signal_storage(address);
+            if status == SUCCESS {
+                self.async_signal_refs.remove(&address);
+            }
+            return status;
+        }
+        if let Some(record) = self.async_signal_refs.get_mut(&address) {
+            // ROCr also retains each async registration. Keep the mapped IPC
+            // allocation and any interrupt event live until the last handler
+            // returns false, even after the public reference is destroyed.
+            record.retired.store(true, Ordering::Release);
+            record.copy_profile = None;
+            if let Some(imported) = self.imported_ipc_signals.get_mut(&address) {
+                imported.references = 0;
+            }
+            return SUCCESS;
+        }
+        self.finish_signal_storage(address)
+    }
+
+    fn finish_signal_storage(&mut self, address: usize) -> Status {
+        if let Some(mut imported) = self.imported_ipc_signals.remove(&address) {
             return match imported.allocation.free() {
                 Ok(()) => SUCCESS,
                 Err(error) => {
@@ -554,9 +753,6 @@ impl Runtime {
                 }
             };
         }
-        if !self.owns_signal(signal) {
-            return INVALID_SIGNAL;
-        }
         if let Some(mut event) = self.interrupt_signals.remove(&address).flatten() {
             if self.signal_event_pool.len() < MAX_POOLED_SIGNAL_EVENTS
                 && self.signal_event_pool.try_reserve(1).is_ok()
@@ -567,10 +763,16 @@ impl Runtime {
                 return map_error(error);
             }
         }
-        // Slab storage remains mapped until shutdown so asynchronous waiters do
-        // not race an unmap; the invalid kind prevents subsequent API use.
-        // SAFETY: owns_signal validated this live slab slot.
-        unsafe { (address as *mut i64).write(AMD_SIGNAL_KIND_INVALID) };
+        // Slab storage remains mapped until shutdown. A later creation may
+        // reuse the slot once all asynchronous registrations have retired.
+        let recycle = self.recycled_signals.try_reserve(1).is_ok();
+        // SAFETY: The caller validated this initialized live slab slot.
+        unsafe { &*(address as *const AmdSignal) }
+            .kind
+            .store(AMD_SIGNAL_KIND_INVALID, Ordering::Release);
+        if recycle {
+            self.recycled_signals.push(address);
+        }
         SUCCESS
     }
 
@@ -592,15 +794,23 @@ impl Runtime {
                 }
             }
         }
-        if let Some(page) = self.signal_event_page.take() {
-            let host = page.info().host_address;
-            if host.is_some_and(|host| PROCESS_SIGNAL_EVENT_PAGE.get() == Some(&host)) {
-                if let Err(error) = linux_interop::retain_kfd_signal_event_page_for_process(page) {
-                    if status == SUCCESS {
-                        status = map_error(error);
-                    }
+        let unresolved_page = self
+            .signal_event_page
+            .as_ref()
+            .is_some_and(SignalEventPage::was_offered)
+            && !self.signal_event_page_confirmed;
+        if let Some(mut page) = self.signal_event_page.take() {
+            if let Err(error) = page.retain_for_process() {
+                if status == SUCCESS {
+                    status = map_error(error);
                 }
             }
+        }
+        // An unsuccessful CREATE_EVENT cannot tell us whether KFD installed
+        // the page. Another runtime would have its address but not its handle.
+        // Quarantine this process instead of reinitializing over that state.
+        if unresolved_page && status == SUCCESS {
+            status = INVALID_RUNTIME_STATE;
         }
         status
     }
@@ -645,14 +855,35 @@ unsafe fn signal_uses_interrupt(
     Ok(consumers.iter().any(|agent| agent.handle == CPU_AGENT))
 }
 
-pub(crate) unsafe fn signal_ref(signal: HsaSignal) -> Option<&'static AmdSignal> {
-    if signal.handle == 0 {
-        return None;
-    }
+/// Finds the record behind one live public signal handle without exporting a
+/// reference whose lifetime could outlive the handle's backing.
+///
+/// # Safety
+/// The handle must identify an aligned initialized signal whose owner remains
+/// mapped for every use of the returned pointer. Public callers retain signals
+/// through their operations; async registrations are retained by the runtime.
+unsafe fn signal_ptr(signal: HsaSignal) -> Option<NonNull<AmdSignal>> {
+    let pointer = NonNull::new(signal.handle as usize as *mut AmdSignal)?;
     // SAFETY: HSA signal handles created by this frontend are aligned pointers
     // to AmdSignal records retained by the runtime or their owning queue.
-    let signal = unsafe { &*(signal.handle as usize as *const AmdSignal) };
-    (signal.kind != AMD_SIGNAL_KIND_INVALID).then_some(signal)
+    let live = unsafe { pointer.as_ref().kind.load(Ordering::Acquire) };
+    (live != AMD_SIGNAL_KIND_INVALID).then_some(pointer)
+}
+
+/// Runs one operation against a live signal without returning a borrowed
+/// reference. The callback result cannot contain the temporary signal borrow.
+///
+/// # Safety
+/// The caller must keep the signal storage live and synchronize destruction
+/// for the complete callback, including any wait performed by the callback.
+pub(crate) unsafe fn with_signal<R>(
+    signal: HsaSignal,
+    operation: impl for<'a> FnOnce(&'a AmdSignal) -> R,
+) -> Option<R> {
+    // SAFETY: The caller keeps the storage live throughout the operation.
+    let pointer = unsafe { signal_ptr(signal) }?;
+    // SAFETY: No reference escapes this call and the caller retains the owner.
+    Some(operation(unsafe { pointer.as_ref() }))
 }
 
 fn condition_met(condition: u32, observed: SignalValue, compare: SignalValue) -> bool {
@@ -816,13 +1047,13 @@ pub unsafe extern "C" fn hsa_amd_ipc_signal_attach(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hsa_signal_load_relaxed(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
-    unsafe { signal_ref(signal) }.map_or(0, |signal| signal.value.load(Ordering::Relaxed))
+    unsafe { with_signal(signal, |signal| signal.value.load(Ordering::Relaxed)) }.unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hsa_signal_load_scacquire(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
-    unsafe { signal_ref(signal) }.map_or(0, |signal| signal.value.load(Ordering::Acquire))
+    unsafe { with_signal(signal, |signal| signal.value.load(Ordering::Acquire)) }.unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
@@ -835,16 +1066,17 @@ pub unsafe extern "C" fn hsa_signal_load_acquire(signal: HsaSignal) -> SignalVal
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hsa_signal_store_relaxed(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Callers must supply a live HSA signal handle.
-    let Some(signal) = (unsafe { signal_ref(signal) }) else {
-        return;
+    let _ = unsafe {
+        with_signal(signal, |signal| {
+            if signal.kind.load(Ordering::Acquire) == AMD_SIGNAL_KIND_DOORBELL {
+                let address = signal.value.load(Ordering::Relaxed) as usize;
+                // SAFETY: A queue doorbell signal contains its live MMIO mapping.
+                rocddi::gpu::queue::ring_doorbell(address, value as u64);
+            } else {
+                signal.value.store(value, Ordering::Relaxed);
+            }
+        })
     };
-    if signal.kind == AMD_SIGNAL_KIND_DOORBELL {
-        let address = signal.value.load(Ordering::Relaxed) as usize;
-        // SAFETY: A queue doorbell signal contains its live MMIO mapping.
-        unsafe { (address as *mut u64).write_volatile(value as u64) };
-    } else {
-        signal.value.store(value, Ordering::Relaxed);
-    }
 }
 
 #[unsafe(no_mangle)]
@@ -862,17 +1094,18 @@ pub unsafe extern "C" fn hsa_signal_silent_store_screlease(signal: HsaSignal, va
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hsa_signal_store_screlease(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Callers must supply a live HSA signal handle.
-    let Some(signal) = (unsafe { signal_ref(signal) }) else {
-        return;
+    let _ = unsafe {
+        with_signal(signal, |signal| {
+            if signal.kind.load(Ordering::Acquire) == AMD_SIGNAL_KIND_DOORBELL {
+                fence(Ordering::Release);
+                let address = signal.value.load(Ordering::Relaxed) as usize;
+                // SAFETY: A queue doorbell signal contains its live MMIO mapping.
+                rocddi::gpu::queue::ring_doorbell(address, value as u64);
+            } else {
+                signal.value.store(value, Ordering::Release);
+            }
+        })
     };
-    if signal.kind == AMD_SIGNAL_KIND_DOORBELL {
-        fence(Ordering::Release);
-        let address = signal.value.load(Ordering::Relaxed) as usize;
-        // SAFETY: A queue doorbell signal contains its live MMIO mapping.
-        unsafe { (address as *mut u64).write_volatile(value as u64) };
-    } else {
-        signal.value.store(value, Ordering::Release);
-    }
 }
 
 #[unsafe(no_mangle)]
@@ -884,7 +1117,7 @@ pub unsafe extern "C" fn hsa_signal_store_release(signal: HsaSignal, value: Sign
 
 unsafe fn signal_exchange(signal: HsaSignal, value: SignalValue, order: Ordering) -> SignalValue {
     // SAFETY: Callers must supply a live HSA user signal.
-    unsafe { signal_ref(signal) }.map_or(0, |signal| signal.value.swap(value, order))
+    unsafe { with_signal(signal, |signal| signal.value.swap(value, order)) }.unwrap_or(0)
 }
 
 unsafe fn signal_compare_exchange(
@@ -895,12 +1128,15 @@ unsafe fn signal_compare_exchange(
     failure: Ordering,
 ) -> SignalValue {
     // SAFETY: Callers must supply a live HSA user signal.
-    unsafe { signal_ref(signal) }.map_or(0, |signal| {
-        signal
-            .value
-            .compare_exchange(expected, value, success, failure)
-            .unwrap_or_else(|observed| observed)
-    })
+    unsafe {
+        with_signal(signal, |signal| {
+            signal
+                .value
+                .compare_exchange(expected, value, success, failure)
+                .unwrap_or_else(|observed| observed)
+        })
+    }
+    .unwrap_or(0)
 }
 
 unsafe fn signal_fetch_update(
@@ -910,9 +1146,7 @@ unsafe fn signal_fetch_update(
     operation: fn(&AtomicI64, SignalValue, Ordering),
 ) {
     // SAFETY: Callers must supply a live HSA user signal.
-    if let Some(signal) = unsafe { signal_ref(signal) } {
-        operation(&signal.value, value, order);
-    }
+    let _ = unsafe { with_signal(signal, |signal| operation(&signal.value, value, order)) };
 }
 
 fn signal_add(value: &AtomicI64, operand: SignalValue, order: Ordering) {
@@ -1074,27 +1308,31 @@ unsafe fn signal_wait(
     order: Ordering,
 ) -> SignalValue {
     // SAFETY: Callers must supply a live HSA user signal.
-    let Some(signal) = (unsafe { signal_ref(signal) }) else {
-        return 0;
-    };
-    // The common satisfied path needs only one atomic load. Read the clock
-    // and system frequency only once the caller actually has to wait.
-    let observed = signal.value.load(order);
-    if condition_met(condition, observed, compare_value) {
-        return observed;
+    unsafe {
+        with_signal(signal, |signal| {
+            // The common satisfied path needs only one atomic load. Read the clock
+            // and system frequency only once the caller actually has to wait.
+            let observed = signal.value.load(order);
+            if condition_met(condition, observed, compare_value) {
+                return observed;
+            }
+            let start = Instant::now();
+            let frequency = system_frequency();
+            loop {
+                let observed = signal.value.load(order);
+                if condition_met(condition, observed, compare_value) {
+                    return observed;
+                }
+                if timeout_hint != u64::MAX
+                    && timeout_elapsed(start.elapsed(), timeout_hint, frequency)
+                {
+                    return observed;
+                }
+                wait_pause(wait_state_hint, &start);
+            }
+        })
     }
-    let start = Instant::now();
-    let frequency = system_frequency();
-    loop {
-        let observed = signal.value.load(order);
-        if condition_met(condition, observed, compare_value) {
-            return observed;
-        }
-        if timeout_hint != u64::MAX && timeout_elapsed(start.elapsed(), timeout_hint, frequency) {
-            return observed;
-        }
-        wait_pause(wait_state_hint, &start);
-    }
+    .unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
@@ -1325,26 +1563,44 @@ pub unsafe extern "C" fn hsa_signal_group_wait_any_scacquire(
     status
 }
 
-unsafe fn signal_wait_inputs<'a>(
+struct WaitInputs {
+    signals: Vec<HsaSignal>,
+    conditions: Vec<u32>,
+    values: Vec<SignalValue>,
+}
+
+unsafe fn copy_wait_input<T: Copy>(pointer: *const T, count: usize) -> Option<Vec<T>> {
+    if count == 0 {
+        return Some(Vec::new());
+    }
+    if pointer.is_null()
+        || count
+            .checked_mul(size_of::<T>())
+            .is_none_or(|bytes| bytes > isize::MAX as usize)
+    {
+        return None;
+    }
+    let mut copied = Vec::new();
+    copied.try_reserve_exact(count).ok()?;
+    // SAFETY: The caller supplies count aligned, readable elements. The
+    // borrow ends before any result pointer can be written by the wait.
+    copied.extend_from_slice(unsafe { std::slice::from_raw_parts(pointer, count) });
+    Some(copied)
+}
+
+unsafe fn signal_wait_inputs(
     signal_count: u32,
     signals: *const HsaSignal,
     conditions: *const u32,
     values: *const SignalValue,
-) -> Option<(&'a [HsaSignal], &'a [u32], &'a [SignalValue])> {
+) -> Option<WaitInputs> {
     let count = signal_count as usize;
-    if count == 0 {
-        return Some((&[], &[], &[]));
-    }
-    if count != 0 && (signals.is_null() || conditions.is_null() || values.is_null()) {
-        return None;
-    }
-    // SAFETY: The caller supplies signal_count readable elements in each array.
-    Some(unsafe {
-        (
-            std::slice::from_raw_parts(signals, count),
-            std::slice::from_raw_parts(conditions, count),
-            std::slice::from_raw_parts(values, count),
-        )
+    // SAFETY: The public ABI supplies readable arrays for the duration of each
+    // copy. Own them before a satisfying-value output can alias any input.
+    Some(WaitInputs {
+        signals: unsafe { copy_wait_input(signals, count) }?,
+        conditions: unsafe { copy_wait_input(conditions, count) }?,
+        values: unsafe { copy_wait_input(values, count) }?,
     })
 }
 
@@ -1360,43 +1616,136 @@ fn wait_pause(wait_state_hint: u32, start: &Instant) {
     }
 }
 
-fn signal_runtime_is_initialized() -> bool {
-    match lock() {
-        Ok(runtime) => runtime.is_some(),
-        Err(_) => false,
+/// One validated signal; `retained` keeps its slot stable even after destroy.
+struct WaitEntry {
+    handle: HsaSignal,
+    signal: Option<NonNull<AmdSignal>>,
+    retired: Option<Arc<AtomicBool>>,
+    retained: bool,
+}
+
+struct WaitRegistration {
+    // Release retained slots before the token permits shutdown to unmap them.
+    entries: Vec<WaitEntry>,
+    _token: InFlightToken,
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for WaitRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = lock() {
+            if let Some(runtime) = guard.as_mut() {
+                release_wait_entries(runtime, &mut self.entries);
+            }
+        }
     }
 }
 
+fn release_wait_entries(runtime: &mut Runtime, entries: &mut [WaitEntry]) {
+    for entry in entries {
+        if entry.retained {
+            entry.signal = None;
+            entry.retired = None;
+            runtime.release_async_signal(entry.handle);
+            entry.retained = false;
+        }
+    }
+}
+
+/// # Safety
+/// The caller must hold the runtime registry lock until every accepted signal
+/// is retained, and must keep the returned registration alive through the wait.
+unsafe fn prepare_multi_wait(
+    runtime: &mut Runtime,
+    handles: &[HsaSignal],
+) -> Option<WaitRegistration> {
+    let token = runtime.inflight.enter()?;
+    // SAFETY: The runtime lock protects every accepted handle while its
+    // storage reference is acquired, and the references are retained below.
+    let mut entries =
+        unsafe { collect_wait_signals(handles, |signal| runtime.owns_signal(signal)) };
+    for index in 0..entries.len() {
+        if entries[index].signal.is_none() {
+            continue;
+        }
+        let handle = entries[index].handle;
+        if runtime.retain_async_signal(handle).is_err() {
+            release_wait_entries(runtime, &mut entries);
+            return None;
+        }
+        entries[index].retained = true;
+        let Some(record) = runtime.async_signal_refs.get(&(handle.handle as usize)) else {
+            release_wait_entries(runtime, &mut entries);
+            return None;
+        };
+        entries[index].retired = Some(record.retired.clone());
+    }
+    Some(WaitRegistration {
+        entries,
+        _token: token,
+        stop: runtime.stop_workers.clone(),
+    })
+}
+
+/// Selects live signals before a wait without touching invalid handles.
+///
+/// # Safety
+/// Every handle accepted by `owns` must remain backed while the returned
+/// entries are used. The caller must synchronize their eventual release.
+unsafe fn collect_wait_signals(
+    signals: &[HsaSignal],
+    mut owns: impl FnMut(HsaSignal) -> bool,
+) -> Vec<WaitEntry> {
+    signals
+        .iter()
+        .map(|signal| {
+            let reference = if owns(*signal) {
+                // SAFETY: The caller guarantees the accepted handle's backing.
+                unsafe { signal_ptr(*signal) }
+            } else {
+                None
+            };
+            WaitEntry {
+                handle: *signal,
+                signal: reference,
+                retired: None,
+                retained: false,
+            }
+        })
+        .collect()
+}
+
 unsafe fn signal_wait_any_open(
-    signal_count: u32,
-    signals: *const HsaSignal,
-    conditions: *const u32,
-    values: *const SignalValue,
+    signals: &[WaitEntry],
+    conditions: &[u32],
+    values: &[SignalValue],
     timeout_hint: u64,
     wait_state_hint: u32,
     satisfying_value: *mut SignalValue,
+    stop: &AtomicBool,
 ) -> u32 {
-    let Some((signals, conditions, values)) =
-        (unsafe { signal_wait_inputs(signal_count, signals, conditions, values) })
-    else {
-        return u32::MAX;
-    };
-    let valid = signals
-        .iter()
-        .enumerate()
-        .filter_map(|(index, signal)| {
-            // SAFETY: NULL and invalidated slab signals are ignored as required.
-            unsafe { signal_ref(*signal) }.map(|signal| (index, signal))
-        })
-        .collect::<Vec<_>>();
-    if valid.is_empty() {
+    if signals.iter().all(|entry| entry.signal.is_none()) {
         return u32::MAX;
     }
     let start = std::time::Instant::now();
     let frequency = system_frequency();
     loop {
-        for &(index, signal) in &valid {
-            let observed = signal.value.load(Ordering::Relaxed);
+        if stop.load(Ordering::Acquire) {
+            return u32::MAX;
+        }
+        for (index, entry) in signals.iter().enumerate() {
+            let Some(signal) = entry.signal else {
+                continue;
+            };
+            if entry
+                .retired
+                .as_ref()
+                .is_some_and(|retired| retired.load(Ordering::Acquire))
+            {
+                return u32::MAX;
+            }
+            // SAFETY: The registration retains this slot until the wait exits.
+            let observed = unsafe { signal.as_ref().value.load(Ordering::Relaxed) };
             if condition_met(conditions[index], observed, values[index]) {
                 if !satisfying_value.is_null() {
                     // SAFETY: The caller supplied optional writable output storage.
@@ -1422,68 +1771,80 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_any(
     wait_state_hint: u32,
     satisfying_value: *mut SignalValue,
 ) -> u32 {
-    if !signal_runtime_is_initialized() {
+    let mut guard = match lock() {
+        Ok(guard) => guard,
+        Err(_) => return u32::MAX,
+    };
+    let Some(runtime) = guard.as_mut() else {
         return u32::MAX;
-    }
-    // SAFETY: Initialization is established before the public array contract
-    // is inspected, matching ROCr's API ordering.
+    };
+    // SAFETY: The caller supplies signal_count readable entries in each array.
+    let Some(inputs) = (unsafe { signal_wait_inputs(signal_count, signals, conditions, values) })
+    else {
+        return u32::MAX;
+    };
+    // SAFETY: The registry lock protects validation and retention; the returned
+    // registration stays alive until this wait returns.
+    let registration = match unsafe { prepare_multi_wait(runtime, &inputs.signals) } {
+        Some(registration) => registration,
+        None => return u32::MAX,
+    };
+    drop(guard);
+    // SAFETY: The caller supplied optional writable output storage.
     unsafe {
         signal_wait_any_open(
-            signal_count,
-            signals,
-            conditions,
-            values,
+            &registration.entries,
+            &inputs.conditions,
+            &inputs.values,
             timeout_hint,
             wait_state_hint,
             satisfying_value,
+            &registration.stop,
         )
     }
 }
 
 unsafe fn signal_wait_all_open(
-    signal_count: u32,
-    signals: *const HsaSignal,
-    conditions: *const u32,
-    values: *const SignalValue,
+    pending: &mut [WaitEntry],
+    conditions: &[u32],
+    values: &[SignalValue],
     timeout_hint: u64,
     wait_state_hint: u32,
     satisfying_values: *mut SignalValue,
+    stop: &AtomicBool,
 ) -> u32 {
-    let Some((signals, conditions, values)) =
-        (unsafe { signal_wait_inputs(signal_count, signals, conditions, values) })
-    else {
-        return u32::MAX;
-    };
     if !satisfying_values.is_null() {
         // SAFETY: The caller supplied signal_count writable output entries.
         // ROCr publishes zero for invalid and not-yet-satisfied signals even
         // when the wait ultimately times out.
-        unsafe { std::ptr::write_bytes(satisfying_values, 0, signals.len()) };
-    }
-    let mut pending = Vec::with_capacity(signals.len());
-    for signal in signals {
-        // SAFETY: NULL and invalidated slab signals count as already satisfied.
-        if let Some(signal) = unsafe { signal_ref(*signal) } {
-            pending.push(Some(signal));
-        } else {
-            pending.push(None);
-        }
+        unsafe { std::ptr::write_bytes(satisfying_values, 0, pending.len()) };
     }
     let start = std::time::Instant::now();
     let frequency = system_frequency();
     loop {
+        if stop.load(Ordering::Acquire) {
+            return u32::MAX;
+        }
         let mut remaining = false;
-        for (index, signal) in pending.iter_mut().enumerate() {
-            let Some(signal_ref) = *signal else {
+        for (index, entry) in pending.iter_mut().enumerate() {
+            let Some(signal_ref) = entry.signal else {
                 continue;
             };
-            let observed = signal_ref.value.load(Ordering::Relaxed);
+            if entry
+                .retired
+                .as_ref()
+                .is_some_and(|retired| retired.load(Ordering::Acquire))
+            {
+                return u32::MAX;
+            }
+            // SAFETY: The registration retains this slot until the wait exits.
+            let observed = unsafe { signal_ref.as_ref().value.load(Ordering::Relaxed) };
             if condition_met(conditions[index], observed, values[index]) {
                 if !satisfying_values.is_null() {
                     // SAFETY: The caller supplied signal_count writable entries.
                     unsafe { satisfying_values.add(index).write(observed) };
                 }
-                *signal = None;
+                entry.signal = None;
             } else {
                 remaining = true;
             }
@@ -1508,33 +1869,44 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_all(
     wait_state_hint: u32,
     satisfying_values: *mut SignalValue,
 ) -> u32 {
-    if !signal_runtime_is_initialized() {
+    let mut guard = match lock() {
+        Ok(guard) => guard,
+        Err(_) => return u32::MAX,
+    };
+    let Some(runtime) = guard.as_mut() else {
         return u32::MAX;
-    }
-    // SAFETY: Initialization is established before the public array contract
-    // is inspected, matching ROCr's API ordering.
+    };
+    // SAFETY: The caller supplies signal_count readable entries in each array.
+    let Some(inputs) = (unsafe { signal_wait_inputs(signal_count, signals, conditions, values) })
+    else {
+        return u32::MAX;
+    };
+    // SAFETY: The registry lock protects validation and retention; the returned
+    // registration stays alive until this wait returns.
+    let mut registration = match unsafe { prepare_multi_wait(runtime, &inputs.signals) } {
+        Some(registration) => registration,
+        None => return u32::MAX,
+    };
+    drop(guard);
+    // SAFETY: The caller supplied optional writable output storage.
     unsafe {
         signal_wait_all_open(
-            signal_count,
-            signals,
-            conditions,
-            values,
+            &mut registration.entries,
+            &inputs.conditions,
+            &inputs.values,
             timeout_hint,
             wait_state_hint,
             satisfying_values,
+            &registration.stop,
         )
     }
 }
 
-unsafe fn signal_value_pointer(
-    signal: HsaSignal,
-    interrupt: bool,
-) -> Result<*mut SignalValue, Status> {
-    // SAFETY: Callers must supply a live HSA signal handle.
-    let Some(signal) = (unsafe { signal_ref(signal) }) else {
+fn signal_value_pointer(signal: &AmdSignal, interrupt: bool) -> Result<*mut SignalValue, Status> {
+    if signal.kind.load(Ordering::Acquire) == AMD_SIGNAL_KIND_INVALID {
         return Err(INVALID_SIGNAL);
-    };
-    if signal.kind != AMD_SIGNAL_KIND_USER || interrupt {
+    }
+    if signal.kind.load(Ordering::Acquire) != AMD_SIGNAL_KIND_USER || interrupt {
         return Err(INVALID_ARGUMENT);
     }
     Ok((&raw const signal.value).cast::<SignalValue>().cast_mut())
@@ -1556,12 +1928,20 @@ pub unsafe extern "C" fn hsa_amd_signal_value_pointer(
         if value.is_null() {
             return INVALID_ARGUMENT;
         }
-        // SAFETY: Runtime initialization and writable output storage have been
-        // established before validating the signal kind.
+        if !runtime.owns_signal(signal) {
+            return INVALID_SIGNAL;
+        }
         let interrupt = runtime
             .interrupt_signals
             .contains_key(&(signal.handle as usize));
-        let pointer = match unsafe { signal_value_pointer(signal, interrupt) } {
+        // SAFETY: owns_signal validated the handle while the runtime lock
+        // prevents destruction of its backing storage.
+        let Some(pointer) =
+            (unsafe { with_signal(signal, |signal| signal_value_pointer(signal, interrupt)) })
+        else {
+            return INVALID_SIGNAL;
+        };
+        let pointer = match pointer {
             Ok(pointer) => pointer,
             Err(status) => return status,
         };
@@ -1616,7 +1996,7 @@ pub unsafe extern "C" fn hsa_amd_async_function(
         };
         runtime.enqueue_async(AsyncRequest::Function {
             callback,
-            arg: arg as usize,
+            arg: unsafe { CallbackArg::new(arg) },
         })
     })
 }
@@ -1624,9 +2004,10 @@ pub unsafe extern "C" fn hsa_amd_async_function(
 fn accept_async_request(request: AsyncRequest, handlers: &mut Vec<AsyncSignalHandler>) {
     match request {
         AsyncRequest::Function { callback, arg } => {
+            let _scope = CallbackScope::enter();
             // SAFETY: The public contract requires callback and arg to remain
             // valid until the callback executes.
-            unsafe { callback(arg as *mut c_void) };
+            unsafe { callback(arg.as_ptr()) };
         }
         AsyncRequest::Signal {
             signal,
@@ -1647,10 +2028,19 @@ fn accept_async_request(request: AsyncRequest, handlers: &mut Vec<AsyncSignalHan
 fn drain_async_requests(
     receiver: &Receiver<AsyncRequest>,
     handlers: &mut Vec<AsyncSignalHandler>,
+    stop: &std::sync::atomic::AtomicBool,
 ) -> bool {
     loop {
+        if stop.load(Ordering::Acquire) {
+            return false;
+        }
         match receiver.try_recv() {
-            Ok(request) => accept_async_request(request, handlers),
+            Ok(request) => {
+                if stop.load(Ordering::Acquire) {
+                    return false;
+                }
+                accept_async_request(request, handlers);
+            }
             Err(TryRecvError::Empty) => return true,
             Err(TryRecvError::Disconnected) => return false,
         }
@@ -1662,42 +2052,67 @@ fn run_async_dispatcher(receiver: &Receiver<AsyncRequest>, stop: &std::sync::ato
     while !stop.load(Ordering::Acquire) {
         if handlers.is_empty() {
             match receiver.recv_timeout(Duration::from_millis(1)) {
-                Ok(request) => accept_async_request(request, &mut handlers),
+                Ok(request) => {
+                    if stop.load(Ordering::Acquire) {
+                        return;
+                    }
+                    accept_async_request(request, &mut handlers);
+                }
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return,
             }
         }
-        if !drain_async_requests(receiver, &mut handlers) {
+        if !drain_async_requests(receiver, &mut handlers, stop) {
             return;
         }
 
         let mut invoked = false;
         let mut index = 0;
         while index < handlers.len() {
+            if stop.load(Ordering::Acquire) {
+                return;
+            }
             let registration = &handlers[index];
-            // SAFETY: Public signal lifetime rules require registered signals
-            // to remain valid while monitoring is active.
+            // SAFETY: The runtime retains each registered signal until this
+            // worker releases its last handler reference.
             let observed = unsafe { hsa_signal_load_scacquire(registration.signal) };
+            if stop.load(Ordering::Acquire) {
+                return;
+            }
             if !condition_met(registration.condition, observed, registration.compare_value) {
                 index += 1;
                 continue;
             }
             invoked = true;
+            let _scope = CallbackScope::enter();
             // SAFETY: HSA requires the callback and argument to remain valid
             // while the registration is active.
-            let keep = unsafe { (registration.handler)(observed, registration.arg as *mut c_void) };
+            let keep = unsafe { (registration.handler)(observed, registration.arg.as_ptr()) };
             if keep {
                 index += 1;
             } else {
-                handlers.remove(index);
+                let removed = handlers.remove(index);
+                if let Ok(mut guard) = lock() {
+                    if let Some(runtime) = guard.as_mut() {
+                        runtime.release_async_signal(removed.signal);
+                    }
+                }
             }
         }
 
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
         if invoked {
             thread::yield_now();
         } else {
             match receiver.recv_timeout(Duration::from_micros(20)) {
-                Ok(request) => accept_async_request(request, &mut handlers),
+                Ok(request) => {
+                    if stop.load(Ordering::Acquire) {
+                        return;
+                    }
+                    accept_async_request(request, &mut handlers);
+                }
                 Err(RecvTimeoutError::Timeout) => (),
                 Err(RecvTimeoutError::Disconnected) => return,
             }
@@ -1725,6 +2140,12 @@ pub unsafe extern "C" fn hsa_amd_signal_async_handler(
         let Some(handler) = handler else {
             return INVALID_ARGUMENT;
         };
+        if !matches!(
+            condition,
+            SIGNAL_CONDITION_EQ | SIGNAL_CONDITION_NE | SIGNAL_CONDITION_LT | SIGNAL_CONDITION_GTE
+        ) {
+            return INVALID_ARGUMENT;
+        }
         if !runtime.owns_signal(signal) {
             return INVALID_SIGNAL;
         }
@@ -1735,13 +2156,20 @@ pub unsafe extern "C" fn hsa_amd_signal_async_handler(
         {
             return INVALID_SIGNAL;
         }
-        runtime.enqueue_async(AsyncRequest::Signal {
+        if let Err(status) = runtime.retain_async_signal(signal) {
+            return status;
+        }
+        let status = runtime.enqueue_async(AsyncRequest::Signal {
             signal,
             condition,
             compare_value,
             handler,
-            arg: arg as usize,
-        })
+            arg: unsafe { CallbackArg::new(arg) },
+        });
+        if status != SUCCESS {
+            runtime.release_async_signal(signal);
+        }
+        status
     })
 }
 
@@ -1749,6 +2177,55 @@ pub unsafe extern "C" fn hsa_amd_signal_async_handler(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_event_retries_only_after_the_page_was_offered() {
+        let mut retries = 0;
+        let result = retry_unconfirmed_event_page(Err::<u32, ()>(()), true, false, || {
+            retries += 1;
+            Ok(7)
+        });
+        assert_eq!(result, Ok(7));
+        assert_eq!(retries, 1);
+
+        let result = retry_unconfirmed_event_page(Err::<u32, ()>(()), false, false, || {
+            retries += 1;
+            Ok(8)
+        });
+        assert_eq!(result, Err(()));
+        assert_eq!(retries, 1);
+
+        let result = retry_unconfirmed_event_page(Err::<u32, ()>(()), true, true, || {
+            retries += 1;
+            Ok(9)
+        });
+        assert_eq!(result, Err(()));
+        assert_eq!(retries, 1);
+    }
+
+    #[test]
+    #[ignore = "requires a qualified GPU and KFD runtime"]
+    fn destroyed_signal_storage_is_reused() {
+        assert_eq!(crate::hsa_init(), SUCCESS);
+        let mut signal = HsaSignal { handle: 0 };
+        let mut previous = 0;
+        for value in 0..10_000 {
+            // SAFETY: The test supplies writable output storage and owns each
+            // returned signal until destruction below.
+            assert_eq!(
+                unsafe { hsa_signal_create(value, 0, std::ptr::null(), &raw mut signal) },
+                SUCCESS
+            );
+            assert_eq!(unsafe { hsa_signal_load_relaxed(signal) }, value);
+            if value != 0 {
+                assert_eq!(signal.handle, previous);
+            }
+            previous = signal.handle;
+            // SAFETY: No other work retains this signal.
+            assert_eq!(unsafe { hsa_signal_destroy(signal) }, SUCCESS);
+        }
+        assert_eq!(crate::hsa_shut_down(), SUCCESS);
+    }
 
     unsafe extern "C" fn count_rearmed_handler(_value: SignalValue, arg: *mut c_void) -> bool {
         // SAFETY: The test passes a live AtomicU64 for the worker lifetime.
@@ -1772,6 +2249,124 @@ mod tests {
         probe.completed.fetch_add(1, Ordering::Release);
     }
 
+    struct StopDispatcherProbe {
+        stop: std::sync::atomic::AtomicBool,
+        later_calls: AtomicU64,
+    }
+
+    unsafe extern "C" fn stop_dispatcher_from_callback(arg: *mut c_void) {
+        // SAFETY: The probe remains live until the dispatcher returns.
+        let probe = unsafe { &*(arg.cast::<StopDispatcherProbe>()) };
+        probe.stop.store(true, Ordering::Release);
+    }
+
+    unsafe extern "C" fn count_later_callback(arg: *mut c_void) {
+        // SAFETY: The probe remains live until the dispatcher returns.
+        let probe = unsafe { &*(arg.cast::<StopDispatcherProbe>()) };
+        probe.later_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn dispatcher_does_not_invoke_queued_callbacks_after_callback_requests_stop() {
+        let probe = StopDispatcherProbe {
+            stop: std::sync::atomic::AtomicBool::new(false),
+            later_calls: AtomicU64::new(0),
+        };
+        // SAFETY: The probe outlives the dispatcher and uses atomic fields.
+        let argument = unsafe { CallbackArg::new((&raw const probe).cast_mut().cast()) };
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender
+            .send(AsyncRequest::Function {
+                callback: stop_dispatcher_from_callback,
+                arg: argument,
+            })
+            .unwrap();
+        sender
+            .send(AsyncRequest::Function {
+                callback: count_later_callback,
+                arg: argument,
+            })
+            .unwrap();
+        drop(sender);
+
+        run_async_dispatcher(&receiver, &probe.stop);
+
+        assert!(probe.stop.load(Ordering::Acquire));
+        assert_eq!(probe.later_calls.load(Ordering::Relaxed), 0);
+    }
+
+    unsafe extern "C" fn shutdown_from_async_callback(arg: *mut c_void) {
+        // SAFETY: The test retains this atomic until the dispatcher exits.
+        let status = unsafe { &*(arg.cast::<AtomicU64>()) };
+        status.store(u64::from(crate::hsa_shut_down()), Ordering::Release);
+    }
+
+    #[test]
+    fn async_callback_without_runtime_reports_not_initialized() {
+        let status = AtomicU64::new(0);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender
+            .send(AsyncRequest::Function {
+                callback: shutdown_from_async_callback,
+                // SAFETY: The atomic remains live until dispatch returns.
+                arg: unsafe { CallbackArg::new((&raw const status).cast_mut().cast()) },
+            })
+            .unwrap();
+        drop(sender);
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        run_async_dispatcher(&receiver, &stop);
+        assert_eq!(status.load(Ordering::Acquire), u64::from(NOT_INITIALIZED));
+    }
+
+    struct ShutdownSignalProbe {
+        status: AtomicU64,
+        stop: std::sync::atomic::AtomicBool,
+    }
+
+    unsafe extern "C" fn shutdown_from_signal_handler(
+        _value: SignalValue,
+        arg: *mut c_void,
+    ) -> bool {
+        // SAFETY: The test retains the probe until the dispatcher joins.
+        let probe = unsafe { &*(arg.cast::<ShutdownSignalProbe>()) };
+        probe
+            .status
+            .store(u64::from(crate::hsa_shut_down()), Ordering::Release);
+        probe.stop.store(true, Ordering::Release);
+        false
+    }
+
+    #[test]
+    fn async_signal_handler_without_runtime_reports_not_initialized() {
+        let storage = AmdSignal::user(1);
+        let signal = HsaSignal {
+            handle: (&raw const storage) as u64,
+        };
+        let probe = std::sync::Arc::new(ShutdownSignalProbe {
+            status: AtomicU64::new(0),
+            stop: std::sync::atomic::AtomicBool::new(false),
+        });
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender
+            .send(AsyncRequest::Signal {
+                signal,
+                condition: SIGNAL_CONDITION_EQ,
+                compare_value: 1,
+                handler: shutdown_from_signal_handler,
+                // SAFETY: The Arc remains live until the dispatcher joins.
+                arg: unsafe { CallbackArg::new(std::sync::Arc::as_ptr(&probe).cast_mut().cast()) },
+            })
+            .unwrap();
+        let worker_probe = probe.clone();
+        let worker = thread::spawn(move || run_async_dispatcher(&receiver, &worker_probe.stop));
+        worker.join().unwrap();
+        drop(sender);
+        assert_eq!(
+            probe.status.load(Ordering::Acquire),
+            u64::from(NOT_INITIALIZED)
+        );
+    }
+
     #[test]
     fn async_handler_rearms_while_condition_remains_satisfied() {
         let storage = AmdSignal::user(1);
@@ -1787,13 +2382,19 @@ mod tests {
                 condition: SIGNAL_CONDITION_EQ,
                 compare_value: 1,
                 handler: count_rearmed_handler,
-                arg: (&raw const calls) as usize,
+                // SAFETY: The atomic remains live until the dispatcher joins.
+                arg: unsafe { CallbackArg::new((&raw const calls).cast_mut().cast()) },
             })
             .unwrap();
         let worker_stop = stop.clone();
         let worker = thread::spawn(move || run_async_dispatcher(&receiver, &worker_stop));
 
-        let deadline = std::time::Instant::now() + Duration::from_millis(100);
+        let timeout = if cfg!(miri) {
+            Duration::from_secs(5)
+        } else {
+            Duration::from_millis(100)
+        };
+        let deadline = std::time::Instant::now() + timeout;
         while calls.load(Ordering::Relaxed) < 3 && std::time::Instant::now() < deadline {
             thread::yield_now();
         }
@@ -1812,7 +2413,8 @@ mod tests {
         };
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (sender, receiver) = std::sync::mpsc::channel();
-        let argument = (&raw const probe) as usize;
+        // SAFETY: The probe outlives the dispatcher and uses atomic fields.
+        let argument = unsafe { CallbackArg::new((&raw const probe).cast_mut().cast()) };
         for _ in 0..2 {
             sender
                 .send(AsyncRequest::Function {
@@ -1824,7 +2426,12 @@ mod tests {
         let worker_stop = stop.clone();
         let worker = thread::spawn(move || run_async_dispatcher(&receiver, &worker_stop));
 
-        let deadline = std::time::Instant::now() + Duration::from_millis(100);
+        let timeout = if cfg!(miri) {
+            Duration::from_secs(5)
+        } else {
+            Duration::from_millis(100)
+        };
+        let deadline = std::time::Instant::now() + timeout;
         while probe.completed.load(Ordering::Acquire) < 2 && std::time::Instant::now() < deadline {
             thread::yield_now();
         }
@@ -1833,6 +2440,37 @@ mod tests {
 
         assert_eq!(probe.completed.load(Ordering::Acquire), 2);
         assert_eq!(probe.maximum_active.load(Ordering::Acquire), 1);
+    }
+
+    #[test]
+    fn lock_free_signal_lookup_observes_atomic_invalidation() {
+        let storage = std::sync::Arc::new(AmdSignal::user(7));
+        let handle = HsaSignal {
+            handle: std::sync::Arc::as_ptr(&storage) as u64,
+        };
+        let observed_live = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reader_storage = storage.clone();
+        let reader_observed = observed_live.clone();
+        let reader = thread::spawn(move || {
+            loop {
+                // SAFETY: Both threads retain the signal allocation until join.
+                if unsafe { signal_ptr(handle) }.is_none() {
+                    break;
+                }
+                reader_observed.store(true, Ordering::Release);
+                thread::yield_now();
+            }
+            drop(reader_storage);
+        });
+        while !observed_live.load(Ordering::Acquire) {
+            thread::yield_now();
+        }
+        storage
+            .kind
+            .store(AMD_SIGNAL_KIND_INVALID, Ordering::Release);
+        reader.join().unwrap();
+        // SAFETY: The allocation remains live through this final lookup.
+        assert!(unsafe { signal_ptr(handle) }.is_none());
     }
 
     #[test]
@@ -1859,7 +2497,10 @@ mod tests {
 
         let signal = SharedSignal::ipc(17);
         assert!(signal.is_ipc());
-        assert_eq!(signal.signal.kind, AMD_SIGNAL_KIND_USER);
+        assert_eq!(
+            signal.signal.kind.load(Ordering::Relaxed),
+            AMD_SIGNAL_KIND_USER
+        );
         assert_eq!(signal.signal.value.load(Ordering::Relaxed), 17);
     }
 
@@ -1903,7 +2544,7 @@ mod tests {
     #[test]
     fn interrupt_signal_exposes_the_kfd_mailbox_layout() {
         let signal = AmdSignal::interrupt(7, 0x1234_5000, 19);
-        assert_eq!(signal.kind, AMD_SIGNAL_KIND_USER);
+        assert_eq!(signal.kind.load(Ordering::Relaxed), AMD_SIGNAL_KIND_USER);
         assert_eq!(signal.value.load(Ordering::Relaxed), 7);
         assert_eq!(signal.event_mailbox_ptr, 0x1234_5000);
         assert_eq!(signal.event_id, 19);
@@ -1913,36 +2554,15 @@ mod tests {
     fn value_pointer_requires_a_busy_wait_signal() {
         let user = AmdSignal::user(7);
         let doorbell = AmdSignal::doorbell(0x1000, 0x2000);
-        // SAFETY: Both handles point to live, aligned signal storage.
-        unsafe {
-            assert_eq!(
-                signal_value_pointer(
-                    HsaSignal {
-                        handle: (&raw const user) as u64,
-                    },
-                    false
-                ),
-                Ok((&raw const user.value).cast::<SignalValue>().cast_mut())
-            );
-            assert_eq!(
-                signal_value_pointer(
-                    HsaSignal {
-                        handle: (&raw const user) as u64,
-                    },
-                    true,
-                ),
-                Err(INVALID_ARGUMENT)
-            );
-            assert_eq!(
-                signal_value_pointer(
-                    HsaSignal {
-                        handle: (&raw const doorbell) as u64,
-                    },
-                    false
-                ),
-                Err(INVALID_ARGUMENT)
-            );
-        }
+        assert_eq!(
+            signal_value_pointer(&user, false),
+            Ok((&raw const user.value).cast::<SignalValue>().cast_mut())
+        );
+        assert_eq!(signal_value_pointer(&user, true), Err(INVALID_ARGUMENT));
+        assert_eq!(
+            signal_value_pointer(&doorbell, false),
+            Err(INVALID_ARGUMENT)
+        );
     }
 
     #[test]
@@ -2038,6 +2658,7 @@ mod tests {
         let second = AmdSignal::user(8);
         let signals = [
             HsaSignal { handle: 0 },
+            HsaSignal { handle: 1 },
             HsaSignal {
                 handle: (&raw const first) as u64,
             },
@@ -2047,43 +2668,48 @@ mod tests {
         ];
         let conditions = [
             SIGNAL_CONDITION_EQ,
+            SIGNAL_CONDITION_EQ,
             SIGNAL_CONDITION_GTE,
             SIGNAL_CONDITION_LT,
         ];
-        let values = [0, 3, 9];
+        let values = [0, 0, 3, 9];
         let mut satisfying = 0;
+        let stop = AtomicBool::new(false);
 
-        // SAFETY: All arrays have signal_count entries and nonzero handles point
-        // to live, aligned signal storage for the duration of each call.
+        // SAFETY: The validated handles point to live, aligned signal storage
+        // for the duration of each wait; the invalid handle is never read.
         unsafe {
+            let mut valid = collect_wait_signals(&signals, |signal| {
+                signal.handle == signals[2].handle || signal.handle == signals[3].handle
+            });
             assert_eq!(
                 signal_wait_any_open(
-                    signals.len() as u32,
-                    signals.as_ptr(),
-                    conditions.as_ptr(),
-                    values.as_ptr(),
+                    &valid,
+                    &conditions,
+                    &values,
                     0,
                     0,
                     &raw mut satisfying,
+                    &stop
                 ),
-                1
+                2
             );
             assert_eq!(satisfying, 3);
 
-            let mut satisfying_all = [-1; 3];
+            let mut satisfying_all = [-1; 4];
             assert_eq!(
                 signal_wait_all_open(
-                    signals.len() as u32,
-                    signals.as_ptr(),
-                    conditions.as_ptr(),
-                    values.as_ptr(),
+                    &mut valid,
+                    &conditions,
+                    &values,
                     0,
                     0,
                     satisfying_all.as_mut_ptr(),
+                    &stop,
                 ),
                 0
             );
-            assert_eq!(satisfying_all, [0, 3, 8]);
+            assert_eq!(satisfying_all, [0, 0, 3, 8]);
         }
     }
 
@@ -2096,24 +2722,188 @@ mod tests {
         let conditions = [SIGNAL_CONDITION_EQ];
         let values = [4];
         let mut satisfying = [-1];
+        let stop = AtomicBool::new(false);
 
-        // SAFETY: All arrays contain one readable or writable element and the
-        // signal storage remains live for the complete wait.
+        // SAFETY: The validated signal storage remains live for the wait.
         unsafe {
+            let mut valid = collect_wait_signals(&signals, |_| true);
             assert_eq!(
                 signal_wait_all_open(
-                    1,
-                    signals.as_ptr(),
-                    conditions.as_ptr(),
-                    values.as_ptr(),
+                    &mut valid,
+                    &conditions,
+                    &values,
                     0,
                     0,
                     satisfying.as_mut_ptr(),
+                    &stop,
                 ),
                 u32::MAX
             );
         }
         assert_eq!(satisfying, [0]);
+    }
+
+    #[test]
+    fn wait_all_accepts_comparison_values_as_output_storage() -> Result<(), &'static str> {
+        let storage = AmdSignal::user(7);
+        let signals = [HsaSignal {
+            handle: (&raw const storage) as u64,
+        }];
+        let conditions = [SIGNAL_CONDITION_EQ];
+        let mut values = [7];
+        let stop = AtomicBool::new(false);
+
+        // SAFETY: The signal storage and input arrays remain live through the
+        // copy. The output aliases the comparison array only after the copy.
+        unsafe {
+            let inputs =
+                signal_wait_inputs(1, signals.as_ptr(), conditions.as_ptr(), values.as_ptr())
+                    .ok_or("valid wait inputs")?;
+            let mut entries = collect_wait_signals(&inputs.signals, |_| true);
+            assert_eq!(
+                signal_wait_all_open(
+                    &mut entries,
+                    &inputs.conditions,
+                    &inputs.values,
+                    0,
+                    0,
+                    values.as_mut_ptr(),
+                    &stop,
+                ),
+                0
+            );
+        }
+        assert_eq!(values, [7]);
+        Ok(())
+    }
+
+    #[test]
+    fn shutdown_cancels_unbounded_multi_signal_waits() {
+        let storage = AmdSignal::user(3);
+        let handles = [HsaSignal {
+            handle: (&raw const storage) as u64,
+        }];
+        let conditions = [SIGNAL_CONDITION_EQ];
+        let values = [4];
+        let stop = AtomicBool::new(true);
+        // SAFETY: The accepted handle stays live through both calls.
+        let mut signals = unsafe { collect_wait_signals(&handles, |_| true) };
+        // SAFETY: Both calls receive valid slices and no output pointer.
+        unsafe {
+            assert_eq!(
+                signal_wait_any_open(
+                    &signals,
+                    &conditions,
+                    &values,
+                    u64::MAX,
+                    0,
+                    std::ptr::null_mut(),
+                    &stop,
+                ),
+                u32::MAX
+            );
+            assert_eq!(
+                signal_wait_all_open(
+                    &mut signals,
+                    &conditions,
+                    &values,
+                    u64::MAX,
+                    0,
+                    std::ptr::null_mut(),
+                    &stop,
+                ),
+                u32::MAX
+            );
+        }
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn retired_signal_ends_multi_signal_waits() {
+        let retired = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_retired = retired.clone();
+        let worker_stop = stop.clone();
+        let (ready_send, ready_recv) = std::sync::mpsc::channel();
+        let (result_send, result_recv) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            let storage = AmdSignal::user(3);
+            let handle = HsaSignal {
+                handle: (&raw const storage) as u64,
+            };
+            // SAFETY: This worker owns the signal storage until the wait exits.
+            let mut entries = unsafe { collect_wait_signals(&[handle], |_| true) };
+            entries[0].retired = Some(worker_retired);
+            ready_send.send(()).unwrap();
+            let conditions = [SIGNAL_CONDITION_EQ];
+            let values = [4];
+            // SAFETY: The signal and both input slices remain live for the wait.
+            let result = unsafe {
+                signal_wait_any_open(
+                    &entries,
+                    &conditions,
+                    &values,
+                    u64::MAX,
+                    0,
+                    std::ptr::null_mut(),
+                    &worker_stop,
+                )
+            };
+            result_send.send(result).unwrap();
+        });
+        ready_recv.recv_timeout(Duration::from_secs(1)).unwrap();
+        retired.store(true, Ordering::Release);
+        let result = result_recv.recv_timeout(Duration::from_secs(1));
+        if result.is_err() {
+            stop.store(true, Ordering::Release);
+        }
+        worker.join().unwrap();
+        assert!(matches!(result, Ok(value) if value == u32::MAX));
+
+        stop.store(false, Ordering::Release);
+        let storage = AmdSignal::user(3);
+        let handle = HsaSignal {
+            handle: (&raw const storage) as u64,
+        };
+        // SAFETY: The signal storage remains live for this immediate wait.
+        let mut entries = unsafe { collect_wait_signals(&[handle], |_| true) };
+        entries[0].retired = Some(retired);
+        let conditions = [SIGNAL_CONDITION_EQ];
+        let values = [4];
+        // SAFETY: Both input slices remain live for this immediate wait.
+        assert_eq!(
+            unsafe {
+                signal_wait_all_open(
+                    &mut entries,
+                    &conditions,
+                    &values,
+                    u64::MAX,
+                    0,
+                    std::ptr::null_mut(),
+                    &stop,
+                )
+            },
+            u32::MAX
+        );
+    }
+
+    #[test]
+    fn ipc_reattach_does_not_clear_a_prior_waiters_retirement() {
+        let mut record = AsyncSignalRecord {
+            references: 1,
+            retired: Arc::new(AtomicBool::new(false)),
+            copy_profile: None,
+        };
+        let prior_waiter = record.retired.clone();
+        record.retired.store(true, Ordering::Release);
+        record.revive();
+        assert!(prior_waiter.load(Ordering::Acquire));
+        assert!(!record.retired.load(Ordering::Acquire));
+        assert!(!Arc::ptr_eq(&prior_waiter, &record.retired));
+
+        let current_waiter = record.retired.clone();
+        record.revive();
+        assert!(Arc::ptr_eq(&current_waiter, &record.retired));
     }
 
     #[test]
