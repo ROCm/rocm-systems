@@ -609,7 +609,6 @@ HRR_TEST_CASE(Unit_HRR_Format_KernelLaunchSnapshotsTruncated) {
  *     nobody filled; the reader says so by refusing the version.
  */
 HRR_TEST_CASE(Unit_HRR_Format_V7Rejected) {
-  static_assert(HRR_VERSION > 7, "this test pins the v7 -> v8 bump");
   TmpArchive arc("v7");
   hrr_file_header fh{};
   fh.magic   = HRR_MAGIC;

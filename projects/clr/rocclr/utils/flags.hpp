@@ -278,12 +278,6 @@ release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
 release(bool, HIP_HRR_DEBUG_ARGS, false,                                      \
         "Enable HRR capture argument-provenance tracing (per-arg dumps and "  \
         "H2D destination logging) at LOG_INFO level")                         \
-release(bool, HIP_HRR_HOST_SNAPSHOTS, true,                                   \
-        "HRR capture: record pinned host buffers a kernel reads, before each " \
-        "launch. 0 = off (the archive then holds no pinned host contents)")   \
-release(uint, HIP_HRR_HOST_SNAPSHOT_MAX_MB, 64,                               \
-        "HRR capture: largest pinned host allocation snapshotted, in MiB; "   \
-        "a larger one is skipped and listed in manifest unreplayable_apis")   \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
         "Number of consecutive dispatches that may skip the doorbell flush.") \
 release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \

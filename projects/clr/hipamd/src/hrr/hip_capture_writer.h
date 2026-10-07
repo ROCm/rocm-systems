@@ -89,11 +89,6 @@ bool is_incomplete();
 // per process.
 void note_unreplayable(const char* api, const char* reason);
 
-// Record in manifest.json whether pinned host buffers were snapshotted before
-// each kernel launch ("host_snapshots": true/false). An archive with true holds
-// host memory the application filled (inputs, token ids, request state).
-void set_host_snapshots(bool enabled);
-
 // Write a buffer as a content-addressed blob. Returns hash, or {} when the
 // writer is not open or capture has stopped for lack of space.
 // Thread-safe. Skips write if blob already exists on disk.

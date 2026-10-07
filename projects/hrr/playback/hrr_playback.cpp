@@ -1711,15 +1711,6 @@ int main(int argc, char** argv) {
              untranslated > 0 ? " — they reached the GPU as null" : "");
   }
 
-  {
-    const uint64_t applied  = ctx.host_snapshots_applied.load();
-    const uint64_t rejected = ctx.host_snapshots_rejected.load();
-    if (applied || rejected)
-      printf("[HRR]   Host snapshots : %llu chunk(s) of pinned host memory "
-             "restored, %llu record(s) rejected\n",
-             (unsigned long long)applied, (unsigned long long)rejected);
-  }
-
   if (ctx.d2h_pass == 0 && ctx.d2h_fail == 0) {
     if (ctx.d2h_attempted > 0) {
       // D2H events with captured blobs existed, but every validation was skipped
