@@ -1436,6 +1436,8 @@ def gen_vector_cvt_pk(
         if is_vop3:
             L.extend(vop3_src_mod('s0', 0, has_abs))
             L.extend(vop3_src_mod('s1', 1, has_abs))
+        # Ties to even in every MODE.FP_ROUND, as the SIMD helper; see the ISA
+        # discrepancy and the pending F16 input flush in util::round_normalized_simd.
         if op == 'i16':
             L.append('    auto cvt_i16 = [](float f) -> int16_t {')
             L.append('      if (std::isnan(f)) return 0;')

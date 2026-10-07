@@ -385,7 +385,11 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetr
     uint16_t unorm, snorm, unorm_negated = 0;
   };
   // Physical RDNA3/4 witnesses: false FP32 midpoint ties, signed saturation,
-  // exact midpoints, infinities and NaN. The normalized conversion ignores MODE.
+  // exact midpoints, infinities and NaN. Rounding ignores MODE.FP_ROUND. Both
+  // MODE values here flush F16 input denormals, and the only subnormal source
+  // (0x33800000 as F16 0x0001) gives 0 with or without that flush, which is
+  // not modeled yet. GFX9 and RDNA1-2 F16 results reuse these RDNA3/4
+  // witnesses and are not verified on hardware.
   constexpr Case second_source{0x3f000000, 0x8000, 0x4000};
   constexpr Case f32_only_cases[] = {
       {0x37c000c0, 0x0001, 0x0001},         {0x386000e0, 0x0003, 0x0002},
@@ -538,6 +542,66 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfReadsOpSelSelectedHalves)
         for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
           EXPECT_EQ(cu->read_vgpr(vb + 2, lane), expected) << "lane=" << lane;
       }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfScalesSubnormalSourcesWhenModeAllows) {
+  struct Case {
+    bool signed_result;
+    uint32_t neg_mask;
+    uint16_t src0, src1;
+    uint32_t mode, expected;
+  };
+  // MODE.FP_DENORM[6] allows F16 input denormals in 0xc0 and 0xf0, so a
+  // subnormal half is widened and scaled. The signed cases are gfx1201
+  // captures; the unsigned ones apply the same scale. CDNA and RDNA1-2 reuse
+  // these gfx1201-derived results and are not verified on hardware.
+  //
+  // gfx1201 flushes these sources to 0 when MODE disables F16 input denormals.
+  // The emulator does not flush them yet; a later PR adds that flush and its
+  // cases here.
+  constexpr Case cases[] = {{true, 0, 0x3c00, 0x83ff, 0xc0, 0xfffe7fff},
+                            {true, 2, 0x0000, 0x83ff, 0xf0, 0x00020000},
+                            {false, 0, 0x3c00, 0x03ff, 0xc0, 0x0004ffff},
+                            {false, 1, 0x83ff, 0x3c00, 0xc0, 0xffff0004}};
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("packed_normalized_subnormal_memory");
+    amdgpu::L2Cache l2("packed_normalized_subnormal_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("packed_normalized_subnormal", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (const auto &c : cases) {
+      SCOPED_TRACE(testing::Message() << "scalar=" << force_scalar << " signed=" << c.signed_result
+                                      << " neg=" << c.neg_mask << " src0=" << c.src0
+                                      << " src1=" << c.src1 << " mode=" << c.mode);
+      const uint32_t opcode = (gfx9() ? 665u : 786u) + !c.signed_result;
+      const uint32_t words[] = {(gfx9() ? 0xd0000002u : 0xd4000002u) | (opcode << 16),
+                                256u | (257u << 9) | (c.neg_mask << 29)};
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+      ASSERT_NE(inst, nullptr);
+      wf->set_mode_raw(c.mode);
+      const uint64_t exec = 0x55ull;
+      wf->set_exec(exec);
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        cu->write_vgpr(vb, lane, c.src0);
+        cu->write_vgpr(vb + 1, lane, c.src1);
+        cu->write_vgpr(vb + 2, lane, 0xdeadbeef);
+      }
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+        EXPECT_EQ(cu->read_vgpr(vb + 2, lane), exec & (1ull << lane) ? c.expected : 0xdeadbeefu)
+            << "lane=" << lane;
     }
     wf->halt();
   }
