@@ -1,0 +1,134 @@
+# RDNA4 (gfx1201) Memory Chart — single metric_table.
+# The rocprofiler-compute GUI memory-chart renderer (memchart.py) requires exactly one
+# metric_table and indexes a fixed set of alias keys (CDNA memory-hierarchy layout). RDNA4
+# maps onto it approximately: VL1 = GL0 (TCP/vector L1), L2 = GL2C, Fabric/HBM = GDDR6,
+# IL1 = SQC instruction cache. Boxes with no RDNA4 equivalent (scalar-L1 / fabric atomics)
+# are reported as 0. Detailed per-cache metrics live in the dedicated panels (900/1100/1300).
+# The previous 9-table version (CLI-only) is kept as 0300_memory_chart.yaml.9table_bak.
+Panel Config:
+  id: 300
+  title: Memory Chart
+  data source:
+  - metric_table:
+      id: 301
+      title: Memory Chart
+      header:
+        metric: Metric
+        value: Value
+      metric:
+        Wavefront Occupancy:
+          value: ROUND(AVG(GRBM_GUI_ACTIVE), 0)
+        Wave Life:
+          value: ROUND(SUM(SQ_WAVE_CYCLES) / SUM(SQ_WAVES), 0)
+        Wavefronts:
+          value: ROUND(SUM(SQ_WAVES), 0)
+        Workgroups:
+          value: 0
+        Active CUs:
+          value: $cu_per_gpu
+        Num CUs:
+          value: $cu_per_gpu
+        VGPR:
+          value: ROUND(AVG(Arch_VGPR), 0)
+        SGPR:
+          value: ROUND(AVG(SGPR), 0)
+        LDS Allocation:
+          value: ROUND(AVG(LDS_Per_Workgroup), 0)
+        Scratch Allocation:
+          value: ROUND(AVG(Scratch_Per_Workitem), 0)
+        SALU:
+          value: ROUND(SUM(SQ_INSTS_SALU_sum), 0)
+        SMEM:
+          value: ROUND(SUM(SQ_INSTS_SMEM_sum), 0)
+        VALU:
+          value: ROUND(SUM(SQ_INSTS_VALU), 0)
+        Matrix Ops:
+          value: ROUND(SUM(SQ_WMMA_VALU_INSTS), 0)
+        VMEM:
+          value: ROUND(SUM(SQ_INSTS_TEX_LOAD_sum + SQ_INSTS_TEX_STORE_sum), 0)
+        LDS:
+          value: ROUND(SUM(SQ_INSTS_LDS_sum), 0)
+        GWS:
+          value: 0
+        BR:
+          value: 0
+        LDS Req:
+          value: ROUND(SUM(SQ_INSTS_LDS_sum), 0)
+        LDS Util:
+          value: 0
+        LDS Latency:
+          value: 0
+        IL1 Fetch:
+          value: ROUND(SUM(SQC_ICACHE_REQ_sum), 0)
+        IL1 Hit:
+          value: ROUND(100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum), 1)
+        IL1 Lat:
+          value: 0
+        IL1_L2 Rd:
+          value: ROUND(SUM(SQC_ICACHE_MISSES_sum), 0)
+        sL1D Hit:
+          value: 0
+        sL1D Rd:
+          value: 0
+        sL1D Lat:
+          value: 0
+        sL1D_L2 Rd:
+          value: 0
+        sL1D_L2 Wr:
+          value: 0
+        sL1D_L2 Atomic:
+          value: 0
+        VL1 Rd:
+          value: ROUND(SUM(TCP_REQ_READ_sum), 0)
+        VL1 Wr:
+          value: ROUND(SUM(TCP_REQ_WRITE_sum), 0)
+        VL1 Atomic:
+          value: 0
+        VL1 Hit:
+          value: ROUND(100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum), 1)
+        VL1 Lat:
+          value: 0
+        VL1 Stall:
+          value: ROUND(SUM(TCP_DATA_FIFO_STALL_sum), 0)
+        VL1 Coalesce:
+          value: 0
+        VL1_L2 Rd:
+          value: ROUND(SUM(TCP_REQ_MISS_sum), 0)
+        VL1_L2 Wr:
+          value: ROUND(SUM(TCP_REQ_WRITE_sum), 0)
+        VL1_L2 Atomic:
+          value: 0
+        L2 Rd:
+          value: ROUND(SUM(GL2C_HIT_sum + GL2C_MISS_sum), 0)
+        L2 Wr:
+          value: 0
+        L2 Atomic:
+          value: 0
+        L2 Hit:
+          value: ROUND(100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum), 1)
+        L2 Rd Lat:
+          value: 0
+        L2 Wr Lat:
+          value: 0
+        Fabric_L2 Rd:
+          value: ROUND(SUM(GL2C_EA_RDREQ_DRAM_sum), 0)
+        Fabric_L2 Wr:
+          value: ROUND(SUM(GL2C_EA_WRREQ_DRAM_sum), 0)
+        Fabric_L2 Atomic:
+          value: 0
+        Fabric Rd Lat:
+          value: 0
+        Fabric Wr Lat:
+          value: 0
+        Fabric Atomic Lat:
+          value: 0
+        HBM Rd:
+          value: ROUND(256 * SUM(GL2C_EA_RDREQ_DRAM_sum), 0)
+        HBM Wr:
+          value: ROUND(256 * SUM(GL2C_EA_WRREQ_DRAM_sum), 0)
+
+  metrics_description:
+    Memory Chart: >-
+      RDNA4 memory hierarchy summary (GL0/TCP -> GL1 -> GL2 -> GDDR6). Diagram boxes
+      follow the rocprofiler-compute (CDNA-derived) layout; RDNA4-specific detail is in
+      the L0/L1/L2 cache panels.
