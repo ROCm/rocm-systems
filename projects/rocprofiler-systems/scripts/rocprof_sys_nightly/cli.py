@@ -35,6 +35,8 @@ Typical usage on a GPU test machine:
     python3 run-nightly-tarball-tests.py --tier full --run-labels mpi
     python3 run-nightly-tarball-tests.py --reruns 2      # retry flaky tests
     python3 run-nightly-tarball-tests.py --rocm-version 7.15.0a20260717
+    python3 run-nightly-tarball-tests.py --tarball release --variant gfx94X-dcgpu
+    python3 run-nightly-tarball-tests.py --tarball tests --variant gfx94X-dcgpu
     python3 run-nightly-tarball-tests.py --pytest-args "-m gpu -k transpose"
 
 Validate freshly-built binaries instead of the tarball's shipped ones (QA-style
@@ -101,6 +103,7 @@ from .constants import (
     REQUIRED_ROCPROFSYS_BINARIES,
     TEST_CATEGORIES_REL,
     TIER_ORDER,
+    tarball_selection,
 )
 from .context import RunContext
 from .environment import make_rocm_env
@@ -123,11 +126,14 @@ from .source import (
 from .tarball import (
     cleanup_downloaded_tarballs,
     current_rocm_tarball,
+    current_tests_tarball,
     download_file,
     extract_tarball,
     parse_dist_tarball,
     resolve_tarball,
+    resolve_tests_tarball,
     set_rocm_tarball,
+    set_tests_tarball,
     verify_tarball,
 )
 from .testing import (
@@ -159,8 +165,20 @@ def parse_args(argv=None):
     p.add_argument(
         "--rocm-version",
         default=None,
-        help="Specific nightly version to use (e.g. 7.15.0a20260717 or 20260717). "
-        "Default: the latest available for the variant.",
+        help="Specific version to use (nightly 7.15.0a20260717 or 20260717, or "
+        "release 10.1.0rc3). A semver prefix such as 10.1.0 selects the newest "
+        "matching build. Default: the latest available for the variant.",
+    )
+    p.add_argument(
+        "--tarball",
+        choices=("nightly", "tests", "release"),
+        default="nightly",
+        help="Which ROCm archive to download (default: nightly). "
+        "'nightly' is the latest non-tests dist tarball. "
+        "'tests' is that same nightly dist tarball plus the matching -tests- "
+        "archive (sample images and videos). "
+        "'release' is the latest release-candidate dist tarball from "
+        "https://rc.repo.amd.com/rocm/core/tarball/.",
     )
     p.add_argument(
         "--sha256",
@@ -414,8 +432,9 @@ def prepare_rocm(ctx: RunContext) -> None:
         "prepare-only" if args.prepare_only else ("offline" if args.offline else "normal")
     )
 
-    # ---- 1. Resolve + download + extract the nightly ROCm tarball ---------- #
-    step("Download + extract nightly ROCm tarball")
+    # ---- 1. Resolve + download + extract the ROCm tarball ------------------- #
+    channel, include_tests = tarball_selection(args.tarball)
+    step(f"Download + extract {args.tarball} ROCm tarball")
     rocm_updated = False
     current = current_rocm_tarball(workdir)
     if args.skip_download and not (rocm_dir / "bin").is_dir():
@@ -426,12 +445,23 @@ def prepare_rocm(ctx: RunContext) -> None:
         )
     if args.skip_download and (rocm_dir / "bin").is_dir():
         log(f"--skip-download: reusing existing ROCm tree ({current or 'unknown'}).")
+        facts["tarball_source"] = args.tarball
         facts["tarball"] = current or "unknown"
+        facts["channel"] = channel
         # report what is staged, not what --variant/--rocm-version asked for: no
         # download happens here, so the extracted tree is the thing under test
         parsed = parse_dist_tarball(current) if current else None
         if parsed:
             facts["variant"], facts["rocm_version"] = parsed
+        if include_tests:
+            staged_tests = current_tests_tarball(workdir)
+            if not staged_tests:
+                die(
+                    "--tarball tests was given with --offline/--skip-download, but "
+                    "no tests archive was staged.\n"
+                    "       Re-run --prepare-only --tarball tests on a networked node."
+                )
+            facts["tests_tarball"] = staged_tests
     else:
         # --variant auto is a best-effort hint, so let it degrade to multiarch;
         # an explicitly requested variant must resolve or abort.
@@ -439,19 +469,23 @@ def prepare_rocm(ctx: RunContext) -> None:
             variant,
             args.rocm_version,
             fallback=MULTIARCH_VARIANT if args.variant == "auto" else None,
+            channel=channel,
         )
+        facts["tarball_source"] = args.tarball
+        facts["channel"] = channel
         facts["variant"] = variant
         facts["tarball"] = filename
         facts["tarball_url"] = url
         parsed = parse_dist_tarball(filename)
         facts["rocm_version"] = parsed[1] if parsed else "unknown"
-        if (rocm_dir / "bin").is_dir() and current == filename:
+        dist_current = (rocm_dir / "bin").is_dir() and current == filename
+        if dist_current:
             log(f"ROCm tarball already current ({filename}); reusing extracted tree.")
         else:
             log(f"Selected tarball: {filename}")
             log(f"URL: {url}")
             if current and current != filename:
-                log(f"Newer nightly available: {current} -> {filename}")
+                log(f"Replacing extracted tarball: {current} -> {filename}")
             tarball = workdir / filename
             download_file(
                 url,
@@ -462,10 +496,30 @@ def prepare_rocm(ctx: RunContext) -> None:
             verify_tarball(url, tarball, args.sha256, args.require_checksum, facts)
             extract_tarball(tarball, rocm_dir)
             set_rocm_tarball(workdir, filename)
-            # the archive is now extracted into rocm_dir; drop every downloaded
+            rocm_updated = True
+        if include_tests:
+            tests_name, tests_url = resolve_tests_tarball(filename, channel=channel)
+            facts["tests_tarball"] = tests_name
+            facts["tests_tarball_url"] = tests_url
+            if dist_current and current_tests_tarball(workdir) == tests_name:
+                log(f"Tests tarball already current ({tests_name}); reusing extracted files.")
+            else:
+                log(f"Selected tests tarball: {tests_name}")
+                log(f"URL: {tests_url}")
+                tests_path = workdir / tests_name
+                download_file(
+                    tests_url,
+                    tests_path,
+                    require_checksum=args.require_checksum,
+                )
+                verify_tarball(tests_url, tests_path, None, args.require_checksum, facts)
+                extract_tarball(tests_path, rocm_dir)
+                set_tests_tarball(workdir, tests_name)
+                rocm_updated = True
+        if rocm_updated:
+            # the archives are now extracted into rocm_dir; drop every downloaded
             # tarball (including this one) to reclaim the multi-GB of disk space.
             cleanup_downloaded_tarballs(workdir)
-            rocm_updated = True
     facts["rocm_updated"] = rocm_updated
 
     # sanity: the profiler binaries must be present in the tarball's bin/

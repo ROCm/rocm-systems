@@ -18,6 +18,7 @@
 # Optional environment:
 #   TIER=quick|standard|comprehensive|full   (default: standard)
 #   VARIANT=auto                             (default: auto)
+#   TARBALL=nightly|tests|release           (default: nightly)
 #   SOURCE_BUILD=1                           also pass --build-from-source
 #   RUN_LABELS=mpi                           re-enable labels excluded from the tier
 
@@ -37,6 +38,7 @@ LAUNCHER="${NIGHTLY_LAUNCHER:-${HERE}/../run-nightly-tarball-tests.py}"
 WORK_DIR="${WORK_DIR:-${SCRATCH:-${HOME}}/rocprof-sys-nightly}"
 TIER="${TIER:-standard}"
 VARIANT="${VARIANT:-auto}"
+TARBALL="${TARBALL:-nightly}"
 
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     if [[ ! -f "${LAUNCHER}" ]]; then
@@ -48,7 +50,7 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     # Slurm copies this file into its spool, so pass the real launcher path through.
     SOURCE_BUILD="${SOURCE_BUILD:-0}"
     RUN_LABELS="${RUN_LABELS:-}"
-    export NIGHTLY_LAUNCHER="${LAUNCHER}" WORK_DIR TIER VARIANT SOURCE_BUILD RUN_LABELS
+    export NIGHTLY_LAUNCHER="${LAUNCHER}" WORK_DIR TIER VARIANT TARBALL SOURCE_BUILD RUN_LABELS
     exec sbatch --export=ALL \
         --output="${WORK_DIR}/slurm-%j.out" \
         --error="${WORK_DIR}/slurm-%j.err" \
@@ -60,6 +62,7 @@ args=(
     --variant "${VARIANT}"
     --tier "${TIER}"
     --jobs "${SLURM_CPUS_PER_TASK:-32}"
+    --tarball "${TARBALL}"
 )
 if [[ "${SOURCE_BUILD:-0}" == "1" ]]; then
     args+=(--build-from-source)

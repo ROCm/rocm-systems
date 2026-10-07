@@ -25,6 +25,47 @@ NIGHTLY_TARBALL_INDEX = "https://nightly.repo.amd.com/rocm/core/tarball/"
 
 NIGHTLY_TARBALL_BASE = "https://nightly.repo.amd.com/rocm/core/tarball"
 
+RELEASE_TARBALL_BASE = "https://rc.repo.amd.com/rocm/core/tarball"
+
+TARBALL_CHANNELS = {
+    "nightly": NIGHTLY_TARBALL_BASE,
+    "release": RELEASE_TARBALL_BASE,
+}
+
+
+TARBALL_CHOICES = ("nightly", "tests", "release")
+
+
+def tarball_selection(choice: str) -> tuple[str, bool]:
+    """Map a ``--tarball`` value to ``(index channel, include tests archive)``.
+
+    ``tests`` stays on the nightly index and also extracts the matching
+    ``-tests-`` archive. That archive is sample media, so the dist tarball is
+    still downloaded first.
+    """
+    if choice == "nightly":
+        return "nightly", False
+    if choice == "tests":
+        return "nightly", True
+    if choice == "release":
+        return "release", False
+    known = ", ".join(TARBALL_CHOICES)
+    raise ValueError(f"unknown tarball choice {choice!r}; expected {known}")
+
+
+def tarball_urls(channel: str) -> tuple[str, str]:
+    """Return ``(index_url, archive_base)`` for a tarball channel.
+
+    ``index_url`` has a trailing slash. ``archive_base`` does not.
+    """
+    try:
+        base = TARBALL_CHANNELS[channel]
+    except KeyError:
+        known = ", ".join(sorted(TARBALL_CHANNELS))
+        raise ValueError(f"unknown tarball channel {channel!r}; expected {known}") from None
+    return base + "/", base
+
+
 ROCM_SYSTEMS_REPO = "https://github.com/ROCm/rocm-systems.git"
 
 PROJECT_SUBDIR = "projects/rocprofiler-systems"

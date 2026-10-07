@@ -23,7 +23,7 @@ from typing import NoReturn
 
 
 from .command import die, log, run
-from .constants import NIGHTLY_TARBALL_BASE, NIGHTLY_TARBALL_INDEX
+from .constants import NIGHTLY_TARBALL_INDEX, tarball_urls
 
 
 def _require_https(url: str) -> None:
@@ -38,20 +38,23 @@ def _http_get_text(url: str, timeout: int = 60) -> str:
         return resp.read().decode("utf-8", errors="replace")
 
 
-_INDEX_HTML: str | None = None
+_INDEX_HTML: dict[str, str] = {}
 
 
-def fetch_tarball_index(timeout: int = 60) -> str:
-    """Return the nightly index HTML, fetching it at most once per run.
+def fetch_tarball_index(index_url: str | None = None, timeout: int = 60) -> str:
+    """Return one tarball index HTML page, fetching each URL at most once per run.
 
     Both the preflight reachability check and the tarball resolution need this
     page, and it does not change mid-run, so the second caller reuses the first
-    one's copy instead of making another request.
+    one's copy instead of making another request. ``index_url`` defaults to the
+    nightly index.
     """
-    global _INDEX_HTML
-    if _INDEX_HTML is None:
-        _INDEX_HTML = _http_get_text(NIGHTLY_TARBALL_INDEX, timeout=timeout)
-    return _INDEX_HTML
+    url = index_url or NIGHTLY_TARBALL_INDEX
+    cached = _INDEX_HTML.get(url)
+    if cached is None:
+        cached = _http_get_text(url, timeout=timeout)
+        _INDEX_HTML[url] = cached
+    return cached
 
 
 def _sha256_file(path: Path, chunk: int = 1 << 20) -> str:
@@ -120,8 +123,10 @@ def verify_tarball(
     facts["sha256"] = actual
 
 
+_VERSION_RE = r"\d+\.\d+\.\d+(?:a\d{8}|rc\d+)"
+
 _DIST_TARBALL_RE = re.compile(
-    r"therock-dist-linux-(?P<variant>.+)-(?P<version>\d+\.\d+\.\d+a\d{8})\.tar\.gz\Z"
+    r"therock-dist-linux-(?P<variant>.+)-(?P<version>" + _VERSION_RE + r")\.tar\.gz\Z"
 )
 
 
@@ -141,11 +146,12 @@ def index_dist_variants(html: str) -> list[str]:
 
     Only the ``therock-dist-linux-<variant>-<version>.tar.gz`` families are
     reported; the parallel ``<variant>-tests-`` tarballs (sample data, not
-    redistributables) are skipped.
+    redistributables) are skipped. Versions are nightly ``X.Y.ZaYYYYMMDD`` or
+    release-candidate ``X.Y.ZrcN``.
     """
     variants = set()
     for m in re.finditer(
-        r"therock-dist-linux-(.+?)-\d+\.\d+\.\d+a\d{8}\.tar\.gz",
+        r"therock-dist-linux-(.+?)-" + _VERSION_RE + r"\.tar\.gz",
         html,
     ):
         variant = m.group(1)
@@ -169,7 +175,10 @@ def _variant_family_pattern(variant: str) -> re.Pattern | None:
 
 
 def redirect_variant(
-    requested: str, available: list[str], fallback: str | None = None
+    requested: str,
+    available: list[str],
+    fallback: str | None = None,
+    index_url: str = NIGHTLY_TARBALL_INDEX,
 ) -> str:
     """Resolve a requested variant to one the index actually publishes.
 
@@ -197,91 +206,158 @@ def redirect_variant(
         )
         return fallback
     die(
-        f"no nightly tarball variant matches '{requested}'.\n"
+        f"no tarball variant matches '{requested}'.\n"
         f"       Available variants: {', '.join(available)}\n"
-        f"       Browse {NIGHTLY_TARBALL_INDEX} for the full listing."
+        f"       Browse {index_url} for the full listing."
     )
 
 
 def resolve_tarball(
-    variant: str, version: str | None, fallback: str | None = None
+    variant: str,
+    version: str | None,
+    fallback: str | None = None,
+    *,
+    channel: str = "nightly",
 ) -> tuple[str, str, str]:
-    """Return (filename, url, variant) of the nightly dist tarball to download.
+    """Return (filename, url, variant) of the dist tarball to download.
 
     ``variant`` is e.g. ``multiarch``, ``gfx94X-dcgpu``, or a specific arch such
     as ``gfx942`` that is redirected to the family tarball that ships it. The
     returned variant is the one actually resolved against the index.
 
-    The filename regex deliberately anchors a digit right after ``<variant>-`` so
-    the separate ``<variant>-tests-`` tarballs are never matched.
+    ``channel`` is ``nightly`` (default) or ``release``. Release candidates come
+    from https://rc.repo.amd.com/rocm/core/tarball/ and use ``X.Y.ZrcN`` versions.
+
+    The filename regex deliberately requires the version to start immediately
+    after ``<variant>-`` so the separate ``<variant>-tests-`` tarballs are never
+    matched.
     """
-    log(f"Reading nightly tarball index: {NIGHTLY_TARBALL_INDEX}")
+    index_url, base_url = tarball_urls(channel)
+    log(f"Reading {channel} tarball index: {index_url}")
     try:
-        html = fetch_tarball_index()
+        html = fetch_tarball_index(index_url)
     except Exception as exc:  # noqa: BLE001
         die(f"could not fetch tarball index: {exc}")
 
     available = index_dist_variants(html)
     if not available:
         die(
-            f"could not parse any dist tarball from {NIGHTLY_TARBALL_INDEX}; the "
+            f"could not parse any dist tarball from {index_url}; the "
             "index layout may have changed."
         )
-    variant = redirect_variant(variant, available, fallback)
+    variant = redirect_variant(variant, available, fallback, index_url)
 
     pattern = re.compile(
-        r"therock-dist-linux-"
-        + re.escape(variant)
-        + r"-((\d+\.\d+\.\d+)a(\d{8}))\.tar\.gz"
+        r"therock-dist-linux-" + re.escape(variant) + r"-(" + _VERSION_RE + r")\.tar\.gz"
     )
 
-    # candidates: list of (date_int, version_str, filename)
-    candidates = {}
+    # candidates: filename -> version string (e.g. 7.15.0a20260717 or 10.1.0rc3)
+    candidates: dict[str, str] = {}
     for m in pattern.finditer(html):
-        filename = m.group(0)
-        full_version = m.group(1)  # e.g. 7.15.0a20260717
-        date_int = int(m.group(3))  # e.g. 20260717
-        candidates[filename] = (date_int, full_version)
+        candidates[m.group(0)] = m.group(1)
 
     if not candidates:
         die(
-            f"no nightly tarballs found for variant '{variant}'.\n"
+            f"no {channel} tarballs found for variant '{variant}'.\n"
             f"       Available variants: {', '.join(available)}\n"
-            f"       Check {NIGHTLY_TARBALL_INDEX}"
+            f"       Check {index_url}"
         )
 
     if version:
         matches = [
             fn
-            for fn, (date_int, ver) in candidates.items()
-            if _rocm_version_matches(version, ver, date_int)
+            for fn, full_version in candidates.items()
+            if _rocm_version_matches(version, full_version)
         ]
         if not matches:
             die(
                 f"requested version '{version}' not found for variant '{variant}'.\n"
-                f"       Browse {NIGHTLY_TARBALL_INDEX} for valid values."
+                f"       Browse {index_url} for valid values."
             )
-        filename = max(matches, key=lambda fn: candidates[fn][0])
+        filename = max(matches, key=lambda fn: _version_sort_key(candidates[fn]))
     else:
-        filename = max(candidates, key=lambda fn: candidates[fn][0])
+        filename = max(candidates, key=lambda fn: _version_sort_key(candidates[fn]))
 
-    url = f"{NIGHTLY_TARBALL_BASE}/{filename}"
+    url = f"{base_url}/{filename}"
     return filename, url, variant
 
 
-def _rocm_version_matches(requested: str, full_version: str, date_int: int) -> bool:
-    """Return True when ``requested`` exactly selects ``full_version`` (X.Y.ZaYYYYMMDD).
+def paired_tests_tarball(dist_filename: str) -> str:
+    """Return the sample-data archive that pairs with a dist tarball.
 
-    Accepts the full nightly string (``7.15.0a20260717``), the trailing build date
-    (``20260717``), or the ROCm semver prefix without the date (``7.15.0``). Rejects
-    loose substring matches such as ``0`` or ``10.1`` matching unrelated tarballs.
+    ``therock-dist-linux-gfx94X-dcgpu-10.1.0rc3.tar.gz`` becomes
+    ``therock-dist-linux-gfx94X-dcgpu-tests-10.1.0rc3.tar.gz``.
+    """
+    parsed = parse_dist_tarball(dist_filename)
+    if parsed is None:
+        die(f"cannot derive a tests tarball name from {dist_filename}")
+    variant, version = parsed
+    if variant.endswith("-tests"):
+        die(
+            f"{dist_filename} is already a tests archive. The dist tarball is "
+            "required for the rocprof-sys binaries."
+        )
+    return f"therock-dist-linux-{variant}-tests-{version}.tar.gz"
+
+
+def resolve_tests_tarball(
+    dist_filename: str, *, channel: str = "nightly"
+) -> tuple[str, str]:
+    """Return ``(filename, url)`` for the tests archive paired with ``dist_filename``."""
+    index_url, base_url = tarball_urls(channel)
+    filename = paired_tests_tarball(dist_filename)
+    html = fetch_tarball_index(index_url)
+    if filename not in html:
+        die(
+            f"no tests tarball named {filename} on the {channel} index.\n"
+            f"       Browse {index_url}"
+        )
+    return filename, f"{base_url}/{filename}"
+
+
+def _version_sort_key(full_version: str) -> tuple[int, ...]:
+    """Order nightly and release-candidate versions from oldest to newest."""
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:a(\d{8})|rc(\d+))", full_version)
+    if match is None:
+        return (0, 0, 0, 0, 0)
+    major, minor, patch, date, rc_num = match.groups()
+    if date is not None:
+        return (int(major), int(minor), int(patch), 1, int(date))
+    return (int(major), int(minor), int(patch), 0, int(rc_num or 0))
+
+
+def _rocm_version_matches(
+    requested: str, full_version: str, date_int: int | None = None
+) -> bool:
+    """Return True when ``requested`` exactly selects ``full_version``.
+
+    Accepts the full version (``7.15.0a20260717`` or ``10.1.0rc3``), a nightly
+    build date (``20260717``), or the ROCm semver prefix (``7.15.0``, ``10.1.0``).
+    A semver prefix matches either the nightly ``a`` build or a release
+    candidate. Rejects loose substring matches such as ``0`` or ``10.1``.
     """
     if requested == full_version:
         return True
-    if requested.isdigit() and len(requested) == 8 and int(requested) == date_int:
+    nightly = re.fullmatch(r"\d+\.\d+\.\d+a(\d{8})", full_version)
+    if (
+        date_int is None
+        and nightly
+        and requested.isdigit()
+        and len(requested) == 8
+    ):
+        date_int = int(nightly.group(1))
+    if (
+        requested.isdigit()
+        and len(requested) == 8
+        and date_int is not None
+        and int(requested) == date_int
+    ):
         return True
     semver = re.fullmatch(r"(\d+\.\d+\.\d+)", requested)
-    if semver and full_version.startswith(semver.group(1) + "a"):
+    if semver and (
+        full_version.startswith(semver.group(1) + "a")
+        or full_version.startswith(semver.group(1) + "rc")
+    ):
         return True
     return False
 
@@ -415,6 +491,19 @@ def current_rocm_tarball(workdir: Path) -> str | None:
 
 def set_rocm_tarball(workdir: Path, filename: str) -> None:
     _rocm_marker(workdir).write_text(filename + "\n")
+
+
+def _tests_marker(workdir: Path) -> Path:
+    return workdir / ".rocm-tests-version"
+
+
+def current_tests_tarball(workdir: Path) -> str | None:
+    marker = _tests_marker(workdir)
+    return marker.read_text().strip() if marker.is_file() else None
+
+
+def set_tests_tarball(workdir: Path, filename: str) -> None:
+    _tests_marker(workdir).write_text(filename + "\n")
 
 
 def cleanup_downloaded_tarballs(workdir: Path) -> None:

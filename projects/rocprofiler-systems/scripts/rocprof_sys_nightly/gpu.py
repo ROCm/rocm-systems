@@ -23,7 +23,7 @@ from typing import NoReturn
 
 
 from .command import die, emit, log, step
-from .constants import MULTIARCH_VARIANT, NIGHTLY_TARBALL_INDEX
+from .constants import MULTIARCH_VARIANT, tarball_selection, tarball_urls
 from .environment import _foreign_rocm_roots, _is_under, _resolved, make_rocm_env
 from .tarball import fetch_tarball_index
 
@@ -270,13 +270,15 @@ def preflight(args, workdir: Path, rocm_dir: Path) -> list[str]:
 
     # network reachability (only matters if we may download)
     if not args.skip_download:
+        channel, _include_tests = tarball_selection(getattr(args, "tarball", "nightly"))
+        index_url, _base = tarball_urls(channel)
         try:
             # cached for resolve_tarball(), which needs the same page
-            fetch_tarball_index(timeout=20)
-            log(f"network : reachable ({NIGHTLY_TARBALL_INDEX})")
+            fetch_tarball_index(index_url, timeout=20)
+            log(f"network : reachable ({index_url})")
         except Exception as exc:  # noqa: BLE001
             die(
-                f"cannot reach the nightly tarball index ({NIGHTLY_TARBALL_INDEX}): "
+                f"cannot reach the tarball index ({index_url}): "
                 f"{exc}. Use --skip-download to reuse an existing ROCm tree offline."
             )
 

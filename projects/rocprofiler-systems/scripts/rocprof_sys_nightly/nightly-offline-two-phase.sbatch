@@ -16,6 +16,8 @@
 # VARIANT is required. Login nodes usually have no GPU, so --variant auto cannot
 # see the device. Use the tarball family for the compute-node GPU
 # (gfx90a, gfx94X-dcgpu, ...).
+# TARBALL=release selects the release-candidate index. TARBALL=tests also
+# downloads the matching nightly -tests- archive during phase 1.
 # WORK_DIR must be on a filesystem both phases can read, and must not be
 # world-writable. Edit the #SBATCH block for the site GPU queue before launching.
 
@@ -34,6 +36,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHER="${NIGHTLY_LAUNCHER:-${HERE}/../run-nightly-tarball-tests.py}"
 WORK_DIR="${WORK_DIR:-${SCRATCH:-${HOME}}/rocprof-sys-nightly}"
 TIER="${TIER:-standard}"
+TARBALL="${TARBALL:-nightly}"
 
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     if [[ -z "${VARIANT:-}" ]]; then
@@ -46,14 +49,17 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     fi
     mkdir -p "${WORK_DIR}"
     echo "Phase 1 on $(hostname): stage tarball, source, and venv under ${WORK_DIR}"
-    python3 "${LAUNCHER}" \
-        --work-dir "${WORK_DIR}" \
-        --variant "${VARIANT}" \
+    prep_args=(
+        --work-dir "${WORK_DIR}"
+        --variant "${VARIANT}"
         --prepare-only
+        --tarball "${TARBALL}"
+    )
+    python3 "${LAUNCHER}" "${prep_args[@]}"
 
     echo "Phase 2: submitting the offline GPU job"
     # Slurm copies this file into its spool, so pass the real launcher path through.
-    export NIGHTLY_LAUNCHER="${LAUNCHER}" WORK_DIR VARIANT TIER
+    export NIGHTLY_LAUNCHER="${LAUNCHER}" WORK_DIR VARIANT TIER TARBALL
     exec sbatch --export=ALL \
         --output="${WORK_DIR}/slurm-%j.out" \
         --error="${WORK_DIR}/slurm-%j.err" \
@@ -62,10 +68,13 @@ fi
 
 echo "Phase 2 on $(hostname) job ${SLURM_JOB_ID}: offline --tier ${TIER}"
 echo "nodes=${SLURM_JOB_NODELIST:-unset} gpus=${SLURM_JOB_GPUS:-unset}"
-python3 "${LAUNCHER}" \
-    --work-dir "${WORK_DIR}" \
-    --offline \
+phase2_args=(
+    --work-dir "${WORK_DIR}"
+    --offline
     --tier "${TIER}"
+    --tarball "${TARBALL}"
+)
+python3 "${LAUNCHER}" "${phase2_args[@]}"
 rc=$?
 echo "result: $(cat "${WORK_DIR}/latest-result.txt" 2>/dev/null || echo missing)"
 exit "${rc}"

@@ -22,7 +22,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 from rocprof_sys_nightly.cli import main  # noqa: E402
-from rocprof_sys_nightly.constants import MULTIARCH_VARIANT  # noqa: E402
+from rocprof_sys_nightly.constants import MULTIARCH_VARIANT, tarball_selection  # noqa: E402
 from rocprof_sys_nightly.environment import make_rocm_env  # noqa: E402
 from rocprof_sys_nightly.gpu import (  # noqa: E402
     _gfx_from_kfd_version,
@@ -32,9 +32,11 @@ from rocprof_sys_nightly.gpu import (  # noqa: E402
 )
 from rocprof_sys_nightly.tarball import (  # noqa: E402
     _rocm_version_matches,
+    _version_sort_key,
     index_dist_variants,
     parse_dist_tarball,
     redirect_variant,
+    paired_tests_tarball,
 )
 
 
@@ -84,6 +86,11 @@ def test_parse_dist_tarball_splits_variant_and_version():
     assert parse_dist_tarball("not-a-tarball.tar.gz") is None
 
 
+def test_parse_dist_tarball_accepts_release_candidate_versions():
+    parsed = parse_dist_tarball("therock-dist-linux-gfx94X-dcgpu-10.1.0rc3.tar.gz")
+    assert parsed == ("gfx94X-dcgpu", "10.1.0rc3")
+
+
 def test_parse_dist_tarball_keeps_tests_suffix_in_the_variant():
     parsed = parse_dist_tarball(
         "therock-dist-linux-gfx94X-dcgpu-tests-7.15.0a20260717.tar.gz"
@@ -91,10 +98,23 @@ def test_parse_dist_tarball_keeps_tests_suffix_in_the_variant():
     assert parsed == ("gfx94X-dcgpu-tests", "7.15.0a20260717")
 
 
+def test_paired_tests_tarball_inserts_tests_before_the_version():
+    assert (
+        paired_tests_tarball("therock-dist-linux-gfx94X-dcgpu-10.2.0a20261007.tar.gz")
+        == "therock-dist-linux-gfx94X-dcgpu-tests-10.2.0a20261007.tar.gz"
+    )
+    assert (
+        paired_tests_tarball("therock-dist-linux-gfx94X-dcgpu-10.1.0rc3.tar.gz")
+        == "therock-dist-linux-gfx94X-dcgpu-tests-10.1.0rc3.tar.gz"
+    )
+
+
 def test_index_dist_variants_skips_tests_tarballs():
     html = """
     therock-dist-linux-gfx94X-dcgpu-7.15.0a20260717.tar.gz
     therock-dist-linux-gfx94X-dcgpu-tests-7.15.0a20260717.tar.gz
+    therock-dist-linux-gfx94X-dcgpu-10.1.0rc3.tar.gz
+    therock-dist-linux-gfx94X-dcgpu-tests-10.1.0rc3.tar.gz
     therock-dist-linux-multiarch-7.15.0a20260717.tar.gz
     """
     assert index_dist_variants(html) == ["gfx94X-dcgpu", "multiarch"]
@@ -115,10 +135,26 @@ def test_redirect_variant_maps_arch_onto_family_tarball():
         ("10.1", "7.15.0a20260717", 20260717, False),
         ("0", "7.15.0a20260717", 20260717, False),
         ("7.15", "7.15.0a20260717", 20260717, False),
+        ("10.1.0rc3", "10.1.0rc3", None, True),
+        ("10.1.0", "10.1.0rc3", None, True),
+        ("10.1.0rc1", "10.1.0rc3", None, False),
+        ("20261007", "10.2.0a20261007", None, True),
     ],
 )
 def test_rocm_version_matches_exact_selectors_only(requested, full, date, expected):
     assert _rocm_version_matches(requested, full, date) is expected
+
+
+def test_tarball_selection_maps_the_single_flag():
+    assert tarball_selection("nightly") == ("nightly", False)
+    assert tarball_selection("tests") == ("nightly", True)
+    assert tarball_selection("release") == ("release", False)
+
+
+def test_version_sort_key_orders_release_candidates_and_nightlies():
+    assert _version_sort_key("10.1.0rc0") < _version_sort_key("10.1.0rc3")
+    assert _version_sort_key("10.1.0rc3") < _version_sort_key("10.2.0rc0")
+    assert _version_sort_key("10.2.0a20261006") < _version_sort_key("10.2.0a20261007")
 
 
 def test_resolve_variant_auto_uses_first_arch_or_multiarch():
