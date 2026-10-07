@@ -387,12 +387,11 @@ TEST_CASE("Unit_HRR_PinnedHost_LaunchApis_Direct", "[.][hrr-direct]") {
   hipFunction_t from_kernel = nullptr;
   const hipError_t got = hipKernelGetFunction(&from_kernel, reinterpret_cast<hipKernel_t>(0x20));
   INFO("hipKernelGetFunction: " << hipGetErrorName(got));
-  if (got == hipSuccess) {
-    const hipError_t r = hipModuleLaunchKernel(from_kernel, 0, 1, 1, kThreads, 1, 1, 0,
-                                               nullptr, args, nullptr);
-    INFO("launch of its handle: " << hipGetErrorName(r));
-    CHECK((r == hipErrorInvalidValue || r == hipErrorInvalidConfiguration));
-  }
+  REQUIRE(got == hipSuccess);
+  const hipError_t r = hipModuleLaunchKernel(from_kernel, 0, 1, 1, kThreads, 1, 1, 0,
+                                             nullptr, args, nullptr);
+  INFO("launch of its handle: " << hipGetErrorName(r));
+  CHECK((r == hipErrorInvalidValue || r == hipErrorInvalidConfiguration));
   (void)hipGetLastError();
 
   HRR_HIP_CHECK(hipFree(out));
@@ -1253,10 +1252,10 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_UnchangedStoredOnce) {
 }
 
 // ---------------------------------------------------------------------------
-// HIP_HRR_HOST_SNAPSHOTS=0 records no pinned contents, says so in the
-// manifest, and replay then reads an unfilled buffer. The struct launch is
-// left out: its pointer is not translated either, and replay would hand the
-// GPU the capture process's address.
+// HIP_HRR_HOST_SNAPSHOTS=0 takes no snapshot, says so in the manifest, and
+// replay then reads an unfilled buffer. The struct launch is left out: its
+// struct holds no device pointer, so its pinned one is not translated either,
+// and replay would hand the GPU the capture process's address.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_OptOut) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_optout.hrr");
@@ -1499,6 +1498,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_UnchangedRecordLeftAlone) {
   INFO("Replay:\n" << out);
   CHECK(rc < 128);
   CHECK(out.find("embedded ptr @+8 unresolved") == std::string::npos);
+  CHECK(line_with(out, "arg[0]: embedded ptr @+8 0x", "[captured]"));
 
   // Launch 2 finds the buffer replay never filled and launch 4 finds what
   // kernel 3 wrote: two chunks each.
@@ -1636,7 +1636,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_Lifetime) {
     CHECK(rc == 0);
     unsigned long long restored = 0, rejected = 0;
     host_snapshot_summary(out, restored, rejected);
-    CHECK(restored >= 12);
+    CHECK(restored == 12);
     CHECK(rejected == 0);
 #ifndef _WIN32
     int d2h_pass = 0, d2h_fail = 0;
