@@ -5,6 +5,9 @@
 #include "common/defines.h"
 #include "common/tool_runner.hpp"
 
+#include <timemory/utility/argparse.hpp>
+
+#include <array>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -19,6 +22,19 @@
 namespace
 {
 constexpr int k_exec_failure_status = 127;
+
+[[noreturn]] void
+print_version(std::string_view program)
+{
+    auto name   = std::string{ program };
+    auto parser = tim::argparse::argument_parser{ name };
+    parser.enable_version(name, ROCPROFSYS_ARGPARSE_VERSION_INFO);
+
+    auto flag = std::string{ "--version" };
+    auto argv = std::array<char*, 2>{ name.data(), flag.data() };
+    parser.parse_args(2, argv.data());
+    std::exit(EXIT_FAILURE);
+}
 
 // Pointers aim into @p args and stay valid for the life of that vector.
 [[nodiscard]] std::vector<char*>
@@ -107,9 +123,7 @@ main(int argc, char** argv)
         case rocprofsys::cli::dispatch_kind::show_help:
             rocprofsys::cli::print_help(std::cout, program);
             return EXIT_SUCCESS;
-        case rocprofsys::cli::dispatch_kind::show_version:
-            rocprofsys::cli::print_version(std::cout, program, ROCPROFSYS_VERSION_STRING);
-            return EXIT_SUCCESS;
+        case rocprofsys::cli::dispatch_kind::show_version: print_version(program);
         case rocprofsys::cli::dispatch_kind::error:
             std::cerr << parsed.error_message << '\n';
             return EXIT_FAILURE;

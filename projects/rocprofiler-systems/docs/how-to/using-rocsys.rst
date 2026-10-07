@@ -109,6 +109,13 @@ Pass ``-o``, ``--output``, or ``-o=`` to choose the path yourself:
 Call-stack sampling
 ===================
 
-Call-stack sampling is not a ``rocsys`` subcommand. ``rocsys sample`` reports
-an unknown subcommand. Use ``rocprof-sys-sample`` directly. See
+``rocsys sample`` is not a subcommand and reports an unknown subcommand.
+Enable call-stack sampling while profiling with ``--sample``:
+
+.. code-block:: shell
+
+   rocsys --sample -- ./my_app
+   rocsys profile --sample -- ./my_app
+
+For a sampling-only run, use ``rocprof-sys-sample`` directly. See
 :doc:`sampling-call-stack`.
