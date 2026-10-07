@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "legacy_gpu_memory_fixture.h"
+
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
@@ -278,9 +280,11 @@ public:
   }
 
   AtomicLoadResult atomic_load(VmMemoryDomain domain, uint64_t address, uint32_t width) override {
-    if (domain != VmMemoryDomain::System || (width != 4 && width != 8) || address > bytes_.size() ||
-        width > bytes_.size() - address)
+    if (domain != VmMemoryDomain::System || (width != 2 && width != 4 && width != 8) ||
+        address > bytes_.size() || width > bytes_.size() - address)
       return {.outcome = VmAccessOutcome::Faulted};
+    if (address == observed_load_address)
+      observed_load_widths.push_back(width);
     uint64_t value = 0;
     std::memcpy(&value, bytes_.data() + address, width);
     return {.outcome = VmAccessOutcome::Complete, .value = value};
@@ -305,6 +309,8 @@ public:
 
   void reset_atomic_store_calls() { atomic_store_calls_.store(0, std::memory_order_relaxed); }
 
+  uint64_t observed_load_address = std::numeric_limits<uint64_t>::max();
+  std::vector<uint32_t> observed_load_widths;
   uint64_t unavailable_store_address = std::numeric_limits<uint64_t>::max();
   VmAccessOutcome store_outcome = VmAccessOutcome::Complete;
 
@@ -783,7 +789,9 @@ TEST(CommandProcessorPacketFetch, AqlSlotReleasePrecedesCursorAndRetriesItsAdmis
         .doorbell_mode = QueueDoorbellMode::VmPolled,
     });
     ASSERT_NE(registration, 0u);
+    backing->observed_load_address = ring;
     ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+    EXPECT_EQ(backing->observed_load_widths, (std::vector<uint32_t>{2, 4}));
     EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 0u);
     EXPECT_EQ(gpu_vm.atomic_load(address_space, ring, 4).value, first_word);
     ASSERT_EQ(gpu_vm.atomic_store(address_space, gate + 8, 8, 0), VmAccessOutcome::Complete);
@@ -816,6 +824,68 @@ TEST(CommandProcessorPacketFetch, AqlSlotReleasePrecedesCursorAndRetriesItsAdmis
     }
     EXPECT_TRUE(cp.unregister_queue_registration(registration));
     EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+  }
+}
+
+TEST(CommandProcessorPacketFetch, ConcurrentHeaderPublishersMakeThePacketBodyVisible) {
+  for (const bool publish_dword : {false, true}) {
+    SCOPED_TRACE(publish_dword);
+    LegacyPageTable page_table;
+    util::DistributedSharedMutex page_table_mutex;
+    test::LegacyGpuMemoryFixture memory("memory");
+    memory.set_passthrough(true);
+    memory.register_process(7, &page_table, &page_table_mutex);
+    auto &gpu_vm = memory.gpu_vm();
+    const auto address_space = gpu_vm.find_vmid(7);
+    ASSERT_TRUE(address_space);
+    alignas(64) hsa_barrier_and_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_INVALID;
+    alignas(8) uint64_t read_pointer = 0, write_pointer = 1, doorbell = 0;
+    alignas(8) uint64_t gate[2] = {0, 1};
+    CommandProcessor cp("cp");
+    cp.set_gpu_vm(&gpu_vm);
+    const auto registration = cp.register_queue({
+        .address_space = *address_space,
+        .process_id = 7,
+        .queue_id = 1,
+        .ring_base_va = reinterpret_cast<uint64_t>(&packet),
+        .ring_size = kAqlPacketBytes,
+        .read_ptr_va = reinterpret_cast<uint64_t>(&read_pointer),
+        .write_ptr_va = reinterpret_cast<uint64_t>(&write_pointer),
+        .doorbell_va = reinterpret_cast<uint64_t>(&doorbell),
+        .doorbell_mode = QueueDoorbellMode::VmPolled,
+    });
+    ASSERT_NE(registration, 0u);
+    ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+    EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 0u);
+
+    std::atomic<bool> published = false;
+    std::thread producer([&] {
+      packet.dep_signal[0].handle = reinterpret_cast<uint64_t>(gate);
+      if (publish_dword) {
+        std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(&packet))
+            .store(HSA_PACKET_TYPE_BARRIER_AND, std::memory_order_release);
+      } else {
+        packet.reserved0 = 0;
+        std::atomic_ref<uint16_t>(packet.header)
+            .store(HSA_PACKET_TYPE_BARRIER_AND, std::memory_order_release);
+      }
+      // This flag must not provide the acquire edge being tested.
+      published.store(true, std::memory_order_relaxed);
+    });
+    do {
+      EXPECT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+      EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 0u);
+    } while (!published.load(std::memory_order_relaxed));
+    EXPECT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+    EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 0u);
+    producer.join();
+    EXPECT_FALSE(cp.queue_faulted_for_test(1, 7));
+    std::atomic_ref<uint64_t>(gate[1]).store(0, std::memory_order_release);
+    ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+    EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 1u);
+    EXPECT_EQ(read_pointer, 1u);
+    EXPECT_TRUE(cp.unregister_queue_registration(registration));
   }
 }
 

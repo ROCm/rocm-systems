@@ -4396,11 +4396,14 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
     const uint32_t slot = static_cast<uint32_t>(read_idx % num_slots);
     const uint64_t pkt_addr = queue.ring_base_va + slot * kAqlPacketBytes;
 
-    // AQL producers initialize the body first and publish the first dword
-    // last with release ordering. Acquire the header before touching any other
-    // byte in the slot so a reserved-but-unpublished packet cannot race its
-    // producer and a published packet's body is visible before we copy it.
-    const AtomicLoadResult header_load = access.atomic_load(pkt_addr, sizeof(uint32_t));
+    // ROCr can publish just the 16-bit header; other producers release-store
+    // the first dword. Acquire both widths before reading the body. In particular,
+    // do not read setup in the dword until the 16-bit publisher has released it.
+    // Once valid, the producer leaves the packet untouched until slot release.
+    AtomicLoadResult header_load = access.atomic_load(pkt_addr, sizeof(uint16_t));
+    if (header_load.outcome == VmAccessOutcome::Complete &&
+        (header_load.value & 0xFF) != HSA_PACKET_TYPE_INVALID)
+      header_load = access.atomic_load(pkt_addr, sizeof(uint32_t));
     if (header_load.outcome != VmAccessOutcome::Complete) {
       process_limit = read_idx;
       if (header_load.outcome == VmAccessOutcome::Unavailable)
