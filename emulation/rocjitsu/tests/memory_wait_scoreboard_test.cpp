@@ -1051,7 +1051,7 @@ TEST(MemoryWaitExecutionTest, ScalarMissingWaitWarnsWithoutChangingTheResult) {
   }
 }
 
-TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndKeepBothQueueEntries) {
+TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterParticipation) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
                     ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     for (uint64_t shared_lanes : {0u, 0b0101u, 0b1111u}) {
@@ -1084,8 +1084,8 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndKeepBothQueueE
         inst.set_data(std::move(data));
         cu->track_memory_wait(inst, *wf, shared_lanes);
         auto &state = *wf->memory_wait_scoreboard();
-        EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
-        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Load), shared_lanes != 0b1111 ? 1u : 0u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), shared_lanes != 0 ? 1u : 0u);
         std::vector<MemoryWaitScoreboard::Hazard> hazards;
         state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
           static_cast<decltype(hazards) *>(p)->push_back(hazard);
@@ -1099,7 +1099,7 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndKeepBothQueueE
         state.wait(waited, 0);
         state.access(result, ready_lanes, 0xf, false);
         EXPECT_TRUE(hazards.empty());
-        EXPECT_EQ(state.outstanding(pending), 1u);
+        EXPECT_EQ(state.outstanding(pending), pending_lanes ? 1u : 0u);
         state.access(result, pending_lanes, 0xf, false);
         ASSERT_EQ(hazards.size(), pending_lanes ? 1u : 0u);
         if (pending_lanes) {
