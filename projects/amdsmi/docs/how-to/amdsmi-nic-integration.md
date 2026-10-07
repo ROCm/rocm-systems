@@ -147,9 +147,10 @@ enumerate one vendor's hardware.
 
 1. **One registration point.** `make_default_vendor_plugins()` (in
    `src/vendors/vendor_registry.{h,cpp}`) returns one plugin instance per
-   supported vendor. Adding a partner is a new `src/vendors/<name>/`
-   subdirectory plus one `push_back` line in this function; nothing else in the
-   core discovery path changes.
+   supported vendor, in this order: Pensando (AINIC), IFoE (UALoE endpoint),
+   Broadcom. Adding a partner is a new `src/vendors/<name>/` subdirectory plus
+   one `push_back` line in this function; nothing else in the core discovery path
+   changes.
 
 2. **Plugins implement `SmiNicSubsystem`.** The base interface
    (`inc/smi_nic_subsystem.h`) is:
@@ -159,34 +160,43 @@ enumerate one vendor's hardware.
     public:
      virtual void discover(const std::string& pci_path, const std::string& net_path,
                            std::shared_ptr<amd::smi::nic::transport::NicTransport> transport) = 0;
-     virtual NicVendor vendor() const = 0;
-     virtual bool driver_loaded(const std::string& bdf, DriverType driver_type) const = 0;
+     virtual NicVendor vendor() const = 0;  // descriptive only
+     virtual bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const = 0;
      virtual const std::vector<std::unique_ptr<SmiNic>>& get_nics() const = 0;
 
     protected:
      std::pair<uint16_t, uint16_t> read_pci_ids(const std::string& sysfs_bus_path) const;
-     bool resolve_bdf(const std::string& symlink, std::string& bdf) const;
+     bool was_bdf_resolved(const std::string& symlink, std::string& bdf) const;
+     bool is_driver_bound_to_bdf(const std::string& driver_dir, const std::string& bdf,
+                                 bool match_canonical) const;
    };
    ```
 
-   The protected helpers `read_pci_ids()` and `resolve_bdf()` are shared by every
-   plugin so vendors don't reimplement sysfs PCI parsing.
+   The protected helpers ``read_pci_ids()``, ``was_bdf_resolved()`` and
+   ``is_driver_bound_to_bdf()`` are shared by every plugin so vendors don't
+   reimplement sysfs PCI parsing or driver-binding checks. ``DriverType`` names a
+   role (``Main`` for the netdev/PCI driver, ``Rdma`` for the RDMA auxiliary
+   driver), and each plugin maps it to its own driver path. ``vendor()`` is
+   descriptive only: two plugins can report the same vendor (IFoE and Pensando are
+   both ``AMD``), so it never routes a query.
 
 3. **Discovery is id-match based.** `SmiNicSystem::discover_nics()`
    (`src/smi_nic_system.cpp`) walks `/sys/bus/pci/devices` and `/sys/class/net`
    and calls each registered plugin's `discover()`. A plugin scans the PCI path,
-   uses `read_pci_ids()` to match its own `VENDOR_ID`/`DEVICE_ID`, builds a
-   `SmiNic` for each match, then associates network ports with it. The system
+   uses `read_pci_ids()` to match its own PCI ids, builds a `SmiNic` for each
+   match, then associates network ports with it (an IFoE endpoint has none). The system
    aggregates every plugin's `get_nics()` into one BDF-sorted list.
 
-4. **Ports reuse the shared ethtool transport.** Port objects (`SmiNicPort`)
-   already own a transport created via
-   `create_transport(NicBackend_t::Auto)` (`inc/smi_nic_transport.h`). `Auto`
+4. **Ports reuse the shared ethtool transport.** `SmiNicSystem` creates one
+   transport with `create_transport(NicBackend_t::Auto)`
+   (`inc/smi_nic_transport.h`) and passes it to every plugin and port. `Auto`
    tries the netlink backend first (kernel 5.6+ with libnl-3, built only when
-   `HAVE_LIBNL3` is defined) and falls back to the ioctl backend. A plugin that
-   builds on `SmiNic`/`SmiNicPort` inherits FEC, pause, link-settings, driver
-   info, and ethtool statistics for free. It does not need to create a
-   transport of its own.
+   `HAVE_LIBNL3` is defined) and falls back to the ioctl backend for pause and
+   link settings; driver info, ethtool statistics and the permanent address always
+   use ioctl, and FEC statistics exist only on the netlink backend. A plugin that
+   builds on `SmiNic`/`SmiNicPort` inherits all of these and does not need to
+   create a transport of its own. Active FEC and driver info are read by the
+   interface layer with a direct ethtool ioctl, not through the transport.
 
 5. **Public surface stays unified.** Plugins are internal to `amdsminic`. They
    do not add symbols to `amdsmi.h`; all access is through the standard
@@ -201,15 +211,26 @@ class SmiNicSubsystemPensando : public SmiNicSubsystem {
   // ...
  private:
   static constexpr uint16_t VENDOR_ID = 0x1dd8;
-  static constexpr uint16_t DEVICE_ID = 0x0008;   // PCI bridge
+  static constexpr std::array<uint16_t, 3> BRIDGE_DEVICE_IDS = {0x0008, 0x1008, 0x1478};
   static constexpr uint16_t PORT_ID   = 0x1002;   // downstream port function
+  static constexpr uint16_t MID_BRIDGE_ID = 0x1001;  // internal bridge, never a NIC
+  static constexpr uint16_t MGMT_ID   = 0x100c;   // pds_core management function
 };
 ```
 
-Its `discover()` matches `VENDOR_ID`/`DEVICE_ID` for the bridge, then
-`discover_ports()` walks `/sys/class/net`, resolves each interface's PCI BDF,
-matches `PORT_ID`, confirms the port is downstream of the bridge, and collects
-InfiniBand/RDMA info and statistics on each accepted port.
+Its `discover()` matches `VENDOR_ID` and one of `BRIDGE_DEVICE_IDS` for the bridge
+(the bridge reports a different id depending on the card), then `discover_ports()`
+walks `/sys/class/net`, resolves each interface's PCI BDF, matches `PORT_ID`,
+confirms the port is downstream of the bridge, and collects InfiniBand/RDMA info
+and statistics on each accepted port. `discover_mgmt_function()` finds the
+`MGMT_ID` function under the same bridge. A `1dd8` PCI bridge that is neither
+listed nor `MID_BRIDGE_ID` is logged at debug level and not added.
+
+The other two plugins follow the same interface: IFoE
+(`src/vendors/amd/ifoe_subsystem.{h,cpp}`) matches PCI ids `1022:1747`, has no
+ports and no netdev, and reports `FWCTL` when an `ifoe.cmd.*` entry exists;
+Broadcom (`src/vendors/broadcom/broadcom_subsystem.{h,cpp}`) matches netdevs
+whose PCI function is bound to `bnxt_en`.
 
 ```mermaid
 flowchart LR
@@ -219,8 +240,11 @@ flowchart LR
     NicLib --> System[SmiNicSystem<br/>discover_nics]
     System --> Registry[make_default_vendor_plugins]
     Registry --> Pensando[Pensando plugin<br/>src/vendors/pensando/]
+    Registry --> Ifoe[IFoE plugin<br/>src/vendors/amd/]
+    Registry --> Broadcom[Broadcom plugin<br/>src/vendors/broadcom/]
     Registry --> VendorX[Other vendor plugin<br/>src/vendors/&lt;name&gt;/]
     Pensando --> Transport[Shared ethtool transport<br/>ioctl / netlink]
+    Broadcom --> Transport
     VendorX --> Transport
     Transport --> Sysfs[(Linux sysfs / netdev /<br/>infiniband / ethtool)]
 ```
@@ -739,7 +763,7 @@ The `amdsminic` static library exposes a vendor-neutral C interface,
 AMD SMI dispatch layer (`src/amd_smi/amd_smi.cc`) calls. It is context-based:
 
 ```c
-smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx);
+smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx, bool ainic_only);
 smi_nic_status_t smi_nic_destroy_context(smi_nic_ctx_t ctx);
 smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t* discovery);
 
@@ -765,22 +789,24 @@ discovery through the vendor plugins:
 - `discover_nics()` iterates the registered plugins, calling
   `discover("/sys/bus/pci/devices", "/sys/class/net", transport)` on each and collecting
   their `get_nics()` into one BDF-sorted list.
-- `driver_loaded()` routes a query to the plugin whose `vendor()` matches the
-  NIC that owns the BDF.
+- `is_driver_loaded()` finds the plugin that owns the NIC (by object identity over
+  each plugin's `get_nics()`, not by `vendor()`) and asks it. The BDF passed in is a
+  port BDF.
 
 The Pensando plugin (`src/vendors/pensando/`) is the reference implementation.
 It matches its PCI IDs during `discover()`, walks `/sys/class/net` in
 `discover_ports()` to associate ports with the device, and implements
-`driver_loaded()` for the `ionic` and `ionic_rdma` drivers.
+`is_driver_loaded()` for the `ionic` and `ionic_rdma` drivers.
 
 ### Device discovery details (Pensando reference)
 
 | Step | Mechanism |
 |------|-----------|
-| Bridge match | Scan `/sys/bus/pci/devices`; `read_pci_ids()` must equal `VENDOR_ID`/`DEVICE_ID`. |
-| Port match | Walk `/sys/class/net`; `resolve_bdf()` on each `<iface>/device`; `read_pci_ids()` must equal `VENDOR_ID`/`PORT_ID`. |
-| Downstream check | Confirm the port BDF resolves under the bridge BDF via the sysfs symlink path. |
-| Driver presence | `driver_loaded()` checks `/sys/bus/pci/drivers/ionic` and `/sys/bus/auxiliary/drivers/ionic_rdma.rdma`. |
+| Bridge match | Scan `/sys/bus/pci/devices`; `read_pci_ids()` must equal `VENDOR_ID` and one of `BRIDGE_DEVICE_IDS`. |
+| Port match | Walk `/sys/class/net`; `was_bdf_resolved()` on each `<iface>/device`; `read_pci_ids()` must equal `VENDOR_ID`/`PORT_ID`. |
+| Downstream check | Confirm the resolved path of the port function contains `/<bridge_bdf>/`. |
+| Management function | Find `VENDOR_ID`/`MGMT_ID` (`pds_core`) under the same bridge; it enables the `FWCTL` capability. |
+| Driver presence | `is_driver_loaded(bdf, Main)` checks `/sys/bus/pci/drivers/ionic`; `is_driver_loaded(bdf, Rdma)` checks that a link under `/sys/bus/auxiliary/drivers/ionic_rdma.rdma` resolves through the port BDF. |
 
 The vendor's kernel driver must be loaded for its ports to appear under
 `/sys/class/net`; without it, no ports are discovered for that device.
@@ -980,8 +1006,11 @@ projects/amdsmi/
 │   └── impl/
 │       ├── amd_smi_common.h                  # Internal common definitions
 │       ├── amd_smi_utils.h                   # Utility functions (sysfs readers, helpers)
-│       └── nic/amdsmi_unified/interface/
-│           └── smi_nic_interface.h           # Internal C interface consumed by the dispatch layer
+│       ├── amd_smi_rdma_port.h               # was_rdma_port_resolved(): flat RDMA index to (port, IB device, RDMA port)
+│       └── nic/
+│           ├── amd_smi_ainic_device.h        # AMDSmiAINICDevice and the AINICInfo snapshot
+│           └── amdsmi_unified/interface/
+│               └── smi_nic_interface.h       # Internal C interface consumed by the dispatch layer
 ├── src/
 │   ├── amd_smi/
 │   │   ├── amd_smi.cc                        # Public API implementation (dispatch layer)
@@ -994,6 +1023,9 @@ projects/amdsmi/
 │       │   ├── smi_nic_subsystem.h           # SmiNicSubsystem base interface + shared helpers
 │       │   ├── smi_nic_system.h              # SmiNicSystem
 │       │   ├── smi_nic_transport.h           # NicTransport + create_transport() factory
+│       │   ├── smi_nic_stats.h               # StatTier_t and StatTable_t (per-vendor counter tables)
+│       │   ├── smi_nic_telemetry.h           # NicTelemetry: temperature (hwmon), health and port split (devlink)
+│       │   ├── smi_nic_log.h                 # Debug-log sink used by the library (RSMI_LOGGING)
 │       │   ├── smi_nic_vpd.h                  # PCI VPD (Vital Product Data) TLV parser interface
 │       │   ├── smi_ethtool_ioctl.h           # ethtool ioctl helpers (ioctl transport)
 │       │   ├── smi_devlink_netlink.h         # devlink-over-netlink helpers
@@ -1004,10 +1036,13 @@ projects/amdsmi/
 │       └── src/
 │           ├── smi_nic.cpp                   # SmiNic / SmiNicPort (owns the Auto transport)
 │           ├── smi_nic_system.cpp            # SmiNicSystem::discover_nics()
-│           ├── smi_nic_subsystem.cpp         # read_pci_ids() / resolve_bdf() helpers
+│           ├── smi_nic_subsystem.cpp         # read_pci_ids() / was_bdf_resolved() / is_driver_bound_to_bdf() helpers
 │           ├── smi_nic_interface.cpp         # C interface implementation
 │           ├── smi_nic_transport_ioctl.cpp   # ioctl transport backend + create_transport() factory
-│           ├── smi_nic_transport_netlink.cpp # netlink transport backend (built when HAVE_LIBNL3)
+│           ├── smi_nic_transport_netlink.cpp # netlink transport backend and AutoBackend (built when HAVE_LIBNL3)
+│           ├── smi_nic_transport_log.cpp     # debug-log decorator applied to every transport backend
+│           ├── smi_nic_telemetry.cpp         # NicTelemetry implementation
+│           ├── smi_nic_log.cpp               # debug-log sink and value masking
 │           ├── smi_ethtool_ioctl.cpp         # ethtool ioctl backend
 │           ├── smi_nic_vpd.cpp               # PCI VPD TLV parser (product/part/serial)
 │           ├── smi_devlink_netlink.cpp       # devlink-over-netlink backend
@@ -1018,15 +1053,20 @@ projects/amdsmi/
 │           └── vendors/
 │               ├── vendor_registry.{h,cpp}   # make_default_vendor_plugins()
 │               ├── pensando/
-│               │   └── pensando_subsystem.{h,cpp}  # Reference vendor plugin (registered)
+│               │   ├── pensando_subsystem.{h,cpp}  # Reference vendor plugin (registered)
+│               │   └── pensando_stats.{h,cpp}      # kPensandoStatTable: counter names by tier
+│               ├── amd/
+│               │   └── ifoe_subsystem.{h,cpp}      # IFoE (UALoE) endpoint plugin (registered)
 │               └── broadcom/
-│                   └── broadcom_subsystem.{h,cpp}  # Broadcom plugin (compiled and registered)
+│                   ├── broadcom_subsystem.{h,cpp}  # Broadcom plugin (compiled and registered)
+│                   └── broadcom_stats.{h,cpp}      # kBroadcomStatTable
 ├── py-interface/
 │   ├── amdsmi_interface.py                   # Python wrapper (high-level, public AMD SMI API only)
 │   └── amdsmi_wrapper.py                     # Python ctypes bindings to amdsmi.h (auto-generated)
 ├── amdsmi_cli/
 │   ├── amdsmi_commands.py                    # Unified CLI command implementations
-│   └── amdsmi_parser.py                      # CLI argument parsing
+│   ├── amdsmi_parser.py                      # CLI argument parsing (--nic, --port, --extended, --rdma)
+│   └── subcommands/                          # list_devices.py, metric.py, static.py, firmware.py, version.py serve --nic
 └── example/
     └── amd_smi_nic.cc                        # NIC C++ example (public AMD SMI API)
 ```
@@ -1053,7 +1093,8 @@ projects/amdsmi/
 5. **Shared transport** (`inc/smi_nic_transport.h`,
    `src/smi_nic_transport_{ioctl,netlink}.cpp`): The ethtool transport used by
    `SmiNicPort`. `create_transport()` selects the backend
-   (`NicBackend_t::{Auto, Ioctl, Netlink}`).
+   (`NicBackend_t::{Auto, Ioctl, Netlink}`) and wraps it in the debug-log
+   decorator (`src/smi_nic_transport_log.cpp`).
 
 6. **Python interface** (`py-interface/amdsmi_interface.py`,
    `py-interface/amdsmi_wrapper.py`): Bindings to the public `amdsmi.h` only. A
@@ -1249,9 +1290,9 @@ reported under `AMDSMI_PROCESSOR_TYPE_AMD_NIC` and queried through the existing
    `src/nic/ai-nic/amdsmi_unified/src/vendors/<name>/`:
    - Add `<name>_subsystem.{h,cpp}` with a class that derives from
      `SmiNicSubsystem` (`inc/smi_nic_subsystem.h`) and implements `discover()`,
-     `vendor()`, `driver_loaded()`, and `get_nics()`.
+     `vendor()`, `is_driver_loaded()`, and `get_nics()`.
    - Match your hardware by PCI vendor/device ID in `discover()` using the
-     inherited `read_pci_ids()` helper; use `resolve_bdf()` to map a network
+     inherited `read_pci_ids()` helper; use `was_bdf_resolved()` to map a network
      interface back to its PCI BDF. Follow `vendors/pensando/` as the model.
    - Build your NIC and port objects on `SmiNic`/`SmiNicPort` so you inherit the
      shared ethtool transport (FEC, pause, link settings, driver info,
