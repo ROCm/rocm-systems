@@ -60,6 +60,58 @@ class AMDSMISubParser(argparse.ArgumentParser):
     the same AmdSmiException framework instead of calling sys.exit(2).
     """
 
+    def parse_known_args(self, args: list = None, namespace: argparse.Namespace = None) -> tuple:
+        args = list(sys.argv[1:] if args is None else args)
+        normalized = []
+        for index, arg in enumerate(args):
+            if arg == "--":
+                normalized.extend(args[index:])
+                break
+            option, separator, value = arg.partition("=")
+            action = self._option_string_actions.get(option)
+            if action is None and separator and self.allow_abbrev and option.startswith("--"):
+                matches = [name for name in self._option_string_actions if name.startswith(option)]
+                if len(matches) == 1:
+                    option = matches[0]
+                    action = self._option_string_actions[option]
+            if (
+                separator
+                and "," in value
+                and action is not None
+                and (
+                    action.nargs in ("+", "*") or isinstance(action.nargs, int) and action.nargs > 1
+                )
+            ):
+                values = value.split(",")
+                if (
+                    isinstance(action.nargs, int)
+                    and len(values) != action.nargs
+                    or any(
+                        not item
+                        or item != item.strip()
+                        or item == "--"
+                        or self._parse_optional(item) is not None
+                        for item in values
+                    )
+                ):
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                        sys.argv[1] if len(sys.argv) > 1 else "",
+                        value,
+                        AMDSMIHelpers().get_output_format(),
+                    )
+                if index + 1 < len(args):
+                    following = args[index + 1]
+                    if following != "--" and self._parse_optional(following) is None:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                            sys.argv[1] if len(sys.argv) > 1 else "",
+                            following,
+                            AMDSMIHelpers().get_output_format(),
+                        )
+                normalized.extend([option, *values])
+            else:
+                normalized.append(arg)
+        return super().parse_known_args(normalized, namespace)
+
     def error(self, message):
         helpers = AMDSMIHelpers()
         outputformat = helpers.get_output_format()
@@ -1303,6 +1355,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         parser.error = _intercept
 
     def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
+        subcommand_parser.epilog = (
+            "Multi-value syntax: --option VALUE1 VALUE2 or --option=VALUE1,VALUE2."
+        )
         # Device arguments help text
         gpu_help = (
             f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"

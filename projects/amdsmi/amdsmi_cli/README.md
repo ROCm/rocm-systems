@@ -17,6 +17,14 @@ Find the documentation in the `docs/` directory.
 - [Install AMD SMI](../docs/install/install.md)
 - [About the tool and how to get started](../docs/how-to/amdsmi-cli-tool.md)
 
+## Argument syntax
+
+Multi-value options accept space-separated values or comma-separated values with `=`.
+For example, `amd-smi metric --gpu 0 1` and `amd-smi metric --gpu=0,1` select the same GPUs.
+The short form `-g=0,1` also works. Do not put spaces around commas or mix trailing
+space-separated values into an equals list. Repeating a device option keeps its last selection.
+Scalar options retain their existing syntax, including commas in file paths.
+
 ## Online documentation
 
 Explore the latest documentation on the [ROCm documentation
