@@ -3009,6 +3009,17 @@ _POST_CALL_EXTRA: Dict[str, List[str]] = {
 #   param : dispatch-table parameter name being bridged
 #   pre   : lines emitted inside the guard ({name} -> param name)
 #   expr  : expression substituted for that argument inside the guard
+# APIs the tree declares before any SDK that CI builds playback against exports
+# them. The call is made through a symbol looked up in the loaded runtime at
+# replay time instead of a link-time reference, so hrr-playback still links
+# against an older amdhip64 and a replay on that runtime skips the call with a
+# warning. Declarations (and the enum types in the signature) must come from
+# the in-tree headers; see HRR_HIP_INCLUDE_DIRS in projects/hrr/CMakeLists.txt.
+# Add an API here when its first CI build fails to link against the SDK.
+_PLAYBACK_RUNTIME_RESOLVED_APIS = frozenset({
+    "hipDeviceFlushGPUDirectRDMAWrites",   # added by #10176
+})
+
 _PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {
     # HIP 8.0 replaced `int device` with a `hipMemLocation` struct. The table
     # (and therefore the recorded field) keeps the int device ordinal, so the
@@ -3453,11 +3464,30 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     args_str = ", ".join(call_args)
     void_ret = _is_void_return(entry.ret_type)
 
+    resolved = entry.name in _PLAYBACK_RUNTIME_RESOLVED_APIS
+    if resolved:
+        if entry.name in _PLAYBACK_ARG_BRIDGES:
+            sys.exit(f"ERROR: {entry.name} is runtime-resolved and has an arg bridge; "
+                     f"the two cannot be combined")
+        lines.append(f"  static const auto _fn = reinterpret_cast<decltype(&{entry.name})>(")
+        lines.append(f"      hrr_runtime_symbol(\"{entry.name}\"));")
+        lines.append(f"  if (_fn == nullptr) {{")
+        lines.append(f"    static bool warned = false;")
+        lines.append(f"    if (!warned) {{")
+        lines.append(f"      warned = true;")
+        lines.append(f"      fprintf(stderr, \"[HRR] {entry.name} is not exported by this \"")
+        lines.append(f"              \"HIP runtime; skipping it during replay, results may \"")
+        lines.append(f"              \"differ from capture.\\n\");")
+        lines.append(f"    }}")
+        lines.append(f"    return hipSuccess;")
+        lines.append(f"  }}")
+
     def _emit_call(target_lines: List[str], a_str: str) -> None:
+        callee = "_fn" if resolved else entry.name
         if void_ret:
-            target_lines.append(f"  {entry.name}({a_str});")
+            target_lines.append(f"  {callee}({a_str});")
         else:
-            target_lines.append(f"  hipError_t _r = (hipError_t){entry.name}({a_str});")
+            target_lines.append(f"  hipError_t _r = (hipError_t){callee}({a_str});")
 
     bridge = _PLAYBACK_ARG_BRIDGES.get(entry.name)
     if bridge:

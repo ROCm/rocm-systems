@@ -5999,7 +5999,19 @@ static hipError_t playback_hipModuleEnumerateFunctions(PlaybackContext& ctx, con
 
 static hipError_t playback_hipDeviceFlushGPUDirectRDMAWrites(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipDeviceFlushGPUDirectRDMAWrites*>(payload);
-  hipError_t _r = (hipError_t)hipDeviceFlushGPUDirectRDMAWrites((enum hipFlushGPUDirectRDMAWritesTarget)a->target, (enum hipFlushGPUDirectRDMAWritesScope)a->scope);
+  static const auto _fn = reinterpret_cast<decltype(&hipDeviceFlushGPUDirectRDMAWrites)>(
+      hrr_runtime_symbol("hipDeviceFlushGPUDirectRDMAWrites"));
+  if (_fn == nullptr) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "[HRR] hipDeviceFlushGPUDirectRDMAWrites is not exported by this "
+              "HIP runtime; skipping it during replay, results may "
+              "differ from capture.\n");
+    }
+    return hipSuccess;
+  }
+  hipError_t _r = (hipError_t)_fn((enum hipFlushGPUDirectRDMAWritesTarget)a->target, (enum hipFlushGPUDirectRDMAWritesScope)a->scope);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceFlushGPUDirectRDMAWrites", a->ret);
     return hipSuccess;
