@@ -100,6 +100,14 @@ class BlitSdmaBase : public core::Blit {
   virtual bool PlatformAtomicSupport() const = 0;
   virtual bool IsGfx125Plus() const = 0;
 
+  /// @brief Largest destination count the multicast packet can describe.  Its
+  /// num_of_destination field is 10 bits holding (count - 1), so 1024 is the
+  /// most that encodes without truncating the field and corrupting the packet.
+  /// This is a property of the packet, not of the agent: a broadcast with more
+  /// destinations is routed to fan-out instead, so it does not lower what
+  /// HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS reports.
+  static constexpr size_t kMaxMulticastDsts = 1u << 10;  // 1024
+
   /// @brief Maximum byte count a single linear copy packet can describe
   /// (the 30-bit count field, ~1 GiB).  Larger copies are split into multiple
   /// chunked packets; both the plain (BuildCopyCommand) and fused WaitSignal

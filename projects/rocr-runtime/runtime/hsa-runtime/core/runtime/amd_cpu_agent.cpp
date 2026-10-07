@@ -428,6 +428,11 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS:
       *((uint32_t*)value) = 0;
       break;
+    case HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS:
+      // A broadcast is carried by a GPU agent's DMA engines; a CPU agent has
+      // none and rejects the operation, so it accepts no destinations.
+      *static_cast<uint32_t*>(value) = 0;
+      break;
     case HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED: {
       /* CPU agents support host memory DMA-BUF allocations if:
         - Virtual memory APIs are supported
