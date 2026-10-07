@@ -511,7 +511,7 @@ DispatchThreadTracer::resource_init()
                                rocp_agent->name);
             continue;
         }
-        agents[rocp_agent->id] = std::make_shared<ThreadTracerAgent>(it->second, rocp_agent->id);
+        agents[rocp_agent->id] = std::make_unique<ThreadTracerAgent>(it->second, rocp_agent->id);
     }
 }
 
@@ -533,8 +533,14 @@ DispatchThreadTracer::resource_deinit()
     }
 
     ROCP_TRACE << "Clearing agents";
-    auto lk = std::unique_lock{agents_map_mut};
-    agents.clear();
+    // Destroy the agents only after releasing agents_map_mut: a completion can be waiting for it
+    // in post_kernel_call on ROCr's async signal handler thread, and on the HSA backend an
+    // agent's destructor calls hsa_queue_destroy(), which waits on that same thread.
+    auto retired = decltype(agents){};
+    {
+        auto lk = std::unique_lock{agents_map_mut};
+        retired.swap(agents);
+    }
 }
 
 /**
@@ -592,7 +598,6 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     auto packet = agent.get_start_packet();
     if(!packet) return {nullptr, parameters.bSerialize};
     packet->SetOwner(tracer_id);
-    packet->SetOwnerState(it->second);
     post_move_data.fetch_add(1);
     packet->populate_before();
     packet->populate_after();
@@ -614,16 +619,14 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
         if(!pkt) continue;
         if(pkt->GetOwner() != tracer_id) continue;
 
+        std::shared_lock<std::shared_mutex> lk(agents_map_mut);
         post_move_data.fetch_sub(1);
 
         if(pkt->after_krn_pkt.empty()) continue;
 
-        // Delivered through the reference the packet carries rather than a lookup in agents,
-        // which resource_deinit() may already have cleared.
-        auto agent = std::static_pointer_cast<ThreadTracerAgent>(pkt->GetOwnerState());
-        if(!agent) continue;
-
-        agent->iterate_data(pkt->GetHandle(), packet_data.user_data);
+        auto it = agents.find(pkt->GetAgent());
+        if(it != agents.end() && it->second != nullptr)
+            it->second->iterate_data(pkt->GetHandle(), packet_data.user_data);
     }
 }
 
@@ -664,19 +667,16 @@ DispatchThreadTracer::intersects(const DispatchThreadTracer& rhs) const
 }
 
 void
-DispatchThreadTracer::start_context() const
+DispatchThreadTracer::start_context()
 {
-    // Thread trace no longer registers a per-queue callback with the queue controller; the
-    // HSA write interceptor now calls thread_trace::kernel_dispatch_phase_enter_hook /
-    // kernel_dispatch_phase_exit_hook directly (see hsa/queue.cpp). Scope serialization to the
-    // agents configured on this context. An empty set still means every agent.
+    // An empty agent set means every agent.
     const auto serialization_agents = configured_agents();
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(serialization_agents);
     enabled.store(true, std::memory_order_release);
 }
 
 void
-DispatchThreadTracer::stop_context() const
+DispatchThreadTracer::stop_context()
 {
     // Stop injecting ATT packets before transitioning serialization. Completion hooks continue
     // to route already-tagged packets via kernel_dispatch_phase_exit_hook even after the context
