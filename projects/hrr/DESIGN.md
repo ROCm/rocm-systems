@@ -545,16 +545,16 @@ in the map and nowhere else. An arbitrary scalar is never handed to
 `hipLaunchByPtr`. An `_spt` launch on the null stream is checked against the
 per-thread stream it runs on.
 
-A `hipFunction_t` the application passes is read only once capture knows it is
-a real kernel: it came from `hipModuleGetFunction`, `hipGetFuncBySymbol` or
-`hipModuleEnumerateFunctions`, or an earlier launch of it succeeded. Of an
-enumerated array only the entries the runtime wrote count, as many as the
-module has kernels; the rest are the caller's. Reading the
-signature of an invalid handle would crash before the runtime could return its
-error. `hipKernelGetFunction` is not trusted: it casts its argument without
-checking it, so its handles are known only after a launch succeeds. A launch by
-host stub resolves the stub through the runtime first, and an unknown stub gets
-no snapshot.
+A `hipFunction_t` the application passes is read only once capture knows it is a
+real kernel: it came from `hipModuleGetFunction`, `hipGetFuncBySymbol` or
+`hipModuleEnumerateFunctions`, or an earlier launch of it succeeded while a
+pinned allocation existed. Of an enumerated array only the entries the runtime
+wrote count, as many as the module has kernels; the rest are the caller's.
+Reading the signature of an invalid handle would crash before the runtime could
+return its error. `hipKernelGetFunction` is not trusted: it casts its argument
+without checking it, so its handles are known only after a launch succeeds while
+a pinned allocation exists. A launch by host stub resolves the stub through the
+runtime first, and an unknown stub gets no snapshot.
 
 **Out of scope.** Graph kernel nodes, and launches into a stream under graph
 capture, get no snapshot. The bytes a captured launch reads are the ones present
@@ -742,7 +742,8 @@ exists to put chosen bytes in front of those kernels.
   snapshots existed. Otherwise the kernel gets the capture-time host address.
   Either way the buffer is not refilled.
 - A kernel handle that never passed through the wrapped producers is not
-  snapshotted on its first launch; from its second launch on it is.
+  snapshotted until a launch of it has succeeded while a pinned allocation
+  existed. Its first such launch gets no snapshot; the launches after it do.
 - An allocation freed through a path capture does not wrap stays in the map.
   A later launch whose argument points into the freed range would read memory
   that is no longer mapped.

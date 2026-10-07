@@ -885,6 +885,43 @@ TEST_CASE("Unit_HRR_PinnedHost_Enumerate_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(h));
 }
 
+// ===========================================================================
+// A handle capture does not trust until it has launched.
+//
+//   0  hipModuleLaunchKernel on a handle from hipLibraryGetKernel and
+//      hipKernelGetFunction, neither of which capture trusts; pattern 50
+//   1  the same handle again, pattern 51
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_LibraryKernel_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                              hipHostMallocDefault));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+  int n = kPinnedInts;
+  void* args[] = {&h, &out, &n};
+
+  const std::vector<char> code = compile_pinned_rtc();
+  hipLibrary_t lib = nullptr;
+  HRR_HIP_CHECK(hipLibraryLoadData(&lib, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+  hipKernel_t kernel = nullptr;
+  HRR_HIP_CHECK(hipLibraryGetKernel(&kernel, lib, "hrr_rtc_pinned_read"));
+  hipFunction_t fn = nullptr;
+  HRR_HIP_CHECK(hipKernelGetFunction(&fn, kernel));
+
+  for (int which : {50, 51}) {
+    fill(h, which);
+    HRR_HIP_CHECK(hipModuleLaunchKernel(fn, kEntryBlocks, 1, 1, kThreads, 1, 1, 0, nullptr,
+                                        args, nullptr));
+    check_out(out, [which](int i) { return pattern(which, i) * 3 + 1; });
+  }
+
+  HRR_HIP_CHECK(hipLibraryUnload(lib));
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(h));
+}
+
 namespace {
 constexpr const char* kDirect = "Unit_HRR_PinnedHost_Direct";
 // A capture or replay that takes longer than this has hung.
@@ -1670,6 +1707,24 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_EnumerateFunctions) {
   CHECK(d2h_pass >= 1);
   CHECK(d2h_fail == 0);
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// A handle from hipKernelGetFunction is not read before its first launch, so
+// that launch gets no snapshot. The launch succeeds, which proves the handle
+// is a kernel, and the second launch is snapshotted.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_TrustedAfterLaunch) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_libkernel.hrr");
+  capture_case("Unit_HRR_PinnedHost_LibraryKernel_Direct", cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(hrr_single_process_archive(cap.path).string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() == 2);
+  CHECK(kls[0]->snapshots.empty());
+  REQUIRE(kls[1]->snapshots.size() == 2);
+  CHECK(kls[1]->snapshots[0].direction == 0);
+  CHECK(kls[1]->snapshots[1].direction == 0);
 }
 
 // ---------------------------------------------------------------------------
