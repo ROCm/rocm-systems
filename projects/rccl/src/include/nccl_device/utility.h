@@ -506,11 +506,16 @@ NCCL_DEVICE_INLINE T loadConstLdg(T const* p) {
 // loadConst defaults to ordinary dereference loads to avoid the __ldg/acquire-fence regression.
 // The loadConst selection macro is intentionally 0 for now; future CUDA-version gating belongs at
 // the define site above.
-template <typename T>
+// Invariant: *p is never written while the kernel runs. On AMDGPU the load then goes through the constant
+// address space, so the compiler may move it past stores or make it a scalar load.
+template <bool Invariant = false, typename T>
 NCCL_DEVICE_INLINE T loadConst(T const* p) {
 #if NCCL_DEVICE_LOADCONST_USE_LDG
   return loadConstLdg(p);
 #else
+#if defined(__HIP_PLATFORM_AMD__) && defined(__HIP_DEVICE_COMPILE__)
+  if constexpr (Invariant) return *(__attribute__((address_space(4))) T const*)p;
+#endif
   return *p;
 #endif
 }
