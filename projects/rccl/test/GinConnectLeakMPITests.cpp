@@ -7,6 +7,7 @@
 // ncclGinConnectOnce must close the comms it already opened when a later connect fails.
 
 #include "MPITestBase.hpp"
+#include "SymmetricMemPrereq.hpp"
 #include "TestChecks.hpp"
 
 #include <gtest/gtest.h>
@@ -99,15 +100,19 @@ protected:
             GTEST_SKIP() << reason;
         }
 
+        // Recorded before the collective decision, so TearDown removes it even if another rank skips.
         char      counterTemplate[] = "/tmp/rccl_gin_counters.XXXXXX";
         const int fd                = mkstemp(counterTemplate);
+        if(fd >= 0)
+        {
+            close(fd);
+            counterPath_ = counterTemplate;
+        }
         if(auto reason = mpiCoordinatedSkipReason(fd < 0, "Could not create a counter file in /tmp");
            !reason.empty())
         {
             GTEST_SKIP() << reason;
         }
-        close(fd);
-        counterPath_ = counterTemplate;
 
         // Absolute path: an in-process LD_LIBRARY_PATH change never reaches dlopen.
         ASSERT_EQ(0, setTestEnv("NCCL_GIN_PLUGIN", plugin));
@@ -142,6 +147,13 @@ TEST_F(GinConnectLeakMPITest, FailedConnectReleasesOpenedComms)
                             /*max_processes=*/2,
                             /*require_power_of_two=*/false,
                             /*min_nodes=*/2);
+
+    const std::string cuMemSkip = RCCLTestGuards::symmetricMemEnvAndRuntimeSkipReason();
+    if(auto reason = mpiCoordinatedSkipReason(!cuMemSkip.empty(), cuMemSkip.empty() ? nullptr : cuMemSkip.c_str());
+       !reason.empty())
+    {
+        GTEST_SKIP() << reason;
+    }
 
     // Drives ncclGinConnectOnce, which is expected to fail on the second connect.
     const bool setupFailed = createTestCommunicator() != ncclSuccess;
