@@ -821,6 +821,12 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     int ptrType = NCCL_PTR_CUDA;
     // ncclGinRegister only requires NCCL_PTR_DMABUF when multiSegment is true.
     bool needDmabuf = mem->maxGlobalNumSegments > 1 || ncclSymIsHostSegment(cuMemLocType);
+    // Host VMM has no ibv_reg_mr fallback; fail closed before the GIN registration.
+    if (ncclSymIsHostSegment(cuMemLocType) && !ncclParamDmaBufEnable()) {
+      WARN("Host VMM GIN segment requires NCCL_DMABUF_ENABLE=1");
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
 #else
     // CUDA HOST_NUMA is pin-able CPU pages (NCCL_PTR_HOST); device VMM is NCCL_PTR_CUDA.
     int ptrType = ncclSymIsHostSegment(cuMemLocType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
@@ -1638,8 +1644,8 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
   if (!comm->symmetricSupport) {
     // Host VMM cannot use the non-symmetric IPC fallback. Probe the layout first
     // so support checks reject it before cudaIpcGetMemHandle. Skip the probe when
-    // cuMem is off: ROCm 7.0.2.2 faults in hipMemRetainAllocationHandle.
-    if (ncclCuMemEnable()) {
+    // cuMem is off on any rank: ROCm 7.0.2.2 faults in hipMemRetainAllocationHandle.
+    if (comm->cuMemSupport) {
       // Classify the pointer before ncclCuMemGetAddressRange. hipMalloc is not
       // cuMem; retaining it WARNs on every registration and can fault on HIP 7.0.
       // A failed probe must still allgather: returning here hangs peers in it.
