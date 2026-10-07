@@ -11,7 +11,6 @@
 #include "hipfile.h"
 #include "io.h"
 #include "stream.h"
-#include "sys.h"
 #include "thread-pool.h"
 #include "util.h"
 
@@ -20,7 +19,6 @@
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
-#include <syslog.h>
 #include <utility>
 
 namespace hipFile {
@@ -35,37 +33,22 @@ enum class IoType;
 
 namespace hipFile {
 
-AsyncMonitor::AsyncMonitor() : task_group{Context<IThreadPool>::get()->makeTaskGroup()}, is_finished{false}
+AsyncMonitor::AsyncMonitor() : task_group{Context<IThreadPool>::get()->makeTaskGroup()}
 {
-    thread = std::thread(&AsyncMonitor::completion_thread, this);
 }
 
 AsyncMonitor::~AsyncMonitor()
 {
     task_group->wait();
-    {
-        std::lock_guard<std::mutex> lock{mutex};
-        is_finished = true;
-    }
-    cv.notify_one();
-    thread.join();
-    if (submitted_ops.size() > 0) {
-        Context<Sys>::get()->syslog(LOG_CRIT,
-                                    "Async state is being destructed while operations are outstanding.");
-    }
 }
 
 static void
 signalOffloadComplete(AsyncOp *op)
 {
+    op->file.reset();
+    op->buffer.reset();
     if (uint64_t *slot = op->stream->signalSlot()) {
         std::atomic_ref<uint64_t>{*slot}.fetch_add(1, std::memory_order_release);
-    }
-    try {
-        Context<AsyncMonitor>::get()->completeOp(op);
-    }
-    catch (...) {
-        Context<Sys>::get()->syslog(LOG_CRIT, "Unable to complete async op. This will leak memory.");
     }
 }
 
@@ -73,54 +56,10 @@ void
 AsyncMonitor::submitIo(AsyncOp *op)
 {
     task_group->run([op]() {
-        op->io_fn(op);
-        signalOffloadComplete(op);
+        std::unique_ptr<AsyncOp> owned{op};
+        owned->io_fn(owned.get());
+        signalOffloadComplete(owned.get());
     });
-}
-
-void
-AsyncMonitor::addOp(std::shared_ptr<AsyncOp> op)
-{
-    std::lock_guard<std::mutex> lock{mutex};
-    submitted_ops.insert({op.get(), std::move(op)});
-}
-
-void
-AsyncMonitor::completeOp(AsyncOp *op)
-{
-    {
-        std::lock_guard<std::mutex> lock{mutex};
-        if (auto found = submitted_ops.find(op); found == submitted_ops.end()) {
-            throw std::invalid_argument("Op does not appear in submitted_ops");
-        }
-        op->file.reset();
-        op->buffer.reset();
-        completed_ops.push_back(op);
-    }
-    cv.notify_one();
-}
-
-void
-AsyncMonitor::completion_thread()
-{
-    while (true) {
-        std::unique_lock<std::mutex> lock{mutex};
-        if (!completed_ops.empty()) {
-            AsyncOp *op{completed_ops.back()};
-            completed_ops.pop_back();
-            auto nh = submitted_ops.extract(op);
-            // Lock needs to be released before destructor runs, as hipHostFree calls hipDeviceSynchronize.
-            // If another host function is running completeOp and waiting for the lock, this would cause
-            // deadlock.
-            lock.unlock();
-        }
-        else if (!is_finished) {
-            cv.wait(lock, [this] { return is_finished || !completed_ops.empty(); });
-        }
-        else {
-            break;
-        }
-    }
 }
 
 AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<IBuffer> _buffer,
@@ -178,42 +117,37 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFil
 
     *bytes_transferred_p = 0;
 
-    auto op     = std::make_shared<AsyncOp>(type, std::move(file), std::move(buffer), stream, size_p,
+    auto op     = std::make_unique<AsyncOp>(type, std::move(file), std::move(buffer), stream, size_p,
                                             file_offset_p, buffer_offset_p, bytes_transferred_p);
     op->backend = std::move(backend);
     op->io_fn   = async_run_io;
-    Context<AsyncMonitor>::get()->addOp(op);
 
-    auto        stream_lock     = stream->getLock();
-    hipStream_t hip_stream      = stream->getHipStream();
-    bool        wait_value      = stream->canUseStreamWaitValue();
-    bool        targeted        = false;
-    bool        runner_enqueued = false;
+    auto        stream_lock = stream->getLock();
+    hipStream_t hip_stream  = stream->getHipStream();
+    bool        wait_value  = stream->canUseStreamWaitValue();
+    bool        targeted    = false;
+    bool        launched    = false;
 
+    AsyncOp *raw = op.release();
     try {
         if (wait_value) {
-            op->wait_target = stream->nextSignalTarget();
+            uint64_t target = stream->nextSignalTarget();
             targeted        = true;
-            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_dispatch, op.get());
-            runner_enqueued = true;
-            Context<Hip>::get()->hipStreamWaitValue64(hip_stream, stream->signalSlot(), op->wait_target,
+            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_dispatch, raw);
+            launched = true;
+            Context<Hip>::get()->hipStreamWaitValue64(hip_stream, stream->signalSlot(), target,
                                                       hipStreamWaitValueGte, ~uint64_t{0});
         }
         else {
-            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_run_inline, op.get());
-            runner_enqueued = true;
+            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_run_inline, raw);
+            launched = true;
         }
     }
     catch (...) {
-        if (!runner_enqueued) {
+        if (!launched) {
+            std::unique_ptr<AsyncOp> owned{raw};
             if (targeted) {
                 std::atomic_ref<uint64_t>{*stream->signalSlot()}.fetch_add(1, std::memory_order_release);
-            }
-            try {
-                Context<AsyncMonitor>::get()->completeOp(op.get());
-            }
-            catch (...) {
-                Context<Sys>::get()->syslog(LOG_CRIT, "Unable to complete async op. This will leak memory.");
             }
         }
         throw;
@@ -232,8 +166,9 @@ async_dispatch(void *userargs)
         Context<AsyncMonitor>::get()->submitIo(op);
     }
     catch (...) {
-        op->io_fn(op);
-        signalOffloadComplete(op);
+        std::unique_ptr<AsyncOp> owned{op};
+        owned->io_fn(owned.get());
+        signalOffloadComplete(owned.get());
     }
 }
 
@@ -241,8 +176,8 @@ void
 async_run_inline(void *userargs)
 {
     using namespace hipFile;
-    auto op = static_cast<AsyncOp *>(userargs);
-    async_run_io(op);
-    signalOffloadComplete(op);
+    std::unique_ptr<AsyncOp> owned{static_cast<AsyncOp *>(userargs)};
+    async_run_io(owned.get());
+    signalOffloadComplete(owned.get());
 }
 }

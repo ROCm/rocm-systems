@@ -7,15 +7,10 @@
 #include "hipfile.h"
 #include "thread-pool.h"
 
-#include <condition_variable>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <sys/types.h>
-#include <thread>
-#include <unordered_map>
 #include <variant>
-#include <vector>
 
 namespace hipFile {
 class IBuffer;
@@ -46,7 +41,6 @@ public:
     std::variant<const hoff_t, hoff_t *> buffer_offset;
     ssize_t *const                       bytes_transferred;
     void (*io_fn)(void *){nullptr};
-    uint64_t                 wait_target{0};
     std::shared_ptr<Backend> backend{};
 
     AsyncOp(const AsyncOp &)            = delete;
@@ -65,19 +59,10 @@ public:
     virtual ~AsyncMonitor();
     AsyncMonitor();
 
-    virtual void addOp(std::shared_ptr<AsyncOp> op);
-    virtual void completeOp(AsyncOp *op);
     virtual void submitIo(AsyncOp *op);
 
 private:
-    void                                                 completion_thread();
-    std::unordered_map<void *, std::shared_ptr<AsyncOp>> submitted_ops;
-    std::vector<AsyncOp *>                               completed_ops;
-    std::unique_ptr<ITaskGroup>                          task_group;
-    std::thread                                          thread;
-    std::mutex                                           mutex;
-    std::condition_variable                              cv;
-    bool                                                 is_finished;
+    std::unique_ptr<ITaskGroup> task_group;
 };
 
 void async_run_io(void *userargs);
