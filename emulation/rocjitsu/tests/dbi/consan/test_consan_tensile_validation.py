@@ -24,6 +24,15 @@ from consan_validation_test_support import temporary_root
 
 
 class TensileValidationTest(unittest.TestCase):
+    @staticmethod
+    def _result_environment(result_path: Path):
+        environment = {"CONSAN_ROW_RESULT_PATH": str(result_path)}
+        # setup-python's shared interpreter needs this path to start child
+        # processes. Keep it while isolating the fixture from workload settings.
+        if "LD_LIBRARY_PATH" in os.environ:
+            environment["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH"]
+        return mock.patch.dict(os.environ, environment, clear=True)
+
     def test_python_command_excludes_implicit_cwd_but_keeps_pythonpath(self) -> None:
         with temporary_root() as root:
             (root / "Tensile.py").write_text("raise RuntimeError('cwd imported')\n")
@@ -142,11 +151,7 @@ class TensileValidationTest(unittest.TestCase):
         with temporary_root() as root:
             forwarded = root / "row.json"
             retained = root / "oracle.json"
-            with mock.patch.dict(
-                os.environ,
-                {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
-                clear=True,
-            ):
+            with self._result_environment(forwarded):
                 tensile_validation._write_oracle_result(
                     "pass",
                     {"numeric_rows": 1},
@@ -573,11 +578,7 @@ class TensileValidationTest(unittest.TestCase):
                         tensile_validation.replay, "freeze", return_value={}
                     ) as freeze,
                     mock.patch.object(sys, "argv", argv),
-                    mock.patch.dict(
-                        os.environ,
-                        {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
-                        clear=True,
-                    ),
+                    self._result_environment(forwarded),
                     redirect_stdout(io.StringIO()),
                     redirect_stderr(io.StringIO()),
                 ):
@@ -653,11 +654,7 @@ class TensileValidationTest(unittest.TestCase):
                         tensile_validation.replay, "freeze", return_value={}
                     ) as freeze,
                     mock.patch.object(sys, "argv", argv),
-                    mock.patch.dict(
-                        os.environ,
-                        {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
-                        clear=True,
-                    ),
+                    self._result_environment(forwarded),
                     redirect_stdout(io.StringIO()),
                     redirect_stderr(io.StringIO()),
                 ):
@@ -702,11 +699,7 @@ class TensileValidationTest(unittest.TestCase):
                     return_value=self._amdgpu_header(),
                 ),
                 mock.patch.object(sys, "argv", self._main_argv(root)),
-                mock.patch.dict(
-                    os.environ,
-                    {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
-                    clear=True,
-                ),
+                self._result_environment(forwarded),
                 redirect_stdout(io.StringIO()),
                 redirect_stderr(io.StringIO()),
             ):
@@ -753,11 +746,7 @@ class TensileValidationTest(unittest.TestCase):
                         return_value=self._amdgpu_header(),
                     ),
                     mock.patch.object(sys, "argv", argv),
-                    mock.patch.dict(
-                        os.environ,
-                        {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
-                        clear=True,
-                    ),
+                    self._result_environment(forwarded),
                     redirect_stdout(io.StringIO()),
                     redirect_stderr(io.StringIO()),
                 ):
@@ -795,11 +784,7 @@ class TensileValidationTest(unittest.TestCase):
                         "argv",
                         self._main_argv(root),
                     ),
-                    mock.patch.dict(
-                        os.environ,
-                        {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
-                        clear=True,
-                    ),
+                    self._result_environment(forwarded),
                     redirect_stdout(io.StringIO()),
                     redirect_stderr(io.StringIO()),
                 ):
@@ -834,11 +819,7 @@ class TensileValidationTest(unittest.TestCase):
                     return_value=paths,
                 ),
                 mock.patch.object(sys, "argv", self._main_argv(root)),
-                mock.patch.dict(
-                    os.environ,
-                    {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
-                    clear=True,
-                ),
+                self._result_environment(forwarded),
                 redirect_stdout(io.StringIO()),
                 redirect_stderr(io.StringIO()),
             ):
@@ -865,11 +846,7 @@ class TensileValidationTest(unittest.TestCase):
                     "argv",
                     self._main_argv(root, timeout_seconds=1),
                 ),
-                mock.patch.dict(
-                    os.environ,
-                    {"CONSAN_ROW_RESULT_PATH": str(forwarded)},
-                    clear=True,
-                ),
+                self._result_environment(forwarded),
                 redirect_stdout(io.StringIO()),
                 redirect_stderr(io.StringIO()),
             ):
