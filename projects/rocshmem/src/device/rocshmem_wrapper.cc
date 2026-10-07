@@ -33,7 +33,7 @@
  * - RMA: put/get/p/g + variants (wave, wg, nbi)
  * - AMO: standard, extended, bitwise
  * - Sync: wait_until variants, test
- * - Collectives: alltoall (typed wg), broadcast (tile)
+ * - Collectives: alltoall (typed wg)
  * - Signal: put_signal variants
  *
  * Intentionally excluded (internal use only):
