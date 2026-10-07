@@ -121,7 +121,12 @@ class TestRocsys(RocprofsysTest):
             run_args=["--version"],
             fail_on_not_found=True,
         )
-        self.assert_regex(result, pass_regex=[r"rocsys version "])
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"rocsys v\d+\.\d+\.\d+ \(rev: [^,]+, .+, compiler: .+, rocm: v.+\)",
+            ],
+        )
 
     @pytest.mark.timeout(15)
     def test_unknown_subcommand(self) -> None:

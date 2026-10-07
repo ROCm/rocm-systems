@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <initializer_list>
 #include <sstream>
 #include <string>
@@ -13,13 +14,12 @@
 #include <vector>
 
 using rocprofsys::cli::dispatch_kind;
-using rocprofsys::cli::find_subcommand;
 using rocprofsys::cli::forward_options;
 using rocprofsys::cli::k_subcommands;
 using rocprofsys::cli::make_forwarded_argv;
 using rocprofsys::cli::parse_dispatch;
 using rocprofsys::cli::print_help;
-using rocprofsys::cli::print_version;
+using rocprofsys::cli::subcommand_spec;
 using rocprofsys::common_utils::tool_mode;
 
 namespace
@@ -71,7 +71,9 @@ invalid_subcommand_count()
     for(const auto& spec : k_subcommands)
     {
         const bool unnamed = spec.name.empty();
-        const bool missing = find_subcommand(spec.name) == nullptr;
+        const bool missing =
+            std::ranges::find(k_subcommands, spec.name, &subcommand_spec::name) ==
+            k_subcommands.end();
         if(unnamed || missing)
         {
             ++invalid;
@@ -364,11 +366,4 @@ TEST(cli_dispatcher_test, print_help_lists_subcommands_and_example)
     EXPECT_EQ(text.find("  trace"), std::string::npos);
     const auto missing = missing_help_entries(text);
     EXPECT_TRUE(missing.empty()) << missing;
-}
-
-TEST(cli_dispatcher_test, print_version_includes_program_and_version)
-{
-    std::ostringstream out;
-    print_version(out, "rocsys", "1.9.0");
-    EXPECT_EQ(out.str(), "rocsys version 1.9.0\n");
 }

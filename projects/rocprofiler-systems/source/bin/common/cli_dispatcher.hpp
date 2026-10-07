@@ -5,7 +5,6 @@
 
 #include "common/tool_runner.hpp"
 
-#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <iosfwd>
@@ -111,21 +110,6 @@ struct dispatch_result
     std::string error_message;
 };
 
-[[nodiscard]] constexpr const subcommand_spec*
-find_subcommand(std::string_view name) noexcept
-{
-    if(name.empty())
-    {
-        return nullptr;
-    }
-    const auto found = std::ranges::find(k_subcommands, name, &subcommand_spec::name);
-    if(found == k_subcommands.end())
-    {
-        return nullptr;
-    }
-    return &*found;
-}
-
 /**
  * Classify a `rocsys` invocation into help, version, in-process tool, exec, or
  * error. Does not execute anything.
@@ -145,8 +129,5 @@ make_forwarded_argv(int argc, char** argv, forward_options options);
 
 void
 print_help(std::ostream& out, std::string_view program);
-
-void
-print_version(std::ostream& out, std::string_view program, std::string_view version);
 
 }  // namespace rocprofsys::cli

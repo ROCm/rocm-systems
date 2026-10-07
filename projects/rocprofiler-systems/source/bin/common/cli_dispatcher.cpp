@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <iterator>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -25,21 +26,6 @@ constexpr std::string_view k_output_long_eq   = "--output=";
 constexpr std::string_view k_output_short_eq  = "-o=";
 constexpr std::size_t      k_name_column      = 14;
 constexpr int              k_index_after_verb = 2;
-
-[[nodiscard]] constexpr bool
-is_injected_flag_present(std::string_view arg, std::string_view flag) noexcept
-{
-    if(arg == flag)
-    {
-        return true;
-    }
-    if(flag != k_output_short)
-    {
-        return false;
-    }
-    return arg == k_output_long || arg.starts_with(k_output_long_eq) ||
-           arg.starts_with(k_output_short_eq);
-}
 
 [[nodiscard]] std::string
 help_hint(std::string_view program)
@@ -64,34 +50,6 @@ payload_index(bool strip_subcommand) noexcept
     return strip_subcommand ? k_index_after_verb : k_after_argv0;
 }
 
-[[nodiscard]] bool
-has_payload_args(int argc, bool strip_subcommand) noexcept
-{
-    return argc > payload_index(strip_subcommand);
-}
-
-[[nodiscard]] bool
-payload_already_has_flag(int argc, char** argv, int start, std::string_view flag) noexcept
-{
-    if(flag.empty() || argv == nullptr)
-    {
-        return false;
-    }
-    for(int idx = start; idx < argc; ++idx)
-    {
-        const auto arg = arg_at(argc, argv, idx);
-        if(arg.empty() || arg == "--")
-        {
-            break;
-        }
-        if(is_injected_flag_present(arg, flag))
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 dispatch_result
 make_error(std::string message)
 {
@@ -108,38 +66,6 @@ unknown_subcommand_error(std::string_view program, std::string_view token)
         fmt::format("error: unknown subcommand '{}'\n{}", token, help_hint(program)));
 }
 
-void
-append_argv0(std::vector<std::string>& args, int argc, char** argv,
-             std::string_view replacement)
-{
-    if(!replacement.empty())
-    {
-        args.emplace_back(replacement);
-        return;
-    }
-    if(argc > 0 && argv != nullptr && argv[0] != nullptr)
-    {
-        args.emplace_back(argv[0]);
-        return;
-    }
-    args.emplace_back(k_program_fallback);
-}
-
-void
-append_payload(std::vector<std::string>& args, int argc, char** argv, int start)
-{
-    if(argc <= 0 || argv == nullptr)
-    {
-        return;
-    }
-    for(int idx = start; idx < argc; ++idx)
-    {
-        if(argv[idx] != nullptr)
-        {
-            args.emplace_back(argv[idx]);
-        }
-    }
-}
 }  // namespace
 
 dispatch_result
@@ -174,10 +100,12 @@ parse_dispatch(int argc, char** argv)
         return result;
     }
 
-    if(const auto* spec = find_subcommand(first))
+    const auto found = std::ranges::find(k_subcommands, first, &subcommand_spec::name);
+    if(found != k_subcommands.end())
     {
+        const auto*    spec         = found;
         constexpr bool k_strip_verb = true;
-        if(spec->requires_app && !has_payload_args(argc, k_strip_verb))
+        if(spec->requires_app && argc <= payload_index(k_strip_verb))
         {
             return make_error(
                 fmt::format("error: missing application argument\n"
@@ -213,14 +141,52 @@ std::vector<std::string>
 make_forwarded_argv(int argc, char** argv, forward_options options)
 {
     std::vector<std::string> args;
-    const int                start = payload_index(options.strip_subcommand);
-    append_argv0(args, argc, argv, options.argv0_override);
-    if(!options.extra_flag.empty() &&
-       !payload_already_has_flag(argc, argv, start, options.extra_flag))
+    const int                start   = payload_index(options.strip_subcommand);
+    const auto               invoked = arg_at(argc, argv, 0);
+    if(!options.argv0_override.empty())
+    {
+        args.emplace_back(options.argv0_override);
+    }
+    else if(!invoked.empty())
+    {
+        args.emplace_back(invoked);
+    }
+    else
+    {
+        args.emplace_back(k_program_fallback);
+    }
+    auto already_present = false;
+    if(!options.extra_flag.empty() && argv != nullptr)
+    {
+        for(int idx = start; idx < argc; ++idx)
+        {
+            const auto arg = arg_at(argc, argv, idx);
+            if(arg.empty() || arg == "--")
+            {
+                break;
+            }
+            const auto same_flag = arg == options.extra_flag;
+            const auto output_alias =
+                options.extra_flag == k_output_short &&
+                (arg == k_output_long || arg.starts_with(k_output_long_eq) ||
+                 arg.starts_with(k_output_short_eq));
+            if(same_flag || output_alias)
+            {
+                already_present = true;
+                break;
+            }
+        }
+    }
+    if(!options.extra_flag.empty() && !already_present)
     {
         args.emplace_back(options.extra_flag);
     }
-    append_payload(args, argc, argv, start);
+    if(argc > 0 && argv != nullptr)
+    {
+        const auto payload = argv + std::min(start, argc);
+        std::copy_if(payload, argv + argc, std::back_inserter(args),
+                     [](const char* arg) { return arg != nullptr; });
+    }
     return args;
 }
 
@@ -249,12 +215,6 @@ print_help(std::ostream& out, std::string_view program)
         << "\n"
         << "Use '" << program
         << " <subcommand> --help' for subcommand-specific options.\n";
-}
-
-void
-print_version(std::ostream& out, std::string_view program, std::string_view version)
-{
-    out << program << " version " << version << '\n';
 }
 
 }  // namespace rocprofsys::cli
