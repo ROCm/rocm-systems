@@ -70,6 +70,8 @@ int main() {
   ExpectReject("other.1275.host", "rep", "");
   ExpectReject("abc.1275.host", "rep", "");
   ExpectReject("rep..host", "rep", "");
+  // "rcclReplayer log.replaylog" splits into base "log" and ext ".replaylog"; a stray log.txt is shorter than both.
+  ExpectReject("log.txt", "log", ".replaylog");
   // Recorded 1 + 3 ranks: the host replaying 3 ranks must get the host that left 3 logs, whatever the name order.
   ExpectMatch("uneven", {{"a", 3}, {"b", 1}}, {{"x", 1}, {"y", 3}}, {{"a", "y"}, {"b", "x"}});
   ExpectMatch("names against count order", {{"a", 1}, {"b", 3}}, {{"x", 3}, {"y", 1}}, {{"a", "y"}, {"b", "x"}});
@@ -77,6 +79,7 @@ int main() {
   ExpectNoMatch("same totals, other split", {{"a", 2}, {"b", 2}}, {{"x", 1}, {"y", 3}});
   ExpectNoMatch("fewer replay hosts", {{"a", 4}}, {{"x", 1}, {"y", 3}});
   ExpectNoMatch("fewer replay hosts, first count equal", {{"a", 1}}, {{"x", 1}, {"y", 3}});
+  ExpectNoMatch("more replay hosts, first count equal", {{"a", 1}, {"b", 3}}, {{"x", 1}});
   ExpectNoMatch("more ranks than logs", {{"a", 4}, {"b", 4}}, {{"x", 4}, {"y", 3}});
   if (failures != 0) {
     printf("%d log name check(s) failed\n", failures);

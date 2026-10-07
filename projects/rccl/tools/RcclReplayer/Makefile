@@ -9,8 +9,8 @@ main: rcclReplayer.cpp rcclReplayer.hpp replay_last_use.hpp replay_log_name.hpp
 	$(ROCM_DIR)/bin/hipcc -std=c++20 rcclReplayer.cpp -O0 -g -o rcclReplayer $(INCLUDES) $(LDFLAGS)
 
 test: test_replay_log_name.cpp replay_log_name.hpp test_replay_last_use.cpp replay_last_use.hpp
-	$(CXX) -std=c++17 -Wall -o test_replay_log_name test_replay_log_name.cpp
-	$(CXX) -std=c++17 -Wall -o test_replay_last_use test_replay_last_use.cpp
+	$(CXX) -std=c++17 -Wall -D_GLIBCXX_ASSERTIONS -o test_replay_log_name test_replay_log_name.cpp
+	$(CXX) -std=c++17 -Wall -D_GLIBCXX_ASSERTIONS -o test_replay_last_use test_replay_last_use.cpp
 	./test_replay_log_name
 	./test_replay_last_use
 

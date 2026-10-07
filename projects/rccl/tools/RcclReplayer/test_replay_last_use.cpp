@@ -71,6 +71,18 @@ void NestedGroups() {
   ExpectDepth("nested groups", t, 0);
 }
 
+void UngroupedUseNotDeferred() {
+  LastUseTracker t;
+  t.UseBuffer(kBufA, 0);
+  t.UseStream(kStream, 0);
+  t.GroupStart();  // line 1
+  t.UseBuffer(kBufB, 2);
+  t.GroupEnd(3);
+  ExpectLine("ungrouped buffer before a group", t.buffers(), kBufA, 0);
+  ExpectLine("ungrouped stream before a group", t.streams(), kStream, 0);
+  ExpectLine("grouped buffer", t.buffers(), kBufB, 3);
+}
+
 void UseAfterGroupWins() {
   LastUseTracker t;
   t.GroupStart();  // line 0
@@ -120,6 +132,7 @@ int main() {
   Ungrouped();
   SingleGroup();
   NestedGroups();
+  UngroupedUseNotDeferred();
   UseAfterGroupWins();
   GroupStateResets();
   UnmatchedGroupEnd();
