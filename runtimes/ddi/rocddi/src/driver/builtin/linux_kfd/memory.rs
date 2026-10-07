@@ -9,7 +9,7 @@ use super::{drm, sys, sysfs, uapi, util};
 use crate::event::GpuMemoryFault;
 use crate::host_storage::{Allocator, Buffer, Owned, Shared};
 use crate::memory::interop::linux::{DmaBuf, DmaBufInfo, KfdIpcMemoryHandle};
-use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
+use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess, HostCachePolicy};
 use crate::{Error, ErrorKind};
 use std::fs::File;
 use std::io;
@@ -779,7 +779,7 @@ struct AccessChange {
 #[derive(Clone, Copy)]
 pub(super) struct BorrowedHostPages {
     address: usize,
-    uncached: bool,
+    cache: HostCachePolicy,
 }
 
 impl BorrowedHostPages {
@@ -787,8 +787,8 @@ impl BorrowedHostPages {
     /// The caller retains the complete page cover and synchronizes CPU and GPU
     /// access until successful allocation cleanup or process teardown.
     #[allow(unsafe_code)]
-    pub(super) unsafe fn new(address: usize, uncached: bool) -> Self {
-        Self { address, uncached }
+    pub(super) unsafe fn new(address: usize, cache: HostCachePolicy) -> Self {
+        Self { address, cache }
     }
 }
 
@@ -806,9 +806,18 @@ pub(super) enum BufferKind {
     Gtt,
     Mmio,
     OwnedUserptr {
-        uncached: bool,
+        cache: HostCachePolicy,
     },
     Userptr(BorrowedHostPages),
+}
+
+fn host_cache_flags(cache: HostCachePolicy) -> u32 {
+    match cache {
+        HostCachePolicy::Coarse => 0,
+        HostCachePolicy::Fine => uapi::COHERENT,
+        HostCachePolicy::Extended => uapi::COHERENT | uapi::EXT_COHERENT,
+        HostCachePolicy::Uncached => uapi::COHERENT | uapi::UNCACHED,
+    }
 }
 
 /// One peer VM retained for the complete lifetime of its native mapping.
@@ -1042,17 +1051,11 @@ impl KfdAllocation {
                         uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE
                     }
                     BufferKind::Mmio => uapi::MMIO_REMAP | uapi::COHERENT,
-                    BufferKind::OwnedUserptr { uncached } => {
-                        uapi::USERPTR
-                            | uapi::COHERENT
-                            | uapi::NO_SUBSTITUTE
-                            | if uncached { uapi::UNCACHED } else { 0 }
+                    BufferKind::OwnedUserptr { cache } => {
+                        uapi::USERPTR | uapi::NO_SUBSTITUTE | host_cache_flags(cache)
                     }
                     BufferKind::Userptr(pages) => {
-                        uapi::USERPTR
-                            | uapi::COHERENT
-                            | uapi::NO_SUBSTITUTE
-                            | if pages.uncached { uapi::UNCACHED } else { 0 }
+                        uapi::USERPTR | uapi::NO_SUBSTITUTE | host_cache_flags(pages.cache)
                     }
                 },
             ..uapi::AllocMemory::default()

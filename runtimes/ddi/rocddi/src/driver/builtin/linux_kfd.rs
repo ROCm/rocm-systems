@@ -34,8 +34,8 @@ use crate::memory::interop::linux::{
     KfdSvmLocation,
 };
 use crate::memory::{
-    AllocationDesc, AllocationLimits, DeviceAccess, HostRegistration, MemoryKind, OwnedMemoryKind,
-    VirtualAddressInfo, VirtualMemoryInfo,
+    AllocationDesc, AllocationLimits, DeviceAccess, HostCachePolicy, HostRegistration, MemoryKind,
+    OwnedMemoryKind, VirtualAddressInfo, VirtualMemoryInfo,
 };
 use crate::profiling::ClockCounters;
 use crate::queue::{QueuePriority, QueueRequest, QueueScratch, QueueTransport};
@@ -778,7 +778,7 @@ impl AllocationDriver for LinuxKfdDriver {
         }
         let native_kind = match kind {
             MemoryKind::System => memory::BufferKind::Gtt,
-            MemoryKind::OwnedHost { uncached } => memory::BufferKind::OwnedUserptr { uncached },
+            MemoryKind::OwnedHost { cache } => memory::BufferKind::OwnedUserptr { cache },
             MemoryKind::RegisteredHost { .. } => {
                 return Err(error(
                     ErrorKind::DriverContract,
@@ -834,13 +834,19 @@ impl AllocationDriver for LinuxKfdDriver {
     ) -> Result<Owned<NativeAllocation>, Error> {
         let HostRegistration {
             address,
-            uncached,
+            cache,
             size,
             alignment,
             permissions,
         } = request;
         let desc = checked_allocation_desc(size, alignment)?;
         if device.lifetime == SessionLifetime::Session {
+            if cache == HostCachePolicy::Extended {
+                return Err(error(
+                    ErrorKind::Unsupported,
+                    "DRM host registration cannot request extended coherency",
+                ));
+            }
             // SAFETY: The driver caller retains the page cover and access
             // synchronization required by this registration contract.
             unsafe {
@@ -850,13 +856,13 @@ impl AllocationDriver for LinuxKfdDriver {
                     desc,
                     address,
                     permissions,
-                    uncached,
+                    cache == HostCachePolicy::Uncached,
                 )
             }
         } else {
             // SAFETY: The driver caller retains these pages until cleanup or
             // process exit, including an ambiguous KFD result.
-            let pages = unsafe { memory::BorrowedHostPages::new(address, uncached) };
+            let pages = unsafe { memory::BorrowedHostPages::new(address, cache) };
             NativeAllocation::create_with_peers(
                 device.vm.clone(),
                 peers.iter().map(|peer| peer.vm.clone()),

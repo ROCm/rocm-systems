@@ -1487,7 +1487,9 @@ impl KfdQueue {
                 contiguous: false,
             }
         } else if request.aql.is_some() && lifetime == SessionLifetime::Process {
-            BufferKind::OwnedUserptr { uncached: true }
+            BufferKind::OwnedUserptr {
+                cache: crate::memory::HostCachePolicy::Uncached,
+            }
         } else {
             // KFD USERPTR cannot be allocated in a secondary INSTANCE VM.
             // Coherent GTT provides a host view of the ring in that context.

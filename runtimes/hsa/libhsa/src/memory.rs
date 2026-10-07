@@ -32,8 +32,8 @@ use crate::platform::memory::{
 use rocddi::device::Device;
 use rocddi::gpu::{CopyRect, GpuCopySequence, GpuCopyTimestamps};
 use rocddi::memory::{
-    Allocation, DeviceAccess, MemoryKind, VirtualAddress, VirtualDeviceMapping, VirtualHostMapping,
-    VirtualMemory,
+    Allocation, DeviceAccess, HostCachePolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
+    VirtualHostMapping, VirtualMemory,
 };
 use rocddi::session::{Session, SessionLifetime};
 use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
@@ -455,8 +455,20 @@ fn cpu_pool_memory_kind(pool: HsaMemoryPool, lifetime: SessionLifetime, flags: u
         MemoryKind::System
     } else {
         MemoryKind::OwnedHost {
-            uncached: flags & ALLOC_UNCACHED != 0,
+            cache: cpu_pool_cache_policy(pool, flags),
         }
+    }
+}
+
+fn cpu_pool_cache_policy(pool: HsaMemoryPool, flags: u32) -> HostCachePolicy {
+    if pool.handle == CPU_POOL_KERNARG || flags & ALLOC_UNCACHED != 0 {
+        HostCachePolicy::Uncached
+    } else if pool.handle == CPU_POOL_EXTENDED {
+        HostCachePolicy::Extended
+    } else if pool.handle == CPU_POOL_FINE || flags & ALLOC_PCIE != 0 {
+        HostCachePolicy::Fine
+    } else {
+        HostCachePolicy::Coarse
     }
 }
 
@@ -2049,7 +2061,7 @@ unsafe fn memory_lock_to_pool(
                 first.register_host_with_peers(
                     &peers,
                     host_base,
-                    flags & ALLOC_UNCACHED != 0,
+                    cpu_pool_cache_policy(pool, flags & ALLOC_UNCACHED),
                     native_size as u64,
                     runtime.host_page_size as u64,
                     DeviceAccess::READ | DeviceAccess::WRITE,
@@ -6945,10 +6957,14 @@ mod tests {
 
     #[test]
     fn cpu_pool_allocations_preserve_their_cache_policy() {
-        for pool in [CPU_POOL_FINE, CPU_POOL_EXTENDED, CPU_POOL_COARSE] {
+        for (pool, cache) in [
+            (CPU_POOL_FINE, HostCachePolicy::Fine),
+            (CPU_POOL_EXTENDED, HostCachePolicy::Extended),
+            (CPU_POOL_COARSE, HostCachePolicy::Coarse),
+        ] {
             assert_eq!(
                 cpu_pool_memory_kind(HsaMemoryPool { handle: pool }, SessionLifetime::Process, 0),
-                MemoryKind::OwnedHost { uncached: false }
+                MemoryKind::OwnedHost { cache }
             );
         }
         assert_eq!(

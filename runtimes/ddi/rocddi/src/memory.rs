@@ -129,6 +129,19 @@ pub enum HostCacheability {
     WriteCombined,
 }
 
+/// GPU cache and coherence policy for host pages in a device address space.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HostCachePolicy {
+    /// Require explicit synchronization between CPU and GPU views.
+    Coarse,
+    /// Provide coherent CPU and GPU access.
+    Fine,
+    /// Provide extended-scope coherent access where supported.
+    Extended,
+    /// Bypass device caches while retaining coherent access.
+    Uncached,
+}
+
 /// Platform-neutral backing and placement requested from the native backend.
 ///
 /// These variants describe ownership, visibility, and address behavior that a
@@ -147,8 +160,8 @@ pub enum MemoryKind {
     /// and device virtual address. The backend may pin, register, or otherwise
     /// bind those pages without exposing that native mechanism.
     OwnedHost {
-        /// Bypass device caches while retaining coherent device access.
-        uncached: bool,
+        /// Requested GPU cache and coherence policy for the owned pages.
+        cache: HostCachePolicy,
     },
     /// Caller-owned host pages made accessible to the device. `address` is the
     /// logical host base and may be subpage aligned. The caller keeps the
@@ -158,8 +171,8 @@ pub enum MemoryKind {
     RegisteredHost {
         /// Borrowed logical host address; ownership remains with the caller.
         address: usize,
-        /// Bypass device caches for this registration.
-        uncached: bool,
+        /// Requested GPU cache and coherence policy for the host pages.
+        cache: HostCachePolicy,
     },
     /// Device-local storage; host visibility is an explicit requirement.
     DeviceLocal {
@@ -202,7 +215,7 @@ impl OwnedMemoryKind {
 #[derive(Clone, Copy)]
 pub(crate) struct HostRegistration {
     pub(crate) address: usize,
-    pub(crate) uncached: bool,
+    pub(crate) cache: HostCachePolicy,
     pub(crate) size: u64,
     pub(crate) alignment: u64,
     pub(crate) permissions: DeviceAccess,
@@ -1049,7 +1062,7 @@ impl Device {
     pub unsafe fn register_host(
         &self,
         address: usize,
-        uncached: bool,
+        cache: HostCachePolicy,
         size: u64,
         alignment: u64,
         permissions: DeviceAccess,
@@ -1062,7 +1075,7 @@ impl Device {
                 &[],
                 HostRegistration {
                     address,
-                    uncached,
+                    cache,
                     size,
                     alignment,
                     permissions,
@@ -1217,12 +1230,12 @@ impl Device {
         &self,
         peers: &[&Self],
         address: usize,
-        uncached: bool,
+        cache: HostCachePolicy,
         size: u64,
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
-        let states = self.peer_states(peers, MemoryKind::RegisteredHost { address, uncached })?;
+        let states = self.peer_states(peers, MemoryKind::RegisteredHost { address, cache })?;
         // SAFETY: The caller retains the complete page cover through successful
         // free or process teardown across every requested peer VM.
         let inner = unsafe {
@@ -1231,7 +1244,7 @@ impl Device {
                 states.as_slice(),
                 HostRegistration {
                     address,
-                    uncached,
+                    cache,
                     size,
                     alignment,
                     permissions,
