@@ -1945,11 +1945,16 @@ class TestExecutor:
         perf_nthreads = int(_t_match.group(1)) if _t_match else 1
         exec_mode = "mpi" if num_ranks > 1 else ("threaded" if perf_nthreads > 1 else "single")
 
-        # Merge environment variables
+        # Merge environment variables.  Expand ${VAR:-default} references so
+        # config values like "${RCCL_MULTIPLANE_MAP_FILE:-}" resolve from the
+        # caller's environment instead of being passed as literal strings.
         merged_env = {
-            **self.global_env,
-            **suite_config.get("env_variables", {}),
-            **env_vars
+            k: expand_env_vars(str(v))
+            for k, v in {
+                **self.global_env,
+                **suite_config.get("env_variables", {}),
+                **env_vars,
+            }.items()
         }
 
         mpi_extra = " ".join(

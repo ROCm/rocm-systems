@@ -27,11 +27,16 @@
 #include "MPITestBase.hpp"
 #include "SymmetricBufferHelpers.hpp"
 #include "TestChecks.hpp"
+#include "nccl_device.h"
 #include "rccl/rccl.h"
 
+#include <algorithm>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <initializer_list>
 #include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -72,6 +77,17 @@ protected:
     {
         return allocSymBuf(bytes, sb) == ncclSuccess;
     }
+
+    // Registers every buffer even after a failure, so all ranks issue the same collective registrations, then votes.
+    std::string allocSymBufsSkipReason(std::initializer_list<std::pair<size_t, SymBuf*>> bufs)
+    {
+        bool ok = true;
+        for(const auto& [bytes, sb] : bufs)
+        {
+            ok = tryAllocSymBuf(bytes, *sb) && ok;
+        }
+        return mpiCoordinatedSkipReason(!ok, "Symmetric memory not available (VMM/cuMem unsupported)");
+    }
 };
 
 // ===========================================================================
@@ -107,10 +123,10 @@ TEST_F(SymmetricKernelCorruptionTest, AllGather_Sub8ByteAlignment)
         size_t recvBytes = count * static_cast<size_t>(nRanks) * sizeof(float);
 
         SymBuf sendSym, recvSym;
-        if(!tryAllocSymBuf(sendBytes, sendSym) ||
-           !tryAllocSymBuf(recvBytes, recvSym))
+        const std::string noSym = allocSymBufsSkipReason({{sendBytes, &sendSym}, {recvBytes, &recvSym}});
+        if(!noSym.empty())
         {
-            GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+            GTEST_SKIP() << noSym;
         }
 
         ASSERT_EQ(hipSuccess,
@@ -163,10 +179,10 @@ TEST_F(SymmetricKernelCorruptionTest, ReduceScatter_Sub8ByteAlignment)
         size_t recvBytes = recvCount * sizeof(float);
 
         SymBuf sendSym, recvSym;
-        if(!tryAllocSymBuf(sendBytes, sendSym) ||
-           !tryAllocSymBuf(recvBytes, recvSym))
+        const std::string noSym = allocSymBufsSkipReason({{sendBytes, &sendSym}, {recvBytes, &recvSym}});
+        if(!noSym.empty())
         {
-            GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+            GTEST_SKIP() << noSym;
         }
 
         // Each rank fills its send buffer with float(rank + 1) at every position.
@@ -239,10 +255,11 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedAllGather_VaryingSizes)
         sendBufs[i] = std::make_unique<SymBuf>();
         recvBufs[i] = std::make_unique<SymBuf>();
 
-        if(!tryAllocSymBuf(sendBytes, *sendBufs[i]) ||
-           !tryAllocSymBuf(recvBytes, *recvBufs[i]))
+        const std::string noSym
+            = allocSymBufsSkipReason({{sendBytes, sendBufs[i].get()}, {recvBytes, recvBufs[i].get()}});
+        if(!noSym.empty())
         {
-            GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+            GTEST_SKIP() << noSym;
         }
 
         ASSERT_EQ(hipSuccess,
@@ -311,10 +328,11 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedReduceScatter_VaryingSizes)
         sendBufs[i] = std::make_unique<SymBuf>();
         recvBufs[i] = std::make_unique<SymBuf>();
 
-        if(!tryAllocSymBuf(sendBytes, *sendBufs[i]) ||
-           !tryAllocSymBuf(recvBytes, *recvBufs[i]))
+        const std::string noSym
+            = allocSymBufsSkipReason({{sendBytes, sendBufs[i].get()}, {recvBytes, recvBufs[i].get()}});
+        if(!noSym.empty())
         {
-            GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+            GTEST_SKIP() << noSym;
         }
 
         ASSERT_EQ(hipSuccess,
@@ -371,12 +389,13 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedMixed_AllGatherAndReduceScatter)
     const size_t rsSendCount = rsRecvCount * static_cast<size_t>(nRanks);
 
     SymBuf agSend, agRecv, rsSend, rsRecv;
-    if(!tryAllocSymBuf(agCount * sizeof(float), agSend) ||
-       !tryAllocSymBuf(agCount * nRanks * sizeof(float), agRecv) ||
-       !tryAllocSymBuf(rsSendCount * sizeof(float), rsSend) ||
-       !tryAllocSymBuf(rsRecvCount * sizeof(float), rsRecv))
+    const std::string noSym = allocSymBufsSkipReason({{agCount * sizeof(float), &agSend},
+                                                      {agCount * nRanks * sizeof(float), &agRecv},
+                                                      {rsSendCount * sizeof(float), &rsSend},
+                                                      {rsRecvCount * sizeof(float), &rsRecv}});
+    if(!noSym.empty())
     {
-        GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+        GTEST_SKIP() << noSym;
     }
 
     ASSERT_EQ(hipSuccess,
@@ -449,12 +468,13 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedOps_Sub8ByteAlignment)
     const size_t rsSendCount = rsRecvCount * static_cast<size_t>(nRanks);
 
     SymBuf agSend, agRecv, rsSend, rsRecv;
-    if(!tryAllocSymBuf(agCount * sizeof(float), agSend) ||
-       !tryAllocSymBuf(agCount * nRanks * sizeof(float), agRecv) ||
-       !tryAllocSymBuf(rsSendCount * sizeof(float), rsSend) ||
-       !tryAllocSymBuf(rsRecvCount * sizeof(float), rsRecv))
+    const std::string noSym = allocSymBufsSkipReason({{agCount * sizeof(float), &agSend},
+                                                      {agCount * nRanks * sizeof(float), &agRecv},
+                                                      {rsSendCount * sizeof(float), &rsSend},
+                                                      {rsRecvCount * sizeof(float), &rsRecv}});
+    if(!noSym.empty())
     {
-        GTEST_SKIP() << "Symmetric memory not available (VMM/cuMem unsupported)";
+        GTEST_SKIP() << noSym;
     }
 
     ASSERT_EQ(hipSuccess,
@@ -504,6 +524,110 @@ TEST_F(SymmetricKernelCorruptionTest, GroupedOps_Sub8ByteAlignment)
             0, 1e-5, &errIdx, &expVal, &actVal))
             << "GroupedSub8 ReduceScatter corruption at index=" << errIdx
             << " expected=" << expVal << " got=" << actVal;
+    }
+}
+
+// ===========================================================================
+// Test group 3: LL all-to-all session data placement
+//
+// Forces ReduceScatter_LL, the only caller of ncclLLA2ASession::send, and
+// sends values unique per (rank, index) so a lane or slot permutation in the
+// send path lands a wrong value in a checked output element.
+// ===========================================================================
+
+// A slot shift that leaves a slot unwritten hangs recvReduce instead of failing; only the runner timeout shows it.
+TEST_F(SymmetricKernelCorruptionTest, ReduceScatterLL_PositionDependentData)
+{
+    // ReduceScatter_LL needs a single LSA team: at most 8 ranks on one node.
+    constexpr int kMaxRanks = 8;
+    if(!validateTestPrerequisites(2, kMaxRanks, false, 1, 1))
+    {
+        GTEST_SKIP() << "Need 2 to " << kMaxRanks << " MPI ranks on a single node";
+    }
+
+    // Read at communicator init, so the guard must outlive createTestCommunicator.
+    MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", "ReduceScatter_LL");
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{};
+    int nRanks{};
+    ASSERT_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+    // Even counts take the aligned 8-byte path, odd ones the bounded path; 512 floats is one LL iteration per block.
+    const std::vector<size_t> counts   = {1, 2, 7, 512, 1536, 1537, 1538, 4096, 4097};
+    const size_t              maxCount = *std::max_element(counts.begin(), counts.end());
+
+    // value(s, i) = i * 8 + s is injective; the largest sum over 8 ranks is about 2^21, so float addition is exact.
+    auto value = [](int src, size_t idx) {
+        return static_cast<float>(idx * kMaxRanks + static_cast<size_t>(src));
+    };
+
+    // Window registration is collective, so allocate once and agree on the outcome before any rank can skip.
+    SymBuf            sendSym;
+    SymBuf            recvSym;
+    const std::string noSym
+        = allocSymBufsSkipReason({{maxCount * nRanks * sizeof(float), &sendSym}, {maxCount * sizeof(float), &recvSym}});
+    if(!noSym.empty())
+    {
+        GTEST_SKIP() << noSym;
+    }
+
+    // Without symmetricSupport the forced kernel is ineligible; skip with that reason instead of on ncclInvalidUsage.
+    ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(getActiveCommunicator(), &props));
+    int symmetric = props.deviceApiSupport ? 1 : 0;
+    ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!symmetric)
+    {
+        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem needs Linux >= 6.8)";
+    }
+
+    for(size_t recvCount : counts)
+    {
+        size_t sendCount = recvCount * static_cast<size_t>(nRanks);
+
+        ASSERT_MPI_EQ(hipSuccess,
+                      initializeBufferWithPattern<float>(
+                          sendSym.ptr, sendCount,
+                          [rank, &value](size_t i) { return value(rank, i); }));
+        ASSERT_MPI_EQ(hipSuccess, zeroInitializeBuffer<float>(recvSym.ptr, recvCount));
+
+        // Only the first count may skip on ncclInvalidUsage; agree collectively so diverging verdicts cannot hang.
+        ncclResult_t res = ncclReduceScatter(sendSym.ptr, recvSym.ptr, recvCount, ncclFloat, ncclSum,
+                                             getActiveCommunicator(), getActiveStream());
+        // Drain before the vote so a skip never leaves a kernel reading a window that ~SymBuf deregisters and frees.
+        hipError_t syncErr = (res == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
+        const std::string ineligible
+            = mpiCoordinatedSkipReason(res == ncclInvalidUsage && recvCount == counts.front(),
+                                       "ReduceScatter_LL symmetric kernel not eligible on this topology");
+        if(!ineligible.empty())
+        {
+            GTEST_SKIP() << ineligible;
+        }
+        ASSERT_MPI_EQ(ncclSuccess, res);
+        ASSERT_MPI_EQ(hipSuccess, syncErr);
+
+        size_t base     = static_cast<size_t>(rank) * recvCount;
+        auto   expected = [nRanks, base, &value](size_t j) {
+            float sum = 0.0f;
+            for(int s = 0; s < nRanks; ++s)
+            {
+                sum += value(s, base + j);
+            }
+            return sum;
+        };
+
+        size_t errIdx{};
+        float  expVal{}, actVal{};
+        bool   ok = verifyBufferData<float>(recvSym.ptr, recvCount, expected, 0, 1e-5, &errIdx, &expVal, &actVal);
+        if(!ok)
+        {
+            ADD_FAILURE() << "ReduceScatter_LL mismatch at recvCount=" << recvCount << " index=" << errIdx
+                          << " expected=" << expVal << " got=" << actVal;
+        }
+        // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next LL kernel.
+        ASSERT_MPI_TRUE(ok);
     }
 }
 
