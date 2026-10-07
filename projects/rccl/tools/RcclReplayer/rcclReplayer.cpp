@@ -53,9 +53,7 @@ Replayer::Replayer(const std::string& logname, int json_format, int rank, int si
 {
   log.open(logname, json_format ? std::ifstream::in : std::ifstream::binary);
   if (!log.is_open()) {
-    printf("[ERROR   ] Rank %d : cannot open replay log %s\n", rank, logname.c_str());
-    fflush(stdout);
-    MPI_Abort(MPI_COMM_WORLD, 1);
+    REPLAY_ABORT("[ERROR   ] Rank %d : cannot open replay log %s\n", rank, logname.c_str());
   }
 }
 
@@ -643,10 +641,8 @@ int main(int argc, char **argv)
   std::string output_file, output_extension;
   int json_format = ParseLogFormat(logFilename, output_file, output_extension);
   if (json_format != 0) {
-    printf("[ERROR   ] Rank %d : JSON logs are not replayable; convert them with "
-           "replay_log_converter.py <basename> tobin\n", mpiRank);
-    fflush(stdout);
-    MPI_Abort(MPI_COMM_WORLD, 1);
+    REPLAY_ABORT("[ERROR   ] Rank %d : JSON logs are not replayable; convert them with "
+                 "replay_log_converter.py <basename> tobin\n", mpiRank);
   }
 
   // Only root handles file-rank assignment to avoid file handle pressure
@@ -684,10 +680,8 @@ int main(int argc, char **argv)
         if (ParseLogName(dir->d_name, output_file, output_extension, &file_pid, &file_host))
         {
           if (file_host.size() >= MPI_MAX_PROCESSOR_NAME) {
-            printf("[ERROR   ] Rank 0 : hostname in %s exceeds %d characters\n", dir->d_name,
-                   MPI_MAX_PROCESSOR_NAME - 1);
-            fflush(stdout);
-            MPI_Abort(MPI_COMM_WORLD, 1);
+            REPLAY_ABORT("[ERROR   ] Rank 0 : hostname in %s exceeds %d characters\n", dir->d_name,
+                         MPI_MAX_PROCESSOR_NAME - 1);
           }
           logHosts[file_host].push_back(file_pid);
           a++;
@@ -702,11 +696,9 @@ int main(int argc, char **argv)
     }
     std::map<std::string, std::string> hostAssignment;
     if (!MatchHostsByRankCount(hostRanks, logCounts, &hostAssignment)) {
-      printf("[ERROR   ] Rank 0 : found %d logs from %zu hosts for %s%s, replaying %d ranks on %zu hosts; "
-             "ranks per host must match logs per host\n", a, logHosts.size(), output_file.c_str(),
-             output_extension.c_str(), numMpiRanks, hostRanks.size());
-      fflush(stdout);
-      MPI_Abort(MPI_COMM_WORLD, 1);
+      REPLAY_ABORT("[ERROR   ] Rank 0 : found %d logs from %zu hosts for %s%s, replaying %d ranks on %zu hosts; "
+                   "ranks per host must match logs per host\n", a, logHosts.size(), output_file.c_str(),
+                   output_extension.c_str(), numMpiRanks, hostRanks.size());
     }
     for (int i = 0; i < numMpiRanks; i++)
     {

@@ -34,15 +34,20 @@
       }                                                                 \
   } while (0)
 
-// Abort the whole job on any NCCL failure so a broken replay never exits 0.
+// Print a printf-style message and abort every rank, so a failed replay never hangs or exits 0.
+#define REPLAY_ABORT(...)                                       \
+  do {                                                          \
+    printf(__VA_ARGS__);                                        \
+    fflush(stdout);                                             \
+    MPI_Abort(MPI_COMM_WORLD, 1);                               \
+  } while (0)
+
 #define NCCL_CALL(cmd)                                          \
   do {                                                          \
     ncclResult_t res = cmd;                                     \
     if (res != ncclSuccess) {                                   \
-      printf("NCCL failure %s:%d '%s'\n",                       \
-             __FILE__,__LINE__,ncclGetErrorString(res));        \
-      fflush(stdout);                                           \
-      MPI_Abort(MPI_COMM_WORLD, 1);                             \
+      REPLAY_ABORT("NCCL failure %s:%d '%s'\n",                 \
+                   __FILE__, __LINE__, ncclGetErrorString(res)); \
     }                                                           \
   } while(0)
 
