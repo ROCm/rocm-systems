@@ -187,7 +187,8 @@ class NullDevice : public amd::Device {
   virtual void deregisterSvmMemory(void* ptr) const { ShouldNotReachHere(); }
 
   //! Just returns nullptr for the dummy device
-  device::Memory* createMemory(amd::Memory& owner) const override {
+  device::Memory* createMemory(
+      amd::Memory& owner, amd::Memory::DeviceCreateStatus* status) const override {
     ShouldNotReachHere();
     return nullptr;
   }
@@ -420,7 +421,8 @@ class Device : public NullDevice {
   virtual device::Program* createProgram(amd::Program& owner,
                                          amd::option::Options* options = nullptr) override;
 
-  virtual device::Memory* createMemory(amd::Memory& owner) const override;
+  virtual device::Memory* createMemory(
+      amd::Memory& owner, amd::Memory::DeviceCreateStatus* status) const override;
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const override;
   //! Sampler object allocation
   virtual bool createSampler(const amd::Sampler& owner,  //!< abstraction layer sampler object

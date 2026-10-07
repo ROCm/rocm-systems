@@ -1231,9 +1231,10 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
     }
   }
 
-  if (!image->create(nullptr)) {
+  amd::Memory::DeviceCreateStatus createStatus = amd::Memory::kDeviceCreateSuccess;
+  if (!image->create(nullptr, false, false, false, &createStatus)) {
     LogPrintfError("Cannot create image: 0x%x", image);
-    if (image->deviceCreateStatus() == amd::Memory::kDeviceCreateImagePitchUnsupported) {
+    if (createStatus == amd::Memory::kDeviceCreateImagePitchUnsupported) {
       status = hipErrorNotSupported;
     } else {
       status = hipErrorOutOfMemory;

@@ -151,8 +151,8 @@ class Memory : public amd::RuntimeObject {
       kHandleFabric    = 0x8
   };
 
-  //! Backend-neutral device create() status carried on UserData. Backends map
-  //! their native failure to one of these before it crosses into the HIP layer.
+  //! Backend-neutral device create() status the device layer reports to HIP via
+  //! an out-param on the create path (not stored on UserData).
   enum DeviceCreateStatus : uint32_t {
     kDeviceCreateSuccess               = 0,  //!< No device-create failure recorded (default).
     kDeviceCreateImagePitchUnsupported = 1,  //!< Image row pitch rejected by the backend.
@@ -181,9 +181,6 @@ class Memory : public amd::RuntimeObject {
     size_t depth_ = 0;   //!< Depth value
 
     bool sync_mem_ops_ = false;  //!< Memops sync, when set synchronize all mem operations.
-
-    //! Backend-neutral status from the last failed device create(); see DeviceCreateStatus.
-    uint32_t device_create_status_ = kDeviceCreateSuccess;
   };
 
  protected:
@@ -325,11 +322,13 @@ class Memory : public amd::RuntimeObject {
   virtual bool create(void* initFrom = NULL,     //!< Pointer to the initialization data
                       bool sysMemAlloc = false,  //!< Allocate device memory in system memory
                       bool skipAlloc = false,    //!< Skip device memory allocation
-                      bool forceAlloc = false    //!< Force device memory allocation
+                      bool forceAlloc = false,   //!< Force device memory allocation
+                      DeviceCreateStatus* status = nullptr  //!< Backend device-create status
   );
 
   //! Allocates device (cache) memory for a specific device
-  bool addDeviceMemory(const Device* dev  //!< Device object
+  bool addDeviceMemory(const Device* dev,  //!< Device object
+                       DeviceCreateStatus* status = nullptr  //!< Backend device-create status
   );
 
   //! Replaces device (cache) memory for a specific device
@@ -339,7 +338,8 @@ class Memory : public amd::RuntimeObject {
 
   //! Find the section for the given device. Return NULL if not found.
   device::Memory* getDeviceMemory(const Device& dev,  //!< Device object
-                                  bool alloc = true   //!< Allocates memory
+                                  bool alloc = true,  //!< Allocates memory
+                                  DeviceCreateStatus* status = nullptr  //!< Backend device-create status
   );
 
   //! Get origianl device memory
@@ -445,13 +445,6 @@ class Memory : public amd::RuntimeObject {
   //! save the user data during memory allocation
   UserData& getUserData() { return userData_; }
 
-  //! Record the backend status from the last failed device create(). See DeviceCreateStatus.
-  void setDeviceCreateStatus(DeviceCreateStatus status) { userData_.device_create_status_ = status; }
-  //! Backend status from the last failed device create() (kDeviceCreateSuccess if none).
-  DeviceCreateStatus deviceCreateStatus() const {
-    return static_cast<DeviceCreateStatus>(userData_.device_create_status_);
-  }
-
   //! find if memory object is Arena memory
   virtual bool isArena() { return false; }
 
@@ -488,7 +481,8 @@ class Buffer : public Memory {
   bool create(void* initFrom = NULL,     //!< Pointer to the initialization data
               bool sysMemAlloc = false,  //!< Allocate device memory in system memory
               bool skipAlloc = false,    //!< Skip device memory allocation
-              bool forceAlloc = false    //!< Force device memory allocation
+              bool forceAlloc = false,   //!< Force device memory allocation
+              DeviceCreateStatus* status = nullptr  //!< Backend device-create status
   );
 
   //! static_cast to Buffer with sanity check
