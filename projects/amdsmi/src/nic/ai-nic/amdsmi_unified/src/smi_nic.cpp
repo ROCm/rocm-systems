@@ -95,8 +95,8 @@ std::optional<std::string> SmiNicPort::mac_address() const {
 
 std::optional<uint32_t> SmiNicPort::port_num() const { return port_num_; }
 
-std::optional<uint8_t> SmiNicPort::ifindex() const {
-  return get_sysfs_data<uint8_t>(sysfs_class_path_ + "/ifindex");
+std::optional<uint32_t> SmiNicPort::ifindex() const {
+  return get_sysfs_data<uint32_t>(sysfs_class_path_ + "/ifindex");
 }
 
 std::optional<uint8_t> SmiNicPort::carrier() const {

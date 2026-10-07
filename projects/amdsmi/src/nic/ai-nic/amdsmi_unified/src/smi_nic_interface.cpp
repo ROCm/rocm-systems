@@ -343,7 +343,7 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device,
     std::snprintf(port_info->netdev, SMI_NIC_MAX_STRING_LENGTH, "%s",
                   !netdev.empty() ? netdev.c_str() : "N/A");
 
-    port_info->ifindex = port.ifindex().value_or(std::numeric_limits<uint8_t>::max());
+    port_info->ifindex = port.ifindex().value_or(std::numeric_limits<uint32_t>::max());
 
     auto mac = port.mac_address();
     std::snprintf(port_info->mac_address, SMI_NIC_MAX_STRING_LENGTH, "%s",

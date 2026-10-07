@@ -3092,9 +3092,10 @@ struct_amdsmi_nic_port_t._fields_ = [
     ('type', ctypes.c_char * 256),
     ('flavour', ctypes.c_char * 256),
     ('netdev', ctypes.c_char * 256),
-    ('ifindex', ctypes.c_ubyte),
+    ('ifindex', ctypes.c_uint32),
     ('mac_address', ctypes.c_char * 256),
     ('carrier', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte),
     ('mtu', ctypes.c_uint16),
     ('link_state', ctypes.c_char * 256),
     ('link_speed', ctypes.c_uint32),
@@ -3103,6 +3104,7 @@ struct_amdsmi_nic_port_t._fields_ = [
     ('pause_autoneg', ctypes.c_char * 256),
     ('pause_rx', ctypes.c_char * 256),
     ('pause_tx', ctypes.c_char * 256),
+    ('PADDING_1', ctypes.c_ubyte * 4),
 ]
 
 amdsmi_nic_port_t = struct_amdsmi_nic_port_t

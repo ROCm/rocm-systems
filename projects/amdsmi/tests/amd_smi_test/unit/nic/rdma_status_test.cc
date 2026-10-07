@@ -11,14 +11,19 @@
 // which no seam exposes, so its zeroed-struct contract is unverified here.
 
 #include <gtest/gtest.h>
+#include <stdlib.h>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iterator>
+#include <string>
 
 #include "amd_smi/impl/amd_smi_nic_testing.h"
+#include "smi_nic.h"
 
 namespace {
 
@@ -208,6 +213,21 @@ TEST_F(NicUnit, RestoreRebindsProductionGetters) {
   nic_set_info_getters_for_testing(nullptr);
   AMDSmiAINICDevice::AINICInfo info = {};
   EXPECT_EQ(populate_amd_ainic_device(nullptr, 0x1000, info), AMDSMI_STATUS_INVAL);
+}
+
+// The kernel numbers network interfaces with an int, and hosts with many
+// interfaces, such as container hosts, hand out indexes above 255. A port's
+// ifindex must come back from sysfs whole, not cut to its low byte. It lives
+// here because every NicUnit test has to share this file's fixture.
+TEST_F(NicUnit, PortIfindexAbove255IsReadWhole) {
+  char dir[] = "/tmp/amdsmi_nic_port_XXXXXX";
+  ASSERT_NE(mkdtemp(dir), nullptr);
+  std::ofstream(std::string(dir) + "/ifindex") << "300\n";
+
+  const SmiNicPort port("eth0", "0000:01:00.0", dir, dir);
+  EXPECT_EQ(port.ifindex(), 300u);
+
+  std::filesystem::remove_all(dir);
 }
 
 }  // namespace
