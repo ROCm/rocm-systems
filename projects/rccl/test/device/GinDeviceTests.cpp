@@ -1901,8 +1901,11 @@ struct DescriptorSmemWithGuard {
 
 // The leaf that ncclGin::putValue(..., ncclGin_DescriptorSmem{&smem}) dispatches to.
 __global__ void kernelPutValueSmemDescriptor(ncclGinCtx ctx, int peer, uint64_t value,
-                                             uint64_t guardInit, uint64_t* guardOut) {
+                                             uint64_t guardInit, uint64_t* guardOut, uint64_t* descOut) {
   __shared__ DescriptorSmemWithGuard smem;
+  // __shared__ is not zero-initialised: seed the descriptor's first qword with bit 0 clear, so that its flag bit
+  // afterwards shows whether the GFD was built here rather than in the leaf's own scratch.
+  *reinterpret_cast<uint64_t*>(&smem.descriptor) = guardInit;
   for (int i = 0; i < kDescriptorGuardWords; i++) smem.guard[i] = guardInit;
   __syncthreads();
   ncclGinSignalDescriptor noSignal{};
@@ -1912,6 +1915,7 @@ __global__ void kernelPutValueSmemDescriptor(ncclGinCtx ctx, int peer, uint64_t 
       noSignal, ncclGinSignalInc, /*signalOpArg=*/0, /*hasDescriptor=*/true, &smem.descriptor,
       cuda::thread_scope_device, cuda::thread_scope_thread);
   __syncthreads();
+  *descOut = *reinterpret_cast<const volatile uint64_t*>(&smem.descriptor);
   const volatile uint64_t* guard = smem.guard;
   for (int i = 0; i < kDescriptorGuardWords; i++) guardOut[i] = guard[i];
 }
@@ -1929,10 +1933,12 @@ TEST_F(GinDeviceTest, PutValue_SmemDescriptorNoOverflow) {
   DeviceBuffer<uint32_t>             d_cis(kNranks);
   DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(1);
   DeviceBuffer<uint64_t>             d_guard(kDescriptorGuardWords);
+  DeviceBuffer<uint64_t>             d_desc(1);
   d_queues.zero();
   d_pis.zero();
   d_cis.zero();
   d_guard.zero();
+  d_desc.zero();
 
   ncclGinProxyGpuCtx_t hostProxyCtx{};
   hostProxyCtx.nranks    = static_cast<int>(kNranks);
@@ -1947,14 +1953,17 @@ TEST_F(GinDeviceTest, PutValue_SmemDescriptorNoOverflow) {
   ctx.nRanks  = static_cast<int>(kNranks);
   ctx.handle  = d_proxyCtx.ptr;
 
-  kernelPutValueSmemDescriptor<<<1, 1>>>(ctx, kPeer, kValue, kGuard, d_guard.ptr);
+  kernelPutValueSmemDescriptor<<<1, 1>>>(ctx, kPeer, kValue, kGuard, d_guard.ptr, d_desc.ptr);
   syncAndCheck();
 
   // The GFD was built in the descriptor and posted to the peer's queue.
+  EXPECT_EQ(d_desc.copyTo()[0] & 1u, 1u) << "the GFD was not built in the caller's ncclGinDescriptorSmem";
   EXPECT_EQ(d_pis.copyTo()[kPeer], 1u);
   const ncclGinProxyGfd_t posted = d_queues.copyTo()[kPeer * kQueueSize];
-  EXPECT_EQ(static_cast<uint32_t>(posted.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow),
-            static_cast<uint32_t>(kValue));
+  EXPECT_EQ(static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow) |
+                (static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow2) << 32) |
+                (static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineHigh].inlineHigh.inlineValHigh) << 48),
+            kValue);
 
   // Shared memory right after the descriptor storage must be left alone.
   const std::vector<uint64_t> guard = d_guard.copyTo();
