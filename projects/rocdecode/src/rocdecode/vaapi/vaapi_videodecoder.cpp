@@ -1109,7 +1109,12 @@ rocDecStatus VaContext::GetAdapterLuid(int device_id, LUID *adapter_luid) {
 void VaContext::ProbeAllProfileCaps(uint32_t va_ctx_idx) {
     auto& ctx = va_contexts_[va_ctx_idx];
     int max_entrypoints = vaMaxNumEntrypoints(ctx.va_display);
-    if (max_entrypoints <= 0) return;
+    if (max_entrypoints <= 0) {
+        ErrorLog(g_rocdec_logger, "vaMaxNumEntrypoints() returned " + ROCDEC_TOSTR(max_entrypoints) +
+                 " for device_id=" + ROCDEC_TOSTR(ctx.device_id) +
+                 ". No decode profile could be probed, so every codec will be reported as unsupported.");
+        return;
+    }
     std::vector<VAEntrypoint> entrypoints(max_entrypoints);
 
     for (int i = 0; i < ctx.num_va_profiles; i++) {
@@ -1150,6 +1155,16 @@ void VaContext::ProbeAllProfileCaps(uint32_t va_ctx_idx) {
         caps.rt_format_attrib = va_config_attrib.value;
         DecodeSurfaceAttribs(attr_list.data(), attr_count, caps);
         ctx.profile_caps[profile] = caps;
+    }
+
+    // Individual profile failures above are skipped silently, since a driver legitimately
+    // advertises profiles it cannot decode. Probing none of them is different: the cache stays
+    // empty and every later rocDecGetDecoderCaps() reports "unsupported", which looks like a
+    // GPU without decode support rather than a failed probe. Say so once, here.
+    if (ctx.profile_caps.empty()) {
+        WarningLog(g_rocdec_logger, "No VLD-capable VA profile could be probed out of " +
+                   ROCDEC_TOSTR(ctx.num_va_profiles) + " profile(s) advertised for device_id=" +
+                   ROCDEC_TOSTR(ctx.device_id) + ". Every codec will be reported as unsupported.");
     }
 }
 #endif
