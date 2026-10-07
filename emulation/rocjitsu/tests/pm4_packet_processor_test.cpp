@@ -3,12 +3,15 @@
 
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
 
+#include "legacy_gpu_memory_fixture.h"
+
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -16,6 +19,7 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -57,6 +61,9 @@ public:
   }
 
   AtomicLoadResult atomic_load(VmMemoryDomain, uint64_t address, uint32_t width) override {
+    atomic_loads.emplace_back(address, width);
+    if (unavailable_read_ && address == *unavailable_read_)
+      return {.outcome = VmAccessOutcome::Unavailable};
     if ((width != 4 && width != 8) || address % width != 0 || address > bytes_.size() ||
         width > bytes_.size() - address)
       return {.outcome = VmAccessOutcome::Malformed};
@@ -97,6 +104,8 @@ public:
     std::memcpy(&value, bytes_.data() + address, sizeof(value));
     return value;
   }
+
+  std::vector<std::pair<uint64_t, uint32_t>> atomic_loads;
 
   void make_read_unavailable(uint64_t address) { unavailable_read_ = address; }
   void make_reads_available() { unavailable_read_.reset(); }
@@ -409,9 +418,12 @@ TEST_F(Pm4PacketProcessorTest, WideWaitUsesMaskedHighBitsAndRetriesUnavailableMe
                            kOutput + 16,
                            0u,
                            function};
+    memory->atomic_loads.clear();
     memory->store<uint64_t>(kOutput, blocked[function - 1] | 0x0000123456780000ull);
     submit(words);
     EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+    ASSERT_EQ(memory->atomic_loads.size(), 1u);
+    EXPECT_EQ(memory->atomic_loads.back(), (std::pair<uint64_t, uint32_t>{kOutput, 8}));
     EXPECT_EQ(memory->load<uint32_t>(kOutput + 16), function - 1);
     EXPECT_EQ(queue.commands.submissions.front().buffers.front().address, kRing);
     memory->store<uint64_t>(kOutput, ready[function - 1] | 0x0000fedcba980000ull);
@@ -423,6 +435,96 @@ TEST_F(Pm4PacketProcessorTest, WideWaitUsesMaskedHighBitsAndRetriesUnavailableMe
     EXPECT_EQ(memory->load<uint32_t>(kOutput + 16), function);
     EXPECT_EQ(memory->load<uint64_t>(kOutput + 8), 0u);
   }
+}
+
+TEST_F(Pm4PacketProcessorTest, WideWaitFaultPreventsLaterMemoryEffects) {
+  for (uint32_t operand : {kOutput + 4, 0x8000u}) {
+    SCOPED_TRACE(operand);
+    completed = false;
+    memory->store<uint32_t>(kOutput + 16, 0);
+    queue.faulted = false;
+    queue.commands.submissions.clear();
+    queue.command_access.reset();
+    const std::array words{0xc0079300u, 0x13u, operand,     0u,     0u,           0u, ~0u,
+                           ~0u,         0u,    0xc0033700u, 0x100u, kOutput + 16, 0u, 99u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+    EXPECT_TRUE(queue.faulted);
+    EXPECT_FALSE(completed);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput + 16), 0u);
+  }
+}
+
+TEST_F(Pm4PacketProcessorTest, ConcurrentWideWaitCannotPassOnMixedHalves) {
+  LegacyPageTable page_table;
+  util::DistributedSharedMutex page_table_mutex;
+  test::LegacyGpuMemoryFixture host_memory("memory");
+  host_memory.set_passthrough(true);
+  host_memory.register_process(7, &page_table, &page_table_mutex);
+  auto &gpu_vm = host_memory.gpu_vm();
+  const auto handle = gpu_vm.find_vmid(7);
+  ASSERT_TRUE(handle);
+  constexpr uint64_t first = 0x1111111122222222ull;
+  constexpr uint64_t second = 0x3333333344444444ull;
+  constexpr uint64_t mixed = 0x1111111144444444ull;
+  alignas(8) uint64_t operand = first;
+  uint32_t output = 0;
+  const uint64_t operand_address = reinterpret_cast<uint64_t>(&operand);
+  const uint64_t output_address = reinterpret_cast<uint64_t>(&output);
+  const std::array words{0xc0079300u,
+                         0x13u,
+                         uint32_t(operand_address),
+                         uint32_t(operand_address >> 32),
+                         uint32_t(mixed),
+                         uint32_t(mixed >> 32),
+                         ~0u,
+                         ~0u,
+                         0u,
+                         0xc0033700u,
+                         0x100u,
+                         uint32_t(output_address),
+                         uint32_t(output_address >> 32),
+                         0xdeadbeefu};
+  queue.address_space = *handle;
+  queue.process_id = 7;
+  queue.packet_format = QueuePacketFormat::Pm4;
+  queue.submission_queue = true;
+  Pm4Submission submission;
+  const uint64_t commands = reinterpret_cast<uint64_t>(words.data());
+  submission.buffers.push_back({.address = commands, .dwords = uint32_t(words.size())});
+  submission.complete = [this](bool success) { completed = success; };
+  queue.commands.submissions.push_back(std::move(submission));
+  auto service_host = [&] {
+    queue.command_retry_pending = false;
+    status = Pm4TestStatus::Ready;
+    process_pm4_packets(queue, &gpu_vm, context);
+    return status;
+  };
+  std::atomic_ref<uint64_t> published(operand);
+  std::atomic<uint32_t> stores = 0;
+  std::jthread producer([&](std::stop_token stop) {
+    while (!stop.stop_requested()) {
+      published.store(first, std::memory_order_release);
+      published.store(second, std::memory_order_release);
+      stores.fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+  // This flag provides no acquire edge for the wait operand.
+  while (stores.load(std::memory_order_relaxed) == 0)
+    std::this_thread::yield();
+  for (uint32_t poll = 0; poll < 10000; ++poll) {
+    ASSERT_EQ(service_host(), Pm4TestStatus::Blocked);
+    ASSERT_EQ(output, 0u);
+    ASSERT_FALSE(completed);
+    ASSERT_EQ(queue.commands.submissions.front().buffers.front().address, commands);
+  }
+  producer.request_stop();
+  producer.join();
+  published.store(mixed, std::memory_order_release);
+  EXPECT_EQ(service_host(), Pm4TestStatus::Ready);
+  EXPECT_EQ(output, 0xdeadbeefu);
+  EXPECT_TRUE(completed);
+  EXPECT_FALSE(queue.faulted);
 }
 
 TEST_F(Pm4PacketProcessorTest, ReleaseInterruptFollowsWriteAndUsesContextId) {
