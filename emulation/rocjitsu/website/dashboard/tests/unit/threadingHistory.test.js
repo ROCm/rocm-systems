@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { selectThreadingHistory } from '../../src/data/selectors.js';
+import { selectOverview, selectThreadingHistory } from '../../src/data/selectors.js';
 
 const filters = { targets: ['gfx950'], suites: ['Triton'] };
 function run(mode, date, duration, sha = date, logicalIds = ['matmul']) {
@@ -61,6 +61,15 @@ test('ranged histories use the latest selected commit day as a common anchor', (
   ], filters, '1D');
   expect(history.anchorDay).toBe('2026-10-07');
   expect(history.series.map(({ data }) => data)).toEqual([[10], [null]]);
+  expect(history.modeSummaries[0]).toMatchObject({ hasRuns: true, currentDuration: 10 });
+  expect(history.modeSummaries[1]).toMatchObject({
+    hasRuns: false, currentDuration: null, durationDelta: null, latestRun: null, firstRun: null,
+  });
+  const wider = selectThreadingHistory([
+    section('default', [run('default', '2026-10-07T12:00:00Z', 10)]),
+    section('single', [run('single', '2026-10-06T12:00:00Z', 20)]),
+  ], filters, 'ALL');
+  expect(wider.modeSummaries[1]).toMatchObject({ hasRuns: true, currentDuration: 20 });
 });
 
 test('insufficient coverage in one mode does not suppress the other mode', () => {
@@ -80,5 +89,21 @@ test('empty modes and filters absent from a mode are safe', () => {
     section('default', []), section('single', [run('single', '2026-10-07T12:00:00Z', 20)]),
   ], { ...filters, suites: ['Plugin'] });
   expect(history.series[0].data).toEqual([null]);
-  expect(history.modeSummaries[0].latestRun).toBeNull();
+  for (const summary of history.modeSummaries) {
+    expect(summary).toMatchObject({ hasRuns: false, currentDuration: null, latestRun: null });
+  }
+});
+
+
+test('shared target selection preserves deltas for modes with disjoint targets', () => {
+  const defaults = [run('default', '2026-10-01T12:00:00Z', 10), run('default', '2026-10-02T12:00:00Z', 9)]
+    .map((item) => ({ ...item, tests: item.tests.map((result) => ({ ...result, target: 'gfx1250' })) }));
+  const singles = [run('single', '2026-10-01T12:00:00Z', 100), run('single', '2026-10-02T12:00:00Z', 120)];
+  const sharedFilters = { ...filters, targets: ['gfx1250', 'gfx950'] };
+  const sections = [section('default', defaults), section('single', singles)];
+  const combined = selectThreadingHistory(sections, sharedFilters);
+  expect(combined.modeSummaries.map(({ durationDelta }) => durationDelta)).toEqual([-10, 20]);
+  expect(combined.series.map(({ name }) => name)).toEqual(['gfx1250 · Default', 'gfx950 · Single-thread']);
+  expect(sections.map(({ data }) => selectOverview(data, sharedFilters).metrics.durationDelta)).toEqual([-10, 20]);
+  expect(selectOverview(sections[0].data, { ...sharedFilters, targets: [] }).history.series).toEqual([]);
 });

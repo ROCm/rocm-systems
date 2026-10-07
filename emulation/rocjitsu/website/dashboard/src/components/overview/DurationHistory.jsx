@@ -316,11 +316,12 @@ export default function DurationHistory({
             </Typography>
           </Box>}
           {history.modeSummaries?.map((summary) => (
-            <Box key={summary.threadingMode}>
+            <Box key={summary.threadingMode} data-testid={`history-summary-${summary.threadingMode}`}>
               <Typography variant="overline">{summary.label}</Typography>
               <Typography fontWeight={750}>{formatDuration(summary.currentDuration)}</Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                {summary.insufficientData ? 'Insufficient history for this range' :
+                {!summary.hasRuns ? 'No runs in this range' :
+                  summary.insufficientData ? 'Insufficient history for this range' :
                   `Range change ${formatPercent(summary.durationDelta)}`}
               </Typography>
             </Box>

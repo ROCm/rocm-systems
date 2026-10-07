@@ -190,11 +190,11 @@ function DashboardHero({ data = null }) {
 
 function ThreadingView({ data, sharedState, showHistory = true }) {
   const localState = useDashboardState(data);
-  const [explorerNavigation, setExplorerNavigation] = useState(sharedState.navigationVersion);
-  if (explorerNavigation !== sharedState.navigationVersion) {
-    setExplorerNavigation(sharedState.navigationVersion);
+  const [explorerNavigation, setExplorerNavigation] = useState(sharedState.benchmarkNavigation);
+  if (explorerNavigation !== sharedState.benchmarkNavigation) {
+    setExplorerNavigation(sharedState.benchmarkNavigation);
     localState.setExplorerRunIds([]);
-    localState.setBenchmarkMode('single');
+    localState.setBenchmarkMode(sharedState.benchmarkNavigation.mode);
   }
   const state = {
     ...localState,
@@ -296,7 +296,7 @@ function Dashboard({ data: allData, dataError = null, onRetry = null }) {
       ? selectThreadingHistory(sections, state.filters, state.historyRange) : null
   ), [sections, state.filters, state.historyRange, state.tab]);
   const dataErrorMessage = dataError ? summarizeDashboardDataError(dataError) : null;
-  const [navigationVersion, setNavigationVersion] = useState(0);
+  const [benchmarkNavigation, setBenchmarkNavigation] = useState({ mode: 'single' });
   const failureCount = useMemo(() => selectFailures(data, state.filters).length, [data, state.filters]);
 
   return (
@@ -335,7 +335,7 @@ function Dashboard({ data: allData, dataError = null, onRetry = null }) {
             <Tabs
               value={state.tab}
               onChange={(_, value) => {
-                if (value === 'benchmarks') setNavigationVersion((current) => current + 1);
+                if (value === 'benchmarks') setBenchmarkNavigation({ mode: 'single' });
                 state.setTab(value);
               }}
               variant="scrollable"
@@ -361,7 +361,10 @@ function Dashboard({ data: allData, dataError = null, onRetry = null }) {
                 history={combinedHistory}
                 range={state.historyRange}
                 onRangeChange={state.setHistoryRange}
-                onOpenBenchmarks={() => state.setTab('benchmarks')}
+                onOpenBenchmarks={() => {
+                  setBenchmarkNavigation({ mode: 'aggregate' });
+                  state.setTab('benchmarks');
+                }}
                 showNormalizationNote={combinedHistory.normalized}
               />
             </Box>
@@ -374,13 +377,13 @@ function Dashboard({ data: allData, dataError = null, onRetry = null }) {
                   {mode === 'single' ? 'Single-thread' : 'Default'}
                 </Typography>
               )}
-              <ThreadingView data={sectionData} sharedState={{ ...state, navigationVersion }} showHistory={!combinedHistory} />
+              <ThreadingView data={sectionData} sharedState={{ ...state, benchmarkNavigation }} showHistory={!combinedHistory} />
             </Box>
           ))}
           {state.threadingModes.length === 0 && allData.runs.length > 0 && (
             <Alert severity="info">Select a threading mode to view benchmark results.</Alert>
           )}
-          {state.availableThreadingModes.length === 0 && <ThreadingView data={data} sharedState={{ ...state, navigationVersion }} />}
+          {state.availableThreadingModes.length === 0 && <ThreadingView data={data} sharedState={{ ...state, benchmarkNavigation }} />}
 
         </Container>
       </Box>

@@ -44,6 +44,7 @@ export async function serveThreadingDataset(page, modes = ['default', 'single'])
     const resource = resources.get(path);
     return resource ? route.fulfill({ json: resource }) : route.continue();
   });
+  return resources;
 }
 
 export async function switchThreading(page, label) {

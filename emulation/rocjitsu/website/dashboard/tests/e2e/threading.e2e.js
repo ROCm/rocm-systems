@@ -169,3 +169,65 @@ test('main trend overlays both threading modes on one graph', async ({ page }) =
     (chart) => chart.getOption().series.map((item) => item.name));
   expect(names.every((name) => !name.includes('Single-thread'))).toBe(true);
 });
+
+
+test('combined normalization link opens complete aggregate histories for every mode', async ({ page }) => {
+  const resources = await serveThreadingDataset(page);
+  const oldRun = resources.get('runs/threading-default-0.json');
+  const oldCatalog = structuredClone(resources.get(oldRun.testCatalog));
+  oldCatalog.id = 'threading-default-old';
+  oldCatalog.tests = oldCatalog.tests.slice(1);
+  const ids = new Set(oldCatalog.tests.map((item) => item.id));
+  oldCatalog.targets.gfx1250 = oldCatalog.targets.gfx1250.filter((id) => ids.has(id));
+  oldRun.targets[0].results = oldRun.targets[0].results.filter((result) => ids.has(result.testId));
+  oldRun.testCatalog = 'test-catalogs/threading-default-old.json';
+  resources.set(oldRun.testCatalog, oldCatalog);
+  await page.goto('/');
+  await page.getByRole('combobox', { name: 'Threading', exact: true }).click();
+  await page.getByRole('option', { name: 'Single-thread', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await page.getByRole('combobox', { name: 'Targets', exact: true }).click();
+  await page.getByRole('option', { name: /Check all targets/ }).click();
+  await page.keyboard.press('Escape');
+  const sections = ['Default', 'Single-thread'].map((mode) => page.getByRole('region', { name: `${mode} threading results`, exact: true }));
+  const openNormalized = () => page.getByTestId('performance-trend-normalization-note').getByRole('button', { name: 'Benchmarks', exact: true }).click();
+  await openNormalized();
+  for (const section of sections) {
+    await expect(section.getByRole('button', { name: 'Aggregate', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  }
+  for (const section of sections) {
+    await page.getByRole('tab', { name: 'Overview', exact: true }).click();
+    await section.getByRole('button', { name: /^View run .* in Benchmark Explorer$/ }).first().click();
+    await expect(section.getByRole('button', { name: 'Clear selected runs (1)' })).toBeVisible();
+  }
+  await page.getByRole('tab', { name: 'Overview', exact: true }).click();
+  await openNormalized();
+  for (const section of sections) {
+    await expect(section.getByRole('button', { name: 'Aggregate', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(section.getByRole('button', { name: 'Clear selected runs (0)' })).toBeDisabled();
+  }
+});
+
+
+test('combined history hides totals for modes with no runs in the selected range', async ({ page }) => {
+  const resources = await serveThreadingDataset(page);
+  const index = resources.get('index.json');
+  index.runFiles = index.runFiles.filter((path) => path !== 'runs/threading-single-1.json');
+  await page.goto('/');
+  await page.getByRole('combobox', { name: 'Threading', exact: true }).click();
+  await page.getByRole('option', { name: 'Single-thread', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await page.getByRole('combobox', { name: 'Targets', exact: true }).click();
+  await page.getByRole('option', { name: /Check all targets/ }).click();
+  await page.keyboard.press('Escape');
+  const single = page.getByTestId('history-summary-single');
+  const defaults = page.getByTestId('history-summary-default');
+  await page.getByRole('button', { name: 'Trailing 24 hours', exact: true }).click();
+  await expect(single).toContainText('No runs in this range');
+  await expect(single).not.toContainText('8m 20.0s');
+  await expect(defaults).toContainText('50.0s');
+  await expect(defaults).not.toContainText('No runs in this range');
+  await page.getByRole('button', { name: 'All available history', exact: true }).click();
+  await expect(single).toContainText('8m 20.0s');
+  await expect(single).not.toContainText('No runs in this range');
+});

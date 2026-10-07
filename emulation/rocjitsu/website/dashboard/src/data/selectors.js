@@ -279,6 +279,8 @@ function weeklyHistorySlots(runs, dayKeys) {
 }
 
 export function selectOverview(data, filters, range = 'ALL', historyAnchorDay = null) {
+  const availableTargets = new Set(data.runs.flatMap((run) => run.tests.map((test) => test.target)));
+  filters = { ...filters, targets: filters.targets.filter((target) => availableTargets.has(target)) };
   const completedRuns = data.runs.filter((run) => isRunCompletedForFilters(run, filters));
   const candidate = data.latestCommitRun ?? sortRunsByCommit(data.runs).at(-1) ?? data.latestRun;
   const trendRuns = completedRuns;
@@ -500,16 +502,20 @@ export function selectThreadingHistory(sections, filters, range = 'ALL') {
       runs: slots.map((slot) => history.slots[indexByKey.get(slotKey(slot))]?.run ?? null),
     }));
   });
-  const modeSummaries = histories.map(({ threadingMode, label, history }) => ({
-    threadingMode,
-    label,
-    currentDuration: history?.currentDuration ?? null,
-    durationDelta: history?.durationDelta ?? null,
-    latestRun: history?.latestRun ?? null,
-    firstRun: history?.firstRun ?? null,
-    insufficientData: Boolean(history?.insufficientData),
-  }));
-  const onlyHistory = histories.length === 1 ? histories[0].history : null;
+  const modeSummaries = histories.map(({ threadingMode, label, history }) => {
+    const hasRuns = Boolean(history?.slots.some((slot) => slot.run));
+    return {
+      threadingMode,
+      label,
+      hasRuns,
+      currentDuration: hasRuns ? history.currentDuration : null,
+      durationDelta: hasRuns ? history.durationDelta : null,
+      latestRun: hasRuns ? history.latestRun : null,
+      firstRun: hasRuns ? history.firstRun : null,
+      insufficientData: Boolean(history?.insufficientData),
+    };
+  });
+  const onlyHistory = modeSummaries.length === 1 ? modeSummaries[0] : null;
   return {
     range,
     mode: isIntraday ? 'intraday' : isWeekly ? 'weekly-by-commit' : 'daily-by-commit',
