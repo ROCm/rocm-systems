@@ -132,14 +132,6 @@ private:
   template <typename PostOptions>
   __device__ void post_ringdb_unlock(int wqe_count, const gda_mlx5_wqe& wqe);
 
-  template <OpCode Op, typename PostOptions>
-  __device__ void post_amo_group(uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-                                 uintptr_t atomic_laddr, uint32_t atomic_lkey, const ActiveWFInfo& wf_info);
-
-  template <OpCode Op, typename PostOptions>
-  __device__ void post_amo_single(uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-                                  uintptr_t atomic_laddr, uint32_t atomic_lkey);
-
 #if defined(BUILD_DEBUG_DEVICE)
   __device__ __noinline__ void print_cqe_error(const mlx5_cqe64* cqe,
                                                uint8_t opcode, uint8_t owner);
@@ -244,13 +236,22 @@ __device__ __noinline__ void QueuePairMLX5::post_wqe_rma_single(
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-template <QueuePairMLX5::OpCode Op, typename PostOptions>
-__device__ __forceinline__ void QueuePairMLX5::post_amo_group(
+template <QueuePairMLX5::OpCode Op, AMOFetchType Fetch, typename... Options>
+__device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-    uintptr_t atomic_laddr, uint32_t atomic_lkey, const ActiveWFInfo& wf_info) {
+    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
+  using PostOptions = PostOpt<Options...>;
   if (wf_info.is_pe_group_last) {
     // acquire SQ lock and poll until we have enough WQEBB for all lanes using this QP
     lock_pollcq<PostOptions>(wf_info.num_pe_group_lanes);
+  }
+
+  uint64_t* atomic_laddr = get_atomic_addr<Fetch>();
+  uint32_t atomic_lkey   = get_atomic_lkey<Fetch>();
+  if constexpr (Fetch == AMOFetchType::Blocking) {
+    uint32_t atomic_idx = (fetching_atomic_idx + wf_info.pe_group_logical_lane_id) % FETCHING_ATOMIC_CNT;
+    atomic_laddr += atomic_idx;
   }
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
@@ -262,25 +263,45 @@ __device__ __forceinline__ void QueuePairMLX5::post_amo_group(
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, static_cast<uint8_t>(Op), qp_num, fm_ce_se,
-                   raddr, rkey, swap_add, compare, atomic_laddr, atomic_lkey};
+                   raddr, rkey, swap_add, compare, reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
 
   // copy to SQ
   sq.buf[sq_idx] = wqe;
 
   if (wf_info.is_pe_group_last) {
+    // increment fetching-atomic counter
+    if constexpr (Fetch == AMOFetchType::Blocking) {
+      fetching_atomic_idx += wf_info.num_pe_group_lanes;
+    }
     /* increment post counter, ring doorbell, and release SQ lock
      * we are the last thread in the wavefront, so we have the last WQE posted */
     post_ringdb_unlock<PostOptions>(wf_info.num_pe_group_lanes, wqe);
+    // wait until fetch completes
+    if constexpr (Fetch == AMOFetchType::Blocking) {
+      quiet_single();
+    }
+  }
+
+  if constexpr (Fetch == AMOFetchType::Blocking) {
+    return *atomic_laddr;
   }
 }
 
 // precondition: called with all active lanes using different QPs
-template <QueuePairMLX5::OpCode Op, typename PostOptions>
-__device__ __forceinline__ void QueuePairMLX5::post_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-    uintptr_t atomic_laddr, uint32_t atomic_lkey) {
+template <QueuePairMLX5::OpCode Op, AMOFetchType Fetch, typename... Options>
+__device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo_single(
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
+  using PostOptions = PostOpt<Options...>;
   // acquire SQ lock and poll until we have enough space for at least one WQEBB
   lock_pollcq<PostOptions>(1);
+
+  uint64_t* atomic_laddr = get_atomic_addr<Fetch>();
+  uint32_t atomic_lkey   = get_atomic_lkey<Fetch>();
+  if constexpr (Fetch == AMOFetchType::Blocking) {
+    uint32_t atomic_idx = fetching_atomic_idx % FETCHING_ATOMIC_CNT;
+    atomic_laddr += atomic_idx;
+  }
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
   uint16_t wqe_idx = get_wqe_idx(0);
@@ -291,54 +312,21 @@ __device__ __forceinline__ void QueuePairMLX5::post_amo_single(
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, static_cast<uint8_t>(Op), qp_num, fm_ce_se,
-                   raddr, rkey, swap_add, compare, atomic_laddr, atomic_lkey};
+                   raddr, rkey, swap_add, compare, reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
 
   // copy to SQ
   sq.buf[sq_idx] = wqe;
 
+  // increment fetching-atomic counter
+  if constexpr (Fetch == AMOFetchType::Blocking) {
+    fetching_atomic_idx += 1;
+  }
   // increment post counter, ring doorbell for this WQE, and release SQ lock
   post_ringdb_unlock<PostOptions>(1, wqe);
-}
-
-// can be called with all active lanes using any number of different QPs, don't assume anything
-template <QueuePairMLX5::OpCode Op, AMOFetchType Fetch, typename... Options>
-__device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo(
-    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
-  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  using PostOptions = PostOpt<Options...>;
-  uint32_t atomic_lkey = get_atomic_lkey<Fetch>();
+  // wait until fetch completes
   if constexpr (Fetch == AMOFetchType::Blocking) {
-    return fetch_with_slot(wf_info, [&](uint64_t* slot) {
-      post_amo_group<Op, PostOptions>(raddr, rkey, swap_add, compare,
-                                      reinterpret_cast<uintptr_t>(slot), atomic_lkey, wf_info);
-      // wait until fetch completes
-      if (wf_info.is_pe_group_last) {
-        quiet_single();
-      }
-    });
-  } else {
-    post_amo_group<Op, PostOptions>(raddr, rkey, swap_add, compare,
-                                    reinterpret_cast<uintptr_t>(get_atomic_addr<Fetch>()), atomic_lkey, wf_info);
-  }
-}
-
-// precondition: called with all active lanes using different QPs
-template <QueuePairMLX5::OpCode Op, AMOFetchType Fetch, typename... Options>
-__device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
-  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  using PostOptions = PostOpt<Options...>;
-  uint32_t atomic_lkey = get_atomic_lkey<Fetch>();
-  if constexpr (Fetch == AMOFetchType::Blocking) {
-    return fetch_with_slot_single([&](uint64_t* slot) {
-      post_amo_single<Op, PostOptions>(raddr, rkey, swap_add, compare, reinterpret_cast<uintptr_t>(slot), atomic_lkey);
-      // wait until fetch completes
-      quiet_single();
-    });
-  } else {
-    post_amo_single<Op, PostOptions>(raddr, rkey, swap_add, compare,
-                                     reinterpret_cast<uintptr_t>(get_atomic_addr<Fetch>()), atomic_lkey);
+    quiet_single();
+    return *atomic_laddr;
   }
 }
 

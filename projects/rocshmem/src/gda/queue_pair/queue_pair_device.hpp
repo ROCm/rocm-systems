@@ -115,6 +115,7 @@ protected:
 
   // Used in most WQEs
   uint32_t qp_num;
+  uint32_t fetching_atomic_idx{0};
 
   // Used in atomic WQEs
   uint64_t* fetching_atomic;
@@ -127,15 +128,6 @@ protected:
   static_assert(FETCHING_ATOMIC_CNT % WF_SIZE == 0);
   using FreeListT = FreeList<uint64_t*>;
   FreeListT* fetching_atomic_freelist;
-
-  // Fetch slots are lent per PE group in chunks of one max-size wavefront, so no slot is reused before it is read.
-  static constexpr size_t FETCHING_ATOMIC_CHUNK{64};
-  static constexpr size_t FETCHING_ATOMIC_CHUNKS{FETCHING_ATOMIC_CNT / FETCHING_ATOMIC_CHUNK};
-  static_assert(FETCHING_ATOMIC_CHUNK >= static_cast<size_t>(WF_SIZE));
-  static_assert(FETCHING_ATOMIC_CNT % FETCHING_ATOMIC_CHUNK == 0);
-  static_assert(FETCHING_ATOMIC_CHUNKS <= 32);
-  // Bit i set means chunk i of fetching_atomic is free.
-  uint32_t fetching_atomic_free{static_cast<uint32_t>((uint64_t{1} << FETCHING_ATOMIC_CHUNKS) - 1)};
 
 private:
   // Used by get_laddr
@@ -194,79 +186,9 @@ protected:
     }
   }
 
-  // Lend each PE group a slot chunk for one blocking AMO; groups that miss retry holding nothing, so waves cannot deadlock.
-  template <typename PostAndWait>
-  __device__ __forceinline__ uint64_t fetch_with_slot(const ActiveWFInfo& wf_info, PostAndWait&& post_and_wait) {
-    uint64_t ret{0};
-    bool done{false};
-    while (!done) {
-      uint64_t* chunk{nullptr};
-      if (wf_info.is_pe_group_first) {
-        chunk = try_acquire_fetching_atomic_chunk();
-      }
-      chunk = reinterpret_cast<uint64_t*>(
-          __shfl(reinterpret_cast<uint64_t>(chunk), wf_info.pe_group_first_phys_lane_id));
-      if (chunk == nullptr) {
-        __builtin_amdgcn_s_sleep(1);
-        continue;
-      }
-      uint64_t* slot = chunk + wf_info.pe_group_logical_lane_id;
-      post_and_wait(slot);
-      ret = *slot;
-      // Consuming ret makes the slot load complete (s_waitcnt) before the chunk can be lent out and rewritten by the NIC.
-      asm volatile("" : "+v"(ret) : : "memory");
-      if (wf_info.is_pe_group_first) {
-        release_fetching_atomic_chunk(chunk);
-      }
-      done = true;
-    }
-    return ret;
-  }
-
-  // Single-lane variant of fetch_with_slot(); every active lane may use a different QP.
-  template <typename PostAndWait>
-  __device__ __forceinline__ uint64_t fetch_with_slot_single(PostAndWait&& post_and_wait) {
-    uint64_t ret{0};
-    bool done{false};
-    while (!done) {
-      uint64_t* chunk = try_acquire_fetching_atomic_chunk();
-      if (chunk == nullptr) {
-        __builtin_amdgcn_s_sleep(1);
-        continue;
-      }
-      post_and_wait(chunk);
-      ret = *chunk;
-      // Consuming ret makes the slot load complete (s_waitcnt) before the chunk can be lent out and rewritten by the NIC.
-      asm volatile("" : "+v"(ret) : : "memory");
-      release_fetching_atomic_chunk(chunk);
-      done = true;
-    }
-    return ret;
-  }
-
 private:
   __device__ Provider& provider() {
     return static_cast<Provider&>(*this);
-  }
-
-  // Take the lowest free chunk of fetching_atomic, or return nullptr if all chunks are lent out.
-  __device__ __forceinline__ uint64_t* try_acquire_fetching_atomic_chunk() {
-    uint32_t free_mask = __scoped_atomic_load_n(&fetching_atomic_free, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
-    while (free_mask != 0) {
-      uint32_t idx = static_cast<uint32_t>(__builtin_ctz(free_mask));
-      // Relaxed: the new owner reads nothing the previous owner wrote, and NIC writes follow the doorbell release.
-      if (__scoped_atomic_compare_exchange_n(&fetching_atomic_free, &free_mask, free_mask & ~(1u << idx), false,
-                                             __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)) {
-        return fetching_atomic + idx * FETCHING_ATOMIC_CHUNK;
-      }
-    }
-    return nullptr;
-  }
-
-  // Return a chunk after its slot loads completed; relaxed, since agent-scope release would add an L2 writeback per AMO.
-  __device__ __forceinline__ void release_fetching_atomic_chunk(uint64_t* chunk) {
-    uint32_t idx = static_cast<uint32_t>((chunk - fetching_atomic) / FETCHING_ATOMIC_CHUNK);
-    __scoped_atomic_fetch_or(&fetching_atomic_free, 1u << idx, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 /**@}*/
 

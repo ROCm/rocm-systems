@@ -102,16 +102,8 @@ private:
                                 uintptr_t raddr, uint32_t rkey, size_t size, bool signaled);
 
   template <OpCode Op, AMOFetchType Fetch, bool CheckSQ>
-  __device__ void write_amo_wqe(uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-                                uint64_t* atomic_laddr, bool signaled);
-
-  template <OpCode Op, AMOFetchType Fetch, typename PostOptions>
-  __device__ void post_amo_group(uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-                                 uint64_t* atomic_laddr, const ActiveWFInfo& wf_info);
-
-  template <OpCode Op, AMOFetchType Fetch, typename PostOptions>
-  __device__ void post_amo_single(uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-                                  uint64_t* atomic_laddr);
+  __device__ uint64_t* write_amo_wqe(uintptr_t raddr, uint32_t rkey,
+                                     uint64_t swap_add, uint64_t compare, bool signaled);
 
   static __device__ void* get_hwqe(const bnxt_device_sq& sq, uint32_t idx);
   static __device__ void fill_psns_for_msntbl(bnxt_device_sq& sq, uint32_t msg_len);
@@ -261,8 +253,8 @@ __device__ __noinline__ void QueuePairBNXT::post_wqe_rma_single(
 }
 
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, bool CheckSQ>
-__device__ void QueuePairBNXT::write_amo_wqe(
-    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, uint64_t* atomic_laddr, bool signaled) {
+__device__ uint64_t* QueuePairBNXT::write_amo_wqe(
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, bool signaled) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   static constexpr size_t size = sizeof(uint64_t);
 
@@ -275,6 +267,7 @@ __device__ void QueuePairBNXT::write_amo_wqe(
   uint32_t wqe_size;
   uint32_t wqe_type;
   uint32_t hdr_flags;
+  uint64_t* atomic_laddr;
 
   if constexpr (CheckSQ) {
     poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
@@ -300,6 +293,10 @@ __device__ void QueuePairBNXT::write_amo_wqe(
   amo.cmp_dt = compare;
 
   /* Populate SG Segment - (Return address of atomic) */
+  atomic_laddr = get_atomic_addr<Fetch>();
+  if constexpr (Fetch == AMOFetchType::Blocking) {
+    atomic_laddr += (fetching_atomic_idx++ % FETCHING_ATOMIC_CNT);
+  }
   sge.pa     = reinterpret_cast<uintptr_t>(atomic_laddr);
   sge.lkey   = get_atomic_lkey<Fetch>();
   sge.length = size;
@@ -314,13 +311,19 @@ __device__ void QueuePairBNXT::write_amo_wqe(
 
   /* Update SQ Pointer */
   incr_tail(sq, GDA_BNXT_WQE_SLOT_COUNT);
+
+  return atomic_laddr;
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename PostOptions>
-__device__ __forceinline__ void QueuePairBNXT::post_amo_group(
+template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
+__device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-    uint64_t* atomic_laddr, const ActiveWFInfo& wf_info) {
+    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
+  using PostOptions = PostOpt<Options...>;
+  uint64_t* atomic_laddr = nullptr;
+
   if constexpr (PostOptions::ThreadSafe) {
     if (wf_info.is_pe_group_first) {
       acquire_lock(&sq.lock);
@@ -335,7 +338,7 @@ __device__ __forceinline__ void QueuePairBNXT::post_amo_group(
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
       /* Write WQE to SQ */
-      write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, atomic_laddr, signaled);
+      atomic_laddr = write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, signaled);
 
       /* Ring Doorbell */
       if constexpr (PostOptions::RingDB) {
@@ -352,12 +355,21 @@ __device__ __forceinline__ void QueuePairBNXT::post_amo_group(
     // need to at least release so that tail is available
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   }
+
+  if constexpr (Fetch == AMOFetchType::Blocking) {
+    quiet(wf_info);
+    return *atomic_laddr;
+  }
 }
 
 // precondition: called with all active lanes using different QPs
-template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename PostOptions>
-__device__ __forceinline__ void QueuePairBNXT::post_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, uint64_t* atomic_laddr) {
+template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
+__device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
+  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
+  using PostOptions = PostOpt<Options...>;
+  uint64_t* atomic_laddr = nullptr;
+
   if constexpr (PostOptions::ThreadSafe) {
     acquire_lock(&sq.lock);
   } else if constexpr (!PostOptions::CheckSQ) {
@@ -368,7 +380,7 @@ __device__ __forceinline__ void QueuePairBNXT::post_amo_single(
   bool signaled = PostOptions::signal_completion_single();
 
   /* Write WQE to SQ */
-  write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, atomic_laddr, signaled);
+  atomic_laddr = write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, signaled);
 
   /* Ring Doorbell */
   if constexpr (PostOptions::RingDB) {
@@ -381,38 +393,10 @@ __device__ __forceinline__ void QueuePairBNXT::post_amo_single(
     // need to at least release so that tail is available
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   }
-}
 
-// can be called with all active lanes using any number of different QPs, don't assume anything
-template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
-__device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
-    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
-    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
-  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  using PostOptions = PostOpt<Options...>;
   if constexpr (Fetch == AMOFetchType::Blocking) {
-    return fetch_with_slot(wf_info, [&](uint64_t* slot) {
-      post_amo_group<Op, Fetch, PostOptions>(raddr, rkey, swap_add, compare, slot, wf_info);
-      quiet(wf_info);
-    });
-  } else {
-    post_amo_group<Op, Fetch, PostOptions>(raddr, rkey, swap_add, compare, get_atomic_addr<Fetch>(), wf_info);
-  }
-}
-
-// precondition: called with all active lanes using different QPs
-template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
-__device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
-  static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
-  using PostOptions = PostOpt<Options...>;
-  if constexpr (Fetch == AMOFetchType::Blocking) {
-    return fetch_with_slot_single([&](uint64_t* slot) {
-      post_amo_single<Op, Fetch, PostOptions>(raddr, rkey, swap_add, compare, slot);
-      quiet_single();
-    });
-  } else {
-    post_amo_single<Op, Fetch, PostOptions>(raddr, rkey, swap_add, compare, get_atomic_addr<Fetch>());
+    quiet_single();
+    return *atomic_laddr;
   }
 }
 

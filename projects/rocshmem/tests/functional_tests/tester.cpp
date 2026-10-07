@@ -36,7 +36,6 @@
 #include "host_rma_tester.hpp"
 #include "amo_extended_tester.hpp"
 #include "amo_standard_tester.hpp"
-#include "default_ctx_fadd_tester.hpp"
 #include "default_ctx_primitive_tester.hpp"
 #include "barrier_all_tester.hpp"
 #include "barrier_all_on_stream_tester.hpp"
@@ -829,10 +828,6 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case SignalWaitUntilTestType:
       test_name = "Signal Wait Until";
       testers.push_back(new SignalingOperationsTester(args));
-      break;
-    case DefaultCTXFAddTestType:
-      test_name = "Default context Fetch-Add (unique returns)";
-      testers.push_back(new DefaultCTXFAddTester(args));
       break;
     case FloodPutTestType:
       test_name = "Flood Put (multidirectional)";

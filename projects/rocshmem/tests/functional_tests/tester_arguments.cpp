@@ -204,7 +204,6 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case SignalAddTestType:
     case SignalSetTestType:
     case SignalWaitUntilTestType:
-    case DefaultCTXFAddTestType:
       min_msg_size = 8;
       max_msg_size = 8;
       break;

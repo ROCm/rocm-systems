@@ -55,8 +55,6 @@ target_sources(
     ping_pong_tester.cpp
     ping_all_tester.cpp
     primitive_tester.cpp
-    default_ctx_fadd_tester.cpp
-    default_ctx_fadd_tester.hpp
     default_ctx_primitive_tester.cpp
     team_ctx_primitive_tester.cpp
     team_ctx_infra_tester.cpp
