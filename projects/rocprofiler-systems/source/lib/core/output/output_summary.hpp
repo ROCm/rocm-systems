@@ -8,7 +8,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <iosfwd>
 #include <mutex>
 #include <span>
 #include <string>
@@ -21,12 +20,12 @@ namespace rocprofsys::output
 
 // Sentinel for "no such pid" — an absent parent (root process) or a not-yet
 // assigned pid field.
-inline constexpr pid_t NO_PID = -1;
+inline constexpr pid_t k_no_pid = -1;
 
 struct process_metadata
 {
-    pid_t       pid{ NO_PID };
-    pid_t       ppid{ NO_PID };
+    pid_t       pid{ k_no_pid };
+    pid_t       ppid{ k_no_pid };
     std::string command;
 };
 
@@ -41,7 +40,7 @@ enum class output_format
 struct artifact
 {
     std::string   path;
-    pid_t         pid{ NO_PID };
+    pid_t         pid{ k_no_pid };
     std::uint64_t size_bytes{ 0 };
     output_format format{ output_format::perfetto };
 };
@@ -107,6 +106,11 @@ public:
     // before a new one starts.
     void start_new_session();
 
+    // Renders a process/output summary from everything registered so far.
+    // Returns an empty string if nothing has been registered.
+    [[nodiscard]] std::string format_summary(
+        std::chrono::steady_clock::time_point load_baseline) const;
+
 private:
     registry() = default;
 
@@ -123,13 +127,5 @@ struct run_metadata
     [[nodiscard]] static run_metadata capture(
         std::chrono::steady_clock::time_point load_baseline);
 };
-
-[[nodiscard]] std::string
-summarize_command(std::string_view command);
-
-// Writes nothing at all if `rows` is empty — there is no output to summarize.
-void
-write_summary(std::ostream& os, const process_tree& tree, const run_metadata& meta,
-              std::span<const artifact> rows, std::size_t process_count);
 
 }  // namespace rocprofsys::output
