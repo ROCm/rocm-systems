@@ -259,7 +259,7 @@ The group data is an array of 32-bit words:
 - Word 0 is the group flags. ROCR and the packer both require `GRP_COMDAT` (`0x1`).
 - Words 1 and more are the section indices of the group members.
 
-ROCR uses the member whose name starts with `.ctrltext` as the control code. If a group has more than one such member, ROCR uses the last one. ROCR and the packer both ignore a group with no `.ctrltext` member. Both refuse the ELF if no group has a `.ctrltext` member.
+ROCR uses the member whose name starts with `.ctrltext` as the control code. If a group has more than one such member, ROCR uses the last one. ROCR and the packer both ignore a group with no `.ctrltext` member. Both refuse the ELF if no group has a `.ctrltext` member. ROCR also refuses the ELF if two groups with a `.ctrltext` member have the same full kernel name.
 
 The hsaco kernel name of a `FullElf` entry must be equal to the `<kernel>:<instance>` name in the full ELF. Two hsaco entries must not point to the same kernel in one full ELF. Kernels in the full ELF that no hsaco entry names are not loaded.
 
@@ -416,6 +416,7 @@ The table shows which tool examines each rule. "—" means that the tool does no
 | Full ELF groups without `.ctrltext` are not kernels | Yes | Yes | — |
 | Full ELF patch sites in range | Yes | — | — |
 | Full ELF PDI section names are not ambiguous | Yes | — | — |
+| Full ELF kernel names are unique | Yes | — | — |
 
 ## 12. The packer command line
 

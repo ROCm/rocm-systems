@@ -384,7 +384,8 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
       }
     }
 
-    kernels.emplace(k.name, std::move(k));
+    // Kernels are looked up by name, so two groups with one name would make the lookup ambiguous.
+    if (!kernels.emplace(k.name, std::move(k)).second) return fail("duplicate kernel name");
   }
   if (kernels.empty()) return fail("no dispatchable kernels");
 
