@@ -14,7 +14,7 @@ use std::sync::Arc;
 fn shared<T>(value: T) -> Shared<T> {
     Shared::new(value, Allocator::default()).unwrap()
 }
-use crate::queue::{QueueProducerMode, SdmaEngineSelection};
+use crate::queue::{QueueProducerMode, QueueRingMemory, SdmaEngineSelection};
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -64,7 +64,7 @@ fn native_node() -> sysfs::NativeNode {
             sdma_qualified: true,
         },
         local_memory_bytes: 1 << 30,
-        public_memory_bytes: 0,
+        public_memory_bytes: 1 << 30,
     }
 }
 
@@ -80,6 +80,7 @@ fn descriptor(parameters: QueueParameters) -> QueueRequest {
 fn aql(producer_mode: QueueProducerMode) -> QueueParameters {
     QueueParameters::Aql {
         producer_mode,
+        ring_memory: QueueRingMemory::System,
         global_work_sync: false,
         inactive_signal: None,
         error_event: None,
@@ -90,6 +91,7 @@ fn aql(producer_mode: QueueProducerMode) -> QueueParameters {
 fn gws_aql() -> QueueParameters {
     QueueParameters::Aql {
         producer_mode: QueueProducerMode::Multiple,
+        ring_memory: QueueRingMemory::System,
         global_work_sync: true,
         inactive_signal: None,
         error_event: None,
@@ -102,6 +104,7 @@ enum AqlRingBacking {
     #[default]
     Userptr,
     Gtt,
+    Local,
 }
 
 #[derive(Default)]
@@ -339,23 +342,33 @@ impl Fixture {
                         };
                         let ring = at(args.ring_address);
                         assert_eq!(ring.size, u64::from(args.ring_size).div_ceil(page) * page);
-                        let expected_ring_flags = if args.queue_type == 2
-                            && state.expected_aql_backing == AqlRingBacking::Userptr
-                        {
-                            uapi::USERPTR
-                                | uapi::WRITABLE
-                                | uapi::EXECUTABLE
-                                | uapi::COHERENT
-                                | uapi::UNCACHED
-                                | uapi::NO_SUBSTITUTE
-                        } else {
-                            uapi::GTT
-                                | uapi::WRITABLE
-                                | uapi::EXECUTABLE
-                                | uapi::COHERENT
-                                | uapi::NO_SUBSTITUTE
-                                | uapi::UNCACHED
-                        };
+                        let expected_ring_flags =
+                            match (args.queue_type, state.expected_aql_backing) {
+                                (2, AqlRingBacking::Userptr) => {
+                                    uapi::USERPTR
+                                        | uapi::WRITABLE
+                                        | uapi::EXECUTABLE
+                                        | uapi::COHERENT
+                                        | uapi::UNCACHED
+                                        | uapi::NO_SUBSTITUTE
+                                }
+                                (2, AqlRingBacking::Local) => {
+                                    uapi::VRAM
+                                        | uapi::PUBLIC
+                                        | uapi::WRITABLE
+                                        | uapi::EXECUTABLE
+                                        | uapi::UNCACHED
+                                        | uapi::NO_SUBSTITUTE
+                                }
+                                _ => {
+                                    uapi::GTT
+                                        | uapi::WRITABLE
+                                        | uapi::EXECUTABLE
+                                        | uapi::COHERENT
+                                        | uapi::UNCACHED
+                                        | uapi::NO_SUBSTITUTE
+                                }
+                            };
                         assert_eq!(ring.flags, expected_ring_flags);
                         let pointers = at(args.read_pointer);
                         assert_eq!(pointers.size, page);
@@ -658,10 +671,15 @@ impl Fixture {
         lifetime: SessionLifetime,
     ) -> Result<Owned<KfdQueue>, Error> {
         let mut state = self.state.lock().unwrap();
-        state.expected_aql_backing = if lifetime == SessionLifetime::Session {
-            AqlRingBacking::Gtt
-        } else {
-            AqlRingBacking::Userptr
+        state.expected_aql_backing = match desc.parameters {
+            QueueParameters::Aql {
+                ring_memory: QueueRingMemory::HostVisibleLocal,
+                ..
+            } => AqlRingBacking::Local,
+            QueueParameters::Aql { .. } if lifetime == SessionLifetime::Process => {
+                AqlRingBacking::Userptr
+            }
+            _ => AqlRingBacking::Gtt,
         };
         state.expected_aql_queue_type = match desc.parameters {
             QueueParameters::Aql {
@@ -1036,6 +1054,55 @@ fn instance_aql_ring_uses_coherent_gtt_when_kfd_rejects_userptr() {
 }
 
 #[test]
+fn gfx1201_host_visible_local_aql_ring_is_mapped_and_released() {
+    let fixture = Fixture::new(true);
+    let mut desc = descriptor(aql(QueueProducerMode::Single));
+    if let QueueParameters::Aql { ring_memory, .. } = &mut desc.parameters {
+        *ring_memory = QueueRingMemory::HostVisibleLocal;
+    }
+    let mut queue = fixture.create(desc).unwrap();
+    let info = queue.info().unwrap();
+    assert_ne!(info.ring_host_address, 0);
+    assert_eq!(info.ring_host_address as u64, info.ring_device_address);
+    queue.destroy().unwrap();
+    drop(queue);
+    fixture.assert_released();
+
+    let fixture = Fixture::new(true);
+    fixture.state.lock().unwrap().fail_allocation = Some(2);
+    assert!(fixture.create(desc).is_err());
+    fixture.assert_released();
+    assert_eq!(fixture.state.lock().unwrap().creates, 0);
+}
+
+#[test]
+fn host_visible_local_aql_ring_requires_sufficient_public_vram() {
+    let mut desc = descriptor(aql(QueueProducerMode::Single));
+    desc.ring_size_bytes = 1024;
+    if let QueueParameters::Aql { ring_memory, .. } = &mut desc.parameters {
+        *ring_memory = QueueRingMemory::HostVisibleLocal;
+    }
+    let mut native = native_node();
+    native.public_memory_bytes = 0;
+    assert_eq!(
+        Request::validate(&native, desc).err().unwrap().kind(),
+        ErrorKind::Unsupported
+    );
+    native.public_memory_bytes = 1024;
+    assert_eq!(
+        Request::validate(&native, desc).err().unwrap().kind(),
+        ErrorKind::Unsupported
+    );
+    native.public_memory_bytes = util::page_size().unwrap() as u64;
+    assert!(Request::validate(&native, desc).is_ok());
+    native.queues.gfx_target = 120_000;
+    assert_eq!(
+        Request::validate(&native, desc).err().unwrap().kind(),
+        ErrorKind::Unsupported
+    );
+}
+
+#[test]
 fn queue_control_updates_forward_the_native_records() {
     let fixture = Fixture::new(true);
     let mut queue = fixture
@@ -1105,6 +1172,7 @@ fn gfx1201_scratch_populates_the_firmware_queue_control_fields() {
     fixture.state.lock().unwrap().expected_scratch = Some(scratch);
     let desc = descriptor(QueueParameters::Aql {
         producer_mode: QueueProducerMode::Single,
+        ring_memory: QueueRingMemory::System,
         global_work_sync: false,
         inactive_signal: None,
         error_event: None,
@@ -1120,6 +1188,7 @@ fn gfx1201_queue_publishes_its_event_signals() {
     let fixture = Fixture::new(true);
     let desc = descriptor(QueueParameters::Aql {
         producer_mode: QueueProducerMode::Single,
+        ring_memory: QueueRingMemory::System,
         global_work_sync: false,
         inactive_signal: Some(0x1234_5000),
         error_event: Some(QueueErrorEvent {
@@ -1255,6 +1324,7 @@ fn invalid_scratch_geometry_fails_before_native_acquisition() {
                 QueueRequest {
                     parameters: QueueParameters::Aql {
                         producer_mode: QueueProducerMode::Single,
+                        ring_memory: QueueRingMemory::System,
                         global_work_sync: false,
                         inactive_signal: None,
                         error_event: None,
@@ -1294,6 +1364,7 @@ fn unsupported_options_and_missing_context_sizes_fail_before_acquisition() {
         QueueRequest {
             parameters: QueueParameters::Aql {
                 producer_mode: QueueProducerMode::Single,
+                ring_memory: QueueRingMemory::System,
                 global_work_sync: false,
                 inactive_signal: None,
                 error_event: Some(QueueErrorEvent {

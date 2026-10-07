@@ -31,6 +31,17 @@ pub enum QueueProducerMode {
     Multiple,
 }
 
+/// Placement of an AQL packet ring. Both choices retain a host mapping for
+/// producers; local memory requires CPU-visible VRAM on the selected GPU.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum QueueRingMemory {
+    /// System memory owned by the native queue.
+    #[default]
+    System,
+    /// Host-visible local memory owned by the native queue.
+    HostVisibleLocal,
+}
+
 /// Packet format and its engine-specific creation parameters. PM4 and AQL use
 /// compute engines; SDMA uses a copy engine. Producer discipline is an AQL
 /// option, not a substitute for this format selection.
@@ -46,6 +57,9 @@ pub enum QueueParameters {
     Aql {
         /// Producer discipline that the caller will uphold.
         producer_mode: QueueProducerMode,
+        /// Native packet-ring placement. The caller still owns packet-store
+        /// ordering before advancing the write index and ringing the doorbell.
+        ring_memory: QueueRingMemory,
         /// Allocate native global work synchronization for this queue before
         /// publishing its transport. KFD permits only one such queue per
         /// process and device; sharing it is the caller's policy.

@@ -25,7 +25,7 @@ use std::time::Duration;
 use rocddi::device::Device;
 use rocddi::gpu::queue::{
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
-    QueueRequest, QueueScratch, QueueTransport, SdmaEngineSelection,
+    QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
 use rocddi::memory::{Allocation, DeviceAccess, MemoryKind};
 use rocddi::topology::GpuInfo;
@@ -870,6 +870,7 @@ unsafe fn create_hardware_queue(
                             } else {
                                 QueueProducerMode::Multiple
                             },
+                            ring_memory: QueueRingMemory::System,
                             global_work_sync: cooperative,
                             inactive_signal: Some(inactive_signal.handle()),
                             error_event: Some(inactive_signal.error_event()),

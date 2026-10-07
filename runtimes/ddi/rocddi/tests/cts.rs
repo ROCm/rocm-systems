@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use rocddi::gpu::queue::{
     QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
-    SdmaEngineSelection,
+    QueueRingMemory, SdmaEngineSelection,
 };
 use rocddi::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::interop::linux::{AisFileOperation, ais_transfer};
@@ -693,20 +693,29 @@ fn gfx1201_user_sdma_queue_contract() -> Result<(), Box<dyn Error>> {
 #[test]
 #[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
 fn gfx1201_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
-    gfx1201_aql_barrier(false)
+    gfx1201_aql_barrier(false, QueueRingMemory::System)
 }
 
 #[test]
 #[ignore = "requires GFX1201 with KFD GWS and a bound DRM render node"]
 fn gfx1201_gws_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
-    gfx1201_aql_barrier(true)
+    gfx1201_aql_barrier(true, QueueRingMemory::System)
+}
+
+#[test]
+#[ignore = "requires GFX1201 with CPU-visible VRAM, KFD, and a bound DRM render node"]
+fn gfx1201_local_ring_aql_barrier_contract() -> Result<(), Box<dyn Error>> {
+    gfx1201_aql_barrier(false, QueueRingMemory::HostVisibleLocal)
 }
 
 #[allow(
     clippy::too_many_lines,
     reason = "one native queue lifetime covers AQL publication, completion, and teardown"
 )]
-fn gfx1201_aql_barrier(global_work_sync: bool) -> Result<(), Box<dyn Error>> {
+fn gfx1201_aql_barrier(
+    global_work_sync: bool,
+    ring_memory: QueueRingMemory,
+) -> Result<(), Box<dyn Error>> {
     const AQL_PACKET_BYTES: usize = 64;
     const BARRIER_HEADER: u16 = 3 | (1 << 8) | (2 << 9) | (2 << 11);
 
@@ -726,6 +735,9 @@ fn gfx1201_aql_barrier(global_work_sync: bool) -> Result<(), Box<dyn Error>> {
     let gpu = device.gpu()?;
     if global_work_sync {
         assert_ne!(gpu.info().gws_count, 0);
+    }
+    if ring_memory == QueueRingMemory::HostVisibleLocal {
+        assert!(endpoint.host_visible_local_memory_bytes >= 4096);
     }
     let mut signal = device.allocate(
         MemoryKind::System,
@@ -760,6 +772,7 @@ fn gfx1201_aql_barrier(global_work_sync: bool) -> Result<(), Box<dyn Error>> {
                 } else {
                     QueueProducerMode::Single
                 },
+                ring_memory,
                 global_work_sync,
                 inactive_signal: None,
                 error_event: None,
