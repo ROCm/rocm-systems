@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -19,9 +20,7 @@ public:
   BufferLoadFormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -35,9 +34,7 @@ public:
   BufferLoadFormatXyVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -51,9 +48,7 @@ public:
   BufferLoadFormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -67,9 +62,7 @@ public:
   BufferLoadFormatXyzwVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -83,10 +76,7 @@ public:
   BufferStoreFormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -100,10 +90,7 @@ public:
   BufferStoreFormatXyVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -117,10 +104,7 @@ public:
   BufferStoreFormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -134,10 +118,7 @@ public:
   BufferStoreFormatXyzwVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -151,10 +132,7 @@ public:
   BufferLoadD16FormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
-    modifiers.memory_result_last_bytes = 0x3;
+    amdgpu::buffer_register_modifiers<false, 0xf, 0x3>(*this, modifiers);
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -169,9 +147,7 @@ public:
   BufferLoadD16FormatXyVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -185,10 +161,7 @@ public:
   BufferLoadD16FormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
-    modifiers.memory_result_last_bytes = 0x3;
+    amdgpu::buffer_register_modifiers<false, 0xf, 0x3>(*this, modifiers);
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -203,9 +176,7 @@ public:
   BufferLoadD16FormatXyzwVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -219,9 +190,7 @@ public:
   BufferStoreD16FormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -235,9 +204,7 @@ public:
   BufferStoreD16FormatXyVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -251,9 +218,7 @@ public:
   BufferStoreD16FormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -267,9 +232,7 @@ public:
   BufferStoreD16FormatXyzwVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -283,9 +246,7 @@ public:
   BufferLoadU8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -299,9 +260,7 @@ public:
   BufferLoadI8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -315,9 +274,7 @@ public:
   BufferLoadU16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -331,9 +288,7 @@ public:
   BufferLoadI16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -347,9 +302,7 @@ public:
   BufferLoadB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -363,9 +316,7 @@ public:
   BufferLoadB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -379,9 +330,7 @@ public:
   BufferLoadB96Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -395,9 +344,7 @@ public:
   BufferLoadB128Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -411,10 +358,7 @@ public:
   BufferStoreB8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -428,10 +372,7 @@ public:
   BufferStoreB16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -445,10 +386,7 @@ public:
   BufferStoreB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -462,10 +400,7 @@ public:
   BufferStoreB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -479,10 +414,7 @@ public:
   BufferStoreB96Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -496,10 +428,7 @@ public:
   BufferStoreB128Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -513,10 +442,7 @@ public:
   BufferLoadD16U8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
-    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+    amdgpu::buffer_register_modifiers<false, 0x3>(*this, modifiers);
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -531,10 +457,7 @@ public:
   BufferLoadD16I8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
-    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+    amdgpu::buffer_register_modifiers<false, 0x3>(*this, modifiers);
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -549,10 +472,7 @@ public:
   BufferLoadD16B16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
-    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+    amdgpu::buffer_register_modifiers<false, 0x3>(*this, modifiers);
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -567,10 +487,7 @@ public:
   BufferLoadD16HiU8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
-    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+    amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -585,10 +502,7 @@ public:
   BufferLoadD16HiI8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
-    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+    amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -603,10 +517,7 @@ public:
   BufferLoadD16HiB16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
-    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+    amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -621,10 +532,7 @@ public:
   BufferStoreD16HiB8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -638,10 +546,7 @@ public:
   BufferStoreD16HiB16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -655,10 +560,7 @@ public:
   BufferLoadD16HiFormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
-    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+    amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -673,9 +575,7 @@ public:
   BufferStoreD16HiFormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -689,10 +589,7 @@ public:
   BufferAtomicSwapB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -707,10 +604,7 @@ public:
   BufferAtomicCmpswapB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vdata_return;
@@ -726,10 +620,7 @@ public:
   BufferAtomicAddU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -744,10 +635,7 @@ public:
   BufferAtomicSubU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -762,10 +650,7 @@ public:
   BufferAtomicSubClampU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -780,10 +665,7 @@ public:
   BufferAtomicMinI32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -798,10 +680,7 @@ public:
   BufferAtomicMinU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -816,10 +695,7 @@ public:
   BufferAtomicMaxI32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -834,10 +710,7 @@ public:
   BufferAtomicMaxU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -852,10 +725,7 @@ public:
   BufferAtomicAndB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -870,10 +740,7 @@ public:
   BufferAtomicOrB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -888,10 +755,7 @@ public:
   BufferAtomicXorB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -906,10 +770,7 @@ public:
   BufferAtomicIncU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -924,10 +785,7 @@ public:
   BufferAtomicDecU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -942,10 +800,7 @@ public:
   BufferAtomicSwapB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -960,10 +815,7 @@ public:
   BufferAtomicCmpswapB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vdata_return;
@@ -979,10 +831,7 @@ public:
   BufferAtomicAddU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -997,10 +846,7 @@ public:
   BufferAtomicSubU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1015,10 +861,7 @@ public:
   BufferAtomicMinI64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1033,10 +876,7 @@ public:
   BufferAtomicMinU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1051,10 +891,7 @@ public:
   BufferAtomicMaxI64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1069,10 +906,7 @@ public:
   BufferAtomicMaxU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1087,10 +921,7 @@ public:
   BufferAtomicAndB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1105,10 +936,7 @@ public:
   BufferAtomicOrB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1123,10 +951,7 @@ public:
   BufferAtomicXorB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1141,10 +966,7 @@ public:
   BufferAtomicIncU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1159,10 +981,7 @@ public:
   BufferAtomicDecU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1177,10 +996,7 @@ public:
   BufferAtomicCondSubU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1195,10 +1011,7 @@ public:
   BufferAtomicMinNumF32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1213,10 +1026,7 @@ public:
   BufferAtomicMaxNumF32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1231,10 +1041,7 @@ public:
   BufferAtomicAddF32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1249,10 +1056,7 @@ public:
   BufferAtomicPkAddF16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1267,10 +1071,7 @@ public:
   BufferAtomicPkAddBf16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1285,9 +1086,7 @@ public:
   TbufferLoadFormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1301,9 +1100,7 @@ public:
   TbufferLoadFormatXyVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1317,9 +1114,7 @@ public:
   TbufferLoadFormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1333,9 +1128,7 @@ public:
   TbufferLoadFormatXyzwVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1349,10 +1142,7 @@ public:
   TbufferStoreFormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1366,10 +1156,7 @@ public:
   TbufferStoreFormatXyVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1383,10 +1170,7 @@ public:
   TbufferStoreFormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1400,10 +1184,7 @@ public:
   TbufferStoreFormatXyzwVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &vdata;
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1417,10 +1198,7 @@ public:
   TbufferLoadD16FormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
-    modifiers.memory_result_last_bytes = 0x3;
+    amdgpu::buffer_register_modifiers<false, 0xf, 0x3>(*this, modifiers);
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -1435,9 +1213,7 @@ public:
   TbufferLoadD16FormatXyVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1451,10 +1227,7 @@ public:
   TbufferLoadD16FormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
-    modifiers.memory_result_last_bytes = 0x3;
+    amdgpu::buffer_register_modifiers<false, 0xf, 0x3>(*this, modifiers);
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -1469,9 +1242,7 @@ public:
   TbufferLoadD16FormatXyzwVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1485,9 +1256,7 @@ public:
   TbufferStoreD16FormatXVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1501,9 +1270,7 @@ public:
   TbufferStoreD16FormatXyVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1517,9 +1284,7 @@ public:
   TbufferStoreD16FormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;
@@ -1533,9 +1298,7 @@ public:
   TbufferStoreD16FormatXyzwVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.buffer_resource = &rsrc;
-    modifiers.buffer_address = &vaddr;
-    modifiers.buffer_offset = &soffset;
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;
   Operand vaddr;

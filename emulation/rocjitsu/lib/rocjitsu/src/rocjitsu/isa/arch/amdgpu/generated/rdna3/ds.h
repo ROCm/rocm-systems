@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 
 namespace rocjitsu {
 namespace rdna3 {
@@ -19,7 +20,7 @@ public:
   DsAddU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -32,7 +33,7 @@ public:
   DsSubU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -45,7 +46,7 @@ public:
   DsRsubU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -58,7 +59,7 @@ public:
   DsIncU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -71,7 +72,7 @@ public:
   DsDecU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -84,7 +85,7 @@ public:
   DsMinI32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -97,7 +98,7 @@ public:
   DsMaxI32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -110,7 +111,7 @@ public:
   DsMinU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -123,7 +124,7 @@ public:
   DsMaxU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -136,7 +137,7 @@ public:
   DsAndB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -149,7 +150,7 @@ public:
   DsOrB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -162,7 +163,7 @@ public:
   DsXorB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -186,7 +187,7 @@ public:
   DsStoreB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -198,8 +199,7 @@ public:
   DsStore2addrB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -212,8 +212,7 @@ public:
   DsStore2addrStride64B32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -226,8 +225,7 @@ public:
   DsCmpstoreB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -241,8 +239,7 @@ public:
   DsCmpstoreF32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -256,7 +253,7 @@ public:
   DsMinF32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -269,7 +266,7 @@ public:
   DsMaxF32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -288,7 +285,7 @@ public:
   DsAddF32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -340,7 +337,7 @@ public:
   DsStoreB8Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -352,7 +349,7 @@ public:
   DsStoreB16Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -364,7 +361,7 @@ public:
   DsAddRtnU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -378,7 +375,7 @@ public:
   DsSubRtnU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -392,7 +389,7 @@ public:
   DsRsubRtnU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -406,7 +403,7 @@ public:
   DsIncRtnU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -420,7 +417,7 @@ public:
   DsDecRtnU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -434,7 +431,7 @@ public:
   DsMinRtnI32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -448,7 +445,7 @@ public:
   DsMaxRtnI32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -462,7 +459,7 @@ public:
   DsMinRtnU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -476,7 +473,7 @@ public:
   DsMaxRtnU32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -490,7 +487,7 @@ public:
   DsAndRtnB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -504,7 +501,7 @@ public:
   DsOrRtnB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -518,7 +515,7 @@ public:
   DsXorRtnB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -544,7 +541,7 @@ public:
   DsStorexchgRtnB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -558,8 +555,7 @@ public:
   DsStorexchg2addrRtnB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -574,8 +570,7 @@ public:
   DsStorexchg2addrStride64RtnB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -590,8 +585,7 @@ public:
   DsCmpstoreRtnB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -606,8 +600,7 @@ public:
   DsCmpstoreRtnF32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -622,7 +615,7 @@ public:
   DsMinRtnF32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -636,7 +629,7 @@ public:
   DsMaxRtnF32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -650,8 +643,7 @@ public:
   DsWrapRtnB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -771,7 +763,7 @@ public:
   DsAddU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -784,7 +776,7 @@ public:
   DsSubU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -797,7 +789,7 @@ public:
   DsRsubU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -810,7 +802,7 @@ public:
   DsIncU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -823,7 +815,7 @@ public:
   DsDecU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -836,7 +828,7 @@ public:
   DsMinI64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -849,7 +841,7 @@ public:
   DsMaxI64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -862,7 +854,7 @@ public:
   DsMinU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -875,7 +867,7 @@ public:
   DsMaxU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -888,7 +880,7 @@ public:
   DsAndB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -901,7 +893,7 @@ public:
   DsOrB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -914,7 +906,7 @@ public:
   DsXorB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -938,7 +930,7 @@ public:
   DsStoreB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -950,8 +942,7 @@ public:
   DsStore2addrB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -964,8 +955,7 @@ public:
   DsStore2addrStride64B64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -978,8 +968,7 @@ public:
   DsCmpstoreB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -993,8 +982,7 @@ public:
   DsCmpstoreF64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -1008,7 +996,7 @@ public:
   DsMinF64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -1021,7 +1009,7 @@ public:
   DsMaxF64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -1034,7 +1022,7 @@ public:
   DsAddRtnU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1048,7 +1036,7 @@ public:
   DsSubRtnU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1062,7 +1050,7 @@ public:
   DsRsubRtnU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1076,7 +1064,7 @@ public:
   DsIncRtnU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1090,7 +1078,7 @@ public:
   DsDecRtnU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1104,7 +1092,7 @@ public:
   DsMinRtnI64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1118,7 +1106,7 @@ public:
   DsMaxRtnI64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1132,7 +1120,7 @@ public:
   DsMinRtnU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1146,7 +1134,7 @@ public:
   DsMaxRtnU64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1160,7 +1148,7 @@ public:
   DsAndRtnB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1174,7 +1162,7 @@ public:
   DsOrRtnB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1188,7 +1176,7 @@ public:
   DsXorRtnB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1214,7 +1202,7 @@ public:
   DsStorexchgRtnB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1228,8 +1216,7 @@ public:
   DsStorexchg2addrRtnB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1244,8 +1231,7 @@ public:
   DsStorexchg2addrStride64RtnB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1260,8 +1246,7 @@ public:
   DsCmpstoreRtnB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1276,8 +1261,7 @@ public:
   DsCmpstoreRtnF64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
-    modifiers.wordwise_source1 = &data1;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1292,7 +1276,7 @@ public:
   DsMinRtnF64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1306,7 +1290,7 @@ public:
   DsMaxRtnF64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1347,7 +1331,7 @@ public:
   DsAddRtnF32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1377,7 +1361,7 @@ public:
   DsCondxchg32RtnB64Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand vdst;
   Operand addr;
@@ -1391,7 +1375,7 @@ public:
   DsStoreB8D16HiDs(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -1403,7 +1387,7 @@ public:
   DsStoreB16D16HiDs(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -1505,7 +1489,7 @@ public:
   DsStoreAddtidB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand data0;
   Operand dsmem;
@@ -1556,7 +1540,7 @@ public:
   DsStoreB96Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;
@@ -1568,7 +1552,7 @@ public:
   DsStoreB128Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    modifiers.wordwise_source0 = &data0;
+    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
   Operand addr;
   Operand data0;

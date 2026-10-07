@@ -10131,6 +10131,7 @@ class CodeGenerator:
 
         for enc in self.isa_spec.inst_encodings:
             inst_classes = []
+            has_register_modifiers_helper = False
             class_func_impls = _ImplOutputs()
             source_impl_units = _ImplOutputs()
             # Collect instructions from this encoding plus any child
@@ -10741,10 +10742,22 @@ class CodeGenerator:
                             'buffer_atomic',
                         ):
                             wordwise_names = ('vdata',)
+                        operand_names = {o.name for o in inst.operands}
+                        wordwise_operands = [
+                            name for name in wordwise_names if name in operand_names
+                        ]
+                        buffer_resource = None
+                        if inst_sem.semantic_class.startswith(('buffer_', 'tbuffer_')):
+                            buffer_resource = next(
+                                (n for n in ('rsrc', 'srsrc') if n in operand_names),
+                                None,
+                            )
+                        ds_wordwise = (
+                            bool(wordwise_operands) and wordwise_names[0] == 'data0'
+                        )
                         for index, operand_name in enumerate(wordwise_names):
-                            if any(
-                                operand.name == operand_name
-                                for operand in inst.operands
+                            if operand_name in operand_names and not (
+                                ds_wordwise or buffer_resource
                             ):
                                 access_conditions.append(
                                     f'modifiers.wordwise_source{index} = &{operand_name};'
@@ -10781,41 +10794,43 @@ class CodeGenerator:
                                 access_conditions.append(
                                     'modifiers.exec_all_if_nonzero = true;'
                                 )
-                        if inst_sem.semantic_class.startswith(('buffer_', 'tbuffer_')):
-                            operand_names = {o.name for o in inst.operands}
-                            resource = next(
-                                (n for n in ('rsrc', 'srsrc') if n in operand_names),
-                                None,
-                            )
-                            if resource:
-                                access_conditions.append(
-                                    f'modifiers.buffer_resource = &{resource};'
-                                )
-                                if 'vaddr' in operand_names:
-                                    access_conditions.append(
-                                        'modifiers.buffer_address = &vaddr;'
-                                    )
-                                if 'soffset' in operand_names:
-                                    access_conditions.append(
-                                        'modifiers.buffer_offset = &soffset;'
-                                    )
+                        result_bytes = last_result_bytes = 0xF
                         if (
                             'load' in inst_sem.semantic_class
                             or inst_sem.semantic_class == 'ds_read'
                         ):
                             if inst_sem.d16_hi:
-                                access_conditions.append(
-                                    'modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;'
-                                )
+                                result_bytes = last_result_bytes = 0xC
                             elif 'FORMAT' in inst.name and inst_sem.elem_size == 2:
                                 if inst_sem.num_elems % 2:
-                                    access_conditions.append(
-                                        'modifiers.memory_result_last_bytes = 0x3;'
-                                    )
+                                    last_result_bytes = 0x3
                             elif inst_sem.d16_lo:
-                                access_conditions.append(
-                                    'modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;'
-                                )
+                                result_bytes = last_result_bytes = 0x3
+                        if ds_wordwise or buffer_resource:
+                            has_register_modifiers_helper = True
+                            if ds_wordwise:
+                                assert wordwise_operands[0] == 'data0', inst.name
+                                helper = 'ds_wordwise_register_modifiers'
+                                assert result_bytes == last_result_bytes == 0xF
+                            else:
+                                args = ['true' if wordwise_operands else 'false']
+                                if result_bytes != 0xF or last_result_bytes != 0xF:
+                                    args.append(hex(result_bytes))
+                                    if last_result_bytes != result_bytes:
+                                        args.append(hex(last_result_bytes))
+                                helper = f'buffer_register_modifiers<{", ".join(args)}>'
+                            access_conditions.append(
+                                f'amdgpu::{helper}(*this, modifiers);'
+                            )
+                        elif result_bytes != 0xF:
+                            access_conditions.append(
+                                'modifiers.memory_result_bytes = '
+                                f'modifiers.memory_result_last_bytes = {hex(result_bytes)};'
+                            )
+                        elif last_result_bytes != 0xF:
+                            access_conditions.append(
+                                f'modifiers.memory_result_last_bytes = {hex(last_result_bytes)};'
+                            )
                         if access_conditions:
                             public_members.append(
                                 cgen.Line(
@@ -13665,6 +13680,10 @@ class CodeGenerator:
                         False,
                     ),
                 ]
+                if has_register_modifiers_helper:
+                    h_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h', False)
+                    )
                 needs_compound_array = (
                     self._supports_cdna_mfma_f8f6f4_vop3px2()
                     and enc.enc_name.upper() == 'ENC_VOP3P'
