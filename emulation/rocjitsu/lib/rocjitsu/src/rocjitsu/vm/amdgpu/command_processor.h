@@ -13,8 +13,8 @@
 /// Architecture: the CP directly owns queue state and doorbell monitoring
 /// (CP hardware functions). Four sub-blocks handle distinct pipeline stages:
 ///   - AqlPacketProcessor: AQL framing, classification, and dependency decoding
-///   - Pm4PacketProcessor: the supported PM4 compute-queue packet subset
-///   - DispatchController: SPI+ADC WG iteration, CU resource check, WF creation
+///   - PM4 packet processing: command-stream decoding and execution in pm4/
+///   - CP dispatch admission: SPI+ADC WG iteration, CU resource check, WF creation
 ///   - CompletionTracker: per-dispatch WG counting, in-order signal retirement
 ///
 /// @see <a
@@ -30,8 +30,8 @@
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
-#include "rocjitsu/vm/amdgpu/pm4.h"
-#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
@@ -71,7 +71,6 @@ namespace amdgpu {
 class GpuVm;
 class GpuVmAccess;
 class CommandProcessorCloseTestAccess;
-class QueueBindingFactory;
 enum class VmAccessOutcome : uint8_t;
 enum class QueueReconfigureStatus : uint8_t;
 enum class QueueSubmissionStatus : uint8_t;
@@ -166,13 +165,6 @@ public:
   /// @param rank This CP's XCD index.
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
-
-  /// @brief Create a PM4 queue binding factory backed by this CP's compute queues.
-  /// @details The returned factory is a lifetime/notification adapter. This CP
-  /// owns PM4 ring, packet, retry, and cursor-publication state so semantics do
-  /// not migrate into MES or a PCI/VFIO transport adapter.
-  [[nodiscard]] std::shared_ptr<QueueBindingFactory>
-  make_pm4_queue_binding_factory(Pm4PacketCallbacks callbacks);
 
   [[nodiscard]] uint64_t register_pm4_queue(Pm4QueueConfig config);
   [[nodiscard]] QueuePrepareCloseStatus
@@ -570,7 +562,9 @@ private:
   /// notifications and schedules them for the following tick so they cannot starve
   /// device work already queued there. Internal test queues have no poll thread and
   /// are driven by engine->run()/step(), so there the re-check must be kept alive by
-  /// rescheduling the doorbell event at @p now + 1.
+  /// one engine-owned stall event at @p now plus the current backoff. A shorter
+  /// deadline supersedes that event; repeated later requests are coalesced. Real
+  /// doorbells remain independent so they can wake the CP immediately.
   void arm_stall_recheck(simdojo::Tick now);
 
   /// @brief Re-arm a re-check while this CP holds a shard whose grid is still
@@ -626,6 +620,8 @@ private:
   /// is returned. The caller must then fault the dispatch without retaining a
   /// reference into the queue entry container across that operation.
   [[nodiscard]] DispatchWorkgroupResult dispatch_workgroups(DispatchEntry &entry);
+  [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
+                                     simdojo::Tick now);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
   void dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
@@ -999,6 +995,12 @@ private:
   /// re-checks on its poll thread's own cadence instead.
   simdojo::Tick stall_recheck_backoff_ = 1;
   static constexpr simdojo::Tick kMaxStallRecheckBackoff = 4096;
+  // Owned by the CP's engine thread, unlike the external poller retry below.
+  // The generation rejects superseded deadlines without duplicating live retries.
+  bool stall_recheck_pending_ = false;
+  simdojo::Tick stall_recheck_tick_ = simdojo::TICK_MAX;
+  uintptr_t stall_recheck_generation_ = 0;
+  simdojo::Event stall_recheck_event_{this, simdojo::EventType::TIMER_CALLBACK};
 
   // Set when a queue stalls on a barrier or another unsatisfied dependency --
   // progress external to the current engine pass (a peer rank's kernel completion

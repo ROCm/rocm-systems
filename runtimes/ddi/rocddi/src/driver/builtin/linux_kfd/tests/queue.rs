@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Scripted KFD ownership tests use sparse files for real shared CPU mappings.
 //! Native replies and errno are independent, so an error can model destruction
 //! that already released an ID. No packets are submitted by these tests.
@@ -118,6 +120,7 @@ struct State {
     expected_aql_queue_type: Option<u32>,
     expected_priority: u32,
     scratch_bases: usize,
+    scratch_base_errno: Option<i32>,
     svm_attempts: usize,
     svm_errno: Option<i32>,
     svm_context: Option<(u64, u64)>,
@@ -173,8 +176,12 @@ impl Fixture {
                         assert_ne!(args.va_address, 0);
                         assert_eq!(args.pad, 0);
                         state.scratch_bases += 1;
+                        if let Some(errno) = state.scratch_base_errno.take() {
+                            return Err(io::Error::from_raw_os_error(errno));
+                        }
                     }
                     sys::Call::Allocate(args) => {
+                        let page = util::page_size().unwrap() as u64;
                         if state.reject_userptr && args.flags & uapi::USERPTR != 0 {
                             return Err(io::Error::from_raw_os_error(95));
                         }
@@ -185,8 +192,8 @@ impl Fixture {
                         args.handle = state.next_handle;
                         args.mmap_offset = state.next_offset;
                         state.next_offset += args.size;
-                        assert_eq!(args.va % 4096, 0);
-                        assert_eq!(args.size % 4096, 0);
+                        assert_eq!(args.va % page, 0);
+                        assert_eq!(args.size % page, 0);
                         state.buffers.insert(args.handle, **args);
                     }
                     sys::Call::Map(args, devices) => {
@@ -244,11 +251,12 @@ impl Fixture {
                         assert!(state.buffers.remove(&args.handle).is_some());
                     }
                     sys::Call::Svm(args, attributes) => {
+                        let page = util::page_size().unwrap() as u64;
                         let flags = uapi::SVM_FLAG_HOST_ACCESS
                             | uapi::SVM_FLAG_GPU_EXECUTE
                             | uapi::SVM_FLAG_GPU_ALWAYS_MAPPED;
                         assert_eq!(args.start_address % CWSR_ALIGNMENT as u64, 0);
-                        assert_eq!(args.size, 69632);
+                        assert_eq!(args.size, 69_632_u64.div_ceil(page) * page);
                         assert_eq!(args.operation, uapi::SVM_OP_SET_ATTR);
                         assert_eq!(args.attribute_count, 6);
                         assert_eq!(
@@ -287,6 +295,7 @@ impl Fixture {
                         state.svm_context = Some((args.start_address, args.size));
                     }
                     sys::Call::CreateQueue(args) => {
+                        let page = util::page_size().unwrap() as u64;
                         state.creates += 1;
                         let expected_scratch = state.expected_scratch;
                         assert_eq!(args.gpu_id, 42);
@@ -308,7 +317,7 @@ impl Fixture {
                                 .unwrap()
                         };
                         let ring = at(args.ring_address);
-                        assert_eq!(ring.size, u64::from(args.ring_size).div_ceil(4096) * 4096);
+                        assert_eq!(ring.size, u64::from(args.ring_size).div_ceil(page) * page);
                         let expected_ring_flags = if args.queue_type == 2
                             && state.expected_aql_backing == AqlRingBacking::Userptr
                         {
@@ -328,7 +337,7 @@ impl Fixture {
                         };
                         assert_eq!(ring.flags, expected_ring_flags);
                         let pointers = at(args.read_pointer);
-                        assert_eq!(pointers.size, 4096);
+                        assert_eq!(pointers.size, page);
                         let read_context = |address: u64, bytes: &mut [u8]| {
                             if state.svm_context.is_some_and(|(base, size)| {
                                 address >= base
@@ -339,7 +348,7 @@ impl Fixture {
                                 process_memory.read_exact_at(bytes, address).unwrap();
                             } else {
                                 let context = at(address);
-                                assert_eq!(context.size, 69632);
+                                assert_eq!(context.size, 69_632_u64.div_ceil(page) * page);
                                 assert_eq!(
                                     context.flags,
                                     uapi::GTT
@@ -490,7 +499,7 @@ impl Fixture {
                             }
                             assert_eq!(args.context_size, 65536);
                             assert_eq!(args.control_stack_size, 4096);
-                            assert_eq!(args.eop_size, 4096);
+                            assert_eq!(args.eop_size, page);
                             assert_eq!(
                                 at(args.eop_address).flags,
                                 uapi::VRAM
@@ -537,7 +546,7 @@ impl Fixture {
                             assert_eq!(error, [0; 8]);
                             assert_eq!(args.context_size, 65536);
                             assert_eq!(args.control_stack_size, 4096);
-                            assert_eq!(args.eop_size, 4096);
+                            assert_eq!(args.eop_size, page);
                             let mut header = [0; 32];
                             read_context(args.context_address, &mut header);
                             let mut expected = [0; 32];
@@ -855,6 +864,9 @@ fn all_formats_and_priorities_reach_native_queue_creation() {
             false,
         ),
     ] {
+        if matches!(parameters, QueueParameters::Pm4) && !supports_pm4(&native_node()) {
+            continue;
+        }
         let fixture = Fixture::new(true);
         let mut desc = descriptor(parameters);
         desc.priority = priority;
@@ -881,6 +893,19 @@ fn all_formats_and_priorities_reach_native_queue_creation() {
         fixture.assert_released();
         assert_eq!(fixture.state.lock().unwrap().destroys, 1);
     }
+}
+
+#[test]
+fn dropping_a_live_queue_keeps_native_backing_for_process_teardown() {
+    let fixture = Fixture::new(true);
+    let queue = fixture.create(descriptor(QueueParameters::Sdma)).unwrap();
+    drop(queue);
+
+    let state = fixture.state.lock().unwrap();
+    assert!(state.live);
+    assert_eq!(state.destroys, 0);
+    assert_eq!(state.frees, 0);
+    assert_eq!(state.buffers.len(), 2);
 }
 
 #[test]
@@ -1174,10 +1199,7 @@ fn backing_and_create_failures_release_only_resources_that_were_acquired() {
 
     let fixture = Fixture::new(true);
     fixture.state.lock().unwrap().create_errno = Some(12);
-    assert_ne!(
-        fixture.create(desc).err().unwrap().kind(),
-        ErrorKind::ResourceOwnershipUncertain
-    );
+    assert!(fixture.create(desc).is_err());
     fixture.assert_released();
     assert_eq!(fixture.state.lock().unwrap().destroys, 0);
 
@@ -1185,13 +1207,161 @@ fn backing_and_create_failures_release_only_resources_that_were_acquired() {
     fixture.state.lock().unwrap().create_errno = Some(14);
     assert_eq!(
         fixture.create(desc).err().unwrap().kind(),
-        ErrorKind::ResourceOwnershipUncertain
+        ErrorKind::DriverContract
     );
     let state = fixture.state.lock().unwrap();
     assert_eq!(state.creates, 1);
     assert_eq!(state.destroys, 0);
     assert_eq!(state.frees, 0);
     assert_eq!(state.buffers.len(), 3);
+}
+
+#[test]
+fn native_create_result_controls_frontend_dependency_lifetime() {
+    struct ExternalBacking(Arc<AtomicUsize>);
+    impl Drop for ExternalBacking {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Release);
+        }
+    }
+
+    let desc = descriptor(aql(QueueProducerMode::Single));
+    for (errno, expected_kind, expected_drops) in [
+        (12, ErrorKind::ResourceExhausted, 1),
+        (14, ErrorKind::DriverContract, 0),
+    ] {
+        let fixture = Fixture::new(true);
+        fixture.state.lock().unwrap().create_errno = Some(errno);
+        let drops = Arc::new(AtomicUsize::new(0));
+        let result = crate::queue::retain_create_dependencies(
+            || fixture.create(desc),
+            ExternalBacking(drops.clone()),
+        );
+        assert_eq!(result.err().unwrap().kind(), expected_kind);
+        assert_eq!(drops.load(Ordering::Acquire), expected_drops);
+        assert_eq!(fixture.state.lock().unwrap().live, errno == 14);
+    }
+
+    let fixture = Fixture::new(true);
+    let drops = Arc::new(AtomicUsize::new(0));
+    let (mut queue, dependency) = crate::queue::retain_create_dependencies(
+        || fixture.create(desc),
+        ExternalBacking(drops.clone()),
+    )
+    .unwrap();
+    assert_eq!(drops.load(Ordering::Acquire), 0);
+    queue.destroy().unwrap();
+    drop(queue);
+    assert_eq!(drops.load(Ordering::Acquire), 0);
+    drop(dependency);
+    assert_eq!(drops.load(Ordering::Acquire), 1);
+    fixture.assert_released();
+}
+
+#[test]
+fn pre_create_scratch_failure_releases_new_external_backing() {
+    struct ExternalBacking(Arc<AtomicUsize>);
+    impl Drop for ExternalBacking {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Release);
+        }
+    }
+    let fixture = Fixture::new(true);
+    fixture.state.lock().unwrap().scratch_base_errno = Some(14);
+    let drops = Arc::new(AtomicUsize::new(0));
+    let desc = descriptor(aql(QueueProducerMode::Single));
+    for _ in 0..2 {
+        let error = crate::queue::retain_create_dependencies(
+            || fixture.create(desc),
+            ExternalBacking(drops.clone()),
+        )
+        .err()
+        .unwrap();
+        assert!(!matches!(error, Error::QueueBackingMayBeLive { .. }));
+    }
+    assert_eq!(drops.load(Ordering::Acquire), 2);
+    assert_eq!(fixture.state.lock().unwrap().creates, 0);
+}
+
+#[test]
+fn native_create_unwind_retains_external_backing() {
+    struct ExternalBacking(Arc<AtomicUsize>);
+    impl Drop for ExternalBacking {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Release);
+        }
+    }
+
+    let drops = Arc::new(AtomicUsize::new(0));
+    let result = std::panic::catch_unwind({
+        let dependency = ExternalBacking(drops.clone());
+        move || {
+            let _ = crate::queue::retain_create_dependencies(
+                || -> Result<(), Error> { panic!("injected native creation unwind") },
+                dependency,
+            );
+        }
+    });
+    assert!(result.is_err());
+    assert_eq!(drops.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn unpublished_native_rollback_retains_external_backing_on_failure() {
+    struct ExternalBacking(Arc<AtomicUsize>);
+    impl Drop for ExternalBacking {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Release);
+        }
+    }
+
+    let desc = descriptor(aql(QueueProducerMode::Single));
+    for destroy_fails in [false, true] {
+        let fixture = Fixture::new(true);
+        let queue = fixture.create(desc).unwrap();
+        if destroy_fails {
+            fixture.state.lock().unwrap().destroy_errno.push_back(5);
+        }
+        let drops = Arc::new(AtomicUsize::new(0));
+        let result =
+            crate::queue::abandon_unpublished(queue, ExternalBacking(drops.clone()), |queue| {
+                queue.destroy()
+            });
+        if destroy_fails {
+            assert_eq!(result.unwrap_err().kind(), ErrorKind::Driver);
+            assert_eq!(drops.load(Ordering::Acquire), 0);
+            let state = fixture.state.lock().unwrap();
+            assert_eq!(state.destroys, 1);
+            assert_eq!(state.frees, 0);
+        } else {
+            result.unwrap();
+            assert_eq!(drops.load(Ordering::Acquire), 1);
+            fixture.assert_released();
+        }
+    }
+}
+
+#[test]
+fn unpublished_rollback_retains_both_owners_if_cleanup_unwinds() {
+    struct DropProbe(Arc<AtomicUsize>);
+    impl Drop for DropProbe {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Release);
+        }
+    }
+
+    let drops = Arc::new(AtomicUsize::new(0));
+    let result = std::panic::catch_unwind({
+        let queue = DropProbe(drops.clone());
+        let external = DropProbe(drops.clone());
+        move || {
+            let _ = crate::queue::abandon_unpublished(queue, external, |_queue| {
+                panic!("injected native cleanup unwind");
+            });
+        }
+    });
+    assert!(result.is_err());
+    assert_eq!(drops.load(Ordering::Acquire), 0);
 }
 
 #[test]
@@ -1220,14 +1390,13 @@ fn doorbell_mapping_failure_destroys_known_queue_before_releasing_backing() {
             .unwrap()
             .destroy_errno
             .extend(destroy_errno);
-        let failure = fixture
+        let error = fixture
             .create(descriptor(aql(QueueProducerMode::Single)))
             .err()
             .unwrap();
-        assert_eq!(
-            failure.kind() == ErrorKind::ResourceOwnershipUncertain,
-            destroy_errno.is_some()
-        );
+        if destroy_errno.is_some() {
+            assert_eq!(error.kind(), ErrorKind::DriverContract);
+        }
         let state = fixture.state.lock().unwrap();
         assert_eq!(state.destroys, 1);
         assert_eq!(
@@ -1667,6 +1836,9 @@ fn busy_queue_keeps_transport_and_native_owner_until_progress_catches_up() {
 
 #[test]
 fn pm4_progress_expands_a_ring_relative_read_index_after_multiple_wraps() {
+    if !supports_pm4(&native_node()) {
+        return;
+    }
     let fixture = Fixture::new(true);
     let mut queue = fixture.create(descriptor(QueueParameters::Pm4)).unwrap();
     let capacity = u64::from(PM4_RING_SIZE / 4);

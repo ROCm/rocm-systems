@@ -65,6 +65,7 @@
 # - Atomics: Atomic operation tests (may not work on all platforms)
 # - Performance: Performance measurement tests (may be slow or unstable)
 # - Experimental: New/unstable tests under development
+# - WslDxg: Tests of the WSL/DXG backend
 #
 groups:
   Core:
@@ -119,6 +120,9 @@ groups:
     - rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait
     - rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt
     - rocrtstPerf.Agent_Preload_Latency
+
+  WslDxg:
+    - rocrtstFunc.Heap_Reservation
 
 # ==============================================================================
 # PLATFORM-SPECIFIC TEST CONFIGURATIONS
@@ -199,6 +203,9 @@ platforms:
       - rocrtstStress.Queue_Add_Write_Index_ConcurrentTest
       - rocrtstStress.Queue_CAS_Write_Index_ConcurrentTest
       - rocrtstStress.Queue_LoadStore_Write_Index_ConcurrentTest
+      # Exercises the WSL/DXG thunk's heap VA reservations; that backend does
+      # not exist here, so the test would only ever report itself skipped.
+      - rocrtstFunc.Heap_Reservation
 
   # FFM Simulator - only Core and Extended groups allowed
   FFM_SIMULATOR:
