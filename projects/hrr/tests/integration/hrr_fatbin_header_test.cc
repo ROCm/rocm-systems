@@ -287,7 +287,7 @@ bool stored_from(const RecordedFatBinary& r, const std::vector<uint8_t>& bundle)
 HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_fatbin_header.hrr");
   std::string out;
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true,
+  { hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true,
                               /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     // The refusals are reported as warnings.

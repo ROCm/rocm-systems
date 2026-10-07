@@ -216,7 +216,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
   };
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     proc.setEnv("AMD_LOG_LEVEL", "0");
     set_proc_search_path(proc);
@@ -242,7 +242,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
     // Same capture with only stdout captured: the notice goes to stderr, so the
     // program's own stdout stays exactly what it was without capture.
     ScopedDir cap_stdout{fs::temp_directory_path() / "hrr_capture_notice_stdout"};
-    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/false);
+    hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true, /*capture_stderr=*/false);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_stdout.path.string());
     proc.setEnv("AMD_LOG_LEVEL", "0");
     set_proc_search_path(proc);
@@ -254,7 +254,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
   }
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+    hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
     proc.setEnv("AMD_LOG_LEVEL", "0");
     // CLR's flag parser turns HIP_HRR_CAPTURE_OUTPUT= into a single space, which
     // still enables capture. Unset the variable so an inherited value cannot arm it.
@@ -279,7 +279,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
  */
 HRR_TEST_CASE(Unit_HRR_CaptureExitSummary) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_capture_exit_summary"};
-  hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+  hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
   // The summary goes through the CLR log at LOG_INFO with LOG_ALWAYS, which no
   // mask filters out; AMD_LOG_MASK=0 keeps the per-API traces out of the output.
@@ -1605,7 +1605,7 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
 HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_failed_memcpy3d"};
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_test_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"Unit_HRR_FailedMemcpy3D_Direct\"");
@@ -1636,7 +1636,7 @@ HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
 HRR_TEST_CASE(Unit_HRR_LongKernelNameNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_long_kernel_name"};
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_test_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"Unit_HRR_LongKernelName_Direct\"");
@@ -1667,7 +1667,7 @@ HRR_TEST_CASE(Unit_HRR_LongKernelNameNotRecorded) {
 HRR_TEST_CASE(Unit_HRR_OverflowingMemcpy3DNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_overflowing_memcpy3d"};
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_test_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"Unit_HRR_OverflowingMemcpy3D_Direct\"");
@@ -1704,7 +1704,7 @@ HRR_TEST_CASE(Unit_HRR_OverflowingMemcpy3DNotRecorded) {
 HRR_TEST_CASE(Unit_HRR_FailedShimCallsNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_failed_shim_calls"};
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_test_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"Unit_HRR_FailedShimCalls_Direct\"");
