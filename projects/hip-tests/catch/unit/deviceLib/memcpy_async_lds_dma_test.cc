@@ -23,10 +23,12 @@ THE SOFTWARE.
 
 // Correctness coverage for cooperative_groups::memcpy_async across the paths the
 // implementation can select. The element type decides whether the accelerated path is
-// eligible: only types aligned to at least a dword can use it, so int-typed copies
-// exercise the accelerated path where the target provides one while char-typed copies
-// exercise the traditional fallback. LDS -> global is covered as well because only the
-// global -> LDS direction has an LDS DMA path.
+// eligible, by alignof(T) % 4 == 0. Alignments of 1 (unsigned char) and 2 (short) stay
+// on the ordinary copy. Alignments of 4 (int, float), 8 (double, unsigned long long),
+// and 16 take LDS DMA where the target provides it, and that path always moves 4 bytes
+// per lane. LDS -> global is covered as well because only the global -> LDS direction
+// has an LDS DMA path. The element-count overload is covered too: it copies
+// nelem * sizeof(T) bytes and uses the same alignment gate.
 //
 // Block sizes include partial waves and non-multiples of either wave size on purpose.
 // Where the copy is performed by LDS DMA the destination base is wave uniform and the
@@ -78,6 +80,27 @@ __global__ void globalToLds(const T* in, T* out, int bytes, int readBack) {
   for (int i = block.thread_rank(); i < readBack; i += block.num_threads()) o[i] = raw[i];
 }
 
+// alignas(16) element. LDS DMA still issues 4-byte loads for this type.
+struct alignas(16) Wide16 {
+  unsigned int e[4];
+};
+
+// Element-count overload. The copied length is nelem * sizeof(T) bytes.
+template <typename T>
+__global__ void globalToLdsElements(const T* in, T* out, int nelem, int readBack) {
+  __shared__ __align__(16) unsigned char raw[kSharedCap];
+  cg::thread_block block = cg::this_thread_block();
+
+  for (int i = block.thread_rank(); i < kSharedCap; i += block.num_threads()) raw[i] = 0;
+  block.sync();
+
+  cg::memcpy_async(block, reinterpret_cast<T*>(raw), nelem, in, nelem);
+  block.sync();
+
+  unsigned char* o = reinterpret_cast<unsigned char*>(out);
+  for (int i = block.thread_rank(); i < readBack; i += block.num_threads()) o[i] = raw[i];
+}
+
 template <typename T>
 __global__ void ldsToGlobal(const T* in, T* out, int bytes) {
   __shared__ __align__(16) unsigned char raw[kSharedCap];
@@ -100,7 +123,7 @@ __global__ void ldsToGlobal(const T* in, T* out, int bytes) {
 // whole waves, partial waves, and non-multiples of either wave size
 constexpr int kThreads[] = {32, 64, 65, 100, 128, 129, 192, 200, 256, 320, 512, 1024};
 // dword multiples, ragged tails, counts below the group size, and large copies
-constexpr int kBytes[] = {4,   8,    12,   64,   100,  255,  256,  257, 258,
+constexpr int kBytes[] = {2,   4,   6,    8,    12,   64,   100,  255,  256,  257, 258,
                           259, 1024, 1025, 1027, 2048, 4095, 4096, 8188};
 
 template <typename T>
@@ -151,23 +174,71 @@ void runCase(const char* tag, int threads, int bytes, const std::vector<unsigned
   REQUIRE(mismatch == -1);
 }
 
+template <typename T>
+void runElements(const char* tag, int threads, int nelem, const std::vector<unsigned char>& ref,
+                 unsigned char* d_in, unsigned char* d_out) {
+  const int bytes = nelem * static_cast<int>(sizeof(T));
+  const int readBack = std::min(bytes + kGuard, kSharedCap);
+  HIP_CHECK(hipMemset(d_out, 0xAB, kSharedCap));
+  globalToLdsElements<T><<<1, threads>>>(reinterpret_cast<const T*>(d_in),
+                                         reinterpret_cast<T*>(d_out), nelem, readBack);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
+  std::vector<unsigned char> got(readBack, 0);
+  HIP_CHECK(hipMemcpy(got.data(), d_out, readBack, hipMemcpyDeviceToHost));
+
+  int mismatch = -1;
+  unsigned expected = 0;
+  for (int i = 0; i < readBack; i++) {
+    expected = (i < bytes) ? ref[i] : 0x00u;
+    if (got[i] != expected) {
+      mismatch = i;
+      break;
+    }
+  }
+  if (mismatch >= 0) {
+    UNSCOPED_INFO(tag << " threads: " << threads << " elements: " << nelem << " bytes: " << bytes
+                      << (mismatch >= bytes ? " wrote past the requested count at index: "
+                                            : " first mismatch at index: ")
+                      << mismatch << " got: " << static_cast<unsigned>(got[mismatch])
+                      << " expected: " << expected);
+  }
+  REQUIRE(mismatch == -1);
+}
+
 // Scratch is not a global address. The whole block participates so the completion path is the
 // real workgroup barrier, including a partial last wave on both wave32 and wave64.
-__global__ void privateSourceToLds(unsigned char* out) {
+__global__ void privateSourceToLds(unsigned char* out, int* probe) {
   __shared__ __align__(16) unsigned char raw[16];
   cg::thread_block block = cg::this_thread_block();
-  // Thread-dependent so this cannot live in the constant pool. Rank 0's bytes are the
-  // ones the fallback stores; a scratch address fed to global_load_lds does not match.
-  unsigned char mine[4];
+  // volatile plus the asm use keep this in scratch. A plain array is legal to promote
+  // into LDS, which would make this case pass without ever rejecting a private pointer.
+  // Rank 0's bytes are the ones the fallback stores.
+  volatile unsigned char mine[4];
   mine[0] = 0x11;
   mine[1] = 0x22;
   mine[2] = 0x33;
   mine[3] = static_cast<unsigned char>(0x40 + block.thread_rank());
+  const void* p = const_cast<unsigned char*>(mine);
+  asm volatile("" : "+v"(p)::"memory");
+
+  if (block.thread_rank() == 0) {
+#if __has_builtin(__builtin_amdgcn_is_private) && __has_builtin(__builtin_amdgcn_is_shared)
+    const auto* q = (const __attribute__((address_space(0))) void*)p;
+    probe[0] = __builtin_amdgcn_is_private(q);
+    probe[1] = __builtin_amdgcn_is_shared(q);
+#else
+    probe[0] = 1;
+    probe[1] = 0;
+    (void)p;
+#endif
+  }
 
   for (int i = block.thread_rank(); i < 16; i += block.num_threads()) raw[i] = 0;
   block.sync();
 
-  cg::memcpy_async(block, raw, mine, static_cast<size_t>(4));
+  cg::memcpy_async(block, raw, const_cast<unsigned char*>(mine), static_cast<size_t>(4));
   block.sync();
 
   if (block.thread_rank() == 0) {
@@ -196,6 +267,41 @@ TEST_CASE("Unit_device_memcpy_async_paths") {
       for (int b : kBytes) runCase<unsigned char>("char g2l", t, b, ref, d_in, d_out, false);
   }
 
+  SECTION("global to lds, 2-byte elements") {
+    for (int t : kThreads)
+      for (int b : kBytes) runCase<short>("short g2l", t, b, ref, d_in, d_out, false);
+  }
+
+  SECTION("global to lds, 4-byte float") {
+    for (int t : kThreads)
+      for (int b : kBytes) runCase<float>("float g2l", t, b, ref, d_in, d_out, false);
+  }
+
+  SECTION("global to lds, 8-byte elements") {
+    for (int t : kThreads) {
+      for (int b : kBytes) {
+        runCase<double>("double g2l", t, b, ref, d_in, d_out, false);
+        runCase<unsigned long long>("u64 g2l", t, b, ref, d_in, d_out, false);
+      }
+    }
+  }
+
+  SECTION("global to lds, 16-byte elements") {
+    for (int t : kThreads)
+      for (int b : kBytes) runCase<Wide16>("wide16 g2l", t, b, ref, d_in, d_out, false);
+  }
+
+  SECTION("global to lds, element count") {
+    const int threads[] = {32, 65, 128, 256, 1024};
+    for (int t : threads) {
+      runElements<short>("short elements", t, 100, ref, d_in, d_out);
+      runElements<float>("float elements", t, 100, ref, d_in, d_out);
+      runElements<double>("double elements", t, 100, ref, d_in, d_out);
+      runElements<unsigned long long>("u64 elements", t, 100, ref, d_in, d_out);
+      runElements<Wide16>("wide16 elements", t, 100, ref, d_in, d_out);
+    }
+  }
+
   SECTION("lds to global, dword aligned elements") {
     for (int t : kThreads)
       for (int b : kBytes) runCase<int>("int l2g", t, b, ref, d_in, d_out, true);
@@ -206,13 +312,20 @@ TEST_CASE("Unit_device_memcpy_async_paths") {
   // if it faults. Rank 0 of the fallback copies these four bytes.
   SECTION("private source falls back") {
     unsigned char* d_flag = nullptr;
+    int* d_probe = nullptr;
     HIP_CHECK(hipMalloc(&d_flag, 16));
+    HIP_CHECK(hipMalloc(&d_probe, 2 * sizeof(int)));
     HIP_CHECK(hipMemset(d_flag, 0xAB, 16));
-    privateSourceToLds<<<1, 128>>>(d_flag);
+    HIP_CHECK(hipMemset(d_probe, 0xFF, 2 * sizeof(int)));
+    privateSourceToLds<<<1, 128>>>(d_flag, d_probe);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
     unsigned char got[16] = {};
+    int probe[2] = {-1, -1};
     HIP_CHECK(hipMemcpy(got, d_flag, 16, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(probe, d_probe, sizeof(probe), hipMemcpyDeviceToHost));
+    REQUIRE(probe[0] == 1);
+    REQUIRE(probe[1] == 0);
     const unsigned char expect[4] = {0x11, 0x22, 0x33, 0x40};
     for (int i = 0; i < 4; i++) {
       INFO("private source byte " << i);
@@ -223,6 +336,7 @@ TEST_CASE("Unit_device_memcpy_async_paths") {
       REQUIRE(got[i] == 0);
     }
     HIP_CHECK(hipFree(d_flag));
+    HIP_CHECK(hipFree(d_probe));
   }
 
   HIP_CHECK(hipFree(d_in));
