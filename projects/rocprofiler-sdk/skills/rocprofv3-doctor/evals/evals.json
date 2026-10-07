@@ -13,10 +13,17 @@
       "unexpected_behavior": [
         "Run sudo, usermod, modprobe, sysctl, setcap, a package manager, or pip install itself",
         "Recommend changing kernel.perf_event_paranoid or running setcap on rocprofv3",
-        "Report checks that were skipped because of another failure as separate problems"
+        "Report checks that were skipped because of another failure as separate problems",
+        "Run the check with sudo or as root on the user's behalf"
       ],
-      "logs_contain": ["--format json", "summarize_report.py"],
-      "files_exist": ["setup_report.md"]
+      "logs_contain": [
+        "--doctor",
+        "--format json",
+        "summarize_report.py"
+      ],
+      "files_exist": [
+        "setup_report.md"
+      ]
     },
     {
       "id": "rocprofv3-doctor-out-of-resources-error",
@@ -32,8 +39,13 @@
         "Conclude the GPU ran out of memory, or that it is a permissions problem, without checking the system first",
         "Run sudo or usermod itself"
       ],
-      "logs_contain": ["--format json"],
-      "files_exist": ["diagnosis.md"]
+      "logs_contain": [
+        "--doctor",
+        "--format json"
+      ],
+      "files_exist": [
+        "diagnosis.md"
+      ]
     },
     {
       "id": "rocprofv3-doctor-container-no-gpu",

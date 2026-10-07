@@ -23,9 +23,9 @@
 # THE SOFTWARE.
 
 
-"""Summarize a rocprofv3-doctor JSON report into a markdown triage.
+"""Summarize a ``rocprofv3 --doctor`` JSON report into a markdown triage.
 
-Reads the file written by ``rocprofv3-doctor --format json --output FILE``
+Reads the file written by ``rocprofv3 --doctor --format json --output FILE``
 (schema_version 1) and reports, in order: the root causes that need fixing,
 each with the checks it blocked and its diagnoses; doctor errors, which are
 bugs in a check rather than findings about the system; informational
@@ -33,7 +33,7 @@ findings; and what the run did not verify. Uses only the Python standard
 library.
 
 Exit status: 0 when a summary was written, 2 when the input cannot be read
-as a rocprofv3-doctor report.
+as a ``rocprofv3 --doctor`` report.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ SMOKE_LAUNCHER = "smoke.rocprofv3-launcher"
 
 
 class ReportError(Exception):
-    """The input is not a usable rocprofv3-doctor report."""
+    """The input is not a usable ``rocprofv3 --doctor`` report."""
 
 
 def load_report(path):
@@ -67,8 +67,8 @@ def load_report(path):
         raise ReportError("{} is not JSON ({})".format(path, exc))
     if not isinstance(report, dict) or "checks" not in report:
         raise ReportError(
-            "{} is not a rocprofv3-doctor report; create one with "
-            "`rocprofv3-doctor --format json --output FILE`".format(path)
+            "{} is not a rocprofv3 --doctor report; create one with "
+            "`rocprofv3 --doctor --format json --output FILE`".format(path)
         )
     version = report.get("schema_version")
     if version != SUPPORTED_SCHEMA:
@@ -151,7 +151,7 @@ def render(report):
     causes, errors, notes, blocked, excluded = classify(report)
     summary = report.get("summary", {})
     ids = {entry["id"] for entry in report["checks"]}
-    out = ["# rocprofv3-doctor summary", ""]
+    out = ["# rocprofv3 --doctor summary", ""]
 
     out.append(
         "- ROCm root: `{}` (found via {}; {})".format(
@@ -161,7 +161,7 @@ def render(report):
         )
     )
     if report.get("tool_version"):
-        out.append("- rocprofv3-doctor version: {}".format(report["tool_version"]))
+        out.append("- rocprofv3 --doctor version: {}".format(report["tool_version"]))
     out.append(
         "- Checks: {pass} passed, {warn} warnings, {fail} failed, {skip} skipped, "
         "{error} errors ({total} total)".format(
@@ -202,7 +202,7 @@ def render(report):
         out.append("")
         for entry in errors:
             out.append(
-                "- {}: {} -- report this as a rocprofv3-doctor bug with the "
+                "- {}: {} -- report this as a rocprofv3 --doctor bug with the "
                 "traceback from `--verbose`".format(
                     entry["id"], (entry.get("detail") or "").strip()
                 )
@@ -244,9 +244,9 @@ def render(report):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
-        description="Summarize a rocprofv3-doctor JSON report as markdown."
+        description="Summarize a rocprofv3 --doctor JSON report as markdown."
     )
-    parser.add_argument("report", help="file written by rocprofv3-doctor --format json")
+    parser.add_argument("report", help="file written by rocprofv3 --doctor --format json")
     parser.add_argument("-o", "--output", help="also write the summary to this file")
     return parser.parse_args(argv)
 
