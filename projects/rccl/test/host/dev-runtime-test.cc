@@ -4352,11 +4352,13 @@ TEST_F(DevrWindowRegisterInGroupTest, NoSymmetricSupport_RoutesToNonSymHelper) {
   EXPECT_EQ(comm->devrState.winSorted[0].win->memory, nullptr);
 }
 
-// Default ncclCuMemEnable is 0. The retain probe faults on ROCm 7.0.2.2, so
+// Default cuMemSupport is 0. The retain probe faults on ROCm 7.0.2.2, so
 // that guard has to keep g_hipMemRetainAllocationHandle from running. The
 // address-range hook only exists so a missing guard fails this assertion
-// instead of spinning on the zero-size default.
+// instead of spinning on the zero-size default. Local cuMem stays on: a peer
+// without cuMem must skip the probe on every rank alike.
 TEST_F(DevrWindowRegisterInGroupTest, CuMemDisabled_SkipsRetainProbe) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t* h, void*) {
     if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
     return hipSuccess;
@@ -4429,6 +4431,7 @@ TEST_F(DevrWindowRegisterInGroupTest, HostVmmLsaTeam_AllgathersThenRejects) {
   comm->peerInfo = peers.data();
 
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  comm->cuMemSupport = 1;
   ScopedHook memType(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
     if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
       *static_cast<hipMemoryType*>(data) = hipMemoryTypeHost;
@@ -4459,6 +4462,7 @@ TEST_F(DevrWindowRegisterInGroupTest, DevicePeerHostVmm_AllgathersThenRejects) {
   comm->peerInfo = peers.data();
 
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  comm->cuMemSupport = 1;
   ScopedHook ptrAttr(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
     if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
       *static_cast<hipMemoryType*>(data) = hipMemoryTypeDevice;
@@ -4497,6 +4501,7 @@ TEST_F(DevrWindowRegisterInGroupTest, ProbeFailure_AllgathersBeforeReturning) {
   comm->peerInfo = peers.data();
 
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  comm->cuMemSupport = 1;
   ScopedHook memType(g_hipPointerGetAttribute,
                      [](void*, hipPointer_attribute, hipDeviceptr_t) { return hipErrorInvalidValue; });
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, [](void*, int*, int self, int, void* buf, int) {
@@ -4524,6 +4529,7 @@ TEST_F(DevrWindowRegisterInGroupTest, DeviceFirstPageHostTail_AllgathersThenReje
   comm->peerInfo = peers.data();
 
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  comm->cuMemSupport = 1;
   ScopedHook ptrAttr(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
     if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
       *static_cast<hipMemoryType*>(data) = hipMemoryTypeDevice;
@@ -4574,6 +4580,7 @@ TEST_F(DevrWindowRegisterInGroupTest, DeviceFirstPageHostTail_AllgathersThenReje
   comm->peerInfo = peers.data();
 
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  comm->cuMemSupport = 1;
   ScopedHook ptrAttr(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t ptr) {
     if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
       *static_cast<hipMemoryType*>(data) =
