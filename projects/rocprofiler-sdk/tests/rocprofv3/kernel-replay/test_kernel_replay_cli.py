@@ -316,6 +316,14 @@ def test_mixed_input_jobs_are_validated_before_any_run_starts():
             ],
             "--replay-mode kernel requires acknowledgement",
         ),
+        (
+            ["--kernel-replay-beta-enabled"],
+            [
+                {"pmc": ["GRBM_COUNT"], "replay_mode": "kernel"},
+                {"pmc": [], "replay_mode": "kernel"},
+            ],
+            "--replay-mode kernel requires counter collection",
+        ),
     ]
 
     def record(app_args, args, **kwargs):
