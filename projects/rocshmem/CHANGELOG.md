@@ -18,16 +18,14 @@
     * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
     * `rocshmem_signal_wait_until`
 
-### Resolved issues
-* Fixed `rocshmem_fence` on the RO backend taking a host proxy round trip from every calling thread.
-  It now skips the proxy when no non-blocking network operation was queued and otherwise fences once per wavefront.
-  The `fence_*` functional tests now run on RO.
-
 ### Deprecated
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
   Use `rocshmem_signal_fetch` instead.
 
 ### Resolved Issues
+* Fixed `rocshmem_fence` on the RO backend taking a host proxy round trip from every calling thread.
+  It now skips the proxy when no non-blocking network operation was queued and otherwise fences once per wavefront.
+  The `fence_*` functional tests now run on RO.
 * Fixed GDA mlx5 and bnxt fetching atomics returning duplicated values when more than 1024 were in flight
   on one queue pair, for example a default-context `rocshmem_uint64_atomic_fetch_add` from several
   1024-thread workgroups.
