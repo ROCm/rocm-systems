@@ -317,9 +317,13 @@ struct PlaybackContext {
     std::atomic<uint64_t> untranslated_ptr_args{0};
 
     // Pinned host snapshot chunks written back before a launch, and records
-    // refused because they did not fit a live host allocation or their blob.
+    // refused because they did not fit a live host allocation or their blob,
+    // or could not be read from the event at all. Valid restore records of a
+    // launch replayed into a graph capture are not applied, and are counted
+    // apart: they are not malformed.
     std::atomic<uint64_t> host_snapshots_applied{0};
     std::atomic<uint64_t> host_snapshots_rejected{0};
+    std::atomic<uint64_t> host_snapshots_in_graph{0};
 
     // ---- Guard pages ----
     // Both off by default: they trade the exact memory layout the replay

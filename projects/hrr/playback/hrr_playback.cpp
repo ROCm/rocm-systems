@@ -1716,10 +1716,15 @@ int main(int argc, char** argv) {
   {
     const uint64_t applied  = ctx.host_snapshots_applied.load();
     const uint64_t rejected = ctx.host_snapshots_rejected.load();
+    const uint64_t in_graph = ctx.host_snapshots_in_graph.load();
     if (applied || rejected)
       printf("[HRR]   Host snapshots : %llu chunk(s) of pinned host memory "
              "restored, %llu record(s) rejected\n",
              (unsigned long long)applied, (unsigned long long)rejected);
+    if (in_graph)
+      printf("[HRR]   Host snapshots : %llu record(s) not applied, their "
+             "launches replayed into a graph capture\n",
+             (unsigned long long)in_graph);
   }
 
   if (ctx.d2h_pass == 0 && ctx.d2h_fail == 0) {

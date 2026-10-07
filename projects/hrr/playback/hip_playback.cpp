@@ -1033,6 +1033,7 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
                                    std::set<uint64_t>* rec_bases_out) {
     const std::string kname = compact_kernel_name(kernel_name);
     if (static_cast<size_t>(end - p) / kHostSnapRecordSize < n) {
+        ctx.host_snapshots_rejected.fetch_add(n, std::memory_order_relaxed);
         fprintf(stderr,
                 "[HRR] '%s': %u pinned host snapshot record(s) run past the end "
                 "of the event — none applied\n", kname.c_str(), n);
@@ -1084,6 +1085,8 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
             continue;
         }
         if (direction == 1 || !apply) {
+            if (direction == 0)
+                ctx.host_snapshots_in_graph.fetch_add(1, std::memory_order_relaxed);
             if (rec_bases_out) rec_bases_out->insert(arec);
             continue;
         }
@@ -1262,15 +1265,18 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     // the stream to drain, then copies the bytes in (not stream-ordered).
     std::set<uint64_t> refilled;
     if (num_snapshots) {
-        if (!tail_ok)
+        if (!tail_ok) {
+            ctx.host_snapshots_rejected.fetch_add(num_snapshots,
+                                                  std::memory_order_relaxed);
             fprintf(stderr,
                     "[HRR] '%s': launch attribute tail is malformed, so its %u "
                     "pinned host snapshot record(s) cannot be located — the "
                     "kernel runs without its host inputs\n",
                     compact_kernel_name(kernel_name).c_str(), num_snapshots);
-        else
+        } else {
             restore_host_snapshots(ctx, p, end, num_snapshots, stream,
                                    kernel_name, &refilled);
+        }
     }
 
     decode_kernel_args(ctx, args_p, end, num_args, kernel_name, arg_ptrs,
