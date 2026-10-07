@@ -1131,6 +1131,101 @@ TEST_CASE("Unit_HRR_PinnedHost_BatchWait_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(h));
 }
 
+// ===========================================================================
+// A launch capture looks at while a blocking stream waits for the host, then
+// a kernel on another blocking stream that the host waits for before it
+// releases the first one.
+//
+//   -  hipStreamWaitValue32 on blocking stream A, on a flag the host sets last
+//   -  the launch HRR_PINNED_VARIANT picks, reading pinned memory filled with
+//      pattern 1:
+//        0  hipLaunchKernel_spt into hipStreamLegacy
+//        1  hipLaunchCooperativeKernel_spt into hipStreamLegacy
+//        2  hipLaunchKernel into the null stream with an oversized block,
+//           which fails its checks before it reaches a stream
+//   -  a write into device memory on blocking stream B, then
+//      hipStreamSynchronize(B)
+//   -  the host sets the flag
+//   -  variant 2 only: a read on the null stream
+// The per-thread launches use the per-thread stream, which waits for the null
+// stream only, and the failed launch waits for nothing. None of them orders B
+// after A. Capture that queued a null-stream wait for A while it looked at the
+// launch would hold B behind A, and the synchronize would never return.
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_NoNullBarrier_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int can_wait = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&can_wait, hipDeviceAttributeCanUseStreamWaitValue, 0));
+  REQUIRE(can_wait != 0);
+  const int variant = env_int("HRR_PINNED_VARIANT");
+  REQUIRE((variant >= 0 && variant <= 2));
+  if (variant == 1) {
+    int coop = 0;
+    HRR_HIP_CHECK(hipDeviceGetAttribute(&coop, hipDeviceAttributeCooperativeLaunch, 0));
+    REQUIRE(coop != 0);
+  }
+
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                              hipHostMallocDefault));
+  uint32_t* flag = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&flag), sizeof(uint32_t),
+                              hipHostMallocMapped));
+  *flag = 0;
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+  int* scratch = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&scratch, kPinnedBytes));
+  hipStream_t a = nullptr;
+  hipStream_t b = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&a));
+  HRR_HIP_CHECK(hipStreamCreate(&b));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  fill(h, 1);
+  int n = kPinnedInts;
+  void* args[] = {&h, &out, &n};
+  const hipError_t wait_err =
+      hipStreamWaitValue32(a, flag, 1, hipStreamWaitValueEq, 0xFFFFFFFF);
+  hipError_t launch_err = hipSuccess;
+  if (variant == 0) {
+    launch_err = hipLaunchKernel_spt(reinterpret_cast<const void*>(hrr_pinned_read),
+                                     dim3(kBlocks), dim3(kThreads), args, 0, hipStreamLegacy);
+  } else if (variant == 1) {
+    launch_err = hipLaunchCooperativeKernel_spt(
+        reinterpret_cast<const void*>(hrr_pinned_read_strided), dim3(kEntryBlocks),
+        dim3(kThreads), args, 0, hipStreamLegacy);
+  } else {
+    launch_err = hipLaunchKernel(reinterpret_cast<const void*>(hrr_pinned_read), dim3(1),
+                                 dim3(4096), args, 0, nullptr);
+    (void)hipGetLastError();
+  }
+  hipLaunchKernelGGL(hrr_pinned_write, dim3(kBlocks), dim3(kThreads), 0, b, scratch,
+                     kPinnedInts, 0x2e2e);
+  const hipError_t write_err = hipGetLastError();
+  const hipError_t sync_err = hipStreamSynchronize(b);
+  __atomic_store_n(flag, 1u, __ATOMIC_SEQ_CST);
+
+  HRR_HIP_CHECK(wait_err);
+  HRR_HIP_CHECK(write_err);
+  HRR_HIP_CHECK(sync_err);
+  INFO("launch: " << hipGetErrorName(launch_err));
+  if (variant == 2) {
+    REQUIRE(launch_err != hipSuccess);
+    read_pinned(h, out, 1);
+  } else {
+    REQUIRE(launch_err == hipSuccess);
+    check_out(out, [](int i) { return pattern(1, i) * 3 + 1; });
+  }
+
+  HRR_HIP_CHECK(hipStreamDestroy(b));
+  HRR_HIP_CHECK(hipStreamDestroy(a));
+  HRR_HIP_CHECK(hipFree(scratch));
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(flag));
+  HRR_HIP_CHECK(hipHostFree(h));
+}
+
 namespace {
 constexpr const char* kDirect = "Unit_HRR_PinnedHost_Direct";
 // A capture or replay that takes longer than this has hung.
@@ -1906,6 +2001,51 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_RestoreWaitsOnStream) {
   CHECK(d2h_fail == 0);
 #endif
 }
+
+namespace {
+// Capture and replay of Unit_HRR_PinnedHost_NoNullBarrier_Direct with one
+// variant. A capture that holds stream B behind stream A never returns from
+// the workload's hipStreamSynchronize(B), and is killed at the deadline.
+void no_null_barrier(const char* variant) {
+  INFO("HRR_PINNED_VARIANT=" << variant);
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_no_null_barrier.hrr");
+  capture_case("Unit_HRR_PinnedHost_NoNullBarrier_Direct", cap.path,
+               {{"HRR_PINNED_VARIANT", variant}});
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  auto [rc, out] = replay(archive);
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(restored == 2);
+  CHECK(rejected == 0);
+#ifndef _WIN32
+  int d2h_pass = 0, d2h_fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+  CHECK(d2h_pass >= 1);
+  CHECK(d2h_fail == 0);
+#endif
+}
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// A per-thread launch into hipStreamLegacy goes to the per-thread stream, and
+// capture asks about that stream. Asking the null stream instead queued a
+// null-stream wait for every blocking stream, which held an unrelated blocking
+// stream behind one waiting for the host.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_SptLegacyNoBarrier) { no_null_barrier("0"); }
+
+// The same through hipLaunchCooperativeKernel_spt.
+HRR_TEST_CASE(Unit_HRR_PinnedHost_SptCoopLegacyNoBarrier) { no_null_barrier("1"); }
+
+// ---------------------------------------------------------------------------
+// A null-stream launch that fails its checks leaves nothing queued: capture
+// finds out whether the blocking streams are busy without the null-stream
+// query, whose wait for them would stay behind on the null stream.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_FailedNullLaunchNoBarrier) { no_null_barrier("2"); }
 
 // ---------------------------------------------------------------------------
 // The two size limits.

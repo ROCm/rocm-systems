@@ -585,10 +585,18 @@ that the host sets only after this launch returns. Capture asks instead whether
 the work the launch will wait for is done. That is the launch stream's own work,
 found with `hipStreamQuery`. A launch into a blocking stream (`hipStreamCreate`,
 or the per-thread stream) also waits for the null stream, which that query does
-not look at; capture reads the null stream's last command as the launch does. A
-launch into `hipStreamLegacy` waits for every blocking stream, and capture asks
-the null-stream query, which covers them, rather than the `hipStreamLegacy` one,
-which does not:
+not look at; capture reads the null stream's last command as the launch does.
+
+A launch into the null stream or `hipStreamLegacy` waits for every blocking
+stream. Capture asks the `hipStreamLegacy` query, which looks at the null stream
+alone, then reads the last command of each blocking stream. It does not ask the
+null-stream query, which also covers them: that query queues a marker on the
+null stream that waits for every blocking stream. A launch that then fails its
+own checks leaves the marker behind, and every later launch into a blocking
+stream waits for it. The per-thread entry points (`hipLaunchKernel_spt` and
+`hipLaunchCooperativeKernel_spt`) launch into the per-thread stream when given
+the null stream or `hipStreamLegacy`, so capture asks about the per-thread
+stream. The answer is one of two:
 
 - idle: the bytes are the ones the kernel will read, and the snapshot is exact;
 - busy: the bytes are read anyway. A chunk that changed since its last record is

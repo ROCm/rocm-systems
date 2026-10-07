@@ -471,6 +471,19 @@ static const char* const kHostSnapApi = "pinned host snapshot";
 
 enum class LaunchStream { Idle, Busy, Capturing, Skip };
 
+// Whether a stream's last queued command is still pending, read the way
+// Device::WaitActiveStreams reads it before a launch waits on that stream. It
+// takes no asynchronous error and queues nothing.
+static bool last_command_pending(hip::Stream* s) {
+  amd::Command* cmd = s->getLastQueuedCommand(true);
+  if (cmd == nullptr) return false;
+  bool ready = s->device().IsHwEventReady(cmd->event());
+  if (!ready) ready = cmd->status() == CL_COMPLETE;
+  if (!ready) cmd->notifyCmdQueue();
+  cmd->release();
+  return !ready;
+}
+
 // Whether the null stream of a blocking stream's device still has work the
 // launch will wait for. The rule is the launch's own (Device::WaitActiveStreams
 // with only the null stream): the null stream's last queued command, done or
@@ -481,22 +494,42 @@ static bool null_stream_busy(hip::Stream* hs) {
   hip::Device* dev = hs->GetDevice();
   hip::Stream* ns  = dev ? dev->GetNullStream() : nullptr;
   if (ns == nullptr || ns == hs) return false;
-  amd::Command* cmd = ns->getLastQueuedCommand(true);
-  if (cmd == nullptr) return false;
-  bool ready = ns->device().IsHwEventReady(cmd->event());
-  if (!ready) ready = cmd->status() == CL_COMPLETE;
-  if (!ready) cmd->notifyCmdQueue();
-  cmd->release();
-  return !ready;
+  return last_command_pending(ns);
+}
+
+// Whether any blocking stream of the current device other than the null stream
+// still has work. A launch into the null stream or hipStreamLegacy waits for
+// all of them (Device::WaitActiveStreams). The null-stream hipStreamQuery would
+// answer the same, but it gets the null stream through NullStream(true), which
+// queues a marker on it that waits for those streams. That marker stays when
+// the launch then fails before it reaches its own stream, and every later
+// launch into a blocking stream would wait behind it: a dependency the
+// application never had, and a hang when one of those streams waits for the
+// host.
+static bool blocking_streams_busy() {
+  hip::Device* dev = hip::getCurrentDevice();
+  if (dev == nullptr) return false;
+  hip::Stream* ns = dev->GetNullStream();
+  bool busy = false;
+  for (amd::CommandQueue* q : dev->devices()[0]->getActiveQueues()) {
+    auto* s = static_cast<hip::Stream*>(q);
+    if (!busy && s != ns && !(s->Flags() & hipStreamNonBlocking) && last_command_pending(s))
+      busy = true;
+    q->release();  // getActiveQueues retained it
+  }
+  return busy;
 }
 
 // Whether the work the launch will wait for has finished, found without
-// waiting for it. That is the launch stream's earlier work and, for a blocking
-// stream, the null stream's; a launch into hipStreamLegacy or the null stream
-// also waits for every blocking stream of the device. Skip means the stream is
-// not one the launch can use, so the launch will fail on its own. None of the
-// calls may change the error the application sees from hipGetLastError, nor
-// take an asynchronous error from a stream before the application asks for it.
+// waiting for it and without queueing anything. That is the launch stream's
+// earlier work and, for a blocking stream, the null stream's; a launch into
+// hipStreamLegacy or the null stream also waits for every blocking stream of
+// the device. A caller passes the stream the launch really uses: the
+// per-thread entry points use the per-thread stream for nullptr and
+// hipStreamLegacy alike. Skip means the stream is not one the launch can use,
+// so the launch will fail on its own. None of the calls may change the error
+// the application sees from hipGetLastError, nor take an asynchronous error
+// from a stream before the application asks for it.
 static LaunchStream launch_stream_state(hipStream_t stream) {
   if (!g_real_table.hipStreamIsCapturing_fn || !g_real_table.hipStreamQuery_fn)
     return LaunchStream::Skip;
@@ -516,10 +549,10 @@ static LaunchStream launch_stream_state(hipStream_t stream) {
         (cr == hipSuccess && status == hipStreamCaptureStatusActive)) {
       st = LaunchStream::Capturing;
     } else if (cr == hipSuccess && status == hipStreamCaptureStatusNone) {
-      // hipStreamQuery(hipStreamLegacy) looks at the null stream alone; the
-      // null-stream query also looks at the blocking streams, as the launch
-      // does.
-      const hipError_t qr = g_real_table.hipStreamQuery_fn(s == hipStreamLegacy ? nullptr : s);
+      // hipStreamQuery(hipStreamLegacy) looks at the null stream alone and
+      // queues nothing; the blocking streams are read below.
+      const bool legacy = s == nullptr || s == hipStreamLegacy;
+      const hipError_t qr = g_real_table.hipStreamQuery_fn(legacy ? hipStreamLegacy : s);
       switch (qr) {
         case hipErrorNotReady: st = LaunchStream::Busy; break;
         case hipSuccess:       st = LaunchStream::Idle; break;
@@ -535,7 +568,9 @@ static LaunchStream launch_stream_state(hipStream_t stream) {
           st = LaunchStream::Idle;
           break;
       }
-      if (st == LaunchStream::Idle && s != nullptr && s != hipStreamLegacy) {
+      if (st == LaunchStream::Idle && legacy) {
+        if (blocking_streams_busy()) st = LaunchStream::Busy;
+      } else if (st == LaunchStream::Idle) {
         auto* hs = reinterpret_cast<hip::Stream*>(s);
         if (!(hs->Flags() & hipStreamNonBlocking) && null_stream_busy(hs))
           st = LaunchStream::Busy;
@@ -1850,8 +1885,10 @@ hipError_t capture_hipLaunchKernel_spt(const void* function_address,
                                        hipStream_t stream) {
   LaunchSnapshots snaps;
   hipFunction_t f = resolve_stub_if_pinned(function_address);
-  // The per-thread entry points treat a null stream as hipStreamPerThread.
-  snapshot_launch(f, stream ? stream : hipStreamPerThread, args, nullptr, snaps, true);
+  // The per-thread entry points use the per-thread stream for both the null
+  // stream and hipStreamLegacy.
+  snapshot_launch(f, (stream == nullptr || stream == hipStreamLegacy) ? hipStreamPerThread : stream,
+                  args, nullptr, snaps, true);
   hipError_t r = g_real_table.hipLaunchKernel_spt_fn(
       function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
   if (r == hipSuccess) {
@@ -1902,8 +1939,9 @@ hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f,
                                                   hipStream_t hStream) {
   LaunchSnapshots snaps;
   hipFunction_t fn = resolve_stub_if_pinned(f);
-  snapshot_launch(fn, hStream ? hStream : hipStreamPerThread, kernelParams, nullptr, snaps,
-                  true);
+  snapshot_launch(fn,
+                  (hStream == nullptr || hStream == hipStreamLegacy) ? hipStreamPerThread : hStream,
+                  kernelParams, nullptr, snaps, true);
   hipError_t r = g_real_table.hipLaunchCooperativeKernel_spt_fn(
       f, gridDim, blockDim, kernelParams, sharedMemBytes, hStream);
   if (r == hipSuccess) {
