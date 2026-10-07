@@ -335,9 +335,15 @@ static ncclResult_t ncclInit() {
   NCCLCHECK(ncclOsTopoGetStrFromSys("/proc", "version", strValue, sizeof(strValue)));
   char *verStr, *state;
   verStr = strtok_r(strValue, " ", &state);
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 2 && verStr != NULL; i++) {
     verStr = strtok_r(NULL, " ", &state);
-    if (verStr == NULL) break;
+  }
+  // fopen of /proc/version fails (EMFILE, missing /proc) as an empty string, and strtok_r
+  // then returns NULL. strstr(NULL) is a SIGSEGV; return an error before call_once so a
+  // later init can retry once descriptors are available.
+  if (verStr == NULL) {
+    WARN("Could not read kernel version from /proc/version");
+    return ncclSystemError;
   }
   INFO(NCCL_INIT, "Kernel version: %s", verStr);
   if (strstr(verStr, "cray") == NULL) {

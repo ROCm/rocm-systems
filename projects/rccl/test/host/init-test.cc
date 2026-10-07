@@ -4537,8 +4537,33 @@ TEST_F(InitMicrotestIsolated, NcclInit_NumaBalancingOffAndIommuPassthrough_Warns
         ASSERT_TRUE(LogHas(log, "Kernel version: 6.8.0-microtest")) << "actual log:\n" << log;
         ASSERT_FALSE(LogHas(log, Dtor_kNumaBalancingWarning)) << "actual log:\n" << log;
         ASSERT_FALSE(LogHas(log, Dtor_kIommuWarning)) << "actual log:\n" << log;
-        // Anchors the iommu leg: the probe sits inside the non-cray block (init.cc:310-336), the INFO above does not.
+        // Anchors the iommu leg: the probe sits inside the non-cray block, the INFO above does not.
         ASSERT_EQ(1, iommu.calls);
+      });
+}
+
+// Empty /proc/version (EMFILE, or any read ncclOsTopoGetStrFromSys reports as "") used to reach
+// strstr(NULL, "cray"). The error is returned before call_once, so this stays reachable in a fresh process.
+TEST_F(InitMicrotestIsolated, NcclInit_UnreadableKernelVersion_ReturnsSystemError) {
+  RUN_ISOLATED_TEST(
+      "Init_NcclInit_UnreadableKernelVersion",
+      []() {
+        ScopedHook sysText(g_microTopoGetStrFromSys,
+                           [](const char*, const char* file, char* out, int maxLen) {
+                             if (!out || maxLen <= 0) return ncclSuccess;
+                             if (file && std::strcmp(file, "version") == 0) {
+                               out[0] = '\0';
+                               return ncclSuccess;
+                             }
+                             std::snprintf(out, maxLen, "0");
+                             return ncclSuccess;
+                           });
+        ScopedHook iommu(g_microIommuPassthroughOk, [](const char*) { return false; });
+        ncclResult_t res = ncclSuccess;
+        const std::string log = RcclUnitTesting::CaptureLog([&] { res = ncclInit(); });
+        ASSERT_EQ(ncclSystemError, res);
+        ASSERT_TRUE(LogHas(log, "Could not read kernel version from /proc/version")) << "actual log:\n" << log;
+        ASSERT_EQ(0, iommu.calls);
       });
 }
 
