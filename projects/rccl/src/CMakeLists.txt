@@ -545,6 +545,7 @@ set(SRC_FILES
   ras/ras_param.h
   ras/rasnet.cc
   rccl_arch_thresholds.cc
+  rccl_dev_runtime.cc
   rccl_wrap.cc
   register/coll_reg.cc
   register/register.cc

@@ -631,7 +631,8 @@ if(BUILD_TESTS)
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsDevRuntime)
 
     set(DEV_RUNTIME_SEGMENTS_CC
-      ${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc)
+      ${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc
+      ${PROJECT_BINARY_DIR}/hipify/src/rccl_dev_runtime.cc)
     set_source_files_properties(${DEV_RUNTIME_SEGMENTS_CC} PROPERTIES
       GENERATED TRUE
       LANGUAGE CXX)
