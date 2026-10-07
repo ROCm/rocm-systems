@@ -2,6 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import queue
 import signal
 import threading
 
@@ -31,41 +32,35 @@ class EventCommands:
         print("EVENT LISTENING:\n")
         print("Press q and hit ENTER when you want to stop.")
         self.stop = False
+        result_queue = queue.Queue()
         threads = []
         for device_handle in range(len(args.gpu)):
-            x = self.EventListenerThread(target=self._event_thread, args=(self, device_handle))
+            x = self.EventListenerThread(
+                target=self._event_thread, args=(self, device_handle), result_queue=result_queue
+            )
             threads.append(x)
             x.start()
+
+        stdin_reader = threading.Thread(target=self._read_stdin, args=(result_queue,), daemon=True)
+        stdin_reader.start()
 
         previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
         system_exit_exc = None
         signal.signal(signal.SIGTERM, self._event_sigterm_handler)
         try:
-            for thread in threads:
-                thread.join()
-            while True:
-                try:
-                    user_input = input()
-                except EOFError:
-                    self.stop = True
-                    break
-                except KeyboardInterrupt:
-                    self.stop = True
-                    break
-
-                if self.stop:
-                    break
-
-                if user_input == "q":
-                    print("Escape Sequence Detected; Exiting")
-                    self.stop = True
-                    break
+            kind, payload = result_queue.get()
+            if kind == "exception":
+                raise payload
+            if kind == "quit":
+                print("Escape Sequence Detected; Exiting")
         except SystemExit as exc:
             system_exit_exc = exc
         except amdsmi_exception.AmdSmiLibraryException as e:
-            print("Error in event listening: ", e)
+            raise e
         finally:
             self.stop = True
+            for thread in threads:
+                thread.join()
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
         if system_exit_exc is not None:
@@ -74,6 +69,21 @@ class EventCommands:
     def _event_sigterm_handler(self, signum, frame):
         self.stop = True
         raise SystemExit(128 + signum)
+
+    def _read_stdin(self, result_queue):
+        while True:
+            try:
+                user_input = input()
+            except EOFError:
+                result_queue.put(("eof", None))
+                return
+            except KeyboardInterrupt:
+                result_queue.put(("interrupt", None))
+                return
+
+            if user_input == "q":
+                result_queue.put(("quit", None))
+                return
 
     def _event_thread(self, commands, i):
         devices = commands.device_handles
@@ -117,19 +127,14 @@ class EventCommands:
 
     # Thread class for capture exceptions from event listener threads which will be passed to main thread
     class EventListenerThread(threading.Thread):
-        def __init__(self, target, args):
+        def __init__(self, target, args, result_queue):
             super().__init__()
             self.target = target
             self.args = args
-            self.exception = None
+            self.result_queue = result_queue
 
         def run(self):
             try:
                 self.target(*self.args)
             except Exception as e:
-                self.exception = e
-
-        def join(self, timeout=None):
-            super().join(timeout)
-            if self.exception:
-                raise self.exception
+                self.result_queue.put(("exception", e))
