@@ -833,6 +833,9 @@ struct KmqMetadata {
   AieKernelKind mode = AieKernelKind::Undecided;
   /// @brief Command BO pool.
   CmdBOPool cmd_bo_pool;
+
+  /// @brief Returns the number of core tiles a hardware context with @ref num_cols columns has.
+  uint32_t NumTiles() const { return num_cols * num_core_rows; }
 };
 
 /// @brief Flushes the CPU cache for the packet's arguments.
@@ -906,7 +909,7 @@ static hsa_status_t CreateHwCtx(int fd, KmqMetadata* kmq_metadata) {
   amdxdna_drm_create_hwctx create_hwctx_args = {};
   create_hwctx_args.qos_p = reinterpret_cast<uintptr_t>(&qos_info);
   create_hwctx_args.max_opc = 0x800;
-  create_hwctx_args.num_tiles = kmq_metadata->num_cols * kmq_metadata->num_core_rows;
+  create_hwctx_args.num_tiles = kmq_metadata->NumTiles();
   hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args);
   if (err != HSA_STATUS_SUCCESS) {
     assert(false && "Failed to create hardware context for KMQ");
