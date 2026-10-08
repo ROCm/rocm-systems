@@ -1,6 +1,6 @@
 ---
 agent: 'agent'
-description: Grill a high-level design against the project template, then draft or review it.
+description: Interview the author, then write one HLD. Review an existing HLD only when asked.
 ---
 
 Follow [`.ai/skills/rocprof-compute-hld.md`](../../.ai/skills/rocprof-compute-hld.md).

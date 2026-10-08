@@ -2,135 +2,227 @@
 
 Follow **[`AGENTS.md`](../../AGENTS.md)** and the full redirect chain it references.
 
-The template is **[`docs/design/hld-template.md`](../../docs/design/hld-template.md)**.
-Follow that file. Do not invent a second outline, and do not paste the template
-into the HLD.
+This skill helps the author write an HLD. Grill the whole design tree first.
+Write `docs/design/hld-<topic>.md` once, after the author accepts the summary
+with no changes.
 
-## Who writes it
+## What binds
 
-The author owns every decision. The agent grills, looks up facts, and writes
-the document only after the author confirms a shared understanding.
+[`docs/design/hld-template.md`](../../docs/design/hld-template.md) owns the
+section headings and the writing rules. Do not paste those headings into the
+HLD, and do not keep a second outline here.
 
-Do not invent requirements, measurements, customer feedback, competitor
-behavior, or a decision the author did not make. Anything unverified is an
-open question.
+The template says to avoid producing an HLD with an AI tool. This skill
+replaces that one line, and only after the author has confirmed every
+decision. Say that to the author before the first question. Until that
+confirmation, do not write the file.
 
-## Grill
+[`hld-torch-trace-collector.md`](../../docs/design/hld-torch-trace-collector.md)
+shows tone and length. It does not supply headings. Its `## Implementation`
+stub is not a valid phase section. Headings come from the template.
 
-Grill the whole tree, then write the HLD once. A settled section stays in
-the interview until the frontier is empty. Do not write that section when
-its own questions end.
+## Entry
 
-Map the HLD as a design tree. Every decision branches into the decisions that
-hang off it. The branches follow the template, and later branches wait on
-earlier ones:
+If the author has not named a topic and a problem, ask for those two things
+and wait.
 
-1. System Context, Problem statement, and Requirements.
-2. Design decisions, each with the alternatives rejected.
-3. Implementation phases, validation, and what stays open.
+If a `docs/design/hld-*.md` for this topic already exists and the author has
+not chosen a mode, ask whether to review that file or replace it. Review
+follows the Review section. Replace follows the interview, then the write.
 
-The frontier is every decision whose prerequisites are already settled: the
-questions you can ask now without guessing at an answer you have not heard.
-Ask the whole frontier in one round. Number each question and give a
-recommended answer. Then wait. A question that depends on another question
-still open in this round belongs to a later round.
+Before the first question, say the answering rules: the author reacts to a
+recommendation, may reject any of them, and no file is written until they
+accept a summary with no changes.
+
+Record each decision the author has already stated. Do not ask it again.
+Recommend only where they have not chosen.
+
+Propose the file slug, show `docs/design/hld-<topic>.md`, and wait for the
+author to accept the path. Use lowercase words separated by hyphens.
+
+List the branches below and start with System Context. That is the root.
+
+## Branches
+
+Ask in this order. A later branch waits until the earlier one is answered
+or explicitly deferred.
+
+1. System Context
+2. Problem statement
+3. Requirements
+4. Design
+5. Implementation phases
+6. Validation, security and debuggability
+7. Open questions
+
+These prompts are the closed set. Ask one only when the branch applies.
+To skip one, name it and the reason in that round. The skip counts only
+after the author agrees. The file still gets that heading, with one line
+on why it does not apply. Do not invent a body for it.
+
+- What is in scope, and what is explicitly out.
+- Why the problem matters, and what breaks if it stays unsolved.
+- Why this approach, and what the alternatives are. What is the worst case.
+  How do you roll it back.
+- What happens on failure, on a missing dependency, and at a load the author
+  names in their own units (profile size, kernel count, or concurrent runs).
+  If they have no number, defer "no load target".
+- What you will test, and what you will log, metric, or trace.
+- What data the change touches, who can invoke it, and what must not leak.
+- What you are deliberately leaving open.
+
+System Context names only components the design changes or depends on, and
+facts a later decision uses. When the author names more than one functional
+requirement, ask for their order and record it.
+
+A vertical slice is one change a user can see in a named workflow: profile,
+analyze, or the report. A phase that never shows up in one of those is not
+a slice.
+
+In Design, use the template's word "alternatives". Say "rejected" only for
+an option the author discarded. A still-open option goes under Open questions.
+
+## Decision log
+
+After each settled answer, append one line to a decision log. Repeat the log
+at the start of the next round so a long chat cannot drop it. The log is not
+the HLD. Do not write a section when its questions end.
+
+Each line is `author-stated` or `accepted recommendation`, plus the author's
+reason. Copy an agent recommendation into the log only when the author
+adopts that reason.
+
+## Rounds
+
+The frontier is every closed prompt for the current branch that is not yet
+answered or deferred. Ask those questions in one round, at most five. Leave
+the rest for the next round. Number questions continuously across rounds.
+
+Independent questions inside one section share a round. A question that
+depends on another question still open in this round waits.
 
 ```
 ❓ **Q1** - **<title>**: <question>
 
-➡️ <recommended answer, and one line why>
+➡️ <recommendation from the author's words or a verified fact, and one line why>
 
 ---
 
 ❓ **Q2** - **<title>**: <question>
 
-➡️ <recommended answer, and one line why>
+➡️ <trade-off, with no winner, when nothing verified supports a choice>
 ```
 
-Before the first round, list the branches you will walk and say which one
-you start with. That is the branch the others depend on.
+Look up facts in the repo before asking. Do not ask the author for anything
+you can look up. Do not show a recommendation until the lookup it depends on
+has finished. If a lookup fails, finds nothing, or contradicts the author,
+say what you checked, park the conflict as an open question, and ask the
+rest of the frontier. If a finished lookup overturns a recommendation already
+shown, ask that question again.
 
-Facts are yours. Read the code and the docs. Do not ask the author for
-anything you can look up. A lookup still running blocks only the questions
-that depend on it. Ask the rest of the frontier now.
+A round stays open until every question in it is answered or explicitly
+deferred. Only an explicit answer settles a question. A skipped question
+returns on the next frontier.
 
-Decisions are the author's. They are reacting to a recommendation, not
-filling a blank. If the answer is vague or "I don't know", give the
-trade-off and the recommendation again, and ask what it looks like in
-practice. Do not treat that as settled.
+The author reacts to a recommendation. They are not filling a blank.
 
-Work these in where they apply. Skip a branch that this design does not have.
+If the answer is vague or "I don't know", restate the trade-off once and
+ask them to decide or to defer. A second vague reply does not settle it.
+Ask them to defer. An explicit deferral moves the item to Open questions
+and off the frontier. Then continue.
 
-- What is in scope, and what is explicitly out.
-- Why the problem matters, and what breaks if it stays unsolved.
-- Why this approach, and not the alternative. What is the worst case. How
-  do you roll it back.
-- What happens at the edges: failure, a missing dependency, much more load.
-- What you will test, and what you will log, metric, or trace.
-- What you are deliberately leaving open.
+A decision is weak when it has no reason, no alternative, or no failure
+behavior. State that objection once. If the author keeps the choice, log it
+with their reason and move on.
 
-Be a direct technical partner. Find the weak decision. Short sentences. No
-filler, and no praise before the next question. Do not write a section, and
-do not start implementation, while any branch is still open.
+If the author tells you to write the file or to start implementation while
+any prompt is still open, name the open branches and ask the next questions.
+Refuse implementation in one sentence and stay in the interview.
 
-When the frontier is empty and nothing is silently assumed:
+## Summary and write
 
-1. Summarize each decision and why.
-2. List what is out of scope and what stays open.
-3. Ask whether that shared understanding is right.
+The frontier is empty when every closed prompt is answered or deferred, and
+nothing is left assumed. In the summary, list:
 
-Write `docs/design/hld-<topic>.md` once, after the author says the summary
-is right. Use their decisions and the facts you verified. Leave the rest
-under Open questions. That write covers every section. It does not resume
-the interview between sections.
+1. Each decision, labeled `author-stated` or `accepted recommendation`, with
+   the author's reason.
+2. Every assumption you used. The author accepts or corrects that list.
+3. What is out of scope, including agreed skips.
+4. Open questions: unverified facts, conflicts, and explicit deferrals.
 
-## Order
+Ask whether that summary is right.
 
-System Context, Problem statement, and Requirements are the first branches
-of the interview. Design questions wait until those answers are settled.
-The file still waits until the whole tree is confirmed.
+Any correction, including "yes, except ...", is not acceptance. Do not write.
+Reopen only the decisions the author named, drop recommendations that
+depended on them, run another round, summarize again, and require a new
+yes with no changes.
 
-## Where it goes
+After that yes, write `docs/design/hld-<topic>.md` once. If the file exists,
+stop and ask whether to review it or replace it. Do not overwrite on the
+same yes that accepted the summary.
 
-Write it to `docs/design/hld-<topic>.md`.
-[`hld-torch-trace-collector.md`](../../docs/design/hld-torch-trace-collector.md)
-is a short example of the shape. Match that shape. Do not copy its content.
+The write uses every template heading, in template order. Confirmed
+decisions and their alternatives go in Design. Unverified facts and
+deferrals go under Open questions only. A number that is not in the code,
+the docs, or the author's answer is an open question. Do not invent it.
 
-## Writing rules
+Do not resume the interview between sections.
 
-- Say why: why it is a problem, why this decision, why this requirement.
-- Be short. Cut filler and new jargon. Keep each decision in one place.
-- Use a diagram when a flow or a boundary is hard to see in prose.
-- Support a claim with a measurement, an estimate, or a stable reference such
-  as a CLI flag, a public behavior, or a doc. Do not cite file paths, line
-  numbers, variable names, or class names. They go stale.
-- Use lists, tables, and short paragraphs to make a point. Skip formatting
-  that only adds noise.
-
-## Sections
-
-Use the template's sections, in this order:
-
-1. **System Context.** Purpose of the part in scope, the class of problem it
-   solves, and what it does not cover. Main components and the technical
-   details that matter. Surrounding components. Customer requests, competitor
-   solutions, assumptions, and constraints, when they change the design.
-2. **Problem statement.** The problems this design solves, why they matter,
-   and their impact.
-3. **Requirements.** Functional requirements, prioritized when the list is
-   long. Non-functional requirements. Guidelines the design must follow, each
-   with a reason.
-4. **Design.** The proposed design. Each architectural decision says why it
-   was chosen and which alternatives were rejected.
-5. **Implementation phases.** Vertical slices. Each phase crosses the stack
-   and delivers something a user can use.
-6. **Validation, security and debuggability.** Which unit, functional, and
-   integration tests are required, and the validation strategy. Logging,
-   metrics, alerting, or tracing that reduces maintenance cost.
-7. **Open questions.** Known unknowns, deferred decisions, and trade-offs.
+After the write, ask the author to accept the file or name one section to
+change. Change only that section, from the confirmed decisions.
 
 ## Review
 
-When asked to review an HLD, do not rewrite it. Grill the gaps: unresolved
-decisions, missing alternatives, and claims with no why. Rewrite a section
-only when the author asks, and keep their decisions.
+Review runs only when the author asks to review an existing HLD, or chooses
+review at entry.
+
+Grill the gaps with the same question format: unresolved decisions, missing
+alternatives, and claims with no why. The ban on writing during the
+interview does not apply here. Rewrite a section only when the author asks
+for that section, even if other gaps stay open. Stop when they say to stop,
+or when that edit is done.
+
+## Worked session
+
+Shape only. Not a real design, and not facts about the tree.
+
+Branches: System Context (start), Problem statement, Requirements, Design,
+Implementation phases, Validation, Open questions.
+
+❓ **Q1** - **Scope**: Should this HLD cover only the analyze error when
+`--path` is not the directory that holds the profile config?
+
+➡️ Limit it to analyze. Profile already reports its own path failure, so
+pulling profile in adds a second workflow with no new decision.
+
+Deferred, not asked: which component formats the error. That waits until
+the problem statement says what is wrong today.
+
+Author: "1 yes."
+
+Later, on the failure-behavior prompt, the author says "I don't know."
+Restate that prompt once. The author still will not choose. Defer it to
+Open questions and continue. Log: `accepted recommendation` — scope is
+analyze only. Author's reason: profile already has its own error.
+
+Summary, after the other prompts are answered or deferred:
+
+- `accepted recommendation` — scope is the analyze path error. Author's
+  reason: profile already reports its own.
+- Assumption: the author meant the directory that contains the profile
+  config. Author must accept or correct this.
+- Out of scope: profile mode.
+- Open: who formats the error. No load target.
+
+"Yes, except also cover profile" is not acceptance. Reopen scope, summarize
+again. Write only after a later yes with no changes.
+
+## Done when
+
+- The HLD file does not exist before the author accepts a summary with no
+  changes.
+- Every template heading is present. A skipped branch is one line on why it
+  does not apply.
+- Each decision in the file is in the decision log, with the author's reason.
+- Numbers and unverified claims appear only under Open questions.
+- A partial yes did not create or overwrite the file.
