@@ -253,6 +253,7 @@ class TestCliBase(unittest.TestCase):
             "SEVERITY": ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"],
             "FOLDER": [cls.TMP_FOLDER],
             "FILE_LIMIT": [10],
+            "FIELD[,...]": ["gfx_activity", "umc_activity,gfx_activity"],
             #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
         }
         baseline["clk_freq"] = cls._read_clk_freq()

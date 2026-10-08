@@ -259,6 +259,7 @@ class _FakeLogger:
 
     def __init__(self, output_format="human"):
         self.output_format = output_format
+        self.destination = "stdout"
         self.captured = {}
         self.store_gpu_json_output = []
 

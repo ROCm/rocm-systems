@@ -14,10 +14,16 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
   - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
 
+- **Added `amd-smi metric --usage-fields` to select usage fields**.  
+  - Returns only the named usage fields, in the requested order, for human, JSON, and CSV output. Named fields are always printed, as `N/A` when unavailable.
+
 ### Changed
 
 - **`amd-smi`, `amd-smi version`, and `amd-smi static --driver` include the DKMS build in the amdgpu version**.  
   - For example `6.19.14.31400000-2370381`. Labels and JSON/CSV keys are unchanged.
+
+- **`amd-smi metric --usage` always reports `usage` as a set of fields**.  
+  - When every source fails, JSON `usage` is an object with each field set to `N/A` instead of the string `N/A`, and CSV has one column per field. Scripts that checked for a single `N/A` should check each field.
 
 ### Resolved Issues
 
@@ -29,6 +35,17 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
+
+- **Fixed `amd-smi metric --usage` discarding readable values when one source failed**.  
+  - A failed average-activity query no longer turns the whole usage section into `N/A`; partition and VCN readings from other sources are kept.
+  - Errors other than AMD SMI library errors now stop the command instead of printing `USAGE: N/A`.
+
+- **Fixed `amd-smi metric --watch --file` losing samples**.  
+  - GPU CSV and human-readable watch files, and NIC and switch watch files in every format, kept every sample except the last one. They now keep all of them, including when the watch is stopped with Ctrl-C or SIGTERM.
+  - A watch stopped before its first sample now leaves an existing `--file` unchanged. `--append` does not apply to watch output.
+
+- **Fixed unstable CSV column order when rows have different fields**.  
+  - Columns that appear only in later rows were added in a random order; they now follow the order they first appear.
 
 ## amd_smi_lib for ROCm 10.1.0
 

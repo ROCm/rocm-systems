@@ -344,6 +344,16 @@ class TestFilterUnsupported(unittest.TestCase):
             self.support.filter_unsupported(values, frozenset({("usage", "mm_activity")})), values
         )
 
+    def test_protected_paths_keep_na_values(self):
+        values = {"usage": {"mm_activity": NA, "jpeg_activity": NA}}
+        suppressed = frozenset({("usage", "mm_activity"), ("usage", "jpeg_activity")})
+        self.assertEqual(
+            self.support.filter_unsupported(
+                values, suppressed, protected_paths=frozenset({("usage", "jpeg_activity")})
+            ),
+            {"usage": {"jpeg_activity": NA}},
+        )
+
     def test_recognizes_human_readable_na_list_string(self):
         values = {
             "usage": {"jpeg_activity": "[N/A, N/A, N/A]", "vcn_activity": "[N/A, 5 %]"},
