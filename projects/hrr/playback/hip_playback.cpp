@@ -2537,6 +2537,7 @@ void hrr_placement_after_event(PlaybackContext& ctx, uint16_t event_type,
                                 ? props.location.id : -1;
             std::unique_lock lk(ctx.map_mutex);
             ctx.pool_device[a->mem_pool] = dev;
+            ctx.pool_max_size[a->mem_pool] = props.maxSize;
             break;
         }
         case HRR_API_HIPDEVICEGETDEFAULTMEMPOOL:
@@ -2857,6 +2858,7 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
         r = hipSuccess;
     } else if (managed) {
         r = hipMallocManaged(&live, pad_sz);
+        if (hrr_drain_for_retry(ctx, r)) r = hipMallocManaged(&live, pad_sz);
     } else {
         r = hipMalloc(&live, pad_sz);
         if (hrr_drain_for_retry(ctx, r)) r = hipMalloc(&live, pad_sz);
@@ -3007,6 +3009,26 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     return r;
 }
 
+// A pool created with a maxSize refuses an allocation that would take it past
+// that, with hipErrorOutOfMemory. Unmapping placement's deferred frees gives
+// the pool nothing back, so that failure is not retried.
+static bool hrr_pool_at_limit(PlaybackContext& ctx, uint64_t rec_pool, hipMemPool_t pool,
+                              size_t size) {
+    size_t max = 0;
+    {
+        std::shared_lock lk(ctx.map_mutex);
+        auto it = ctx.pool_max_size.find(rec_pool);
+        if (it != ctx.pool_max_size.end()) max = it->second;
+    }
+    if (max == 0 || !pool) return false;
+    uint64_t high = 0;
+    if (hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemHigh, &high) != hipSuccess) {
+        (void)hipGetLastError();
+        return false;
+    }
+    return high + size > max;
+}
+
 hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
                                            const uint8_t* pl) {
     const auto* a  = reinterpret_cast<const hrr_args_hipMallocFromPoolAsync*>(pl);
@@ -3025,14 +3047,14 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     if (why) {
         hrr_placing(ctx)->fell_back(a->dev_ptr, orig_sz, "hipMallocFromPoolAsync", why);
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
-        if (hrr_drain_for_retry(ctx, r))
+        if (!hrr_pool_at_limit(ctx, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
             r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     } else if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocFromPoolAsync",
                                      stream, device, &live)) {
         pad_sz = orig_sz;
     } else {
         r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
-        if (hrr_drain_for_retry(ctx, r))
+        if (!hrr_pool_at_limit(ctx, a->mem_pool, pool, pad_sz) && hrr_drain_for_retry(ctx, r))
             r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     }
     if (r == hipSuccess) {
@@ -4908,6 +4930,7 @@ hipError_t playback_hipArrayCreate(PlaybackContext& ctx, const uint8_t* pl) {
     std::memcpy(&desc, a->array_desc_bytes, sizeof(desc));
     hipArray_t arr = nullptr;
     hipError_t r = hipArrayCreate(&arr, &desc);
+    if (hrr_drain_for_retry(ctx, r)) r = hipArrayCreate(&arr, &desc);
     if (r == hipSuccess) ctx.record_array(a->pHandle, arr);
     if (hrr_replayed_recorded_error(ctx, "hipArrayCreate", a->ret, r))
         return hipSuccess;
@@ -4920,6 +4943,7 @@ hipError_t playback_hipArray3DCreate(PlaybackContext& ctx, const uint8_t* pl) {
     std::memcpy(&desc, a->array3d_desc_bytes, sizeof(desc));
     hipArray_t arr = nullptr;
     hipError_t r = hipArray3DCreate(&arr, &desc);
+    if (hrr_drain_for_retry(ctx, r)) r = hipArray3DCreate(&arr, &desc);
     if (r == hipSuccess) ctx.record_array(a->array, arr);
     if (hrr_replayed_recorded_error(ctx, "hipArray3DCreate", a->ret, r))
         return hipSuccess;
@@ -5076,6 +5100,9 @@ hipError_t playback_hipMemCreate(PlaybackContext& ctx, const uint8_t* pl) {
     hipMemGenericAllocationHandle_t live_handle{};
     hipError_t r = hipMemCreate(&live_handle, static_cast<size_t>(a->size), &prop,
                                 static_cast<unsigned long long>(a->flags));
+    if (hrr_drain_for_retry(ctx, r))
+        r = hipMemCreate(&live_handle, static_cast<size_t>(a->size), &prop,
+                         static_cast<unsigned long long>(a->flags));
     if (r == hipSuccess) {
         std::unique_lock lk(ctx.map_mutex);
         ctx.vmm_handle_map[rec_handle] = live_handle;

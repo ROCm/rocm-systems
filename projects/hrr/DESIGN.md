@@ -1138,7 +1138,18 @@ An allocation over a deferred mapping is handled three ways:
 
 When mapping a placed allocation runs out of memory, and when an allocation that
 is not placed runs out of memory, replay unmaps every deferred mapping and tries
-once more. It does not while a capture is open.
+once more. It does not while a capture is open. The allocations retried this way
+are `hipMalloc`, `hipMallocManaged`, `hipExtMallocWithFlags`, `hipMallocAsync`,
+`hipMallocFromPoolAsync`, a region segment, a replayed `hipMemCreate`,
+`hipArrayCreate` and `hipArray3DCreate`. A `hipMallocFromPoolAsync` is not
+retried when its pool was created with a `maxSize` and the allocation would take
+it past that: the pool refuses it whatever replay unmaps. Not retried:
+`hipMallocPitch`, `hipMemAllocPitch`, `hipMalloc3D`, `hipMallocArray`,
+`hipMalloc3DArray`, `hipMallocMipmappedArray` and `hipMipmappedArrayCreate`,
+whose handlers are generated; graph memory nodes, which allocate when the graph
+runs; and memory the runtime allocates for itself, such as kernel scratch. Under
+`--guard-segments` placement is off, so nothing is deferred and there is nothing
+to retry for.
 
 A replayed `hipStreamEndCapture` closes its stream's capture even when replay's
 call fails, and so does `hipStreamEndCapture_spt`. `hipStreamBeginCaptureToGraph`

@@ -362,6 +362,9 @@ struct PlaybackContext {
     // location, or the device hipDeviceGetDefaultMemPool/hipDeviceGetMemPool
     // named. -1 for a pool on the host. Guarded by map_mutex.
     std::unordered_map<uint64_t, int> pool_device;
+    // The maxSize each recorded hipMemPoolCreate gave its pool, 0 for none.
+    // Guarded by map_mutex.
+    std::unordered_map<uint64_t, size_t> pool_max_size;
 
     // ---- Guard pages ----
     // Both off by default. --guard-segments puts a gap after every allocation,
