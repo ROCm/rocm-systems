@@ -738,6 +738,34 @@ MATH_COMPARISON_HP_TEST_DEF(__hlt2, __hlt_ref, Float16, float, false)
  */
 MATH_COMPARISON_HP_TEST_DEF(__hltu2, __hlt_ref, Float16, float, true)
 
+// IEEE 754 2019 maximumNumber: returns the non-NaN operand if one is NaN, a quiet NaN if both are,
+// and orders -0.0 < +0.0.
+static float __hmax_ref(float x1, float x2) {
+  if (std::isnan(x1) && std::isnan(x2))
+    return std::numeric_limits<float>::quiet_NaN();
+  if (std::isnan(x1))
+    return x2;
+  if (std::isnan(x2))
+    return x1;
+  if (x1 == x2)
+    return std::signbit(x1) ? x2 : x1;
+  return x1 > x2 ? x1 : x2;
+}
+
+// IEEE 754 2019 minimumNumber: returns the non-NaN operand if one is NaN, a quiet NaN if both are,
+// and orders -0.0 < +0.0.
+static float __hmin_ref(float x1, float x2) {
+  if (std::isnan(x1) && std::isnan(x2))
+    return std::numeric_limits<float>::quiet_NaN();
+  if (std::isnan(x1))
+    return x2;
+  if (std::isnan(x2))
+    return x1;
+  if (x1 == x2)
+    return std::signbit(x1) ? x1 : x2;
+  return x1 < x2 ? x1 : x2;
+}
+
 MATH_BINARY_HP_KERNEL_DEF(__hmax)
 
 /**
@@ -745,7 +773,7 @@ MATH_BINARY_HP_KERNEL_DEF(__hmax)
  * ------------------------
  *    - Tests the numerical accuracy of `__hmax(x,y)` against a table of difficult values, followed
  * by a large number of randomly generated values. The results are compared against reference
- * function `float std::fmax(float, float)`
+ * function `__hmax_ref`, which implements IEEE 754 2019 maximumNumber
  *
  * Test source
  * ------------------------
@@ -754,8 +782,7 @@ MATH_BINARY_HP_KERNEL_DEF(__hmax)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-MATH_BINARY_HP_TEST_DEF_IMPL(__hmax, static_cast<float (*)(float, float)>(std::fmax),
-                             EqValidatorBuilderFactory<float>())
+MATH_BINARY_HP_TEST_DEF_IMPL(__hmax, __hmax_ref, EqOrderedZeroValidatorBuilderFactory<float>())
 
 MATH_BINARY_HP_KERNEL_DEF(__hmin)
 
@@ -764,7 +791,7 @@ MATH_BINARY_HP_KERNEL_DEF(__hmin)
  * ------------------------
  *    - Tests the numerical accuracy of `__hmin(x,y)` against a table of difficult values, followed
  * by a large number of randomly generated values. The results are compared against reference
- * function `float std::fmin(float, float)`
+ * function `__hmin_ref`, which implements IEEE 754 2019 minimumNumber
  *
  * Test source
  * ------------------------
@@ -773,16 +800,15 @@ MATH_BINARY_HP_KERNEL_DEF(__hmin)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-MATH_BINARY_HP_TEST_DEF_IMPL(__hmin, static_cast<float (*)(float, float)>(std::fmin),
-                             EqValidatorBuilderFactory<float>())
+MATH_BINARY_HP_TEST_DEF_IMPL(__hmin, __hmin_ref, EqOrderedZeroValidatorBuilderFactory<float>())
 
+// IEEE 754 2019 maximum: returns a quiet NaN if either operand is NaN, and orders -0.0 < +0.0.
 static float __hmax_nan_ref(float x1, float x2) {
-  if (std::isnan(x1))
-    return x1;
-  else if (std::isnan(x2))
-    return x2;
-  else
-    return std::fmax(x1, x2);
+  if (std::isnan(x1) || std::isnan(x2))
+    return std::numeric_limits<float>::quiet_NaN();
+  if (x1 == x2)
+    return std::signbit(x1) ? x2 : x1;
+  return x1 > x2 ? x1 : x2;
 }
 
 MATH_BINARY_HP_KERNEL_DEF(__hmax_nan)
@@ -792,7 +818,8 @@ MATH_BINARY_HP_KERNEL_DEF(__hmax_nan)
  * ------------------------
  *    - Tests the numerical accuracy of `__hmax_nan(x,y)` against a table of difficult values,
  * followed by a large number of randomly generated values. The results are compared against
- * reference function `float std::fmax(float, float)` with modified result when an operand is nan.
+ * reference function `__hmax_nan_ref`, which implements IEEE 754 2019 maximum, returning nan if
+ * either operand is nan.
  *
  * Test source
  * ------------------------
@@ -801,15 +828,16 @@ MATH_BINARY_HP_KERNEL_DEF(__hmax_nan)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-MATH_BINARY_HP_TEST_DEF_IMPL(__hmax_nan, __hmax_nan_ref, EqValidatorBuilderFactory<float>())
+MATH_BINARY_HP_TEST_DEF_IMPL(__hmax_nan, __hmax_nan_ref,
+                             EqOrderedZeroValidatorBuilderFactory<float>())
 
+// IEEE 754 2019 minimum: returns a quiet NaN if either operand is NaN, and orders -0.0 < +0.0.
 static float __hmin_nan_ref(float x1, float x2) {
-  if (std::isnan(x1))
-    return x1;
-  else if (std::isnan(x2))
-    return x2;
-  else
-    return std::fmin(x1, x2);
+  if (std::isnan(x1) || std::isnan(x2))
+    return std::numeric_limits<float>::quiet_NaN();
+  if (x1 == x2)
+    return std::signbit(x1) ? x1 : x2;
+  return x1 < x2 ? x1 : x2;
 }
 
 MATH_BINARY_HP_KERNEL_DEF(__hmin_nan)
@@ -819,7 +847,8 @@ MATH_BINARY_HP_KERNEL_DEF(__hmin_nan)
  * ------------------------
  *    - Tests the numerical accuracy of `__hmin_nan(x,y)` against a table of difficult values,
  * followed by a large number of randomly generated values. The results are compared against
- * reference function `float std::fmin(float, float)` with modified result when an operand is nan.
+ * reference function `__hmin_nan_ref`, which implements IEEE 754 2019 minimum, returning nan if
+ * either operand is nan.
  *
  * Test source
  * ------------------------
@@ -828,7 +857,8 @@ MATH_BINARY_HP_KERNEL_DEF(__hmin_nan)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-MATH_BINARY_HP_TEST_DEF_IMPL(__hmin_nan, __hmin_nan_ref, EqValidatorBuilderFactory<float>())
+MATH_BINARY_HP_TEST_DEF_IMPL(__hmin_nan, __hmin_nan_ref,
+                             EqOrderedZeroValidatorBuilderFactory<float>())
 
 /**
  * End doxygen group MathTest.
