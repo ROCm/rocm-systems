@@ -533,6 +533,18 @@ __host__ void HostInterface::putmem_signal_on_stream(
       dest, source, nelems, sig_addr, signal, sig_op, pe);
 }
 
+__host__ void HostInterface::signal_add_on_stream(uint64_t *sig_addr,
+                                                  uint64_t signal, int pe,
+                                                  hipStream_t stream) {
+  rocshmem_signal_add_kernel<<<1, 1, 0, stream>>>(sig_addr, signal, pe);
+}
+
+__host__ void HostInterface::signal_set_on_stream(uint64_t *sig_addr,
+                                                  uint64_t signal, int pe,
+                                                  hipStream_t stream) {
+  rocshmem_signal_set_kernel<<<1, 1, 0, stream>>>(sig_addr, signal, pe);
+}
+
 __host__ void HostInterface::signal_wait_until_on_stream(uint64_t *sig_addr,
                                                          int cmp,
                                                          uint64_t cmp_value,
