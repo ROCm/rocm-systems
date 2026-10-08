@@ -1,11 +1,7 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * Host-only microtests for src/algorithms/dda/fabric/fabric_init.cu,
- * #include-d via FABRIC_INIT_CC_PATH: the fabric-path gate, per-comm fabric
- * DDA setup, and its teardown. The handler and barrier it builds on are the
- * real ones the sibling tests include, driven at the HIP VMM and bootstrap
- * seams through HipVmmLedger.
+ * Host-only tests for src/algorithms/dda/fabric/fabric_init.cu.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -35,8 +31,7 @@
 #include "algorithms/dda/fabric/FabricTestFixture.h"
 #include "mem_manager.h"
 
-// Everything fabric_init.cu includes, first, so the free/ncclCalloc shims below
-// reach only its own body.
+// Included before the shims below so they reach only fabric_init.cu.
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "algorithms/dda/fabric/fabric_init.h"
@@ -50,8 +45,7 @@
 #include "param.h"
 #include "rccl_common.h"
 
-// Host memory fabric_init.cu allocates with ncclCalloc and releases with free,
-// with its size; the ledger only sees device memory.
+// Host allocations by fabric_init.cu, with sizes.
 static std::map<void*, size_t> g_initHostLive;
 template <typename T>
 static ncclResult_t InitCalloc(T** ptr, size_t nelem, const char* file, int line, const char* fn) {
@@ -59,7 +53,6 @@ static ncclResult_t InitCalloc(T** ptr, size_t nelem, const char* file, int line
   if (ret == ncclSuccess && *ptr != nullptr) g_initHostLive[*ptr] = nelem * sizeof(T);
   return ret;
 }
-// [dst, dst + n) lies inside one live ncclCalloc block.
 static bool InitHostCovers(const void* dst, size_t n) {
   auto it = g_initHostLive.upper_bound(const_cast<void*>(dst));
   if (it == g_initHostLive.begin()) return false;
@@ -89,21 +82,18 @@ using dda_fabric_test::kBootstrap;
 using dda_fabric_test::kNRanks;
 using dda_fabric_test::kRank;
 
-// The local block cap. Above the AllGather term of ddaLLEpochCount for kNRanks (4 * 8 = 32),
-// so the agreed block count is what sizes the epoch cells.
+// Above kNRanks * 8, so the block count sizes the epoch cells.
 constexpr int kCuCount = 40;
 constexpr int64_t kScratchBytes = 64 * 1024;
 char kGfx1250[] = "gfx1250";
 
-// Installs `fail` in front of `slot`'s current behaviour for the calls `when` picks.
+// Fails the calls `when` picks; passes the rest through.
 template <typename R, typename... Args, typename When>
 void FailWhen(std::function<R(Args...)>& slot, When when, R fail) {
   auto pass = slot;
   slot = [pass, when, fail](Args... args) mutable -> R { return when(args...) ? fail : pass(args...); };
 }
 
-// The fabric resources ncclDdaFabricCommInit hands to the comm and
-// ncclDdaFabricCommFini takes back.
 void ExpectNoFabricResources(const ncclComm& comm) {
   EXPECT_EQ(comm.ddaFabricMemHandler, nullptr);
   EXPECT_EQ(comm.ddaScratch, nullptr);
@@ -116,8 +106,7 @@ void ExpectNoFabricResources(const ncclComm& comm) {
   EXPECT_EQ(comm.ddaLLEpochLen, 0);
 }
 
-// ...plus the block count, which only a successful Init sets. Fini leaves it as
-// it was, so Fini tests check ExpectNoFabricResources only.
+// Fini does not reset ddaFabricMaxBlocks, so Fini tests skip it.
 void ExpectNoFabricState(const ncclComm& comm) {
   ExpectNoFabricResources(comm);
   EXPECT_EQ(comm.ddaFabricMaxBlocks, 0);
@@ -173,8 +162,7 @@ class DdaFabricCommTest : public FabricLedgerTest {
     if (HasFatalFailure()) return;
     SetMicroEnvAbsent("RCCL_DDA_FABRIC_MAXBLOCKS");
     g_initHostLive.clear();
-    // Host-to-host copies are not the ledger's to check; the one init makes, into
-    // its ncclCalloc'd peer table, must land inside a block it allocated.
+    // Host-to-host copies must land inside a tracked host block.
     auto ledgerCopy = g_hipMemcpy;
     g_hipMemcpy = [this, ledgerCopy](void* dst, const void* src, size_t n, hipMemcpyKind kind) {
       if (kind == hipMemcpyHostToHost && !InitHostCovers(dst, n)) {
@@ -193,7 +181,7 @@ class DdaFabricCommTest : public FabricLedgerTest {
       const bool unset = !bufferSize_.has_value() || std::string(name) != "RCCL_DDA_FABRIC_BUFFER_SIZE";
       return unset ? deftVal : *bufferSize_;
     };
-    // A homogeneous clique: every peer publishes what this rank published.
+    // Every peer publishes what this rank published.
     g_bootstrapAllGather = [this](void* state, void* allData, int size) {
       gatherStates_.push_back(state);
       auto* slots = static_cast<char*>(allData);
@@ -203,7 +191,7 @@ class DdaFabricCommTest : public FabricLedgerTest {
       return ncclSuccess;
     };
 
-    comm_ = std::make_unique<ncclComm>();  // value-initialised: no fabric state
+    comm_ = std::make_unique<ncclComm>();
     comm_->nRanks = kNRanks;
     comm_->rank = kRank;
     comm_->bootstrap = kBootstrap;
@@ -214,29 +202,25 @@ class DdaFabricCommTest : public FabricLedgerTest {
   }
 
   void TearDown() override {
-    // first: Fini frees through the ledger hooks
     if (comm_) ncclDdaFabricCommFini(comm_.get());
     EXPECT_TRUE(HostClean());
     ResetRcclWrapFakes();
     FabricLedgerTest::TearDown();
   }
 
-  // Nothing host-side left allocated, and no host copy refused.
   ::testing::AssertionResult HostClean() const {
     if (g_initHostLive.empty() && hostCopiesRefused_ == 0) return ::testing::AssertionSuccess();
     return ::testing::AssertionFailure() << g_initHostLive.size() << " host allocations live; " << hostCopiesRefused_
                                          << " host copies refused";
   }
 
-  // Nothing device- or host-side left allocated, and nothing refused.
   ::testing::AssertionResult AllReleased() const {
     ::testing::AssertionResult device = LedgerClean();
     if (!device) return device;
     return HostClean();
   }
 
-  // Peers report these block caps instead of this rank's (indexed by rank; the
-  // entry at this rank's own slot is ignored).
+  // Peers report these caps; this rank's own slot is ignored.
   void SetPeerBlockCaps(std::vector<int> caps) {
     auto homogeneous = g_bootstrapAllGather;
     g_bootstrapAllGather = [this, caps, homogeneous](void* state, void* allData, int size) {
@@ -256,9 +240,9 @@ class DdaFabricCommTest : public FabricLedgerTest {
     return nullptr;
   }
 
-  std::optional<int64_t> bufferSize_ = kScratchBytes;  // RCCL_DDA_FABRIC_BUFFER_SIZE; nullopt = unset
+  std::optional<int64_t> bufferSize_ = kScratchBytes;  // RCCL_DDA_FABRIC_BUFFER_SIZE
   int hostCopiesRefused_ = 0;
-  std::unique_ptr<ncclMemManager> manager_;  // outlives TearDown's Fini
+  std::unique_ptr<ncclMemManager> manager_;  // outlives TearDown
   std::unique_ptr<ncclComm> comm_;
   std::vector<Memset> memsets_;
   std::vector<void*> gatherStates_;
@@ -313,7 +297,7 @@ INSTANTIATE_TEST_SUITE_P(
                       SkipCase{"BufferSizeZero", [](ncclComm*, std::optional<int64_t>* bytes) { *bytes = 0; }},
                       SkipCase{"DdaDisabled",
                                [](ncclComm*, std::optional<int64_t>* bytes) {
-                                 bytes->reset();  // unset: sized from DDA, which is off
+                                 bytes->reset();
                                  g_rcclParamDdaEnable = 0;
                                }},
                       SkipCase{"VmmUnavailable",
@@ -336,7 +320,7 @@ TEST_F(DdaFabricCommInitTest, CommInit_AllSucceed_HandsEveryResourceToComm) {
   EXPECT_NE(comm_->ddaPeerPtrsHost, nullptr);
   ASSERT_NE(comm_->ddaFabricBarrierState, nullptr);
   EXPECT_NE(comm_->ddaFabricBarrierState->resources, nullptr);
-  EXPECT_EQ(StateOf(comm_->ddaFabricBarrierState->barrierHost).nRanks, kNRanks);  // the barrier was kept
+  EXPECT_EQ(StateOf(comm_->ddaFabricBarrierState->barrierHost).nRanks, kNRanks);
   EXPECT_EQ(comm_->ddaFabricMaxBlocks, kCuCount);
   EXPECT_NE(comm_->ddaLLEpochDev, nullptr);
   EXPECT_EQ(comm_->ddaLLEpochLen, kCuCount);
@@ -353,7 +337,7 @@ TEST_F(DdaFabricCommInitTest, CommInit_BufferSizeUnset_SizesScratchFromDdaPayloa
   bufferSize_.reset();
   g_rcclParamDdaLL = 0;
   g_rcclParamDdaLL128 = 0;
-  // Not a page multiple: ddaScratchBytes is the size asked for, not the rounded reservation.
+  // Not a page multiple.
   constexpr size_t kPayloadCap = 3 * 4096 + 100;
   ScopedHook cap(g_rcclDdaScratchPayloadCap, [](const ncclComm*) { return kPayloadCap; });
 
@@ -367,7 +351,7 @@ TEST_F(DdaFabricCommInitTest, CommInit_BufferSizeUnset_SizesScratchForTheAllRedu
   g_rcclParamDdaLL = 0;
   g_rcclParamDdaLL128 = 1;
   constexpr size_t kPayloadCap = 4096;
-  constexpr size_t kLL128Threshold = 1024 * 1024;  // its slot arrays outgrow the payload cap
+  constexpr size_t kLL128Threshold = 1024 * 1024;
   ScopedHook cap(g_rcclDdaScratchPayloadCap, [](const ncclComm*) { return kPayloadCap; });
   ScopedHook ll128(g_rcclDdaLL128Threshold, [](const ncclComm*, ncclFunc_t func) {
     EXPECT_EQ(func, ncclFuncAllReduce);
@@ -382,7 +366,7 @@ TEST_F(DdaFabricCommInitTest, CommInit_BufferSizeUnset_SizesScratchForTheAllRedu
 }
 
 TEST_F(DdaFabricCommInitTest, CommInit_AllSucceed_PeersMapTheWholeScratch) {
-  constexpr int64_t kUnalignedScratch = 5 * 4096 + 100;  // a wrong size would round differently
+  constexpr int64_t kUnalignedScratch = 5 * 4096 + 100;  // not a page multiple
   bufferSize_ = kUnalignedScratch;
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
   auto* const* dev = static_cast<void* const*>(comm_->ddaPeerPtrsDev);  // host stand-in
@@ -407,8 +391,6 @@ TEST_F(DdaFabricCommInitTest, CommInit_AllSucceed_PeerTablesHoldOwnScratchAndEac
     EXPECT_EQ(dev[i], expected) << "rank " << i;
     EXPECT_EQ(host[i], expected) << "rank " << i;
   }
-  // Independently of the handler: the peer slots are exactly the scratch-sized
-  // mappings other than this rank's own scratch.
   std::set<void*> scratchMappings;
   for (const auto& entry : ledger_.reserved) {
     if (entry.second == static_cast<size_t>(kScratchBytes) && entry.first != comm_->ddaScratch) {
@@ -448,7 +430,7 @@ TEST_F(DdaFabricCommInitTest, CommInit_AllSucceed_BarrierUsesCommGeometry) {
 }
 
 TEST_F(DdaFabricCommInitTest, CommInit_WithManager_TracksScratchAndUntracksPeerMappingsInIt) {
-  manager_ = std::make_unique<ncclMemManager>();  // value-initialised: nothing released
+  manager_ = std::make_unique<ncclMemManager>();
   ncclMemManager* const manager = manager_.get();
   comm_->memManager = manager;
   std::vector<std::pair<ncclMemManager*, void*>> tracked;
@@ -486,7 +468,7 @@ TEST_F(DdaFabricCommInitTest, CommInit_WithManager_TracksScratchAndUntracksPeerM
 }
 
 TEST_F(DdaFabricCommInitTest, CommInit_PeerCapsLower_UsesSmallestCapAcrossRanks) {
-  constexpr int kSmallest = 36;  // above the epoch cells' AllGather term (32), so it sizes them
+  constexpr int kSmallest = 36;  // above kNRanks * 8
   SetPeerBlockCaps({kCuCount, /*own slot*/ -1, kSmallest, 38});
 
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
@@ -534,7 +516,6 @@ TEST_F(DdaFabricCommInitTest, CommInit_RanksAtCap_SetsUpFabricPath) {
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
   EXPECT_NE(comm_->ddaFabricMemHandler, nullptr);
-  // The one shape where the epoch cells' AllGather term (nRanks * 8) outgrows the block count.
   const size_t epochLen = static_cast<size_t>(dda::common::kDdaMaxNranks) * nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
   ASSERT_GT(epochLen, static_cast<size_t>(kCuCount));
   EXPECT_EQ(static_cast<size_t>(comm_->ddaLLEpochLen), epochLen);
@@ -553,9 +534,6 @@ TEST_F(DdaFabricCommInitTest, CommInit_BlockCapGatherFails_ReturnsErrorWithoutAl
   EXPECT_TRUE(AllReleased());
 }
 
-// Current behaviour: every failure after the block-cap gather falls back on
-// this rank alone -- success, no fabric state on the comm, nothing left
-// allocated.
 struct FailCase {
   const char* name;
   std::function<void()> install;
@@ -572,8 +550,6 @@ TEST_P(DdaFabricCommInitFailTest, CommInit_StepFails_FallsBackWithoutFabricState
   EXPECT_TRUE(AllReleased());
 }
 
-// Sizes that tell the allocations apart: the scratch is kScratchBytes, the
-// peer table kNRanks pointers, the epoch cells kCuCount uint32s.
 constexpr size_t kPeerTableBytes = kNRanks * sizeof(void*);
 constexpr size_t kEpochBytes = kCuCount * sizeof(uint32_t);
 
@@ -586,7 +562,7 @@ INSTANTIATE_TEST_SUITE_P(
                        g_hipMemCreate,
                        [](hipMemGenericAllocationHandle_t*, size_t size, const hipMemAllocationProp*,
                           unsigned long long) {
-                         return size == static_cast<size_t>(kScratchBytes);  // a page multiple
+                         return size == static_cast<size_t>(kScratchBytes);
                        },
                        hipErrorOutOfMemory);
                  }},
@@ -606,7 +582,7 @@ INSTANTIATE_TEST_SUITE_P(
                  }},
         FailCase{"PeerTableCopy",
                  [] {
-                   // The barrier stages a table of the same size; fail only the one hipMalloc made.
+                   // The barrier's table has the same size; fail only init's.
                    auto table = std::make_shared<void*>(nullptr);
                    auto ledgerMalloc = g_hipMalloc;
                    g_hipMalloc = [table, ledgerMalloc](void** ptr, size_t size) {
@@ -628,7 +604,6 @@ INSTANTIATE_TEST_SUITE_P(
                  }},
         FailCase{"Barrier",
                  [] {
-                   // The barrier's flag buffer is the only VMM allocation smaller than the scratch.
                    FailWhen(
                        g_hipMemCreate,
                        [](hipMemGenericAllocationHandle_t*, size_t size, const hipMemAllocationProp*,
