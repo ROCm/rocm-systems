@@ -2804,6 +2804,8 @@ template <typename Inst, typename FmaOp>
 
 /// @brief Execute VOP3 F16 ternary SIMD with promoted F32 output modifiers.
 /// @details Pipeline: widen sources -> ABS/NEG -> `tern_op` -> F32 OMOD/CLAMP -> round F16.
+/// Scalar/SIMD ordering mismatch: MAD/older min/max scalar paths round before
+/// OMOD/CLAMP; this SIMD path rounds afterward. DIV_FIXUP needs separate review.
 /// Storage: generic zero-extends the destination dword; true16 selects source
 /// and destination halves per OP_SEL and ISA storage policy.
 template <bool True16, typename Inst, typename FmaOp>
