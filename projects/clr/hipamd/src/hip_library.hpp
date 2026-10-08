@@ -63,7 +63,7 @@ class LibraryContainer {
   std::mutex lib_mutex_;
   std::atomic_bool built_ = false;
   std::unique_ptr<hip::DynCO> dynco_;
-  // Set once Module() has registered dynco_ into PlatformState.
+  // Set once GetModule() has registered dynco_ into PlatformState.
   bool module_registered_ = false;
   // Function-only code objects keyed by device ID; dynco_ owns the primary full load.
   std::map<int, std::unique_ptr<hip::DynCO>> code_objects_by_device_;
