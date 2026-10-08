@@ -1386,7 +1386,9 @@ TEST_CASE("Unit_HRR_PinnedHost_CaptureElsewhere_Direct", "[.][hrr-direct]") {
 //        3  none: device 1 is made current and synchronized, and the
 //           workload ends with S still busy and the buffer allocated
 //        4  hipHostFree, then the flag is set
-//        5  hipDeviceReset of device 1, which releases its allocations
+//        5  hipDeviceReset of device 1. With two or more devices a reset
+//           frees no pinned host memory, so the buffer stays allocated;
+//           the case shows only that replay waits before the reset.
 // Each release syncs device 1 only, so S is still held. Replay queues the
 // restore for the read behind what holds S. If it released the buffer straight
 // away, the restore would write freed memory. In variant 3 replay ends with
@@ -2931,8 +2933,10 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceRestoreAtExit) {
 }
 
 // ---------------------------------------------------------------------------
-// hipDeviceReset of the allocating device releases the buffer without waiting
-// for device 0's streams, so replay waits for every queued restore first.
+// Replay waits for every queued restore before a hipDeviceReset. With one GPU
+// the reset releases pinned host memory, and a restore still queued on the
+// null stream would write it afterwards. With two, as here, the reset frees
+// none, so the case checks only that replay waits.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceReset) {
   cross_device_free("5", "hipDeviceReset waits for a pinned host snapshot restore");

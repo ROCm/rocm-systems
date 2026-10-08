@@ -752,7 +752,9 @@ the old buffer that the runtime does not know. The six cross-device cases need
 two devices and skip with fewer, which is every runner that pins one GPU: a
 free, an unregister, a `hipFree`, a `hipDeviceReset` of the allocating device,
 no free at all (the summary and the `--kernel-filter` warm-up wait), and a free
-whose restore waits for a later event (the bounded wait and the leak). Three
+whose restore waits for a later event (the bounded wait and the leak). With
+two devices the reset frees no pinned host memory, so the reset case shows
+only that replay waits before it. Three
 paths are untested by design: the fork handlers, a blob or event that cannot be
 written, and a restore `hipLaunchHostFunc` refuses. Each needs a fault injected
 into the capture or replay process, which no test hook provides. The waits at
@@ -812,9 +814,10 @@ out. Two paths release the allocation anyway, so a restore queued before them
 can write archive-chosen bytes into memory that has been released and may have
 been reused:
 
-- a replayed `hipDeviceReset` whose bounded wait runs out. An archive can
-  arrange this on purpose: hold the launch stream with a stream wait, reset
-  the allocating device, allocate again, then release the stream;
+- a replayed `hipDeviceReset` whose bounded wait runs out, when replay sees one
+  GPU (with more, a reset frees no pinned host memory). An archive can arrange
+  this on purpose: hold the null stream with a stream wait, launch on it, reset
+  the device, allocate again, then release the null stream;
 - an exit after a fatal HIP error, which does not drain queued restores while
   the process tears its memory down.
 
@@ -848,10 +851,15 @@ bytes in front of those kernels.
   on the allocating device's streams: the captured free waited for them, so the
   recorded program did not hold them past it.
 - A replayed `hipDeviceReset` first waits for every queued restore, at most
-  `--sync-watchdog-ms` or 10 s. If one is still queued then, the reset goes on
-  and releases the device's pinned allocations, and the restore can later write
-  released memory: a reset releases them all, so replay cannot leak just the
-  one it waits for.
+  `--sync-watchdog-ms` or 10 s, and then goes on. With two or more GPUs a reset
+  never frees pinned host memory: the runtime keeps it in a context shared by
+  every device, which a reset leaves alone. With one GPU it does free it, after
+  it destroys the device's streams other than the null stream, so only a
+  restore queued on the null stream can still be pending. That restore can
+  then write released memory: the reset releases every pinned allocation, so
+  replay cannot leak just the one the restore writes. Replay orders the reset
+  against the other threads' events, so that their launches do not keep
+  queueing restores while it waits.
 - Replay exits after a fatal HIP error without syncing the device or draining
   queued restores. A host function that still runs keeps its own state alive,
   but the pinned memory it writes is torn down as the process exits, so it can

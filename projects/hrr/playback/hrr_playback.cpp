@@ -572,6 +572,9 @@ static bool needs_ordering(uint16_t etype) {
     case HRR_API_HIPSTREAMCREATEWITHFLAGS:
     case HRR_API_HIPSTREAMCREATEWITHPRIORITY:
     case HRR_API_HIPSTREAMDESTROY:
+    // A reset destroys streams and first waits for every queued pinned host
+    // restore, which launches on other threads would keep queueing.
+    case HRR_API_HIPDEVICERESET:
     // Event create / destroy
     case HRR_API_HIPEVENTCREATE:
     case HRR_API_HIPEVENTCREATEWITHFLAGS:

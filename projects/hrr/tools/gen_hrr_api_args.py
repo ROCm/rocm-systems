@@ -2856,9 +2856,10 @@ _HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc', 'hipMallocHost',
 # hipHostUnregister are hand-written and do the same there.
 _HOST_ALLOC_FREE_APIS = {'hipHostFree', 'hipFreeHost'}
 
-# APIs that release every allocation of the device, pinned host memory
-# included, without waiting for streams of other devices. The handler first
-# waits, a bounded time, for every queued pinned host snapshot restore.
+# APIs that can release pinned host memory under a restore still queued on a
+# stream they do not drain: hipDeviceReset does on one GPU, where the null
+# stream survives it. The handler first waits, a bounded time, for every
+# queued pinned host snapshot restore.
 _RELEASES_ALL_HOST_ALLOCS_APIS = {'hipDeviceReset'}
 
 # APIs that free device allocations: API name -> rec_ptr_param name in struct
