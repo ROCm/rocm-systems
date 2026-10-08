@@ -701,6 +701,7 @@ static hipError_t playback_hipDevicePrimaryCtxSetFlags(PlaybackContext& ctx, con
 
 static hipError_t playback_hipDeviceReset(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipDeviceReset*>(payload);
+  (void)hrr_wait_host_restores(ctx, nullptr, "hipDeviceReset");
   hipError_t _r = (hipError_t)hipDeviceReset();
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceReset", a->ret);

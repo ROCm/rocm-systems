@@ -840,7 +840,7 @@ NOOP_PLAYBACK_APIS: Set[str] = {
 # dispatch_event() treats any non-success handler return as fatal, so a single
 # untranslatable destination would abort the entire replay. Warn once and skip
 # the call instead, which is the unmapped-pointer contract the hand-written
-# playback_hipFree / playback_hipFreeAsync / playback_hipHostFree already use.
+# playback_hipFree / playback_hipFreeAsync already use.
 # Slightly-wrong data beats no replay at all.
 SKIP_IF_UNMAPPED_PLAYBACK_APIS: Dict[str, str] = {
     "hipStreamWriteValue32": "ptr",
@@ -2856,6 +2856,11 @@ _HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc', 'hipMallocHost',
 # hipHostUnregister are hand-written and do the same there.
 _HOST_ALLOC_FREE_APIS = {'hipHostFree', 'hipFreeHost'}
 
+# APIs that release every allocation of the device, pinned host memory
+# included, without waiting for streams of other devices. The handler first
+# waits, a bounded time, for every queued pinned host snapshot restore.
+_RELEASES_ALL_HOST_ALLOCS_APIS = {'hipDeviceReset'}
+
 # APIs that free device allocations: API name -> rec_ptr_param name in struct
 _ALLOC_FREE_APIS: Dict[str, str] = {
     'hipFree':         'ptr',
@@ -3411,6 +3416,8 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         translate_fn = _PLAYBACK_HANDLE_TRANSLATE.get(hdl_type, '')
         if translate_fn:
             lines.append(f"  uint64_t _rec_hdl = a->{rec_param};")
+    if entry.name in _RELEASES_ALL_HOST_ALLOCS_APIS:
+        lines.append(f"  (void)hrr_wait_host_restores(ctx, nullptr, \"{entry.name}\");")
 
     # Build argument list for the real call
     pre_lines: List[str] = []

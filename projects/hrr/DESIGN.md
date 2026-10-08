@@ -814,8 +814,11 @@ exists to put chosen bytes in front of those kernels.
   program then holds memory the captured one had released. This cannot happen
   on the allocating device's streams: the captured free waited for them, so the
   recorded program did not hold them past it.
-- A replayed `hipDeviceReset` releases the device's pinned allocations without
-  waiting for restores queued for them on another device's stream.
+- A replayed `hipDeviceReset` first waits for every queued restore, at most
+  `--sync-watchdog-ms` or 10 s. If one is still queued then, the reset goes on
+  and releases the device's pinned allocations, and the restore can later write
+  released memory: a reset releases them all, so replay cannot leak just the
+  one it waits for.
 - Replay exits after a fatal HIP error without syncing the device or draining
   queued restores. A host function that still runs keeps its own state alive,
   but the pinned memory it writes is torn down as the process exits, so it can

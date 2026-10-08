@@ -1386,6 +1386,7 @@ TEST_CASE("Unit_HRR_PinnedHost_CaptureElsewhere_Direct", "[.][hrr-direct]") {
 //        3  none: device 1 is made current and synchronized, and the
 //           workload ends with S still busy and the buffer allocated
 //        4  hipHostFree, then the flag is set
+//        5  hipDeviceReset of device 1, which releases its allocations
 // Each release syncs device 1 only, so S is still held. Replay queues the
 // restore for the read behind what holds S. If it released the buffer straight
 // away, the restore would write freed memory. In variant 3 replay ends with
@@ -1402,7 +1403,7 @@ TEST_CASE("Unit_HRR_PinnedHost_CrossDeviceFree_Direct", "[.][hrr-direct]") {
     return;
   }
   const int variant = env_int("HRR_PINNED_VARIANT");
-  REQUIRE((variant >= 0 && variant <= 4));
+  REQUIRE((variant >= 0 && variant <= 5));
   constexpr int kSpinMs = 2000;
   constexpr int kSeed   = 0x6e6e;
 
@@ -1469,6 +1470,11 @@ TEST_CASE("Unit_HRR_PinnedHost_CrossDeviceFree_Direct", "[.][hrr-direct]") {
     case 4: HRR_HIP_CHECK(hipHostFree(h)); break;
     case 1: HRR_HIP_CHECK(hipHostUnregister(reg)); break;
     case 2: HRR_HIP_CHECK(hipFree(h)); break;
+    case 5:
+      HRR_HIP_CHECK(hipSetDevice(1));
+      HRR_HIP_CHECK(hipDeviceReset());
+      HRR_HIP_CHECK(hipSetDevice(0));
+      break;
     default: break;
   }
   // S was still held when the buffer went.
@@ -2741,7 +2747,7 @@ void cross_device_free(const char* variant, const std::string& wait,
   const fs::path archive = hrr_single_process_archive(cap.path);
   const int v = std::atoi(variant);
   const bool held_by_flag = v == 4;
-  const bool checks_scratch = v <= 2;
+  const bool checks_scratch = v <= 2 || v == 5;
 
   hrr::Archive arc;
   REQUIRE(hrr::load_archive(archive.string(), arc));
@@ -2804,6 +2810,14 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceHipFree) { cross_device_free("2", k
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceRestoreAtExit) {
   cross_device_free("3", "the replay summary waits for a pinned host snapshot restore");
+}
+
+// ---------------------------------------------------------------------------
+// hipDeviceReset of the allocating device releases the buffer without waiting
+// for device 0's streams, so replay waits for every queued restore first.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceReset) {
+  cross_device_free("5", "hipDeviceReset waits for a pinned host snapshot restore");
 }
 
 // ---------------------------------------------------------------------------
