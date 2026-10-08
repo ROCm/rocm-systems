@@ -14,11 +14,14 @@
 #include "fail_loud.h"
 #include "nccl_fakes.h"
 #include "rma/rma.h"
+#include "tuning_fakes.h"
 
-// init.cc owns NCCL_PARAM(P2pDisable). enqueue.cc's addP2pToPlan calls it via
-// rcclP2pPolicyChannels; wrap_fakes.cc supplies the body for binaries that
-// compile rccl_wrap.cc, which this target does not.
-int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", 0); }
+// init.cc owns NCCL_PARAM(P2pDisable). The execution policy adapter that enqueue.cc's addP2pToPlan
+// calls reads it; wrap_fakes.cc supplies the body for binaries that
+// compile rccl_wrap.cc, which this target does not. This strong definition
+// replaces tuning_fakes.cc's weak one, so it keeps g_tuningParamP2pDisable as
+// the default for tests that drive the param through that seam.
+int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", g_tuningParamP2pDisable); }
 
 // rma.cc owns scheduleRmaTasksToPlan, but rma_fakes.cc also links into binaries that compile the
 // real rma.cc. api_trace.cc owns ncclGetErrorString, and api_trace_fakes.cc does not link here.
