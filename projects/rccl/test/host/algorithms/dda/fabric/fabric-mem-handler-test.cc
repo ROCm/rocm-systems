@@ -1,11 +1,7 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * Host-only microtests for src/algorithms/dda/fabric/fabric_mem_handler.cc,
- * #include-d via FABRIC_MEM_HANDLER_CC_PATH. The handler's peer mappings go
- * through alloc.h's inline cuMem helpers, so the fixture drives them at the HIP
- * VMM seams: InstallHipVmmEmulator() plus a reservation ledger that remembers
- * each mapping's size, which the emulator's address-range query does not.
+ * Host-only tests for src/algorithms/dda/fabric/fabric_mem_handler.cc.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -35,7 +31,7 @@ namespace {
 
 constexpr int kNRanks = 4;
 constexpr int kRank = 1;
-constexpr size_t kPage = 4096;  // InstallHipVmmEmulator()'s allocation granularity
+constexpr size_t kPage = 4096;  // emulator allocation granularity
 
 void* const kBootstrap = reinterpret_cast<void*>(0xB007);
 void* const kSelfPtr = reinterpret_cast<void*>(0x5E1F000);
@@ -43,8 +39,7 @@ const hipMemGenericAllocationHandle_t kSelfHandle = reinterpret_cast<hipMemGener
 constexpr size_t kSelfSize = 2 * kPage;
 constexpr uint64_t kSelfDesc = 0xD5E1F;
 
-// What each peer publishes in the allgather. Page multiples, so the size a
-// peer advertises is exactly the size its mapping reserves.
+// Page multiples, so each advertised size is the size reserved.
 uint64_t PeerDesc(int rank) { return 0xD000 + rank; }
 size_t PeerSize(int rank) { return static_cast<size_t>(rank + 3) * kPage; }
 hipMemGenericAllocationHandle_t HandleForDesc(uint64_t desc) {
@@ -54,19 +49,12 @@ hipMemGenericAllocationHandle_t HandleForDesc(uint64_t desc) {
 class FabricMemHandlerTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    // alloc.h memoises, once per process, whether to skip peer unmaps: from this
-    // variable, or when it is unset from the device arch. Unset plus the
-    // emulator's gfx900 keeps every free in the binary real.
-    savedHandleType_ = ncclCuMemHandleType;  // first: TearDown restores it even if SetUp bails
+    savedHandleType_ = ncclCuMemHandleType;
     SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");
     InstallHipVmmEmulator();
-    // Latch that decision now, under this fixture's env and arch, so no later
-    // test can find it already latched the other way.
-    ASSERT_FALSE(rcclSkipCuMemFree());
+    ASSERT_FALSE(rcclSkipCuMemFree());  // alloc.h caches this once per process
 
-    // Ledger over the emulator: remember every reservation's size so the free
-    // path's address-range query can report it, and refuse a free of anything
-    // not reserved here.
+    // Track reservations so frees can be checked.
     auto emulatedReserve = g_hipMemAddressReserve;
     auto emulatedFree = g_hipMemAddressFree;
     g_hipMemAddressReserve = [this, emulatedReserve](void** ptr, size_t size, size_t align, void* addr,
@@ -110,7 +98,6 @@ class FabricMemHandlerTest : public ::testing::Test {
       released_.push_back(handle);
       return hipSuccess;
     };
-    // Every peer's entry arrives filled in; the caller's own slot is left as sent.
     g_bootstrapAllGather = [this](void*, void* allData, int) {
       auto* entries = static_cast<FabricExchEntry*>(allData);
       for (int r = 0; r < nRanks_; ++r) {
@@ -123,7 +110,7 @@ class FabricMemHandlerTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    handler_.reset();  // first: the destructor frees through the ledger hooks
+    handler_.reset();
     EXPECT_TRUE(reserved_.empty()) << reserved_.size() << " peer mappings never freed";
     ncclCuMemHandleType = savedHandleType_;
     ResetBootstrapStubs();
@@ -139,7 +126,6 @@ class FabricMemHandlerTest : public ::testing::Test {
     return handler_.get();
   }
 
-  // A handler whose local memory is registered, ready to exchange.
   ncclFabricMemHandler* MakeRegisteredHandler(int nRanks = kNRanks, int rank = kRank) {
     ncclFabricMemHandler* h = MakeHandler(nRanks, rank);
     EXPECT_EQ(h->addSelfDeviceMem(kSelfPtr, kSelfHandle, kSelfSize), ncclSuccess);
@@ -152,7 +138,6 @@ class FabricMemHandlerTest : public ::testing::Test {
     return h;
   }
 
-  // An import hook that records every descriptor and fails the given peer's.
   auto FailImportOfPeer(int peer) {
     return [this, peer](hipMemGenericAllocationHandle_t* handle, void* shareable, hipMemAllocationHandleType) {
       const uint64_t desc = static_cast<ncclCuDesc*>(shareable)->data;
@@ -188,7 +173,6 @@ TEST_F(FabricMemHandlerTest, GetPeerDeviceMemPtr_BeforeExchange_ReturnsInvalidUs
   const ncclFabricMemHandler* h = MakeRegisteredHandler();
   void* p = nullptr;
 
-  // Even the self slot, which is already known, is gated on the exchange.
   EXPECT_EQ(h->getPeerDeviceMemPtr(kRank, &p), ncclInvalidUsage);
 }
 
@@ -234,7 +218,7 @@ TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_AllSucceed_SelfSlotIsLocalPtrAndPee
 }
 
 TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_ExportsSelfHandleAndImportsPeersWithConfiguredHandleType) {
-  // Any value but the fake's POSIX-FD default, so a hard-coded type shows up.
+  // Not the default, so a hard-coded type fails.
   ncclCuMemHandleType = hipMemHandleTypeWin32Kmt;
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   auto importPeer = g_hipMemImportFromShareableHandle;
@@ -267,7 +251,7 @@ TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_PublishesExportedDescAndSizeAtOwnRa
     const auto* entries = static_cast<const FabricExchEntry*>(allData);
     EXPECT_EQ(entries[kRank].desc.data, kSelfDesc);
     EXPECT_EQ(entries[kRank].size, kSelfSize);
-    return ncclSystemError;  // stop here: only the published payload matters
+    return ncclSystemError;
   });
 
   EXPECT_EQ(h->exchangeMemPtrs(), ncclSystemError);
@@ -312,7 +296,6 @@ TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_SingleRank_SucceedsWithoutImporting
 
 TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_AlreadyExchanged_ReturnsSuccessWithoutExchangingAgain) {
   ncclFabricMemHandler* h = MakeExchangedHandler();
-  // Wrap the fixture's own behaviour: count calls without changing what they do.
   ScopedHook exportHook(g_hipMemExportToShareableHandle, g_hipMemExportToShareableHandle);
   ScopedHook gather(g_bootstrapAllGather, g_bootstrapAllGather);
 
@@ -396,7 +379,7 @@ TEST_F(FabricMemHandlerTest, ExchangeMemPtrs_FailsAfterSomePeersMapped_PeerPoint
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   ScopedHook import(g_hipMemImportFromShareableHandle, FailImportOfPeer(2));
   ASSERT_NE(h->exchangeMemPtrs(), ncclSuccess);
-  ASSERT_EQ(reserved_.size(), 1u);  // peer 0 is already mapped
+  ASSERT_EQ(reserved_.size(), 1u);  // peer 0
   void* p = nullptr;
 
   EXPECT_EQ(h->getPeerDeviceMemPtr(0, &p), ncclInvalidUsage);
@@ -434,7 +417,7 @@ TEST_F(FabricMemHandlerTest, Destructor_AfterReleaseFails_StillFreesThatPeersMap
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
   ASSERT_NE(h->exchangeMemPtrs(), ncclSuccess);
-  ASSERT_EQ(reserved_.size(), 1u);  // peer 0, mapped before its release failed
+  ASSERT_EQ(reserved_.size(), 1u);  // peer 0
   void* const peer0 = reserved_.begin()->first;
 
   handler_.reset();
