@@ -10,14 +10,15 @@
 ///
 /// Scope:
 /// - Shared scalar/SIMD stage for migrated VOP3 results on every target.
-/// - Older targets enable OMOD only with IEEE=0 and output denormals flushed.
+/// - The emulator's older-target gate enables OMOD only with IEEE=0 and output
+///   denormals flushed. Available RDNA2/3 captures do not test the output-keep case.
 ///
 /// Paths outside the shared stage:
 /// - Not yet migrated:
 ///   - Host-result scalar lowering and SIMD destination helpers: separate
 ///     OMOD/CLAMP implementations for remaining F32/F64 operations.
 ///   - Specialized generators using vop3_dst_mod: F32 intermediate modifiers,
-///     including before F16 narrowing in DIV_FIXUP.
+///     including the current pre-narrowing F16 DIV_FIXUP implementation.
 ///   - SDWA F16 (dpp_sdwa_ops.h): separate arithmetic and rounded-TRANS
 ///     helpers; no captures.
 /// - Intentional exception:
@@ -25,20 +26,21 @@
 ///     rounding; match gfx1201 captures.
 ///
 /// Note: Migration must preserve each operation's rounding and flushing:
-/// - SDWA F16 arithmetic and F16 TRANS flush outputs via output_denormal.h.
+/// - F16 arithmetic, TRANS, MODE-aware binary SIMD, and SDWA F16 arithmetic
+///   flush outputs via output_denormal.h.
 /// - FMA tininess and OMOD zero/subnormal rules keep their own handling.
 /// - F32 arithmetic with effective OMOD flushes output denormals before scaling.
 ///
 /// Hardware evidence:
 /// - gfx1201 (RDNA4): every F16/F32/F64 min/max matches under all probed MODEs.
 ///   OMOD overflow checked both signs, four rounding modes, FP16_OVFL off/on.
-///   Captures also establish round-before-modifiers for affected arithmetic,
-///   F16 unary/TRANS, conversion and division results.
+///   Captures also establish round-before-modifiers for the probed F16 ADD/MUL,
+///   unary/TRANS, LDEXP, and DIV_FIXUP forms. F16 DIV_FIXUP migration is separate.
 /// - gfx1100 (RDNA3, W7900): IEEE=0 F16 MUL/ADD div:2 captures match gfx1201
 ///   for overflow before scaling and the sign of a halved negative normal.
-/// - gfx1030 (RDNA2, RX 6800 XT) / gfx1010 (RDNA1, RX 5700 XT): IEEE=0 with
-///   output denormals flushed matches gfx1201 on all non-NaN OMOD lanes;
-///   gfx1010 matches gfx1030 bit for bit.
+/// - gfx1030 (RDNA2, RX 6800 XT): the same F16 MUL/ADD div:2 lanes were measured.
+/// - gfx1010 (RDNA1): expectations follow the shared RDNA1/2 executor and gfx1030
+///   results; no RDNA1 capture is recorded in this tree.
 /// - RDNA3.5 / CDNA1-5: extrapolated; no captures, hardware verification required.
 ///
 /// CDNA4 V_MINIMUM3_F32/V_MAXIMUM3_F32 retain the emulator's wave-IEEE-based
@@ -46,8 +48,9 @@
 /// disables OMOD under IEEE=1; whether that override also suppresses their
 /// OMOD needs hardware verification and a separate instruction-policy follow-up.
 ///
-/// legacy_rounded_result_modifier_cases in valu_fp_mode_test.cpp decodes
-/// gfx1100/gfx1030 captures, including IEEE=1 controls.
+/// legacy_rounded_result_modifier_cases in valu_fp_mode_test.cpp decodes the
+/// gfx1100/gfx1030 ADD/MUL captures, including IEEE=1 controls. Those captures
+/// use MODE 0x00/0x50 and do not measure preserved F16 output denormals.
 /// Encodings: F16 in the low half of uint32; F32/F64 in uint32/uint64.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"

@@ -2575,6 +2575,7 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsWithSimdEnabledAndForc
       ASSERT_NE(unclamped_f64, nullptr);
       EXPECT_TRUE(cu->execute_instruction(unclamped_f64.get(), *wf).succeeded());
       // gfx1201 keeps the sign of a halved F64 -min_normal, as it does for F32.
+      // The gfx1250 expectation is derived from gfx1201; CDNA5 is not measured.
       for (std::size_t lane = 0; lane < kF64Inputs.size(); ++lane) {
         EXPECT_EQ(cu->read_vgpr(vb + 8, lane), 0u);
         EXPECT_EQ(cu->read_vgpr(vb + 9, lane), lane == 1 ? 0x80000000u : 0u);
