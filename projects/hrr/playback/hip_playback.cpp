@@ -1256,6 +1256,43 @@ static const uint8_t* skip_kernel_args(const uint8_t* p, const uint8_t* end,
     return p;
 }
 
+// The fixed part of a kernel launch payload, between the event header and the
+// arguments: stream, kernel name, the code object hash when there is room for
+// it, dimensions, then the argument and snapshot record counts. Returns the
+// byte after it, or nullptr when the payload is too short. Both
+// hrr_launch_has_host_snapshots and replay_kernel_launch read it here.
+struct LaunchHead {
+    uint64_t stream_rec;
+    const char* name;
+    uint16_t name_len;
+    uint64_t co_hash_lo = 0, co_hash_hi = 0;
+    uint32_t grid[3], block[3], shared_mem;
+    uint16_t num_args, num_snapshots;
+};
+
+static const uint8_t* read_launch_head(const uint8_t* p, const uint8_t* end,
+                                       LaunchHead& h) {
+    if (end - p < 10) return nullptr;
+    memcpy(&h.stream_rec, p, 8);
+    memcpy(&h.name_len, p + 8, 2);
+    p += 10;
+    if (end - p < h.name_len) return nullptr;
+    h.name = reinterpret_cast<const char*>(p);
+    p += h.name_len;
+    if (end - p >= 16) {
+        memcpy(&h.co_hash_lo, p, 8);
+        memcpy(&h.co_hash_hi, p + 8, 8);
+        p += 16;
+    }
+    if (end - p < 32) return nullptr;
+    memcpy(h.grid, p, 12);
+    memcpy(h.block, p + 12, 12);
+    memcpy(&h.shared_mem, p + 24, 4);
+    memcpy(&h.num_args, p + 28, 2);
+    memcpy(&h.num_snapshots, p + 30, 2);
+    return p + 32;
+}
+
 bool hrr_launch_has_host_snapshots(uint16_t etype, const uint8_t* pl, size_t size) {
     switch (etype) {
         case HRR_API_HIPMODULELAUNCHKERNEL:
@@ -1272,21 +1309,12 @@ bool hrr_launch_has_host_snapshots(uint16_t etype, const uint8_t* pl, size_t siz
         default:
             return false;
     }
-    // The fixed part of the payload as replay_kernel_launch reads it, up to
-    // the snapshot record count.
     if (size < sizeof(hrr_event_header)) return false;
     const auto* hdr = reinterpret_cast<const hrr_event_header*>(pl);
-    const uint8_t* p   = pl + sizeof(hrr_event_header);
-    const uint8_t* end = pl + std::min<size_t>(size, hdr->payload_length);
-    if (end - p < 10) return false;
-    uint16_t name_len; memcpy(&name_len, p + 8, 2);
-    p += 10;
-    if (end - p < name_len) return false;
-    p += name_len;
-    if (end - p >= 16) p += 16;  // code object hash
-    if (end - p < 32) return false;
-    uint16_t num_snapshots; memcpy(&num_snapshots, p + 30, 2);
-    return num_snapshots != 0;
+    LaunchHead h;
+    return read_launch_head(pl + sizeof(hrr_event_header),
+                            pl + std::min<size_t>(size, hdr->payload_length), h) &&
+           h.num_snapshots != 0;
 }
 
 static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
@@ -1295,17 +1323,16 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                                        bool cooperative = false) {
     // Skip the 32-byte header; kernel launch has a variable-length binary format.
     const auto* hdr = reinterpret_cast<const hrr_event_header*>(pl);
-    const uint8_t* p   = pl + sizeof(hrr_event_header);
     const uint8_t* end = pl + hdr->payload_length;
-
-    if (p + 8 > end) return hipErrorInvalidValue;
-    uint64_t stream_rec; memcpy(&stream_rec, p, 8); p += 8;
-
-    if (p + 2 > end) return hipErrorInvalidValue;
-    uint16_t name_len; memcpy(&name_len, p, 2); p += 2;
-    if (p + name_len > end) return hipErrorInvalidValue;
-    std::string kernel_name(reinterpret_cast<const char*>(p), name_len);
-    p += name_len;
+    LaunchHead h;
+    const uint8_t* p = read_launch_head(pl + sizeof(hrr_event_header), end, h);
+    if (!p) return hipErrorInvalidValue;
+    const std::string kernel_name(h.name, h.name_len);
+    const uint64_t stream_rec = h.stream_rec;
+    const uint32_t* grid = h.grid;
+    const uint32_t* block = h.block;
+    const uint32_t shared_mem = h.shared_mem;
+    const uint16_t num_args = h.num_args, num_snapshots = h.num_snapshots;
 
     // Workaround for recordings made before the capture side tagged Ext launches:
     // hipBLASLt/Tensile ("Cijk_*") StreamK kernels are launched via
@@ -1327,29 +1354,13 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         std::getenv("HIP_HRR_REPLAY_FORCE_EXT_CIJK"))
         ext_global_worksize = true;
 
-    uint64_t co_hash_lo = 0, co_hash_hi = 0;
-    if (p + 16 <= end) {
-        memcpy(&co_hash_lo, p, 8); p += 8;
-        memcpy(&co_hash_hi, p, 8); p += 8;
-    }
-
-    if (p + 32 > end) return hipErrorInvalidValue;
-    uint32_t grid[3], block[3], shared_mem;
-    memcpy(grid,       p, 12); p += 12;
-    memcpy(block,      p, 12); p += 12;
-    memcpy(&shared_mem, p, 4); p +=  4;
-
-    uint16_t num_args, num_snapshots;
-    memcpy(&num_args,       p, 2); p += 2;
-    memcpy(&num_snapshots,  p, 2); p += 2;
-
     // Apply kernel filter if set
     if (!ctx.kernel_filter.empty() &&
         kernel_name.find(ctx.kernel_filter) == std::string::npos)
         return hipSuccess;
 
     hipFunction_t func = resolve_kernel_function(ctx, kernel_name,
-                                                 co_hash_lo, co_hash_hi);
+                                                 h.co_hash_lo, h.co_hash_hi);
     if (!func) return hipErrorNotFound;
 
     // Build kernelParams[] from captured args, translating GPU pointers.
