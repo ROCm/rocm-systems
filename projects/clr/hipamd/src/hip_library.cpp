@@ -99,7 +99,7 @@ hipError_t LibraryContainer::GetManaged(const std::string& name, void** dptr, si
   return dynco_->GetManaged(name, dptr, bytes);
 }
 
-hipError_t LibraryContainer::Module(hipModule_t* module) {
+hipError_t LibraryContainer::GetModule(hipModule_t* module) {
   std::scoped_lock<std::mutex> lock(lib_mutex_);
   if (dynco_ == nullptr) {
     return hipErrorInvalidValue;
@@ -278,7 +278,7 @@ hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
   if (ret != hipSuccess) {
     HIP_RETURN(ret);
   }
-  HIP_RETURN(l->Module(pMod));
+  HIP_RETURN(l->GetModule(pMod));
 }
 
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,

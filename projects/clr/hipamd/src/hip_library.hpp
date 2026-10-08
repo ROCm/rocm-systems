@@ -51,9 +51,7 @@ class LibraryContainer {
   hipError_t GetGlobal(const std::string& name, void** dptr, size_t* bytes);
   hipError_t GetManaged(const std::string& name, void** dptr, size_t* bytes);
 
-  // Module handle of the underlying DynCO, for hipLibraryGetModule. It returns
-  // the module for the device the library was built on.
-  hipError_t Module(hipModule_t* module);
+  hipError_t GetModule(hipModule_t* module);
 
  private:
   LibraryContainer() = delete;
