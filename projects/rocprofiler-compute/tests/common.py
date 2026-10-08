@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import gzip
 import inspect
 import os
 import re
@@ -9,16 +10,16 @@ import subprocess
 import sys
 from pathlib import Path
 from threading import Thread
+from typing import Set
 from unittest.mock import Mock
+
+from utils import csv_compression
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 src_candidate = os.path.join(ROOT, "src")
 SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
-
-# Imported after sys.path is extended, since it lives under src/.
-from utils import csv_compression  # noqa: E402
 
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
@@ -58,13 +59,28 @@ def check_resource_allocation():
 def check_file_pattern(pattern, file_path):
     """Check if the given pattern exists in the file.
 
-    Opened through the compression boundary so a compressed results file is
-    searched by its contents, the same as a plain one.
+    Callers pass compressed counter artifacts as well as plain files such as
+    sysinfo.csv and profiling_config.yaml, so the reader follows the name.
     """
-    content = ""
-    with csv_compression.open_csv_read(file_path) as f:
+    if str(file_path).endswith(".gz"):
+        opener = gzip.open(file_path, "rt", encoding="utf-8")
+    else:
+        opener = open(file_path, encoding="utf-8")
+    with opener as f:
         content = f.read()
     return len(re.findall(pattern, content)) != 0
+
+
+def write_gzip_csv(path, text):
+    """Write text to a gzip CSV through the interface the source uses."""
+    with csv_compression.open_gzip_csv_write(path) as f:
+        f.write(text)
+    return Path(path)
+
+
+def write_result_csv(workload_dir, text, pass_index=0):
+    """Write a compressed rocpd counter artifact into workload_dir."""
+    return write_gzip_csv(workload_dir / f"results_pmc_perf_{pass_index}.csv.gz", text)
 
 
 def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
@@ -121,11 +137,6 @@ def read_binary_file_tree(root: Path) -> dict[Path, bytes]:
         for file_path in root.rglob("*")
         if file_path.is_file()
     }
-
-
-def strip_ansi(s: str) -> str:
-    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
-    return ansi_escape.sub("", s)
 
 
 def _tee(pipe, sink, out) -> None:
@@ -198,3 +209,16 @@ def patch_console(monkeypatch, module, *names, **overrides):
         monkeypatch.setattr(f"{module}.console_{name}", mock)
         mocks[name] = mock
     return mocks
+
+
+_KERNEL_SUFFIX_RE = re.compile(r"(?:\s*(?:\[clone \.[^\]]+\]|\.kd))+\s*$")
+
+
+def normalize_kernel_name(name: str) -> str:
+    """Return ``name`` without trailing ``.kd`` or ``[clone ...]`` suffixes."""
+    return _KERNEL_SUFFIX_RE.sub("", name).strip()
+
+
+def normalize_kernel_names(names: Set[str]) -> Set[str]:
+    """Return the normalized form of each name in ``names``."""
+    return {normalize_kernel_name(name) for name in names}

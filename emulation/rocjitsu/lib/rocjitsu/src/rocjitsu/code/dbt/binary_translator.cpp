@@ -85,7 +85,7 @@ public:
       return decoder_->decode(inst, emit_error);
 
     std::array<rj_code_binary_inst_t, kLookaheadWords> canonical{};
-    std::copy_n(inst, kLookaheadWords, canonical.begin());
+    std::ranges::copy_n(inst, kLookaheadWords, canonical.begin());
     constexpr uint32_t kSrc2Mask = 0x1ffu << 18;
     canonical[1] = (canonical[1] & ~kSrc2Mask) | (0x100u << 18);
     return decoder_->decode(canonical.data(), emit_error);
@@ -2203,9 +2203,10 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     }
 
     util::StringDiagnostic decode_error;
-    FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result =
-        BasicBlock::build(output, *decoder, host_arch_, decode_error.emitter(), block_leaders,
-                          ExternalEntryPolicy::ExplicitOnly);
+    FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result = BasicBlock::build_cfg(
+        output, *decoder, host_arch_,
+        {.decode_policy = BasicBlock::DecodePolicy::FullSection, .entries = block_leaders},
+        decode_error.emitter());
     if (block_result.failed()) {
       append_rewrite_discharge_error(
           result.diagnostics, "rewrite-discharge verification failed to decode final output: " +
@@ -2290,6 +2291,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
             registry.find_default_gpu_target(*guest_descriptor))
       effective_guest_target = default_target->public_id;
   }
+  const IsaGpuTargetDescription *effective_guest_gpu_target =
+      registry.find_gpu_target(effective_guest_target);
+  const bool effective_setreg_vgpr_msb_fixup =
+      effective_guest_gpu_target != nullptr &&
+      effective_guest_gpu_target->capabilities.setreg_vgpr_msb_fixup;
 
   // A same-target gfx1250 translation is direction-specific: A0 and B0 share
   // an ELF machine ID, so both revisions must be given. Do not apply this
@@ -2480,17 +2486,23 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   block_split_points.erase(std::ranges::unique(block_split_points).begin(),
                            block_split_points.end());
 
-  // Phase 2: build a CFG over .text, including recovered indirect targets as
-  // block leaders, then compute one source-reachable block set per descriptor
+  // Phase 2: use shared CFG construction with eager decoding. DBT already
+  // inspects whole text sections; discovering indirect targets during decoding
+  // would repeat large dataflow passes without reducing this workload. Keep
+  // function symbols and stored-pointer targets as split points, not external
+  // entries, so helper bodies retain the facts established by their callers.
+  // Then compute one source-reachable block set per descriptor
   // root. These sets are intentionally kernel-local: if two roots reach the same
   // helper block, Phase 3 emits that helper into both relocated bodies so every
   // branch or call target can be resolved through the current kernel's placement
   // map without borrowing another kernel's return continuation.
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   util::StringDiagnostic decode_error;
-  auto block_result =
-      BasicBlock::build(obj, *decoder, guest_arch_, decode_error.emitter(), block_leaders,
-                        ExternalEntryPolicy::ExplicitOnly, block_split_points);
+  auto block_result = BasicBlock::build_cfg(obj, *decoder, guest_arch_,
+                                            {.decode_policy = BasicBlock::DecodePolicy::FullSection,
+                                             .entries = block_leaders,
+                                             .split_points = block_split_points},
+                                            decode_error.emitter());
   if (block_result.failed()) {
     append_error(result.diagnostics, DiagnosticKind::Legalization, decode_error.message());
     return leave_unchanged();
@@ -3292,6 +3304,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     liveness_options.max_free_vgpr =
         static_cast<uint16_t>(isa_properties(host_arch_).max_addressable_vgprs_per_wf);
     liveness_options.arch = guest_arch_;
+    liveness_options.target = effective_guest_target;
     liveness_options.entry_block = scope.entry;
     liveness_options.additional_entry_blocks = scope_adopted_entry_blocks;
     liveness_options.text = text;
@@ -3353,7 +3366,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           }
           wmma_completion_wait_vgpr_msb = std::make_unique<Gfx1250VgprMsbAnalysis>(
               KernelBlockScope(scope.blocks), scope.entry, scope_analysis_edges, text,
-              scope_adopted_entry_blocks);
+              scope_adopted_entry_blocks, effective_setreg_vgpr_msb_fixup);
         }
         vgpr_msb = wmma_completion_wait_vgpr_msb.get();
       }

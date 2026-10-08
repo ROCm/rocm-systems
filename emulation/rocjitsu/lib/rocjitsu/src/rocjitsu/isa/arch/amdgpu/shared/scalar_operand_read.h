@@ -120,7 +120,7 @@ read_scalar_register(const Wavefront &wf, const ScalarRegisterRange &range, uint
   case ScalarRegisterStorage::M0:
     return wf.m0();
   case ScalarRegisterStorage::EXEC:
-    return index == 0 ? static_cast<uint32_t>(wf.exec())
+    return index == 0 ? static_cast<uint32_t>(wf.exec_raw())
                       : static_cast<uint32_t>(wf.exec_raw() >> 32);
   case ScalarRegisterStorage::DISCARD:
     return 0;

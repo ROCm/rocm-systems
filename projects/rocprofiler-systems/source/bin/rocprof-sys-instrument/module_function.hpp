@@ -84,22 +84,22 @@ struct module_function
     bool is_visibility_constrained() const;
     bool is_linkage_constrained() const;
 
-    size_t                                         start_address     = 0;
-    std::uint64_t                                  address_range     = 0;
-    std::uint64_t                                  num_instructions  = 0;
-    module_t*                                      module            = nullptr;
-    procedure_t*                                   function          = nullptr;
-    symtab_func_t*                                 symtab_function   = nullptr;
-    flow_graph_t*                                  flow_graph        = nullptr;
-    string_t                                       module_name       = {};
-    string_t                                       function_name     = {};
-    function_signature                             signature         = {};
-    basic_block_set_t                              basic_blocks      = {};
-    basic_loop_vec_t                               loop_blocks       = {};
-    std::map<instruction_category_t, std::int64_t> instruction_types = {};
-    std::vector<std::vector<instr_addr_pair_t>>    instructions      = {};
+    size_t                                         start_address    = 0;
+    std::uint64_t                                  address_range    = 0;
+    std::uint64_t                                  num_instructions = 0;
+    module_t*                                      module           = nullptr;
+    procedure_t*                                   function         = nullptr;
+    symtab_func_t*                                 symtab_function  = nullptr;
+    flow_graph_t*                                  flow_graph       = nullptr;
+    string_t                                       module_name;
+    string_t                                       function_name;
+    function_signature                             signature = {};
+    basic_block_set_t                              basic_blocks;
+    basic_loop_vec_t                               loop_blocks;
+    std::map<instruction_category_t, std::int64_t> instruction_types;
+    std::vector<std::vector<instr_addr_pair_t>>    instructions;
 
-    mutable str_msg_vec_t messages = {};
+    mutable str_msg_vec_t messages;
 
     bool is_overlapping() const;  // checks if func overlaps
 
@@ -137,13 +137,15 @@ public:
     {
         std::stringstream ss;
 
-        auto w0 = std::min<size_t>(get_width()[0], absolute_max_width);
-        auto w1 = std::min<size_t>(get_width()[1], absolute_max_width);
-        auto w2 = std::min<size_t>(get_width()[2], absolute_max_width);
+        auto const w0 = std::min<size_t>(get_width()[0], absolute_max_width);
+        auto const w1 = std::min<size_t>(get_width()[1], absolute_max_width);
+        auto const w2 = std::min<size_t>(get_width()[2], absolute_max_width);
 
-        auto _get_str = [](const std::string& _inc) {
+        auto const _get_str = [](const std::string& _inc) {
             if(_inc.length() > absolute_max_width)
+            {
                 return _inc.substr(0, absolute_max_width - 3) + "...";
+            }
             return _inc;
         };
 
@@ -224,7 +226,9 @@ module_function::serialize(ArchiveT& ar, const unsigned)
         ar.setNextName("instruction_breakdown");
         ar.startNode();
         for(auto itr : instruction_types)
+        {
             ar(cereal::make_nvp(std::to_string(itr.first).c_str(), itr.second));
+        }
         ar.finishNode();
         // instructions can inflate JSON size so only output when verbosity is increased
         // above default

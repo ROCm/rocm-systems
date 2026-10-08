@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <array>
 #include <cstdint>
 #include <fmt/ranges.h>
 #include <timemory/log/color.hpp>
@@ -20,7 +21,11 @@
 #include "core/components/fwd.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/constraint.hpp"
+#include "core/config/trace_period_config.hpp"
+#include "core/control/clocks/posix.hpp"
+#include "core/control/clocks/steady.hpp"
+#include "core/control/session.hpp"
+#include "core/control/triggers/time_window.hpp"
 #include "core/cpu.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
@@ -41,9 +46,12 @@
 #include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
+#include "library/components/mpip.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/shmem_gotcha.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
+#include "library/components/ucx_gotcha.hpp"
 #include "library/components/ucx_gotcha_policy.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
@@ -51,7 +59,6 @@
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/roctx_client.hpp"
-#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -84,8 +91,11 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <functional>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <pthread.h>
 #include <sstream>
 #include <stdexcept>
@@ -97,14 +107,11 @@ using namespace rocprofsys;
 
 //======================================================================================//
 
-namespace rocprofsys
-{
-namespace timeout
+namespace rocprofsys::timeout
 {
 void
 setup() ROCPROFSYS_INTERNAL_API;
 }
-}  // namespace rocprofsys
 
 namespace
 {
@@ -113,6 +120,13 @@ std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
 std::atomic<bool>  rocprofsys_finalization_done{ false };
 auto               _timemory_manager  = tim::manager::instance();
 auto               _timemory_settings = tim::settings::shared_instance();
+
+std::shared_ptr<control::session>&
+get_control_session()
+{
+    static auto s_instance = std::make_shared<control::session>();
+    return s_instance;
+}
 
 void
 set_metadata_process_start_timestamp(std::int64_t _ts)
@@ -153,8 +167,11 @@ escape_quotes(std::string str)
 bool
 ensure_initialization(bool _offset, std::int64_t _glob_n, std::int64_t _offset_n)
 {
-    auto _exit_info = component::exit_gotcha::get_exit_info();
-    if(_exit_info.is_known && _exit_info.exit_code != EXIT_SUCCESS) return _offset;
+    auto const _exit_info = component::exit_gotcha::get_exit_info();
+    if(_exit_info.is_known && _exit_info.exit_code != EXIT_SUCCESS)
+    {
+        return _offset;
+    }
 
     auto _tid              = utility::get_thread_index();
     auto _peak_num_threads = grow_data(_tid + 1);
@@ -174,30 +191,38 @@ ensure_initialization(bool _offset, std::int64_t _glob_n, std::int64_t _offset_n
 void
 finalization_handler()
 {
-    if(state::process::get() == state::process::Active) rocprofsys_finalize();
+    if(state::process::get() == state::process::Active)
+    {
+        rocprofsys_finalize();
+    }
 }
 
 auto
 ensure_finalization(bool _static_init = false)
 {
     if(config::set_signal_handler(nullptr) == nullptr)
+    {
         config::set_signal_handler(&finalization_handler);
+    }
 
     if(_static_init)
     {
-        auto _idx = threading::add_callback(&ensure_initialization);
+        auto const _idx = threading::add_callback(&ensure_initialization);
         if(_idx < 0)
+        {
             throw exception<std::runtime_error>("failure adding threading callback");
+        }
     }
 
     if(config::set_signal_handler(nullptr) != &finalization_handler)
-
+    {
         throw std::runtime_error(fmt::format(
             "Assignment of signal handler failed. signal handler is {}, expected "
             "{}",
             fmt::format("0x{:X}",
                         reinterpret_cast<uintptr_t>(config::set_signal_handler(nullptr))),
             fmt::format("0x{:X}", reinterpret_cast<uintptr_t>(&finalization_handler))));
+    }
 
     const auto& _info = thread_info::init();
     const auto& _tid  = _info->index_data;
@@ -217,7 +242,10 @@ ensure_finalization(bool _static_init = false)
         }
     }
 
-    if(common::get_env(env_vars::MONOCHROME, false)) tim::log::monochrome() = true;
+    if(common::get_env(env_vars::MONOCHROME, false))
+    {
+        tim::log::monochrome() = true;
+    }
 
     timeout::setup();
 
@@ -228,15 +256,18 @@ ensure_finalization(bool _static_init = false)
     {
         tim::get_shared_ptr_pair_callback() =
             new tim::shared_ptr_pair_callback_t{ [](std::int64_t _n) {
-                if(_n == 0) rocprofsys_finalize_hidden();
+                if(_n == 0)
+                {
+                    rocprofsys_finalize_hidden();
+                }
             } };
     }
 
     if(_static_init)
     {
-        auto _verbose =
+        auto const _verbose =
             get_verbose_env() + ((get_debug_env() || get_debug_init()) ? 16 : 0);
-        auto _search_paths = fmt::format(
+        auto const _search_paths = fmt::format(
             "{}:{}:{}:{}:{}", rocprofsys::get_env<std::string>(env_vars::PATH, ""),
             rocprofsys::get_env<std::string>("PWD"), ".",
             rocprofsys::get_env<std::string>("LD_LIBRARY_PATH", ""),
@@ -245,7 +276,10 @@ ensure_finalization(bool _static_init = false)
         common::setup_environ(_verbose, _search_paths);
     }
 
-    if(_timemory_manager) _timemory_manager->set_write_metadata(-1);
+    if(_timemory_manager)
+    {
+        _timemory_manager->set_write_metadata(-1);
+    }
 
     return scope::destructor{ []() { rocprofsys_finalize_hidden(); } };
 }
@@ -268,28 +302,31 @@ struct fini_bundle
     template <typename... Args>
     void start(Args&&... _args)
     {
-        ROCPROFSYS_FOLD_EXPRESSION(tim::operation::start<Tp>{}(
-            std::get<Tp>(m_data), std::forward<Args>(_args)...));
+        (tim::operation::start<Tp>{}(std::get<Tp>(m_data), std::forward<Args>(_args)...),
+         ...);
     }
 
     template <typename... Args>
     void stop(Args&&... _args)
     {
-        ROCPROFSYS_FOLD_EXPRESSION(tim::operation::stop<Tp>{}(
-            std::get<Tp>(m_data), std::forward<Args>(_args)...));
+        (tim::operation::stop<Tp>{}(std::get<Tp>(m_data), std::forward<Args>(_args)...),
+         ...);
     }
 
     std::string as_string(bool _print_prefix = true) const
     {
         std::stringstream _ss;
-        if(_print_prefix && m_label.length() > 0) _ss << m_label << " : ";
+        if(_print_prefix && !m_label.empty())
+        {
+            _ss << m_label << " : ";
+        }
         size_t _idx = 0;
         ((_ss << (_idx++ > 0 ? ", " : "") << std::get<Tp>(m_data)), ...);
         return _ss.str();
     }
 
-    std::string_view m_label = {};
-    data_type        m_data  = {};
+    std::string_view m_label;
+    data_type        m_data = {};
 };
 
 template <typename... Tp>
@@ -298,7 +335,7 @@ struct fini_bundle<tim::lightweight_tuple<Tp...>>
     using base_type = fini_bundle<Tp...>;
 };
 
-using fini_bundle_t = typename fini_bundle<main_bundle_t>::base_type;
+using fini_bundle_t = fini_bundle<main_bundle_t>::base_type;
 }  // namespace
 
 //======================================================================================//
@@ -381,8 +418,13 @@ rocprofsys_preinit_cache()
     config::print_settings_json(_extdata_stream);
 
     trace_cache::get_metadata_registry().set_process(
-        { getpid(), getppid(), _command, "", escape_quotes(_extdata_stream.str()), 0,
-          0 });
+        { .pid         = getpid(),
+          .ppid        = getppid(),
+          .command     = _command,
+          .environment = "",
+          .extdata     = escape_quotes(_extdata_stream.str()),
+          .start       = 0,
+          .end         = 0 });
 }
 
 void
@@ -409,7 +451,9 @@ invoke_external_pause_callbacks()
 {
     const std::lock_guard<std::mutex> lock{ external_pause_resume_callbacks_mutex };
     for(auto* _fn : external_pause_callbacks)
+    {
         _fn();
+    }
 }
 
 void
@@ -417,9 +461,56 @@ invoke_external_resume_callbacks()
 {
     const std::lock_guard<std::mutex> lock{ external_pause_resume_callbacks_mutex };
     for(auto* _fn : external_resume_callbacks)
+    {
         _fn();
+    }
 }
 
+using trace_window_t =
+    rocprofsys::control::triggers::time_window<rocprofsys::control::clocks::steady>;
+using posix_trace_window_t =
+    rocprofsys::control::triggers::time_window<rocprofsys::control::clocks::posix>;
+using trace_config_t =
+    rocprofsys::config::trace_config<rocprofsys::config::default_trace_config_externals>;
+
+// Constructs a time_window<Clock>, which self-registers with the session
+// (and its initial action is reflected) as soon as it's constructed. Does
+// NOT start the worker thread - that must happen after State::Active, since
+// the worker captures its delay/duration reference point (t0) at start()
+// time, and starting any earlier lets init-time overhead eat into the
+// window.
+template <typename Clock>
+std::unique_ptr<rocprofsys::control::triggers::time_window<Clock>>
+make_time_window(
+    std::shared_ptr<rocprofsys::control::session> session, Clock& clock,
+    rocprofsys::control::triggers::time_window_specs specs,
+    rocprofsys::control::scope event_scope = rocprofsys::control::scope::global)
+{
+    using window_t = rocprofsys::control::triggers::time_window<Clock>;
+    return std::make_unique<window_t>(std::move(session), clock, specs, event_scope);
+}
+
+rocprofsys::control::clocks::steady               g_trace_window_clock;
+rocprofsys::control::clocks::steady               g_sampling_dur_window_clock;
+std::optional<rocprofsys::control::clocks::posix> g_posix_window_clock;
+std::unique_ptr<trace_window_t>                   g_trace_window;
+std::unique_ptr<posix_trace_window_t>             g_posix_trace_window;
+std::unique_ptr<trace_window_t>                   g_sampling_dur_window;
+
+void
+stop_time_windows()
+{
+    const auto stop_and_reset = [](auto& window) {
+        if(window)
+        {
+            window->stop();
+        }
+        window.reset();
+    };
+    stop_and_reset(g_sampling_dur_window);
+    stop_and_reset(g_trace_window);
+    stop_and_reset(g_posix_trace_window);
+}
 }  // namespace
 
 extern "C" void
@@ -446,7 +537,10 @@ rocprofsys_set_mpi_hidden(bool use)
 
     // this function may be called multiple times if multiple libraries are instrumented
     // we want to guard against multiple calls which with different arguments
-    if(_once && _arg == use) return;
+    if(_once && _arg == use)
+    {
+        return;
+    }
     _once = true;
 
     // just search env to avoid initializing the settings
@@ -483,15 +577,18 @@ rocprofsys_set_mpi_hidden(bool use)
 extern "C" void
 rocprofsys_init_library_hidden()
 {
-    auto _tid = threading::get_id();
+    auto const _tid = threading::get_id();
     (void) _tid;
 
-    auto _debug_init = get_debug_init();
+    auto const _debug_init = get_debug_init();
 
     int _selinux_mode = 0;
     {
         std::ifstream _fenforcing{ "/sys/fs/selinux/enforce" };
-        if(!(_fenforcing >> _selinux_mode)) _selinux_mode = 0;
+        if(!(_fenforcing >> _selinux_mode))
+        {
+            _selinux_mode = 0;
+        }
         _fenforcing.close();
     }
 
@@ -514,10 +611,16 @@ rocprofsys_init_library_hidden()
             fmt::format("State is not PreInit :: {}", state::process::get()));
     }
 
-    if(state::process::get() != state::process::PreInit) return;
-    if(rocprofsys_init_library_done.exchange(true)) return;
+    if(state::process::get() != state::process::PreInit)
+    {
+        return;
+    }
+    if(rocprofsys_init_library_done.exchange(true))
+    {
+        return;
+    }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(_debug_init)
     {
@@ -554,7 +657,7 @@ rocprofsys_init_library_hidden()
     // Disable Timemory console output for specified ranks
     if(!config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
     {
-        auto* _settings = tim::settings::instance();
+        auto const* _settings = tim::settings::instance();
         if(_settings)
         {
             _settings->cout_output() = false;
@@ -563,11 +666,16 @@ rocprofsys_init_library_hidden()
         }
     }
 
-    auto _debug_value = get_debug();
-    if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
+    auto const _debug_value = get_debug();
+    if(_debug_init)
+    {
+        config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
+    }
     const scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
         if(_debug_init)
+        {
             config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
+        }
     } };
 }
 
@@ -576,7 +684,10 @@ rocprofsys_init_library_hidden()
 extern "C" bool
 rocprofsys_init_tooling_hidden(void)
 {
-    if(get_env(env_vars::MONOCHROME, false)) tim::log::monochrome() = true;
+    if(get_env(env_vars::MONOCHROME, false))
+    {
+        tim::log::monochrome() = true;
+    }
 
     if(!rocprofsys::get_env(env_vars::INIT_TOOLING, true))
     {
@@ -584,20 +695,25 @@ rocprofsys_init_tooling_hidden(void)
         return false;
     }
 
-    auto _debug_init = get_debug_init();
+    auto const _debug_init = get_debug_init();
 
     if(_debug_init)
     {
         LOG_DEBUG("State is {}...", state::process::get());
     }
 
-    if(state::process::get() != state::process::PreInit) return false;
+    if(state::process::get() != state::process::PreInit)
+    {
+        return false;
+    }
 
     pid_t expected = 0;
     if(!rocprofsys_init_tooling_done.compare_exchange_strong(expected, getpid()))
+    {
         return false;
+    }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(state::process::get() == state::process::Init)
     {
@@ -622,9 +738,12 @@ rocprofsys_init_tooling_hidden(void)
 
     print_banner();
 
-    auto _dtor = scope::destructor{ []() {
+    auto const _dtor = scope::destructor{ []() {
         // if set to finalized, don't continue
-        if(state::process::get() > state::process::Active) return;
+        if(state::process::get() > state::process::Active)
+        {
+            return;
+        }
 
         rocprofsys_preinit_cache();
 
@@ -671,45 +790,105 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
-        auto trace_controller = rocprofiler_sdk::get_trace_controller();
-        if(trace_controller)
-        {
-            auto pause_callback = [](void) {
-                LOG_DEBUG("Pause callback...");
-                rocprofiler_sdk::pause();
-                sampling::pause();
-                component::mpi_gotcha::pause();
-                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::pause();
-                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
-                component::vaapi_gotcha::pause();
-                ::rocprofsys::pthread_gotcha::pause();
-                component::numa_gotcha::pause();
-                rocprofsys::kokkosp::pause();
-                process_sampler::pause();
-                invoke_external_pause_callbacks();
-            };
-            auto resume_callback = [](void) {
-                LOG_DEBUG("Resume callback...");
-                rocprofiler_sdk::resume();
-                sampling::resume();
-                component::mpi_gotcha::resume();
-                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::resume();
-                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
-                component::vaapi_gotcha::resume();
-                ::rocprofsys::pthread_gotcha::resume();
-                component::numa_gotcha::resume();
-                rocprofsys::kokkosp::resume();
-                process_sampler::resume();
-                invoke_external_resume_callbacks();
-            };
-            trace_controller->register_region_pause_resume_callbacks(resume_callback,
-                                                                     pause_callback);
+        rocprofiler_sdk::set_session(get_control_session());
 
-            trace_controller->force_initial_pause();
+        {
+            using shmem_t = component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>;
+            using ucx_t   = component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>;
+
+            // clang-format off
+            auto subscribers = std::to_array<control::subscriber>({
+                { .on_pause = &rocprofiler_sdk::pause, .on_resume = &rocprofiler_sdk::resume, .name = "rocm", .scopes = { control::scope::global } },
+                { .on_pause = &sampling::pause, .on_resume = &sampling::resume, .name = "sampling",
+                  .scopes = { control::scope::global, control::scope::sampling } },
+                { .on_pause = &component::pause_mpip, .on_resume = &component::resume_mpip, .name = "mpi", .scopes = { control::scope::global } },
+                { .on_pause = &ucx_t::pause, .on_resume = &ucx_t::resume, .name = "ucx", .scopes = { control::scope::global } },
+                { .on_pause = &shmem_t::pause, .on_resume = &shmem_t::resume, .name = "shmem", .scopes = { control::scope::global } },
+                { .on_pause = &component::vaapi_gotcha::pause, .on_resume = &component::vaapi_gotcha::resume, .name = "vaapi", .scopes = { control::scope::global } },
+                { .on_pause = &::rocprofsys::pthread_gotcha::pause, .on_resume = &::rocprofsys::pthread_gotcha::resume, .name = "pthread", .scopes = { control::scope::global } },
+                { .on_pause = &component::numa_gotcha::pause, .on_resume = &component::numa_gotcha::resume, .name = "numa", .scopes = { control::scope::global } },
+                { .on_pause = &rocprofsys::kokkosp::pause, .on_resume = &rocprofsys::kokkosp::resume, .name = "kokkos", .scopes = { control::scope::global } },
+                { .on_pause = &process_sampler::pause, .on_resume = &process_sampler::resume, .name = "process_sampler", .scopes = { control::scope::global } },
+                { .on_pause = &invoke_external_pause_callbacks, .on_resume = &invoke_external_resume_callbacks, .name = "external", .scopes = { control::scope::global } },
+            });
+            // clang-format on
+            for(auto& sub : subscribers)
+            {
+                get_control_session()->subscribe(std::move(sub));
+            }
+
+            // Every subscriber above must be registered before any trigger
+            // constructed below: a trigger's registration broadcasts a
+            // pause/resume transition immediately, so a subscriber added
+            // afterward would miss it.
+            if(auto trace_specs = trace_config_t::get_trace_specs(); !trace_specs.empty())
+            {
+                const auto& spec  = trace_specs.front();
+                const auto  delay = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::duration<double>{ spec.delay });
+                const auto dur = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::duration<double>{ spec.duration });
+
+                // Safety-net subscriber for category-traited recording paths
+                // (timemory storage, perfetto trace_events from callbacks not
+                // covered by a subsystem pause subscriber).
+                get_control_session()->subscribe(
+                    { .on_pause =
+                          []() {
+                              categories::disable_categories(
+                                  config::get_enabled_categories());
+                          },
+                      .on_resume =
+                          []() {
+                              categories::enable_categories(
+                                  config::get_enabled_categories());
+                          },
+                      .name   = "trace_categories",
+                      .scopes = { control::scope::global } });
+
+                if(trace_config_t::get_trace_period_clock_id() ==
+                   CLOCK_PROCESS_CPUTIME_ID)
+                {
+                    g_posix_window_clock.emplace(CLOCK_PROCESS_CPUTIME_ID);
+                    g_posix_trace_window =
+                        make_time_window(get_control_session(), *g_posix_window_clock,
+                                         { .delay = delay, .duration = dur });
+                }
+                else
+                {
+                    g_trace_window =
+                        make_time_window(get_control_session(), g_trace_window_clock,
+                                         { .delay = delay, .duration = dur });
+                }
+            }
+
+            if(const auto samp_dur = config::get_sampling_duration(); samp_dur > 0.0)
+            {
+                g_sampling_dur_window = make_time_window(
+                    get_control_session(), g_sampling_dur_window_clock,
+                    { .duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          std::chrono::duration<double>{ samp_dur }) },
+                    control::scope::sampling);
+            }
+
+            rocprofiler_sdk::create_roctx_client();
         }
 
         state::process::set(
             state::process::Active);  // set to active as very last operation
+
+        if(g_trace_window)
+        {
+            g_trace_window->start();
+        }
+        if(g_posix_trace_window)
+        {
+            g_posix_trace_window->start();
+        }
+        if(g_sampling_dur_window)
+        {
+            g_sampling_dur_window->start();
+        }
     } };
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -718,7 +897,10 @@ rocprofsys_init_tooling_hidden(void)
     rocprofsys_preinit_hidden();
 
     // start these gotchas once settings have been initialized
-    if(get_init_bundle()) get_init_bundle()->start();
+    if(get_init_bundle())
+    {
+        get_init_bundle()->start();
+    }
 
     if(get_use_ucx())
     {
@@ -738,7 +920,10 @@ rocprofsys_init_tooling_hidden(void)
         component::vaapi_gotcha::start();
     }
 
-    if(get_use_sampling()) sampling::block_signals();
+    if(get_use_sampling())
+    {
+        sampling::block_signals();
+    }
 
     // perfetto initialization
     if(get_use_perfetto())
@@ -747,7 +932,10 @@ rocprofsys_init_tooling_hidden(void)
         rocprofsys::perfetto::setup();
     }
 
-    if(get_use_causal()) causal::start_experimenting();
+    if(get_use_causal())
+    {
+        causal::start_experimenting();
+    }
 
     if(get_use_timemory())
     {
@@ -755,8 +943,10 @@ rocprofsys_init_tooling_hidden(void)
         std::set<int> _comps{};
         // convert string into set of enumerations
         for(auto&& itr : rocprofsys::delimit(tim::settings::global_components()))
+        {
             _comps.emplace(tim::runtime::enumerate(itr));
-        if(_comps.size() == 1 && _comps.find(TIMEMORY_WALL_CLOCK) != _comps.end())
+        }
+        if(_comps.size() == 1 && _comps.contains(TIMEMORY_WALL_CLOCK))
         {
             // using wall_clock directly is lower overhead than using it via user_bundle
             instrumentation_bundle_t::get_initializer() =
@@ -789,7 +979,7 @@ rocprofsys_init_tooling_hidden(void)
     // if static objects are destroyed in the inverse order of when they are
     // created this should ensure that finalization is called before perfetto
     // ends the tracing session
-    static auto _ensure_finalization = ensure_finalization();
+    static auto const _ensure_finalization = ensure_finalization();
 
     return true;
 }
@@ -802,14 +992,16 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
     static int  _total_count = 0;
     static auto _args = std::make_pair(std::string_view{ _mode }, _is_binary_rewrite);
 
-    auto _count   = _total_count++;
-    auto _mode_sv = std::string_view{ _mode };
-    auto _argv0   = (_argv0_c) ? std::string{ _argv0_c } : config::get_exe_name();
+    auto const _count   = _total_count++;
+    auto       _mode_sv = std::string_view{ _mode };
+    auto       _argv0   = _argv0_c ? std::string{ _argv0_c } : config::get_exe_name();
     // this function may be called multiple times if multiple libraries are instrumented
     // we want to guard against multiple calls which with different arguments
     if(_count > 0 &&
        std::tie(_args.first, _args.second) == std::tie(_mode_sv, _is_binary_rewrite))
+    {
         return;
+    }
 
     if(_count > 0 &&
        std::tie(_args.first, _args.second) != std::tie(_mode_sv, _is_binary_rewrite))
@@ -851,7 +1043,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
         }
         if(state::process::get() == state::process::Active)
         {
-            auto _name = (_argv0_c) ? std::string{ _argv0_c } : config::get_exe_name();
+            auto _name = _argv0_c ? std::string{ _argv0_c } : config::get_exe_name();
             // if main hasn't been popped yet, pop it
             LOG_DEBUG("Running rocprofsys_pop_trace({})...", _name);
             rocprofsys_pop_trace_hidden(_name.c_str());
@@ -860,7 +1052,10 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
 
     std::atexit([]() {
         // if active (not already finalized) then we should finalize
-        if(state::process::get() == state::process::Active) rocprofsys_finalize_hidden();
+        if(state::process::get() == state::process::Active)
+        {
+            rocprofsys_finalize_hidden();
+        }
     });
 
     set_metadata_process_start_timestamp(comp::wall_clock::record());
@@ -892,11 +1087,16 @@ rocprofsys_reset_preload_hidden(void)
         auto _modified_preload = std::string{};
         for(const auto& itr : delimit(_preload_libs, ":"))
         {
-            if(itr.find("librocprof-sys") != std::string::npos) continue;
+            if(itr.find("librocprof-sys") != std::string::npos)
+            {
+                continue;
+            }
             _modified_preload += fmt::format(":{}", itr);
         }
-        if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
+        if(!_modified_preload.empty() && _modified_preload.starts_with(':'))
+        {
             _modified_preload = _modified_preload.substr(1);
+        }
 
         rocprofsys::set_env("LD_PRELOAD", _modified_preload, 1);
     }
@@ -937,6 +1137,9 @@ rocprofsys_finalize_hidden(void)
 
         // Flush buffered traces in case of child process
 
+        LOG_DEBUG("Shutting down control session...");
+        get_control_session()->shutdown();
+
         LOG_DEBUG("Shutting down ROCm...");
         rocprofiler_sdk::shutdown();
 
@@ -952,6 +1155,8 @@ rocprofsys_finalize_hidden(void)
     }
 
     LOG_INFO("Finalizing rocprof-sys...");
+
+    stop_time_windows();
 
     sampling::block_samples();
 
@@ -970,7 +1175,7 @@ rocprofsys_finalize_hidden(void)
     // e.g. rocprofsys_pop_trace("main");
     if(_push_count > _pop_count)
     {
-        for(auto& itr : tracing::get_finalization_functions())
+        for(auto const& itr : tracing::get_finalization_functions())
         {
             itr();
             ++_pop_count;
@@ -986,16 +1191,24 @@ rocprofsys_finalize_hidden(void)
     // in category
     categories::enable_categories();
 
-    auto _debug_init  = get_debug_finalize();
-    auto _debug_value = get_debug();
-    if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
+    auto const _debug_init  = get_debug_finalize();
+    auto const _debug_value = get_debug();
+    if(_debug_init)
+    {
+        config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
+    }
     const scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
         if(_debug_init)
+        {
             config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
+        }
     } };
 
     auto& _thread_bundle = thread_data<thread_bundle_t>::instance();
-    if(_thread_bundle) _thread_bundle->stop();
+    if(_thread_bundle)
+    {
+        _thread_bundle->stop();
+    }
 
     if(get_verbose() >= 1 || get_debug())
     {
@@ -1050,6 +1263,9 @@ rocprofsys_finalize_hidden(void)
         process_sampler::shutdown();
     }
 
+    LOG_DEBUG("Shutting down control session...");
+    get_control_session()->shutdown();
+
     // -----------------------------------------------------------------------
     // Causal-profiling shutdown must happen BEFORE rocprofiler_sdk::shutdown().
     //
@@ -1086,7 +1302,10 @@ rocprofsys_finalize_hidden(void)
     auto* _bundles = instrumentation_bundles::get();
     for(size_t i = 0; _bundles && i < thread_info::get_peak_num_threads(); ++i)
     {
-        if(i >= _bundles->size()) continue;
+        if(i >= _bundles->size())
+        {
+            continue;
+        }
         const auto& _info = thread_info::get(i, SequentTID);
         auto&       itr   = _bundles->at(i);
         while(itr != nullptr && !itr->empty())
@@ -1140,8 +1359,11 @@ rocprofsys_finalize_hidden(void)
     if(get_main_bundle())
     {
         std::string _msg = get_main_bundle()->as_string();
-        auto        _pos = _msg.find(">>>  ");
-        if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
+        auto const  _pos = _msg.find(">>>  ");
+        if(_pos != std::string::npos)
+        {
+            _msg = _msg.substr(_pos + 5);
+        }
         LOG_INFO("{}", _msg);
         LOG_DEBUG("Resetting main bundle...");
         get_main_bundle()->reset();
@@ -1160,8 +1382,11 @@ rocprofsys_finalize_hidden(void)
                !itr->get<comp::wall_clock>()->get_is_running())
             {
                 std::string _msg = itr->as_string();
-                auto        _pos = _msg.find(">>>  ");
-                if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
+                auto const  _pos = _msg.find(">>>  ");
+                if(_pos != std::string::npos)
+                {
+                    _msg = _msg.substr(_pos + 5);
+                }
                 if(_thr_verbose)
                 {
                     LOG_INFO("{}", _msg);
@@ -1225,8 +1450,8 @@ rocprofsys_finalize_hidden(void)
 
         rocprofsys::progress::tracker _tracker{ [_bar_opts](std::string   _label,
                                                             std::uint64_t _total) {
-            auto                      _bar = std::make_shared<rocprofsys::progress::bar>(std::move(_label),
-                                                                                         _total, _bar_opts);
+            auto const                _bar = std::make_shared<rocprofsys::progress::bar>(
+                std::move(_label), _total, _bar_opts);
             return rocprofsys::progress::progress_callback{ [_bar](std::uint64_t _delta) {
                 _bar->on_advance(_delta);
             } };
@@ -1244,22 +1469,27 @@ rocprofsys_finalize_hidden(void)
             {
                 auto&& _path = itr.pathname;
                 if(!_path.empty() && _path.at(0) != '[' && path::is_regular_file(_path))
+                {
                     _libs.emplace(_path);
+                }
             }
             ar(tim::cereal::make_nvp("memory_maps_files", _libs),
                tim::cereal::make_nvp("memory_maps", _maps));
         });
 
-        static auto* attach_add_session_id = getenv(env_vars::REATTACH_ADD_SESSION_ID);
-        static auto  session_id            = 0;
+        static auto const* attach_add_session_id =
+            getenv(env_vars::REATTACH_ADD_SESSION_ID);
+        static auto session_id = 0;
 
         if(attach_add_session_id)
+        {
             settings::default_process_suffix() = fmt::format("%pid%-{}", session_id++);
+        }
 
         // Disable Timemory file output for disabled ranks
         if(!config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
         {
-            auto* _settings = tim::settings::instance();
+            auto const* _settings = tim::settings::instance();
             if(_settings)
             {
                 _settings->file_output() = false;
@@ -1279,13 +1509,16 @@ rocprofsys_finalize_hidden(void)
 
         if(config::get_use_timemory())
         {
-            auto _components = config::get_setting_value<std::string>(
-                                   std::string{ env_vars::TIMEMORY_COMPONENTS })
-                                   .value_or("wall_clock");
+            auto const _components = config::get_setting_value<std::string>(
+                                         std::string{ env_vars::TIMEMORY_COMPONENTS })
+                                         .value_or("wall_clock");
 
             for(auto&& _comp_name : rocprofsys::delimit(_components, ",; "))
             {
-                if(_comp_name.empty()) continue;
+                if(_comp_name.empty())
+                {
+                    continue;
+                }
 
                 _output_registry.register_file(
                     settings::compose_output_filename(_comp_name, "txt", _cfg),

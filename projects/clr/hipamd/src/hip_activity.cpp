@@ -6,7 +6,9 @@
 
 #include "platform/activity.hpp"
 #include <hip/hip_runtime_api.h>
+#include <hip/library_types.h>
+#include "hip_internal.hpp"
 
-extern "C" const char* hipGetCmdName(unsigned op) {
+HIP_PUBLIC_API const char* hipGetCmdName(unsigned op) {
   return amd::activity_prof::getOclCommandKindString(static_cast<cl_command_type>(op));
 }

@@ -1511,3 +1511,11 @@ def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
     assert canonical_config_arch("gfx1152") == "gfx115x"
     assert canonical_config_arch("gfx1153") == "gfx115x"
     assert canonical_config_arch("gfx942") == "gfx942"
+
+
+@pytest.mark.misc
+def test_is_gfx1250_matches_only_the_supported_architecture():
+    assert utils_common.is_gfx1250("gfx1250")
+    assert not utils_common.is_gfx1250("gfx12500")
+    assert not utils_common.is_gfx1250("gfx1251")
+    assert not utils_common.is_gfx1250(None)

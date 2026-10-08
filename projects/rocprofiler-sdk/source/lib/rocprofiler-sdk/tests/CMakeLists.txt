@@ -5,6 +5,17 @@ rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
 
+add_library(rocprofiler-sdk-registration-attach-fixture SHARED
+            registration_attach_fixture.cpp)
+target_link_libraries(
+    rocprofiler-sdk-registration-attach-fixture
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
+            rocprofiler-sdk::rocprofiler-sdk-build-flags)
+install(
+    TARGETS rocprofiler-sdk-registration-attach-fixture
+    LIBRARY DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/lib
+            COMPONENT tests)
+
 # -------------------------------------------------------------------------------------- #
 #
 # Link to static rocprofiler library
@@ -13,6 +24,8 @@ include(GoogleTest)
 
 set(rocprofiler_lib_sources
     agent.cpp
+    agent_mapping.cpp
+    parse_gfx_target_version_test.cpp
     buffer.cpp
     contexts.cpp
     enum_string.cpp
@@ -21,6 +34,7 @@ set(rocprofiler_lib_sources
     naming.cpp
     queue_controller.cpp
     queue_interposition.cpp
+    signal_pool.cpp
     timestamp.cpp
     version.cpp
     hsa_barrier.cpp)
@@ -58,8 +72,9 @@ rocprofiler_add_unit_test(
 #
 # -------------------------------------------------------------------------------------- #
 
-set(rocprofiler_shared_lib_sources external_correlation.cpp intercept_table.cpp
-                                   registration.cpp roctx.cpp status.cpp)
+set(rocprofiler_shared_lib_sources
+    external_correlation.cpp intercept_table.cpp registration.cpp registration_attach.cpp
+    roctx.cpp status.cpp)
 
 add_executable(rocprofiler-sdk-lib-tests-shared)
 target_sources(rocprofiler-sdk-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sources})
@@ -73,6 +88,13 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-roctx-shared-library
             GTest::gtest
             GTest::gtest_main)
+target_compile_definitions(
+    rocprofiler-sdk-lib-tests-shared
+    PRIVATE
+        "ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE=\"$<TARGET_FILE_NAME:rocprofiler-sdk-registration-attach-fixture>\""
+    )
+add_dependencies(rocprofiler-sdk-lib-tests-shared
+                 rocprofiler-sdk-registration-attach-fixture)
 set_target_properties(rocprofiler-sdk-lib-tests-shared PROPERTIES BUILD_RPATH
                                                                   "\$ORIGIN/../lib")
 

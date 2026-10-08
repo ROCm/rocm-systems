@@ -124,7 +124,7 @@ target_sources(amdhip64 PRIVATE
   hip_vm.cpp
   hip_api_trace.cpp
   hip_table_interface.cpp
-  hip_table_interface_c.cpp
+  hip_deprecated_abi.cpp
   hip_comgr_helper.cpp
   hip_library.cpp
   profiler/hip_clr_profiler.cpp
@@ -156,6 +156,11 @@ if(BUILD_SHARED_LIBS)
     target_link_options(amdhip64 PRIVATE "/DEF:${AMDHIP_DEF_OUTPUT_NATIVE}")
     set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${AMDHIP_DEF_OUTPUT}")
   else()
+    # Unix compiler and linker default visibility to visible. Let's change to
+    # hidden so we only expose what we need.
+    set_target_properties(amdhip64 PROPERTIES
+      CXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN ON)
     target_link_libraries(amdhip64 PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
     set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
   endif()
@@ -173,6 +178,8 @@ target_include_directories(amdhip64
     ${PROJECT_BINARY_DIR}/include)
 
 target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
+
+target_compile_definitions(amdhip64 PRIVATE HIP_ABI_IMPL)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
 # Add link to comgr, hsa-runtime and other required libraries in target files
@@ -264,16 +271,21 @@ if(USE_PROF_API)
   ")
   endif()
 
+
+  if(MSVC)
+    set(pp_out /P /Fi:${PROF_API_NEWHDR}.i)
+  else()
+    set(pp_out -E -o ${PROF_API_NEWHDR}.i)  # note: -E before input
+  endif()
+
   add_custom_command(OUTPUT ${PROF_API_NEWHDR}.i
     COMMAND ${CMAKE_COMMAND} -E cat ${PROF_API_HDR} ${PROF_GL_HDR} > ${PROF_API_NEWHDR}
     COMMAND ${CMAKE_C_COMPILER}
         "-D$<JOIN:$<TARGET_PROPERTY:amdhip64,COMPILE_DEFINITIONS>,;-D>"
-        "-I$<JOIN:$<TARGET_PROPERTY:amdhip64,INCLUDE_DIRECTORIES>,;-I>"
+        "$<LIST:TRANSFORM,$<TARGET_PROPERTY:amdhip64,INCLUDE_DIRECTORIES>,PREPEND,-I>" # Directory name may contain spaces.
         "-DHIP_INCLUDE_HIP_HIP_RUNTIME_PT_API_H=1"
-        ${c_flags}
         $<TARGET_PROPERTY:amdhip64,COMPILE_OPTIONS>
-        ${CPP_EXTRA_C_FLAGS}
-        -E ${PROF_API_NEWHDR} -o ${PROF_API_NEWHDR}.i
+        ${pp_out} ${PROF_API_NEWHDR}
     COMMAND_EXPAND_LISTS VERBATIM
     IMPLICIT_DEPENDS C ${PROF_API_HDR} ${PROF_GL_HDR} ${PROF_API_DEPRECATED}
     DEPENDS ${PROF_API_HDR} ${PROF_GL_HDR} ${PROF_API_DEPRECATED}

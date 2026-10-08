@@ -23,13 +23,18 @@ Pre-built configurations ship in the `configs/` directory:
 | `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
 | `gfx950_mi355x_kmd.json` | Single CDNA4 GPU (daemon or KFD mode) |
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
-| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone simulation) |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs (multi-GPU daemon mode) |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
 
 Standalone configs (without `_kmd` in the name) are intended for caller-driven simulation where you step or run the VM directly. KMD configs initialize the emulated kernel driver so that an unmodified HIP or HSA application can issue ioctls through the LD_PRELOAD interposer.
+
+The gfx1250 standalone profile also supplies the compute-only PCI function used
+by the VFIO-user server. Follow
+[Run a QEMU VFIO-user compute guest](qemu-vfio.md) for its guest-kernel,
+firmware, and launch requirements.
 
 ## Edit key fields
 
@@ -39,6 +44,7 @@ Copy a pre-built config and modify the fields that matter for your workload. The
 {
   "max_ticks": 100000,
   "num_threads": 1,
+  "cpu_dispatch_threads": 0,
   "exec_mode": "functional",
   "vm": { "arch": "cdna4" },
   "topology": { "..." : "..." }
@@ -51,7 +57,42 @@ An integer that caps the number of simulation ticks. The VM stops when all prima
 
 ### `num_threads`
 
-The number of worker threads the PDES simulation engine uses. Set to `1` for single-threaded execution.
+The number of Simdojo engine partitions. rocJITsu assigns whole XCD subtrees to
+these partitions and clamps the value to the aggregate XCD count. Set to `1` to
+keep all XCDs on one engine partition.
+
+### `cpu_dispatch_threads`
+
+The host-thread width used to execute accepted CU work in functional mode. A
+nonzero value is applied per SoC and shared by all command processors in that
+SoC. Omission or `0` selects a preferred allocation from `thread_allocations`;
+`1` forces serial dispatch. The shared pool covers concurrent XCD submissions;
+its width is bounded by one plus the sum of CUs-1 across nonempty XCDs.
+Each submission uses at most its active CU count.
+Clocked mode always uses a width of one.
+
+### `async_helper_threads`
+
+Shared MMA helpers across the VM's CUs. Omission or -1 selects from the target
+table; zero disables helpers. Explicit values range from 0 to 128. The gfx950
+and gfx1250 single-GPU tables enable helpers within the shared thread budget;
+other shipped targets and multi-GPU defaults keep H=0. See
+[asynchronous MMA execution](../../async-instructions.md).
+
+### Execution budget and preferred allocations
+
+`cpu_thread_budget` is a ceiling for engines, retained dispatch workers and shared MMA helpers:
+E + sum(D - 1) + H. Its default is process affinity and the target allocation
+table. Desktop/older CDNA presets stop at 24 engine/dispatch threads; gfx950
+adds eight helpers, while gfx1250 uses up to 40 engine/dispatch threads and
+eight helpers. A positive budget overrides affinity. The selector picks the largest fitting
+entry in `thread_allocations`; it leaves unused budget between granules.
+Explicit E/D/H knobs take priority and may exceed the automatic budget. A config
+without a table uses serial defaults for unspecified knobs.
+
+Use `rocjitsu --config <path> --thread-budget-table` to show expected allocations
+without starting a VM. `rocjitsu --cpu-thread-budget N` replaces the JSON ceiling
+for that launch. Mirage embeds the native tables in its RocJITsu backend.
 
 ### `exec_mode`
 

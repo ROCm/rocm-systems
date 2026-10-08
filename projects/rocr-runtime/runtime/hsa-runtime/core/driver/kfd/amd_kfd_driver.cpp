@@ -430,7 +430,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
     const bool is_windxg =
-        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
+        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
     const bool require_pinning =
         !is_windxg &&
         (!m_region.full_profile() || m_region.IsLocalMemory() ||
@@ -619,6 +619,13 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->owner = this;
     // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
     handle->owns_allocation = true;
+
+    if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
+                                           &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
+      DestroyMemoryHandle(handle);
+      return HSA_STATUS_ERROR;
+    }
+
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
@@ -717,12 +724,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
     return ret;
   assert(targetHandle.size == size);
 
-  const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
-  const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
-  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
-    DestroyMemoryHandle(&targetHandle);
-    return HSA_STATUS_ERROR;
-  }
+  handle->mmap_offset = targetHandle.mmap_offset;
 
   // handle->handle is replaced by the imported BO; handle->size carries over from allocation.
   handle->handle = targetHandle.handle;
@@ -792,7 +794,6 @@ hsa_status_t KfdDriver::SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t si
 
   return HSA_STATUS_SUCCESS;
 }
-
 hsa_status_t KfdDriver::OpenSMI(uint32_t node_id, int* fd) const {
   if (HSAKMT_CALL(hsaKmtOpenSMI(node_id, fd)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
@@ -1096,6 +1097,13 @@ hsa_status_t KfdDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* read
     *ready = false;
   }
 
+  return HSA_STATUS_SUCCESS;
+}
+
+
+hsa_status_t KfdDriver::SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) {
+  if (HSAKMT_CALL(hsaKmtSetPersistingCacheSize)(node_id, cache_size) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 

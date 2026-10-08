@@ -186,7 +186,7 @@ Additional configuration options to control the tracing behavior include:
 - ``ROCPROFSYS_TRACE_DELAY`` (``--trace-wait``): Delay before starting trace collection (in seconds).
 - ``ROCPROFSYS_TRACE_DURATION`` (``--trace-duration``): Duration of trace collection (in seconds).
 - ``ROCPROFSYS_TRACE_PERIODS`` (``--trace-periods``): Specifies multiple delay/duration periods in the format ``<DELAY>:<DURATION>``, ``<DELAY>:<DURATION>:<REPEAT>``, or ``<DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>``.
-- ``ROCPROFSYS_TRACE_PERIOD_CLOCK_ID`` (``--trace-clock-id``): Clock type for timing, such as ``realtime``, ``monotonic``, ``cputime``.
+- ``ROCPROFSYS_TRACE_PERIOD_CLOCK_ID`` (``--trace-clock-id``): Clock type for timing, either ``realtime`` (default) or ``cputime``.
 
 Profile mode
 ^^^^^^^^^^^^^^^^^^^^^^^^

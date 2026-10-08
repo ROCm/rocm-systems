@@ -19,7 +19,7 @@ hipFile targets Linux with ROCm HIP. For supported GPUs and stack components,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
 - CMake 3.21 or later
-- A C++ compiler that matches the ``AIS_CXX_STANDARD`` value you select. The
+- A C++ compiler that matches the ``HIPFILE_CXX_STANDARD`` value you select. The
   default is C++20.
 - HIP and HSA packages from ROCm so CMake can locate ``hip`` and ``hsa-runtime64``
 - ``libmount`` from ``util-linux`` for mount metadata parsing
@@ -98,19 +98,19 @@ exist for sanitizers, clang-tidy, and documentation generation. Inspect
    * - ``BUILD_SHARED_LIBS``
      - ``ON``
      - Builds shared libraries when ``ON`` and static libraries when ``OFF``.
-   * - ``AIS_CXX_STANDARD``
+   * - ``HIPFILE_CXX_STANDARD``
      - ``20``
      - C++ dialect. Allowed values are ``20``, ``23``, and ``26``.
-   * - ``AIS_INSTALL_EXAMPLES``
+   * - ``HIPFILE_INSTALL_EXAMPLES``
      - ``ON``
      - Installs sample binaries such as ``aiscp`` when enabled.
-   * - ``AIS_INSTALL_TOOLS``
+   * - ``HIPFILE_INSTALL_TOOLS``
      - ``ON``
      - Installs host tools such as ``ais-stats`` when enabled on AMD builds.
-   * - ``AIS_BUILD_DOCS``
+   * - ``HIPFILE_BUILD_DOCS``
      - ``OFF``
      - Enables the ``doc`` target when ``ON``. Requires Doxygen in your environment.
-   * - ``AIS_USE_CODE_COVERAGE``
+   * - ``HIPFILE_USE_CODE_COVERAGE``
      - ``OFF``
      - Adds LLVM coverage instrumentation for Clang builds.
    * - ``BUILD_TESTING``
@@ -120,3 +120,9 @@ exist for sanitizers, clang-tidy, and documentation generation. Inspect
      - ``RelWithDebInfo``
      - CMake build flavor. Other common values are ``Debug``, ``Release``,
        ``MinSizeRel``, and ``None``.
+
+.. note::
+
+   The ``HIPFILE_`` options were previously named with an ``AIS_`` prefix (for
+   example, ``AIS_CXX_STANDARD``). The ``AIS_`` names still work but are
+   deprecated, and CMake prints a deprecation warning when you use them.
