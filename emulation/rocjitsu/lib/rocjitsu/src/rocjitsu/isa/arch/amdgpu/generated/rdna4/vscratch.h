@@ -158,6 +158,9 @@ class ScratchLoadD16U8Vscratch : public Vscratch {
 public:
   ScratchLoadD16U8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand vaddr;
@@ -169,6 +172,9 @@ class ScratchLoadD16I8Vscratch : public Vscratch {
 public:
   ScratchLoadD16I8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand vaddr;
@@ -180,6 +186,9 @@ class ScratchLoadD16B16Vscratch : public Vscratch {
 public:
   ScratchLoadD16B16Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand vaddr;
@@ -191,6 +200,9 @@ class ScratchLoadD16HiU8Vscratch : public Vscratch {
 public:
   ScratchLoadD16HiU8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand vaddr;
@@ -202,6 +214,9 @@ class ScratchLoadD16HiI8Vscratch : public Vscratch {
 public:
   ScratchLoadD16HiI8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand vaddr;
@@ -213,6 +228,9 @@ class ScratchLoadD16HiB16Vscratch : public Vscratch {
 public:
   ScratchLoadD16HiB16Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand vaddr;
