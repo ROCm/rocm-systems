@@ -2622,15 +2622,16 @@ std::vector<ArithmeticCase> rounded_result_modifier_cases() {
   return cases;
 }
 
-// The emulator's gfx1100/gfx1030 gate applies OMOD only with MODE.IEEE clear
-// and F16 output denormals flushed. Captures cover MODE 0x00/0x50 and IEEE
-// controls, not the output-keep case. When OMOD applies, both GPUs scale after
-// rounding to half, as gfx1201 does. Each case transcribes a lane from external
-// VALU probe captures (v_mul_f16_e64 and v_add_f16_e64 with div:2); the raw
-// artifacts are not checked into this tree. Both GPUs return the same half and
-// keep the initialized 0xa5a5 high half. RDNA2 cases start from a zero high
-// half because the emulator's RDNA2 executor clears it, a separate difference
-// from gfx1030 hardware.
+// The emulator's pre-RDNA4 gate applies OMOD only with MODE.IEEE clear and F16
+// output denormals flushed. Captures cover MODE 0x00/0x50 and IEEE controls on
+// gfx1100, gfx1030, and gfx1010. The output-keep case (MODE 0xf0/0xa0, OMOD
+// ignored) is captured on gfx1030/gfx1010. When OMOD applies, these GPUs scale
+// after rounding to half, as gfx1201 does. Each case transcribes a
+// lane from external VALU probe captures (v_mul_f16_e64 and v_add_f16_e64 with
+// div:2); the raw artifacts are not checked into this tree. The captures return
+// the same half and keep the initialized 0xa5a5 high half. RDNA1/2 cases start
+// from a zero high half because their shared emulator executor clears it, a
+// separate difference from hardware.
 std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
   static constexpr uint32_t kIeee = 1u << 9;
   static constexpr uint32_t kFp16Ovfl = 1u << 23;
@@ -2650,6 +2651,10 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
           rdna3::build_vop3(rdna3::kVAddF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3})},
       Target{
           "Gfx1030", ROCJITSU_CODE_ARCH_RDNA2, 0u,
+          rdna2::build_vop3(rdna2::kVMulF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3}),
+          rdna2::build_vop3(rdna2::kVAddF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3})},
+      Target{
+          "Gfx1010", ROCJITSU_CODE_ARCH_RDNA1, 0u,
           rdna2::build_vop3(rdna2::kVMulF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3}),
           rdna2::build_vop3(rdna2::kVAddF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3})},
   };
@@ -2679,6 +2684,16 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
         0x00u);
     add("AddF16Div2NegativeMinNormalKeepInputs", target.addition, 0x8400u, 0x0000u, 0x8000u, 0x50u);
     add("AddF16Div2IeeeIgnoresOmod", target.addition, 0x8400u, 0x0000u, 0x8400u, kIeee);
+    if (target.arch == ROCJITSU_CODE_ARCH_RDNA3)
+      continue;
+    // Preserved F16 output denormals disable OMOD, with or without input flushing.
+    add("MulF16Div2KeepOutputsIgnoresOmod", target.mul, 0x3c00u, 0x3c00u, 0x3c00u, 0xf0u);
+    add("MulF16Div2FlushInputsKeepOutputsIgnoresOmod", target.mul, 0x3c00u, 0x3c00u, 0x3c00u,
+        0xa0u);
+    add("AddF16Div2NegativeMinNormalKeepOutputs", target.addition, 0x8400u, 0x0000u, 0x8400u,
+        0xf0u);
+    add("AddF16Div2NegativeMinNormalFlushInputsKeepOutputs", target.addition, 0x8400u, 0x0000u,
+        0x8400u, 0xa0u);
   }
   return cases;
 }

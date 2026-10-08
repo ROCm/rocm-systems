@@ -2642,6 +2642,9 @@ template <typename Inst, typename UnOp>
 /// 4. Round to F16.
 /// 5. Apply OMOD, then CLAMP.
 ///
+/// TRANS functors already round and apply MODE output flushing in step 3;
+/// step 4 repacks that half value. Ordinary unary functors do not apply a
+/// separate output-flush stage.
 /// `transcendental` selects TRANS OMOD overflow rounding: nearest in every MODE.
 /// Storage:
 /// - Generic: low source half; zero-extended destination dword.

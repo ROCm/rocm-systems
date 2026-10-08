@@ -1997,6 +1997,8 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
 # TRUNC/RNDNE           preserve                  ordinary
 # FRACT                 preserve (flush TODO)     ordinary
 # SQRT/RCP/RSQ/EXP/LOG  MODE flush                TRANS
+# TRANS functors round and apply MODE output flushing before returning to the
+# glue. Ordinary unary functors do not apply a separate output-flush stage.
 SIMD_VOP3_UNARY_FP16: dict[str, str] = {
     'v_ceil_f16_vop3': '[](auto a) { return util::ceil_simd(a); }',
     'v_floor_f16_vop3': '[](auto a) { return util::floor_simd(a); }',
@@ -2102,6 +2104,8 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
 }
 
 # Non-fused F16 ternaries: widen -> ABS/NEG -> evaluate -> round F16 -> OMOD/CLAMP.
+# MAD and older min/max forms retain their existing MODE and NaN-policy gaps;
+# matching scalar output order does not establish hardware correctness.
 # DIV_FIXUP explicitly retains modifiers before narrowing. Fused FMA uses the
 # MODE-aware native<double> route selected by SIMD_VOP3_FMA_MODE_FP16 below.
 SIMD_VOP3_TERNARY_FP16: dict[str, str] = {

@@ -583,7 +583,8 @@ def _mode_arithmetic(
         ['0.0' if width == 64 else '0.0f'] if len(operands) == 2 else []
     )
     arguments.append(f'wf.fp_round_mode_{mode}()')
-    # F16 sources are flushed at the register read; the helper takes no MODE.
+    # F16 sources are flushed at the register read; the helper only takes the
+    # rounding control. Destination finishing owns output-denormal handling.
     if width != 16:
         arguments.append(f'wf.fp_denorm_mode_{mode}()')
     if operation == 'FMA' and ctx.dx9_zero_fma:
