@@ -5088,7 +5088,8 @@ hipError_t playback_hipMemMap(PlaybackContext& ctx, const uint8_t* pl) {
                              static_cast<unsigned long long>(a->flags));
     if (r == hipSuccess) {
         std::unique_lock lk(ctx.map_mutex);
-        ctx.vmm_mappings[reinterpret_cast<uint64_t>(live_va)] = static_cast<size_t>(a->size);
+        hrr::va_track_mapping(ctx.vmm_mappings, reinterpret_cast<uint64_t>(live_va),
+                              static_cast<size_t>(a->size));
     }
     return r;
 }
@@ -5100,7 +5101,8 @@ hipError_t playback_hipMemUnmap(PlaybackContext& ctx, const uint8_t* pl) {
     hipError_t r = hipMemUnmap(live_va, static_cast<size_t>(a->size));
     if (r == hipSuccess) {
         std::unique_lock lk(ctx.map_mutex);
-        ctx.vmm_mappings.erase(reinterpret_cast<uint64_t>(live_va));
+        hrr::va_untrack_mapping(ctx.vmm_mappings, reinterpret_cast<uint64_t>(live_va),
+                                static_cast<size_t>(a->size));
     }
     return r;
 }
@@ -5120,14 +5122,17 @@ void hrr_release_vmm_state(PlaybackContext& ctx) {
         (void)hipMemUnmap(reinterpret_cast<void*>(va), size);
     for (const auto& [rec, h] : handles) (void)hipMemRelease(h);
     hrr::VaPlacement* placing = hrr_placing(ctx);
+    std::vector<hrr::VaRange> rehold;
     for (const auto& [rec, va] : reservations) {
-        if (hipMemAddressFree(va.live, va.size) != hipSuccess) {
-            (void)hipGetLastError();
-            continue;
-        }
+        if (hipMemAddressFree(va.live, va.size) != hipSuccess) continue;
         if (placing && reinterpret_cast<uint64_t>(va.live) == rec)
-            placing->restore_vmm_hold(rec, va.size);
+            rehold.push_back({rec, rec + va.size});
     }
+    // One read of /proc/self/maps for all of them.
+    if (placing) placing->restore_vmm_holds(rehold);
+    // Any of the calls above can fail, and a failure is sticky. The timed pass
+    // must not find it in its first replayed hipGetLastError.
+    (void)hipGetLastError();
 }
 
 // ---------------------------------------------------------------------------
