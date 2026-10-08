@@ -481,7 +481,8 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 //   then:     u32 n_attrs, u32 stride, n_attrs * stride attribute bytes
 //   then:     num_snapshots * 41-byte records: u64 ptr, offset, length,
 //             hash_lo, hash_hi, u8 direction (0 = restore before the launch,
-//             1 = read unchanged while the stream was busy, leave alone).
+//             1 = read unchanged while work the launch waited for was
+//             still queued, leave alone).
 
 // ext_global_worksize: the captured grid[] holds *global work-item counts*
 // (HSA/OpenCL semantics, as passed to hipExtModuleLaunchKernel), NOT workgroup
@@ -1043,18 +1044,44 @@ static void decode_kernel_args(
 // its blob is exactly its length, applied or not; any other record is skipped
 // with a message.
 //
-// Direction 0 is applied. The restore is not stream-ordered: replay waits on
-// the host for the launch stream to drain, and for the null stream as well
-// when the launch stream is a blocking one, then copies the bytes in with
-// memcpy, leaving alone a chunk that already holds them (typically because
-// replayed device work wrote the same thing). Direction 1 is a chunk capture
-// read unchanged while the stream still had work queued; that work may have
-// written it before the kernel ran, so replay leaves it to the replayed work.
+// Direction 0 is applied. The restore is ordered on the launch stream: one
+// host function per launch, queued with hipLaunchHostFunc just before the
+// kernel, copies the bytes in with memcpy, leaving alone a chunk that already
+// holds them (typically because replayed device work wrote the same thing).
+// The host function waits for what the kernel waits for: the launch stream's
+// earlier work, the null stream's when the stream is a blocking one, and every
+// blocking stream's when it is the null stream. The kernel waits for the host
+// function. Replay itself never blocks on the host here, so a launch whose
+// stream waits on work replayed later (hipStreamBatchMemOp, say) does not hang.
+// Direction 1 is a chunk capture read unchanged while work the launch waited
+// for was still queued; that work may have written it before the kernel ran,
+// so replay leaves it to the replayed work.
 //
 // rec_bases_out gets the recorded base of every allocation a valid record
 // names, applied or not: decode_kernel_args uses it to tell which unmarked
 // pinned words in by-value arguments are scalars.
 static constexpr size_t kHostSnapRecordSize = 8 * 5 + 1;
+
+// The chunks one launch restores, owned by the host function that applies
+// them. The blobs stay alive until it runs. It calls no HIP API.
+struct HostSnapshotRestore {
+    struct Chunk {
+        uint8_t* dst;
+        std::shared_ptr<const std::vector<uint8_t>> blob;
+    };
+    std::vector<Chunk> chunks;
+    std::atomic<uint64_t>* applied;
+};
+
+static void apply_host_snapshots(void* user) {
+    std::unique_ptr<HostSnapshotRestore> job(static_cast<HostSnapshotRestore*>(user));
+    for (const auto& c : job->chunks) {
+        if (memcmp(c.dst, c.blob->data(), c.blob->size()) != 0) {
+            memcpy(c.dst, c.blob->data(), c.blob->size());
+            job->applied->fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+}
 
 static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
                                    const uint8_t* end, uint16_t n,
@@ -1085,7 +1112,8 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
                 "skipped\n", kname.c_str(), i, (unsigned long long)ptr,
                 (unsigned long long)off, (unsigned long long)len, why);
     };
-    bool synced = false;
+    auto job = std::make_unique<HostSnapshotRestore>();
+    job->applied = &ctx.host_snapshots_applied;
     for (uint16_t i = 0; i < n; i++, p += kHostSnapRecordSize) {
         uint64_t ptr, off, len, hlo, hhi;
         memcpy(&ptr, p,      8);
@@ -1131,25 +1159,25 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
             if (rec_bases_out) rec_bases_out->insert(arec);
             continue;
         }
-        // Earlier work the launch waits for may still be reading or writing
-        // the buffer: the launch stream's and, on a blocking stream, the null
-        // stream's. Synchronizing a blocking stream does not drain the null
-        // stream; hipStreamLegacy's synchronize drains the null stream alone.
-        if (!synced) {
-            (void)hipStreamSynchronize(stream);
-            unsigned int flags = 0;
-            if (stream != nullptr && hipStreamGetFlags(stream, &flags) == hipSuccess &&
-                !(flags & hipStreamNonBlocking))
-                (void)hipStreamSynchronize(hipStreamLegacy);
-            synced = true;
-        }
-        auto* dst = static_cast<uint8_t*>(live) + off;
-        if (memcmp(dst, blob->data(), len) != 0) {
-            memcpy(dst, blob->data(), len);
-            ctx.host_snapshots_applied.fetch_add(1, std::memory_order_relaxed);
-        }
+        job->chunks.push_back({static_cast<uint8_t*>(live) + off, std::move(blob)});
         if (rec_bases_out) rec_bases_out->insert(arec);
     }
+    if (job->chunks.empty()) return;
+    // Earlier work the launch waits for may still be reading or writing the
+    // buffer, so the bytes go in from the launch stream, not from here.
+    HostSnapshotRestore* raw = job.get();
+    if (hipLaunchHostFunc(stream, apply_host_snapshots, raw) == hipSuccess) {
+        job.release();  // apply_host_snapshots owns it now
+        return;
+    }
+    (void)hipGetLastError();
+    static std::atomic<bool> warned{false};
+    if (!warned.exchange(true))
+        fprintf(stderr,
+                "[HRR] '%s': could not queue the pinned host snapshot restore on "
+                "the launch stream; restored without waiting for its earlier "
+                "work\n", kname.c_str());
+    apply_host_snapshots(job.release());
 }
 
 // Step over the argument block of a kernel launch payload without decoding
@@ -1306,9 +1334,9 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         ctx.kernels_launched.load(std::memory_order_relaxed) + 1;
 
     // Pinned host memory the kernel reads, as the host left it before the
-    // launch at capture time. Written back now: replay waits on the host for
-    // the work the launch waits for to drain, then copies the bytes in (not
-    // stream-ordered).
+    // launch at capture time. Written back by a host function queued on the
+    // launch stream ahead of the kernel, so after the work the kernel waits
+    // for.
     std::set<uint64_t> refilled;
     if (num_snapshots) {
         if (!tail_ok) {
