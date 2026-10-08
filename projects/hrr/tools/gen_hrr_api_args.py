@@ -2859,7 +2859,9 @@ _HOST_ALLOC_FREE_APIS = {'hipHostFree', 'hipFreeHost'}
 # APIs that can release pinned host memory under a restore still queued on a
 # stream they do not drain: hipDeviceReset does on one GPU, where the null
 # stream survives it. The handler first waits, a bounded time, for every
-# queued pinned host snapshot restore.
+# queued pinned host snapshot restore. After a successful call it drops from
+# tracking the pinned allocations the runtime no longer knows
+# (hrr_forget_released_host_allocs), so no later record restores into them.
 _RELEASES_ALL_HOST_ALLOCS_APIS = {'hipDeviceReset'}
 
 # APIs that free device allocations: API name -> rec_ptr_param name in struct
@@ -3535,6 +3537,9 @@ def generate_playback_shim(entry: ApiEntry) -> str:
             lines.append(f"  if ({success_cond}) {{")
             lines.append(f"    {remove_fn}(_rec_hdl);")
             lines.append(f"  }}")
+
+    if entry.name in _RELEASES_ALL_HOST_ALLOCS_APIS:
+        lines.append(f"  if ({success_cond}) hrr_forget_released_host_allocs(ctx);")
 
     for extra in _POST_CALL_EXTRA.get(entry.name, []):
         lines.append(f"  {extra}")

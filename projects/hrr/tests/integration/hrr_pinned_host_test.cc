@@ -2807,6 +2807,53 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_DeviceReset) {
 }
 
 // ---------------------------------------------------------------------------
+// After a replayed hipDeviceReset on one GPU, a record naming a pinned buffer
+// the reset freed is refused. Reset_Direct's launch 1 gets its first record
+// pointed into buffer A, which the reset released, instead of B. Replay that
+// kept A in its tracking let the record through and restored archive bytes
+// into the released memory. Replay runs with --continue-on-error, since
+// events after a reset need not replay.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_RecordAfterReset) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_record_after_reset.hrr");
+  (void)capture_case("Unit_HRR_PinnedHost_Reset_Direct", cap.path);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() >= 2);
+  REQUIRE(kls[0]->snapshots.size() == kResetABytes / kChunk);
+  REQUIRE(kls[1]->snapshots.size() == 2);
+  REQUIRE(kls[1]->snapshots[0].length == kChunk);
+
+  // A chunk-sized range inside A that B does not cover, so that the record
+  // can only name A.
+  const uint64_t a = kls[0]->snapshots[0].ptr_handle;
+  const uint64_t b = kls[1]->snapshots[0].ptr_handle;
+  uint64_t stale = 0;
+  for (uint64_t p : {a, a + kResetABytes - kChunk})
+    if (stale == 0 && (p + kChunk <= b || p >= b + kPinnedBytes)) stale = p;
+  INFO("A 0x" << std::hex << a << ", B 0x" << b);
+  REQUIRE(stale != 0);
+
+  std::vector<uint8_t> events = read_bytes(archive / "events.bin");
+  const auto spans = launch_spans(events);
+  REQUIRE(spans.size() == kls.size());
+  patch_snapshot(events, spans, kls, 1, 0, /*ptr*/ 0, stale);
+  patch_snapshot(events, spans, kls, 1, 0, /*offset*/ 1, 0);
+  write_bytes(archive / "events.bin", events);
+
+  auto [rc, out] = replay(archive, "--continue-on-error");
+  INFO("Replay exit: " << rc << "\nReplay:\n" << out);
+  CHECK(rc < 128);
+  CHECK(count_of(out, "names no live allocation") == 1);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(rejected == 1);
+}
+
+// ---------------------------------------------------------------------------
 // A launch on a stream that is not capturing is restored while another stream
 // captures. Deciding from whether any capture is open skipped launch 2's
 // restore, and the read saw pattern 1.

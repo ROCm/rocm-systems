@@ -850,6 +850,16 @@ bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* 
 // into it.
 bool hrr_host_release_ready(PlaybackContext& ctx, const void* live);
 
+// Called after a replayed hipDeviceReset succeeds. Drops from tracking every
+// pinned host allocation the runtime no longer knows, as capture does: with
+// one GPU the reset frees hipHostMalloc memory and drops hipHostRegister
+// registrations. A later record naming one is then refused as naming no live
+// allocation, rather than restored into released memory. A registered range
+// keeps its backing buffer in host_reg_bufs: replay allocated it and it stays
+// valid, so teardown or the replayed unregister still frees it after the
+// usual wait.
+void hrr_forget_released_host_allocs(PlaybackContext& ctx);
+
 // Whether the event is a kernel launch whose payload carries pinned host
 // snapshot records. A multi-threaded replay orders such a launch against the
 // other threads' events, like an allocation or a free: the launch checks that

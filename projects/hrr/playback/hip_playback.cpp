@@ -1122,6 +1122,30 @@ bool hrr_host_release_ready(PlaybackContext& ctx, const void* live) {
     return false;
 }
 
+void hrr_forget_released_host_allocs(PlaybackContext& ctx) {
+    std::vector<std::pair<uint64_t, void*>> host;
+    {
+        std::shared_lock lk(ctx.map_mutex);
+        for (auto& [rec, e] : ctx.alloc_map)
+            if (e.kind == AllocKind::HostMalloc || e.kind == AllocKind::HostRegister)
+                host.emplace_back(rec, e.live_ptr);
+    }
+    std::vector<std::pair<uint64_t, void*>> gone;
+    for (auto& [rec, live] : host) {
+        hipPointerAttribute_t attr{};
+        const hipError_t r = hipPointerGetAttributes(&attr, live);
+        (void)hipGetLastError();
+        if (r == hipSuccess && attr.type == hipMemoryTypeUnregistered)
+            gone.emplace_back(rec, live);
+    }
+    std::unique_lock lk(ctx.map_mutex);
+    for (auto& [rec, live] : gone) {
+        auto it = ctx.alloc_map.find(rec);
+        if (it != ctx.alloc_map.end() && it->second.live_ptr == live)
+            ctx.alloc_map.erase(it);
+    }
+}
+
 static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
                                    const uint8_t* end, uint16_t n,
                                    hipStream_t stream,

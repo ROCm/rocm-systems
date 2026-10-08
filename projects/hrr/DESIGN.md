@@ -765,7 +765,8 @@ free, an unregister, a `hipFree`, a `hipDeviceReset` of the allocating device,
 no free at all (the summary and the `--kernel-filter` warm-up wait), and a free
 whose restore waits for a later event (the bounded wait and the leak). With two
 devices the reset frees no pinned host memory, so the reset case shows only that
-replay waits before it. Three paths are untested by design: the fork handlers, a
+replay waits before it. A one-GPU case points a record after a reset at the
+buffer the reset freed, and checks that replay refuses it. Three paths are untested by design: the fork handlers, a
 blob or event that cannot be written, and a restore `hipLaunchHostFunc` refuses.
 Each needs a fault injected into the capture or replay process, which no test
 hook provides. Of the leaks, only the one in `hipHostFree` is tested; those in
@@ -820,19 +821,25 @@ checks each record when it queues the restore, not when the restore runs. At
 that point the record must name a pinned host allocation replay made, lie
 inside its bounds, and come with a blob of exactly the recorded length. A record
 that names device memory, no allocation, a range outside its allocation, an
-unknown direction or a blob of another size is refused. Replay then keeps the
-allocation alive until the restore has run: a free, an unregister or teardown
-waits for it, and leaks the allocation rather than free it when the wait runs
-out. Two paths release the allocation anyway, so a restore queued before them
-can write archive-chosen bytes into memory that has been released and may have
-been reused:
+unknown direction or a blob of another size is refused. After a replayed
+`hipDeviceReset`, replay stops tracking every pinned allocation the runtime no
+longer knows, as capture does, so a later record naming one is refused too.
+Replay then keeps the allocation alive until the restore has run or the process
+exits: a free, an unregister or teardown waits for it, and leaks the allocation
+rather than free it when the wait runs out. Once the summary's wait or one
+teardown wait has run out, teardown leaks without waiting. Two paths release
+the allocation anyway, so a restore queued before them can write
+archive-chosen bytes into memory that has been released and may have been
+reused:
 
 - a replayed `hipDeviceReset` whose bounded wait runs out, when replay sees one
   GPU (with more, a reset frees no pinned host memory). An archive can arrange
-  this on purpose: hold the null stream with a stream wait, launch on it, reset
-  the device, allocate again, then release the null stream;
+  this on purpose: a kernel on the null stream that runs longer than the bound,
+  a launch behind it on the null stream with a record for the allocation, then
+  the reset, which frees the allocation before the restore runs;
 - an exit after a fatal HIP error, which does not drain queued restores while
-  the process tears its memory down.
+  the process tears its memory down. A restore still queued when teardown
+  leaked its allocation is in the same position at a normal exit.
 
 This does not make an untrusted archive safe to replay: the archive also
 supplies the kernels and their arguments, and a snapshot exists to put chosen
@@ -871,10 +878,13 @@ bytes in front of those kernels.
   every device, which a reset leaves alone. With one GPU it does free it, after
   it destroys the device's streams other than the null stream, so only a
   restore queued on the null stream can still be pending. That restore can
-  then write released memory: the reset releases every pinned allocation, so
-  replay cannot leak just the one the restore writes. Replay orders the reset
-  against the other threads' events, so that their launches do not keep
-  queueing restores while it waits.
+  then write released memory: the reset releases every `hipHostMalloc`
+  allocation, so replay cannot leak just the one the restore writes. A
+  `hipHostRegister` range only loses its registration; replay's own buffer
+  behind it stays allocated until teardown or the replayed unregister frees
+  it. After the reset replay stops tracking both, so no later record restores
+  into them. Replay orders the reset against the other threads' events, so
+  that their launches do not keep queueing restores while it waits.
 - Replay exits after a fatal HIP error without syncing the device or draining
   queued restores. A host function that still runs keeps its own state alive,
   but the pinned memory it writes is torn down as the process exits, so it can
