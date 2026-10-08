@@ -12,7 +12,7 @@ Panel Config:
         unit: Unit
       metric:
         Hit rate:
-          value: 100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          value: COLLECT_SUM(_collect.vl1d_hit_non_rw, _collect.vl1d_hit_atom)
           unit: Percent
         Bandwidth Utilization:
           value: 100 * 128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 128 * $cu_per_gpu)
@@ -23,6 +23,12 @@ Panel Config:
         Coalescing:
           value: 100 * 64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum))
           unit: Percent
+        _collect.vl1d_hit_non_rw:
+          value: 100 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          _collectable_id: collect.vl1d_hit_non_rw
+        _collect.vl1d_hit_atom:
+          value: -100 * SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          _collectable_id: collect.vl1d_hit_atom
       comparable: false
       cli_style: simple_bar
   - metric_table:
@@ -79,9 +85,9 @@ Panel Config:
           max: 128 * MAX(TCP_TOTAL_CACHE_ACCESSES_sum / (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Cache Hit Rate:
-          avg: 100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
-          min: MIN(100 - 100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / TCP_TOTAL_CACHE_ACCESSES_sum)
-          max: MAX(100 - 100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / TCP_TOTAL_CACHE_ACCESSES_sum)
+          avg: COLLECT_SUM(_collect.vl1d_hit_non_rw, _collect.vl1d_hit_atom)
+          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
+          max: None
           unit: Percent
         Cache Accesses:
           avg: SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM($denom)
@@ -89,9 +95,9 @@ Panel Config:
           max: MAX(TCP_TOTAL_CACHE_ACCESSES_sum / $denom)
           unit: (Requests + $normUnit)
         Cache Hits:
-          avg: SUM(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM($denom)
-          min: MIN((TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom)
-          max: MAX((TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom)
+          avg: COLLECT_SUM(_collect.vl1d_hits_non_rw, _collect.vl1d_hits_atom)
+          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
+          max: None
           unit: (Requests + $normUnit)
         Invalidations:
           avg: SUM(TCP_TOTAL_WRITEBACK_INVALIDATES_sum) / SUM($denom)
@@ -118,6 +124,18 @@ Panel Config:
           min: MIN((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / $denom)
           max: MAX((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / $denom)
           unit: (Requests + $normUnit)
+        _collect.vl1d_hit_non_rw:
+          avg: 100 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          _collectable_id: collect.vl1d_hit_non_rw
+        _collect.vl1d_hit_atom:
+          avg: -100 * SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          _collectable_id: collect.vl1d_hit_atom
+        _collect.vl1d_hits_non_rw:
+          avg: SUM(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM($denom)
+          _collectable_id: collect.vl1d_hits_non_rw
+        _collect.vl1d_hits_atom:
+          avg: SUM(-(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM($denom)
+          _collectable_id: collect.vl1d_hits_atom
   - metric_table:
       id: 1604
       title: L1D - L2 Transactions
