@@ -1717,8 +1717,7 @@ revisions. Build before reserving the machine for measurements.</p>
 cmake<span class="w"> </span>-S<span class="w"> </span><span class="s2">"</span><span class="nv">$repo</span><span class="s2">/emulation/rocjitsu"</span><span class="w"> </span>-B<span class="w"> </span><span class="s2">"</span><span class="nv">$build</span><span class="s2">"</span><span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-DBUILD_TESTING<span class="o">=</span>OFF<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DLTO<span class="o">=</span>OFF<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DROCM_PATH<span class="o">=</span><span class="s2">"</span><span class="nv">$rocm_sdk</span><span class="s2">"</span>
+<span class="w">  </span>-DLTO<span class="o">=</span>OFF
 cmake<span class="w"> </span>--build<span class="w"> </span><span class="s2">"</span><span class="nv">$build</span><span class="s2">"</span><span class="w"> </span>--target<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>rocjitsu_bin<span class="w"> </span>rocjitsu_shared<span class="w"> </span>rocjitsu_plugin_throughput_so
 
