@@ -928,16 +928,29 @@ inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_
   return finalize_omod_f16(result, omod);
 }
 
-/// @brief Whether a host SIMD arithmetic fast path implements the wave's FP policy.
-/// @details Requires nearest rounding and preserved host inputs/outputs.
-/// MODE-aware helpers that implement flushing themselves pass denorm_mode=3
-/// for this host check, then apply the wave's actual denormal policy separately.
-inline bool native_arithmetic_matches(uint32_t round_mode, uint32_t denorm_mode) {
-  if (round_mode != 0 || denorm_mode != 3 || std::fegetround() != FE_TONEAREST)
+/// @brief Whether host SIMD arithmetic uses nearest-even rounding.
+/// @details This ignores host flush controls. It is valid only when the caller
+/// proves that its host-format operands and results cannot be subnormal.
+inline bool native_rounding_matches(uint32_t round_mode) {
+  if (round_mode != 0 || std::fegetround() != FE_TONEAREST)
     return false;
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
   // MXCSR rounding can differ from the x87 rounding reported by fegetround().
-  return (_mm_getcsr() & ((1u << 6) | (1u << 15) | _MM_ROUND_MASK)) == 0;
+  return (_mm_getcsr() & _MM_ROUND_MASK) == 0;
+#elif defined(__aarch64__)
+  return true;
+#else
+  return false;
+#endif
+}
+
+/// @brief Whether a host SIMD arithmetic fast path implements the wave's FP policy.
+/// @details Requires nearest rounding and preserved host inputs/outputs.
+inline bool native_arithmetic_matches(uint32_t round_mode, uint32_t denorm_mode) {
+  if (denorm_mode != 3 || !native_rounding_matches(round_mode))
+    return false;
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+  return (_mm_getcsr() & ((1u << 6) | (1u << 15))) == 0;
 #elif defined(__aarch64__)
   return (detail::read_fpcr() & ((uint64_t{1} << 0) | (uint64_t{1} << 19) | (uint64_t{1} << 24))) ==
          0;
