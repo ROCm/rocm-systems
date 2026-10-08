@@ -1574,6 +1574,7 @@ int main(int argc, char** argv) {
     ctx.host_snapshots_rejected.store(0, std::memory_order_relaxed);
     ctx.host_snapshots_in_graph.store(0, std::memory_order_relaxed);
     ctx.host_allocs_leaked.store(0, std::memory_order_relaxed);
+    ctx.host_snapshot_notices.clear();
     printf("[HRR] Warm-up done. Running filtered pass...\n");
   }
 

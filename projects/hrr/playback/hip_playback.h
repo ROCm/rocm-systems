@@ -327,6 +327,20 @@ struct PlaybackContext {
     // for them had still not run when the free came; see
     // hrr_host_release_ready.
     std::atomic<uint64_t> host_allocs_leaked{0};
+    // The one-time pinned host snapshot notices: a wait for a queued restore,
+    // restores not applied under graph capture, and a restore that could not
+    // be queued on its stream. Cleared after the --kernel-filter warm-up, so
+    // that the timed pass prints them too.
+    struct HostSnapshotNotices {
+        std::atomic<bool> wait{false};
+        std::atomic<bool> in_graph{false};
+        std::atomic<bool> unqueued{false};
+        void clear() {
+            wait.store(false);
+            in_graph.store(false);
+            unqueued.store(false);
+        }
+    } host_snapshot_notices;
 
     // What replay shares with the host functions that restore pinned host
     // snapshots. It is held by a shared_ptr, not by the context, because a

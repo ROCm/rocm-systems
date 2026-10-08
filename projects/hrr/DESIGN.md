@@ -593,9 +593,9 @@ alone, then reads the last command of each blocking stream. It does not ask the
 null-stream query, which also covers them: that query queues a marker on the
 null stream that waits for every blocking stream. A launch that then fails its
 own checks leaves the marker behind, and every later launch into a blocking
-stream waits for it. None of the checks capture makes queues a wait on another
-stream. `hipStreamQuery` can still queue a marker with no dependencies on the
-stream it asks about. The per-thread entry points (`hipLaunchKernel_spt` and
+stream waits for it. No check capture makes queues a wait on another stream.
+`hipStreamQuery` can still queue a marker with no dependencies on the stream it
+asks about. The per-thread entry points (`hipLaunchKernel_spt` and
 `hipLaunchCooperativeKernel_spt`) launch into the per-thread stream when given
 the null stream or `hipStreamLegacy`, so capture asks about the per-thread
 stream. The answer is one of two:
@@ -717,8 +717,11 @@ for every queued restore: the pass's closing sync covers the current device
 only, and a restore still queued on another device would be missing from the
 count. The count and the restored total live in state each host function holds
 a reference to, so one that runs after replay has exited does not touch a
-destroyed context. `--kernel-filter` resets the counters after its warm-up
-pass. The summary prints the chunks restored and the records rejected.
+destroyed context. `--kernel-filter` resets the counters and the one-time
+notices after its warm-up pass, so the timed pass prints its own. The summary
+prints the chunks restored and the records rejected. Snapshot blobs are held in
+a cache of at most 256 MiB, oldest out first, rather than the unbounded blob
+cache.
 
 A multi-threaded replay lets an event start before the one recorded ahead of
 it has finished, except allocations, frees, stream and graph capture calls and
@@ -731,9 +734,6 @@ host function into a graph node. The next event therefore starts only once the
 launch has queued its restore and its kernel. The launch hands the turn on at
 that point, before the timing or the sync a debug option adds after it.
 Launches without records stay unordered.
-Snapshot blobs are
-held in a cache of at most 256 MiB, oldest out first, rather than the unbounded
-blob cache.
 
 `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` reports host memory a kernel reads that no
 snapshot record names: a pointer argument into such a pinned allocation, and a

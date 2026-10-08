@@ -1091,8 +1091,7 @@ bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* 
         return base ? st.pending.find(base) == st.pending.end() : st.pending.empty();
     };
     if (done()) return true;
-    static std::atomic<bool> noted{false};
-    if (!noted.exchange(true))
+    if (!ctx.host_snapshot_notices.wait.exchange(true))
         fprintf(stderr,
                 "[HRR] %s waits for a pinned host snapshot restore still "
                 "queued on a stream\n", why);
@@ -1145,8 +1144,7 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
                      : cr != hipSuccess                    ? true
                                                            : cap == hipStreamCaptureStatusNone;
     if (!apply) {
-        static std::atomic<bool> warned{false};
-        if (!warned.exchange(true))
+        if (!ctx.host_snapshot_notices.in_graph.exchange(true))
             fprintf(stderr,
                     "[HRR] pinned host snapshots are not applied to kernels "
                     "replayed into a graph capture\n");
@@ -1225,8 +1223,7 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
         return;
     }
     (void)hipGetLastError();
-    static std::atomic<bool> warned{false};
-    if (!warned.exchange(true))
+    if (!ctx.host_snapshot_notices.unqueued.exchange(true))
         fprintf(stderr,
                 "[HRR] '%s': could not queue the pinned host snapshot restore on "
                 "the launch stream; restored without waiting for its earlier "

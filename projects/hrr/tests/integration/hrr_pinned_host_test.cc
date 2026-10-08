@@ -2622,13 +2622,16 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_GraphCapture) {
   CHECK(host_snapshots_in_graph(out) == 1);
 
   // --kernel-filter replays everything once to warm up, then the filtered
-  // pass. The summary counts the filtered pass alone.
+  // pass. The summary counts the filtered pass alone, and the one-time
+  // notice is printed once in each pass.
   auto [frc, fout] = replay(archive, "--kernel-filter hrr_pinned_read");
   INFO("Filtered replay:\n" << fout);
   CHECK(frc < 128);
   host_snapshot_summary(fout, restored, rejected);
   CHECK(rejected == 1);
   CHECK(host_snapshots_in_graph(fout) == 1);
+  CHECK(count_of(fout, "pinned host snapshots are not applied to kernels replayed into "
+                       "a graph capture") == 2);
 }
 
 // ---------------------------------------------------------------------------
