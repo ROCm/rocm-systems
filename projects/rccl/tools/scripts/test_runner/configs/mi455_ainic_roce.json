@@ -2845,6 +2845,31 @@
         }
       ]
     },
+    "ce_hier_alltoallv": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchical",
+          "description": "Hierarchical CE AlltoAllv on 2 nodes (2 ranks/node): intra-node CE plus inter-node RMA",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchical"
+        },
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchicalChunkBoundary",
+          "description": "Hierarchical CE AlltoAllv with a 68 MiB pair that crosses the 64 MiB chunk boundary",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchicalChunkBoundary",
+          "timeout": 600
+        },
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchicalSparse",
+          "description": "Hierarchical CE AlltoAllv with zero-byte remote and local pairs",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchicalSparse"
+        }
+      ]
+    },
     "ce_internal": {
       "extends": "ce_base",
       "num_ranks": 2,
