@@ -1179,6 +1179,15 @@ What deferral costs:
   every such allocation, except those reallocated from the same first page and
   no larger, until the device runs out of memory, which then drains them, or
   until teardown. The recording's pool reused that memory at once.
+- **Events.** Each placed `hipFreeAsync` made with no capture open keeps one
+  event until its mapping is taken back or unmapped. In a trace that only ever
+  synchronizes streams they pile up with the mappings they belong to; the cost
+  is host memory, small next to the device memory those mappings hold.
+- **Pool memory released early.** The host wait of a take-back with no stream is
+  a `hipEventSynchronize`, which also releases the freed memory of every pool on
+  the event's device, at a point where the recording did not. Only allocations
+  that fell back to a pool see it: they may get other addresses than they would
+  have.
 - **`--skip-device-sync`.** It skips replayed `hipDeviceSynchronize`, and with it
   the drain there. Deferred frees then wait for an allocation that runs out of
   memory, the warm-up reset, or teardown.
@@ -1195,18 +1204,24 @@ recording's `hipFree` waited for the same streams. The overlap drain and the
 out-of-memory drain have no such counterpart: the recording's pool reused the
 memory without waiting. Neither has the host wait of an allocation with no
 stream that takes back a mapping freed by `hipFreeAsync`: in the recording that
-free had finished. If a kernel already queued spins on a flag that only a later
-replayed event sets, that drain or wait never returns and the replay hangs. This
-is a known risk, not a solved one. It needs a non-matching overlap with a freed
-mapping, an exhausted device, or such a take-back, while such a kernel is
-running.
+free had finished. Nor has the host wait a stream-ordered take-back falls back to
+when `hipStreamWaitEvent` fails. If a kernel already queued spins on a flag that
+only a later replayed event sets, that drain or wait never returns and the
+replay hangs. This is a known risk, not a solved one. It needs a non-matching
+overlap with a freed mapping, an exhausted device, or such a take-back, while
+such a kernel is running.
 
 **Several GPUs.** A placed allocation is backed on the device it was made on: the
 current device for `hipMalloc`, the stream's device for `hipMallocAsync`, and the
 pool's location for `hipMallocFromPoolAsync`. `hipMemCreate` takes its memory
 from the current device and only records the location it is given as the owner,
-so replay makes that device current around the call and restores the old one. A pool on the host or on a device
-replay cannot see falls back, with the reason named. When the archive uses more
+so replay makes that device current around the call and restores the old one. It
+does the same around the event a `hipFreeAsync` keeps, which has to belong to the
+freeing stream's device. That `hipSetDevice` marks the replay thread as having
+set its device, which would turn a later `hipSetValidDevices` on that thread into
+a no-op; replay does not replay `hipSetValidDevices` at all, so nothing changes
+today. A pool on the host or on a device replay cannot see falls back, with the
+reason named. When the archive uses more
 than one device, or enables peer access, every mapping is also made accessible from
 each device that `hipDeviceCanAccessPeer` says can reach it.
 
@@ -1244,6 +1259,46 @@ allocations, and graph memory-allocation nodes. Placement never sees `__device__
 globals, which the code object places, a pointer computed by arithmetic from
 something that never crossed a HIP API, such as a device-side `malloc`, or memory
 imported from another process.
+
+Under `--verbose`, placement also prints: every fallback, not only the first 16;
+`unmapped N deferred free(s) at <api>` at each drain point and `unmapped N
+deferred free(s) to retry an allocation that ran out of memory` before an
+out-of-memory retry;
+`<api> <address> takes back the mapping freed there (<how>)`, where `<how>` says
+whether it was freed on the same stream, the allocating stream waits for the
+free, or the host does; and `no event could be recorded after the hipFreeAsync
+of <address>` when that free keeps no event. Two lines show replay's own view of
+the memory, for the tests that check where placed memory lives:
+`[HRR] hipMemGetInfo device=<d> free=<bytes> total=<bytes>` at each replayed
+`hipMemGetInfo`, from the replay thread's current device, and `[HRR]
+hipPointerGetAttributes <recorded> -> type=<t> device=<d> devicePointer=<live>`
+at each replayed `hipPointerGetAttributes`.
+
+**Not covered by tests.** These paths have no test, because the GPU cannot be
+made to reach them on purpose, no recording can reach them, or the CI runners
+have one GPU:
+
+- the out-of-memory retry at each call site (`hipMalloc`, `hipMallocManaged`,
+  `hipExtMallocWithFlags`, `hipMallocAsync`, `hipMallocFromPoolAsync`, region
+  segments, `hipMemCreate`, `hipArrayCreate`, `hipArray3DCreate`); the drain
+  itself is unit-tested (`FallbackRetriesAfterOutOfMemory`,
+  `OutOfMemoryDrainsFreed`);
+- the generated `hipMallocPitch`, `hipMemAllocPitch`, `hipMalloc3D`, array and
+  mipmapped-array handlers, which do not retry at all;
+- the null-stream guard for `hipStreamBeginCaptureToGraph` in
+  `hrr_track_capture`, and the null-stream guard in `hrr_stream_capturing`: a
+  capture on the null stream fails and is never recorded;
+- the per-thread keying as wired into the capture and `hipStreamDestroy`
+  handlers: `PerThreadCapturesKeptApart` tests `hrr_capture_key` and the capture
+  flag, and `Lifetimes` runs its per-thread capture on one thread, where it
+  passes with or without the thread in the key;
+- a `hipFreeAsync` on a capturing stream, deferred as a free on no stream: CLR
+  accepts only a graph allocation there, which placed memory never is;
+- the host wait `wait_for_free` falls back to when `hipStreamWaitEvent` fails,
+  and a free whose event could not be recorded (the unit tests use stand-ins
+  that always succeed);
+- the device switches around `hipMemCreate` and the free event: only `MultiGpu`
+  covers them, and it skips on a runner with one GPU.
 
 ### `hipMemcpyDeviceToDevice` — Not Captured
 
