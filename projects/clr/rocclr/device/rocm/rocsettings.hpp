@@ -39,7 +39,8 @@ class Settings : public device::Settings {
       uint queue_pipe_dist_ : 1;       //!< gfx94x queue pipe distribution
       uint ext_dispatch_packet_ : 1;   //!< Uses new ext dispatch packet for all launches
       uint aql_barrier_opt_ : 1;       //!< Per-stream barrier-bit optimization
-      uint reserved_ : 17;
+      uint isOrderedDoorbell_ : 1;     //!< Ring shared AQL ring doorbells in slot order
+      uint reserved_ : 16;
     };
     uint value_;
   };
