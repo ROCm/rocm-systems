@@ -1073,24 +1073,43 @@ static void apply_host_snapshots(void* user) {
     st.cv.notify_all();
 }
 
-void hrr_wait_host_restores(PlaybackContext& ctx, const void* base) {
+static unsigned host_restore_wait_ms(const PlaybackContext& ctx) {
+    return ctx.sync_watchdog_ms ? ctx.sync_watchdog_ms : 10000;
+}
+
+bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* why) {
     auto& st = *ctx.host_restores;
     std::unique_lock<std::mutex> lk(st.mu);
     auto done = [&] {
         return base ? st.pending.find(base) == st.pending.end() : st.pending.empty();
     };
-    if (done()) return;
+    if (done()) return true;
     static std::atomic<bool> noted{false};
     if (!noted.exchange(true))
         fprintf(stderr,
                 "[HRR] %s waits for a pinned host snapshot restore still "
-                "queued on a stream\n",
-                base ? "freeing a pinned host allocation" : "the warm-up pass");
-    if (st.cv.wait_for(lk, std::chrono::seconds(10), done)) return;
+                "queued on a stream\n", why);
+    const unsigned ms = host_restore_wait_ms(ctx);
+    if (st.cv.wait_for(lk, std::chrono::milliseconds(ms), done)) return true;
+    if (!base)
+        fprintf(stderr,
+                "[HRR] %s: a pinned host snapshot restore is still queued after "
+                "%u ms; replay goes on without it\n", why, ms);
+    return false;
+}
+
+bool hrr_host_release_ready(PlaybackContext& ctx, const void* live) {
+    if (hrr_wait_host_restores(ctx, live, "freeing a pinned host allocation"))
+        return true;
+    void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
+    (void)ctx.live_alloc_of(live, &abase, &asize, &arec);
+    ctx.host_allocs_leaked.fetch_add(1, std::memory_order_relaxed);
     fprintf(stderr,
-            "[HRR] a pinned host snapshot restore has been queued for 10 s; "
-            "replay keeps waiting for it\n");
-    st.cv.wait(lk, done);
+            "[HRR] pinned host allocation 0x%llx (live %p, %zu bytes) is not "
+            "freed: a snapshot restore queued for it has not run after %u ms, "
+            "and would write it once freed. Replay leaks it.\n",
+            (unsigned long long)arec, live, asize, host_restore_wait_ms(ctx));
+    return false;
 }
 
 static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
@@ -3174,7 +3193,7 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 
 // ---------------------------------------------------------------------------
 // Manual playback: hipHostMalloc. hipMallocHost, hipHostFree and hipFreeHost
-// are generated; the two frees wait for pending pinned host restores.
+// are generated; the two frees go through hrr_host_release_ready.
 // ---------------------------------------------------------------------------
 // hipHostMalloc:  ret(4) ptr(8) size(8) flags(4)
 
@@ -3255,7 +3274,10 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     void* live = buf ? buf : ctx.translate_ptr(a->hostPtr);
     if (!live) return hipSuccess;
 
-    hrr_wait_host_restores(ctx, live);
+    if (!hrr_host_release_ready(ctx, live)) {  // leaked: stays registered and allocated
+        ctx.remove_alloc(a->hostPtr);
+        return hipSuccess;
+    }
     hipError_t r = hipHostUnregister(live);
     if (r == hipSuccess) ctx.remove_alloc(a->hostPtr);
 
@@ -3327,7 +3349,11 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
         ctx.remove_alloc(a->ptr);
         return hipSuccess;
     }
-    hrr_wait_host_restores(ctx, live);  // hipFree also frees pinned host memory
+    // hipFree also frees pinned host memory.
+    if (!hrr_host_release_ready(ctx, live)) {
+        ctx.remove_alloc(a->ptr);
+        return hipSuccess;
+    }
     hipError_t r = hipFree(live);
     if (r == hipSuccess) ctx.remove_alloc(a->ptr);
     return r;

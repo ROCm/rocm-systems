@@ -323,6 +323,10 @@ struct PlaybackContext {
     // counted apart: they are not malformed.
     std::atomic<uint64_t> host_snapshots_rejected{0};
     std::atomic<uint64_t> host_snapshots_in_graph{0};
+    // Pinned host allocations replay did not free because a restore queued
+    // for them had still not run when the free came; see
+    // hrr_host_release_ready.
+    std::atomic<uint64_t> host_allocs_leaked{0};
 
     // What replay shares with the host functions that restore pinned host
     // snapshots. It is held by a shared_ptr, not by the context, because a
@@ -810,11 +814,24 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
 
 // Wait until no queued pinned host snapshot restore still has to write into
-// the host allocation whose live base is `base`. Called before replay frees or
-// unregisters it: hipHostFree and hipHostUnregister sync only the device that
-// allocated it, and a restore may be queued on another device's stream. A null
-// base waits for every queued restore.
-void hrr_wait_host_restores(PlaybackContext& ctx, const void* base);
+// the host allocation whose live base is `base`, or, for a null base, until no
+// restore is queued at all. hipHostFree and hipHostUnregister sync only the
+// device that allocated the memory, and a restore may be queued on another
+// device's stream. The wait is bounded by --sync-watchdog when that is set and
+// by 10 s otherwise, because the stream may be held by work that only a later
+// replayed event releases. Returns false when restores are still queued after
+// that; for a null base it then says that replay goes on. `why` names the
+// waiter in the one-time notice.
+bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* why);
+
+// Called before replay frees or unregisters the pinned host allocation whose
+// live base is `live`. Waits as above. True means the caller may release it.
+// False means a restore queued for it has still not run, so releasing it would
+// let that restore write unmapped memory: the allocation is leaked instead.
+// One warning names it and the summary counts it; the caller skips the release
+// and drops the allocation from tracking, so that no later launch restores
+// into it.
+bool hrr_host_release_ready(PlaybackContext& ctx, const void* live);
 
 // ---------------------------------------------------------------------------
 // hrr_note_unreplayable — this API cannot be reproduced, and here is why.

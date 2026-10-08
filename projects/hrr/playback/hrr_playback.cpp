@@ -1555,10 +1555,11 @@ int main(int argc, char** argv) {
     ctx.guard_blind_max.store(0, std::memory_order_relaxed);
     // The warm-up's closing sync covers one device; a restore queued on
     // another may still be pending, and would count in the timed pass.
-    hrr_wait_host_restores(ctx, nullptr);
+    (void)hrr_wait_host_restores(ctx, nullptr, "the warm-up pass");
     ctx.host_restores->applied.store(0, std::memory_order_relaxed);
     ctx.host_snapshots_rejected.store(0, std::memory_order_relaxed);
     ctx.host_snapshots_in_graph.store(0, std::memory_order_relaxed);
+    ctx.host_allocs_leaked.store(0, std::memory_order_relaxed);
     printf("[HRR] Warm-up done. Running filtered pass...\n");
   }
 
@@ -1589,8 +1590,7 @@ int main(int argc, char** argv) {
       switch (entry.kind) {
         case AllocKind::Device:        hrr_free_device_alloc(ctx, entry.live_ptr); break;
         case AllocKind::HostMalloc:
-          hrr_wait_host_restores(ctx, entry.live_ptr);
-          (void)hipHostFree(entry.live_ptr);
+          if (hrr_host_release_ready(ctx, entry.live_ptr)) (void)hipHostFree(entry.live_ptr);
           break;
         case AllocKind::HostRegister:                                     break;
         case AllocKind::DevicePtrAlias:                                   break;
@@ -1601,8 +1601,7 @@ int main(int argc, char** argv) {
     // remaining backing buffer here to avoid leaking both the pinned registration
     // and the malloc'd buffer every run.
     for (auto& [rec, buf] : ctx.host_reg_bufs) {
-      if (!buf) continue;
-      hrr_wait_host_restores(ctx, buf);
+      if (!buf || !hrr_host_release_ready(ctx, buf)) continue;
       (void)hipHostUnregister(buf);
 #ifdef _WIN32
       _aligned_free(buf);
@@ -1643,6 +1642,11 @@ int main(int argc, char** argv) {
     fprintf(stderr, "[HRR] Replay aborted due to fatal HIP error — exiting\n");
     return 1;
   }
+
+  // The pass's closing sync covers the current device only. A restore queued
+  // on another device's stream may still be pending, and the summary below
+  // would not count it.
+  (void)hrr_wait_host_restores(ctx, nullptr, "the replay summary");
 
   // ---------------------------------------------------------------------------
   // Summary
@@ -1735,6 +1739,11 @@ int main(int argc, char** argv) {
       printf("[HRR]   Host snapshots : %llu record(s) not applied, their "
              "launches replayed into a graph capture\n",
              (unsigned long long)in_graph);
+    const uint64_t leaked = ctx.host_allocs_leaked.load();
+    if (leaked)
+      printf("[HRR]   Host snapshots : %llu pinned host allocation(s) leaked, "
+             "not freed, because a restore queued for each had not run\n",
+             (unsigned long long)leaked);
   }
 
   if (ctx.d2h_pass == 0 && ctx.d2h_fail == 0) {

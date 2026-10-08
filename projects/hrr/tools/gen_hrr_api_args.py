@@ -2851,8 +2851,9 @@ _HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc', 'hipMallocHost',
 # Subset of _ALLOC_FREE_APIS that free pinned host memory. A pinned host
 # snapshot restore queued on a stream may still write the buffer, and
 # hipHostFree syncs only the device that allocated it, so the handler waits for
-# those restores first. hipFree and hipHostUnregister are hand-written and wait
-# there.
+# those restores first, a bounded time; if they still have not run, it leaks the
+# buffer rather than free it (hrr_host_release_ready). hipFree and
+# hipHostUnregister are hand-written and do the same there.
 _HOST_ALLOC_FREE_APIS = {'hipHostFree', 'hipFreeHost'}
 
 # APIs that free device allocations: API name -> rec_ptr_param name in struct
@@ -3401,7 +3402,10 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         lines.append(f"  uint64_t _rec_ptr = a->{rec_param};")
         lines.append(f"  void*    _live_ptr = ctx.translate_ptr(_rec_ptr);")
         if entry.name in _HOST_ALLOC_FREE_APIS:
-            lines.append(f"  if (_live_ptr) hrr_wait_host_restores(ctx, _live_ptr);")
+            lines.append(f"  if (_live_ptr && !hrr_host_release_ready(ctx, _live_ptr)) {{")
+            lines.append(f"    ctx.remove_alloc(_rec_ptr);")
+            lines.append(f"    return hipSuccess;")
+            lines.append(f"  }}")
     if is_hdl_destroy:
         rec_param, hdl_type = _HANDLE_DESTROY_APIS[entry.name]
         translate_fn = _PLAYBACK_HANDLE_TRANSLATE.get(hdl_type, '')

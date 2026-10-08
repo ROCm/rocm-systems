@@ -1366,19 +1366,33 @@ TEST_CASE("Unit_HRR_PinnedHost_CaptureElsewhere_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// A pinned buffer freed while a launch on another device still waits to use
-// it. Needs two devices; skips with fewer.
+// A pinned buffer released while a launch on another device still waits to
+// use it. Needs two devices; skips with fewer.
 //
-//   -  hipHostMalloc on device 1, host filled pattern 1
-//   0  slow write on device 0, non-blocking stream S: spins for kSpinMs, then
-//      writes device scratch
+//   -  pinned memory made with device 1 current, host filled pattern 1:
+//      hipHostRegister of a host buffer for variant 1, hipHostMalloc otherwise
+//   0  device 0, non-blocking stream S, what holds S:
+//        variants 0-3: a slow write that spins for kSpinMs, then writes
+//                      device scratch
+//        variant 4:    hipStreamBatchMemOp waiting for a device flag that
+//                      only a later hipStreamWriteValue32 on another stream
+//                      sets; no launch, so the read below is launch 0
 //   1  read      on S, n = 0, with the pinned buffer as its argument: capture
 //      snapshots the buffer, but the kernel reads none of it
-//   -  hipHostFree on device 0 at once; it syncs device 1 only, so launch 0
-//      is still spinning
-// Replay queues the restore for launch 1 behind launch 0. If it then freed the
-// buffer straight away, the restore would write freed memory. The kernels run
-// on device 0 because replay loads code objects for device 0 only.
+//   -  at once, while S is still held, HRR_PINNED_VARIANT picks the release:
+//        0  hipHostFree
+//        1  hipHostUnregister, then the host buffer is freed
+//        2  hipFree
+//        3  none: device 1 is made current and synchronized, and the
+//           workload ends with S still busy and the buffer allocated
+//        4  hipHostFree, then the flag is set
+// Each release syncs device 1 only, so S is still held. Replay queues the
+// restore for the read behind what holds S. If it released the buffer straight
+// away, the restore would write freed memory. In variant 3 replay ends with
+// device 1 current, so its closing sync leaves the restore queued. In variant 4
+// the restore cannot run before the flag is set, which replay reaches only
+// after the free. The kernels run on device 0 because replay loads code
+// objects for device 0 only.
 // ===========================================================================
 TEST_CASE("Unit_HRR_PinnedHost_CrossDeviceFree_Direct", "[.][hrr-direct]") {
   int ndev = 0;
@@ -1387,13 +1401,23 @@ TEST_CASE("Unit_HRR_PinnedHost_CrossDeviceFree_Direct", "[.][hrr-direct]") {
     skip_direct("needs two devices, found " + std::to_string(ndev));
     return;
   }
-  constexpr int kSpinMs = 500;
+  const int variant = env_int("HRR_PINNED_VARIANT");
+  REQUIRE((variant >= 0 && variant <= 4));
+  constexpr int kSpinMs = 2000;
   constexpr int kSeed   = 0x6e6e;
 
   HRR_HIP_CHECK(hipSetDevice(1));
   int* h = nullptr;
-  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
-                              hipHostMallocPortable));
+  void* reg = nullptr;
+  if (variant == 1) {
+    reg = std::aligned_alloc(4096, kPinnedBytes);
+    REQUIRE(reg != nullptr);
+    HRR_HIP_CHECK(hipHostRegister(reg, kPinnedBytes, hipHostRegisterPortable));
+    h = static_cast<int*>(reg);
+  } else {
+    HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                                hipHostMallocPortable));
+  }
   fill(h, 1);
 
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -1409,22 +1433,60 @@ TEST_CASE("Unit_HRR_PinnedHost_CrossDeviceFree_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&done), sizeof(unsigned int)));
   hipStream_t s = nullptr;
   HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  uint32_t* flag = nullptr;
+  hipStream_t release = nullptr;
+  if (variant == 4) {
+    int can_wait = 0;
+    HRR_HIP_CHECK(
+        hipDeviceGetAttribute(&can_wait, hipDeviceAttributeCanUseStreamWaitValue, 0));
+    REQUIRE(can_wait != 0);
+    HRR_HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&flag), sizeof(uint32_t)));
+    HRR_HIP_CHECK(hipMemset(flag, 0, sizeof(uint32_t)));
+    HRR_HIP_CHECK(hipStreamCreateWithFlags(&release, hipStreamNonBlocking));
+  }
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
   // 0
-  hipLaunchKernelGGL(hrr_pinned_slow_write, dim3(1), dim3(kThreads), 0, s, scratch,
-                     kPinnedInts, kSeed, ticks, done);
-  HRR_HIP_CHECK(hipGetLastError());
+  if (variant == 4) {
+    hipStreamBatchMemOpParams op{};
+    op.operation = hipStreamMemOpWaitValue32;
+    op.waitValue.operation = hipStreamMemOpWaitValue32;
+    op.waitValue.address = reinterpret_cast<hipDeviceptr_t>(flag);
+    op.waitValue.value = 1;
+    op.waitValue.flags = hipStreamWaitValueEq;
+    HRR_HIP_CHECK(hipStreamBatchMemOp(s, 1, &op, 0));
+  } else {
+    hipLaunchKernelGGL(hrr_pinned_slow_write, dim3(1), dim3(kThreads), 0, s, scratch,
+                       kPinnedInts, kSeed, ticks, done);
+    HRR_HIP_CHECK(hipGetLastError());
+  }
   // 1
   hipLaunchKernelGGL(hrr_pinned_read, dim3(1), dim3(kThreads), 0, s, h, out, 0);
   HRR_HIP_CHECK(hipGetLastError());
   const hipError_t query = hipStreamQuery(s);
-  HRR_HIP_CHECK(hipHostFree(h));
-  // Launch 0 was still spinning when the buffer went.
+  switch (variant) {
+    case 0:
+    case 4: HRR_HIP_CHECK(hipHostFree(h)); break;
+    case 1: HRR_HIP_CHECK(hipHostUnregister(reg)); break;
+    case 2: HRR_HIP_CHECK(hipFree(h)); break;
+    default: break;
+  }
+  // S was still held when the buffer went.
   CHECK(query == hipErrorNotReady);
+  if (variant == 3) {
+    HRR_HIP_CHECK(hipSetDevice(1));
+    HRR_HIP_CHECK(hipDeviceSynchronize());
+    return;
+  }
+  if (variant == 4) HRR_HIP_CHECK(hipStreamWriteValue32(release, flag, 1, 0));
   HRR_HIP_CHECK(hipStreamSynchronize(s));
-  check_out(scratch, [](int i) { return kSeed ^ i; });
+  if (variant != 4) check_out(scratch, [](int i) { return kSeed ^ i; });
 
+  if (variant == 1) std::free(reg);
+  if (variant == 4) {
+    HRR_HIP_CHECK(hipStreamDestroy(release));
+    HRR_HIP_CHECK(hipFree(flag));
+  }
   HRR_HIP_CHECK(hipStreamDestroy(s));
   HRR_HIP_CHECK(hipFree(done));
   HRR_HIP_CHECK(hipFree(out));
@@ -2665,43 +2727,97 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_CaptureElsewhere) {
 #endif
 }
 
+namespace {
+// Capture and replay of Unit_HRR_PinnedHost_CrossDeviceFree_Direct with one
+// variant; `wait` is the line replay must print, `extra_args` its options.
+// Skips on fewer than two devices.
+void cross_device_free(const char* variant, const std::string& wait,
+                       const std::string& extra_args = "") {
+  INFO("HRR_PINNED_VARIANT=" << variant);
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_cross_device_free.hrr");
+  const std::string skipped = capture_case("Unit_HRR_PinnedHost_CrossDeviceFree_Direct",
+                                           cap.path, {{"HRR_PINNED_VARIANT", variant}});
+  if (!skipped.empty()) SKIP(skipped);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  const int v = std::atoi(variant);
+  const bool held_by_flag = v == 4;
+  const bool checks_scratch = v <= 2;
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() == (held_by_flag ? 1u : 2u));
+  REQUIRE(kls.back()->snapshots.size() == 2);
+  CHECK(kls.back()->snapshots[0].direction == 0);
+  CHECK(kls.back()->snapshots[1].direction == 0);
+
+  auto [rc, out] = replay(archive, extra_args);
+  INFO("Replay exit: " << rc
+       << (rc == hrr::test::SpawnProc::kKilledOnTimeout ? " (hung, killed)" : "")
+       << "\nReplay:\n" << out);
+  REQUIRE(rc == 0);
+  CHECK(out.find(wait) != std::string::npos);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(restored == 2);
+  CHECK(rejected == 0);
+  unsigned long long leaked = 0;
+  if (!host_snapshot_line(out,
+                          "Host snapshots : %llu pinned host allocation(s) leaked, not "
+                          "freed, because a restore queued for each had not run",
+                          1, &leaked))
+    leaked = 0;
+  CHECK(leaked == (held_by_flag ? 1u : 0u));
+#ifndef _WIN32
+  if (checks_scratch) {
+    int d2h_pass = 0, d2h_fail = 0;
+    REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+    CHECK(d2h_pass >= 1);
+    CHECK(d2h_fail == 0);
+  }
+#endif
+}
+
+constexpr const char* kFreeWaits =
+    "freeing a pinned host allocation waits for a pinned host snapshot restore";
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // Replay frees a pinned buffer only after the restores queued for it have run.
 // hipHostFree syncs the device that allocated the buffer, not the device whose
 // stream holds the restore. Needs two devices.
 // ---------------------------------------------------------------------------
-HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceFree) {
-  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_cross_device_free.hrr");
-  const std::string skipped =
-      capture_case("Unit_HRR_PinnedHost_CrossDeviceFree_Direct", cap.path);
-  if (!skipped.empty()) SKIP(skipped);
-  const fs::path archive = hrr_single_process_archive(cap.path);
+HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceFree) { cross_device_free("0", kFreeWaits); }
 
-  hrr::Archive arc;
-  REQUIRE(hrr::load_archive(archive.string(), arc));
-  const auto kls = launches_of(arc);
-  REQUIRE(kls.size() == 2);
-  REQUIRE(kls[1]->snapshots.size() == 2);
-  CHECK(kls[1]->snapshots[0].direction == 0);
-  CHECK(kls[1]->snapshots[1].direction == 0);
+// The same for hipHostUnregister of a registered buffer.
+HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceUnregister) {
+  cross_device_free("1", kFreeWaits);
+}
 
-  auto [rc, out] = replay(archive);
-  INFO("Replay exit: " << rc
-       << (rc == hrr::test::SpawnProc::kKilledOnTimeout ? " (hung, killed)" : "")
-       << "\nReplay:\n" << out);
-  REQUIRE(rc == 0);
-  CHECK(out.find("freeing a pinned host allocation waits for a pinned host snapshot "
-                 "restore") != std::string::npos);
-  unsigned long long restored = 0, rejected = 0;
-  host_snapshot_summary(out, restored, rejected);
-  CHECK(restored == 2);
-  CHECK(rejected == 0);
-#ifndef _WIN32
-  int d2h_pass = 0, d2h_fail = 0;
-  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
-  CHECK(d2h_pass >= 1);
-  CHECK(d2h_fail == 0);
-#endif
+// The same for hipFree, which also frees pinned host memory.
+HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceHipFree) { cross_device_free("2", kFreeWaits); }
+
+// ---------------------------------------------------------------------------
+// A restore still queued on another device when the pass ends is counted in
+// the summary. The pass's closing sync covers the current device only, so the
+// summary read the count before the restore ran.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceRestoreAtExit) {
+  cross_device_free("3", "the replay summary waits for a pinned host snapshot restore");
+}
+
+// ---------------------------------------------------------------------------
+// A free whose restore cannot run until a later event waits a bounded time,
+// here the --sync-watchdog-ms value, then leaks the buffer instead of freeing
+// it and goes on. The restore runs once the flag is set and writes memory that
+// is still allocated. Waiting without a bound hung replay: the event that
+// releases the stream comes after the free.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceFreeHeld) {
+  cross_device_free("4",
+                    "is not freed: a snapshot restore queued for it has not run after "
+                    "3000 ms",
+                    "--sync-watchdog-ms 3000");
 }
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
