@@ -104,7 +104,7 @@ TEST(memory_allocation_test, on_memory_allocation_forwards_record_fields_to_depe
              .end_timestamp           = record.end_timestamp,
              .thread_id               = record.thread_id,
              .agent_id_handle         = record.agent_id.handle,
-             .kind                    = static_cast<std::int32_t>(record.kind),
+             .name                    = "operation",
              .operation               = static_cast<std::int32_t>(record.operation),
              .allocation_size         = record.allocation_size,
              .correlation_id_internal = record.correlation_id.internal,

@@ -246,6 +246,37 @@ struct WaitcheckTarget {
 
   [[nodiscard]] static util::FailureOr<uint32_t> maximum_dependency_wait(rj_code_arch_t arch,
                                                                          WaitCounterKind counter);
+  [[nodiscard]] static constexpr uint32_t maximum_dependency_wait(WaitcntModel model,
+                                                                  WaitCounterKind counter) {
+    // LLVM caps a dependency score at the largest non-sentinel wait value.
+    // The all-ones encoding means "no wait", so the largest useful value is
+    // one less than the hardware counter mask.
+    switch (counter) {
+    case WaitCounterKind::Load:
+    case WaitCounterKind::Store:
+      return 62;
+    case WaitCounterKind::Ds:
+      return model == WaitcntModel::LegacyNoVscnt ? 14 : 62;
+    case WaitCounterKind::Km:
+      return 30;
+    case WaitCounterKind::Sample:
+      return 62;
+    case WaitCounterKind::Bvh:
+    case WaitCounterKind::Exp:
+    case WaitCounterKind::VmVsrc:
+      return 6;
+    case WaitCounterKind::X:
+    case WaitCounterKind::Async:
+    case WaitCounterKind::Tensor:
+      return 62;
+    case WaitCounterKind::VaVdst:
+      return 14;
+    case WaitCounterKind::Depctr:
+    case WaitCounterKind::Count:
+      return std::numeric_limits<uint32_t>::max();
+    }
+    return std::numeric_limits<uint32_t>::max();
+  }
 
   [[nodiscard]] static util::FailureOr<std::optional<uint32_t>>
   counter_no_wait_value(rj_code_arch_t arch, WaitCounterKind counter);
@@ -303,6 +334,11 @@ struct WaitcheckTarget {
 
   [[nodiscard]] static util::FailureOr<std::vector<ClassifiedEvent>>
   classify_events(const Instruction &inst, rj_code_arch_t arch);
+
+  // Runtime issuers retain the output storage between instructions.
+  [[nodiscard]] static util::Result classify_events_into(const Instruction &inst,
+                                                         rj_code_arch_t arch,
+                                                         std::vector<ClassifiedEvent> &events);
 };
 
 } // namespace waitcheck_detail
