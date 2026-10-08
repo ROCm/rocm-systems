@@ -27,6 +27,7 @@
 #include <hip/hiprtc.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -34,6 +35,7 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -578,8 +580,8 @@ constexpr int kEntryBlocks = 64;
 
 // Grid of the cooperative launches: kEntryBlocks, or fewer when a small
 // device cannot hold that many kThreads blocks at once. It covers the
-// strided kernel and, if fn is set, the module kernel. 0 if not even one
-// block fits per CU.
+// strided kernel and, if fn is set, the module kernel. Neither kernel uses
+// shared memory, so one kThreads block fits on a CU and the grid is never 0.
 int coop_entry_blocks(hipFunction_t fn) {
   int cus = 0;
   HRR_HIP_CHECK(hipDeviceGetAttribute(&cus, hipDeviceAttributeMultiprocessorCount, 0));
@@ -612,7 +614,7 @@ int coop_entry_blocks(hipFunction_t fn) {
 //      capture must still know the range
 // Every launch reads the whole buffer, which holds new bytes each time. The
 // cooperative launches take the largest grid up to kEntryBlocks the device
-// holds at once; a device that holds none skips the case.
+// holds at once.
 // ===========================================================================
 TEST_CASE("Unit_HRR_PinnedHost_EntryPoints_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -628,12 +630,7 @@ TEST_CASE("Unit_HRR_PinnedHost_EntryPoints_Direct", "[.][hrr-direct]") {
   const void* stub = reinterpret_cast<const void*>(hrr_pinned_read_strided);
   const int coop_blocks = coop_entry_blocks(fn);
   std::printf("cooperative grid: %d blocks\n", coop_blocks);
-  if (coop_blocks == 0) {
-    HRR_HIP_CHECK(hipModuleUnload(mod));
-    skip_direct("a cooperative launch cannot hold one block of " + std::to_string(kThreads) +
-                " threads per CU on this device");
-    return;
-  }
+  REQUIRE(coop_blocks > 0);
 
   int* h = nullptr;
   HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
@@ -804,9 +801,6 @@ TEST_CASE("Unit_HRR_PinnedHost_Reset_Direct", "[.][hrr-direct]") {
 
   HRR_HIP_CHECK(hipFree(out));
   HRR_HIP_CHECK(hipHostFree(b));
-#ifndef _WIN32
-  if (held) munmap(a, kResetABytes);
-#endif
 }
 
 namespace {
@@ -1231,7 +1225,9 @@ TEST_CASE("Unit_HRR_PinnedHost_BatchWait_Direct", "[.][hrr-direct]") {
 // The per-thread launches use the per-thread stream, which waits for the null
 // stream only, and the failed launch waits for nothing. None of them orders B
 // after A. Capture that queued a null-stream wait for A while it looked at the
-// launch would hold B behind A, and the synchronize would never return.
+// launch would hold B behind A. The host polls B for kPollSec rather than
+// synchronizing it, then sets the flag either way, so that case fails with a
+// message instead of hanging.
 // ===========================================================================
 TEST_CASE("Unit_HRR_PinnedHost_NoNullBarrier_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -1246,11 +1242,7 @@ TEST_CASE("Unit_HRR_PinnedHost_NoNullBarrier_Direct", "[.][hrr-direct]") {
     HRR_HIP_CHECK(hipDeviceGetAttribute(&coop, hipDeviceAttributeCooperativeLaunch, 0));
     REQUIRE(coop != 0);
     coop_blocks = coop_entry_blocks(nullptr);
-    if (coop_blocks == 0) {
-      skip_direct("a cooperative launch cannot hold one block of " +
-                  std::to_string(kThreads) + " threads per CU on this device");
-      return;
-    }
+    REQUIRE(coop_blocks > 0);
   }
 
   int* h = nullptr;
@@ -1291,11 +1283,18 @@ TEST_CASE("Unit_HRR_PinnedHost_NoNullBarrier_Direct", "[.][hrr-direct]") {
   hipLaunchKernelGGL(hrr_pinned_write, dim3(kBlocks), dim3(kThreads), 0, b, scratch,
                      kPinnedInts, 0x2e2e);
   const hipError_t write_err = hipGetLastError();
-  const hipError_t sync_err = hipStreamSynchronize(b);
+  constexpr int kPollSec = 20;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(kPollSec);
+  hipError_t sync_err = hipErrorNotReady;
+  while ((sync_err = hipStreamQuery(b)) == hipErrorNotReady &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
   __atomic_store_n(flag, 1u, __ATOMIC_SEQ_CST);
 
   HRR_HIP_CHECK(wait_err);
   HRR_HIP_CHECK(write_err);
+  INFO("stream B still busy after " << kPollSec << " s: it waits for stream A");
   HRR_HIP_CHECK(sync_err);
   INFO("launch: " << hipGetErrorName(launch_err));
   if (variant == 2) {
@@ -2100,18 +2099,26 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_RestoreWaitsOnStream) {
 
 namespace {
 // Capture and replay of Unit_HRR_PinnedHost_NoNullBarrier_Direct with one
-// variant. A capture that holds stream B behind stream A never returns from
-// the workload's hipStreamSynchronize(B), and is killed at the deadline.
+// variant. A capture that holds stream B behind stream A fails the workload's
+// bounded wait for B. The per-thread variants launch into an idle per-thread
+// stream, so capture must find the launch ordered: reading the legacy stream
+// instead sees blocking stream A still waiting.
 void no_null_barrier(const char* variant) {
   INFO("HRR_PINNED_VARIANT=" << variant);
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_no_null_barrier.hrr");
-  const std::string skipped = capture_case("Unit_HRR_PinnedHost_NoNullBarrier_Direct",
-                                           cap.path, {{"HRR_PINNED_VARIANT", variant}});
-  if (!skipped.empty()) HRR_SKIP(skipped);
+  capture_case("Unit_HRR_PinnedHost_NoNullBarrier_Direct", cap.path,
+               {{"HRR_PINNED_VARIANT", variant}});
   const fs::path archive = hrr_single_process_archive(cap.path);
+  if (std::string(variant) != "2") {
+    const std::string manifest = read_text_file(archive / "manifest.json");
+    INFO("manifest:\n" << manifest);
+    CHECK(manifest_count(manifest, "host_snapshots_unordered") == 0);
+  }
 
   auto [rc, out] = replay(archive);
-  INFO("Replay:\n" << out);
+  INFO("Replay exit: " << rc
+       << (rc == hrr::test::SpawnProc::kKilledOnTimeout ? " (hung, killed)" : "")
+       << "\nReplay:\n" << out);
   CHECK(rc == 0);
   unsigned long long restored = 0, rejected = 0;
   host_snapshot_summary(out, restored, rejected);
@@ -2436,8 +2443,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_FailedLaunch) {
 HRR_TEST_CASE(Unit_HRR_PinnedHost_EntryPoints) {
   constexpr int kLaunches = 8;
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_entry.hrr");
-  const std::string skipped = capture_case("Unit_HRR_PinnedHost_EntryPoints_Direct", cap.path);
-  if (!skipped.empty()) HRR_SKIP(skipped);
+  capture_case("Unit_HRR_PinnedHost_EntryPoints_Direct", cap.path);
   const fs::path archive = hrr_single_process_archive(cap.path);
 
   const std::string manifest = read_text_file(archive / "manifest.json");
@@ -2469,20 +2475,21 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_EntryPoints) {
 
 // ---------------------------------------------------------------------------
 // After hipDeviceReset capture records the new buffer and forgets the old
-// one, so a stale pointer to it is not read.
+// one, so a stale pointer to it is not read. When the workload finds no stale
+// address to try, it makes no launch 2, and only that check is skipped.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_DeviceReset) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_reset.hrr");
   const std::string skipped = capture_case("Unit_HRR_PinnedHost_Reset_Direct", cap.path);
-  if (!skipped.empty()) HRR_SKIP(skipped);
   hrr::Archive arc;
   REQUIRE(hrr::load_archive(hrr_single_process_archive(cap.path).string(), arc));
   const auto kls = launches_of(arc);
-  REQUIRE(kls.size() == 3);
+  REQUIRE(kls.size() == (skipped.empty() ? 3u : 2u));
   CHECK(kls[0]->snapshots.size() == kResetABytes / kChunk);
   REQUIRE(kls[1]->snapshots.size() == 2);
   CHECK(kls[1]->snapshots[0].direction == 0);
   CHECK(kls[1]->snapshots[1].direction == 0);
+  if (!skipped.empty()) SKIP(skipped);
   CHECK(kls[2]->snapshots.empty());
 }
 
