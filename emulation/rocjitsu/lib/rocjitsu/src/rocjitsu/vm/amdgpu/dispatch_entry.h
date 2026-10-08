@@ -316,6 +316,9 @@ struct DispatchEntry {
   uint32_t queue_id = 0;
   uint32_t queue_packet_id = 0;
   AddressSpaceHandle address_space;
+  /// Immutable VM snapshot captured by the queue-service transaction that
+  /// admitted this dispatch. Every wave in the dispatch shares this snapshot.
+  std::shared_ptr<const GpuVmAccess> execution_access;
   InterruptSink interrupt_sink;
   uint32_t process_id = 0;
 
@@ -418,6 +421,9 @@ struct DispatchEntry {
   bool wait_for_predecessors = false;
   /// Packet-type ordering: following packets cannot pass this packet.
   bool blocks_following = false;
+  /// An AMD vendor packet executes this PM4 buffer before publishing completion.
+  uint64_t aql_pm4_ib_address = 0;
+  uint32_t aql_pm4_ib_dwords = 0;
   /// Completion hooks and signal have already been delivered.
   bool completion_notified = false;
   bool execution_begun = false;
@@ -740,6 +746,13 @@ struct ComputeQueueRecord : ComputeQueueConfig {
   /// the queue's read_dispatch_id at a trapped dispatch (so packets are not
   /// re-fetched). See fetch_from_queue and serialize_queue_debug_waves.
   uint64_t fetch_cursor = 0;
+  /// A durable admission must invalidate its ring slot before publishing the cursor.
+  struct AqlSlotRelease {
+    GpuVmAccess access;
+    uint64_t address;
+    uint32_t header;
+  };
+  std::optional<AqlSlotRelease> aql_slot_release;
   /// Set on the replicas that xcd_fanout creates. A replica never reads the ring
   /// and never polls a doorbell; work reaches it as dispatch shards from the XCD
   /// that owns the queue.

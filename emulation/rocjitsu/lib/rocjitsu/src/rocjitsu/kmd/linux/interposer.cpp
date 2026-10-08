@@ -2409,6 +2409,7 @@ public:
     uint64_t mmap_offset = 0;
     uint32_t alloc_flags = 0;
     void *cpu_ptr = nullptr;
+    bool sealed_ram = false;
     SimulatedKfd *owner = nullptr;
     std::vector<GemMapping> installed_vas;
   };
@@ -2449,7 +2450,7 @@ public:
         (request.domains & ~domains))
       return -EINVAL;
     uint64_t size = (request.bo_size + 4095) & ~uint64_t{4095};
-    int fd = real().memfd_create("rocjitsu_gem", MFD_CLOEXEC);
+    int fd = real().memfd_create("rocjitsu_gem", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (fd < 0)
       return -errno;
     if (ftruncate(fd, static_cast<off_t>(size)) != 0) {
@@ -2457,6 +2458,7 @@ public:
       real().close(fd);
       return -error;
     }
+    const bool sealed_ram = real().fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK) == 0;
     auto backing = PrivateDrmFd::duplicate(fd);
     const int error = errno;
     real().close(fd);
@@ -2470,6 +2472,7 @@ public:
       candidate = next_gem_handle_++;
     GemEntry entry{};
     entry.dmabuf_fd = std::move(backing);
+    entry.sealed_ram = sealed_ram;
     entry.drm_file_id = file->id;
     entry.size = size;
     entry.mmap_offset = next_gem_mmap_offset_;
@@ -2872,6 +2875,8 @@ public:
     GemEntry &gem = gem_entries_[handle];
     gem = {};
     gem.dmabuf_fd = std::move(backing_fd);
+    // Repeated imports can map the same file bytes at different host addresses.
+    // Only fresh GEM allocations qualify for disjoint parallel RAM accesses.
     gem.drm_file_id = drm_file->id;
     gem.size = size;
     gem.alloc_flags = alloc_flags;
@@ -2961,7 +2966,7 @@ public:
     // only returns false if the local process vanished mid-call; treat that as a
     // failed map (do not record the range) so GEM_VA reports the error rather than a
     // phantom success.
-    if (!prt && !drv->gem_va_map(va_address, host, map_size, gem.alloc_flags))
+    if (!prt && !drv->gem_va_map(va_address, host, map_size, gem.alloc_flags, gem.sealed_ram))
       return -EINVAL;
     gem.installed_vas.push_back(range);
     if (publish_timeline)

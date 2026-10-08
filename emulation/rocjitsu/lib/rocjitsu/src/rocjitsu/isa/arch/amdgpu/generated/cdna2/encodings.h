@@ -481,6 +481,28 @@ public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_dpp() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = false;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
+      modifiers.sdwa = true;
+      modifiers.src0 = sdwa_src0_operand_;
+      modifiers.src1 = sdwa_src1_operand_;
+      modifiers.src0_selection = sdwa_src0_sel_;
+      modifiers.src1_selection = sdwa_src1_sel_;
+      modifiers.dst_selection = sdwa_dst_sel_;
+      modifiers.dst_unused = sdwa_dst_unused_;
+    }
+  }
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
@@ -542,6 +564,15 @@ public:
 class Vopc : public IsaInstruction<Isa> {
 public:
   Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
+      modifiers.sdwa = true;
+      modifiers.src0 = sdwa_src0_operand_;
+      modifiers.src1 = sdwa_src1_operand_;
+      modifiers.src0_selection = sdwa_src0_sel_;
+      modifiers.src1_selection = sdwa_src1_sel_;
+    }
+  }
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
@@ -596,6 +627,28 @@ public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_dpp() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = false;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
+      modifiers.sdwa = true;
+      modifiers.src0 = sdwa_src0_operand_;
+      modifiers.src1 = sdwa_src1_operand_;
+      modifiers.src0_selection = sdwa_src0_sel_;
+      modifiers.src1_selection = sdwa_src1_sel_;
+      modifiers.dst_selection = sdwa_dst_sel_;
+      modifiers.dst_unused = sdwa_dst_unused_;
+    }
+  }
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
