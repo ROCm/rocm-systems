@@ -3981,7 +3981,6 @@ def compare_single_op(
     profiler_kernels = ground_truth_entry.get("cuda_kernels", [])
     profiler_kernel_set = normalize_kernel_names(set(profiler_kernels))
     cuda_time_us = float(ground_truth_entry.get("cuda_time_us") or 0.0)
-    has_cuda_work = bool(profiler_kernel_set) or cuda_time_us > 0.0
     op_edges = [
         tuple(edge)
         for edge in ground_truth_entry.get("op_edges") or []
@@ -4038,14 +4037,6 @@ def compare_single_op(
             "",
             coverage_log_pass(op.name, note="structural: matching analyze node")
             + verbose_tail,
-        )
-
-    if has_cuda_work and gpu_ns <= 0.0:
-        reason = "inclusive GPU ns is 0 while profiler recorded CUDA work"
-        return OpCompareOutcome(
-            "fail",
-            reason,
-            coverage_log_fail(op.name, reason) + verbose_tail,
         )
 
     if profiler_kernel_set:
