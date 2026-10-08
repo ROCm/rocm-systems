@@ -2825,6 +2825,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_RecordAfterReset) {
   REQUIRE(kls.size() >= 2);
   REQUIRE(kls[0]->snapshots.size() == kResetABytes / kChunk);
   REQUIRE(kls[1]->snapshots.size() == 2);
+  REQUIRE(kls[1]->snapshots[0].offset == 0);
   REQUIRE(kls[1]->snapshots[0].length == kChunk);
 
   // A chunk-sized range inside A that B does not cover, so that the record
@@ -2841,7 +2842,6 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_RecordAfterReset) {
   const auto spans = launch_spans(events);
   REQUIRE(spans.size() == kls.size());
   patch_snapshot(events, spans, kls, 1, 0, /*ptr*/ 0, stale);
-  patch_snapshot(events, spans, kls, 1, 0, /*offset*/ 1, 0);
   write_bytes(archive / "events.bin", events);
 
   auto [rc, out] = replay(archive, "--continue-on-error");
