@@ -26,7 +26,7 @@ metadata. Running the recommended command requires an installed or built
 | `workload-trace` | gpu | AI/ML training, long-running GPU/HPC workloads (MPI+RCCL+rocPD, 2GB trace buffer) |
 | `trace-hpc` | hpc | MPI/OpenMP/Kokkos/RCCL + PAPI counters, compute-intensive HPC apps |
 | `trace-openmp` | hpc | OpenMP GPU target-offload apps (kernel/memcpy trace, HSA API excluded) |
-| `profile-mpi` | hpc | MPI communication latency only, no GPU metrics or tracing |
+| `profile-mpi` | hpc | MPI communication latency: flat profile with wall-clock per rank, no tracing |
 | `sys-trace` | tracing | Full system API trace (HIP + HSA + ROCTx + RCCL) for debugging runtime-layer interactions |
 | `runtime-trace` | tracing | Runtime API trace only (excludes HSA/compiler-API noise) |
 
@@ -40,7 +40,7 @@ Resolve these in order; the first question that narrows to a single preset wins.
    compiler-level noise should be excluded).
 
 2. **Does the workload have a dominant parallel runtime?**
-   - MPI communication latency is the *only* concern, no GPU/tracing needed →
+   - MPI communication latency is the *only* concern, no tracing needed →
      `profile-mpi`.
    - OpenMP GPU target-offload kernels → `trace-openmp`.
    - Mixed MPI/OpenMP/Kokkos/RCCL, compute-intensive, and hardware counters are
