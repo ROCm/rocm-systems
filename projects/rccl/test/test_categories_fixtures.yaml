@@ -70,6 +70,7 @@ test_categories:
       - "HierarchicalShuffleTest.*"
       - "LlFifoSysScopeDeviceTest.*"
       - "LlFifoSysScope.*"
+      - "DdaIpcGpuBarrierOrdering.*"
       - "DIVUP.*"
       - "ROUNDUP.*"
       - "ALIGN_POWER.*"
