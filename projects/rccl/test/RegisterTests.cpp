@@ -544,23 +544,27 @@ static void testP2pThenCollectiveSameBuffer()
     }
 }
 
-// Regression test for NCCL 2.32.3 (NVIDIA/nccl#2362): rank 0 sends from the first, then the second cuMem
-// segment of one registered buffer; before the fix the reused IPC import covered only the first segment.
+// Regression test for NCCL 2.32.3 (NVIDIA/nccl#2362): rank 0 sends from the first, then the second half of one
+// registered buffer, each half its own cuMem segment; before the fix the reused IPC import covered only the first.
 // numSegments == 1 is the control. One process per rank: a same-process multi-segment import hangs.
 static int segReuseRunRank(int rank, int numSegments, P2pCollShared* shared)
 {
     prctl(PR_SET_PDEATHSIG, SIGKILL);
     setvbuf(stdout, nullptr, _IOLBF, 0);
-    int numDevices = 0;
-    CHILD_HC(hipGetDeviceCount(&numDevices));
-    // Both ranks check both devices, so they skip together rather than one waiting for the other in init.
-    if (numDevices < 2 || !deviceSupportsCuMemVmm(0) || !deviceSupportsCuMemVmm(1)) {
+    // Rank 0 decides for both, as in p2pCollRunRank, so the ranks cannot disagree and leave one waiting in init.
+    if (rank == 0) {
+        int numDevices = 0;
+        CHILD_HC(hipGetDeviceCount(&numDevices));
+        const bool usable = numDevices >= 2 && deviceSupportsCuMemVmm(0) && deviceSupportsCuMemVmm(1);
+        if (usable) CHILD_NC(ncclGetUniqueId(&shared->id));
+        shared->state.store(usable ? P2pCollState::Ready : P2pCollState::Skip, std::memory_order_release);
+    }
+    P2pCollState st;
+    while ((st = shared->state.load(std::memory_order_acquire)) == P2pCollState::NotReady) { /* spin */ }
+    if (st == P2pCollState::Skip) {
         printf("[rank %d] skip: needs 2 GPUs with cuMem VMM (gfx942, gfx950 or gfx1250)\n", rank);
         return CHILD_SKIP;
     }
-    if (rank == 0) CHILD_NC(ncclGetUniqueId(&shared->id));
-    if (rank == 0) shared->state.store(P2pCollState::Ready, std::memory_order_release);
-    while (shared->state.load(std::memory_order_acquire) != P2pCollState::Ready) { /* spin */ }
     CHILD_HC(hipSetDevice(rank));
     // Init before the pageable H2D copy below: on ROCm 7.0.2 it can make init's 512 MiB cuMem allocation fail.
     ncclComm_t comm;
@@ -571,7 +575,7 @@ static int segReuseRunRank(int rank, int numSegments, P2pCollShared* shared)
     prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
     size_t gran = 0;
     CHILD_HC(hipMemGetAllocationGranularity(&gran, &prop, hipMemAllocationGranularityMinimum));
-    const size_t seg = ((size_t(2) << 20) + gran - 1) / gran * gran, total = 2 * seg, chunk = seg / 2,
+    const size_t half = ((size_t(2) << 20) + gran - 1) / gran * gran, total = 2 * half, chunk = half / 2,
                  segBytes = total / numSegments;
     char* buf = nullptr;
     CHILD_HC(hipMemAddressReserve(reinterpret_cast<void**>(&buf), total, 0, nullptr, 0));
@@ -582,6 +586,16 @@ static int segReuseRunRank(int rank, int numSegments, P2pCollShared* shared)
     }
     const hipMemAccessDesc access = {prop.location, hipMemAccessFlagsProtReadWrite};
     CHILD_HC(hipMemSetAccess(buf, total, &access, 1));
+    // RCCL registers segment by segment only when the cuMem range at the buffer's start is shorter than the buffer
+    // (src/transport/p2p.cc); were it the whole reservation, the MultiSegment case would take the control's path.
+    void* rangeBase = nullptr;
+    size_t rangeSize = 0;
+    CHILD_HC(hipMemGetAddressRange(&rangeBase, &rangeSize, buf));
+    if (rangeBase != buf || rangeSize != segBytes) {
+        printf("[rank %d] cuMem range at the buffer is %zu bytes at %p, expected one %zu-byte segment at %p\n", rank,
+               rangeSize, rangeBase, segBytes, static_cast<void*>(buf));
+        return CHILD_FAIL;
+    }
     std::vector<uint32_t> ramp(total / sizeof(uint32_t)), got(chunk / sizeof(uint32_t));
     for (size_t i = 0; i < ramp.size(); i++) ramp[i] = static_cast<uint32_t>(i + 1);
     CHILD_HC(rank == 0 ? hipMemcpy(buf, ramp.data(), total, hipMemcpyHostToDevice) : hipMemset(buf, 0, total));
@@ -589,7 +603,7 @@ static int segReuseRunRank(int rank, int numSegments, P2pCollShared* shared)
     void* reg = nullptr;
     CHILD_HC(hipStreamCreate(&stream));
     CHILD_NC(ncclCommRegister(comm, buf, total, &reg));
-    for (size_t off : {size_t(0), seg}) {
+    for (size_t off : {size_t(0), half}) {
         CHILD_NC(rank == 0 ? ncclSend(buf + off, chunk, ncclChar, 1, comm, stream)
                            : ncclRecv(buf + off, chunk, ncclChar, 0, comm, stream));
         CHILD_HC(hipStreamSynchronize(stream));
