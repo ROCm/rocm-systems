@@ -509,7 +509,11 @@ TEST(VfioDeviceHost, ReadsAndWritesAcrossHundredsOfPageDistinctWindows) {
   }
 
   std::vector<std::byte> expected(pages, pages + kTransferSize);
+  // Page 0 starts with 00 00. A zero-filled destination would still match if
+  // the read left those bytes untouched.
   std::vector<std::byte> destination(kTransferSize);
+  std::transform(expected.cbegin(), expected.cend(), destination.begin(),
+                 [](std::byte value) { return ~value; });
   ASSERT_EQ(served.host().read_outcome(kGuestAddress, destination),
             simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(destination, expected);
@@ -1233,13 +1237,12 @@ TEST(VfioDeviceHost, DiscardsAskedWorkWhenServingHasStopped) {
 
 // Device-facing DMA data-path coverage.
 //
-// The tests above stop at protocol callbacks: a window is mapped, the device
-// is told, the count changes. None of them moves a byte through
-// DmaEngine::read()/write(), which is the path a real device leans on for
-// command buffers and completion records. These tests share windows through
-// the protocol client, drive the engine the way the device does, and verify
-// the data against the backing files independently, so a symmetric
-// addressing error cannot hide inside a write/read round trip.
+// The tests above already move bytes. A failed transfer must leave reachable
+// memory alone, and an aggregate read and write crosses hundreds of windows.
+// The cases below check those bytes against the backing files: a split across
+// two registrations, an unmapped gap, write protection, and revocation after
+// unmap or disconnect. They share windows through the protocol client, so a
+// matching read/write pair cannot hide a bad address.
 
 namespace {
 
@@ -1250,6 +1253,11 @@ constexpr uint64_t kProtectionIova = 0x70000000;
 constexpr uint64_t kMultiSegmentIova = 0x80000000;
 constexpr uint64_t kReconnectIova = 0x90000000;
 constexpr std::size_t kBoundaryHalfBytes = 64;
+// The two successful split tests copy 64 bytes from the first registration
+// and 96 from the second, so a loop that reuses the first entry's length
+// cannot pass.
+constexpr std::size_t kSplitFirstBytes = 64;
+constexpr std::size_t kSplitSecondBytes = 96;
 
 /// @brief A zero-filled anonymous file of at least @p bytes, rounded up to a
 ///        host-page boundary.
@@ -1304,6 +1312,16 @@ std::vector<std::byte> byte_pattern(std::size_t length, uint8_t seed, uint64_t b
     }
   }
   return bytes;
+}
+
+/// @brief A buffer the same length as @p bytes, with every byte complemented.
+/// @details Successful reads start from this instead of zeros. `byte_pattern`
+///          puts 00 00 in the first two bytes of a page-aligned pattern, so a
+///          zero-filled destination still matches if those bytes are skipped.
+std::vector<std::byte> complemented(std::span<const std::byte> bytes) {
+  std::vector<std::byte> out(bytes.size());
+  std::transform(bytes.begin(), bytes.end(), out.begin(), [](std::byte value) { return ~value; });
+  return out;
 }
 
 /// @brief Read exactly @p dst.size() bytes at @p offset, retrying short reads.
@@ -1387,15 +1405,17 @@ TEST(VfioDeviceHostDma, TransfersWithinOneRegisteredWindow) {
   ASSERT_TRUE(read_all_at(backing.fd(), tail, after));
   EXPECT_EQ(after, sentinel_after) << "bytes after the write were touched";
 
-  std::vector<std::byte> read_back(kLength);
+  std::vector<std::byte> read_back = complemented(source);
   EXPECT_TRUE(served.dma().read(kSingleWindowIova + kStart, read_back));
   EXPECT_EQ(read_back, source);
 }
 
 // Two registrations side by side: the transfer crosses their boundary, so the
 // library reports two scatter-gather entries and the host must copy each into
-// its own registration. Losing an entry, using one entry's file offset for
-// the other, or mishandling the split length all fail the per-file checks.
+// its own registration. The first entry is 64 bytes and the second is 96, so
+// reusing the first entry's length for both segments fails the per-file
+// checks, as does losing an entry or using one entry's file offset for the
+// other.
 TEST(VfioDeviceHostDma, SplitsATransferAtRegistrationBoundaries) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
@@ -1413,40 +1433,40 @@ TEST(VfioDeviceHostDma, SplitsATransferAtRegistrationBoundaries) {
   ASSERT_TRUE(write_all_at(first_page.fd(), 0, first_sentinel));
   ASSERT_TRUE(write_all_at(second_page.fd(), 0, second_sentinel));
 
-  const std::vector<std::byte> source = byte_pattern(kBoundaryHalfBytes * 2, 0x99);
-  EXPECT_TRUE(served.dma().write(kCrossRegistrationIova + page_size - kBoundaryHalfBytes, source));
+  const std::size_t split = kSplitFirstBytes + kSplitSecondBytes;
+  const std::vector<std::byte> source = byte_pattern(split, 0x99);
+  EXPECT_TRUE(served.dma().write(kCrossRegistrationIova + page_size - kSplitFirstBytes, source));
 
-  std::vector<std::byte> first_tail(kBoundaryHalfBytes);
-  ASSERT_TRUE(read_all_at(first_page.fd(), page_size - kBoundaryHalfBytes, first_tail));
-  std::vector<std::byte> expected_first(source.begin(), source.begin() + kBoundaryHalfBytes);
-  EXPECT_EQ(first_tail, expected_first) << "the first registration's half is wrong";
+  std::vector<std::byte> first_tail(kSplitFirstBytes);
+  ASSERT_TRUE(read_all_at(first_page.fd(), page_size - kSplitFirstBytes, first_tail));
+  std::vector<std::byte> expected_first(source.begin(), source.begin() + kSplitFirstBytes);
+  EXPECT_EQ(first_tail, expected_first) << "the first registration's share is wrong";
 
-  std::vector<std::byte> second_head(kBoundaryHalfBytes);
+  std::vector<std::byte> second_head(kSplitSecondBytes);
   ASSERT_TRUE(read_all_at(second_page.fd(), 0, second_head));
-  std::vector<std::byte> expected_second(source.begin() + kBoundaryHalfBytes, source.end());
-  EXPECT_EQ(second_head, expected_second) << "the second registration's half is wrong";
+  std::vector<std::byte> expected_second(source.begin() + kSplitFirstBytes, source.end());
+  EXPECT_EQ(second_head, expected_second) << "the second registration's share is wrong";
 
-  std::vector<std::byte> first_head(page_size - kBoundaryHalfBytes);
+  std::vector<std::byte> first_head(page_size - kSplitFirstBytes);
   ASSERT_TRUE(read_all_at(first_page.fd(), 0, first_head));
   EXPECT_EQ(first_head,
             std::vector<std::byte>(first_sentinel.begin(),
-                                   first_sentinel.begin() + (page_size - kBoundaryHalfBytes)))
+                                   first_sentinel.begin() + (page_size - kSplitFirstBytes)))
       << "the untouched start of the first registration changed";
 
-  std::vector<std::byte> second_tail(page_size - kBoundaryHalfBytes);
-  ASSERT_TRUE(read_all_at(second_page.fd(), kBoundaryHalfBytes, second_tail));
-  EXPECT_EQ(second_tail, std::vector<std::byte>(second_sentinel.begin() + kBoundaryHalfBytes,
+  std::vector<std::byte> second_tail(page_size - kSplitSecondBytes);
+  ASSERT_TRUE(read_all_at(second_page.fd(), kSplitSecondBytes, second_tail));
+  EXPECT_EQ(second_tail, std::vector<std::byte>(second_sentinel.begin() + kSplitSecondBytes,
                                                 second_sentinel.end()))
       << "the untouched end of the second registration changed";
 
-  const std::vector<std::byte> read_pattern = byte_pattern(kBoundaryHalfBytes * 2, 0xAA);
-  ASSERT_TRUE(write_all_at(first_page.fd(), page_size - kBoundaryHalfBytes,
-                           {read_pattern.begin(), read_pattern.begin() + kBoundaryHalfBytes}));
+  const std::vector<std::byte> read_pattern = byte_pattern(split, 0xAA);
+  ASSERT_TRUE(write_all_at(first_page.fd(), page_size - kSplitFirstBytes,
+                           {read_pattern.begin(), read_pattern.begin() + kSplitFirstBytes}));
   ASSERT_TRUE(write_all_at(second_page.fd(), 0,
-                           {read_pattern.begin() + kBoundaryHalfBytes, read_pattern.end()}));
-  std::vector<std::byte> read_back(kBoundaryHalfBytes * 2);
-  EXPECT_TRUE(
-      served.dma().read(kCrossRegistrationIova + page_size - kBoundaryHalfBytes, read_back));
+                           {read_pattern.begin() + kSplitFirstBytes, read_pattern.end()}));
+  std::vector<std::byte> read_back = complemented(read_pattern);
+  EXPECT_TRUE(served.dma().read(kCrossRegistrationIova + page_size - kSplitFirstBytes, read_back));
   EXPECT_EQ(read_back, read_pattern);
 }
 
@@ -1518,7 +1538,7 @@ TEST(VfioDeviceHostDma, EnforcesWriteProtection) {
   const std::vector<std::byte> initial = byte_pattern(page_size, 0x44);
   ASSERT_TRUE(write_all_at(read_only.fd(), 0, initial));
 
-  std::vector<std::byte> read_back(page_size);
+  std::vector<std::byte> read_back = complemented(initial);
   EXPECT_TRUE(served.dma().read(kProtectionIova, read_back));
   EXPECT_EQ(read_back, initial) << "reading a read-only window returned wrong bytes";
 
@@ -1537,14 +1557,15 @@ TEST(VfioDeviceHostDma, EnforcesWriteProtection) {
   ASSERT_TRUE(read_all_at(read_write.fd(), 0, landed));
   EXPECT_EQ(landed, accepted) << "the permitted write did not land";
 
-  std::vector<std::byte> rw_read_back(page_size);
+  std::vector<std::byte> rw_read_back = complemented(accepted);
   EXPECT_TRUE(served.dma().read(kProtectionIova + page_size, rw_read_back));
   EXPECT_EQ(rw_read_back, accepted);
 }
 
-// The multi-entry path again, with the window set released afterwards. The
-// data checks carry the regression value; the unmap checks below then verify
-// that withdrawal revokes access, not just the device's mapping count.
+// The multi-entry path again, with the same 64/96 split, and the window set
+// released afterwards. The data checks carry the regression value; the unmap
+// checks below then verify that withdrawal revokes access, not just the
+// device's mapping count.
 TEST(VfioDeviceHostDma, CompletesMultiSegmentTransfersAndReleasesTheWindowSet) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
@@ -1557,24 +1578,24 @@ TEST(VfioDeviceHostDma, CompletesMultiSegmentTransfersAndReleasesTheWindowSet) {
   ASSERT_TRUE(client.dma_map(kMultiSegmentIova, page_size, first_page.fd(), 0));
   ASSERT_TRUE(client.dma_map(kMultiSegmentIova + page_size, page_size, second_page.fd(), 0));
 
-  const std::vector<std::byte> source = byte_pattern(kBoundaryHalfBytes * 2, 0xb1);
-  EXPECT_TRUE(served.dma().write(kMultiSegmentIova + page_size - kBoundaryHalfBytes, source));
+  const std::size_t split = kSplitFirstBytes + kSplitSecondBytes;
+  const std::vector<std::byte> source = byte_pattern(split, 0xb1);
+  EXPECT_TRUE(served.dma().write(kMultiSegmentIova + page_size - kSplitFirstBytes, source));
 
-  std::vector<std::byte> first_tail(kBoundaryHalfBytes);
-  ASSERT_TRUE(read_all_at(first_page.fd(), page_size - kBoundaryHalfBytes, first_tail));
-  EXPECT_EQ(first_tail,
-            std::vector<std::byte>(source.begin(), source.begin() + kBoundaryHalfBytes));
-  std::vector<std::byte> second_head(kBoundaryHalfBytes);
+  std::vector<std::byte> first_tail(kSplitFirstBytes);
+  ASSERT_TRUE(read_all_at(first_page.fd(), page_size - kSplitFirstBytes, first_tail));
+  EXPECT_EQ(first_tail, std::vector<std::byte>(source.begin(), source.begin() + kSplitFirstBytes));
+  std::vector<std::byte> second_head(kSplitSecondBytes);
   ASSERT_TRUE(read_all_at(second_page.fd(), 0, second_head));
-  EXPECT_EQ(second_head, std::vector<std::byte>(source.begin() + kBoundaryHalfBytes, source.end()));
+  EXPECT_EQ(second_head, std::vector<std::byte>(source.begin() + kSplitFirstBytes, source.end()));
 
-  const std::vector<std::byte> read_pattern = byte_pattern(kBoundaryHalfBytes * 2, 0x4d);
-  ASSERT_TRUE(write_all_at(first_page.fd(), page_size - kBoundaryHalfBytes,
-                           {read_pattern.begin(), read_pattern.begin() + kBoundaryHalfBytes}));
+  const std::vector<std::byte> read_pattern = byte_pattern(split, 0x4d);
+  ASSERT_TRUE(write_all_at(first_page.fd(), page_size - kSplitFirstBytes,
+                           {read_pattern.begin(), read_pattern.begin() + kSplitFirstBytes}));
   ASSERT_TRUE(write_all_at(second_page.fd(), 0,
-                           {read_pattern.begin() + kBoundaryHalfBytes, read_pattern.end()}));
-  std::vector<std::byte> read_back(kBoundaryHalfBytes * 2);
-  EXPECT_TRUE(served.dma().read(kMultiSegmentIova + page_size - kBoundaryHalfBytes, read_back));
+                           {read_pattern.begin() + kSplitFirstBytes, read_pattern.end()}));
+  std::vector<std::byte> read_back = complemented(read_pattern);
+  EXPECT_TRUE(served.dma().read(kMultiSegmentIova + page_size - kSplitFirstBytes, read_back));
   EXPECT_EQ(read_back, read_pattern);
 
   ASSERT_TRUE(client.dma_unmap(kMultiSegmentIova, page_size));
@@ -1606,6 +1627,8 @@ TEST(VfioDeviceHostLifecycle, ForgetsGuestWindowsBeforeServingAnotherClient) {
     BackingFile first_backing(0x1000);
     const uint64_t page_size = first_backing.page_size();
     ASSERT_TRUE(first.dma_map(kReconnectIova, page_size, first_backing.fd(), 0));
+    EXPECT_EQ(served.device().mapped_regions(), 1u)
+        << "the first client's window must be registered with the device";
 
     const std::vector<std::byte> first_source = byte_pattern(0x100, 0x3c);
     ASSERT_TRUE(served.dma().write(kReconnectIova, first_source));
@@ -1615,7 +1638,7 @@ TEST(VfioDeviceHostLifecycle, ForgetsGuestWindowsBeforeServingAnotherClient) {
     EXPECT_EQ(first_in_file, first_source)
         << "the first client's write did not land before disconnect";
 
-    std::vector<std::byte> first_read_back(0x100);
+    std::vector<std::byte> first_read_back = complemented(first_source);
     ASSERT_TRUE(served.dma().read(kReconnectIova, first_read_back));
     EXPECT_EQ(first_read_back, first_source);
   }
@@ -1632,6 +1655,8 @@ TEST(VfioDeviceHostLifecycle, ForgetsGuestWindowsBeforeServingAnotherClient) {
   BackingFile second_backing(0x1000);
   const uint64_t page_size = second_backing.page_size();
   ASSERT_TRUE(second.dma_map(kReconnectIova, page_size, second_backing.fd(), 0));
+  EXPECT_EQ(served.device().mapped_regions(), 1u)
+      << "the replacement client's window must be registered with the device";
 
   const std::vector<std::byte> second_source = byte_pattern(0x100, 0x7e);
   ASSERT_TRUE(served.dma().write(kReconnectIova, second_source));
@@ -1641,7 +1666,7 @@ TEST(VfioDeviceHostLifecycle, ForgetsGuestWindowsBeforeServingAnotherClient) {
   EXPECT_EQ(second_in_file, second_source)
       << "the second client's write did not land at the reused address";
 
-  std::vector<std::byte> second_read_back(0x100);
+  std::vector<std::byte> second_read_back = complemented(second_source);
   ASSERT_TRUE(served.dma().read(kReconnectIova, second_read_back));
   EXPECT_EQ(second_read_back, second_source);
 }
