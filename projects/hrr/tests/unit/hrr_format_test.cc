@@ -430,6 +430,36 @@ HRR_TEST_CASE(Unit_HRR_AllocMap_OverlapDropsHostUnregistered) {
   CHECK(ctx.alloc_map.at(0x40000ULL).kind == AllocKind::HostUnregistered);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Register a host range and mark it unregistered.
+ *   - Record a padded device allocation below it whose padding runs into the
+ *     range and whose application size ends at the range's base.
+ *   - Verify the range is still tracked: the padding is replay's own, and the
+ *     application may still use the range.
+ */
+HRR_TEST_CASE(Unit_HRR_AllocMap_PaddingDropsNothing) {
+  PlaybackContext ctx;
+  void* range = reinterpret_cast<void*>(static_cast<uintptr_t>(0xA0000000u));
+  void* fresh = reinterpret_cast<void*>(static_cast<uintptr_t>(0xC0000000u));
+
+  ctx.record_alloc(0x10000ULL, range, 0x1000, AllocKind::HostRegister);
+  {
+    std::unique_lock lk(ctx.map_mutex);
+    ctx.mark_host_unregistered(0x10000ULL);
+  }
+
+  // Padded [0xE000, 0x12000) covers the range; the application's
+  // [0xE000, 0x10000) stops at its base.
+  ctx.record_alloc(0xE000ULL, fresh, 0x4000, AllocKind::Device, 0x2000);
+  REQUIRE(ctx.alloc_map.count(0x10000ULL) == 1);
+  CHECK(ctx.alloc_map.at(0x10000ULL).kind == AllocKind::HostUnregistered);
+  void* expected =
+      reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(range) + 0x800);
+  CHECK(ctx.translate_ptr(0x10800ULL) == expected);
+}
+
 // ---------------------------------------------------------------------------
 // Archive reader SIZE_OK guard tests (CPU-only, no GPU required)
 //

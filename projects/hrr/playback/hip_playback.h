@@ -703,17 +703,24 @@ struct PlaybackContext {
     // which picks the tightest enclosing entry, would send the part of the new
     // allocation above the range's base to the range's stale buffer. The
     // buffer stays in host_reg_bufs, and teardown frees it. An alias names
-    // memory already tracked, so it drops nothing.
+    // memory already tracked, so it drops nothing. A padded allocation passes
+    // the size the application asked for as app_sz: the padding is replay's,
+    // and a range it covers may still be live. 0 means sz.
+    //
+    // HostUnregistered entries come only from mark_host_unregistered, which
+    // lists them in host_unregistered_bases. One recorded here directly is
+    // never dropped.
     void record_alloc(uint64_t rec, void* live, size_t sz,
-                      AllocKind kind = AllocKind::Device) {
+                      AllocKind kind = AllocKind::Device, size_t app_sz = 0) {
         std::unique_lock lk(map_mutex);
-        if (kind != AllocKind::DevicePtrAlias && sz != 0) {
+        const size_t span = app_sz != 0 ? app_sz : sz;
+        if (kind != AllocKind::DevicePtrAlias && span != 0) {
             auto& bases = host_unregistered_bases;
             for (size_t i = 0; i < bases.size();) {
                 auto it = alloc_map.find(bases[i]);
                 const bool live_entry =
                     it != alloc_map.end() && it->second.kind == AllocKind::HostUnregistered;
-                const bool overlaps = live_entry && it->first < rec + sz &&
+                const bool overlaps = live_entry && it->first < rec + span &&
                                       rec < it->first + it->second.size;
                 if (overlaps) alloc_map.erase(it);
                 if (!live_entry || overlaps) {

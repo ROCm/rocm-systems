@@ -3159,7 +3159,7 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
         // where the original run never issued it and an injected memset would
         // invalidate the capture (HIP 901) for every subsequent op in the graph.
         hrr_zero_init_alloc(ctx, live, pad_sz);
-        ctx.record_alloc(a->ptr, live, pad_sz);
+        ctx.record_alloc(a->ptr, live, pad_sz, AllocKind::Device, orig_sz);
         if (ctx.verbose && pad_sz > orig_sz)
             fprintf(stderr, "[HRR] hipMalloc 0x%llx: orig=%zu padded=%zu\n",
                     (unsigned long long)a->ptr, orig_sz, pad_sz);
@@ -3189,7 +3189,7 @@ hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* p
     hipError_t r = hipExtMallocWithFlags(&live, pad_sz, a->flags);
     if (r == hipSuccess) {
         hrr_zero_init_alloc(ctx, live, pad_sz);
-        ctx.record_alloc(a->ptr, live, pad_sz);
+        ctx.record_alloc(a->ptr, live, pad_sz, AllocKind::Device, orig_sz);
         if (ctx.verbose && pad_sz > orig_sz)
             fprintf(stderr, "[HRR] hipExtMallocWithFlags 0x%llx: orig=%zu padded=%zu\n",
                     (unsigned long long)a->ptr, orig_sz, pad_sz);
@@ -3221,7 +3221,7 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     if (r == hipSuccess) {
         if (hrr_replay_zero_init() && !ctx.in_graph_capture)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
-        ctx.record_alloc(a->dev_ptr, live, pad_sz);
+        ctx.record_alloc(a->dev_ptr, live, pad_sz, AllocKind::Device, orig_sz);
     }
     return r;
 }
@@ -3238,7 +3238,7 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     if (r == hipSuccess) {
         if (hrr_replay_zero_init() && !ctx.in_graph_capture)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
-        ctx.record_alloc(a->dev_ptr, live, pad_sz);
+        ctx.record_alloc(a->dev_ptr, live, pad_sz, AllocKind::Device, orig_sz);
     }
     return r;
 }
