@@ -3181,30 +3181,31 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 // gfx1250, message just above the LL ceiling and within the LL128 band
 // (ddaLL128Max[A2A] = 1 MiB total):
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL128.
+// gfx1250, LL128 tier disabled (ddaLL128Max[A2A] = 0 after commit 363b197e):
+// a message just above the LL ceiling must fall to Direct p2p, not LL128.
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 {
     auto comm = std::make_unique<ncclComm>();
     InitA2ADecisionComm(*comm, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
-    const size_t llMax    = tbl->ddaLLMax[ncclFuncAlltoAll];
-    const size_t ll128Max = tbl->ddaLL128Max[ncclFuncAlltoAll];
-    ASSERT_GT(ll128Max, llMax) << "gfx1250 LL128 cap must exceed LL cap for AlltoAll";
+    ASSERT_EQ(tbl->ddaLL128Max[ncclFuncAlltoAll], 0ul)
+        << "gfx1250 LL128 tier must be disabled for AlltoAll";
+    const size_t llMax = tbl->ddaLLMax[ncclFuncAlltoAll];
+    ASSERT_GT(llMax, 0ul) << "gfx1250 must have a non-zero LL cap for AlltoAll";
 
-    // One 16*nRanks step above the LL ceiling, still within LL128.
-    // The alignment ensures each per-rank chunk is a multiple of 16 bytes
-    // (required by both LL128 and LL eligibility predicates).
+    // One alignment step above the LL ceiling; with LL128 disabled, this must
+    // fall directly to RCCL_DIRECT_ALLTOALL rather than RCCL_DDA_FABRIC_LL128.
     const size_t align      = 16u * (size_t)comm->nRanks;
     const size_t totalBytes = ((llMax + align) / align) * align;
-    ASSERT_LE(totalBytes, ll128Max);
 
     rcclCollDecision dec{};
     ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
-    EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
+    EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
 }
 
-// gfx1250, message above all DDA caps (ddaVmmMax[A2A] = 0 disables VMM;
-// ddaLL128Max[A2A] = 1 MiB): anything above 1 MiB falls to Direct p2p.
+// gfx1250, message above all DDA caps (ddaVmmMax[A2A] = 0, ddaLL128Max[A2A] = 0):
+// anything above the LL ceiling (64 KiB) falls to Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3213,10 +3214,13 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
     ASSERT_NE(tbl, nullptr);
     ASSERT_EQ(tbl->ddaVmmMax[ncclFuncAlltoAll], 0ul)
         << "gfx1250 VMM must be disabled for AlltoAll";
-    const size_t ll128Max = tbl->ddaLL128Max[ncclFuncAlltoAll];
+    ASSERT_EQ(tbl->ddaLL128Max[ncclFuncAlltoAll], 0ul)
+        << "gfx1250 LL128 must be disabled for AlltoAll";
+    const size_t llMax = tbl->ddaLLMax[ncclFuncAlltoAll];
+    ASSERT_GT(llMax, 0ul) << "gfx1250 must have a non-zero LL cap for AlltoAll";
 
     const size_t align      = 16u * (size_t)comm->nRanks;
-    const size_t totalBytes = ((ll128Max + align) / align) * align;
+    const size_t totalBytes = ((llMax + align) / align) * align;
 
     rcclCollDecision dec{};
     ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
