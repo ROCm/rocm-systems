@@ -25,7 +25,7 @@ breathe==4.35.0
     # via rocm-docs-core
 certifi==2024.8.30
     # via requests
-cffi==1.17.1
+cffi==2.1.1
     # via
     #   cryptography
     #   pynacl
@@ -41,7 +41,7 @@ click-log==0.4.0
     # via doxysphinx
 comm==0.2.2
     # via ipykernel
-cryptography==43.0.1
+cryptography==50.0.0
     # via pyjwt
 debugpy==1.8.12
     # via ipykernel
