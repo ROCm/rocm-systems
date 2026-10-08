@@ -675,9 +675,12 @@ the live allocation it lands in. It uses the record only when all of these hold:
 A record that fails a check is named on stderr with its reason and counted as
 rejected; nothing is written for it. When the count runs past the end of the
 event or the tail is malformed, every record the launch claims is counted. A
-valid direction 0 record of a launch replayed into a graph capture is not
-applied either, but it is not rejected: it is counted apart and printed on its
-own summary line.
+valid direction 0 record of a launch into a capturing stream is not applied
+either, but it is not rejected: it is counted apart and printed on its own
+summary line. Replay asks `hipStreamIsCapturing` about the launch's own stream,
+so a capture open on another stream does not stop the restore. A launch into
+the null stream or `hipStreamLegacy` while a blocking stream captures is a
+capture error, and its restore is skipped the same way.
 
 The restore is ordered on the launch stream. Replay queues one host function
 per launch with `hipLaunchHostFunc`, just before the kernel. The host function

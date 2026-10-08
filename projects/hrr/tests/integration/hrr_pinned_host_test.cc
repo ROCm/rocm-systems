@@ -1313,6 +1313,58 @@ TEST_CASE("Unit_HRR_PinnedHost_NoNullBarrier_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(h));
 }
 
+// ===========================================================================
+// A read on an ordinary stream while another stream is under graph capture.
+//
+//   0  read      on non-blocking stream S, host filled pattern 1
+//   -  hipStreamBeginCapture on non-blocking stream G, relaxed mode
+//   1  write     into device scratch on G, captured into the graph
+//   2  read      on S, host filled pattern 2, while G still captures
+//   -  hipStreamEndCapture on G; the graph is never launched
+// Launch 2 runs at once on S, so replay must restore it even though a capture
+// is open on another stream.
+// ===========================================================================
+TEST_CASE("Unit_HRR_PinnedHost_CaptureElsewhere_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* h = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
+                              hipHostMallocDefault));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, kPinnedBytes));
+  int* scratch = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&scratch, kPinnedBytes));
+  hipStream_t s = nullptr;
+  hipStream_t g = nullptr;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&g, hipStreamNonBlocking));
+
+  // 0
+  fill(h, 1);
+  read_pinned(h, out, 1, kPinnedInts, s);
+
+  // 1, 2
+  fill(h, 2);
+  HRR_HIP_CHECK(hipStreamBeginCapture(g, hipStreamCaptureModeRelaxed));
+  hipLaunchKernelGGL(hrr_pinned_write, dim3(kBlocks), dim3(kThreads), 0, g, scratch,
+                     kPinnedInts, 0x3c3c);
+  const hipError_t write_err = hipGetLastError();
+  hipLaunchKernelGGL(hrr_pinned_read, dim3(kBlocks), dim3(kThreads), 0, s, h, out,
+                     kPinnedInts);
+  const hipError_t read_err = hipGetLastError();
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipStreamEndCapture(g, &graph));
+  HRR_HIP_CHECK(write_err);
+  HRR_HIP_CHECK(read_err);
+  check_out(out, [](int i) { return pattern(2, i) * 3 + 1; });
+
+  HRR_HIP_CHECK(hipGraphDestroy(graph));
+  HRR_HIP_CHECK(hipStreamDestroy(g));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  HRR_HIP_CHECK(hipFree(scratch));
+  HRR_HIP_CHECK(hipFree(out));
+  HRR_HIP_CHECK(hipHostFree(h));
+}
+
 namespace {
 constexpr const char* kDirect = "Unit_HRR_PinnedHost_Direct";
 // A capture or replay that takes longer than this has hung.
@@ -2491,6 +2543,42 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_DeviceReset) {
   CHECK(kls[1]->snapshots[1].direction == 0);
   if (!skipped.empty()) SKIP(skipped);
   CHECK(kls[2]->snapshots.empty());
+}
+
+// ---------------------------------------------------------------------------
+// A launch on a stream that is not capturing is restored while another stream
+// captures. Deciding from whether any capture is open skipped launch 2's
+// restore, and the read saw pattern 1.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_CaptureElsewhere) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_capture_elsewhere.hrr");
+  capture_case("Unit_HRR_PinnedHost_CaptureElsewhere_Direct", cap.path);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() == 3);
+  CHECK(kls[0]->snapshots.size() == 2);
+  CHECK(kls[1]->snapshots.empty());
+  REQUIRE(kls[2]->snapshots.size() == 2);
+  CHECK(kls[2]->snapshots[0].direction == 0);
+  CHECK(kls[2]->snapshots[1].direction == 0);
+
+  auto [rc, out] = replay(archive);
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(restored == 4);
+  CHECK(rejected == 0);
+  CHECK(host_snapshots_in_graph(out) == 0);
+#ifndef _WIN32
+  int d2h_pass = 0, d2h_fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+  CHECK(d2h_pass >= 2);
+  CHECK(d2h_fail == 0);
+#endif
 }
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE

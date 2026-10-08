@@ -1074,7 +1074,18 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
                 "of the event — none applied\n", kname.c_str(), n);
         return;
     }
-    const bool apply = !ctx.in_graph_capture;
+    // A host function sent into a capturing stream would become a graph node,
+    // so the restore is applied only when the launch's own stream is not
+    // capturing. A null or legacy stream reports hipErrorStreamCaptureImplicit
+    // while a blocking stream captures; the launch is then itself a capture
+    // error, and the restore is skipped like a captured one. Any other error
+    // is left to hipLaunchHostFunc below.
+    hipStreamCaptureStatus cap = hipStreamCaptureStatusNone;
+    const hipError_t cr = hipStreamIsCapturing(stream, &cap);
+    if (cr != hipSuccess) (void)hipGetLastError();
+    const bool apply = cr == hipErrorStreamCaptureImplicit ? false
+                     : cr != hipSuccess                    ? true
+                                                           : cap == hipStreamCaptureStatusNone;
     if (!apply) {
         static std::atomic<bool> warned{false};
         if (!warned.exchange(true))
