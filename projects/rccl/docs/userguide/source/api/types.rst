@@ -299,7 +299,7 @@ ncclConfig_t
 
  .. c:macro:: graphUsageMode
 
-  Set the graph usage mode for the communicator. It support three possible values: 0 (no graphs), 1 (one graph) and 2 (either multiple graphs or mix of graph and non-graph). In RCCL the default value is 0 (upstream NCCL defaults to 2), so graph mixing is off unless the communicator sets 2 or :ref:`NCCL_GRAPH_MIXING_SUPPORT` is ``1``. RCCL handles 0 and 1 alike: graphs can be captured and launched, but the uses listed under :ref:`NCCL_GRAPH_MIXING_SUPPORT` are not supported. If :ref:`NCCL_GRAPH_STREAM_ORDERING` or :c:macro:`graphStreamOrdering` disables capture-time stream ordering (``0``), **graph mixing must be off**—use ``graphUsageMode`` ``0`` or ``1`` only; ``graphUsageMode=2`` must not be combined with ordering ``0`` (see :ref:`NCCL_GRAPH_STREAM_ORDERING`).
+  Set the graph usage mode for the communicator. It support three possible values: 0 (no graphs), 1 (one graph) and 2 (either multiple graphs or mix of graph and non-graph). In RCCL the default value is 0 (upstream NCCL defaults to 2), so graph mixing is off unless the communicator sets 2 or :ref:`NCCL_GRAPH_MIXING_SUPPORT` is ``1``. Only 2 turns on the support that mixing needs; with 0 or 1 the uses listed under :ref:`NCCL_GRAPH_MIXING_SUPPORT` are not supported. Graphs can still be captured and launched with 0, but RCCL then logs an INFO message for each captured call that the communicator is not configured for graphs; set 1 for a communicator used from one graph at a time. If :ref:`NCCL_GRAPH_STREAM_ORDERING` or :c:macro:`graphStreamOrdering` disables capture-time stream ordering (``0``), **graph mixing must be off**—use ``graphUsageMode`` ``0`` or ``1`` only, and leave :ref:`NCCL_GRAPH_MIXING_SUPPORT` unset or ``0``, since ``1`` forces ``graphUsageMode=2``; ``graphUsageMode=2`` must not be combined with ordering ``0`` (see :ref:`NCCL_GRAPH_STREAM_ORDERING`).
 
  .. c:macro:: graphStreamOrdering
 
@@ -317,8 +317,8 @@ ncclConfig_t
   ``0`` or ``1`` overrides this field.
 
   ``graphStreamOrdering=0`` requires ``graphUsageMode`` ``0`` or ``1``
-  (mixing **off**). If it is combined with ``graphUsageMode=2``, NCCL emits a
-  warning and forces ``graphStreamOrdering`` to ``1``; communicator creation
+  (mixing **off**). If it is combined with ``graphUsageMode=2``, NCCL logs an
+  INFO message and forces ``graphStreamOrdering`` to ``1``; communicator creation
   still succeeds. See :ref:`NCCL_GRAPH_STREAM_ORDERING`. NCCL enforces this
   compatibility fallback within a single communicator only. Communicators
   created by ``ncclCommSplit`` with ``splitShare`` share one internal
