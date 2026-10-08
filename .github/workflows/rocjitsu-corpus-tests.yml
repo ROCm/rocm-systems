@@ -710,6 +710,8 @@ jobs:
           hashes = [sha for cases in groups.values() for sha in cases]
           assert len(hashes) == len(set(hashes)), "Duplicate DBT quarantine entries"
           assert all(re.fullmatch(r"[0-9a-f]{64}", sha) for sha in hashes), "Invalid DBT SHA256"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"quarantined_objects={len(hashes)}", file=output)
           if hashes:
               print("not (" + " or ".join(hashes) + ")")
               issues = ", ".join(issue for issue, cases in groups.items() if cases)
@@ -717,6 +719,7 @@ jobs:
               print(f"::warning::{message}", file=sys.stderr)
               with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
                   print(message, file=summary)
+                  print("SHA-pair collection is deferred until all corpus inputs can pass idempotence checks; no incomplete comparison artifact will be published.", file=summary)
                   print(file=summary)
                   for issue, cases in groups.items():
                       if cases:
@@ -728,6 +731,8 @@ jobs:
             if [[ -n "${QUARANTINE_EXPRESSION}" ]]; then
               DBT_SELECTION=(-k "${QUARANTINE_EXPRESSION}")
             fi
+          else
+            echo "quarantined_objects=0" >> "${GITHUB_OUTPUT}"
           fi
           "${ROCJITSU_DBT_VENV}/bin/python" -m pytest tests/test_corpus.py \
             "${DBT_SELECTION[@]}" \
@@ -751,9 +756,13 @@ jobs:
 
       - name: Collect gfx1250 B0-to-A0 SHA pairs
         id: collect_dbt_sha_pairs
+        # TODO(#13070): Resume full SHA-pair collection once all quarantined
+        # objects pass idempotence. The collector independently verifies every
+        # input, and partial manifests cannot be compared with the full baseline.
         if: >-
           matrix.name == 'release' &&
           steps.run_dbt.outcome == 'success' &&
+          steps.run_dbt.outputs.quarantined_objects == '0' &&
           (github.event_name == 'pull_request' ||
            (github.ref == 'refs/heads/develop' &&
             (github.event_name == 'push' ||
