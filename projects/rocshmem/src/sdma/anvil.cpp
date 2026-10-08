@@ -232,10 +232,11 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
     const std::string srcBus = getBusId(localDeviceId);
     const std::string dstBus = getBusId(remoteDeviceId);
     LOG_ERROR(
-        "anvil: hsaKmtCreateQueueExt failed hsakmt=%d (%s) node=%u engineId=%u srcDev=%d (%s) "
-        "dstDev=%d (%s) usedPreferred=%d preferredStatus=%#x preferredMask=0x%x hostEng=%u "
-        "xgmiEng=%u total=%u",
-        static_cast<int>(createStatus_), hsakmtStatusName(createStatus_), localNodeId, engineId,
+        "anvil: hsaKmtCreateQueueExt failed hsakmt=%d (%s) genericRetry=%d (%s) node=%u "
+        "engineId=%u srcDev=%d (%s) dstDev=%d (%s) usedPreferred=%d preferredStatus=%#x "
+        "preferredMask=0x%x hostEng=%u xgmiEng=%u total=%u",
+        static_cast<int>(createStatus_), hsakmtStatusName(createStatus_),
+        static_cast<int>(queueStatus), hsakmtStatusName(queueStatus), localNodeId, engineId,
         localDeviceId, srcBus.c_str(), remoteDeviceId, dstBus.c_str(),
         selection.usedPreferred ? 1 : 0, static_cast<unsigned>(selection.preferredStatus),
         selection.preferredMask, selection.numSdmaEngines, selection.numSdmaXgmiEngines,
@@ -540,6 +541,13 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
 }
 
 bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
+  // createSdmaQueue's getHipGpuAgent exits the process on an unmapped device; refuse here instead.
+  if (srcDeviceId < 0 || srcDeviceId >= static_cast<int>(gpuAgentsByHipDev_.size()) ||
+      !hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)])) {
+    LOG_ERROR("anvil: no HSA agent mapped for HIP device %d, cannot connect to %d", srcDeviceId,
+              dstDeviceId);
+    return false;
+  }
   const EngineSelection selection = getSdmaEngineId(srcDeviceId, dstDeviceId);
   if (selection.engineId < 0) {
     LOG_ERROR("anvil: no SDMA engine mapping for %d -> %d", srcDeviceId, dstDeviceId);
@@ -591,7 +599,7 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   for (int c = 0; c < numChannels; ++c) {
     SdmaQueue* queue = createSdmaQueue(srcDeviceId, dstDeviceId, engineId, selection);
     if (queue == nullptr) {
-      if (queueBudget > 0 && lastQueueStatus_ == HSAKMT_STATUS_NO_MEMORY) {
+      if (lastQueueStatus_ == HSAKMT_STATUS_NO_MEMORY) {
         reportBudget(queuesUsedTotal_);
       }
       rollback();
@@ -691,7 +699,7 @@ int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
   // (srcFn + dstFn) rather than dstFn alone: with 2 engines the two split a mixed-parity mesh the
   // same way, but once the node has more than 2 engines the sum still separates pairs that share a
   // destination function. Two engines cannot give 8 partitions distinct ids.
-  const bool partition = numSdmaXgmiEngines_ == 0 && numSdmaEnginesTotal_ > 0;
+  const bool partition = isSdmaPartition(numSdmaXgmiEngines_, numSdmaEnginesTotal_);
   if (oamMapEngineNeedsFold(numSdmaXgmiEngines_, numSdmaEnginesTotal_, engineId)) {
     const PciFunctionBus srcPci = pciFunctionBus(getBusId(srcDeviceId));
     const PciFunctionBus dstPci = pciFunctionBus(getBusId(dstDeviceId));
