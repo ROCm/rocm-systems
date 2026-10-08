@@ -53,14 +53,6 @@ static ncclResult_t InitCalloc(T** ptr, size_t nelem, const char* file, int line
   if (ret == ncclSuccess && *ptr != nullptr) g_initHostLive[*ptr] = nelem * sizeof(T);
   return ret;
 }
-static bool InitHostCovers(const void* dst, size_t n) {
-  auto it = g_initHostLive.upper_bound(const_cast<void*>(dst));
-  if (it == g_initHostLive.begin()) return false;
-  --it;
-  const auto* base = static_cast<const char*>(it->first);
-  const auto* p = static_cast<const char*>(dst);
-  return p >= base && p + n <= base + it->second;
-}
 static void InitFree(void* ptr) {
   g_initHostLive.erase(ptr);
   std::free(ptr);
@@ -165,7 +157,7 @@ class DdaFabricCommTest : public FabricLedgerTest {
     // Host-to-host copies must land inside a tracked host block.
     auto ledgerCopy = g_hipMemcpy;
     g_hipMemcpy = [this, ledgerCopy](void* dst, const void* src, size_t n, hipMemcpyKind kind) {
-      if (kind == hipMemcpyHostToHost && !InitHostCovers(dst, n)) {
+      if (kind == hipMemcpyHostToHost && !RangeCovers(g_initHostLive, dst, n)) {
         hostCopiesRefused_++;
         return hipErrorInvalidValue;
       }

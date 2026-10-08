@@ -28,6 +28,9 @@
 
 #include FABRIC_MEM_HANDLER_CC_PATH
 
+// alloc.h data symbol with no owning fakes file, as in p2p-test.cc.
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
+
 namespace {
 
 using dda_fabric_test::FabricLedgerTest;

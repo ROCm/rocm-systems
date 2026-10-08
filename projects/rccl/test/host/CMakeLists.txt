@@ -308,7 +308,6 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/fabric/fabric-mem-handler-test.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc  # real DeviceBuffer
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
-    fakes/alloc_fakes.cc                 # alloc.h data symbols (allocTracker)
     fakes/bootstrap_stubs.cc             # bootstrapAllGather
     fakes/env_fakes.cc                   # NCCL_CUMEM_SKIP_FREE
     fakes/hip_fakes.cc
