@@ -502,7 +502,6 @@ static hipError_t handle_special(PlaybackContext& ctx, const hrr::Event& ev) {
                   r, hipGetErrorString(r));
           return r;
         }
-        hrr_placement_at_sync(ctx, "hipStreamSynchronize");
       }
       return hipSuccess;
 
@@ -630,6 +629,7 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   }
 
   hipError_t r = hrr_playback_dispatch[etype](ctx, ev.raw_payload.data());
+  hrr_track_capture(ctx, etype, ev.raw_payload.data());
   if (r == hipSuccess)
     hrr_placement_after_event(ctx, etype, ev.raw_payload.data(), ev.raw_payload.size());
 

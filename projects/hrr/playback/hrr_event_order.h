@@ -68,6 +68,11 @@ inline bool hrr_needs_ordering(uint16_t etype) {
     // Graph / graph-exec create
     case HRR_API_HIPSTREAMBEGINCAPTURE:
     case HRR_API_HIPSTREAMENDCAPTURE:
+    // The other ways to open and close a capture: replay tracks which captures
+    // are open, and a free on another thread has to see that in order.
+    case HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH:
+    case HRR_API_HIPSTREAMBEGINCAPTURE_SPT:
+    case HRR_API_HIPSTREAMENDCAPTURE_SPT:
     case HRR_API_HIPGRAPHINSTANTIATE:
     case HRR_API_HIPGRAPHINSTANTIATEWITHFLAGS:
     case HRR_API_HIPGRAPHINSTANTIATEWITHPARAMS:

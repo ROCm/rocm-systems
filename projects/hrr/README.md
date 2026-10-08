@@ -199,7 +199,7 @@ recorded program.
 | `HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL` | `0` | Dump pointer translation map, and the allocation each argument lands in, at kernel ordinal `N` (debug) |
 | `HIP_HRR_REPLAY_SCAN_ARGS_ORDINAL` | `0` | Before kernel `N`, read back each pointer argument's allocation and report words that are recorded addresses (debug) |
 | `HIP_HRR_REPLAY_SCAN_ARGS_BYTES` | `4096` | Per-allocation cap for the argument scan |
-| `HIP_HRR_REPLAY_SCAN_H2D` | off | Report recorded addresses inside the payloads of 1-D host-to-device `hipMemcpy`, `hipMemcpyAsync`, `hipMemcpyHtoD`, `hipMemcpyHtoDAsync` and `hipMemcpyWithStream` from the first copy. The scan starts by itself once an allocation is not placed |
+| `HIP_HRR_REPLAY_SCAN_H2D` | off | Report recorded addresses inside the payloads of 1-D host-to-device `hipMemcpy`, `hipMemcpyAsync`, `hipMemcpyHtoD`, `hipMemcpyHtoDAsync` and `hipMemcpyWithStream` from the first copy. The scan starts by itself once an allocation is not placed. It names the first 16 payloads that hold one, counts the rest, and the summary gives the total; `--verbose` names every one |
 | `HIP_HRR_REPLAY_PLACE_DENY` | unset | Comma-separated recorded addresses whose range placement treats as taken, so they fall back; held even with placement off, so the runtime cannot return them (testing) |
 | `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` | off | Report kernels taking a pointer into host memory, whose contents replay cannot restore (debug) |
 | `HIP_HRR_REPLAY_FILL_BYTE` | `0` | Byte to fill fresh allocations with; set it to e.g. `0xa5` to expose kernels reading memory nothing wrote (debug) |

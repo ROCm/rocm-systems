@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <condition_variable>
 #include <cstring>
 #include <iterator>
 #include <map>
@@ -144,6 +145,26 @@ inline bool va_overlaps(const std::vector<VaRange>& sorted, uint64_t b, uint64_t
                                [](uint64_t v, const VaRange& r) { return v < r.base; });
     if (it != sorted.begin() && std::prev(it)->end > b) return true;
     return it != sorted.end() && it->base < e;
+}
+
+// The VMM mappings a replay made, base -> size, kept disjoint. A recorded
+// hipMemUnmap can cover several hipMemMap pieces, or only part of one, so
+// forgetting a range drops every entry it touches and keeps what lies outside.
+inline void va_untrack_mapping(std::map<uint64_t, size_t>& m, uint64_t va, size_t size) {
+    const uint64_t e = va + size;
+    auto it = m.lower_bound(va);
+    if (it != m.begin() && std::prev(it)->first + std::prev(it)->second > va) --it;
+    while (it != m.end() && it->first < e) {
+        const uint64_t b0 = it->first, e0 = b0 + it->second;
+        it = m.erase(it);
+        if (b0 < va) m[b0] = va - b0;
+        if (e0 > e) m[e] = e0 - e;
+    }
+}
+
+inline void va_track_mapping(std::map<uint64_t, size_t>& m, uint64_t va, size_t size) {
+    va_untrack_mapping(m, va, size);
+    m[va] = size;
 }
 
 // Which allocation APIs are placed, and what range one recorded call claimed.
@@ -570,12 +591,15 @@ std::vector<VaRange> read_proc_maps();
 void hold_free_pieces(uint64_t b, uint64_t e, const std::vector<VaRange>& occupied,
                       std::vector<VaRange>* out);
 
-// A placed mapping: page range [key, end), the recorded allocation base, and
-// its physical handle.
+// A placed mapping: page range [key, end), the recorded allocation base, its
+// physical handle and the device it lives on. `unmapping` marks a freed one
+// whose hipMemUnmap is running outside the lock: it still occupies its range.
 struct PlacedMapping {
     uint64_t end;
     uint64_t rec;
     hipMemGenericAllocationHandle_t handle;
+    int  device    = 0;
+    bool unmapping = false;
 };
 using PlacedMap = std::map<uint64_t, PlacedMapping>;
 
@@ -589,12 +613,28 @@ inline const PlacedMapping* va_mapping_overlapping(const PlacedMap& m, uint64_t 
     return it->second.end > pb ? &it->second : nullptr;
 }
 
-// The two VMM calls that take a placed mapping down. Tests replace them to
-// run unmap() without a GPU.
-struct UnmapOps {
+// The page bases of every mapping in `m` that overlaps [pb, pe), in order.
+inline std::vector<uint64_t> va_mappings_overlapping(const PlacedMap& m, uint64_t pb,
+                                                     uint64_t pe) {
+    std::vector<uint64_t> out;
+    auto it = m.lower_bound(pb);
+    if (it != m.begin() && std::prev(it)->second.end > pb) --it;
+    for (; it != m.end() && it->first < pe; ++it) out.push_back(it->first);
+    return out;
+}
+
+#ifdef HRR_VA_PLACEMENT_TESTING
+// Tests only: the VMM calls placement makes, replaced to run without a GPU.
+struct VmmOps {
+    hipError_t (*map)(void* va, size_t len, int device, hipMemGenericAllocationHandle_t* h,
+                      const std::vector<int>& peers) = hrr_vmm_map_into;
     hipError_t (*unmap)(void* base, size_t size)              = hipMemUnmap;
     hipError_t (*release)(hipMemGenericAllocationHandle_t h) = hipMemRelease;
+    void (*clear_error)()                                     = nullptr;
 };
+// How many times read_proc_maps() has read /proc/self/maps.
+size_t proc_maps_reads_for_test();
+#endif
 
 class VaPlacement {
   public:
@@ -622,8 +662,14 @@ class VaPlacement {
 
     // Map `size` bytes at recorded address `rec` on `device`. On success
     // *live == rec. Returns false when the allocation has to fall back, after
-    // reporting why; the caller then allocates the old way. `capturing` says
-    // whether any thread is inside a graph capture, when unmapping is illegal.
+    // reporting why; the caller then allocates the old way.
+    //
+    // A freed mapping still waiting for its unmap, over exactly the same pages
+    // on the same device, is taken back as it is: no unmap, no new map. Any
+    // other overlap with one is unmapped first, unless `capturing` says a
+    // graph capture is open, because hipMemUnmap would wait for the capturing
+    // stream. When the map runs out of memory and no capture is open, the
+    // freed mappings are unmapped and the map is tried once more.
     bool map_at(uint64_t rec, size_t size, int device, const char* api, void** live,
                 bool capturing = false);
 
@@ -632,16 +678,24 @@ class VaPlacement {
 
     // If `live` is a placed mapping, unmap it and release its handle. The
     // reservation stays, so the next allocation recorded there lands again.
-    // With `defer` it moves to a list drain_deferred() unmaps later, and until
-    // then nothing is placed over it. Replay defers when a graph capture is
-    // open, since hipMemUnmap would wait for the capturing stream, and for
-    // every hipFreeAsync, since hipMemUnmap waits for every stream.
+    // With `defer` it moves to a list drain_deferred() unmaps later. Until
+    // then, an allocation over exactly its pages on the same device takes it
+    // back, and one that only overlaps it unmaps it first, or falls back while
+    // a capture is open. Replay defers when a graph capture is open, since
+    // hipMemUnmap would wait for the capturing stream, and for every
+    // hipFreeAsync, since hipMemUnmap waits for every stream.
     bool unmap(void* live, bool defer = false);
-    // Whether `live` is the base of a live placed mapping.
+    // Whether `live` is the base of a live placed mapping. Waits while an
+    // unmap of `live` is still running.
     bool is_mapped(void* live);
     // Unmap everything unmap() deferred, and retry unmaps that failed. Call
     // only when no capture is open. Returns how many were unmapped.
     size_t drain_deferred();
+    // An allocation that did not go through placement returned `r`. If it ran
+    // out of memory and no capture is open, unmap the deferred frees, which
+    // still hold memory. Returns how many were unmapped: when that is not 0,
+    // the caller tries the allocation once more.
+    size_t drain_for_retry(hipError_t r, bool capturing);
 
     // hipMemAddressReserve: give back the placeholder over [base, base+size) so
     // the reserve at that hint can take it. False when placement does not hold
@@ -651,6 +705,8 @@ class VaPlacement {
     bool release_vmm_hold(uint64_t base, size_t size);
     // hipMemAddressFree: hold the range again for a later reserve there.
     void restore_vmm_hold(uint64_t base, size_t size);
+    // The same for many ranges, with one read of /proc/self/maps.
+    void restore_vmm_holds(const std::vector<VaRange>& ranges);
     // The replayed hipMemAddressReserve returned `live`. Counts it, and when
     // `held` and the runtime put it elsewhere, holds the recorded range again.
     void vmm_reserved(uint64_t rec, size_t size, bool held, uint64_t live);
@@ -671,17 +727,32 @@ class VaPlacement {
     size_t   lost_ranges() const { return lost_ranges_; }
     std::vector<uint64_t> mapped_bases();
 
-    // Tests only: replace the unmap calls, and take [rec, rec + size) as a
-    // placed mapping, as map_at would, so unmap() runs without a GPU.
-    void set_unmap_ops_for_test(UnmapOps ops) { ops_ = ops; }
-    void adopt_mapping_for_test(uint64_t rec, size_t size);
+#ifdef HRR_VA_PLACEMENT_TESTING
+    // Tests only: replace the VMM calls; take [b, e) as reserved on
+    // `devices` devices, as reserve() would; take [rec, rec + size) as a
+    // placed mapping on `device`, as map_at would.
+    void set_vmm_ops_for_test(VmmOps ops) { ops_ = ops; }
+    void adopt_reservation_for_test(uint64_t b, uint64_t e, int devices);
+    void adopt_mapping_for_test(uint64_t rec, size_t size, int device = 0);
+#endif
 
   private:
+    hipError_t vmm_map(uint64_t pb, uint64_t pe, int device,
+                       hipMemGenericAllocationHandle_t* h);
+    void clear_error();
     bool unmap_one(uint64_t pb, const PlacedMapping& m);
+    // Unmap the deferred mappings at `keys` that no other thread is
+    // unmapping. They stay in deferred_, marked, while hipMemUnmap runs with
+    // mu_ released; `lk` holds mu_ again on return. Returns how many went.
+    size_t drain_locked(std::unique_lock<std::mutex>& lk, const std::vector<uint64_t>& keys);
+    bool any_unmapping() const;
     void reserve_line(bool whole, uint64_t b, uint64_t e, const char* why);
 
     std::mutex mu_;
-    UnmapOps ops_;
+    std::condition_variable cv_;           // an unmap outside mu_ finished
+#ifdef HRR_VA_PLACEMENT_TESTING
+    VmmOps ops_;
+#endif
     bool active_  = false;
     bool verbose_ = false;
     int  device_count_ = 0;
@@ -690,7 +761,7 @@ class VaPlacement {
     std::vector<VaRange> reserved_;        // placement-owned reservations, sorted
     std::vector<VaRange> alloc_holds_;     // allocation placeholders left after reserve()
     PlacedMap mapped_;                     // page base -> live mapping
-    PlacedMap deferred_;                   // freed, unmap deferred or failed
+    PlacedMap deferred_;                   // freed, unmap deferred, running or failed
     std::vector<std::vector<int>> peers_;  // device -> peers granted access
     std::vector<VaRange> vmm_held_;        // placeholders awaiting a reserve
     std::map<uint64_t, std::vector<VaRange>> vmm_released_;  // reserve base -> dropped

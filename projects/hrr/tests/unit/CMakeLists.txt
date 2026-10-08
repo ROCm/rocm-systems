@@ -36,8 +36,12 @@ target_link_libraries(hrr-unit-tests PRIVATE
 # HRR_API_ARGS_IMPLEMENTATION emits the hrr_api_names[] table with internal
 # linkage per translation unit, matching hrr_reader; keep it defined here so the
 # test TUs use their own copy rather than the extern declaration.
+# HRR_VA_PLACEMENT_TESTING exposes the placement test seams (replaceable VMM
+# calls, adopted reservations and mappings) in the copy of
+# hrr_va_placement.cpp this target compiles. hrr-playback is built without it.
 target_compile_definitions(hrr-unit-tests PRIVATE
   HRR_API_ARGS_IMPLEMENTATION
+  HRR_VA_PLACEMENT_TESTING
   __HIP_PLATFORM_AMD__
   ROCM_BIN_PATH="${ROCM_PATH}/bin"
 )
