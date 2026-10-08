@@ -897,6 +897,10 @@ void append_gfx942_s_waitcnt_vmcnt_0(std::vector<uint32_t> &program) {
   program.push_back(0xBF8C0F70u);
 }
 
+void append_gfx942_s_waitcnt_vmcnt_1(std::vector<uint32_t> &program) {
+  program.push_back(0xBF8C0F71u);
+}
+
 void append_gfx942_s_waitcnt_lgkmcnt_0(std::vector<uint32_t> &program) {
   program.push_back(0xBF8CC07Fu);
 }
@@ -1310,55 +1314,154 @@ TEST(WaitcheckTest, Gfx942AcceptsSWaitcntLgkmcntZeroBeforeScalarLoadUse) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
-TEST(WaitcheckTest, Gfx942AcceptsOldVgprUseWhileDsReplacementIsPending) {
+TEST(WaitcheckTest, Gfx942ReportsReadAndWriteWhileDsReplacementIsPending) {
   std::vector<uint32_t> program;
-  append_gfx942_v_mov_b32_v4_v2(program);   // Establish the committed v4 generation.
+  append_gfx942_v_mov_b32_v4_v2(program);   // Initialize v4.
   append_gfx942_ds_read_b32_v4_v0(program); // Start an asynchronous replacement.
-  append_gfx942_v_mov_b32_v5_v4(program);   // Consume the old v4 generation.
-  append_gfx942_v_mov_b32_v4_v2(program);   // Replace that old generation in place.
+  append_gfx942_v_mov_b32_v5_v4(program);   // Cannot assume the old v4 value.
+  append_gfx942_v_mov_b32_v4_v2(program);   // Cannot overwrite a pending physical destination.
   append_gfx942_s_waitcnt_lgkmcnt_0(program);
-  append_gfx942_v_mov_b32_v5_v4(program); // Consume the replacement generation.
+  append_gfx942_v_mov_b32_v5_v4(program); // The load has completed.
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
 
-  EXPECT_TRUE(report.supported) << report.analysis_error;
-  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 4, 1}));
+  EXPECT_EQ(report.diagnostics[0].producer_section_offset, 4u);
+  EXPECT_EQ(report.diagnostics[0].section_offset, 12u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+  EXPECT_EQ(report.diagnostics[1].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[1].reg, (RegisterRef{RegClass::VGPR, 4, 1}));
+  EXPECT_EQ(report.diagnostics[1].producer_section_offset, 4u);
+  EXPECT_EQ(report.diagnostics[1].section_offset, 16u);
+  EXPECT_EQ(report.diagnostics[1].required_count, 0u);
 }
 
-TEST(WaitcheckTest, Gfx942AcceptsLiveInVgprUseWhileReplacementIsPending) {
+TEST(WaitcheckTest, Gfx942ReportsLiveInVgprUseWhileReplacementIsPending) {
   std::vector<uint32_t> program;
-  append_gfx942_v_mov_b32_v5_v4(program);   // Consume the ABI/live-in v4 generation.
+  append_gfx942_v_mov_b32_v5_v4(program);   // Read the ABI/live-in v4 value.
   append_gfx942_ds_read_b32_v4_v0(program); // Start an asynchronous replacement.
-  append_gfx942_v_mov_b32_v5_v4(program);   // Consume the old v4 generation.
+  append_gfx942_v_mov_b32_v5_v4(program);   // Cannot assume the old v4 value.
   append_gfx942_s_waitcnt_lgkmcnt_0(program);
-  append_gfx942_v_mov_b32_v5_v4(program); // Consume the replacement generation.
+  append_gfx942_v_mov_b32_v5_v4(program); // The load has completed.
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
 
-  EXPECT_TRUE(report.supported) << report.analysis_error;
-  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 4, 1}));
+  EXPECT_EQ(report.diagnostics[0].producer_section_offset, 4u);
+  EXPECT_EQ(report.diagnostics[0].section_offset, 12u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
 }
 
-TEST(WaitcheckTest, Gfx942AcceptsSynchronousOverlayCreatedAfterDsRead) {
+TEST(WaitcheckTest, Gfx942ReportsSynchronousOverwriteAndReadAfterDsRead) {
   std::vector<uint32_t> program;
-  append_gfx942_ds_read_b32_v4_v0(program); // Start the future generation.
-  append_gfx942_v_mov_b32_v4_v2(program);   // Create the immediately visible generation.
-  append_gfx942_v_mov_b32_v5_v4(program);   // Consume that visible generation.
+  append_gfx942_ds_read_b32_v4_v0(program); // Issue an asynchronous load.
+  append_gfx942_v_mov_b32_v4_v2(program);   // Overwrite its pending destination.
+  append_gfx942_v_mov_b32_v5_v4(program);   // The overwrite does not retire the load.
   append_gfx942_s_waitcnt_lgkmcnt_0(program);
-  append_gfx942_v_mov_b32_v5_v4(program); // Consume the retired DS generation.
+  append_gfx942_v_mov_b32_v5_v4(program); // The load has completed.
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
 
-  EXPECT_TRUE(report.supported) << report.analysis_error;
-  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 4, 1}));
+  EXPECT_EQ(report.diagnostics[0].producer_section_offset, 0u);
+  EXPECT_EQ(report.diagnostics[0].section_offset, 8u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+  EXPECT_EQ(report.diagnostics[1].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[1].reg, (RegisterRef{RegClass::VGPR, 4, 1}));
+  EXPECT_EQ(report.diagnostics[1].producer_section_offset, 0u);
+  EXPECT_EQ(report.diagnostics[1].section_offset, 12u);
+  EXPECT_EQ(report.diagnostics[1].required_count, 0u);
 }
 
-TEST(WaitcheckTest, Gfx942StillReportsUncommittedVgprUseWithOtherReadyValues) {
+TEST(WaitcheckTest, CdnaPartialWaitDoesNotMakeNewerPhysicalDestinationReady) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    for (bool wait_for_newer : {false, true}) {
+      SCOPED_TRACE(wait_for_newer);
+      std::vector<uint32_t> program;
+      // Same-class VMEM writes are ordered, but waiting for the older one
+      // does not make the destination readable while the newer one is pending.
+      append_gfx942_buffer_load_dword(program, 0, 8);
+      append_gfx942_buffer_load_dword(program, 0, 8);
+      append_gfx942_s_waitcnt_vmcnt_1(program);
+      if (wait_for_newer)
+        append_gfx942_s_waitcnt_vmcnt_0(program);
+      append_gfx942_v_mov_b32_v1_v0(program);
+
+      auto report = analyze_waitcnts(program, arch);
+      ASSERT_TRUE(report.supported) << report.analysis_error;
+      if (wait_for_newer) {
+        EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+      } else {
+        ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+        EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+        EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+        EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+        EXPECT_EQ(report.diagnostics[0].producer_section_offset, 8u);
+        EXPECT_EQ(report.diagnostics[0].section_offset, 20u);
+        EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+      }
+    }
+  }
+}
+
+TEST(WaitcheckTest, CdnaMaskedOverwriteDoesNotHidePendingResultAfterExecRestore) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    for (bool wait_before_overwrite : {false, true}) {
+      SCOPED_TRACE(wait_before_overwrite);
+      std::vector<uint32_t> program;
+      append_gfx942_ds_read_b32_v4_v0(program);
+      if (wait_before_overwrite)
+        append_gfx942_s_waitcnt_lgkmcnt_0(program);
+      program.push_back(0xbe842000u); // s_and_saveexec_b64 s[4:5], s[0:1]
+      append_gfx942_v_mov_b32_v4_v2(program);
+      program.push_back(0xbefe0104u); // s_mov_b64 exec, s[4:5]
+      append_gfx942_v_mov_b32_v5_v4(program);
+      append_gfx942_s_waitcnt_lgkmcnt_0(program);
+      append_gfx942_v_mov_b32_v5_v4(program);
+
+      auto report = analyze_waitcnts(program, arch);
+      ASSERT_TRUE(report.supported) << report.analysis_error;
+      if (wait_before_overwrite) {
+        EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+      } else {
+        ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+        EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+        EXPECT_EQ(report.diagnostics[0].section_offset, 12u);
+        EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Use);
+        EXPECT_EQ(report.diagnostics[1].section_offset, 20u);
+        for (const auto &diagnostic : report.diagnostics) {
+          EXPECT_EQ(diagnostic.counter, WaitCounterKind::Ds);
+          EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::VGPR, 4, 1}));
+          EXPECT_EQ(diagnostic.producer_section_offset, 0u);
+          EXPECT_EQ(diagnostic.required_count, 0u);
+        }
+      }
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx942ReportsPendingVgprUseWithOtherInitializedRegisters) {
   std::vector<uint32_t> program;
-  append_gfx942_v_mov_b32_v4_v2(program); // An unrelated committed generation.
+  append_gfx942_v_mov_b32_v4_v2(program); // An unrelated initialized register.
   append_gfx942_buffer_load_dword_v0_v8_s0_offen(program);
   append_gfx942_v_mov_b32_v4_v2(program); // Another unrelated definition.
-  append_gfx942_v_mov_b32_v1_v0(program); // Consume the uncommitted load result.
+  append_gfx942_v_mov_b32_v1_v0(program); // Consume the pending load result.
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
 
@@ -1369,7 +1472,7 @@ TEST(WaitcheckTest, Gfx942StillReportsUncommittedVgprUseWithOtherReadyValues) {
   EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
 }
 
-TEST(WaitcheckTest, Gfx942StillReportsUncommittedCrossCounterAsyncReplacement) {
+TEST(WaitcheckTest, Gfx942ReportsPendingCrossCounterAsyncReplacement) {
   std::vector<uint32_t> program;
   append_gfx942_ds_read_b32_v4_v0(program);
   append_gfx942_global_load_dword_v4_v2(program);
@@ -1723,8 +1826,8 @@ TEST(WaitcheckTest, Gfx950CounterParityMatchesRequiredVmcnt) {
 
 TEST(WaitcheckTest, Gfx950CounterParityMatchesPendingReplacementDefinitionsLikeLlvm) {
   std::vector<uint32_t> program;
-  append_gfx950_v_mov_b32_v0_v2(program); // Establish committed v0.
-  append_gfx950_v_mov_b32_v1_v0(program); // Establish committed v1.
+  append_gfx950_v_mov_b32_v0_v2(program); // Initialize v0.
+  append_gfx950_v_mov_b32_v1_v0(program); // Initialize v1.
   append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
   append_gfx950_buffer_load_dword_v1_v8_s0_offen(program);
   append_gfx950_s_waitcnt_vmcnt_0(program);
@@ -5597,52 +5700,119 @@ TEST(WaitcheckTest, Gfx950AcceptsSWaitcntLgkmcntZeroBeforeDsReadUse) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
-TEST(WaitcheckTest, Gfx950AcceptsOldVgprUseWhileDsReplacementIsPending) {
+TEST(WaitcheckTest, Gfx950FmoeDsOverwritesRequireOrderedLgkmWaits) {
+  for (bool insert_waits : {false, true}) {
+    SCOPED_TRACE(insert_waits);
+    // Encodings from fMoE, with LLVM SIInsertWaitcnts' lgkmcnt(1)/lgkmcnt(0)
+    // repair as the control. These are physical writes, even without a read
+    // of either DS result before its destination is overwritten.
+    std::vector<uint32_t> program{
+        0xd9fe1140u, 0x60000006u, // ds_read_b128 v[96:99], v6 offset:4416
+        0xd9fe1180u, 0x64000006u, // ds_read_b128 v[100:103], v6 offset:4480
+    };
+    if (insert_waits)
+      append_gfx950_s_waitcnt_lgkmcnt_1(program);
+    program.insert(program.end(), {0xd1340060u, 0x00007902u}); // v_add_u32 v96, v2, s60
+    if (insert_waits)
+      append_gfx950_s_waitcnt_lgkmcnt_0(program);
+    program.insert(program.end(), {0xd1340064u, 0x00007902u}); // v_add_u32 v100, v2, s60
+
+    auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(report.supported) << report.analysis_error;
+    if (insert_waits) {
+      EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+    } else {
+      ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+      for (size_t i = 0; i < report.diagnostics.size(); ++i) {
+        const auto &diagnostic = report.diagnostics[i];
+        EXPECT_EQ(diagnostic.counter, WaitCounterKind::Ds);
+        EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::Def);
+        EXPECT_EQ(diagnostic.reg,
+                  (RegisterRef{RegClass::VGPR, static_cast<uint16_t>(96 + 4 * i), 1}));
+        EXPECT_EQ(diagnostic.producer_section_offset, 8 * i);
+        EXPECT_EQ(diagnostic.section_offset, 16 + 8 * i);
+        EXPECT_EQ(diagnostic.required_count, 1 - i);
+      }
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx950ReportsReadAndWriteWhileDsReplacementIsPending) {
   std::vector<uint32_t> program;
-  append_gfx950_v_mov_b32_v0_v2(program);   // Establish the committed v0 generation.
+  append_gfx950_v_mov_b32_v0_v2(program);   // Initialize v0.
   append_gfx950_ds_read_b32_v0_v4(program); // Start an asynchronous replacement.
-  append_gfx950_v_mov_b32_v1_v0(program);   // Consume the old v0 generation.
-  append_gfx950_v_mov_b32_v0_v2(program);   // Replace that old generation in place.
+  append_gfx950_v_mov_b32_v1_v0(program);   // Cannot assume the old v0 value.
+  append_gfx950_v_mov_b32_v0_v2(program);   // Cannot overwrite a pending physical destination.
   append_gfx950_s_waitcnt_lgkmcnt_0(program);
-  append_gfx950_v_mov_b32_v1_v0(program); // Consume the replacement generation.
+  append_gfx950_v_mov_b32_v1_v0(program); // The load has completed.
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
 
-  EXPECT_TRUE(report.supported) << report.analysis_error;
-  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(report.diagnostics[0].producer_section_offset, 4u);
+  EXPECT_EQ(report.diagnostics[0].section_offset, 12u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+  EXPECT_EQ(report.diagnostics[1].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[1].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(report.diagnostics[1].producer_section_offset, 4u);
+  EXPECT_EQ(report.diagnostics[1].section_offset, 16u);
+  EXPECT_EQ(report.diagnostics[1].required_count, 0u);
 }
 
-TEST(WaitcheckTest, Gfx950AcceptsLiveInVgprUseWhileReplacementIsPending) {
+TEST(WaitcheckTest, Gfx950ReportsLiveInVgprUseWhileReplacementIsPending) {
   std::vector<uint32_t> program;
-  append_gfx950_v_mov_b32_v1_v0(program);   // Consume the ABI/live-in v0 generation.
+  append_gfx950_v_mov_b32_v1_v0(program);   // Read the ABI/live-in v0 value.
   append_gfx950_ds_read_b32_v0_v4(program); // Start an asynchronous replacement.
-  append_gfx950_v_mov_b32_v1_v0(program);   // Consume the old v0 generation.
+  append_gfx950_v_mov_b32_v1_v0(program);   // Cannot assume the old v0 value.
   append_gfx950_s_waitcnt_lgkmcnt_0(program);
-  append_gfx950_v_mov_b32_v1_v0(program); // Consume the replacement generation.
+  append_gfx950_v_mov_b32_v1_v0(program); // The load has completed.
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
 
-  EXPECT_TRUE(report.supported) << report.analysis_error;
-  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(report.diagnostics[0].producer_section_offset, 4u);
+  EXPECT_EQ(report.diagnostics[0].section_offset, 12u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
 }
 
-TEST(WaitcheckTest, Gfx950AcceptsSynchronousOverlayCreatedAfterDsRead) {
+TEST(WaitcheckTest, Gfx950ReportsSynchronousOverwriteAndReadAfterDsRead) {
   std::vector<uint32_t> program;
-  append_gfx950_ds_read_b32_v0_v4(program); // Start the future generation.
-  append_gfx950_v_mov_b32_v0_v2(program);   // Create the immediately visible generation.
-  append_gfx950_v_mov_b32_v1_v0(program);   // Consume that visible generation.
+  append_gfx950_ds_read_b32_v0_v4(program); // Issue an asynchronous load.
+  append_gfx950_v_mov_b32_v0_v2(program);   // Overwrite its pending destination.
+  append_gfx950_v_mov_b32_v1_v0(program);   // The overwrite does not retire the load.
   append_gfx950_s_waitcnt_lgkmcnt_0(program);
-  append_gfx950_v_mov_b32_v1_v0(program); // Consume the retired DS generation.
+  append_gfx950_v_mov_b32_v1_v0(program); // The load has completed.
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
 
-  EXPECT_TRUE(report.supported) << report.analysis_error;
-  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(report.diagnostics[0].producer_section_offset, 0u);
+  EXPECT_EQ(report.diagnostics[0].section_offset, 8u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+  EXPECT_EQ(report.diagnostics[1].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[1].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(report.diagnostics[1].producer_section_offset, 0u);
+  EXPECT_EQ(report.diagnostics[1].section_offset, 12u);
+  EXPECT_EQ(report.diagnostics[1].required_count, 0u);
 }
 
-TEST(WaitcheckTest, Gfx950StillReportsUncommittedVgprUseWithOtherReadyValues) {
+TEST(WaitcheckTest, Gfx950ReportsPendingVgprUseWithOtherInitializedRegisters) {
   std::vector<uint32_t> program;
-  append_gfx950_v_mov_b32_v0_v2(program); // An unrelated committed generation.
+  append_gfx950_v_mov_b32_v0_v2(program); // An unrelated initialized register.
   append_gfx950_buffer_load_dword_v1_v8_s0_offen(program);
   append_gfx950_v_mov_b32_v8_v10(program); // Another unrelated definition.
   program.push_back(0x7E040301u);          // v_mov_b32_e32 v2, v1.
@@ -6924,15 +7094,49 @@ TEST(WaitcheckTest, ObjectAnalysisAcceptsZeroWaitForMixedLoadOrderAtJoin) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
-TEST(WaitcheckTest, ObjectAnalysisConvergesWhenOldValueAvailabilityChangesAroundLoop) {
+TEST(WaitcheckTest, ObjectAnalysisKeepsCdnaPendingDestinationAcrossJoin) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    for (bool wait_at_join : {false, true}) {
+      SCOPED_TRACE(wait_at_join);
+      std::vector<uint32_t> program;
+      append_gfx942_v_mov_b32_v4_v2(program);
+      append_gfx942_ds_read_b32_v4_v0(program);
+      program.push_back(0xbf850001u); // s_cbranch_scc1 skips the overwrite
+      append_gfx942_v_mov_b32_v4_v2(program);
+      if (wait_at_join)
+        append_gfx942_s_waitcnt_lgkmcnt_0(program);
+      append_gfx942_v_mov_b32_v5_v4(program);
+      program.push_back(0xbf810000u); // s_endpgm
+      TestCodeObject code_object(program);
+      auto report = analyze_waitcnts(code_object, arch);
+
+      ASSERT_TRUE(report.supported) << report.analysis_error;
+      ASSERT_EQ(report.diagnostics.size(), wait_at_join ? 1u : 2u) << diagnostic_summary(report);
+      EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
+      EXPECT_EQ(report.diagnostics[0].section_offset, 16u);
+      if (!wait_at_join) {
+        EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Use);
+        EXPECT_EQ(report.diagnostics[1].section_offset, 20u);
+      }
+      for (const auto &diagnostic : report.diagnostics) {
+        EXPECT_EQ(diagnostic.counter, WaitCounterKind::Ds);
+        EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::VGPR, 4, 1}));
+        EXPECT_EQ(diagnostic.producer_section_offset, 4u);
+        EXPECT_EQ(diagnostic.required_count, 0u);
+      }
+    }
+  }
+}
+
+TEST(WaitcheckTest, ObjectAnalysisConvergesWithRepeatedRegisterLoadsAroundLoop) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     SCOPED_TRACE(arch);
     for (bool wait_before_use : {false, true}) {
       SCOPED_TRACE(wait_before_use);
-      // Reduced from the Tensile GEMM in ROCm/aorta#453. Availability of the
-      // committed v0 value changes as the two pre-loop joins are revisited.
-      // Replacing each input used to circulate different old_value_regs facts
-      // around the three-block loop forever, despite stable events and ages.
+      // Reduced from the Tensile GEMM in ROCm/aorta#453. Repeated v0 loads
+      // reach the loop through two pre-loop joins. Analysis must converge
+      // without losing pending physical destinations as the joins are revisited.
       std::vector<uint32_t> program{
           0xbf850002u,              // s_cbranch_scc1 to the wait
           0xe0501000u, 0x80000008u, // buffer_load_dword v0, v8, s[0:3], 0 offen

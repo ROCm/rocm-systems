@@ -86,7 +86,7 @@ The initial corpus work established these recurring classes:
 
 | Class | Attribution |
 | --- | --- |
-| Pending physical-register replacement definitions | Waitcheck originally followed only the runtime-visible committed generation. LLVM post-RA accounting follows pending physical definitions; parity mode now does the same. |
+| Pending physical-register replacement definitions | Normal diagnostics and parity accounting both follow pending physical definitions. An earlier value or a synchronous overwrite does not exempt a pending destination from RAW or WAW checks. |
 | Shared scalar-memory counter ordering | SMEM may complete out of order relative to other events on a shared legacy counter. A nonzero partial wait cannot retire a particular dependency; waitcheck now requires zero. |
 | CDNA flat-memory ordering | Flat operations make the relevant legacy VM/LGKM completion order uncertain. Partial waits cannot select a particular result; waitcheck now follows LLVM's zero-wait rule. |
 | DS read-result overwrite | LLVM treats a second DS read defining the same VGPR as a pending-definition WAW. Waitcheck's former DS-to-DS ordered-WAW exemption was removed. |

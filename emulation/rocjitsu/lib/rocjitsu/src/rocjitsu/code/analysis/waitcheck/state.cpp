@@ -30,11 +30,10 @@ bool WaitcheckStateOps::same_event_identity(const PendingEvent &lhs, const Pendi
   return lhs.counter == rhs.counter && lhs.kind == rhs.kind && lhs.regs == rhs.regs &&
          lhs.partial_reg == rhs.partial_reg && lhs.partial_reg_mask == rhs.partial_reg_mask &&
          lhs.special_reg == rhs.special_reg && lhs.barrier_id == rhs.barrier_id &&
-         lhs.produces_regs == rhs.produces_regs && lhs.check_uses == rhs.check_uses &&
-         lhs.check_defs == rhs.check_defs && lhs.check_exec_defs == rhs.check_exec_defs &&
-         lhs.section_name == rhs.section_name && lhs.section_offset == rhs.section_offset &&
-         lhs.file_offset == rhs.file_offset && lhs.instruction == rhs.instruction &&
-         lhs.check_memory_order == rhs.check_memory_order &&
+         lhs.check_uses == rhs.check_uses && lhs.check_defs == rhs.check_defs &&
+         lhs.check_exec_defs == rhs.check_exec_defs && lhs.section_name == rhs.section_name &&
+         lhs.section_offset == rhs.section_offset && lhs.file_offset == rhs.file_offset &&
+         lhs.instruction == rhs.instruction && lhs.check_memory_order == rhs.check_memory_order &&
          lhs.check_program_end == rhs.check_program_end &&
          lhs.check_counter_parity_order == rhs.check_counter_parity_order;
 }
@@ -63,14 +62,14 @@ bool WaitcheckStateOps::register_set_less(const RegisterSet &lhs, const Register
 }
 
 bool WaitcheckStateOps::event_identity_less(const PendingEvent &lhs, const PendingEvent &rhs) {
-  const auto lhs_key = std::tie(
-      lhs.section_name, lhs.section_offset, lhs.file_offset, lhs.instruction, lhs.counter, lhs.kind,
-      lhs.barrier_id, lhs.produces_regs, lhs.check_uses, lhs.check_defs, lhs.check_exec_defs,
-      lhs.check_memory_order, lhs.check_program_end, lhs.check_counter_parity_order);
-  const auto rhs_key = std::tie(
-      rhs.section_name, rhs.section_offset, rhs.file_offset, rhs.instruction, rhs.counter, rhs.kind,
-      rhs.barrier_id, rhs.produces_regs, rhs.check_uses, rhs.check_defs, rhs.check_exec_defs,
-      rhs.check_memory_order, rhs.check_program_end, rhs.check_counter_parity_order);
+  const auto lhs_key =
+      std::tie(lhs.section_name, lhs.section_offset, lhs.file_offset, lhs.instruction, lhs.counter,
+               lhs.kind, lhs.barrier_id, lhs.check_uses, lhs.check_defs, lhs.check_exec_defs,
+               lhs.check_memory_order, lhs.check_program_end, lhs.check_counter_parity_order);
+  const auto rhs_key =
+      std::tie(rhs.section_name, rhs.section_offset, rhs.file_offset, rhs.instruction, rhs.counter,
+               rhs.kind, rhs.barrier_id, rhs.check_uses, rhs.check_defs, rhs.check_exec_defs,
+               rhs.check_memory_order, rhs.check_program_end, rhs.check_counter_parity_order);
   if (lhs_key != rhs_key)
     return lhs_key < rhs_key;
   if (register_ref_key(lhs.special_reg) != register_ref_key(rhs.special_reg))
@@ -125,7 +124,7 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
   if (dst.expert_scheduling != src.expert_scheduling)
     dst.expert_scheduling = {.enabled = true, .known = false};
   for (size_t i = 0; i < kCounterCount; ++i) {
-    // Presence and old-value proofs do not change hardware issue order.
+    // Path coverage does not change hardware issue order.
     const bool same_order = std::ranges::equal(
         dst.pending[i], src.pending[i], [](const PendingEvent &lhs, const PendingEvent &rhs) {
           return same_event_identity(lhs, rhs) && lhs.min_younger == rhs.min_younger;
@@ -135,11 +134,6 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
     for (PendingEvent &event : dst.pending[i]) {
       const auto position = std::ranges::lower_bound(src.pending[i], event, event_identity_less);
       const bool found = position != src.pending[i].end() && same_event_identity(*position, event);
-      if (!found || !position->present_on_all_paths) {
-        if (event.present_on_all_paths)
-          event.ready_on_absent_paths = event.regs;
-        event.ready_on_absent_paths &= found ? position->ready_on_absent_paths : src.ready_regs;
-      }
       event.present_on_all_paths &= found && position->present_on_all_paths;
     }
     for (size_t kind = 0; kind < kWaitEventKindCount; ++kind) {
@@ -155,18 +149,12 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
       auto position = std::ranges::lower_bound(dst.pending[i], event, event_identity_less);
       if (position == dst.pending[i].end() || !same_event_identity(*position, event)) {
         position = dst.pending[i].insert(position, event);
-        if (position->present_on_all_paths)
-          position->ready_on_absent_paths = position->regs;
-        position->ready_on_absent_paths &= dst.ready_regs;
         position->present_on_all_paths = false;
       } else {
         position->min_younger = std::min(position->min_younger, event.min_younger);
-        position->old_value_regs &= event.old_value_regs;
       }
     }
   }
-  // Missing-event coverage above needs each predecessor's original readiness.
-  dst.ready_regs &= src.ready_regs;
   merge_sgpr_hazards(dst.sgpr_hazards, src.sgpr_hazards);
   merge_va_vdst_hazards(dst.va_vdst_hazards, src.va_vdst_hazards);
   dst.vgpr_msb_setreg_hazard = dst.vgpr_msb_setreg_hazard || src.vgpr_msb_setreg_hazard;
@@ -196,55 +184,6 @@ WaitcheckStateOps::merge_predecessors(std::span<const size_t> predecessors,
   return merged;
 }
 
-bool WaitcheckStateOps::same_register_generation(const PendingEvent &lhs, const PendingEvent &rhs) {
-  return lhs.produces_regs && rhs.produces_regs && lhs.regs == rhs.regs &&
-         lhs.section_name == rhs.section_name && lhs.section_offset == rhs.section_offset &&
-         lhs.file_offset == rhs.file_offset && lhs.instruction == rhs.instruction;
-}
-
-void WaitcheckStateOps::make_retired_generations_ready(
-    PendingState &state, std::span<const PendingEvent> retired_events) {
-  for (const PendingEvent &retired : retired_events) {
-    if (!retired.produces_regs)
-      continue;
-    retired.regs.for_each([&](RegisterRef reg) {
-      if (!retired.present_on_all_paths && !retired.ready_on_absent_paths.contains(reg))
-        return;
-      if (reg.cls != RegClass::VGPR && reg.cls != RegClass::ACC_VGPR)
-        return;
-      const bool generation_still_pending =
-          std::ranges::any_of(state.pending, [&](const std::vector<PendingEvent> &events) {
-            return std::ranges::any_of(events, [&](const PendingEvent &pending) {
-              return pending.regs.contains(reg) && same_register_generation(retired, pending);
-            });
-          });
-      if (generation_still_pending)
-        return;
-
-      state.ready_regs.expand(reg);
-      for (auto &events : state.pending) {
-        for (PendingEvent &pending : events) {
-          if (pending.produces_regs && pending.regs.contains(reg))
-            pending.old_value_regs.expand(reg);
-        }
-      }
-    });
-  }
-}
-
-template <typename Predicate>
-void WaitcheckStateOps::retire_events(PendingState &state, std::vector<PendingEvent> &events,
-                                      Predicate should_retire) {
-  std::vector<PendingEvent> retired_events;
-  std::erase_if(events, [&](const PendingEvent &event) {
-    if (!should_retire(event))
-      return false;
-    retired_events.push_back(event);
-    return true;
-  });
-  make_retired_generations_ready(state, retired_events);
-}
-
 void WaitcheckStateOps::apply_wait_to_event_ages(PendingState &state, WaitCounterKind counter,
                                                  uint32_t count) {
   auto &ages = state.pending_event_ages[counter_index(counter)].values;
@@ -259,13 +198,12 @@ void WaitcheckStateOps::apply_wait(PendingState &state, WaitCounterKind counter,
   auto &pending = state.pending[idx];
   apply_wait_to_event_ages(state, counter, count);
   if (count == 0) {
-    retire_events(state, pending, [](const PendingEvent &) { return true; });
+    pending.clear();
     state.pending_smem[idx] = false;
     state.uncertain_order[idx] = false;
     return;
   }
-  retire_events(state, pending,
-                [count](const PendingEvent &event) { return event.min_younger >= count; });
+  std::erase_if(pending, [count](const PendingEvent &event) { return event.min_younger >= count; });
   if (pending.empty())
     state.uncertain_order[idx] = false;
 }
@@ -309,7 +247,7 @@ void WaitcheckStateOps::apply_filtered_vm_vsrc_wait(PendingState &state, Predica
   const size_t idx = counter_index(WaitCounterKind::VmVsrc);
   auto &pending = state.pending[idx];
   if (count == 0) {
-    retire_events(state, pending, is_implied);
+    std::erase_if(pending, is_implied);
     retire_event_kind_ages(state, WaitCounterKind::VmVsrc, is_implied);
     if (pending.empty())
       state.uncertain_order[idx] = false;
@@ -338,7 +276,7 @@ void WaitcheckStateOps::apply_filtered_vm_vsrc_wait(PendingState &state, Predica
     return;
   }
   const uint32_t youngest_retired_age = matching_ages[count];
-  retire_events(state, pending, [&](const PendingEvent &event) {
+  std::erase_if(pending, [&](const PendingEvent &event) {
     return is_implied(event) && event.min_younger >= youngest_retired_age;
   });
   retire_event_kind_ages(state, WaitCounterKind::VmVsrc, is_implied, youngest_retired_age);
@@ -402,7 +340,7 @@ template <typename Predicate>
 void WaitcheckStateOps::retire_xcnt_group(PendingState &state, Predicate belongs_to_group) {
   const size_t idx = counter_index(WaitCounterKind::X);
   auto &pending = state.pending[idx];
-  retire_events(state, pending, belongs_to_group);
+  std::erase_if(pending, belongs_to_group);
   retire_event_kind_ages(state, WaitCounterKind::X, belongs_to_group);
   if (pending.empty())
     state.uncertain_order[idx] = false;
@@ -542,7 +480,7 @@ util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCount
       return vm_vsrc_event_implied_by_wait(source.kind, counter) && age != kNoPendingEventAge &&
              age >= count;
     };
-    retire_events(state, sources, [&](const PendingEvent &source) {
+    std::erase_if(sources, [&](const PendingEvent &source) {
       if (!vm_vsrc_event_implied_by_wait(source.kind, counter))
         return false;
       // The primary kind's newest request being complete proves the entire

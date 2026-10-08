@@ -17,10 +17,6 @@ namespace {
 using namespace waitcheck_detail;
 using Ops = WaitcheckStateOps;
 
-bool has_committed_generations(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
-}
-
 std::optional<RegisterRef> first_intersection(const RegisterSet &a, const RegisterSet &b) {
   std::optional<RegisterRef> first;
   // Keep the optional assignment together with RegisterRef construction.
@@ -244,14 +240,10 @@ public:
     apply_translation_ordering(effects, events);
     if (check_dependencies(inst, effects, events, offset).failed())
       return util::Result::failure();
-    RegisterSet async_defs;
     for (const auto &event : events) {
-      if (event.registers == TrackedRegisterSource::Defs)
-        async_defs |= registers_for_event(event, effects, inst);
       if (add_event(event, effects, inst, offset).failed())
         return util::Result::failure();
     }
-    update_committed_registers(effects, async_defs);
     return util::Result::success();
   }
 
@@ -259,7 +251,6 @@ private:
   rj_code_arch_t arch_;
   WaitcheckStreamOptions options_;
   PendingState state_;
-  RegisterSet local_ready_;
   WaitcheckStreamReport &report_;
 
   util::Result check_dependencies(const Instruction &inst, const RegisterEffects &effects,
@@ -269,10 +260,10 @@ private:
         std::optional<RegisterRef> reg;
         auto access = WaitcheckAccess::Read;
         if (event.check_uses)
-          reg = first_intersection(event.regs - event.old_value_regs, effects.uses);
+          reg = first_intersection(event.regs, effects.uses);
         if (!reg && event.check_defs) {
-          // A visible old value can satisfy a read, but an outstanding memory
-          // response can still overwrite a newer synchronous definition.
+          // Outstanding results also protect their physical destinations
+          // from unordered writes, regardless of earlier register contents.
           if (!ordered_waw(event, current, arch_))
             reg = first_intersection(event.regs, effects.defs);
           access = WaitcheckAccess::Write;
@@ -303,11 +294,6 @@ private:
     event.counter = classification.counter;
     event.kind = classification.kind;
     event.regs = registers_for_event(classification, effects, inst);
-    event.produces_regs = has_committed_generations(arch_) &&
-                          classification.registers == TrackedRegisterSource::Defs &&
-                          event.regs == vector_registers(event.regs);
-    if (event.produces_regs)
-      event.old_value_regs = event.regs & (state_.ready_regs | local_ready_);
     event.check_uses = classification.check_uses;
     event.check_defs = classification.check_defs;
     event.check_exec_defs = classification.check_exec_defs;
@@ -335,27 +321,6 @@ private:
     if (!event.regs.none() || event.check_exec_defs || event.special_reg)
       state_.pending[idx].push_back(std::move(event));
     return util::Result::success();
-  }
-
-  void update_committed_registers(const RegisterEffects &effects, const RegisterSet &async_defs) {
-    if (!has_committed_generations(arch_))
-      return;
-    RegisterSet unavailable;
-    for (const auto &pending : state_.pending) {
-      for (const auto &event : pending) {
-        if (event.produces_regs)
-          unavailable |= event.regs - event.old_value_regs;
-      }
-    }
-    local_ready_ |= vector_registers(effects.uses - unavailable);
-    const auto synchronous = vector_registers(effects.defs - async_defs);
-    state_.ready_regs |= synchronous;
-    for (auto &pending : state_.pending) {
-      for (auto &event : pending) {
-        if (event.produces_regs)
-          event.old_value_regs |= event.regs & synchronous;
-      }
-    }
   }
 
   void apply_translation_ordering(const RegisterEffects &effects,
@@ -403,7 +368,8 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
     return emit_error.emit() << "unsupported waitcheck architecture";
   }
   if ((options.wave_size != 32 && options.wave_size != 64) ||
-      (has_committed_generations(arch) && options.wave_size != 64))
+      ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+       options.wave_size != 64))
     return emit_error.emit() << "invalid waitcheck wave size";
   if (options.expert_scheduling && !waitcheck_detail::supports_expert_scheduling(arch))
     return emit_error.emit() << "expert scheduling is unavailable on this architecture";
