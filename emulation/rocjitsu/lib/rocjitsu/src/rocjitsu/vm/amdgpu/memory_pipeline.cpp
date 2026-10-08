@@ -456,14 +456,16 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       // Descriptor bounds suppress memory access while preserving zero writeback.
     } else if (d.elem_size < 4) {
       uint8_t bytes[4] = {};
-      const VmAccessOutcome outcome = l1_->load_bytes(d.addr, d.elem_size, bytes, wf.process_id());
+      const VmAccessOutcome outcome =
+          l1_->load_bytes(d.addr, d.elem_size, bytes, wf.process_id(), d.mtype);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
       d.response_data[0] = extend_scalar_load(bytes, d.elem_size, d.sign_extend);
     } else if (d.load_dword_mask != 0xffff) {
       for (uint32_t i = 0; i < d.num_dwords; ++i)
         if (d.load_dword_mask & (1u << i)) {
-          const auto outcome = l1_->load(d.addr + i * 4, 1, &d.response_data[i], wf.process_id());
+          const auto outcome = l1_->load(d.addr + i * 4, 1, &d.response_data[i], wf.process_id(),
+                                         /*allow_private_batch=*/false, d.mtype);
           if (outcome != VmAccessOutcome::Complete)
             return outcome;
         }
@@ -471,13 +473,14 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       auto &cu = wf.raw_cu();
       const bool allow_private_batch =
           GpuVmAccessBatchGuard::active() && !cu.debug_active() && cu.plugin_group().empty();
-      const VmAccessOutcome outcome =
-          l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id(), allow_private_batch);
+      const VmAccessOutcome outcome = l1_->load(d.addr, d.num_dwords, d.response_data,
+                                                wf.process_id(), allow_private_batch, d.mtype);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
   } else {
-    const VmAccessOutcome outcome = l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id());
+    const VmAccessOutcome outcome =
+        l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id(), d.mtype);
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
   }

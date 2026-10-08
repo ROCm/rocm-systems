@@ -2,7 +2,7 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 10.2.0 for ROCm 10.2.0
+## HIP 7.17.0 for ROCm 10.2.0
 
 ### Added
 * New HIP APIs
@@ -19,7 +19,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
 
-## HIP 10.1.0 for ROCm 10.1.0
+## HIP 7.16.0 for ROCm 10.1.0
 
 ### Added
 * New HIP APIs
@@ -41,7 +41,7 @@ The HIP/HSA runtime now correctly releases allocated signal objects during strea
 
 * Under WSL2 (Windows Subsystem for Linux 2), GPU device-side memory faults may not be reported correctly and can result in the process hanging.
 
-## HIP 10.0.0 for ROCm 10.0.0
+## HIP 7.15.0 for ROCm 10.0.0
 
 ### Added
 * New HIP APIs
