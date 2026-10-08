@@ -192,3 +192,31 @@ set_tests_properties(
                "rocprofv3-test-kernel-replay-data;rocprofv3-test-kernel-replay-perf-data"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Async copies in flight when a replay window snapshots must not be reverted by its
+# restores. The application verifies every copy itself and exits non-zero on a mismatch:
+# "streams" issues the copy on a side stream and replayed kernels on another stream of the
+# same thread, "threads" copies on one thread while another launches replayed kernels.
+foreach(_MODE streams threads)
+    add_test(
+        NAME rocprofv3-test-kernel-replay-copy-fence-${_MODE}
+        COMMAND
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU --pmc
+            SQ_INSTS_SALU GRBM_COUNT --pmc SQ_INSTS_VMEM_RD SQ_INSTS_VMEM_WR
+            --replay-mode kernel --kernel-replay-beta-enabled --output-format csv -d
+            ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-copy-fence-${_MODE} -o out --
+            $<TARGET_FILE:kernel-replay-copy-race> 12 128 ${_MODE})
+
+    set_tests_properties(
+        rocprofv3-test-kernel-replay-copy-fence-${_MODE}
+        PROPERTIES TIMEOUT
+                   300
+                   LABELS
+                   "integration-tests;kernel-replay"
+                   ENVIRONMENT
+                   "${rocprofv3-generate-env}"
+                   RESOURCE_LOCK
+                   rocprofiler_kernel_replay
+                   FAIL_REGULAR_EXPRESSION
+                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+endforeach()
