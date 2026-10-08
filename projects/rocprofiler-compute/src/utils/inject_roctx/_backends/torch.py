@@ -813,10 +813,33 @@ def _uninitialized_tensor_mixin_cls() -> Optional[type]:
     return getattr(parameter, "UninitializedTensorMixin", None)
 
 
+def _restore_uninitialized_tensor(source: object, result: object) -> object:
+    """Return result as the same uninitialized Parameter or Buffer class as source."""
+    if type(result) is type(source):
+        return result
+    cls = type(source)
+    init_kwargs: dict[str, object] = {
+        "requires_grad": bool(getattr(source, "requires_grad", False)),
+        "device": getattr(result, "device", None),
+        "dtype": getattr(result, "dtype", None),
+    }
+    persistent = getattr(source, "persistent", None)
+    if persistent is not None:
+        try:
+            return cls(**init_kwargs, persistent=persistent)
+        except TypeError:
+            pass
+    return cls(**init_kwargs)
+
+
 def _call_tensor_method_allowing_uninitialized(
     original: Callable[..., Any], *args: Any, **kwargs: Any
 ) -> object:
-    """Call original; disable subclass __torch_function__ for uninitialized tensors."""
+    """Call original without subclass __torch_function__ for uninitialized tensors.
+
+    When device or dtype changes, rebuild the same UninitializedParameter or
+    UninitializedBuffer class as args[0].
+    """
     uninitialized_tensor_cls = _uninitialized_tensor_mixin_cls()
     disable_torch_function_subclass = getattr(
         getattr(_STATE.torch, "_C", None), "DisableTorchFunctionSubclass", None
@@ -829,7 +852,8 @@ def _call_tensor_method_allowing_uninitialized(
     ):
         return original(*args, **kwargs)
     with disable_torch_function_subclass():
-        return original(*args, **kwargs)
+        result = original(*args, **kwargs)
+    return _restore_uninitialized_tensor(args[0], result)
 
 
 def _wrap_tensor_method_allowing_uninitialized(
