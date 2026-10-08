@@ -439,7 +439,7 @@ ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
 // import/export paths in alloc.h, which now route allocations through the
 // ncclMemManager tracking layer. None of the microtests exercise real HIP
 // allocation (the ncclCudaCallocAsync macro is shimmed away), so these are
-// pure no-ops that satisfy the linker and report success.
+// pure no-ops, except ncclMemTrack / ncclMemUntrackDynamic, which the DDA tests drive as seams.
 // ---------------------------------------------------------------------------
 
 static ncclResult_t DefaultMemTrack(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,

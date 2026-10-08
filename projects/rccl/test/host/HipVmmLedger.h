@@ -21,6 +21,16 @@
 
 #include "fakes/hip_fakes.h"
 
+// [dst, dst + n) lies inside one entry of a ptr -> size map.
+inline bool RangeCovers(const std::map<void*, size_t>& allocs, const void* dst, size_t n) {
+  auto it = allocs.upper_bound(const_cast<void*>(dst));
+  if (it == allocs.begin()) return false;
+  --it;
+  const auto* base = static_cast<const char*>(it->first);
+  const auto* p = static_cast<const char*>(dst);
+  return p >= base && p + n <= base + it->second;
+}
+
 class HipVmmLedger {
  public:
   HipVmmLedger() = default;
@@ -133,15 +143,7 @@ class HipVmmLedger {
   }
 
   bool Covers(const void* dst, size_t n) const {
-    auto inside = [dst, n](const std::map<void*, size_t>& allocs) {
-      auto it = allocs.upper_bound(const_cast<void*>(dst));
-      if (it == allocs.begin()) return false;
-      --it;
-      const auto* base = static_cast<const char*>(it->first);
-      const auto* p = static_cast<const char*>(dst);
-      return p >= base && p + n <= base + it->second;
-    };
-    return inside(liveBuffers) || inside(reserved);
+    return RangeCovers(liveBuffers, dst, n) || RangeCovers(reserved, dst, n);
   }
 
   std::set<hipMemGenericAllocationHandle_t> created_;
