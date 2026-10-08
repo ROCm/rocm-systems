@@ -175,25 +175,50 @@ hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event) {
 }
 
 void hrr_flush_gpu_tlb(int device) {
+    static std::atomic<bool> warned_get{false}, warned_restore{false}, warned_flush{false};
+    bool failed = false;
     int cur = -1;
-    if (hipGetDevice(&cur) != hipSuccess) cur = -1;
+    if (hipGetDevice(&cur) != hipSuccess) {
+        cur = -1;
+        failed = true;
+        if (!warned_get.exchange(true))
+            fprintf(stderr,
+                    "[HRR] Placement: hipGetDevice failed before flushing the TLBs of device "
+                    "%d after an unmap, so the current device is flushed instead. Only the "
+                    "first failure is reported\n",
+                    device);
+    }
     const bool switched = cur >= 0 && cur != device;
     hipError_t r = switched ? hipSetDevice(device) : hipSuccess;
+    bool leaked = false;
     if (r == hipSuccess) {
         void* p = nullptr;
         r = hipMalloc(&p, size_t(4) << 20);
-        if (r == hipSuccess) r = hipFree(p);
-        if (switched) (void)hipSetDevice(cur);
+        if (r == hipSuccess) {
+            r = hipFree(p);
+            leaked = r != hipSuccess;
+        }
+        if (switched && hipSetDevice(cur) != hipSuccess) {
+            failed = true;
+            if (!warned_restore.exchange(true))
+                fprintf(stderr,
+                        "[HRR] Placement: device %d could not be made current again after "
+                        "flushing the TLBs of device %d; replay goes on with device %d "
+                        "current. Only the first failure is reported\n",
+                        cur, device, device);
+        }
     }
-    if (r == hipSuccess) return;
-    static std::atomic<bool> warned{false};
-    if (!warned.exchange(true))
-        fprintf(stderr,
-                "[HRR] Placement: flushing the TLBs of device %d after an unmap failed "
-                "(%s); memory mapped again at an unmapped address may be reached through "
-                "the pages it replaced. Only the first failure is reported\n",
-                device, hipGetErrorString(r));
-    (void)hipGetLastError();
+    if (r != hipSuccess) {
+        failed = true;
+        if (!warned_flush.exchange(true))
+            fprintf(stderr,
+                    "[HRR] Placement: flushing the TLBs of device %d after an unmap failed "
+                    "(%s)%s; memory mapped again at an unmapped address may be reached "
+                    "through the pages it replaced. Only the first failure is reported\n",
+                    device, hipGetErrorString(r),
+                    leaked ? ", and the 4 MiB buffer it allocated is leaked" : "");
+    }
+    if (failed) (void)hipGetLastError();
 }
 
 bool VaPlacement::hold(PlacementPlan plan) {
@@ -435,8 +460,10 @@ void VaPlacement::flush_after_unmap(bool capturing) {
     flush_tlbs(std::move(all));
 }
 
-void VaPlacement::flush_pending() {
-    if (flush_pending_.load() && flush_pending_.exchange(false)) flush_after_unmap(false);
+bool VaPlacement::flush_pending() {
+    if (!flush_pending_.load() || !flush_pending_.exchange(false)) return false;
+    flush_after_unmap(false);
+    return true;
 }
 
 void VaPlacement::drop_event(hipEvent_t e) {

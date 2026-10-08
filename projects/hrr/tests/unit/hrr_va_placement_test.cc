@@ -828,11 +828,11 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapFlushesTlb) {
     multi.flush_after_unmap(/*capturing=*/true);
     REQUIRE(multi.drain_deferred() == 0);
     REQUIRE(take_flushes() == (Flushes{{0, 1}, {1, 1}}));
-    // Or flush_pending(); nothing is left after it.
+    // Or flush_pending(), which says it flushed; nothing is left after it.
     multi.flush_after_unmap(/*capturing=*/true);
-    multi.flush_pending();
+    REQUIRE(multi.flush_pending());
     REQUIRE(take_flushes() == (Flushes{{0, 1}, {1, 1}}));
-    multi.flush_pending();
+    REQUIRE_FALSE(multi.flush_pending());
     REQUIRE(multi.drain_deferred() == 0);
     REQUIRE(g_flushes.empty());
   }

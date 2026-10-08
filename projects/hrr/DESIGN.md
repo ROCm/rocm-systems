@@ -1222,11 +1222,11 @@ Memory mapped next at the same address is then written by the copy engines, and
 read by some shader engines, through the physical pages it replaced, until
 something flushes them. A standalone program with no HRR in it (map, write,
 launch, unmap, map new memory at the same address, repeat) fails 26-81% of its
-iterations there, and 8-94% across the variants tried. In replay it showed as the `--kernel-filter` reservation
-section of `Lifetimes`: in the timed pass, two of the four workgroups of one
-kernel read the old contents of a cell whose page the warm-up reset had
-unmapped and the timed pass mapped again. gfx1200 hosts on Linux 6.8 with a
-DKMS amdgpu, and gfx950, do not show it.
+iterations there, and 8-94% across the variants tried. In replay it showed as
+the `--kernel-filter` reservation section of `Lifetimes`: in the timed pass, two
+of the four workgroups of one kernel read the old contents of a cell whose page
+the warm-up reset had unmapped and the timed pass mapped again. gfx1200 hosts on
+Linux 6.8 with a DKMS amdgpu, and gfx950, do not show it.
 
 This is a driver bug outside HRR, but placement maps the same addresses again by
 design, so replay works around it. With placement on, it flushes the TLBs after
@@ -1247,22 +1247,29 @@ mapping was on and the peers granted access to it. Placement does not track
 which devices can reach a mapping the recording made itself with `hipMemMap`, so
 after those it flushes every device. `hipMalloc` and `hipFree` invalidate an open
 graph capture. A `hipMemUnmap` replayed while one is open therefore leaves its
-flush pending, and the next drain, placed allocation or replayed `hipMemMap` with
-no capture open runs it. A `hipMemMap` replayed before the capture ends, at the
-address just unmapped, can still be reached through the old pages. The flush's
-`hipFree` waits for every stream on its device, which a drain's unmap may not
-have done there, so it widens the hang risk above slightly. A failed flush
-prints one warning and clears its error, together with any earlier error left
-sticky by a replayed call.
+flush pending, and the end of the last open capture runs it, before the graph
+can be launched. A `hipMemMap` replayed inside the capture, at the address just
+unmapped, is covered too: flushing after the new mapping is in place still
+drops the stale translation. Like every capture check
+placement makes, the check for an open capture and the flush that follows are
+not atomic: in multi-threaded replay another thread can begin a capture between
+them, and the flush then invalidates it. The flush's `hipFree` waits for every
+stream on its device, which a drain's unmap may not have done there, so it
+widens the hang risk above slightly. A failed flush prints one warning for each
+kind of failure (reading the current device, which then flushes the current
+one; the flush itself, naming a 4 MiB buffer leaked when only `hipFree` failed;
+restoring the old device) and clears its error, together with any earlier error
+left sticky by a replayed call.
 
 Once drivers with the fix are the minimum HRR supports, the workaround can be
 removed. `UnmapFlushesTlb` checks that a drain flushes once, after its unmaps,
 each device that could reach what it unmapped, and not when nothing was
 unmapped; and that an unmap outside placement flushes every device, or, while a
 capture is open, leaves the flush for the next map or drain. The flush after the
-warm-up reset is what `Lifetimes` needs on the affected hosts. No test covers the
-replayed `hipMemUnmap` itself, with or without a capture open, nor flushing a
-second GPU on real hardware.
+warm-up reset is what `Lifetimes` needs on the affected hosts. `UnmapInCapture`
+replays a `hipMemUnmap` and a `hipMemMap` at the same address inside a
+global-mode capture: the capture must still end with a graph, and the flush
+must run where it ends. No test flushes a second GPU on real hardware.
 
 **Several GPUs.** A placed allocation is backed on the device it was made on: the
 current device for `hipMalloc`, the stream's device for `hipMallocAsync`, and the

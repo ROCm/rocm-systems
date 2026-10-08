@@ -2492,6 +2492,18 @@ void hrr_placement_at_sync(PlaybackContext& ctx, const char* api) {
         fprintf(stderr, "[HRR] Placement: unmapped %zu deferred free(s) at %s\n", n, api);
 }
 
+// Call after a capture ends. A hipMemUnmap replayed while one was open left
+// its TLB flush pending, and a hipMemMap after it may have mapped the same
+// address again; the graph can be launched before anything else runs the
+// flush, so run it once the last capture is closed.
+static void hrr_capture_ended(PlaybackContext& ctx, const char* api) {
+    hrr::VaPlacement* pl = hrr_placing(ctx);
+    if (!pl || ctx.in_graph_capture.any() || !pl->flush_pending()) return;
+    if (ctx.verbose)
+        fprintf(stderr, "[HRR] Placement: flushed the TLBs an unmap inside the capture left "
+                        "pending, at %s\n", api);
+}
+
 // The recorded thread that made the call in `payload`.
 static uint64_t hrr_event_thread(const uint8_t* payload) {
     hrr_event_header h;
@@ -2530,6 +2542,7 @@ void hrr_track_capture(PlaybackContext& ctx, uint16_t event_type,
             const auto* a =
                 reinterpret_cast<const hrr_args_hipStreamEndCapture_spt*>(payload);
             (void)ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
+            hrr_capture_ended(ctx, "hipStreamEndCapture_spt");
             break;
         }
         default:
@@ -3827,6 +3840,7 @@ hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
     // memset ends here. The frees deferred inside it are unmapped at the next
     // replayed device synchronization, like any other.
     (void)ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(pl)));
+    hrr_capture_ended(ctx, "hipStreamDestroy");
     return r;
 }
 
@@ -3890,6 +3904,7 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
         fprintf(stderr, "[HRR] hipStreamEndCapture: stream 0x%llx not found in map\n",
                 (unsigned long long)a->stream);
         ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
+        hrr_capture_ended(ctx, "hipStreamEndCapture");
         return hipSuccess;  // non-fatal
     }
     hipGraph_t live_graph = nullptr;
@@ -3898,6 +3913,7 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
     // defer every later placed free, and make the allocations recorded over
     // them fall back, for the rest of the replay.
     ctx.in_graph_capture.end(hrr_capture_key(a->stream, hrr_event_thread(payload)));
+    hrr_capture_ended(ctx, "hipStreamEndCapture");
     if (r == hipSuccess && live_graph) {
         ctx.record_graph(a->pGraph, live_graph);
         if (ctx.verbose)

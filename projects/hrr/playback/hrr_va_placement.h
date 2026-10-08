@@ -652,8 +652,9 @@ hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event);
 // one larger than ROCr's 2 MiB fragment blocks, whose free goes straight to
 // KFD, with `device` current around both and the old one restored. The
 // hipFree waits for every stream on `device`. hipMalloc and hipFree
-// invalidate an open graph capture, so never call this while one is open. A
-// failure is reported once and its error cleared.
+// invalidate an open graph capture, so never call this while one is open.
+// When the current device cannot be read, the current one is flushed. Each
+// kind of failure is reported once, and its error cleared.
 void hrr_flush_gpu_tlb(int device);
 
 #ifdef HRR_VA_PLACEMENT_TESTING
@@ -760,11 +761,11 @@ class VaPlacement {
     // mapped again: flush every device now, which placement does not track
     // for those. With `capturing` the flush would invalidate the capture, so
     // it is left pending for the next drain, the next map_at with no capture
-    // open, or flush_pending().
+    // open, or flush_pending(), which replay calls when the last capture ends.
     void flush_after_unmap(bool capturing);
-    // Run a flush flush_after_unmap() left pending, if any. Call only when no
-    // capture is open.
-    void flush_pending();
+    // Run a flush flush_after_unmap() left pending, if any, and say whether
+    // there was one. Call only when no capture is open.
+    bool flush_pending();
 
     // hipMemAddressReserve: give back the placeholder over [base, base+size) so
     // the reserve at that hint can take it. False when placement does not hold
