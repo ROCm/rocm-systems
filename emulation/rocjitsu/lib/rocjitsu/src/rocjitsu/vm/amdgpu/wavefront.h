@@ -274,7 +274,17 @@ public:
   AddressSpaceHandle address_space() const { return address_space_; }
 
   /// @brief Set the owning GPU address space at dispatch time.
-  void set_address_space(AddressSpaceHandle address_space) { address_space_ = address_space; }
+  void set_address_space(AddressSpaceHandle address_space) {
+    if (address_space_ != address_space)
+      vm_access_.reset();
+    address_space_ = address_space;
+  }
+
+  /// @brief Return the immutable VM snapshot captured when this wave was admitted.
+  const GpuVmAccess *vm_access() const { return vm_access_.get(); }
+
+  /// @brief Share the dispatch-scoped VM snapshot with this wave.
+  void set_vm_access(std::shared_ptr<const GpuVmAccess> access) { vm_access_ = std::move(access); }
   /// @brief Select host monotonic timestamps for PM4, modeled time for AQL.
   void set_system_clock(bool enabled) { use_system_clock_ = enabled; }
   /// @brief Read the realtime clock selected by the launch ABI.
@@ -476,6 +486,7 @@ public:
   static constexpr uint32_t DX10_CLAMP_BIT = 1u << 8;
   static constexpr uint32_t IEEE_BIT = 1u << 9;
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
+  static constexpr uint32_t VSKIP_BIT = 1u << 28;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
 
   /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
@@ -1025,6 +1036,7 @@ public:
     code_load_bias_ = 0;
     wave_in_group_ = 0;
     address_space_ = {};
+    vm_access_.reset();
     process_id_ = 0;
     use_system_clock_ = false;
     scratch_lease_.reset();
@@ -1115,7 +1127,8 @@ protected:
   uint64_t code_load_bias_ = 0;      ///< GPU load bias for code-object-relative call targets.
   uint32_t wave_in_group_ = 0;       ///< Position of this wave within its workgroup (debugger).
   AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
-  uint32_t process_id_ = 0;          ///< Owning process ID (PASID analog, set per dispatch).
+  std::shared_ptr<const GpuVmAccess> vm_access_; ///< Dispatch-scoped immutable VM snapshot.
+  uint32_t process_id_ = 0; ///< Owning process ID (PASID analog, set per dispatch).
 
   bool use_system_clock_ = false;                ///< PM4 shader timestamps use host monotonic time.
   std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.
