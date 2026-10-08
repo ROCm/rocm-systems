@@ -56,6 +56,13 @@
 // Kernel-launch handlers use this to wait for their submission turn and then
 // immediately unblock the next thread before doing timing/sync.
 thread_local uint64_t hrr_dispatch_seq = 0;
+thread_local uint64_t hrr_dispatch_release_seq = 0;
+
+void hrr_release_dispatch_order(PlaybackContext& ctx) {
+    if (!hrr_dispatch_release_seq) return;
+    ctx.next_seq.store(hrr_dispatch_release_seq, std::memory_order_release);
+    hrr_dispatch_release_seq = 0;
+}
 
 void hrr_note_unreplayable(PlaybackContext& ctx, const char* api,
                            const char* reason) {
@@ -1051,8 +1058,10 @@ static void decode_kernel_args(
 // The host function waits for what the kernel waits for: the launch stream's
 // earlier work, the null stream's when the stream is a blocking one, and every
 // blocking stream's when it is the null stream. The kernel waits for the host
-// function. Replay itself never blocks on the host here, so a launch whose
-// stream waits on work replayed later (hipStreamBatchMemOp, say) does not hang.
+// function. Replay itself does not block on the host here, so a launch whose
+// stream waits on work replayed later (hipStreamBatchMemOp, say) does not hang;
+// only releasing the allocation waits for the restore, for a bounded time
+// (hrr_host_release_ready).
 // Direction 1 is a chunk capture read unchanged while work the launch waited
 // for was still queued; that work may have written it before the kernel ran,
 // so replay leaves it to the replayed work.
@@ -1095,24 +1104,42 @@ static void apply_host_snapshots(void* user) {
     st.cv.notify_all();
 }
 
-void hrr_wait_host_restores(PlaybackContext& ctx, const void* base) {
+static unsigned host_restore_wait_ms(const PlaybackContext& ctx) {
+    return ctx.sync_watchdog_ms ? ctx.sync_watchdog_ms : 10000;
+}
+
+bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* why) {
     auto& st = *ctx.host_restores;
     std::unique_lock<std::mutex> lk(st.mu);
     auto done = [&] {
         return base ? st.pending.find(base) == st.pending.end() : st.pending.empty();
     };
-    if (done()) return;
-    static std::atomic<bool> noted{false};
-    if (!noted.exchange(true))
+    if (done()) return true;
+    if (!ctx.host_snapshot_notices.wait.exchange(true))
         fprintf(stderr,
                 "[HRR] %s waits for a pinned host snapshot restore still "
-                "queued on a stream\n",
-                base ? "freeing a pinned host allocation" : "the warm-up pass");
-    if (st.cv.wait_for(lk, std::chrono::seconds(10), done)) return;
+                "queued on a stream\n", why);
+    const unsigned ms = host_restore_wait_ms(ctx);
+    if (st.cv.wait_for(lk, std::chrono::milliseconds(ms), done)) return true;
+    if (!base)
+        fprintf(stderr,
+                "[HRR] %s: a pinned host snapshot restore is still queued after "
+                "%u ms; replay goes on without it\n", why, ms);
+    return false;
+}
+
+bool hrr_host_release_ready(PlaybackContext& ctx, const void* live) {
+    if (hrr_wait_host_restores(ctx, live, "freeing a pinned host allocation"))
+        return true;
+    void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
+    (void)ctx.live_alloc_of(live, &abase, &asize, &arec);
+    ctx.host_allocs_leaked.fetch_add(1, std::memory_order_relaxed);
     fprintf(stderr,
-            "[HRR] a pinned host snapshot restore has been queued for 10 s; "
-            "replay keeps waiting for it\n");
-    st.cv.wait(lk, done);
+            "[HRR] pinned host allocation 0x%llx (live %p, %zu bytes) is not "
+            "freed: a snapshot restore queued for it has not run after %u ms, "
+            "and would write it once freed. Replay leaks it.\n",
+            (unsigned long long)arec, live, asize, host_restore_wait_ms(ctx));
+    return false;
 }
 
 static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
@@ -1141,8 +1168,7 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
                      : cr != hipSuccess                    ? true
                                                            : cap == hipStreamCaptureStatusNone;
     if (!apply) {
-        static std::atomic<bool> warned{false};
-        if (!warned.exchange(true))
+        if (!ctx.host_snapshot_notices.in_graph.exchange(true))
             fprintf(stderr,
                     "[HRR] pinned host snapshots are not applied to kernels "
                     "replayed into a graph capture\n");
@@ -1221,8 +1247,7 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
         return;
     }
     (void)hipGetLastError();
-    static std::atomic<bool> warned{false};
-    if (!warned.exchange(true))
+    if (!ctx.host_snapshot_notices.unqueued.exchange(true))
         fprintf(stderr,
                 "[HRR] '%s': could not queue the pinned host snapshot restore on "
                 "the launch stream; restored without waiting for its earlier "
@@ -1249,6 +1274,39 @@ static const uint8_t* skip_kernel_args(const uint8_t* p, const uint8_t* end,
         }
     }
     return p;
+}
+
+bool hrr_launch_has_host_snapshots(uint16_t etype, const uint8_t* pl, size_t size) {
+    switch (etype) {
+        case HRR_API_HIPMODULELAUNCHKERNEL:
+        case HRR_API_HIPEXTMODULELAUNCHKERNEL:
+        case HRR_API_HIPLAUNCHKERNEL:
+        case HRR_API_HIPLAUNCHBYPTR:
+        case HRR_API_HIPLAUNCHKERNEL_SPT:
+        case HRR_API_HIPLAUNCHCOOPERATIVEKERNEL:
+        case HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT:
+        case HRR_API_HIPDRVLAUNCHKERNELEX:
+        case HRR_API_HIPLAUNCHKERNELEXC:
+        case HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL:
+            break;
+        default:
+            return false;
+    }
+    // The fixed part of the payload as replay_kernel_launch reads it, up to
+    // the snapshot record count.
+    if (size < sizeof(hrr_event_header)) return false;
+    const auto* hdr = reinterpret_cast<const hrr_event_header*>(pl);
+    const uint8_t* p   = pl + sizeof(hrr_event_header);
+    const uint8_t* end = pl + std::min<size_t>(size, hdr->payload_length);
+    if (end - p < 10) return false;
+    uint16_t name_len; memcpy(&name_len, p + 8, 2);
+    p += 10;
+    if (end - p < name_len) return false;
+    p += name_len;
+    if (end - p >= 16) p += 16;  // code object hash
+    if (end - p < 32) return false;
+    uint16_t num_snapshots; memcpy(&num_snapshots, p + 30, 2);
+    return num_snapshots != 0;
 }
 
 static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
@@ -1678,6 +1736,10 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             }
         }
     }
+
+    // The restore and the kernel are queued: the other replay threads may go
+    // on while this one times or syncs the launch.
+    hrr_release_dispatch_order(ctx);
 
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_stop, stream)) == hipSuccess);
@@ -3196,7 +3258,7 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 
 // ---------------------------------------------------------------------------
 // Manual playback: hipHostMalloc. hipMallocHost, hipHostFree and hipFreeHost
-// are generated; the two frees wait for pending pinned host restores.
+// are generated; the two frees go through hrr_host_release_ready.
 // ---------------------------------------------------------------------------
 // hipHostMalloc:  ret(4) ptr(8) size(8) flags(4)
 
@@ -3277,7 +3339,10 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     void* live = buf ? buf : ctx.translate_ptr(a->hostPtr);
     if (!live) return hipSuccess;
 
-    hrr_wait_host_restores(ctx, live);
+    if (!hrr_host_release_ready(ctx, live)) {  // leaked: stays registered and allocated
+        ctx.remove_alloc(a->hostPtr);
+        return hipSuccess;
+    }
     hipError_t r = hipHostUnregister(live);
     if (r == hipSuccess) ctx.remove_alloc(a->hostPtr);
 
@@ -3349,7 +3414,11 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
         ctx.remove_alloc(a->ptr);
         return hipSuccess;
     }
-    hrr_wait_host_restores(ctx, live);  // hipFree also frees pinned host memory
+    // hipFree also frees pinned host memory.
+    if (!hrr_host_release_ready(ctx, live)) {
+        ctx.remove_alloc(a->ptr);
+        return hipSuccess;
+    }
     hipError_t r = hipFree(live);
     if (r == hipSuccess) ctx.remove_alloc(a->ptr);
     return r;

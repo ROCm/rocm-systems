@@ -622,7 +622,14 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // Give kernel-launch handlers the sequence ID so they can wait and advance
   // next_seq at the exact point of the HIP call.
   hrr_dispatch_seq = ev.header().sequence_id;
-  auto order = needs_ordering(etype);
+  // A launch that restores pinned host memory is ordered too, so that the
+  // next event, a free of that memory or a capture begun on the launch
+  // stream, cannot run on another thread while the restore is being queued.
+  // The launch hands the turn on itself once the kernel is queued.
+  const bool order_launch =
+      !needs_ordering(etype) &&
+      hrr_launch_has_host_snapshots(etype, ev.raw_payload.data(), ev.raw_payload.size());
+  const bool order = needs_ordering(etype) || order_launch;
 
   // Spin-wait for our turn in global capture order.
   // Also check fatal_error: if another thread failed and advanced next_seq
@@ -652,19 +659,26 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // RAII guard: non-ordering events advance immediately (constructor) so the
   // next thread can proceed while this call is still in-flight; ordered events
   // advance on scope exit so the next thread is unblocked on every return path.
+  // An ordered launch may have advanced already (hrr_release_dispatch_order),
+  // and must not move next_seq back once another thread moved it on.
   struct SeqAdvance {
     PlaybackContext& ctx;
     uint64_t next;
     bool order;
-    SeqAdvance(PlaybackContext& c, uint64_t n, bool o) : ctx(c), next(n), order(o) {
+    bool launch;
+    SeqAdvance(PlaybackContext& c, uint64_t n, bool o, bool l)
+        : ctx(c), next(n), order(o), launch(l) {
+      hrr_dispatch_release_seq = launch ? next : 0;
       if (!order)
         ctx.next_seq.store(next, std::memory_order_release);
     }
     ~SeqAdvance() {
-      if (order)
+      if (launch)
+        hrr_release_dispatch_order(ctx);
+      else if (order)
         ctx.next_seq.store(next, std::memory_order_release);
     }
-  } seq_guard{ctx, ev.header().sequence_id + 1, order};
+  } seq_guard{ctx, ev.header().sequence_id + 1, order, order_launch};
 
   // Advance the external region annotations to this event's capture timestamp,
   // so a handler that translates a pointer sees the regions that were live at
@@ -1555,10 +1569,12 @@ int main(int argc, char** argv) {
     ctx.guard_blind_max.store(0, std::memory_order_relaxed);
     // The warm-up's closing sync covers one device; a restore queued on
     // another may still be pending, and would count in the timed pass.
-    hrr_wait_host_restores(ctx, nullptr);
+    (void)hrr_wait_host_restores(ctx, nullptr, "the warm-up pass");
     ctx.host_restores->applied.store(0, std::memory_order_relaxed);
     ctx.host_snapshots_rejected.store(0, std::memory_order_relaxed);
     ctx.host_snapshots_in_graph.store(0, std::memory_order_relaxed);
+    ctx.host_allocs_leaked.store(0, std::memory_order_relaxed);
+    ctx.host_snapshot_notices.clear();
     printf("[HRR] Warm-up done. Running filtered pass...\n");
   }
 
@@ -1589,8 +1605,7 @@ int main(int argc, char** argv) {
       switch (entry.kind) {
         case AllocKind::Device:        hrr_free_device_alloc(ctx, entry.live_ptr); break;
         case AllocKind::HostMalloc:
-          hrr_wait_host_restores(ctx, entry.live_ptr);
-          (void)hipHostFree(entry.live_ptr);
+          if (hrr_host_release_ready(ctx, entry.live_ptr)) (void)hipHostFree(entry.live_ptr);
           break;
         case AllocKind::HostRegister:                                     break;
         case AllocKind::DevicePtrAlias:                                   break;
@@ -1601,8 +1616,7 @@ int main(int argc, char** argv) {
     // remaining backing buffer here to avoid leaking both the pinned registration
     // and the malloc'd buffer every run.
     for (auto& [rec, buf] : ctx.host_reg_bufs) {
-      if (!buf) continue;
-      hrr_wait_host_restores(ctx, buf);
+      if (!buf || !hrr_host_release_ready(ctx, buf)) continue;
       (void)hipHostUnregister(buf);
 #ifdef _WIN32
       _aligned_free(buf);
@@ -1643,6 +1657,11 @@ int main(int argc, char** argv) {
     fprintf(stderr, "[HRR] Replay aborted due to fatal HIP error — exiting\n");
     return 1;
   }
+
+  // The pass's closing sync covers the current device only. A restore queued
+  // on another device's stream may still be pending, and the summary below
+  // would not count it.
+  (void)hrr_wait_host_restores(ctx, nullptr, "the replay summary");
 
   // ---------------------------------------------------------------------------
   // Summary
@@ -1735,6 +1754,11 @@ int main(int argc, char** argv) {
       printf("[HRR]   Host snapshots : %llu record(s) not applied, their "
              "launches replayed into a graph capture\n",
              (unsigned long long)in_graph);
+    const uint64_t leaked = ctx.host_allocs_leaked.load();
+    if (leaked)
+      printf("[HRR]   Host snapshots : %llu pinned host allocation(s) leaked, "
+             "not freed, because a restore queued for each had not run\n",
+             (unsigned long long)leaked);
   }
 
   if (ctx.d2h_pass == 0 && ctx.d2h_fail == 0) {

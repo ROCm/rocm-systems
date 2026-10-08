@@ -593,9 +593,9 @@ alone, then reads the last command of each blocking stream. It does not ask the
 null-stream query, which also covers them: that query queues a marker on the
 null stream that waits for every blocking stream. A launch that then fails its
 own checks leaves the marker behind, and every later launch into a blocking
-stream waits for it. None of the checks capture makes queues a wait on another
-stream. `hipStreamQuery` can still queue a marker with no dependencies on the
-stream it asks about. The per-thread entry points (`hipLaunchKernel_spt` and
+stream waits for it. No check capture makes queues a wait on another stream.
+`hipStreamQuery` can still queue a marker with no dependencies on the stream it
+asks about. The per-thread entry points (`hipLaunchKernel_spt` and
 `hipLaunchCooperativeKernel_spt`) launch into the per-thread stream when given
 the null stream or `hipStreamLegacy`, so capture asks about the per-thread
 stream. The answer is one of two:
@@ -688,9 +688,11 @@ waits for the work the kernel waits for: the launch stream's earlier work, the
 null stream's when the launch stream is a blocking one (the per-thread stream
 is one), and every blocking stream's when the launch stream is the null stream
 or `hipStreamLegacy`. It copies a chunk with `memcpy` only when the buffer holds
-different bytes, and calls no HIP API. The kernel waits for it. Replay never
-blocks on the host for the restore, so a launch stream held back by a wait that
-later replayed work releases does not hang the replay. When the host function
+different bytes, and calls no HIP API. The kernel waits for it. Replay does not
+block on the host for the restore when it queues it, so a launch stream held
+back by a wait that later replayed work releases does not hang the replay. It
+blocks only before it releases the memory, as described next, and for a bounded
+time. When the host function
 cannot be queued, replay warns once and restores at once, without waiting. The
 host functions run on the HSA async handler thread, which every host callback
 and completion handler of the process shares. A launch with many chunks copies
@@ -698,17 +700,40 @@ them all there, up to `HIP_HRR_HOST_SNAPSHOT_MAX_MB` per allocation, and
 delays the other handlers while it does.
 
 A host function that has not run yet still writes its allocation later.
-`hipHostFree` and `hipHostUnregister` sync the streams of the allocating device
-only, and a restore can be queued on another device's stream. So replay counts
-the restores queued for each allocation, and waits for that count to reach zero
-before it frees or unregisters the allocation, including at teardown. The first
-such wait is printed. The count and the restored total live in state each host
-function holds a reference to, so one that runs after replay has exited does
-not touch a destroyed context. `--kernel-filter` resets the counters after its
-warm-up pass. The summary prints the chunks restored and the records rejected.
-Snapshot blobs are
-held in a cache of at most 256 MiB, oldest out first, rather than the unbounded
-blob cache.
+`hipHostFree`, `hipFree` and `hipHostUnregister` sync the streams of the
+allocating device only, and a restore can be queued on another device's stream.
+So replay counts the restores queued for each allocation, and waits for that
+count to reach zero before it frees or unregisters the allocation, including at
+teardown. The first such wait is printed. The wait is bounded: by the
+`--sync-watchdog-ms` value when that is set, by 10 s otherwise. A restore whose
+stream is held by work that only a later replayed event releases would
+otherwise hang a single-threaded replay, which never reaches that event. When
+the time runs out, replay does not free the allocation: it leaks it, drops it
+from its tracking so that no later launch restores into it, prints a warning
+naming it, and goes on. The late restore then writes memory that is still
+allocated. The summary counts the leaked allocations. Before the summary, and
+after the `--kernel-filter` warm-up pass, replay waits the same bounded time
+for every queued restore: the pass's closing sync covers the current device
+only, and a restore still queued on another device would be missing from the
+count. The count and the restored total live in state each host function holds
+a reference to, so one that runs after replay has exited does not touch a
+destroyed context. `--kernel-filter` resets the counters and the one-time
+notices after its warm-up pass, so the timed pass prints its own. The summary
+prints the chunks restored and the records rejected. Snapshot blobs are held in
+a cache of at most 256 MiB, oldest out first, rather than the unbounded blob
+cache.
+
+A multi-threaded replay lets an event start before the one recorded ahead of
+it has finished, except allocations, frees, stream and graph capture calls and
+the like, which it orders. A launch with snapshot records is ordered too: it
+checks that each record names a live allocation, counts the restore against
+that allocation, and queues it on the launch stream. A free replayed on another
+thread between those steps found nothing to wait for and released the buffer
+under the restore, and a `hipStreamBeginCapture` on the launch stream turned the
+host function into a graph node. The next event therefore starts only once the
+launch has queued its restore and its kernel. The launch hands the turn on at
+that point, before the timing or the sync a debug option adds after it.
+Launches without records stay unordered.
 
 `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` reports host memory a kernel reads that no
 snapshot record names: a pointer argument into such a pinned allocation, and a
@@ -721,13 +746,20 @@ leaves alone are not reported.
 **Tests.** `hrr_pinned_host_test.cc` covers the behaviour above, including a
 failed launch, every launch entry point, a free that fails and `hipDeviceReset`.
 Most cases capture a workload and replay it; the ones that check only what
-capture records or trusts do not replay. Two cases can skip. The
+capture records or trusts do not replay. Some cases can skip. The
 `hipDeviceReset` case skips its last check when the reset leaves no address in
-the old buffer that the runtime does not know. The cross-device free needs two
-devices. Three paths are untested by design: the fork handlers, a blob or event
-that cannot be written, and a restore `hipLaunchHostFunc` refuses. Each needs a
-fault injected into the capture or replay process, which no test hook
-provides.
+the old buffer that the runtime does not know. The six cross-device cases need
+two devices and skip with fewer, which is every runner that pins one GPU: a
+free, an unregister, a `hipFree`, a `hipDeviceReset` of the allocating device,
+no free at all (the summary and the `--kernel-filter` warm-up wait), and a free
+whose restore waits for a later event (the bounded wait and the leak). Three
+paths are untested by design: the fork handlers, a blob or event that cannot be
+written, and a restore `hipLaunchHostFunc` refuses. Each needs a fault injected
+into the capture or replay process, which no test hook provides. The waits at
+teardown are untested too: the summary's wait drains every restore first, so
+they only matter when a divergence stops replay before the summary. So is the
+ordering of a launch against a `hipStreamBeginCapture` on another thread; the
+case for a free on another thread covers the same ordering.
 
 ### Threat Model: Pinned Host Snapshots
 
@@ -768,13 +800,27 @@ synthetic inputs when the archive has to be shared.
   adds a blob per changed chunk per launch. The writer's disk-space guard still
   applies.
 
-**Replaying an untrusted archive.** Archive contents are untrusted. A record can
-only write into a pinned host allocation replay made, inside its bounds, and only
-the bytes of a blob of exactly the recorded length. A record that names device
-memory, no allocation, a range outside its allocation, an unknown direction or a
-blob of another size is refused. This does not make an untrusted archive safe to
-replay: the archive also supplies the kernels and their arguments, and a snapshot
-exists to put chosen bytes in front of those kernels.
+**Replaying an untrusted archive.** Archive contents are untrusted. Replay
+checks each record when it queues the restore, not when the restore runs. At
+that point the record must name a pinned host allocation replay made, lie
+inside its bounds, and come with a blob of exactly the recorded length. A record
+that names device memory, no allocation, a range outside its allocation, an
+unknown direction or a blob of another size is refused. Replay then keeps the
+allocation alive until the restore has run: a free, an unregister or teardown
+waits for it, and leaks the allocation rather than free it when the wait runs
+out. Two paths release the allocation anyway, so a restore queued before them
+can write archive-chosen bytes into memory that has been released and may have
+been reused:
+
+- a replayed `hipDeviceReset` whose bounded wait runs out. An archive can
+  arrange this on purpose: hold the launch stream with a stream wait, reset
+  the allocating device, allocate again, then release the stream;
+- an exit after a fatal HIP error, which does not drain queued restores while
+  the process tears its memory down.
+
+This does not make an untrusted archive safe to replay: the archive also
+supplies the kernels and their arguments, and a snapshot exists to put chosen
+bytes in front of those kernels.
 
 **Residual risks.**
 
@@ -794,12 +840,18 @@ exists to put chosen bytes in front of those kernels.
   later launch on an idle stream wrote its own. The later kernel can then read
   the earlier bytes, and the host is left holding them. The earlier launch was
   recorded unordered, so the application raced there too.
-- A free or unregister waits for the restores queued for its allocation. When
-  such a restore's stream is held by work that only later replayed events
-  release, replay waits for it. It prints a line after 10 s. CLR's own
-  `hipHostFree` waits the same way for the streams of the allocating device.
-- A replayed `hipDeviceReset` releases the device's pinned allocations without
-  waiting for restores queued for them on another device's stream.
+- A free or unregister waits for the restores queued for its allocation, at
+  most `--sync-watchdog-ms` or 10 s. When such a restore's stream is held by
+  work that only later replayed events release, the wait runs out and replay
+  leaks the allocation instead of freeing it, with a warning. The replayed
+  program then holds memory the captured one had released. This cannot happen
+  on the allocating device's streams: the captured free waited for them, so the
+  recorded program did not hold them past it.
+- A replayed `hipDeviceReset` first waits for every queued restore, at most
+  `--sync-watchdog-ms` or 10 s. If one is still queued then, the reset goes on
+  and releases the device's pinned allocations, and the restore can later write
+  released memory: a reset releases them all, so replay cannot leak just the
+  one it waits for.
 - Replay exits after a fatal HIP error without syncing the device or draining
   queued restores. A host function that still runs keeps its own state alive,
   but the pinned memory it writes is torn down as the process exits, so it can

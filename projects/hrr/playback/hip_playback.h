@@ -323,6 +323,24 @@ struct PlaybackContext {
     // counted apart: they are not malformed.
     std::atomic<uint64_t> host_snapshots_rejected{0};
     std::atomic<uint64_t> host_snapshots_in_graph{0};
+    // Pinned host allocations replay did not free because a restore queued
+    // for them had still not run when the free came; see
+    // hrr_host_release_ready.
+    std::atomic<uint64_t> host_allocs_leaked{0};
+    // The one-time pinned host snapshot notices: a wait for a queued restore,
+    // restores not applied under graph capture, and a restore that could not
+    // be queued on its stream. Cleared after the --kernel-filter warm-up, so
+    // that the timed pass prints them too.
+    struct HostSnapshotNotices {
+        std::atomic<bool> wait{false};
+        std::atomic<bool> in_graph{false};
+        std::atomic<bool> unqueued{false};
+        void clear() {
+            wait.store(false);
+            in_graph.store(false);
+            unqueued.store(false);
+        }
+    } host_snapshot_notices;
 
     // What replay shares with the host functions that restore pinned host
     // snapshots. It is held by a shared_ptr, not by the context, because a
@@ -810,11 +828,32 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
 
 // Wait until no queued pinned host snapshot restore still has to write into
-// the host allocation whose live base is `base`. Called before replay frees or
-// unregisters it: hipHostFree and hipHostUnregister sync only the device that
-// allocated it, and a restore may be queued on another device's stream. A null
-// base waits for every queued restore.
-void hrr_wait_host_restores(PlaybackContext& ctx, const void* base);
+// the host allocation whose live base is `base`, or, for a null base, until no
+// restore is queued at all. hipHostFree and hipHostUnregister sync only the
+// device that allocated the memory, and a restore may be queued on another
+// device's stream. The wait is bounded by --sync-watchdog-ms when that is set and
+// by 10 s otherwise, because the stream may be held by work that only a later
+// replayed event releases. Returns false when restores are still queued after
+// that; for a null base it then says that replay goes on. `why` names the
+// waiter in the one-time notice.
+bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* why);
+
+// Called before replay frees or unregisters the pinned host allocation whose
+// live base is `live`. Waits as above. True means the caller may release it.
+// False means a restore queued for it has still not run, so releasing it would
+// let that restore write unmapped memory: the allocation is leaked instead.
+// One warning names it and the summary counts it; the caller skips the release
+// and drops the allocation from tracking, so that no later launch restores
+// into it.
+bool hrr_host_release_ready(PlaybackContext& ctx, const void* live);
+
+// Whether the event is a kernel launch whose payload carries pinned host
+// snapshot records. A multi-threaded replay orders such a launch against the
+// other threads' events, like an allocation or a free: the launch checks that
+// each record names a live allocation, counts the restore against it and
+// queues it, and a free or a hipStreamBeginCapture replayed by another thread
+// in between would undo one of those steps.
+bool hrr_launch_has_host_snapshots(uint16_t etype, const uint8_t* payload, size_t size);
 
 // ---------------------------------------------------------------------------
 // hrr_note_unreplayable — this API cannot be reproduced, and here is why.
@@ -879,6 +918,14 @@ hipCtx_t hrr_live_ctx(uint64_t recorded);
 // Kernel-launch handlers read this to wait for their submission turn at the
 // exact point of the HIP call, allowing preparation work to run in parallel.
 extern thread_local uint64_t hrr_dispatch_seq;
+
+// The sequence id the current event hands on to the next one, when it is a
+// kernel launch that dispatch_event ordered because it restores pinned host
+// memory; 0 otherwise, or once handed on. replay_kernel_launch hands it on as
+// soon as the kernel is queued, behind its restore, so that the debug syncs and
+// timing after the launch do not hold the other replay threads.
+extern thread_local uint64_t hrr_dispatch_release_seq;
+void hrr_release_dispatch_order(PlaybackContext& ctx);
 
 // Device synchronize with an optional watchdog. When ctx.sync_watchdog_ms == 0
 // this is a plain hipDeviceSynchronize(). Otherwise the (potentially blocking)
