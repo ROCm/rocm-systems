@@ -810,8 +810,8 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     return ncclSuccess;
   }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // One DMA-BUF cannot cover a multi-segment window; NCCL_MULTI_SEGMENT_REGISTER=0 turns off per-segment MRs.
-  if (mem->maxGlobalNumSegments > 1 && !ncclParamMultiSegmentRegister()) {
+  // One HIP DMA-BUF covers only the first segment; with =0 fail closed instead of a partial MR.
+  if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment && !ncclParamMultiSegmentRegister()) {
     WARN("Window %p spans %d physical segments; GIN needs NCCL_MULTI_SEGMENT_REGISTER=1 to register it",
          mem->primaryAddr, mem->maxGlobalNumSegments);
     ret = ncclInvalidUsage;
