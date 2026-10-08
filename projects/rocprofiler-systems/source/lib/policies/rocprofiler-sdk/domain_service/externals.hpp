@@ -62,6 +62,7 @@ concept externals =
         typename Externals::rocm_rocshmem_api_category;
         typename Externals::rocm_hipfile_api_category;
         typename Externals::rocm_rccl_api_category;
+        typename Externals::rocm_ompt_api_category;
         typename Externals::state_thread;
         typename Externals::pmc_event_with_sample;
         requires agent_manager_policy<typename Externals::agent_manager_t,
@@ -154,6 +155,9 @@ concept externals =
         } -> std::convertible_to<std::string_view>;
         {
             Externals::rocm_rccl_api_category_name
+        } -> std::convertible_to<std::string_view>;
+        {
+            Externals::rocm_ompt_api_category_name
         } -> std::convertible_to<std::string_view>;
         { Externals::comm_data_name } -> std::convertible_to<std::string_view>;
         { Externals::comm_data_description } -> std::convertible_to<std::string_view>;
