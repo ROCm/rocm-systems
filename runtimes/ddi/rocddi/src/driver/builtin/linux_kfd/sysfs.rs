@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Passive Linux topology discovery and validation.
@@ -47,6 +48,8 @@ pub(crate) struct NativeQueueProperties {
     pub context_size: u32,
     pub control_stack_size: u32,
     pub sdma_engines: u32,
+    pub sdma_xgmi_engines: u32,
+    pub gws_count: u32,
     pub compute_queues: u32,
     pub sdma_qualified: bool,
 }
@@ -214,7 +217,7 @@ fn cache_properties(text: &str) -> Result<CacheInfo, Error> {
     }
     let properties = Properties(text);
     let _ = properties.u32("processor_id_low")?;
-    let _ = properties.u32("cache_line_size")?;
+    let line_size_bytes = properties.u32("cache_line_size")?;
     let _ = properties.u32("cache_lines_per_tag")?;
     let _ = properties.u32("association")?;
     let _ = properties.u32("latency")?;
@@ -222,6 +225,7 @@ fn cache_properties(text: &str) -> Result<CacheInfo, Error> {
     Ok(CacheInfo {
         level: properties.u32("level")?,
         size_bytes: u64::from(properties.u32("size")?) * 1024,
+        line_size_bytes,
         kind: properties.u32("type")?,
     })
 }
@@ -277,6 +281,75 @@ fn caches(
     Shared::new(cache_info, allocator)
         .map(Some)
         .map_err(Into::into)
+}
+
+fn memory_bank_properties(text: &str) -> Result<Option<(u32, u32)>, Error> {
+    let properties = Properties::new(text)?;
+    let heap = properties.u32("heap_type")?;
+    let size = properties.required("size_in_bytes")?;
+    if size == 0 || !matches!(heap, 1 | 2) {
+        return Ok(None);
+    }
+    Ok(Some((
+        properties.optional_u32("width")?.unwrap_or(0),
+        properties.optional_u32("mem_clk_max")?.unwrap_or(0),
+    )))
+}
+
+fn memory_bus(
+    root: &str,
+    node: u32,
+    count: u32,
+    allocator: Allocator,
+) -> Result<(u32, u32), Error> {
+    if count == 0 {
+        return Ok((0, 0));
+    }
+    let capacity = usize::try_from(count).map_err(|_| {
+        error(
+            ErrorKind::ResourceExhausted,
+            "native memory-bank count overflow",
+        )
+    })?;
+    let mut records = Buffer::try_with_capacity(capacity, allocator)?;
+    let path = StackPath::new(format_args!("{root}/nodes/{node}/mem_banks"))?;
+    sys::numeric_directories(path.path(), &mut |ordinal| {
+        if ordinal >= count || records.iter().any(|(seen, _)| *seen == ordinal) {
+            return Err(error(
+                ErrorKind::InvalidData,
+                "native memory-bank ordinal is outside its declared range",
+            ));
+        }
+        let path = StackPath::new(format_args!(
+            "{root}/nodes/{node}/mem_banks/{ordinal}/properties"
+        ))?;
+        let mut bytes = [0; 4096];
+        records.try_push((
+            ordinal,
+            memory_bank_properties(read(path.path(), &mut bytes)?)?,
+        ))?;
+        Ok(())
+    })?;
+    if records.len() != capacity {
+        return Err(error(
+            ErrorKind::InvalidData,
+            "native memory-bank count does not match its directory",
+        ));
+    }
+    records.sort_unstable_by_key(|(ordinal, _)| *ordinal);
+    let mut selected = (0, 0);
+    for (expected, (ordinal, bank)) in records.iter().enumerate() {
+        if usize::try_from(*ordinal) != Ok(expected) {
+            return Err(error(
+                ErrorKind::InvalidData,
+                "native memory-bank ordinals are not contiguous",
+            ));
+        }
+        if let Some(bank) = bank {
+            selected = *bank;
+        }
+    }
+    Ok(selected)
 }
 
 pub(super) fn enumerate(
@@ -597,6 +670,12 @@ fn read_node(
     let hive_id = p.optional("hive_id")?.unwrap_or(0);
     let family_id = p.optional_u32("family_id")?.unwrap_or(0);
     let maximum_engine_clock_mhz = p.optional_u32("max_engine_clk_fcompute")?.unwrap_or(0);
+    let (memory_bus_width_bits, maximum_memory_clock_mhz) = memory_bus(
+        root,
+        node,
+        p.optional_u32("mem_banks_count")?.unwrap_or(0),
+        allocator,
+    )?;
     let sdma_xgmi_engines = p.optional_u32("num_sdma_xgmi_engines")?.unwrap_or(0);
     let gws_count = p.optional_u32("num_gws")?.unwrap_or(0);
     let io_link_count = p.optional_u32("io_links_count")?.unwrap_or(0);
@@ -669,6 +748,8 @@ fn read_node(
         context_size: context.unwrap_or(0),
         control_stack_size: stack.unwrap_or(0),
         sdma_engines: sdma.unwrap_or(0),
+        sdma_xgmi_engines,
+        gws_count,
         compute_queues: p.u32("num_cp_queues")?,
         sdma_qualified,
     };
@@ -732,6 +813,8 @@ fn read_node(
                 asic_family_id: family_id,
                 asic_revision: (capability & 0x03c0_0000) >> 22,
                 maximum_engine_clock_mhz,
+                memory_bus_width_bits,
+                maximum_memory_clock_mhz,
                 wavefront_size: wave_size,
                 compute_unit_count: simds / per_cu,
                 simd_count_per_compute_unit: per_cu,
@@ -749,6 +832,9 @@ fn read_node(
                 packet_processor_firmware_version: p.optional_u32("fw_version")?.unwrap_or(0)
                     & 0x3ff,
                 sdma_firmware_version: p.optional_u32("sdma_fw_version")?.unwrap_or(0) & 0x3ff,
+                persisting_l2_cache_size_max: p
+                    .optional_u32("persisting_cache_size_max")?
+                    .unwrap_or(0),
                 queues: GpuQueueCapabilities {
                     aql: supports_aql,
                     // System-scope AQL packet fences and a kernel-issued system
@@ -932,6 +1018,64 @@ mod tests {
         fn drop(&mut self) {
             std::fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    #[test]
+    fn persisting_l2_limit_comes_from_the_gpu_node() {
+        let fixture = Fixture::new();
+        let properties = fixture.0.join("topology/nodes/1/properties");
+        let mut contents = std::fs::read_to_string(&properties).unwrap();
+        contents.push_str("persisting_cache_size_max 1048576\n");
+        std::fs::write(&properties, contents).unwrap();
+        let (root, drm) = fixture.roots();
+        let endpoint = open_endpoint(
+            &root,
+            &drm,
+            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
+            Allocator::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint.gpu().unwrap().persisting_l2_cache_size_max,
+            1_048_576
+        );
+    }
+
+    #[test]
+    fn memory_bus_facts_come_from_nonempty_vram_banks() {
+        let fixture = Fixture::new();
+        let properties = fixture.0.join("topology/nodes/1/properties");
+        let mut contents = std::fs::read_to_string(&properties).unwrap();
+        contents.push_str("mem_banks_count 3\n");
+        std::fs::write(&properties, contents).unwrap();
+        for (ordinal, heap, size, width, clock) in [
+            (0, 0, 16_384, 128, 2000),
+            (1, 2, 1_048_576, 384, 1400),
+            (2, 1, 0, 32, 10),
+        ] {
+            let directory = fixture
+                .0
+                .join(format!("topology/nodes/1/mem_banks/{ordinal}"));
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                directory.join("properties"),
+                format!(
+                    "heap_type {heap}\nsize_in_bytes {size}\nwidth {width}\nmem_clk_max {clock}\n"
+                ),
+            )
+            .unwrap();
+        }
+        let (root, drm) = fixture.roots();
+        let endpoint = open_endpoint(
+            &root,
+            &drm,
+            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
+            Allocator::default(),
+        )
+        .unwrap();
+        let gpu = endpoint.gpu().unwrap();
+        assert_eq!(gpu.memory_bus_width_bits, 384);
+        assert_eq!(gpu.maximum_memory_clock_mhz, 1400);
     }
 
     #[test]
@@ -1215,6 +1359,7 @@ mod tests {
         assert!(crate::gpu::is_compute_data_cache(&endpoint.caches()[3]));
         assert_eq!(endpoint.caches()[3].level(), 2);
         assert_eq!(endpoint.caches()[3].size_bytes(), 262_144);
+        assert_eq!(endpoint.caches()[3].line_size_bytes(), 64);
     }
 
     #[test]

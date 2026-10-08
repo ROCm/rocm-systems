@@ -3187,15 +3187,13 @@ TEST(DppPermuteTest, Dpp8SelectsWithinGroupsOfEight) {
 }
 
 TEST(DppPermuteTest, True16SourceByteMaskFollowsOpSel) {
-  using namespace amdgpu::dpp;
-
-  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/0),
+  EXPECT_EQ(rocjitsu::amdgpu::true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/0),
             ExecutionPlugin::kLowHalfByteMask);
-  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0001, /*source_index=*/0),
+  EXPECT_EQ(rocjitsu::amdgpu::true16_source_byte_mask(/*opsel=*/0b0001, /*source_index=*/0),
             ExecutionPlugin::kHighHalfByteMask);
-  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/1),
+  EXPECT_EQ(rocjitsu::amdgpu::true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/1),
             ExecutionPlugin::kLowHalfByteMask);
-  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0010, /*source_index=*/1),
+  EXPECT_EQ(rocjitsu::amdgpu::true16_source_byte_mask(/*opsel=*/0b0010, /*source_index=*/1),
             ExecutionPlugin::kHighHalfByteMask);
 }
 
