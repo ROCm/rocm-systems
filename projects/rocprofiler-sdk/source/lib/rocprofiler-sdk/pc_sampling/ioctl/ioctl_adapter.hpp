@@ -49,12 +49,14 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
 /**
  * @brief Get the process-wide file descriptor for /dev/kfd.
  *
- * The device is opened (O_RDWR | O_CLOEXEC) on the first call and the result, including a
- * failure (-1), is cached for the lifetime of the process; a failed open is not retried. The
- * descriptor is owned by this module and is never closed; callers must not close it.
+ * The result is computed on the first call and cached for the lifetime of the process; it is
+ * never retried. On WSL2/DXG (platform::wsl::is_available()), which does not expose KFD, -1 is
+ * cached without opening the device or logging. Elsewhere the device is opened
+ * (O_RDWR | O_CLOEXEC); a failed open is reported once through ROCP_CI_LOG(WARNING), which is
+ * fatal in ROCPROFILER_CI builds, and -1 is cached. The descriptor is owned by this module and is
+ * never closed; callers must not close it.
  *
- * @return The KFD file descriptor, or -1 if KFD is unavailable (e.g. /dev/kfd does not exist on
- * WSL2/DXG, or opening it failed).
+ * @return The KFD file descriptor, or -1 if KFD is unavailable on WSL2/DXG or opening it failed.
  */
 int
 get_kfd_fd();

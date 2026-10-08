@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
@@ -938,11 +939,11 @@ TEST(profiler_ioctl_request, version_2_0_uses_mainline_request)
               static_cast<unsigned long>(AMDKFD_IOWR(0x28, struct kfd_ioctl_profiler_args)));
 }
 
-// Exercised on hosts without /dev/kfd (e.g. WSL2/DXG): the KFD-only device lock and
-// PTL controls must degrade to "unsupported" so PMC collection continues without them.
+// WSL2/DXG does not expose KFD: the KFD-only device lock and PTL controls must degrade to
+// "unsupported" so PMC collection continues without them.
 TEST(profiler_ioctl_request, no_kfd_device_lock_and_ptl_unavailable)
 {
-    if(agent::kfd_device_available()) GTEST_SKIP() << "/dev/kfd is available";
+    if(!platform::wsl::is_available()) GTEST_SKIP() << "not running under WSL2/DXG";
 
     rocprofiler_agent_t agent{};
     agent.gpu_id = 1;

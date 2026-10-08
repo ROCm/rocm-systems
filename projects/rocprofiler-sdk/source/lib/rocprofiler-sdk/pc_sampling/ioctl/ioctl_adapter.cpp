@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -100,14 +101,10 @@ kfd_open()
     if(fd == -1)
     {
         auto err = errno;
-        // ENOENT: no KFD device node on this platform (e.g. WSL2/DXG)
-        if(err != ENOENT)
-        {
-            ROCP_CI_LOG(WARNING) << fmt::format("Cannot open {} for pc sampling (errno {}: {})",
-                                                kfd_device_name,
-                                                err,
-                                                std::strerror(err));
-        }
+        ROCP_CI_LOG(WARNING) << fmt::format("Cannot open {} for pc sampling (errno {}: {})",
+                                            kfd_device_name,
+                                            err,
+                                            std::strerror(err));
         return -1;
     }
 
@@ -476,7 +473,8 @@ is_pc_sampling_method_supported(rocprofiler_ioctl_pc_sampling_method_kind_t ioct
 int
 get_kfd_fd()
 {
-    static auto _v = kfd_open();
+    // WSL2/DXG exposes /dev/dxg instead of /dev/kfd, so KFD is absent by design there
+    static auto _v = platform::wsl::is_available() ? -1 : kfd_open();
     return _v;
 }
 

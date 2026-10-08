@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -32,16 +33,21 @@
 
 using namespace rocprofiler;
 
+// Outside WSL2/DXG a /dev/kfd that cannot be opened is reported through ROCP_CI_LOG, which is
+// fatal in CI builds, so only WSL2/DXG and hosts with a usable /dev/kfd are checked here.
 TEST(pc_sampling_kfd_unavailable, kfd_fd_matches_kfd_device_availability)
 {
+    if(!platform::wsl::is_available() && !agent::kfd_device_available())
+        GTEST_SKIP() << "/dev/kfd cannot be opened and this is not WSL2/DXG";
+
     EXPECT_EQ(pc_sampling::ioctl::get_kfd_fd() >= 0, agent::kfd_device_available());
 }
 
-// Exercised on hosts without /dev/kfd (e.g. WSL2/DXG): PC sampling must report
-// NOT_AVAILABLE without aborting or issuing ioctls on an invalid descriptor.
+// WSL2/DXG does not expose KFD: PC sampling must report NOT_AVAILABLE without aborting or
+// issuing ioctls on an invalid descriptor.
 TEST(pc_sampling_kfd_unavailable, pc_sampling_reports_not_available)
 {
-    if(agent::kfd_device_available()) GTEST_SKIP() << "/dev/kfd is available";
+    if(!platform::wsl::is_available()) GTEST_SKIP() << "not running under WSL2/DXG";
 
     rocprofiler_agent_t agent{};
     agent.name   = "gfx1100";
