@@ -222,6 +222,16 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
   compiles for real. See `test_categories_micro_diagnostics.yaml`.
 
+- **`rccl-UnitTestsMicroDda`**: `src/algorithms/dda/` — currently
+  `fabric/fabric_mem_handler.cc` (via `FABRIC_MEM_HANDLER_CC_PATH`, suite
+  `FabricMemHandlerTest.*`). Tests here mirror the source tree:
+  `test/host/<path under src>/<file>-test.cc`, e.g.
+  `algorithms/dda/fabric/fabric-mem-handler-test.cc`; the files are listed by
+  path from `test/host/CMakeLists.txt`, with no nested CMake project. One binary
+  for all of DDA, since its units share the same seams (cuMem VMM, bootstrap
+  allgather). Fixtures pin `NCCL_CUMEM_SKIP_FREE` unset, because `alloc.h`
+  memoises that skip once per process. See `test_categories_micro_dda.yaml`.
+
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
 
@@ -340,6 +350,7 @@ symbol.
 | Production TU | Fakes file |
 |---|---|
 | `src/algorithms/dda/*.cc` | `fakes/dda_fakes.cc` |
+| `src/init.cc`'s `alloc.h` data symbols (`allocTracker`), for binaries that don't compile `init.cc` | `fakes/alloc_fakes.cc` |
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
@@ -421,13 +432,11 @@ Five things do NOT follow the TU-per-file rule, deliberately:
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all. `rcclEffectiveP2pBatchEnable`
   did have one and moved to `fakes/enqueue_fakes.cc`.
-- `IsArchMatch` and the `allocTracker` data symbol stay in `p2p-test.cc`
-  itself rather than a fakes file, because neither has an owning production
-  TU to name a fakes file after: `IsArchMatch` is declared in the
-  header-only `archinfo.h`, and `allocTracker` is an `alloc.h` data symbol
-  that only `p2p.cc` references in this target. (The busId helpers alongside
-  them *do* have an owner — `src/misc/utils.cc` — so they live in
-  `fakes/utils_fakes.cc`, not here.)
+- `IsArchMatch` is not faked: the real `src/misc/archinfo.cc` is compiled as
+  an oracle TU. The `allocTracker` data symbol, which `src/init.cc` defines in
+  production, comes from `fakes/alloc_fakes.cc` in binaries that don't compile
+  `init.cc`. (The busId helpers have an owner too — `src/misc/utils.cc` — so
+  they live in `fakes/utils_fakes.cc`.)
 
 An aggregation header includes the per-TU headers a unit's tests use and
 declares the reset that chains their per-TU resets, and defines no seams itself.
@@ -726,7 +735,7 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
-`rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -766,6 +775,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
+./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
 ./build/rccl-HostUnitTests
 ```
 
