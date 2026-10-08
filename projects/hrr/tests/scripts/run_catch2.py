@@ -333,6 +333,9 @@ def _run_suite(args: argparse.Namespace, state: dict) -> int:
         return completed.returncode or 1
 
     counts, _ = _report(root)
+    for line in completed.stdout.splitlines():
+        if "hrr spawn:" in line:
+            print(line)
 
     # A crash can leave syntactically valid, but incomplete, JUnit without a
     # failed case. Preserve the raw transcript only for that exceptional path.

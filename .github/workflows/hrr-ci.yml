@@ -658,11 +658,13 @@ jobs:
       - name: Restore executable bits
         run: chmod +x build/hrr/playback/hrr-playback build/hrr/tests/*/hrr-*tests
 
-      # In a container the workspace is /__w/..., while HRR_TEST_EXE and
-      # HRR_PLAYBACK_EXE were baked on the build machine. Some images already
-      # have that path as a real directory. ln -sfn will not replace one: it
-      # nests the link inside it, and every workload then dies in execvp
-      # with 127.
+      # In a container the workspace is /__w/..., while HRR_TEST_EXE,
+      # HRR_PLAYBACK_EXE and the SDK RUNPATH were baked on the build machine.
+      # The tests re-exec /proc/self/exe, because a symlink to the checkout
+      # created on the container root can sit on a noexec mount: test -x
+      # succeeds and execve returns EACCES, which the suite reports as 127.
+      # The tool-cache link is what makes that RUNPATH resolve when a child
+      # cannot use LD_LIBRARY_PATH. ln -sfn will not replace a real directory.
       - name: Recreate build path
         env:
           BUILD_WORKSPACE: ${{ needs.build.outputs.workspace }}
@@ -675,6 +677,18 @@ jobs:
             fi
             if [ ! -e "${BUILD_WORKSPACE}" ] || [ -L "${BUILD_WORKSPACE}" ]; then
               ln -sfn "${PWD}" "${BUILD_WORKSPACE}"
+            fi
+          fi
+          # Build-machine SDK path -> this container's tool cache.
+          if [ -d /__w/_tool ]; then
+            tool=/home/runner/_work/_tool
+            mkdir -p /home/runner/_work
+            if [ -d "${tool}" ] && [ ! -L "${tool}" ] \
+                && [ "$(stat -c '%d:%i' "${tool}")" != "$(stat -c '%d:%i' /__w/_tool)" ]; then
+              rm -rf "${tool}"
+            fi
+            if [ ! -e "${tool}" ] || [ -L "${tool}" ]; then
+              ln -sfn /__w/_tool "${tool}"
             fi
           fi
           exe="${BUILD_WORKSPACE:-${PWD}}/build/hrr/tests/integration/hrr-integration-tests"
