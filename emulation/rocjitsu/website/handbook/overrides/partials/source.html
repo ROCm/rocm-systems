@@ -1,0 +1,16 @@
+{# Keep repository facts visible even if GitHub is temporarily unavailable. #}
+{% set stats = config.extra.repository_stats %}
+<div class="source-links">
+  <a href="{{ config.repo_url }}" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      {% include ".icons/" ~ config.theme.icon.repo ~ ".svg" %}
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      {{ config.repo_name }}
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: {{ stats.get('stargazers_count', 'count unavailable') }} · build snapshot" aria-label="Stars: {{ stats.get('stargazers_count', 'count unavailable') }}">{{ stats.get('stargazers_count', '—') }}</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: {{ stats.get('forks_count', 'count unavailable') }} · build snapshot" aria-label="Forks: {{ stats.get('forks_count', 'count unavailable') }}">{{ stats.get('forks_count', '—') }}</li>
+      </ul>
+    </div>
+  </a>
+</div>

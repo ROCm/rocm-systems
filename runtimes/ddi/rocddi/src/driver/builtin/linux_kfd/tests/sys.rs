@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Exercise kernel output and retry contracts through the typed call boundary.
@@ -67,6 +68,33 @@ fn available_memory_query_preserves_the_kernel_result() {
         Ok(())
     }));
     assert_eq!(kfd.available_memory(42).unwrap(), 0x3f5c_00000);
+}
+
+#[test]
+fn ais_rejects_kernel_progress_beyond_the_submitted_transfer() {
+    let kfd = endpoint(Arc::new(|call| {
+        let Call::Ais(args) = call else {
+            panic!("unexpected ioctl")
+        };
+        assert_eq!(args.requested_input().handle, 17);
+        args.set_completed_output(uapi::AisOutput {
+            size_copied: 4097,
+            status: 0,
+            pad: 0,
+        });
+        Ok(())
+    }));
+    let error = kfd
+        .ais(uapi::AisInput {
+            handle: 17,
+            handle_offset: 0,
+            file_offset: 0,
+            size: 4096,
+            operation: uapi::AIS_READ,
+            descriptor: 3,
+        })
+        .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
 }
 
 #[test]
