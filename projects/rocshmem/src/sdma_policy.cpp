@@ -115,7 +115,11 @@ __host__ void SdmaImpl::sdmaHostStop() {
     CHECK_HIP(hipFree(deviceHandles_d));
     deviceHandles_d = nullptr;
   }
-  sdma_anvil::anvil.disconnect();
+  // Release only the peers sdmaHostInit wired: the channel map is process-global, so disconnect()
+  // would also destroy queues another user still holds. A disabled or failed init left none.
+  if (sdmaEnabled) {
+    for (int i = 0; i < shm_size; i++) sdma_anvil::anvil.disconnectDevice(i);
+  }
 }
 
 #endif  // USE_SDMA
