@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Shared helpers for single-pass, legacy, and inspector bucket packing."""
+"""Shared helpers for single-pass metric and inspector bucket packing."""
 
 from typing import (
     TYPE_CHECKING,
@@ -18,10 +18,6 @@ from typing import (
 from utils.metrics.expression import (
     is_composite_avg_formula,
     reject_counter_bearing_composite_extents,
-)
-from utils.utils_common import (
-    METRIC_ID_RE,
-    convert_metric_id_to_panel_info,
 )
 from utils.utils_counter_defs import (
     denom_colocated_counters,
@@ -106,18 +102,16 @@ def _composite_formula(body: Dict[str, Any]) -> Optional[str]:
 
 
 def iter_metric_groups(
-    priority_metric_ids: Iterable[str],
     yaml_metrics: Iterable[_YamlMetric],
     gpu_series: str,
     profile_counters: Set[str],
 ) -> List[_MetricGroup]:
-    """Metric PMC groups in priority-tier order for the profiled counters.
+    """Metric PMC groups for the profiled counters, largest first.
 
     profile_counters is already expanded, so a TCC channel template in a
     formula matches the channel counters it holds. Composite parents are not
     a second PMC pack.
     """
-    priority_keys = _priority_metric_keys(priority_metric_ids)
     raw_metrics = list(yaml_metrics)
 
     rows: List[_MetricGroup] = []
@@ -146,8 +140,7 @@ def iter_metric_groups(
         counters = _profiled_counters(set(formula_hw), profile_counters)
         if not counters:
             continue
-        tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
-        sort_key = (tier, -len(counters), stem_id, panel_key, metric_idx)
+        sort_key = (-len(counters), stem_id, panel_key, metric_idx)
         label = f"{stem_id}.{panel_key}.{metric_idx} ({metric_name})"
         rows.append((sort_key, counters, label))
     rows.sort(key=lambda row: row[0])
@@ -181,21 +174,6 @@ def count_multi_bucket_metrics(
         if _group_bucket_span(group, bucket_sets) > 1:
             count += 1
     return count
-
-
-def _priority_metric_keys(
-    priority_metric_ids: Iterable[str],
-) -> Set[Tuple[str, Any, int]]:
-    priority_keys: Set[Tuple[str, Any, int]] = set()
-    for token in priority_metric_ids:
-        tid = token.strip()
-        if not METRIC_ID_RE.match(tid):
-            continue
-        file_id, panel_id, metric_idx = convert_metric_id_to_panel_info(tid)
-        if metric_idx is None:
-            continue
-        priority_keys.add((file_id, panel_id, metric_idx))
-    return priority_keys
 
 
 def _profiled_counters(
