@@ -768,17 +768,18 @@ no free at all (the summary and the `--kernel-filter` warm-up wait), and a free
 whose restore waits for a later event (the bounded wait and the leak). With two
 devices the reset frees no pinned host memory, so the reset case shows only that
 replay waits before it. A one-GPU case points a record after a reset at the
-buffer the reset freed, and checks that replay refuses it. Three paths are untested by design: the fork handlers, a
-blob or event that cannot be written, and a restore `hipLaunchHostFunc` refuses.
-Each needs a fault injected into the capture or replay process, which no test
-hook provides. Of the leaks, only the one in `hipHostFree` is tested; those in
-`hipFree`, `hipHostUnregister` and `hipFreeHost` call the same check and are
-not. The waits at teardown are untested too, and so is their giving up after
-the first one runs out: they matter only when a divergence stops replay before
-the summary's wait, or when that wait runs out. So is the
-ordering of a launch against a `hipStreamBeginCapture` on another thread; the
-case for a free on another thread covers the same ordering. Neither is the
-ordering of a `hipDeviceReset` against other threads' launches.
+buffer the reset freed, and checks that replay refuses it. Three paths are
+untested by design: the fork handlers, a blob or event that cannot be written,
+and a restore `hipLaunchHostFunc` refuses. Each needs a fault injected into the
+capture or replay process, which no test hook provides. Of the leaks, only the
+one in `hipHostFree` is tested; those in `hipFree`, `hipHostUnregister` and
+`hipFreeHost` call the same check and are not. The waits at teardown are
+untested too, and so is their giving up after the first one runs out: they
+matter only when a divergence stops replay before the summary's wait, or when
+that wait runs out. So is the ordering of a launch against a
+`hipStreamBeginCapture` on another thread; the case for a free on another
+thread covers the same ordering. Neither is the ordering of a `hipDeviceReset`
+against other threads' launches.
 
 ### Threat Model: Pinned Host Snapshots
 
@@ -824,16 +825,16 @@ checks each record when it queues the restore, not when the restore runs. At
 that point the record must name a pinned host allocation replay made, lie
 inside its bounds, and come with a blob of exactly the recorded length. A record
 that names device memory, no allocation, a range outside its allocation, an
-unknown direction or a blob of another size is refused. After a replayed
-`hipDeviceReset`, replay stops tracking every pinned allocation the runtime no
-longer knows, as capture does, so a later record naming one is refused too.
-Replay then keeps the allocation alive until the restore has run or the process
-exits: a free, an unregister or teardown waits for it, and leaks the allocation
-rather than free it when the wait runs out. Once the summary's wait or one
-teardown wait has run out, teardown leaks without waiting. Two paths release
-the allocation anyway, so a restore queued before them can write
-archive-chosen bytes into memory that has been released and may have been
-reused:
+unknown direction or a blob of another size is refused. So is a record naming
+an allocation a replayed `hipDeviceReset` released: after the reset, replay
+stops tracking every pinned allocation the runtime no longer knows, as capture
+does. For a record it accepts, replay keeps the allocation alive until the
+restore has run or the process exits: a free, an unregister or teardown waits
+for it, and leaks the allocation rather than free it when the wait runs out.
+Once the summary's wait or one teardown wait has run out, teardown leaks
+without waiting. Two paths release the allocation anyway, so a restore queued
+before them can write archive-chosen bytes into memory that has been released
+and may have been reused:
 
 - a replayed `hipDeviceReset` whose bounded wait runs out, when replay sees one
   GPU (with more, a reset frees no pinned host memory). An archive can arrange
