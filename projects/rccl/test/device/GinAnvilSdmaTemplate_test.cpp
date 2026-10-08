@@ -585,15 +585,6 @@ __global__ void kernelMarkSdmaDirty(TemplateHarness* h, uint64_t* dirty, int pee
   nccl::gin::anvil::detail::markSdmaDirty(&h->ctx, peer, h->ctx.numChannels, /*effCh=*/0);
 }
 
-__global__ void kernelFlushDirty(TemplateHarness* h, uint64_t* dirty) {
-  h->ctx.sdmaDirty = dirty;
-  ncclGinCtx ginCtx{};
-  ginCtx.handle = &h->ctx;
-  ginCtx.nRanks = 2;
-  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
-                                                         cuda::memory_order_seq_cst, nullptr);
-}
-
 // Drives the stub's quiet() to mark `bit` dirty, imitating a put on another
 // wave that rings its doorbell mid-drain.
 static void setMarkDirtyOnQuiet(uint64_t* dirty, uint64_t bit) {
@@ -645,7 +636,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_CapturesAndClearsDirty) {
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   resetQuietCount();
-  kernelFlushDirty<<<1, 1>>>(d_h.ptr, d_dirty.ptr);
+  kernelFlushQuiet<<<1, 1>>>(d_h.ptr, d_dirty.ptr);
   syncAndCheck();
   EXPECT_EQ(d_dirty.download(), 0ULL);
   EXPECT_EQ(readQuietCount(), 1ULL);
@@ -667,7 +658,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_MarkDuringQuietSurvives) {
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   resetQuietCount();
   setMarkDirtyOnQuiet(d_dirty.ptr, 1ULL << 1);
-  kernelFlushDirty<<<1, 1>>>(d_h.ptr, d_dirty.ptr);
+  kernelFlushQuiet<<<1, 1>>>(d_h.ptr, d_dirty.ptr);
   syncAndCheck();
   setMarkDirtyOnQuiet(nullptr, 0);
   EXPECT_EQ(d_dirty.download(), 1ULL << 1);
@@ -693,7 +684,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Flush_ClearsOnlyAfterDraining) {
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
   resetQuietCount();
   setObserveDirtyOnQuiet(d_dirty.ptr);
-  kernelFlushDirty<<<1, 1>>>(d_h.ptr, d_dirty.ptr);
+  kernelFlushQuiet<<<1, 1>>>(d_h.ptr, d_dirty.ptr);
   syncAndCheck();
   const unsigned long long duringQuiet = readDirtyAtQuiet();
   setObserveDirtyOnQuiet(nullptr);
@@ -1477,6 +1468,10 @@ TEST_P(GinAnvilSdmaSignalFenceTest, FenceCount) {
 
 // SdmaThenSignal is not fused (no signal_remote_addrs), so fenceBeforeSignal
 // quiets and system-fences, then signalPeer fences again before the atomic.
+// expectSystem pins how many NCCL_GIN_THREADFENCE_SYSTEM fences each path emits
+// now, not the 2 -> 1 drop on IpcSignal: the stub counts only that macro, and the
+// old signalPeer fence was a raw __threadfence_system(). expectQuiet is what tells
+// the IPC rows apart from the old quiet-on-every-signal behaviour.
 INSTANTIATE_TEST_SUITE_P(
     Paths, GinAnvilSdmaSignalFenceTest,
     ::testing::Values(

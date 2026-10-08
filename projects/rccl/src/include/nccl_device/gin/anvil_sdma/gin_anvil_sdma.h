@@ -153,10 +153,7 @@ NCCL_DEVICE_INLINE void signalPeer(ncclGinAnvilSdmaGPUContext* rsCtx, int peer, 
   ipcFlatAtomicAddSys64(remoteSig, value);
 }
 
-NCCL_DEVICE_INLINE void fenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx, bool needSdmaQuiet,
-                                          ::sdma_anvil::SdmaQueueDeviceHandle* handle, bool hasCounter) {
-  (void)rsCtx;
-  (void)hasCounter;
+NCCL_DEVICE_INLINE void fenceBeforeSignal(bool needSdmaQuiet, ::sdma_anvil::SdmaQueueDeviceHandle* handle) {
   // quiet() drains this peer/channel queue. Sub-threshold IPC stores are not
   // on that queue, so a system fence still orders them ahead of the signal.
   if (needSdmaQuiet && handle != nullptr) ::sdma_anvil::quiet(*handle);
@@ -175,7 +172,7 @@ NCCL_DEVICE_INLINE void maybeFenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx
                                                bool issuedSdmaThisCall, bool hasSignal, bool hasCounter) {
   bool needSdmaQuiet = needSdmaQuietBeforeSignal(rsCtx, peer, blockId, handle, issuedSdmaThisCall);
   if (!skipFenceBeforeSignal(needSdmaQuiet, hasSignal, hasCounter)) {
-    fenceBeforeSignal(rsCtx, needSdmaQuiet, *handle, hasCounter);
+    fenceBeforeSignal(needSdmaQuiet, *handle);
   }
 }
 
