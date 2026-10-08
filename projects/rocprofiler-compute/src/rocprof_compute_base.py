@@ -152,19 +152,14 @@ class RocProfCompute:
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
 
+        if self.__mode == "analyze":
+            self.detect_analyze()
+
         self._validate_list_option_exclusions()
 
         if self.__mode == "profile":
             self._validate_profile_mode_arguments()
             self._resolve_pc_sampling_interval()
-        elif self.__mode == "analyze":
-            self.detect_analyze()
-            if self.__args.list_stats and self.__analyze_mode == "db":
-                console_error(
-                    "--list-stats cannot be used with --output-format csv or db. "
-                    "Use --output-format stdout or txt, or omit --list-stats "
-                    "to export analysis results."
-                )
 
         # Validate name and output directory arguments in profiling mode
         # Skip validation if only listing metrics or sets
@@ -609,10 +604,18 @@ class RocProfCompute:
             )
 
     def _validate_list_option_exclusions(self) -> None:
-        """Validate that list/discovery options aren't combined with --block.
+        """Validate incompatible combinations of list/discovery options.
+
         Applies to both profile and analyze mode.
         """
         args = self.__args
+        if self.__mode == "analyze" and args.list_stats and self.__analyze_mode == "db":
+            console_error(
+                "--list-stats cannot be used with --output-format csv or db. "
+                "Use --output-format stdout or txt, or omit --list-stats "
+                "to export analysis results."
+            )
+
         block_active = bool(
             getattr(args, "filter_blocks", None)
             or getattr(args, "filter_metrics", None)

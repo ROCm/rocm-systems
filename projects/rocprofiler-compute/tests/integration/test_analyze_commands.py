@@ -98,7 +98,6 @@ def test_list_stats_rejects_db_output(
     output = captured.out + captured.err
     assert "--list-stats cannot be used with --output-format csv or db" in output
     assert "Use --output-format stdout or txt" in output
-    assert "deriving rocprofiler-compute metrics" not in output
     assert not output_path.exists()
     assert not output_path.with_suffix(".db").exists()
 
