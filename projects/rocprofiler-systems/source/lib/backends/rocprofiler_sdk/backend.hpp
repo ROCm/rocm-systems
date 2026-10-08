@@ -89,6 +89,9 @@ struct backend
     using kernel_dispatch_record_t       = Wrapper::kernel_dispatch_record;
     using memory_copy_record_t           = Wrapper::memory_copy_record;
     using scratch_memory_record_t        = Wrapper::scratch_memory_record;
+    using code_object_load_data_t        = Wrapper::code_object_load_data;
+    using code_object_kernel_symbol_register_data_t =
+        Wrapper::code_object_kernel_symbol_register_data;
 #if ROCPROFILER_VERSION >= 700
     using async_correlation_id_t    = Wrapper::async_correlation_id_t;
     using tracing_hip_stream_data_t = Wrapper::hip_stream_data;
@@ -175,6 +178,10 @@ struct backend
         Wrapper::RCCL_API_ID_ncclAlltoAll;
 #endif
     // NOLINTEND(readability-identifier-naming)
+    // ─── Code object operation constants ─────────────────────────────────────────
+    static constexpr tracing_operation_t CODE_OBJECT_LOAD = Wrapper::CODE_OBJECT_LOAD;
+    static constexpr tracing_operation_t CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER =
+        Wrapper::CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
 
 #if ROCPROFILER_VERSION >= 600
     // ─── OMPT types and constants ─────────────────────────────────────────────────
