@@ -24,11 +24,6 @@ using ::testing::Throw;
 constexpr std::uint64_t k_start_ts = 5000;
 constexpr std::uint64_t k_end_ts   = 6000;
 
-constexpr auto k_copy_kind =
-    static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY);
-constexpr auto k_scratch_kind =
-    static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
-
 class rocpd_processor_handle_test : public rocpd_processor_mock_test
 {
 protected:
@@ -318,10 +313,10 @@ TEST_F(rocpd_processor_handle_test,
                     IsEnv(copy_env())))
         .Times(1);
 
-    make_processor()->handle(memory_copy_sample{
-        k_start_ts, k_end_ts, k_thread_id, k_gpu_handle, k_cpu_handle, k_copy_kind,
-        static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE), k_copy_bytes,
-        1, 0, k_dst_address, k_src_address, k_stream_id });
+    make_processor()->handle(
+        memory_copy_sample{ k_start_ts, k_end_ts, k_thread_id, k_gpu_handle, k_cpu_handle,
+                            "MEMORY_COPY_HOST_TO_DEVICE", k_copy_bytes, 1, 0,
+                            k_dst_address, k_src_address, k_stream_id });
 }
 
 TEST_F(rocpd_processor_handle_test, handle_memory_copy_device_to_host_uses_its_own_name)
@@ -334,10 +329,10 @@ TEST_F(rocpd_processor_handle_test, handle_memory_copy_device_to_host_uses_its_o
                     IsEnv(copy_env())))
         .Times(1);
 
-    make_processor()->handle(memory_copy_sample{
-        k_start_ts, k_end_ts, k_thread_id, k_gpu_handle, k_cpu_handle, k_copy_kind,
-        static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST), k_copy_bytes,
-        1, 0, k_dst_address, k_src_address, k_stream_id });
+    make_processor()->handle(
+        memory_copy_sample{ k_start_ts, k_end_ts, k_thread_id, k_gpu_handle, k_cpu_handle,
+                            "MEMORY_COPY_DEVICE_TO_HOST", k_copy_bytes, 1, 0,
+                            k_dst_address, k_src_address, k_stream_id });
 }
 
 TEST_F(rocpd_processor_handle_test, handle_memory_copy_propagates_writer_failure)
@@ -353,9 +348,8 @@ TEST_F(rocpd_processor_handle_test, handle_memory_copy_propagates_writer_failure
         [&] {
             processor->handle(memory_copy_sample{
                 k_start_ts, k_end_ts, k_thread_id, k_gpu_handle, k_cpu_handle,
-                k_copy_kind,
-                static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE),
-                k_copy_bytes, 1, 0, k_dst_address, k_src_address, 999 });
+                "MEMORY_COPY_HOST_TO_DEVICE", k_copy_bytes, 1, 0, k_dst_address,
+                k_src_address, 999 });
         },
         ::testing::ThrowsMessage<std::runtime_error>(
             ::testing::HasSubstr("Stream not registered")));
@@ -390,7 +384,8 @@ TEST_F(rocpd_processor_handle_test, handle_scratch_memory_inserts_scratch_alloca
         .Times(1);
 
     make_processor()->handle(scratch_memory_sample{
-        k_start_ts, k_end_ts, k_thread_id, k_gpu_handle, k_queue_id, k_scratch_kind,
+        k_start_ts, k_end_ts, k_thread_id, k_gpu_handle, k_queue_id,
+        "SCRATCH_MEMORY_ALLOC",
         static_cast<std::int32_t>(ROCPROFILER_SCRATCH_MEMORY_ALLOC), k_scratch_flags,
         k_alloc_bytes, 100, 50, k_stream_id });
 }
@@ -407,7 +402,8 @@ TEST_F(rocpd_processor_handle_test, handle_scratch_memory_propagates_writer_fail
     EXPECT_THAT(
         [&] {
             processor->handle(scratch_memory_sample{
-                k_start_ts, k_end_ts, k_thread_id, k_gpu_handle, 999, k_scratch_kind,
+                k_start_ts, k_end_ts, k_thread_id, k_gpu_handle, 999,
+                "SCRATCH_MEMORY_ALLOC",
                 static_cast<std::int32_t>(ROCPROFILER_SCRATCH_MEMORY_ALLOC),
                 k_scratch_flags, k_alloc_bytes, 100, 50, k_stream_id });
         },
@@ -444,8 +440,7 @@ TEST_F(rocpd_processor_handle_test, handle_memory_allocate_inserts_real_allocati
         .Times(1);
 
     make_processor()->handle(memory_allocate_sample{
-        k_start_ts, k_end_ts, k_thread_id, k_gpu_handle,
-        static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION),
+        k_start_ts, k_end_ts, k_thread_id, k_gpu_handle, "MEMORY_ALLOCATION_ALLOCATE",
         static_cast<std::int32_t>(ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE),
         k_allocate_bytes, 200, 100, k_allocate_address, k_stream_id });
 }
@@ -520,12 +515,11 @@ TEST_F(rocpd_processor_handle_test, handle_mixed_samples_inserts_one_record_per_
     processor->handle(kernel_dispatch_sample{ 1500, 2000, k_thread_id, k_gpu_handle, 1, 1,
                                               k_queue_id, 2, 1, 0, 0, 128, 1, 1, 512, 1,
                                               1, k_stream_id });
-    processor->handle(memory_copy_sample{
-        2500, 3000, k_thread_id, k_gpu_handle, k_cpu_handle, k_copy_kind,
-        static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE), 2048, 3, 0, 0,
-        0, k_stream_id });
+    processor->handle(memory_copy_sample{ 2500, 3000, k_thread_id, k_gpu_handle,
+                                          k_cpu_handle, "MEMORY_COPY_HOST_TO_DEVICE",
+                                          2048, 3, 0, 0, 0, k_stream_id });
     processor->handle(scratch_memory_sample{
-        3500, 3600, k_thread_id, k_gpu_handle, k_queue_id, k_scratch_kind,
+        3500, 3600, k_thread_id, k_gpu_handle, k_queue_id, "SCRATCH_MEMORY_ALLOC",
         static_cast<std::int32_t>(ROCPROFILER_SCRATCH_MEMORY_ALLOC), 0, 32768, 4, 0,
         k_stream_id });
     processor->handle(backtrace_region_sample{ 0, k_thread_id, "Sampling", "bt_func",

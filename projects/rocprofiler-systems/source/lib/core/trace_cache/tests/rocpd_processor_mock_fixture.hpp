@@ -234,21 +234,6 @@ protected:
         m_metadata->add_kernel_symbol(symbol);
     }
 
-    /// SDK buffer and callback names the registry pre-registers in every metadata.
-    [[nodiscard]] int count_sdk_name_strings() const
-    {
-        std::size_t count = 0;
-        for(const auto& info : m_metadata->get_buffer_name_info())
-        {
-            count += std::ranges::distance(info.items());
-        }
-        for(const auto& info : m_metadata->get_callback_tracing_info())
-        {
-            count += std::ranges::distance(info.items());
-        }
-        return static_cast<int>(count);
-    }
-
     std::shared_ptr<metadata_registry> m_metadata;
     std::shared_ptr<agent_manager>     m_agents = std::make_shared<agent_manager>();
     output_file_registry               m_registry;
