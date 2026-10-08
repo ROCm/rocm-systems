@@ -186,6 +186,18 @@ function(rccl_define_micro_source_lists)
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroConnect -- REAL src/graph/connect.cc (#included via CONNECT_CC_PATH) with the real
+  # ring/tree helpers it calls; connect-test.cc fakes the few remaining symbols itself.
+  set(TEST_MICRO_CONNECT_SOURCE_FILES
+    connect-test.cc
+    fakes/hip_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroEnqueue(+-devlinker) -- src/enqueue.cc.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
@@ -834,6 +846,22 @@ foreach(_variant "" "-uncached" "-faultinj")
     target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
   endif()
 endforeach()
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroConnect -- ncclTopoPreset / ncclTopoPostset unstubbed.
+# ---------------------------------------------------------------------------
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc
+  PROPERTIES GENERATED TRUE)
+rccl_add_micro_binary(rccl-UnitTestsMicroConnect
+  SOURCES ${TEST_MICRO_CONNECT_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ${_MICRO_AMDSMI_DEF}
+    CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_connect.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (+ shipping -devlinker arm standalone)

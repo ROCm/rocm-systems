@@ -217,6 +217,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
 
+- **`rccl-UnitTestsMicroConnect`** — `src/graph/connect.cc` (via `CONNECT_CC_PATH`,
+  suites `EveryRank/ConnectMicrotest.*` and `ConnectMicrotestReject.*`):
+  `ncclTopoPreset` and `ncclTopoPostset` run unstubbed on a hand-built
+  single-node comm, with the real `rings.cc`, `trees.cc`, `rccl_graph_gen.cc` and
+  `archinfo.cc` linked in. Its own binary because every other micro target links
+  `topo_stubs.cc`, whose Preset/Postset stubs would be duplicate symbols; the few
+  remaining dependencies (logging, params, `bootstrapAllGather`) are faked in
+  `connect-test.cc` itself. See `test_categories_micro_connect.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`). Its own binary: it fakes the
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
@@ -765,6 +773,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-HostUnitTests
 ```

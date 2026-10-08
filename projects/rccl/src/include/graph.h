@@ -221,6 +221,7 @@ ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, stru
 
 struct ncclTopoRanks {
   int crossNicRing;
+  int nChannels;  // valid channels in the per-channel arrays below; set by Preset, raised by Postset's expansion
   int ringRecv[MAXCHANNELS];
   int ringSend[MAXCHANNELS];
   int ringPrev[MAXCHANNELS];
