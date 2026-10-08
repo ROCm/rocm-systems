@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 """Host-only regressions for the Cargo/CMake boundary (no Rust build required)."""
