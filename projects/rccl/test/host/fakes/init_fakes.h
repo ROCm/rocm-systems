@@ -44,6 +44,15 @@ extern int g_firmwareVersion;
 extern int g_gdrSupportValue;
 extern int g_gdrSupportCalls;
 
+// fillInfo's MLOPart PCI-function fallback (init.cc:1092) probes sysfs for the class of its own BDF.
+// The default is an accelerator class, i.e. what sysfs reports for a real GPU's own BDF; a test that
+// wants the HIP-alias shape (BDF absent from sysfs, so the probe yields nothing) must ask for "".
+// The call counter is the only way to see that the fn check short-circuited before the probe.
+// See kDefaultPciDeviceClass in init_fakes.cc for why the default is not "".
+extern std::string g_pciDeviceClass;
+extern int g_pciDeviceClassCalls;
+extern std::string g_lastPciDeviceClassBusId;
+
 extern bool g_bootstrapNetInitFail;
 
 extern ncclResult_t g_ncclNetInitResult;
