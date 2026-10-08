@@ -8,7 +8,7 @@
 #include "connect.h"
 #include "common.h"
 #include "p2p.h"
-#include "gin.h"
+#include "rma_multiseg.h"
 #include "p2p_resiliency.h"
 
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);

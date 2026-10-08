@@ -14,7 +14,7 @@
 #include "RmaMultiSegmentHelpers.hpp"
 #include "HybridVmmHelpers.hpp"
 #include "MPIHelpers.hpp"
-#include "transport/net_ib/gin.h"
+#include "transport/net_ib/rma_multiseg.h"
 
 #include <algorithm>
 #include <cstdint>
