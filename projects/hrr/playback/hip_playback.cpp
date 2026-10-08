@@ -2709,10 +2709,11 @@ static hipError_t hrr_block_guard_resolve(PlaybackContext& ctx,
     if (rls.guards.empty()) return hipSuccess;
 
     if (ctx.in_graph_capture) {
-        // hipDeviceSynchronize and blocking D2D hipMemcpy are illegal during
-        // stream capture (HIP 901). Relocate already skips when capturing, so
-        // this is defence in depth: tear the reservations down without a device
-        // round-trip and without treating a capture abort as a guard fault.
+        // hipDeviceSynchronize and a blocking D2D hipMemcpy would sync inside
+        // the capture, which fails and invalidates it (HIP 901). Relocate
+        // already skips when capturing, so this is defence in depth: tear the
+        // reservations down without a device round-trip and without treating
+        // a capture abort as a guard fault.
         for (const auto& g : rls.guards) hrr_block_guard_teardown(g);
         rls.guards.clear();
         rls.relocated.clear();

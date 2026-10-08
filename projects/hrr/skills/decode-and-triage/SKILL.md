@@ -227,7 +227,7 @@ program stored in device memory (vLLM's block table) stays true. A line
 address: <reason>` says one allocation replayed elsewhere. Any stored copy of
 its address is then stale, and a kernel reading through it fails a D2H check or
 faults exactly like a workload defect. The `[HRR h2d-scan]` lines that follow
-name the payload that stored it.
+name the first 16 payloads that stored such an address; `--verbose` names all.
 
 So when the summary counts `M fell back` with M above 0 and the replay failed,
 the fault class stays what the evidence says, the finding carries a

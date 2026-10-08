@@ -1087,20 +1087,77 @@ mapping tracked, logs it, and is tried again later. A recorded
 recording got back. When the runtime answers with another address, replay holds
 the recorded range again for a later reservation there.
 
-**Deferred frees.** `hipMemUnmap` waits for every stream, the capturing one
-included, so replay cannot unmap while a capture is open. A free during a capture
-moves the mapping to a deferred list instead. So does every placed
-`hipFreeAsync`: unmapping it on the spot would turn a stream-ordered free into a
-device-wide wait. The list is drained, and unmaps that failed earlier are tried
-again, at a replayed `hipDeviceSynchronize`, `hipStreamSynchronize` or
-`hipCtxSynchronize`, at the end of the last open capture, and when an allocation
-is placed over a deferred one. Nothing drains while any recorded stream is still
-capturing. A replayed `hipStreamEndCapture` closes its stream's capture even when
-replay's call fails. The capture also closes at `hipStreamDestroy`. Failed calls
-are not recorded, so a capture the program's own `hipStreamEndCapture` failed to
-end leaves no end in the archive; destroying its stream is where it ends.
-Until it drains, nothing is mapped over a deferred mapping, because the graph or
-the stream may still use it. The summary counts these frees.
+**Deferred frees.** `hipMemUnmap` waits for every stream on the device, the
+capturing one included, so replay cannot unmap while a capture is open. A free
+during a capture moves the mapping to a deferred list instead. So does every
+placed `hipFreeAsync`: unmapping it on the spot would turn a stream-ordered free
+into a device-wide wait the recording never had. A placed `hipFree` outside a
+capture unmaps at once, which matches the recording: `hipFree` waits for every
+stream too.
+
+The list is drained, and unmaps that failed earlier are tried again, at these
+points only:
+
+- a replayed `hipDeviceSynchronize` or `hipCtxSynchronize`, which waited for the
+  whole device in the recording too;
+- the reset between the `--kernel-filter` warm-up and the timed pass, and teardown;
+- an allocation that runs out of memory, described below.
+
+A `hipStreamSynchronize`, a `hipEventSynchronize`, the end of a capture and
+`hipStreamDestroy` do not drain: each waited for one stream, and an unmap there
+would wait for all of them. Nothing drains while any recorded stream is still
+capturing. HIP on Linux answers `hipCtxSynchronize` with `hipErrorNotSupported`
+and capture records only calls that succeeded, so in practice the device sync is
+the drain point.
+
+An allocation over a deferred mapping is handled three ways:
+
+- The same pages on the same device, as a stream-ordered pool hands an address
+  straight back: the allocation takes the mapping back as it is. No unmap and no
+  new map, so it works inside a capture too.
+- Any other overlap, with no capture open: the deferred mappings there are
+  unmapped first, then the allocation is mapped.
+- Any other overlap while a capture is open: the allocation falls back, named.
+
+When mapping a placed allocation runs out of memory, and when an allocation that
+is not placed runs out of memory, replay unmaps every deferred mapping and tries
+once more. It does not while a capture is open.
+
+A replayed `hipStreamEndCapture` closes its stream's capture even when replay's
+call fails, and so does `hipStreamEndCapture_spt`. `hipStreamBeginCaptureToGraph`
+and `hipStreamBeginCapture_spt` open one, when the stream is capturing after the
+call. The capture also closes at `hipStreamDestroy`. Failed calls are not
+recorded, so a capture the program's own `hipStreamEndCapture` failed to end
+leaves no end in the archive; destroying its stream is where it ends. A capture
+whose stream is never destroyed and never ends stays open for the rest of the
+replay, and every placed free after it is deferred until teardown. The summary
+counts deferred frees.
+
+What deferral costs:
+
+- **Memory.** A deferred mapping keeps its physical memory until it drains. A
+  trace that frees with `hipFreeAsync` and only ever synchronizes streams holds
+  every such allocation until the device runs out of memory, which then drains
+  them, or until teardown. The recording's pool reused that memory at once.
+- **`--skip-device-sync`.** It skips replayed `hipDeviceSynchronize`, and with it
+  the drain there. Deferred frees then wait for an allocation that runs out of
+  memory, the warm-up reset, or teardown.
+
+`hipMemUnmap` never runs under placement's lock. A drain marks the mappings it
+unmaps, releases the lock, unmaps them, and takes the lock again to drop them.
+Until then they still occupy their pages: an allocation over them waits, and
+`is_mapped` gives the answer the unmap ends with. An allocation or free elsewhere
+does not wait.
+
+Allocations and frees are ordered events, which hold the replay's event sequence
+until they return. An unmap inside one therefore stops every other replay thread
+until every stream on the device is idle. A placed `hipFree` does this, but the
+recording's `hipFree` waited for the same streams. The overlap drain and the
+out-of-memory drain have no such counterpart: the recording's pool reused the
+memory without waiting. If a kernel already queued spins on a flag that only a
+later replayed event sets, that drain never returns and the replay hangs. This is
+a known risk, not a solved one. It needs a non-matching overlap with a freed
+mapping, or an exhausted device, while such a kernel is running.
 
 **Several GPUs.** A placed allocation is backed on the device it was made on: the
 current device for `hipMalloc`, the stream's device for `hipMallocAsync`, and the
@@ -1125,7 +1182,8 @@ gives the total. The address ranges it matches against are sorted once and cache
 until an allocation or reservation changes them. `HIP_HRR_REPLAY_SCAN_H2D=1` forces
 the scan on from the start.
 
-Placement turns itself off, with one line saying why, under `--no-placement`,
+Placement turns itself off, with one line saying why, on Windows (its
+placeholders need `mmap`), under `--no-placement`,
 under `--guard-segments` (whose tail guard needs room the recorded layout does not
 have), when `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` is above 1 (padding pushes an
 allocation past its recorded neighbour), and when a device does not support virtual

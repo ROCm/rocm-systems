@@ -58,9 +58,10 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
 // Which recorded streams are inside a stream capture. Keyed by the recorded
 // stream handle, so the hipStreamEndCapture replayed for a stream clears that
 // stream's capture and no other, whichever thread it runs on and however the
-// call ends. Converting to bool asks whether any capture is open: device
-// synchronization, hipMemUnmap and event timing are illegal process-wide while
-// one is (HIP 900/901).
+// call ends. Converting to bool asks whether any capture is open: while one
+// is, device synchronization and event timing fail (HIP 900/901), and
+// hipMemUnmap would sync inside the capture, because it waits for every
+// stream on the device.
 class StreamCaptureFlag {
   public:
     void begin(uint64_t stream) {
