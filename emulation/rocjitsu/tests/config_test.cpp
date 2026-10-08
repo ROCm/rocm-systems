@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "long_path_handoff.h"
 #include "scoped_temp.h"
@@ -23,6 +24,7 @@
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
@@ -101,6 +103,26 @@ bool replace_exactly_once(std::string &text, std::string_view from, std::string_
     return false;
   text.replace(offset, from.size(), to);
   return true;
+}
+
+TEST(SoCTest, SelectsSdmaPacketDialect) {
+  const std::array cases = {
+      std::pair{ROCJITSU_CODE_ARCH_CDNA1, amdgpu::SdmaPacketDialect::Legacy},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA3, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA4, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_CDNA5, amdgpu::SdmaPacketDialect::Gfx1250},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA1, amdgpu::SdmaPacketDialect::Legacy},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA3, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA4, amdgpu::SdmaPacketDialect::Gfx11Plus},
+  };
+  for (const auto &[arch, expected] : cases) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    SoC soc("soc", nullptr, arch);
+    EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), expected);
+  }
 }
 
 TEST(ConfigLoaderTest, LoadCdna2Config) {
@@ -671,6 +693,60 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_TRUE(rdna35.soc()->xcd(0)->command_processor()->packed_tid());
   EXPECT_EQ(rdna35.soc()->sdma_queue_scheduler().packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
+}
+
+TEST(ConfigLoaderTest, Gfx1151HighSgprsAndVccStayWithinTheirWave) {
+  auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  // RDNA3.5 ISA section 3.3.1: s0-s105 are general-purpose registers;
+  // selectors 106/107 name VCC, which has separate simulator storage.
+  ASSERT_EQ(cu->config().sgprs_per_wf, 106u);
+  auto *wf = cu->dispatch_wf(0, 0, 106, 8, 32);
+  auto *neighbor = cu->dispatch_wf(1, 0, 106, 8, 32);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_NE(neighbor, nullptr);
+  const uint32_t base = wf->sgpr_alloc().base;
+  const uint32_t neighbor_base = neighbor->sgpr_alloc().base;
+  ASSERT_EQ(neighbor_base, base + 106u);
+  constexpr uint32_t sentinel = 0x12345678u;
+  cu->write_sgpr(neighbor_base, sentinel);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_NE(decoder, nullptr);
+  // LLVM MC gfx1151 encodings exercise both the destination and source
+  // selectors that the undersized 104-register profile could not back.
+  constexpr std::array<uint32_t, 6> words{
+      0xBEE80081u, // s_mov_b32 s104, 1
+      0xBEE90082u, // s_mov_b32 s105, 2
+      0xBE840068u, // s_mov_b32 s4, s104
+      0xBE850069u, // s_mov_b32 s5, s105
+      0xBEEA0083u, // s_mov_b32 vcc_lo, 3
+      0xBE86006Au, // s_mov_b32 s6, vcc_lo
+  };
+  for (uint32_t word : words) {
+    const std::array<uint32_t, 2> encoding{word, 0};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  }
+  EXPECT_EQ(cu->read_sgpr(base + 104), 1u);
+  EXPECT_EQ(cu->read_sgpr(base + 105), 2u);
+  EXPECT_EQ(cu->read_sgpr(base + 4), 1u);
+  EXPECT_EQ(cu->read_sgpr(base + 5), 2u);
+  EXPECT_EQ(cu->read_sgpr(base + 6), 3u);
+  EXPECT_EQ(wf->vcc(), 3u);
+  EXPECT_EQ(cu->read_sgpr(neighbor_base), sentinel);
+  EXPECT_EQ(neighbor->vcc(), 0u);
+
+  EXPECT_TRUE(cu->owns_sgpr_range(*wf, base + 105, 1));
+  EXPECT_FALSE(cu->owns_sgpr_range(*wf, base + 106, 1));
+  amdgpu::RegisterAccess registers(*wf);
+  EXPECT_EQ(registers.read_sgpr(neighbor_base), 0u);
+  registers.write_sgpr(neighbor_base, 0xDEADBEEFu);
+  EXPECT_EQ(cu->read_sgpr(neighbor_base), sentinel);
+  wf->halt();
+  neighbor->halt();
 }
 
 TEST(ConfigLoaderTest, BuildFromJsonString) {
