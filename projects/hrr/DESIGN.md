@@ -704,38 +704,47 @@ A host function that has not run yet still writes its allocation later.
 allocating device only, and a restore can be queued on another device's stream.
 So replay counts the restores queued for each allocation, and waits for that
 count to reach zero before it frees or unregisters the allocation, including at
-teardown. The first such wait is printed. The wait is bounded: by the
-`--sync-watchdog-ms` value when that is set, by 10 s otherwise. A restore whose
-stream is held by work that only a later replayed event releases would
-otherwise hang a single-threaded replay, which never reaches that event. When
-the time runs out, replay does not free the allocation: it leaks it, drops it
-from its tracking so that no later launch restores into it, prints a warning
+teardown. The first wait for a restore is printed, whoever waits: a free, a
+reset, the summary or the warm-up pass. Later waits print nothing. The wait is
+bounded: by the `--sync-watchdog-ms` value when that is set, by 10 s otherwise.
+A restore whose stream is held by work that only a later replayed event releases
+would otherwise hang a single-threaded replay, which never reaches that event.
+When the time runs out, replay does not free the allocation: it leaks it, drops
+it from its tracking so that no later launch restores into it, prints a warning
 naming it, and goes on. The late restore then writes memory that is still
 allocated. The summary counts the allocations leaked before it; one leaked at
 teardown, which comes after the summary, gets its warning only. Before the
 summary, and after the `--kernel-filter` warm-up pass, replay waits the same
 bounded time for every queued restore: the pass's closing sync covers the
 current device only, and a restore still queued on another device would be
-missing from the count. When the summary's wait runs out, the teardown waits
-do not wait: they would run out again, once per allocation. The count and the restored total live in state each host function holds
-a reference to, so one that runs after replay has exited does not touch a
-destroyed context. `--kernel-filter` resets the counters and the one-time
-notices after its warm-up pass, so the timed pass prints its own. The summary
+missing from the count. When the summary's wait runs out, the teardown waits do
+not wait: they would run out again, once per allocation. The count and the
+restored total live in state each host function holds a reference to, so one
+that runs after replay has exited does not touch a destroyed context.
+`--kernel-filter` resets the counters and the one-time notices after its warm-up
+pass, so the timed pass prints its own. A warm-up restore that is still queued
+when that wait runs out is counted in the timed pass when it runs. The summary
 prints the chunks restored and the records rejected. Snapshot blobs are held in
 a cache of at most 256 MiB, oldest out first, rather than the unbounded blob
 cache.
 
-A multi-threaded replay lets an event start before the one recorded ahead of
-it has finished, except allocations, frees, stream and graph capture calls and
-the like, which it orders. A launch with snapshot records is ordered too: it
-checks that each record names a live allocation, counts the restore against
-that allocation, and queues it on the launch stream. A free replayed on another
+A multi-threaded replay lets an event start before the one recorded ahead of it
+has finished, except allocations, frees, stream and graph capture calls and the
+like, which it orders. A launch with snapshot records is ordered too: it checks
+that each record names a live allocation, counts the restore against that
+allocation, and queues it on the launch stream. A free replayed on another
 thread between those steps found nothing to wait for and released the buffer
 under the restore, and a `hipStreamBeginCapture` on the launch stream turned the
 host function into a graph node. The next event therefore starts only once the
 launch has queued its restore and its kernel. The launch hands the turn on at
-that point, before the timing or the sync a debug option adds after it.
-Launches without records stay unordered.
+that point, before the timing or the sync a debug option adds after it. Launches
+without records stay unordered. While it holds the turn, the launch can block
+inside HIP: when the kernel argument chunk it is about to reuse is still in use
+by the GPU, when the AQL ring is full, and in the device sync `--scan-args` adds
+before its kernel. If a stream wait or a spinning kernel that only another
+thread's later event releases is what keeps the GPU from getting there,
+multi-threaded replay hangs; before such launches were ordered, that event could
+run and release it. Single-threaded replay blocks at the same point anyway.
 
 `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` reports host memory a kernel reads that no
 snapshot record names: a pointer argument into such a pinned allocation, and a
@@ -754,16 +763,18 @@ the old buffer that the runtime does not know. The six cross-device cases need
 two devices and skip with fewer, which is every runner that pins one GPU: a
 free, an unregister, a `hipFree`, a `hipDeviceReset` of the allocating device,
 no free at all (the summary and the `--kernel-filter` warm-up wait), and a free
-whose restore waits for a later event (the bounded wait and the leak). With
-two devices the reset frees no pinned host memory, so the reset case shows
-only that replay waits before it. Three
-paths are untested by design: the fork handlers, a blob or event that cannot be
-written, and a restore `hipLaunchHostFunc` refuses. Each needs a fault injected
-into the capture or replay process, which no test hook provides. The waits at
-teardown are untested too: they matter only when a divergence stops replay
-before the summary's wait, or when that wait runs out. So is the
+whose restore waits for a later event (the bounded wait and the leak). With two
+devices the reset frees no pinned host memory, so the reset case shows only that
+replay waits before it. Three paths are untested by design: the fork handlers, a
+blob or event that cannot be written, and a restore `hipLaunchHostFunc` refuses.
+Each needs a fault injected into the capture or replay process, which no test
+hook provides. Of the leaks, only the one in `hipHostFree` is tested; those in
+`hipFree`, `hipHostUnregister` and `hipFreeHost` call the same check and are
+not. The waits at teardown are untested too: they matter only when a divergence
+stops replay before the summary's wait, or when that wait runs out. So is the
 ordering of a launch against a `hipStreamBeginCapture` on another thread; the
-case for a free on another thread covers the same ordering.
+case for a free on another thread covers the same ordering. Neither is the
+ordering of a `hipDeviceReset` against other threads' launches.
 
 ### Threat Model: Pinned Host Snapshots
 
@@ -849,9 +860,11 @@ bytes in front of those kernels.
   most `--sync-watchdog-ms` or 10 s. When such a restore's stream is held by
   work that only later replayed events release, the wait runs out and replay
   leaks the allocation instead of freeing it, with a warning. The replayed
-  program then holds memory the captured one had released. This cannot happen
-  on the allocating device's streams: the captured free waited for them, so the
-  recorded program did not hold them past it.
+  program then holds memory the captured one had released. The wait also runs
+  out when the work queued ahead of the restore simply takes longer than the
+  bound, on any device, the allocating one included; a small
+  `--sync-watchdog-ms` makes that likely. Either way the result is only a
+  leak: the restore still runs, into memory that is still allocated.
 - A replayed `hipDeviceReset` first waits for every queued restore, at most
   `--sync-watchdog-ms` or 10 s, and then goes on. With two or more GPUs a reset
   never frees pinned host memory: the runtime keeps it in a context shared by
