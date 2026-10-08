@@ -49,8 +49,9 @@
 # kernel the restore must wait for, a launch stream held until a later replayed
 # release, per-thread launches into hipStreamLegacy and a failed null-stream
 # launch that must not hold other streams, size caps, every pinned allocator
-# and free, every launch entry point, graph capture, a failed launch, a device
-# reset, a failed free, pinned pointers in by-value structs, enumerated handles
+# and free, every launch entry point, graph capture, a launch beside an open
+# capture, a free on one device while another still restores, a failed launch,
+# a device reset, a failed free, pinned pointers in by-value structs, enumerated handles
 # and handles trusted after a launch. It edits captured archives to check that replay
 # refuses malformed records and leaves unchanged ones alone.
 #
