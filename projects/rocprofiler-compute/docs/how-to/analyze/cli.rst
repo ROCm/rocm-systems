@@ -20,6 +20,8 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 
 * :ref:`Roofline HTML generation <roofline-html-generation>`: Generate interactive HTML roofline charts from profiling data.
 
+* :ref:`Memory Chart HTML report <cli-memory-chart-html>`: Explore the memory hierarchy and individual kernels in an offline browser page.
+
 Run ``rocprof-compute analyze -h`` for more details.
 
 .. _cli-walkthrough:
@@ -111,6 +113,33 @@ There are three high-level GPU analysis views:
                                                                                                         ╰────────────────────────────────────────────╯
 
    Legend: <---- Read  ----> Write  <---> Atomic  █ Util  █ Hit%
+
+.. _cli-memory-chart-html:
+
+When a Memory Chart block is analyzed, the CLI also writes a self-contained
+``mem_chart.html`` in the workload directory. Open it in a browser to select a
+kernel or return to the aggregate with **Show all**. Its kernel list follows
+the duration-sorted kernel statistics table. Selecting a kernel changes the
+chart metrics, tables, and header. The header shows the selection, GPU and
+dispatch scope, and normalization separately.
+
+Scroll over the diagram to zoom, drag to pan, or double-click to fit.
+**Fit diagram** fits the complete hierarchy into the diagram
+area. **Export PNG** saves the current diagram view with its heading and legend;
+**Dark mode** switches the theme. These controls work offline. Expand **Metrics**
+to see the tables, which start collapsed. Their column widths and the disclosure
+state stay stable when selecting another kernel. Block notes, scope labels, and
+attached I/O blocks follow the architecture layout. Values use the same metric
+units and formatting as the terminal chart.
+
+``-k`` selects the initial kernel in the page when it names exactly one kernel;
+the list still includes all kernels in the analyzed workload. GPU and dispatch
+filters limit the chart data and kernel list. Their IDs appear in filenames such
+as ``mem_chart_gpu-0_d-3_4.html``. Each ``-p`` workload receives its own page,
+and a repeat analysis overwrites the page with the same name. The page is also
+written with ``--view table`` and ``--output-format txt``. Analysis without a
+Memory Chart block, list-statistics mode, and CSV or database output do not
+write a page.
 
 .. _cli-memory-chart-viewing:
 
