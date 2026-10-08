@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for src/device/ce_reduce/generate.py.
 
-generate.py splits the 40 (type, redop) instantiations of
+generate.py splits the supported (type, redop) instantiations of
 ncclCeLocalReduceKernelVec into separate TUs (see generate.py's module
 docstring for why) by combining two on-disk templates -- ce_reduce_impl.h.in
 (copied verbatim) and ce_reduce_launcher.cpp.in (expanded per-instantiation via
@@ -40,12 +40,16 @@ TYPES = [
     ("u8", "uint8_t"),
 ]
 
-REDOPS = [
+BASE_REDOPS = [
     ("Sum", 0),
     ("Prod", 1),
     ("Min", 2),
     ("Max", 3),
 ]
+
+
+def redops_for_type(tag: str) -> list[tuple[str, int]]:
+    return BASE_REDOPS + ([("Avg", 4)] if tag == "bf16" else [])
 
 VECTORIZE_OK = {
     ("i8", "Min"),
@@ -85,7 +89,7 @@ class CeReduceGenerationTest(unittest.TestCase):
             cls.impl_header = f.read()
         cls.launchers = {}
         for tag, _ in TYPES:
-            for redname, _ in REDOPS:
+            for redname, _ in redops_for_type(tag):
                 fname = "ce_reduce_%s_%s.cpp" % (tag, redname)
                 with open(os.path.join(cls._dir, fname)) as f:
                     cls.launchers[(tag, redname)] = f.read()
@@ -103,9 +107,15 @@ class CeReduceGenerationTest(unittest.TestCase):
     def test_generates_one_file_per_instantiation_plus_header(self) -> None:
         produced = set(os.listdir(self._dir))
         expected = {"ce_reduce_impl.h"}
-        expected.update("ce_reduce_%s_%s.cpp" % (tag, redname) for tag, _ in TYPES for redname, _ in REDOPS)
+        expected.update(
+            "ce_reduce_%s_%s.cpp" % (tag, redname)
+            for tag, _ in TYPES
+            for redname, _ in redops_for_type(tag)
+        )
         self.assertEqual(produced, expected)
-        self.assertEqual(len(self.launchers), len(TYPES) * len(REDOPS))
+        self.assertEqual(
+            len(self.launchers), sum(len(redops_for_type(tag)) for tag, _ in TYPES)
+        )
 
     def test_impl_header_has_shared_definitions(self) -> None:
         self.assertIn("#pragma once", self.impl_header)
@@ -125,7 +135,7 @@ class CeReduceGenerationTest(unittest.TestCase):
 
     def test_launcher_uses_correct_type_and_redop(self) -> None:
         for tag, ctype in TYPES:
-            for redname, redval in REDOPS:
+            for redname, redval in redops_for_type(tag):
                 with self.subTest(tag=tag, redname=redname):
                     text = self.launchers[(tag, redname)]
                     self.assertIn("using T = %s;" % ctype, text)
@@ -136,7 +146,7 @@ class CeReduceGenerationTest(unittest.TestCase):
 
     def test_vectorize_ok_define_matches_table(self) -> None:
         for tag, _ in TYPES:
-            for redname, _ in REDOPS:
+            for redname, _ in redops_for_type(tag):
                 with self.subTest(tag=tag, redname=redname):
                     text = self.launchers[(tag, redname)]
                     has_define = "#define CE_REDUCE_VECTORIZE_OK" in text
@@ -326,7 +336,11 @@ class CeReducePersistentContractTest(unittest.TestCase):
     def test_slot_constants_agree_with_ce_coll_h(self) -> None:
         with open(CE_COLL_H) as f:
             header = f.read()
-        for name in ("NCCL_CE_REDUCE_MAX_BLOCKS", "NCCL_CE_NUM_SLOTS"):
+        for name in (
+            "NCCL_CE_REDUCE_MAX_BLOCKS",
+            "NCCL_CE_REDUCE_DEFAULT_BLOCKS",
+            "NCCL_CE_NUM_SLOTS",
+        ):
             with self.subTest(constant=name):
                 pattern = r"#define\s+%s\s+(\d+)" % name
                 kernel_side = re.search(pattern, self.impl)
@@ -335,6 +349,31 @@ class CeReducePersistentContractTest(unittest.TestCase):
                 self.assertIsNotNone(host_side, "%s not defined in ce_coll.h" % name)
                 assert kernel_side is not None and host_side is not None
                 self.assertEqual(kernel_side.group(1), host_side.group(1))
+
+    def test_block_geometry_uses_runtime_occupancy_cap(self) -> None:
+        with open(CE_REDUCE_CC) as f:
+            dispatcher = f.read()
+        self.assertIn(
+            'RCCL_PARAM(CeReduceMaxBlocks, "CE_REDUCE_MAX_BLOCKS", '
+            "NCCL_CE_REDUCE_DEFAULT_BLOCKS)",
+            dispatcher,
+        )
+        self.assertIn("int ncclCeLocalReduceMaxBlocks()", dispatcher)
+        self.assertIn("(size_t)ncclCeLocalReduceMaxBlocks()", self.impl)
+
+    def test_bf16_avg_scales_once_after_reduction(self) -> None:
+        self.assertIn("struct CeReducePostOp<hip_bfloat16, 4>", self.impl)
+        self.assertNotIn("CeReducePreOp", self.impl)
+        self.assertIn("CeReducePostOp<T, RedOp>::apply(a, nRanks)", self.impl)
+        # Scalar and packed post-ops must share one reciprocal definition.
+        self.assertIn("ceReduceBfloat16AvgScale", self.impl)
+        self.assertEqual(self.impl.count("(hip_bfloat16)(1.0f / (float)nRanks)"), 1)
+
+    def test_bf16_avg_uses_packed_pair_arithmetic(self) -> None:
+        self.assertIn("struct CeReducePackOp<hip_bfloat16, 4>", self.impl)
+        self.assertIn("__hadd2(acc2[k], value2[k])", self.impl)
+        self.assertIn("__hmul2(value2[k], scale.pair)", self.impl)
+        self.assertIn("ceReduceBfloat16AvgScale(nRanks)", self.impl)
 
     def test_launch_bounds_matches_launcher_thread_count(self) -> None:
         bounds = re.search(r"__launch_bounds__\((\d+)\)", self.impl)

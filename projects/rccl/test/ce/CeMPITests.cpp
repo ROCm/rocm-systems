@@ -812,6 +812,200 @@ TEST_F(CeMPI_AllReduce, PipelinedMultiChunk)
 }
 
 // ===========================================================================
+// CeMPI_ReduceScatter – forced CE correctness, including rank-varying in-place
+// output alignment.
+// ===========================================================================
+
+class CeMPI_ReduceScatter : public CeMPITest
+{
+protected:
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> ceReduceScatterGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> forceCeReduceScatterGuard_;
+
+    void SetUp() override
+    {
+        CeMPITest::SetUp();
+        ceReduceScatterGuard_ =
+            std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_CE_REDUCESCATTER", "1");
+        forceCeReduceScatterGuard_ =
+            std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_FORCE_CE_REDUCESCATTER", "1");
+    }
+
+    void TearDown() override
+    {
+        forceCeReduceScatterGuard_.reset();
+        ceReduceScatterGuard_.reset();
+        CeMPITest::TearDown();
+    }
+
+    bool isCeReduceScatterExpected() const
+    {
+        return isCeReduceScatterDispatchConfigured() && !isMultiNodeTest();
+    }
+
+    void assertCEPathTaken(const char* context, size_t recvcount, ncclDataType_t datatype,
+                           ncclRedOp_t op, const void* sendbuff, void* recvbuff)
+    {
+        const std::string log = readAllLogs();
+        if(isCeReduceScatterExpected())
+        {
+            EXPECT_TRUE(ceLogShowsReduceScatterPath(log))
+                << context << ": CE ReduceScatter log marker absent";
+            EXPECT_TRUE(ceLogShowsReduceScatterReducer(log, ceExpectedReduceScatterReducer()))
+                << context << ": expected reducer=" << ceExpectedReduceScatterReducer();
+            int algo = 0, proto = 0, nChannels = 0;
+            ASSERT_EQ(ncclSuccess,
+                      rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncReduceScatter, recvcount,
+                                          datatype, op, sendbuff, recvbuff, /*graphCapturing=*/0, &algo,
+                                          &proto, &nChannels))
+                << context << ": rcclGetCollImplInfo failed";
+            EXPECT_TRUE(algo == static_cast<int>(RCCL_CE_2SHOT) ||
+                        algo == static_cast<int>(RCCL_CE_REGISTERED))
+                << context << ": rcclGetCollImplInfo must report a CE algo when CE ran"
+                << " (algo=" << algo << ")";
+        }
+        else
+        {
+            EXPECT_FALSE(ceLogShowsReduceScatterPath(log))
+                << context << ": CE ReduceScatter ran without its prerequisites";
+        }
+    }
+
+    void runReduceScatter(size_t recvcount, bool inPlace, const char* testId)
+    {
+        if(!validateTestPrerequisites(kMinRanks2))
+            GTEST_SKIP() << "Need >= " << kMinRanks2 << " MPI ranks";
+
+        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+        int rank{}, nRanks{};
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+
+        const size_t totalElem = recvcount * static_cast<size_t>(nRanks);
+        void* sendBuf = nullptr;
+        ASSERT_EQ(hipSuccess, hipMalloc(&sendBuf, totalElem * sizeof(float)));
+        RCCLTestGuards::DeviceBufferAutoGuard sendGuard(sendBuf);
+        fillRankScalar(sendBuf, totalElem, rank);
+
+        void* recvAllocation = nullptr;
+        float* recvBuf = nullptr;
+        if(inPlace)
+        {
+            recvBuf = static_cast<float*>(sendBuf) + static_cast<size_t>(rank) * recvcount;
+        }
+        else
+        {
+            ASSERT_EQ(hipSuccess, hipMalloc(&recvAllocation, recvcount * sizeof(float)));
+            recvBuf = static_cast<float*>(recvAllocation);
+        }
+        RCCLTestGuards::DeviceBufferAutoGuard recvGuard(recvAllocation);
+
+        ASSERT_EQ(ncclSuccess,
+                  ncclReduceScatter(sendBuf, recvBuf, recvcount, ncclFloat32, ncclSum,
+                                    getActiveCommunicator(), getActiveStream()));
+        ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
+        ASSERT_TRUE(verifyBufferData<float>(recvBuf, recvcount,
+                                            [expectedSum](size_t) { return expectedSum; }))
+            << "Rank " << rank << ": CE ReduceScatter Sum verification failed";
+        assertCEPathTaken(testId, recvcount, ncclFloat32, ncclSum, sendBuf, recvBuf);
+    }
+
+    // Primus GPT-OSS BF16 Avg ReduceScatter shapes. grouped wraps the call in
+    // ncclGroupStart/End; minChunksPerShard > 0 requires the multi-chunk path.
+    void runBfloat16Average(size_t recvcount, bool grouped, size_t minChunksPerShard,
+                            const char* testId)
+    {
+        if(!validateTestPrerequisites(kMinRanks8))
+            GTEST_SKIP() << "Need >= " << kMinRanks8 << " MPI ranks";
+
+        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+        int rank{}, nRanks{};
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+        const size_t totalElem = recvcount * static_cast<size_t>(nRanks);
+
+        hip_bfloat16* sendBuf = nullptr;
+        hip_bfloat16* recvBuf = nullptr;
+        ASSERT_EQ(hipSuccess, hipMalloc(&sendBuf, totalElem * sizeof(hip_bfloat16)));
+        ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, recvcount * sizeof(hip_bfloat16)));
+        RCCLTestGuards::DeviceBufferAutoGuard sendGuard(sendBuf);
+        RCCLTestGuards::DeviceBufferAutoGuard recvGuard(recvBuf);
+        ASSERT_EQ(hipSuccess,
+                  initializeBufferWithPattern<hip_bfloat16>(
+                      sendBuf, totalElem,
+                      [rank](size_t) { return hip_bfloat16(static_cast<float>(rank + 1)); }));
+
+        if(grouped)
+            ASSERT_EQ(ncclSuccess, ncclGroupStart());
+        ASSERT_EQ(ncclSuccess,
+                  ncclReduceScatter(sendBuf, recvBuf, recvcount, ncclBfloat16, ncclAvg,
+                                    getActiveCommunicator(), getActiveStream()));
+        if(grouped)
+            ASSERT_EQ(ncclSuccess, ncclGroupEnd());
+        ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        const hip_bfloat16 expected(static_cast<float>(nRanks + 1) / 2.0f);
+        ASSERT_TRUE(verifyBufferData<hip_bfloat16>(
+            recvBuf, recvcount, [expected](size_t) { return expected; }))
+            << "Rank " << rank << ": CE ReduceScatter BF16 Avg verification failed";
+
+        assertCEPathTaken(testId, recvcount, ncclBfloat16, ncclAvg, sendBuf, recvBuf);
+        if(isCeReduceScatterExpected() && minChunksPerShard > 0)
+        {
+            EXPECT_GE(ceLogChunksPerShard(readAllLogs()), minChunksPerShard)
+                << testId << ": expected chunksPerShard >= " << minChunksPerShard;
+        }
+    }
+};
+
+TEST_F(CeMPI_ReduceScatter, OutOfPlace)
+{
+    runReduceScatter(kSmallCount, false, "CeMPI_ReduceScatter/OutOfPlace");
+}
+
+// recvcount=4097 floats makes recvbuff = sendbuff + rank*recvcount have a
+// different 16-byte alignment on adjacent ranks. All ranks must still select
+// CE, and the kernel must use scalar stores for the unaligned shards.
+TEST_F(CeMPI_ReduceScatter, InPlaceRankVaryingAlignment)
+{
+    runReduceScatter(4097, true, "CeMPI_ReduceScatter/InPlaceRankVaryingAlignment");
+}
+
+// Primus GPT-OSS uses BF16 Avg for gradient ReduceScatter. Validate CE's
+// sum-then-post-scale implementation through the public API on eight ranks.
+TEST_F(CeMPI_ReduceScatter, Bfloat16Average)
+{
+    runBfloat16Average(kSmallCount, /*grouped=*/false, /*minChunksPerShard=*/0,
+                       "CeMPI_ReduceScatter/Bfloat16Average");
+}
+
+// Primus batches gradient collectives between ncclGroupStart/End. Exercise the
+// queued CE dispatch path rather than only the eager public-API path above.
+TEST_F(CeMPI_ReduceScatter, GroupedBfloat16Average)
+{
+    runBfloat16Average(kSmallCount, /*grouped=*/true, /*minChunksPerShard=*/0,
+                       "CeMPI_ReduceScatter/GroupedBfloat16Average");
+}
+
+// GPT-OSS's gradient bucket is larger than a CE staging slot, so correctness
+// also depends on recycling staging slots while the copy-engine stream fills
+// later chunks. The default reducer uses two slots; the finite per-chunk mode
+// reserves more. Keep this comfortably smaller than the production 2.23 GiB
+// collective while still forcing three chunks per shard with the default
+// 256 MiB per-slot staging capacity on eight ranks.
+TEST_F(CeMPI_ReduceScatter, GroupedPipelinedBfloat16Average)
+{
+    constexpr size_t kShardBytes = 96ull * 1024 * 1024;
+    const size_t recvcount = kShardBytes / sizeof(hip_bfloat16);
+    runBfloat16Average(recvcount, /*grouped=*/true, /*minChunksPerShard=*/3,
+                       "CeMPI_ReduceScatter/GroupedPipelinedBfloat16Average");
+}
+
+// ===========================================================================
 // CeMPI_Fallback – CE not taken for AllReduce when RCCL_CE_ALLREDUCE is off
 // ===========================================================================
 

@@ -4688,7 +4688,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       }
       if (info->coll == ncclFuncReduceScatter) {
         const bool ceReduceScatterOpSupported =
-          (info->op == ncclSum || info->op == ncclProd || info->op == ncclMin || info->op == ncclMax);
+          (info->op == ncclSum || info->op == ncclProd || info->op == ncclMin || info->op == ncclMax ||
+           (info->op == ncclAvg && info->datatype == ncclBfloat16));
         if (!ceArGraphAllowed || !ceReduceScatterOpSupported || !rcclParamCeReduceScatter()) {
           ceAvailable = false;
         } else if (ceReduceScatterOpSupported) {

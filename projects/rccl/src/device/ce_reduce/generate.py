@@ -3,7 +3,7 @@
 Generate one translation unit per (type, redop) instantiation of
 ncclCeLocalReduceKernelVec.
 
-Previously all 40 instantiations lived in a single ce_reduce.cc, which meant
+Previously all instantiations lived in a single ce_reduce.cc, which meant
 the device linker paid for all of them in one single-threaded LLVM bitcode
 link + O3 codegen pass (ld.lld). Two of those 40 kernels -- int8_t/uint8_t
 Min and Max -- balloon to ~56K instructions each (vs ~5-6K for Sum/Prod on
@@ -97,6 +97,15 @@ REDOPS = [
     ("Max", 3),
 ]
 
+# Floating-point ncclAvg lowers to PreMulSum. GPT-OSS reduces BF16 gradients,
+# so instantiate that path without adding unvalidated Avg kernels for every
+# other datatype.
+AVG_TYPES = {"bf16"}
+
+
+def redops_for_type(tag):
+    return REDOPS + ([('Avg', 4)] if tag in AVG_TYPES else [])
+
 # (type, redop) pairs where measurement (gfx950, >=1MB/rank chunks) showed
 # leaving the loop vectorizer enabled on the rank-reduction loop is faster
 # than disabling it -- see the NOTE above ncclCeLocalReduceKernelVec. Not in
@@ -122,7 +131,7 @@ BLOCKS_FN = string.Template(
     "}\n")
 
 for tag, ctype in TYPES:
-    for redname, redval in REDOPS:
+    for redname, redval in redops_for_type(tag):
         fname = "ce_reduce_%s_%s.cpp" % (tag, redname)
         vec_define = "#define CE_REDUCE_VECTORIZE_OK\n" if (tag, redname) in VECTORIZE_OK else ""
         blocks_fn = BLOCKS_FN.substitute(tag=tag, ctype=ctype) if redname == "Sum" else ""
@@ -130,4 +139,5 @@ for tag, ctype in TYPES:
             f.write(LAUNCHER_TEMPLATE.substitute(tag=tag, ctype=ctype, redname=redname, redval=redval,
                                                   vec_define=vec_define, blocks_fn=blocks_fn))
 
-print("-- Generated %d CE-reduce kernel TUs in %s" % (len(TYPES) * len(REDOPS), out_dir))
+print("-- Generated %d CE-reduce kernel TUs in %s" %
+      (sum(len(redops_for_type(tag)) for tag, _ in TYPES), out_dir))
