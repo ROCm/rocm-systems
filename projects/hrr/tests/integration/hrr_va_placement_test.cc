@@ -1009,8 +1009,10 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Lifetimes) {
 // stream takes the memory.
 namespace {
 #define HRR_ORDER_MARKER "HRR_PLACE_ORDER"
-constexpr int kOldFill = 0x0a0a0a0a;
-constexpr int kNewFill = 0x0b0b0b0b;
+// The bit patterns of 1.0f and 3.0f: the D2H check compares 4-byte words as
+// floats within a tolerance, so the two values must differ as floats too.
+constexpr int kOldFill = 0x3f800000;
+constexpr int kNewFill = 0x40400000;
 }  // namespace
 
 // Spins for `ticks` of the constant-rate wall clock, then fills `p` with `v`.
