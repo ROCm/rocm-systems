@@ -28,8 +28,9 @@
 //
 // alloc.h memoises once per process whether ncclCuMemFreeAddr skips peer
 // unmaps (NCCL_CUMEM_SKIP_FREE, else the device arch). Fixtures using the
-// ledger call SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE"); with the emulator's
-// gfx900 that keeps every free real whichever test runs first.
+// ledger unset that variable and then latch the decision with
+// ASSERT_FALSE(rcclSkipCuMemFree()): with the emulator's gfx900 every free stays
+// real, and a test that finds it already latched the other way fails loudly.
 
 #ifndef RCCL_TEST_HOST_HIPVMMLEDGER_H_
 #define RCCL_TEST_HOST_HIPVMMLEDGER_H_
