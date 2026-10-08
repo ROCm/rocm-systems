@@ -205,6 +205,33 @@ def pass_scoped_builtins(layout: PassLayout, gpu_series: str) -> FrozenSet[str]:
     return frozenset(scoped)
 
 
+# Column names that are not perfmon counters. PassLayout records Counter_Name
+# only, so timestamps and the per-kernel unit must not decide the pass.
+_NON_PMC_BIND_NAMES = frozenset({
+    "Start_Timestamp",
+    "End_Timestamp",
+    UNIT_COUNTER,
+})
+
+
+def hardware_counters_for_pass_select(
+    required: FrozenSet[str],
+    _gpu_series: str,
+) -> FrozenSet[str]:
+    """PMC names used to choose a pass.
+
+    Timestamps and non-counter SUPPORTED_DENOM tokens are stripped. Hardware
+    denominator counters such as SQ_WAVES stay, and the normalization fallback
+    may still relax those.
+    """
+    drop = set(_NON_PMC_BIND_NAMES)
+    for formula in SUPPORTED_DENOM.values():
+        for token in ("Start_Timestamp", "End_Timestamp", UNIT_COUNTER):
+            if token in formula:
+                drop.add(token)
+    return frozenset(name for name in required if name not in drop)
+
+
 def select_pass(
     required: FrozenSet[str],
     layout: PassLayout,
@@ -255,6 +282,47 @@ def select_pass_with_normalization_fallback(
 _SAME_PASS_COUNTERS = frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"})
 
 _UNSET_EXPRESSION = "None"
+
+
+def choose_metric_pass(
+    required: FrozenSet[str],
+    layout: PassLayout,
+    gpu_series: str,
+    label: str,
+) -> Optional[str]:
+    """Pick a pass from the hardware PMC set.
+
+    Timestamps alone do not make the row unset. If the remaining PMC set fits
+    no pass, warn and return None so the caller leaves the metric unset.
+    """
+    pmc_required = hardware_counters_for_pass_select(required, gpu_series)
+    chosen, normalization_relaxed = select_pass_with_normalization_fallback(
+        pmc_required,
+        layout,
+        gpu_series,
+    )
+    if chosen is None:
+        if pmc_required:
+            console_warning(
+                "pass_provenance",
+                f"{label}: contract violation, PMC set {sorted(pmc_required)} "
+                "does not fit one pass; leaving the metric unset",
+            )
+        else:
+            console_debug(
+                "pass_provenance",
+                f"{label}: no hardware PMC set to bind",
+            )
+        return None
+    if normalization_relaxed:
+        missing = pmc_required - layout.counters_by_pass[chosen]
+        console_warning(
+            "pass_provenance",
+            f"{label}: runtime normalization counters {sorted(missing)} "
+            f"are not in {chosen}; binding formula counters to that pass",
+        )
+    return chosen
+
 
 _ALREADY_BOUND_BUILTIN_RE = re.compile(rf"{re.escape(PASS_VAR_SEP)}\d+$")
 _BOUND_BUILTIN_SUFFIX_RE = re.compile(
@@ -464,18 +532,24 @@ def resolve_weight_counter_column(
     sub_metric_name: str,
     df: pd.DataFrame,
     pass_layout: Optional[PassLayout],
-) -> str:
-    """Read a WEIGHTED_AVG weight from the sub-metric's bound pass.
+) -> Optional[str]:
+    """Read a WEIGHTED_AVG weight from the sub-metric's pass.
 
-    A weight from another replay is a different sample. When that pass does
-    not hold the counter, the qualified name is returned so analysis does
-    not use another pass.
+    A weight that exists in only one pass is still that pass. If it is not
+    the sub-ratio's pass, return the qualified name for the sub-ratio's pass
+    so analysis does not read the other replay. None means the pass is
+    unknown and the composite must stay unset.
     """
-    if pass_layout is None or not pass_layout.has_duplicates:
+    if pass_layout is None or not pass_layout.pass_keys:
         return weight_counter
     pass_key = _bound_pass_for_sub_metric(df, sub_metric_name)
     if pass_key is None:
-        return weight_counter
+        console_warning(
+            "pass_provenance",
+            f"WEIGHTED_AVG weight {weight_counter!r} for {sub_metric_name!r} "
+            "has no sub-metric pass; not reading another replay",
+        )
+        return None
     in_pass = weight_counter in pass_layout.counters_by_pass.get(pass_key, frozenset())
     if not in_pass:
         console_warning(
@@ -551,27 +625,17 @@ def _choose_metric_pass(
     counter and fits no single pass is left unset.
     """
     required = expand_required_counters(extract_row_refs(expressions), gpu_series)
-    if not required:
+    pmc_required = hardware_counters_for_pass_select(required, gpu_series)
+    if not pmc_required:
         return None, False
-    chosen, normalization_relaxed = select_pass_with_normalization_fallback(
-        required, layout, gpu_series
-    )
-    if chosen is None:
-        if not required & layout.duplicated:
+    if not pmc_required & layout.duplicated:
+        fits, _ = select_pass_with_normalization_fallback(
+            pmc_required, layout, gpu_series
+        )
+        if fits is None:
             return None, False
-        console_warning(
-            "pass_provenance",
-            f"{label}: no single pass for {sorted(required)}; leaving the metric unset",
-        )
-        return None, True
-    if normalization_relaxed:
-        missing = required - layout.counters_by_pass[chosen]
-        console_warning(
-            "pass_provenance",
-            f"{label}: runtime normalization counters {sorted(missing)} are "
-            f"not in {chosen}; binding formula counters to that pass",
-        )
-    return chosen, False
+    chosen = choose_metric_pass(required, layout, gpu_series, label)
+    return chosen, chosen is None
 
 
 def _referenced_builtins(

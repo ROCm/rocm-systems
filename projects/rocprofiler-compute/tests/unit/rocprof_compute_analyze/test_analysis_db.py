@@ -26,6 +26,7 @@ from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLin
 from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
     _roofline_point_values,
+    _visible_metric_rows,
     db_analysis,
     filter_dispatch_frame,
     report_evaluation_diagnostics,
@@ -3827,3 +3828,12 @@ def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_p
     # Also covers a layout file skipped as broken
     workload = run_memory_chart_workload(tmp_path, "gfx1030")
     assert workload.memory_chart_layout_extdata is None
+
+
+def test_visible_metric_rows_drop_collectable_names():
+    frame = pd.DataFrame({
+        "Metric": ["AI HBM", "_collect.flops", "VALU FLOPs"],
+        "Value": ["", "to_sum(raw_pmc_df['SQ_A'])", "1"],
+    })
+    names = [row["Metric"] for _metric_id, row in _visible_metric_rows(frame)]
+    assert names == ["AI HBM", "VALU FLOPs"]
