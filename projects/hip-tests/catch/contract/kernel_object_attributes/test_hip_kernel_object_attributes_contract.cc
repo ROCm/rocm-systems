@@ -210,7 +210,7 @@ HIP_TEST_CASE(
 }
 #endif
 
-// TODO check nvidia minimum version
+#if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION >= 12000)
 // @asserts: Unit_hipKernelSetCacheConfig - all hipFuncCache_t values are supported and kernel
 //           launches execute correctly, regardless of the carveout (which is a hint and the kernel
 //           must work even if the user choose a carveout that does not provide enough shared memory).
@@ -267,6 +267,12 @@ HIP_TEST_CASE(Contract_HipKernelSetCacheConfig_ValidValues_Are_Supported)
 
   HIP_CHECK(hipLibraryUnload(library));
 }
+#else
+HIP_TEST_CASE(Contract_HipKernelSetCacheConfig_ValidValues_Are_Supported)
+{
+   HIP_SKIP_TEST("hipKernelSetCacheConfig requires CUDA 12.0 or later")
+}
+#endif
 
 // @asserts: hipKernelGetParamInfo - reports the first parameter at offset zero with size at least that of a device pointer
 HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout) {
