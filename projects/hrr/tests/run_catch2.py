@@ -109,6 +109,9 @@ def main() -> int:
         f"{counts['SKIP']} skipped"
     )
 
+    # cross-only diagnostic: keep the console transcript (WARN lines included).
+    print("\n--- Catch2 console transcript (cross-check diagnostic) ---")
+    print(completed.stdout, end="")
     # A crash can leave syntactically valid, but incomplete, JUnit without a
     # failed case. Preserve the raw transcript only for that exceptional path.
     # Catch2 returns 4 when the selected cases were all skipped; that is not a
