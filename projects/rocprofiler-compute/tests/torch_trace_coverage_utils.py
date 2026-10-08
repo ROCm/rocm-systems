@@ -4074,11 +4074,13 @@ def compare_single_op(
     """Compare one op's profiler entry against the analyze forest.
 
     Name match. Structural ops pass when a matching node is present.
-    ATen ops also require a non-empty kernel-name intersection and,
-    when the profiler recorded CUDA work, inclusive GPU ns > 0.
-    ``op_edges`` whose parent is the sampled op must appear as
-    descendants. Window-wide ``torch_ops`` are not required in the
-    subtree because the profiler records argument-setup ops too.
+    When the profiler recorded CUDA kernels, ATen ops require a
+    non-empty intersection of those names with inclusive tree kernels,
+    except ops in ``KNOWN_KERNEL_FREE_ATEN_OPS``. Profiler ``op_edges``
+    whose parent is the sampled op and whose child is an operator name
+    (not a kernel) must appear as analyze descendants. Argument-setup
+    events in the same profiler window are not required in the subtree
+    and do not gate inclusive GPU ns.
     """
     ground_truth_entry = ground_truth.get(op.name)
 
