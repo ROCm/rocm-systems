@@ -726,8 +726,6 @@ class VaPlacement {
     // A live stream is being destroyed: a deferred free made on it no longer
     // counts as made on whatever stream gets its handle next.
     void stream_destroyed(hipStream_t stream);
-    // Whether `live` is the base of a live placed mapping.
-    bool is_mapped(void* live);
     // Unmap everything unmap() deferred, and retry unmaps that failed. Call
     // only when no capture is open. Returns how many were unmapped.
     size_t drain_deferred();
@@ -774,6 +772,8 @@ class VaPlacement {
     void set_vmm_ops_for_test(VmmOps ops) { ops_ = ops; }
     void adopt_reservation_for_test(uint64_t b, uint64_t e, int devices);
     void adopt_mapping_for_test(uint64_t rec, size_t size, int device = 0);
+    // Whether `live` is the base of a live placed mapping.
+    bool is_mapped(void* live);
 #endif
 
   private:

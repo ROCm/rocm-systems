@@ -3816,7 +3816,8 @@ hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
     hipError_t r = hipSuccess;
     // A free deferred on this stream no longer matches a new stream that
     // gets the same handle.
-    if (hrr::VaPlacement* pl = hrr_placing(ctx); pl && stream) pl->stream_destroyed(stream);
+    if (hrr::VaPlacement* placing = hrr_placing(ctx); placing && stream)
+        placing->stream_destroyed(stream);
     if (stream) r = hipStreamDestroy(stream);
     ctx.remove_stream(a->stream);
     // Destroying a capturing stream ends its capture. The recording shows no

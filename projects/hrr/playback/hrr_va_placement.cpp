@@ -721,7 +721,6 @@ void VaPlacement::adopt_mapping_for_test(uint64_t rec, size_t size, int device) 
     active_ = true;
     mapped_[va_floor(rec, gran_)] = {va_ceil(rec + size, gran_), rec, {}, device, false};
 }
-#endif
 
 bool VaPlacement::is_mapped(void* live) {
     if (!active_ || !live) return false;
@@ -732,6 +731,7 @@ bool VaPlacement::is_mapped(void* live) {
     --it;
     return it->second.rec == v;
 }
+#endif
 
 std::vector<uint64_t> VaPlacement::mapped_bases() {
     std::lock_guard<std::mutex> lk(mu_);

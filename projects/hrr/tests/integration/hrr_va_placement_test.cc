@@ -1268,8 +1268,10 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_MultiGpu) {
   const long long took1 = static_cast<long long>(info[0].second - info[2].second);
   const long long took0 = static_cast<long long>(info[1].second - info[3].second);
   INFO("device 1 gave " << took1 << " bytes, device 0 " << took0);
-  CHECK(took1 >= static_cast<long long>(kMultiGpuBig));
-  CHECK(took0 < static_cast<long long>(kMultiGpuBig / 2));
+  // With a margin: another process may allocate or free on either device
+  // meanwhile.
+  CHECK(took1 >= static_cast<long long>(kMultiGpuBig / 4 * 3));
+  CHECK(took0 < static_cast<long long>(kMultiGpuBig / 4));
   // big1 was freed on device 1's stream with device 0 current. The event
   // recorded at that free is on device 1 too, so the other stream that got
   // the block back waits for it rather than unmapping the mapping first.
