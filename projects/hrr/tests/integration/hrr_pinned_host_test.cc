@@ -1698,6 +1698,10 @@ void write_bytes(const fs::path& p, const std::vector<uint8_t>& b) {
   o.write(reinterpret_cast<const char*>(b.data()), b.size());
 }
 
+// Size of one snapshot record in a launch payload: five u64 fields, then the
+// u8 direction.
+constexpr size_t kSnapshotRecordBytes = 8 * 5 + 1;
+
 // Byte range of each kernel launch event in events.bin, in file order.
 std::vector<std::pair<size_t, size_t>> launch_spans(const std::vector<uint8_t>& f) {
   std::vector<std::pair<size_t, size_t>> spans;
@@ -2076,7 +2080,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_MalformedRecordRejected) {
   // Launch 6: an attribute tail longer than the event. A plain launch writes
   // a zero count, so the tail is the 8 bytes before the records.
   {
-    const size_t tail = spans[6].second - kls[6]->snapshots.size() * 41 - 8;
+    const size_t tail = spans[6].second - kls[6]->snapshots.size() * kSnapshotRecordBytes - 8;
     const uint32_t n_attrs = 1000, stride = 24;
     std::memcpy(events.data() + tail, &n_attrs, 4);
     std::memcpy(events.data() + tail + 4, &stride, 4);
@@ -2601,10 +2605,11 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_GraphCapture) {
   const auto spans = launch_spans(events);
   REQUIRE(spans.size() == 2);
   const size_t rec = record_at(events, spans, kls, 0, 0);
-  std::vector<uint8_t> records(events.begin() + rec, events.begin() + rec + 41);
-  records.insert(records.end(), events.begin() + rec, events.begin() + rec + 41);
+  const auto record = events.begin() + rec;
+  std::vector<uint8_t> records(record, record + kSnapshotRecordBytes);
+  records.insert(records.end(), record, record + kSnapshotRecordBytes);
   const uint64_t short_len = kChunk - 8;
-  std::memcpy(records.data() + 41 + 16, &short_len, 8);
+  std::memcpy(records.data() + kSnapshotRecordBytes + 16, &short_len, 8);
   const size_t n_at = num_snapshots_at(events, spans[1]);
   uint16_t n = 0;
   std::memcpy(&n, events.data() + n_at, 2);
@@ -2669,7 +2674,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_NullLaunchDuringCapture) {
   const auto spans = launch_spans(events);
   REQUIRE(spans.size() == 2);
   const size_t rec = record_at(events, spans, kls, 0, 0);
-  std::vector<uint8_t> record(events.begin() + rec, events.begin() + rec + 41);
+  std::vector<uint8_t> record(events.begin() + rec,
+                              events.begin() + rec + kSnapshotRecordBytes);
   const size_t n_at = num_snapshots_at(events, spans[1]);
   const uint16_t n = 1;
   std::memcpy(events.data() + n_at, &n, 2);
@@ -2952,8 +2958,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceReset) {
 HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceFreeHeld) {
   cross_device_free("4",
                     "is not freed: a snapshot restore queued for it has not run after "
-                    "3000 ms",
-                    "--sync-watchdog-ms 3000");
+                    "1000 ms",
+                    "--sync-watchdog-ms 1000");
 }
 
 // ---------------------------------------------------------------------------
