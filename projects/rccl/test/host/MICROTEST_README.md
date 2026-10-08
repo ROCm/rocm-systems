@@ -224,13 +224,22 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 
 - **`rccl-UnitTestsMicroDda`**: `src/algorithms/dda/` — currently
   `fabric/fabric_mem_handler.cc` (via `FABRIC_MEM_HANDLER_CC_PATH`, suite
-  `FabricMemHandlerTest.*`). Tests here mirror the source tree:
+  `FabricMemHandlerTest.*`) and `fabric/fabric_gpu_barrier.cu`'s host-side
+  `mallocAndInit` (via `FABRIC_GPU_BARRIER_CC_PATH`; hipify renames `.cu` to
+  `.cu.cpp`; suites `FabricGpuBarrierTest.*` and
+  `Geometry/FabricGpuBarrier{Invalid,Valid}GeometryTest.*`). A unit
+  `#include`d here is the definition the other DDA tests link against, so the
+  barrier exercises the real mem handler; `device/device_buffer.cc` is compiled
+  as a real oracle TU for the same reason. Tests here mirror the source tree:
   `test/host/<path under src>/<file>-test.cc`, e.g.
   `algorithms/dda/fabric/fabric-mem-handler-test.cc`; the files are listed by
   path from `test/host/CMakeLists.txt`, with no nested CMake project. One binary
   for all of DDA, since its units share the same seams (cuMem VMM, bootstrap
-  allgather). Fixtures pin `NCCL_CUMEM_SKIP_FREE` unset, because `alloc.h`
-  memoises that skip once per process. See `test_categories_micro_dda.yaml`.
+  allgather). Their fixtures track device memory with `HipVmmLedger.h` (VMM
+  emulator plus reservation/handle/buffer bookkeeping, and a record of every
+  free or copy it refused), and pin `NCCL_CUMEM_SKIP_FREE` unset because
+  `alloc.h` memoises that skip once per process. See
+  `test_categories_micro_dda.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -349,7 +358,7 @@ symbol.
 
 | Production TU | Fakes file |
 |---|---|
-| `src/algorithms/dda/*.cc` | `fakes/dda_fakes.cc` |
+| `src/algorithms/dda/*.cc` (`rccl-UnitTestsMicroDda` compiles them for real instead) | `fakes/dda_fakes.cc` |
 | `src/init.cc`'s `alloc.h` data symbols (`allocTracker`), for binaries that don't compile `init.cc` | `fakes/alloc_fakes.cc` |
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |

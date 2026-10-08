@@ -5,6 +5,9 @@ test_categories:
   quick: &micro_dda_quick
     description: "Smoke - host-only src/algorithms/dda/ micro-tests, sub-second."
     test_patterns:
+      - "FabricGpuBarrierTest.*"
+      - "Geometry/FabricGpuBarrierInvalidGeometryTest.*"
+      - "Geometry/FabricGpuBarrierValidGeometryTest.*"
       - "FabricMemHandlerTest.*"
     exclude_windows:
       - "*"

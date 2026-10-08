@@ -40,6 +40,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAddressRange,         hipMemGetAddressRange)
 ASSERT_HOOK_MATCHES_PROD(g_hipIpcGetMemHandle,            hipIpcGetMemHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocationHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,                 hipMemRelease);
 ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,        hipPointerGetAttribute);
 ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
@@ -338,6 +339,10 @@ static hipError_t DefaultHipMemsetAsync(void*, int, size_t, hipStream_t)
 {
     return g_hipAsyncOpsResult;
 }
+static hipError_t DefaultHipMemset(void*, int, size_t)
+{
+    return hipErrorInvalidValue;
+}
 
 static hipError_t DefaultHipStreamCreateWithFlags(hipStream_t* stream, unsigned)
 {
@@ -378,6 +383,7 @@ std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind)> g_hipMemcpy
 std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)>
     g_hipMemcpyAsync = DefaultHipMemcpyAsync;
 std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync = DefaultHipMemsetAsync;
+std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
 std::function<hipError_t(hipStream_t*, unsigned)> g_hipStreamCreateWithFlags = DefaultHipStreamCreateWithFlags;
 std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize = DefaultHipStreamSynchronize;
 std::function<hipError_t(hipStream_t)> g_hipStreamDestroy = DefaultHipStreamDestroy;
@@ -492,6 +498,10 @@ void InstallHipVmmEmulator()
         return hipSuccess;
     };
     g_hipMemsetAsync = [](void* dst, int value, size_t n, hipStream_t) {
+        if (dst != nullptr) std::memset(dst, value, n);
+        return hipSuccess;
+    };
+    g_hipMemset = [](void* dst, int value, size_t n) {
         if (dst != nullptr) std::memset(dst, value, n);
         return hipSuccess;
     };
@@ -617,6 +627,7 @@ void ResetHipFakes()
     g_hipMemcpy                     = DefaultHipMemcpy;
     g_hipMemcpyAsync                = DefaultHipMemcpyAsync;
     g_hipMemsetAsync                = DefaultHipMemsetAsync;
+    g_hipMemset                     = DefaultHipMemset;
     g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
     g_hipStreamSynchronize          = DefaultHipStreamSynchronize;
     g_hipStreamDestroy              = DefaultHipStreamDestroy;
@@ -932,7 +943,7 @@ hipError_t hipMallocManaged(void** p, size_t size, unsigned int flags)
     return g_hipMallocManaged(p, size, flags);
 }
 hipError_t hipMemcpy(void* d, const void* s, size_t n, hipMemcpyKind k) { return g_hipMemcpy(d, s, n, k); }
-hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
+hipError_t hipMemset(void* dst, int value, size_t bytes) { return g_hipMemset(dst, value, bytes); }
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
 // We define hipGetDevicePropertiesR0600, the versioned public HIP ABI symbol,
 // rather than the unversioned hipGetDeviceProperties. Callers write
