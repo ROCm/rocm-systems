@@ -1,3 +1,5 @@
+#include <unistd.h>
+
 #include <nlohmann/json.hpp>
 #include <curl/curl.h>
 
@@ -24,16 +26,55 @@ size_t write_callback(
 
     return size * nmemb;
 }
+
+// Line protocol: escape comma, space, equals, backslash in tag values
+std::string escape_tag(const std::string& s)
+{
+    std::string out;
+    for (char c : s)
+    {
+        if (c == ',' || c == ' ' || c == '=' || c == '\\')
+            out += '\\';
+        out += c;
+    }
+    return out;
+}
+
+// InfluxQL string literal: escape backslash and single quote
+std::string escape_ql_string(const std::string& s)
+{
+    std::string out;
+    for (char c : s)
+    {
+        if (c == '\\' || c == '\'')
+            out += '\\';
+        out += c;
+    }
+    return out;
+}
+
+std::string local_hostname()
+{
+    char buf[256] = {};
+    if (gethostname(buf, sizeof(buf) - 1) != 0 || buf[0] == '\0')
+        throw std::runtime_error("Failed to determine local hostname for client_id");
+    return std::string(buf);
+}
 }  // namespace
 
 influx_client::influx_client(
     std::string host,
     uint16_t port,
-    std::string database)
+    std::string database,
+    std::string client_id)
 : host_(std::move(host))
 , port_(port)
-, database_(std::move(database))
+, database_(std::move(database)),
+, client_id_(std::move(client_id))
 {
+    if (client_id_.empty())
+        client_id_ - local_hostname();
+
     // test that host is reachable
     if (!ping())
         throw std::runtime_error("Failed to connect to the database host");
@@ -63,6 +104,7 @@ influx_client::write_batch(const std::vector<entry_t>& entries)
         const auto& point = entry.point;
 
         payload << "gpu_timesync";
+        payload << "client_id=" << escape_tag(client_id_);
         payload << ",gpu_id=" << entry.gpu_id;
         payload << " ";
         payload << "system_timestamp="
@@ -125,9 +167,8 @@ influx_client::lookup_oldest_k(
     std::ostringstream q;
     q << "SELECT system_timestamp "
       << "FROM gpu_timesync "
-      << "WHERE gpu_id='"
-      << gpu_id
-      << "' "
+      << "WHERE client_id='" << escape_ql_string_(client_id) << "'"
+      << "AND gpu_id='" << gpu_id << "' "
       << "ORDER BY time ASC "
       << "LIMIT "
       << k;
@@ -178,9 +219,8 @@ influx_client::lookup_newest_k(
     std::ostringstream q;
     q << "SELECT system_timestamp "
       << "FROM gpu_timesync "
-      << "WHERE gpu_id='"
-      << gpu_id
-      << "' "
+      << "WHERE client_id='" << escape_ql_string_(client_id) << "'"
+      << "AND gpu_id='" << gpu_id << "' "
       << "ORDER BY time DESC "
       << "LIMIT "
       << k;
@@ -357,12 +397,10 @@ influx_client::lookup_before(
 
     q << "SELECT system_timestamp "
       << "FROM gpu_timesync "
+      << "WHERE client_id='" << escape_ql_string_(client_id) << "'"
+      << "AND gpu_id='" << gpu_id << "' "
       << "WHERE gpu_id='"
-      << gpu_id
-      << "' "
-      << "AND time <= "
-      << gpu_timestamp
-      << " "
+      << "AND time <= " << gpu_timestamp << " "
       << "ORDER BY time DESC "
       << "LIMIT 1";
 
@@ -417,12 +455,10 @@ influx_client::lookup_after(
 
     q << "SELECT system_timestamp "
       << "FROM gpu_timesync "
+      << "WHERE client_id='" << escape_ql_string_(client_id) << "'"
+      << "AND gpu_id='" << gpu_id << "' "
       << "WHERE gpu_id='"
-      << gpu_id
-      << "' "
-      << "AND time >= "
-      << gpu_timestamp
-      << " "
+      << "AND time >= " << gpu_timestamp << " "
       << "ORDER BY time ASC "
       << "LIMIT 1";
 

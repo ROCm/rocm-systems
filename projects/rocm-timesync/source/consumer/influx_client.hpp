@@ -15,7 +15,8 @@ class influx_client : public timesync_db
 public:
     influx_client(std::string host,
                   uint16_t port,
-                  std::string database);
+                  std::string database,
+                  std::string client_id = {});
 
     bool write(const entry_t& entry) override;
     bool write_batch(const std::vector<entry_t>& entries) override;
@@ -43,6 +44,7 @@ private:
     std::string host_;
     uint16_t port_;
     std::string database_;
+    std::string client_id_;
 };
 
 } // namespace rocm_timesync
