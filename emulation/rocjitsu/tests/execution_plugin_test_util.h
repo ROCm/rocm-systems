@@ -289,6 +289,7 @@ struct CapturedAccess {
   std::vector<uint64_t> element_lane_masks;
   std::vector<uint64_t> addresses;
   std::vector<uint64_t> pre_routing_addresses;
+  std::vector<uint64_t> execution_addresses;
   std::vector<uint64_t> secondary_addresses;
   std::vector<amdgpu::WaitCounterType> issued_counters;
 };
@@ -311,6 +312,11 @@ public:
     const auto counters = CounterObservingPipeline{}.issue_counters(inst);
     accesses.back().issued_counters.assign(counters.types.begin(),
                                            counters.types.begin() + counters.size);
+    if (inst.data()->tag() == amdgpu::GLOBAL_MEM || inst.data()->tag() == amdgpu::LOCAL_MEM) {
+      const auto &addresses = inst.data_as<amdgpu::VectorMemState>()->per_lane_addr;
+      accesses.back().execution_addresses.assign(addresses.begin(),
+                                                 addresses.begin() + access.wavefront_size);
+    }
   }
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override {

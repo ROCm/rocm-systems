@@ -474,18 +474,26 @@ There are two memory hooks, and they see different things.
 instruction still carries the address space it decoded as and the addresses it
 computed. `onAmdgpuMemoryAccessRouted` fires once routing has settled and
 reports a `MemoryAccessObservation` describing the access the memory system is
-actually about to be asked for — the pipeline it was issued to, the wait
-counter it will post to, and the addresses it was issued with. When all requesting
-FLAT lanes use the shared aperture, routing selects the LDS pipeline, rewrites
+actually about to be asked for — the pipeline it was issued to, its routing-selected
+counter, and its effective addresses. The scalar `wait_counter` field does not
+describe the complete wait requirement: mixed FLAT retains its VMEM counter here,
+while `VectorMemState::routed_issue_info` carries both VMEM and LDS obligations.
+Consult that routed issue's `counter_obligations()` for the full set.
+
+When all requesting FLAT lanes use the shared aperture, routing selects the
+LDS pipeline, rewrites
 the addresses into the workgroup's LDS allocation, and sets
 `normalized_to_local` to `true`.
 
-Mixed FLAT requests retain `MemoryRoute::GLOBAL` and their original
-shared-aperture addresses. The global pipeline separates the lanes by backing
-store, completing retryable global/scratch work before accessing LDS. These
-observations have `normalized_to_local == false` and an empty
-`pre_routing_addresses`. Observers must inspect `flat_local_lane_mask` and
-`flat_dds_lane_mask` to account for LDS and DDS lanes; choosing a backing store
+Mixed FLAT requests retain `MemoryRoute::GLOBAL` and their original execution
+addresses. The global pipeline separates the lanes by backing store, completing
+retryable global/scratch work before accessing LDS. These
+observations have `normalized_to_local == false`. On both routes, `addresses`
+reports effective shared addresses in the workgroup's LDS allocation, and
+`pre_routing_addresses` preserves the original aperture addresses. Normalizing
+a mixed observation does not alter the instruction's retained execution state.
+Observers must inspect `flat_local_lane_mask` and `flat_dds_lane_mask` to account
+for LDS and DDS lanes; choosing a backing store
 from `route` alone misses the shared-aperture portion of a mixed request.
 
 `decoded_space` preserves the instruction's original address-space family

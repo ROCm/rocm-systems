@@ -1355,14 +1355,18 @@ TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCou
     state->wf_size = 64;
     state->flat_shared_lane_mask = shared_lanes;
     state->flat_shared_aperture_base = shared_lanes ? shared_base : 0;
-    for (uint32_t lane = 0; lane < 2; ++lane)
+    std::array<uint64_t, 64> effective_addresses{};
+    for (uint32_t lane = 0; lane < 2; ++lane) {
       state->per_lane_addr[lane] =
           (shared_lanes & (uint64_t{1} << lane) ? shared_base + 0x40 : 0x1000) + lane * 4;
+      effective_addresses[lane] =
+          (shared_lanes & (uint64_t{1} << lane) ? wf->lds_base() + 0x40 : 0x1000) + lane * 4;
+    }
     TestMemoryInstruction flat(std::move(state),
                                {{WaitCounterType::VMCNT, MemoryCompletionClass::UNORDERED},
                                 {WaitCounterType::LGKMCNT, MemoryCompletionClass::UNORDERED}});
     // Zero denotes an unresolved observation. Both mixed lane orderings retain
-    // GLOBAL routing and the original shared-aperture addresses.
+    // GLOBAL execution while observations expose effective shared addresses.
     MemoryAccessObservation access;
     if (shared_lanes != 0) {
       access.route = MemoryRoute::GLOBAL;
@@ -1370,7 +1374,9 @@ TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCou
       access.request_lane_mask = access.active_lane_mask = access.valid_lane_mask = 3;
       access.flat_local_lane_mask = shared_lanes;
       access.wavefront_size = wf->wf_size();
-      access.addresses = {flat.data_as<VectorMemState>()->per_lane_addr.data(), wf->wf_size()};
+      access.addresses = {effective_addresses.data(), wf->wf_size()};
+      access.pre_routing_addresses = {flat.data_as<VectorMemState>()->per_lane_addr.data(),
+                                      wf->wf_size()};
     }
     f.plugin_group_->onAmdgpuMemoryAccessRouted(access, flat, *wf);
 
@@ -1446,12 +1452,21 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           data->flat_shared_lane_mask = local_route ? 0 : shared_lanes;
           data->flat_shared_aperture_base = data->flat_shared_lane_mask ? shared_base : 0;
           std::array<uint64_t, 64> original_addresses{};
+          std::array<uint64_t, 64> effective_addresses{};
           for (uint32_t lane = 0; lane < 2; ++lane) {
             original_addresses[lane] =
                 (shared_lanes & (uint64_t{1} << lane) ? shared_base + 0x40 : 0x1000) + lane * 4;
+            effective_addresses[lane] =
+                (shared_lanes & (uint64_t{1} << lane) ? wf->lds_base() + 0x40 : 0x1000) + lane * 4;
             data->per_lane_addr[lane] =
-                local_route ? wf->lds_base() + 0x40 + lane * 4 : original_addresses[lane];
+                local_route ? effective_addresses[lane] : original_addresses[lane];
           }
+          cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+          for (unsigned lane = 0; lane < 2; ++lane) {
+            cu->write_vgpr(wf->vgpr_alloc().base, lane, original_addresses[lane]);
+            cu->write_vgpr(wf->vgpr_alloc().base + 1, lane, original_addresses[lane] >> 32);
+          }
+          cu->track_memory_wait(*load, *wf);
           load->set_data(std::move(data));
           MemoryAccessObservation access;
           access.route = local_route ? MemoryRoute::LOCAL : MemoryRoute::GLOBAL;
@@ -1460,18 +1475,10 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           access.flat_local_lane_mask = shared_lanes;
           access.wavefront_size = wave_size;
           access.normalized_to_local = local_route;
-          access.addresses = {load->data_as<VectorMemState>()->per_lane_addr.data(), wave_size};
-          if (local_route)
+          access.addresses = {effective_addresses.data(), wave_size};
+          if (shared_lanes != 0)
             access.pre_routing_addresses = {original_addresses.data(), wave_size};
           f.plugin_group_->onAmdgpuMemoryAccessRouted(access, *load, *wf);
-          constexpr uint64_t shared_base = uint64_t{1} << 32;
-          cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
-          for (unsigned lane = 0; lane < 2; ++lane) {
-            cu->write_vgpr(wf->vgpr_alloc().base, lane, 0x100);
-            cu->write_vgpr(wf->vgpr_alloc().base + 1, lane,
-                           shared_lanes & (uint64_t{1} << lane) ? 1 : 2);
-          }
-          cu->track_memory_wait(*load, *wf);
           auto &core = wf->ensure_memory_wait_scoreboard();
           unsigned core_reports = 0;
           core.bind(0x200, &core_reports,
