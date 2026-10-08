@@ -27,6 +27,7 @@
 #include "core/agent_manager.hpp"
 
 #include "core/amd_smi.hpp"
+#include "core/cpu.hpp"
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/cxx/serialization.hpp>
 #include <rocprofiler-sdk/fwd.h>
@@ -150,6 +151,12 @@ query_rocm_agents()
     {
         LOG_ERROR("Exception thrown getting the rocm agents: {}. _dev_cnt={}", _e.what(),
                   _dev_cnt);
+    }
+    // rocprofiler reports no agents on hosts without KFD, but CPU-side samples still
+    // need a CPU agent to resolve against.
+    if(get_agent_manager_instance().get_cpu_agents_count() == 0)
+    {
+        cpu::query_cpu_agents();
     }
     _dev_cnt = get_agent_manager_instance().get_gpu_agents_count();
     return _dev_cnt;
