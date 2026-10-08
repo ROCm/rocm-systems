@@ -373,8 +373,8 @@ if(BUILD_TESTS)
       DdaCollCommonTests.cpp
       CheapPostSendFenceTests.cpp
       Gfx1250SendRecvLl128WindowTests.cpp
-      VersionInfoTests.cpp
       ProfilerOverheadTests.cpp
+      VersionInfoTests.cpp
       device/TestOp128.cpp
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
