@@ -8,6 +8,10 @@ subtrees:
         title: Build from source
       - file: install/python-bindings
         title: Install Python bindings
+  - caption: Conceptual
+    entries:
+      - file: conceptual/amd-infinity-storage
+        title: AMD Infinity Storage
   - caption: How to
     entries:
       - file: how-to/checking-system-compatibility

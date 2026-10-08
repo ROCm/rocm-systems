@@ -21,8 +21,9 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
       * :doc:`Build hipFile from source <install/build-from-source>`
       * :doc:`Install the hipFile Python bindings <install/python-bindings>`
 
-.. grid:: 2
-   :gutter: 3
+   .. grid-item-card:: Conceptual
+
+      * :doc:`AMD Infinity Storage <conceptual/amd-infinity-storage>`
 
    .. grid-item-card:: How to
 
