@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # Cargo owns Rust dependency tracking; CMake owns native consumers and staging.
 include_guard(GLOBAL)
 find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)

@@ -45,7 +45,7 @@ version = version_number
 release = version_number
 
 setting_all_article_info = True
-all_article_info_os = ["linux"]
+all_article_info_os = ["linux", "windows"]
 
 external_toc_path = "./sphinx/_toc.yml"
 

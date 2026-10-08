@@ -16,8 +16,8 @@
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
-#include "rocjitsu/vm/amdgpu/pm4.h"
-#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
 #include "rocjitsu/vm/amdgpu/queue_doorbell.h"
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
@@ -316,6 +316,9 @@ struct DispatchEntry {
   uint32_t queue_id = 0;
   uint32_t queue_packet_id = 0;
   AddressSpaceHandle address_space;
+  /// Immutable VM snapshot captured by the queue-service transaction that
+  /// admitted this dispatch. Every wave in the dispatch shares this snapshot.
+  std::shared_ptr<const GpuVmAccess> execution_access;
   InterruptSink interrupt_sink;
   uint32_t process_id = 0;
 
@@ -418,6 +421,9 @@ struct DispatchEntry {
   bool wait_for_predecessors = false;
   /// Packet-type ordering: following packets cannot pass this packet.
   bool blocks_following = false;
+  /// An AMD vendor packet executes this PM4 buffer before publishing completion.
+  uint64_t aql_pm4_ib_address = 0;
+  uint32_t aql_pm4_ib_dwords = 0;
   /// Completion hooks and signal have already been delivered.
   bool completion_notified = false;
   bool execution_begun = false;
