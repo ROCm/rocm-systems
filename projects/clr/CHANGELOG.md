@@ -8,6 +8,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
+* Fixed `hipEventElapsedTime` reporting unstable or impossibly small durations on the PAL backend. An event marker's timestamp is no longer overwritten by intervening kernel launches, and the GPU to CPU timestamp adjustment is no longer recalibrated from a sync point taken while the GPU was already idle, so a reported interval no longer depends on when the runtime happened to collect each of its two events.
 
 ### Changed
 

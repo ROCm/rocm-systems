@@ -3544,11 +3544,7 @@ void VirtualGPU::waitEventLock(CommandBatch* cb) {
     // If earlyDone is TRUE, then CPU didn't wait for GPU.
     // Thus the sync point between CPU and GPU is unclear and runtime
     // will use an older adjustment value to maintain the same timeline
-    if (!earlyDone ||
-        //! \note Workaround for APU(s).
-        //! GPU-CPU timelines may go off too much, thus always
-        //! force calibration with the last batch in the list
-        (cbQueue_.size() <= 1) || (readjustTimeGPU_ == 0)) {
+    if (!earlyDone || (readjustTimeGPU_ == 0)) {
       uint64_t startTimeStampGPU = 0;
       uint64_t endTimeStampGPU = 0;
 
@@ -3584,6 +3580,7 @@ bool VirtualGPU::allocConstantBuffers() {
 }
 
 void VirtualGPU::profilingBegin(amd::Command& command) {
+  profileTs_ = nullptr;
   // Is profiling enabled?
   if (command.profilingInfo().enabled_) {
     // Allocate a timestamp object from the cache
