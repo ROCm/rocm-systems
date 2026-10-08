@@ -27,6 +27,8 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
+#include <rocprofiler-sdk/cxx/operators.hpp>
+
 namespace rocprofiler
 {
 namespace hsa
@@ -38,6 +40,13 @@ signal_pool_exists()
 {
     return (common::static_object<common::container::pool<signal_t>>::get() != nullptr);
 }
+
+signal_t&
+reset_hsa_signal(signal_t& signal, hsa_signal_value_t initial_value)
+{
+    get_core_table()->hsa_signal_store_screlease_fn(signal.value, initial_value);
+    return signal;
+}
 }  // namespace
 
 signal_t&
@@ -47,6 +56,13 @@ construct_hsa_signal(signal_t&          signal,
                      const hsa_agent_t* consumers,
                      uint64_t           attributes)
 {
+    if(signal.value != hsa_signal_t{})
+    {
+        ROCP_WARNING_IF(num_consumers != 0 || consumers != nullptr || attributes != 0)
+            << "Ignoring HSA signal creation arguments when reusing an existing signal";
+        return reset_hsa_signal(signal, initial_value);
+    }
+
     auto status = HSA_STATUS_SUCCESS;
     if(!get_amd_ext_table() || !get_amd_ext_table()->hsa_amd_signal_create_fn)
         status = HSA_STATUS_ERROR;

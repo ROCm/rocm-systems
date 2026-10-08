@@ -32,7 +32,11 @@ _SCALAR_NA_SECTIONS = ("ecc_blocks", "overdrive", "xgmi_err", "energy")
 _DICT_NA_SECTIONS = ("pcie", "voltage_curve", "voltage")
 
 
-class _FakeLibraryException(Exception):
+class _FakeAmdSmiException(Exception):
+    """Stands in for ``AmdSmiException``, the base metric.py catches on the header read."""
+
+
+class _FakeLibraryException(_FakeAmdSmiException):
     def __init__(self, message="AMDSMI_STATUS_NOT_SUPPORTED"):
         super().__init__(message)
         self._message = message
@@ -108,6 +112,7 @@ def _build_fake_amdsmi():
 
     interface.__getattr__ = _unsupported
 
+    exception.AmdSmiException = _FakeAmdSmiException
     exception.AmdSmiLibraryException = _FakeLibraryException
 
     amdsmi_pkg.amdsmi_interface = interface
@@ -121,7 +126,7 @@ def _build_fake_amdsmi():
 
 
 def _load_metric_module():
-    return load_cli_module("metric_apu_under_test", METRIC_PATH)
+    return load_cli_module("metric_apu_under_test", METRIC_PATH, sys_path_dir=_CLI_DIR)
 
 
 class _FakeLogger:

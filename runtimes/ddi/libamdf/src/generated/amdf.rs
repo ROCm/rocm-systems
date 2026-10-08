@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 // Snapshot generated from the pinned AMDF headers. Do not edit by hand.
-// Source: api-headers/include/amdf/ at upstream 4aa34130de44c45d68a48575cebfd0ff0610c461.
+// Source: api-headers/include/amdf/ at upstream bd24215e6a5d1e12570c892356fd5b343ac38a6d.
 //! AMDF C ABI declarations. See api-headers/README.md.
 //!
 //! Zero defaults initialize storage only. Callers must set structure tags,
@@ -1619,6 +1619,7 @@ pub struct amdf_kernel_queue_info_t {
     pub command_type: amdf_queue_command_type_t,
     pub maximum_pending_submission_count: u32,
     pub maximum_command_count: u32,
+    pub notification_types: amdf_native_event_types_t,
 }
 impl Default for amdf_kernel_queue_info_t {
     fn default() -> Self {
@@ -1643,6 +1644,51 @@ impl Default for amdf_kernel_queue_status_t {
     fn default() -> Self {
         // SAFETY: ABI records contain only integer values, raw pointers,
         // nullable function pointers, and aggregates of those types.
+        unsafe { ::core::mem::zeroed() }
+    }
+}
+
+pub type amdf_native_event_type_t = u32;
+
+pub type amdf_native_event_type_e = ::core::ffi::c_uint;
+
+pub const AMDF_NATIVE_EVENT_TYPE_NONE: amdf_native_event_type_t = 0;
+
+pub const AMDF_NATIVE_EVENT_TYPE_EVENTFD: amdf_native_event_type_t = 1;
+
+pub const AMDF_NATIVE_EVENT_TYPE_WIN32_EVENT: amdf_native_event_type_t = 2;
+
+pub type amdf_native_event_types_t = u64;
+
+pub type amdf_native_event_type_bits_e = ::core::ffi::c_uint;
+
+pub const AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD: amdf_native_event_types_t = 2;
+
+pub const AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT: amdf_native_event_types_t = 4;
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union amdf_native_event_payload_t {
+    pub file_descriptor: i64,
+    pub native_handle: *mut ::core::ffi::c_void,
+}
+impl Default for amdf_native_event_payload_t {
+    fn default() -> Self {
+        // SAFETY: ABI payload permits its all-zero representation as storage.
+        unsafe { ::core::mem::zeroed() }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_native_event_t {
+    pub r#type: amdf_native_event_type_t,
+    pub reserved: u32,
+    pub payload: amdf_native_event_payload_t,
+}
+impl Default for amdf_native_event_t {
+    fn default() -> Self {
+        // SAFETY: ABI records contain integer values and a pointer union.
         unsafe { ::core::mem::zeroed() }
     }
 }
@@ -1847,6 +1893,19 @@ pub struct amdf_api_t {
             *mut amdf_memory_pair_info_t,
         ) -> amdf_status_t,
     >,
+    pub kernel_queue_refresh_status: Option<
+        unsafe extern "C" fn(
+            *mut amdf_kernel_queue_t,
+            *mut amdf_kernel_queue_status_t,
+        ) -> amdf_status_t,
+    >,
+    pub kernel_queue_request_notification: Option<
+        unsafe extern "C" fn(
+            *mut amdf_kernel_queue_t,
+            u64,
+            *const amdf_native_event_t,
+        ) -> amdf_status_t,
+    >,
 }
 impl Default for amdf_api_t {
     fn default() -> Self {
@@ -1989,11 +2048,24 @@ pub const AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR: amdf_queue_format_feature
 
 pub type amdf_gpu_sdma_format_feature_bits_e = ::core::ffi::c_uint;
 
-pub const AMDF_GPU_SDMA_FORMAT_FEATURE_GCR: amdf_queue_format_features_t = 1;
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR: amdf_queue_format_features_t = 1;
 
 pub const AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM: amdf_queue_format_features_t = 2;
 
 pub const AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE: amdf_queue_format_features_t = 4;
+
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_MEMORY_TYPE: amdf_queue_format_features_t = 8;
+
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT: amdf_queue_format_features_t = 16;
+
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_EXTENDED_Z: amdf_queue_format_features_t =
+    32;
+
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE: amdf_queue_format_features_t = 64;
+
+pub type amdf_gpu_aql_format_feature_bits_e = ::core::ffi::c_uint;
+
+pub const AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE: amdf_queue_format_features_t = 16;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -2060,7 +2132,7 @@ pub struct amdf_gpu_kernel_queue_create_info_t {
     pub structure_size: u32,
     pub next: *const ::core::ffi::c_void,
     pub queue_family_ordinal: u32,
-    pub reserved: u32,
+    pub maximum_pending_submission_count: u32,
 }
 impl Default for amdf_gpu_kernel_queue_create_info_t {
     fn default() -> Self {
@@ -2376,7 +2448,7 @@ pub struct amdf_xdna_kernel_queue_create_info_t {
     pub structure_size: u32,
     pub next: *const ::core::ffi::c_void,
     pub queue_family_ordinal: u32,
-    pub reserved: u32,
+    pub maximum_pending_submission_count: u32,
 }
 impl Default for amdf_xdna_kernel_queue_create_info_t {
     fn default() -> Self {
@@ -2498,7 +2570,11 @@ pub const AMDF_ABI_VERSION_2: amdf_abi_version_t = 2;
 
 pub const AMDF_ABI_VERSION_3: amdf_abi_version_t = 3;
 
-pub const AMDF_ABI_VERSION_LATEST: amdf_abi_version_t = 3;
+pub const AMDF_ABI_VERSION_4: amdf_abi_version_t = 4;
+
+pub const AMDF_ABI_VERSION_5: amdf_abi_version_t = 5;
+
+pub const AMDF_ABI_VERSION_LATEST: amdf_abi_version_t = 5;
 
 pub const AMDF_ADDRESS_DOMAIN_ORDINAL_NONE: u32 = 4294967295;
 
@@ -2515,6 +2591,10 @@ pub const AMDF_GPU_EXTENSION_VERSION_LATEST: ::core::ffi::c_uint = 1;
 pub const AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1: ::core::ffi::c_uint = 1;
 
 pub const AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1: ::core::ffi::c_uint = 1;
+
+pub const AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1: ::core::ffi::c_uint = 1;
+
+pub const AMDF_GPU_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT: ::core::ffi::c_uint = 4096;
 
 pub const AMDF_MEMORY_PROFILE_EXTERNAL_SUPPORT_CAPACITY: ::core::ffi::c_uint = 5;
 
@@ -2559,6 +2639,8 @@ pub const AMDF_XDNA_EXTENSION_VERSION_LATEST: ::core::ffi::c_uint = 1;
 pub const AMDF_XDNA_PHYSICAL_COLUMN_ORIGIN_ANY: u32 = 4294967295;
 
 pub const AMDF_XDNA_QUEUE_FORMAT_VERSION_1: ::core::ffi::c_uint = 1;
+
+pub const AMDF_XDNA_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT: ::core::ffi::c_uint = 128;
 
 pub const AMDF_XDNA_TARGET_ID_CAPACITY: ::core::ffi::c_uint = 64;
 

@@ -13,8 +13,10 @@
 #include "xml.h"
 #include "net.h"
 #include "os.h"
+#include "nvmlwrap.h"
 #include "archinfo.h"
 #include <string.h>
+#include <map>
 
 #define LOC_BW 5000.0
 #define MLOPART_LOC_BW 2618.0
@@ -24,6 +26,7 @@
 #define SM90_NVLINK_BW 20.6
 #define SM86_NVLINK_BW 12.0
 #define SM100_NVLINK_BW 40.1
+#define RUBIN_NVLINK_BW 31.2
 #define PCI_BW 12.0           // PCI Gen3 x16
 #define AMD_ZEN12_BW 16.0
 #define AMD_ZEN34_BW 24.0
@@ -95,6 +98,7 @@ struct ncclTopoLinkList {
 };
 
 #define NCCL_TOPO_UNDEF (-1)
+#define NCCL_TOPO_UNDEF_BIT (0x1 << 16)
 
 #define NCCL_TOPO_ID_LOCAL_ID_MASK 0x00ffffffffffffff
 #define NCCL_TOPO_ID_SYSTEM_ID(id) (id >> 56)
@@ -173,8 +177,8 @@ struct ncclTopoNode {
       int maxChannels;
       int localGpu;
       int64_t busId;
-      int16_t railId;
-      int16_t planeId;
+      int railId;
+      int planeId;
     } net;
     struct {
       int arch;
@@ -197,6 +201,10 @@ struct ncclTopoNode {
 struct ncclTopoNodeSet {
   int count;
   struct ncclTopoNode nodes[NCCL_TOPO_MAX_NODES];
+};
+
+struct ncclTopoNetRailKeyList {
+  std::map<uint64_t, int> keys;
 };
 
 struct ncclTopoSystem {
@@ -228,6 +236,9 @@ struct ncclTopoSystem {
   int romeTopoModelIdx;
   /* Preset matchers assume uniform ranks per host; otherwise use generic search in ncclTopoCompute */
   bool skipPresetTopoMatching;
+  // mirrors the comm's values
+  bool cuMemGdrSupport;  // global cuMem GDR support
+  int minDriverVersion;  // min CUDA driver version across ranks
 };
 
 ncclResult_t ncclTopoGetNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);
@@ -271,12 +282,32 @@ struct ncclTopoNetInfo {
   ncclResult_t (*getProperties)(int, ncclNetProperties_t*);
   ncclResult_t (*makeVDevice)(int*, ncclNetVDeviceProps_t*);
   ncclResult_t (*devices)(int*);
+
+  // system-wide list of unique rail keys
+  struct ncclTopoNetRailKeyList* railKeyList;
 };
 
 ncclResult_t ncclTopoProcessNet(ncclXml* xml, const char* dumpXmlFile, struct ncclTopoNetInfo* net);
 ncclResult_t ncclTopoForceMerge(struct ncclXml* xml, struct ncclTopoNetInfo* netInfo, int* placedDevs,
                                 ncclNetProperties_t* propsList, struct ncclXmlNode** physNetNodes, int nPhysDevs);
-ncclResult_t ncclTopoGetFusionEnv(int* mergeLevel, const char** forceMerge);
+ncclResult_t ncclTopoGetXmlCpuArch(ncclXml* xml, int* cpuArch);
+ncclResult_t ncclTopoGetFusionEnv(int* mergeLevel, const char** forceMerge, int cudaCompCap, int cpuArch);
+
+// Owned subset of network properties that remains valid after the topology lock is released.
+struct ncclTopoNetPropertiesSnapshot {
+  bool propertiesValid;
+  ncclNetVDeviceProps_t vProps;
+  int speed;
+  int port;
+  ncclNetDeviceType netDeviceType;
+  char name[PATH_MAX];
+  char pciPath[PATH_MAX];
+};
+
+// Caller keeps comm and its network plugin alive. When requireCommInitialized is true, the plugin is queried only
+// after communicator initialization succeeds. The caller owns *snapshots.
+ncclResult_t ncclTopoGetNetPropertiesSnapshot(struct ncclComm* comm, bool requireCommInitialized,
+                                              struct ncclTopoNetPropertiesSnapshot** snapshots, int* nSnapshots);
 
 #define NCCL_TOPO_XML_MAX_NODES 8192
 #define NCCL_GRAPH_XML_MAX_NODES 8192
@@ -351,15 +382,22 @@ static float ncclTopoXGMISpeed(const char* gcn) {
   else return VEGA_XGMI_WIDTH;
 }
 
+// [RCCL] Upstream gets RUBIN_AND_LATER from cudawrap.h. topo.h does not include it here: cudawrap.h
+// redefines CUPFN, which the host unit tests override through rocmwrap.h. Keep in sync with cudawrap.h.
+#ifndef RUBIN_AND_LATER
+#define RUBIN_AND_LATER(sm) (sm >= 107 && sm != 110 && sm != 120 && sm != 121)
+#endif
+
 // Returns NVLink bw in GB/s
 static float ncclTopoNVLinkBw(int cudaCompCap) {
-  return cudaCompCap >= 100 ? SM100_NVLINK_BW :
-         cudaCompCap >= 90  ? SM90_NVLINK_BW :
-         cudaCompCap == 86  ? SM86_NVLINK_BW :
-         cudaCompCap >= 80  ? SM80_NVLINK_BW :
-         cudaCompCap >= 70  ? SM70_NVLINK_BW :
-         cudaCompCap >= 60  ? SM60_NVLINK_BW :
-                              SM80_NVLINK_BW;
+  return RUBIN_AND_LATER(cudaCompCap) ? RUBIN_NVLINK_BW :
+         cudaCompCap >= 100           ? SM100_NVLINK_BW :
+         cudaCompCap >= 90            ? SM90_NVLINK_BW :
+         cudaCompCap == 86            ? SM86_NVLINK_BW :
+         cudaCompCap >= 80            ? SM80_NVLINK_BW :
+         cudaCompCap >= 70            ? SM70_NVLINK_BW :
+         cudaCompCap >= 60            ? SM60_NVLINK_BW :
+                                        SM80_NVLINK_BW;
 }
 
 // Mirror bits
