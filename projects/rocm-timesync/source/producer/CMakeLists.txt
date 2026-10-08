@@ -9,7 +9,14 @@ add_executable(rocm-timesyncd
     $<TARGET_OBJECTS:rocm-timesync-core>
 )
 
-find_package(hsakmt REQUIRED)
+# to avoid a circular dependency between ourselves and rocr-runtime
+add_subdirectory(
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../rocr-runtime/libhsakmt
+    ${CMAKE_BINARY_DIR}/hsakmt
+    EXCLUDE_FROM_ALL
+)
+#find_package(hsakmt REQUIRED)
+
 find_package(yaml-cpp REQUIRED)
 
 target_link_libraries(rocm-timesyncd
