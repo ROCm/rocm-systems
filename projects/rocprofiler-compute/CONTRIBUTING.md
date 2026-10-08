@@ -137,7 +137,6 @@ When a feature is ready for general availability:
 
 ## Adding or Changing Command-Line Options
 
-All command-line options are defined in [`src/argparser.py`](./src/argparser.py).
 [`.ai/rules/cli-options.md`](.ai/rules/cli-options.md) is the single source of truth
 for how options are named, how their help text is written, and how an option is
 renamed or deprecated
