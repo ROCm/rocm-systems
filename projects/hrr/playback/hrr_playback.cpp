@@ -572,6 +572,9 @@ static bool needs_ordering(uint16_t etype) {
     case HRR_API_HIPSTREAMCREATEWITHFLAGS:
     case HRR_API_HIPSTREAMCREATEWITHPRIORITY:
     case HRR_API_HIPSTREAMDESTROY:
+    // A reset destroys streams and first waits for every queued pinned host
+    // restore, which launches on other threads would keep queueing.
+    case HRR_API_HIPDEVICERESET:
     // Event create / destroy
     case HRR_API_HIPEVENTCREATE:
     case HRR_API_HIPEVENTCREATEWITHFLAGS:
@@ -619,8 +622,8 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
                                  size_t idx, bool log) {
   uint16_t etype = ev.header().event_type;
 
-  // Give kernel-launch handlers the sequence ID so they can wait and advance
-  // next_seq at the exact point of the HIP call.
+  // The sequence ID, for handlers that name the event in diagnostics. An
+  // ordered launch passes the turn on through hrr_dispatch_release_seq.
   hrr_dispatch_seq = ev.header().sequence_id;
   // A launch that restores pinned host memory is ordered too, so that the
   // next event, a free of that memory or a capture begun on the launch
@@ -1236,6 +1239,11 @@ static void print_usage(const char* argv0) {
     "  --sync-watchdog-ms N  Abort with a diagnostic if any device synchronize does\n"
     "                        not complete within N ms (catches hung/deadlocked\n"
     "                        kernels, e.g. StreamK flag spin-waits). 0 = disabled.\n"
+    "                        Also bounds every wait for queued pinned host\n"
+    "                        restores: before a free, a hipDeviceReset, the\n"
+    "                        summary and after the --kernel-filter warm-up (10 s\n"
+    "                        when 0). A free whose wait times out leaks the\n"
+    "                        allocation; replay does not abort.\n"
     "  --trace-kernels       Print one compact line before every kernel launch\n"
     "  --trace-sync          Print sync begin/done markers around kernel syncs\n"
     "  --progress-kernels N  Print heartbeat every N launched kernels\n"
@@ -1592,6 +1600,14 @@ int main(int argc, char** argv) {
   // implementation can drift. Not called on the fatal-HIP-error path, where the
   // device context may be dead and these calls could hang or error.
   auto cleanup = [&]() {
+    // Once one wait for a queued restore runs out here, the others would run
+    // out too, one bound per allocation: a divergence stop can skip the event
+    // that releases a held stream. The waits after it do not wait.
+    auto release_ready = [&](const void* live) {
+      if (hrr_host_release_ready(ctx, live)) return true;
+      ctx.host_restore_no_wait = true;
+      return false;
+    };
     for (auto& [rec, gexec] : ctx.graph_exec_map) (void)hipGraphExecDestroy(gexec);
     for (auto& [rec, graph] : ctx.graph_map)      (void)hipGraphDestroy(graph);
 
@@ -1605,7 +1621,7 @@ int main(int argc, char** argv) {
       switch (entry.kind) {
         case AllocKind::Device:        hrr_free_device_alloc(ctx, entry.live_ptr); break;
         case AllocKind::HostMalloc:
-          if (hrr_host_release_ready(ctx, entry.live_ptr)) (void)hipHostFree(entry.live_ptr);
+          if (release_ready(entry.live_ptr)) (void)hipHostFree(entry.live_ptr);
           break;
         case AllocKind::HostRegister:                                     break;
         case AllocKind::DevicePtrAlias:                                   break;
@@ -1616,7 +1632,7 @@ int main(int argc, char** argv) {
     // remaining backing buffer here to avoid leaking both the pinned registration
     // and the malloc'd buffer every run.
     for (auto& [rec, buf] : ctx.host_reg_bufs) {
-      if (!buf || !hrr_host_release_ready(ctx, buf)) continue;
+      if (!buf || !release_ready(buf)) continue;
       (void)hipHostUnregister(buf);
 #ifdef _WIN32
       _aligned_free(buf);
@@ -1660,8 +1676,10 @@ int main(int argc, char** argv) {
 
   // The pass's closing sync covers the current device only. A restore queued
   // on another device's stream may still be pending, and the summary below
-  // would not count it.
-  (void)hrr_wait_host_restores(ctx, nullptr, "the replay summary");
+  // would not count it. If this wait runs out, each teardown wait would run
+  // out again, one bound per allocation, so teardown does not wait.
+  if (!hrr_wait_host_restores(ctx, nullptr, "the replay summary"))
+    ctx.host_restore_no_wait = true;
 
   // ---------------------------------------------------------------------------
   // Summary

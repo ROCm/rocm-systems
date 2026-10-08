@@ -1386,7 +1386,9 @@ TEST_CASE("Unit_HRR_PinnedHost_CaptureElsewhere_Direct", "[.][hrr-direct]") {
 //        3  none: device 1 is made current and synchronized, and the
 //           workload ends with S still busy and the buffer allocated
 //        4  hipHostFree, then the flag is set
-//        5  hipDeviceReset of device 1, which releases its allocations
+//        5  hipDeviceReset of device 1. With two or more devices a reset
+//           frees no pinned host memory, so the buffer stays allocated;
+//           the case shows only that replay waits before the reset.
 // Each release syncs device 1 only, so S is still held. Replay queues the
 // restore for the read behind what holds S. If it released the buffer straight
 // away, the restore would write freed memory. In variant 3 replay ends with
@@ -1701,6 +1703,10 @@ void write_bytes(const fs::path& p, const std::vector<uint8_t>& b) {
   std::ofstream o(p, std::ios::binary | std::ios::trunc);
   o.write(reinterpret_cast<const char*>(b.data()), b.size());
 }
+
+// Size of one snapshot record in a launch payload: five u64 fields, then the
+// u8 direction.
+constexpr size_t kSnapshotRecordBytes = 8 * 5 + 1;
 
 // Byte range of each kernel launch event in events.bin, in file order.
 std::vector<std::pair<size_t, size_t>> launch_spans(const std::vector<uint8_t>& f) {
@@ -2080,7 +2086,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_MalformedRecordRejected) {
   // Launch 6: an attribute tail longer than the event. A plain launch writes
   // a zero count, so the tail is the 8 bytes before the records.
   {
-    const size_t tail = spans[6].second - kls[6]->snapshots.size() * 41 - 8;
+    const size_t tail = spans[6].second - kls[6]->snapshots.size() * kSnapshotRecordBytes - 8;
     const uint32_t n_attrs = 1000, stride = 24;
     std::memcpy(events.data() + tail, &n_attrs, 4);
     std::memcpy(events.data() + tail + 4, &stride, 4);
@@ -2605,10 +2611,11 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_GraphCapture) {
   const auto spans = launch_spans(events);
   REQUIRE(spans.size() == 2);
   const size_t rec = record_at(events, spans, kls, 0, 0);
-  std::vector<uint8_t> records(events.begin() + rec, events.begin() + rec + 41);
-  records.insert(records.end(), events.begin() + rec, events.begin() + rec + 41);
+  const auto record = events.begin() + rec;
+  std::vector<uint8_t> records(record, record + kSnapshotRecordBytes);
+  records.insert(records.end(), record, record + kSnapshotRecordBytes);
   const uint64_t short_len = kChunk - 8;
-  std::memcpy(records.data() + 41 + 16, &short_len, 8);
+  std::memcpy(records.data() + kSnapshotRecordBytes + 16, &short_len, 8);
   const size_t n_at = num_snapshots_at(events, spans[1]);
   uint16_t n = 0;
   std::memcpy(&n, events.data() + n_at, 2);
@@ -2673,7 +2680,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_NullLaunchDuringCapture) {
   const auto spans = launch_spans(events);
   REQUIRE(spans.size() == 2);
   const size_t rec = record_at(events, spans, kls, 0, 0);
-  std::vector<uint8_t> record(events.begin() + rec, events.begin() + rec + 41);
+  std::vector<uint8_t> record(events.begin() + rec,
+                              events.begin() + rec + kSnapshotRecordBytes);
   const size_t n_at = num_snapshots_at(events, spans[1]);
   const uint16_t n = 1;
   std::memcpy(events.data() + n_at, &n, 2);
@@ -2802,6 +2810,53 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_DeviceReset) {
   CHECK(kls[1]->snapshots[1].direction == 0);
   if (!skipped.empty()) SKIP(skipped);
   CHECK(kls[2]->snapshots.empty());
+}
+
+// ---------------------------------------------------------------------------
+// After a replayed hipDeviceReset on one GPU, a record naming a pinned buffer
+// the reset freed is refused. Reset_Direct's launch 1 gets its first record
+// pointed into buffer A, which the reset released, instead of B. Replay that
+// kept A in its tracking let the record through and restored archive bytes
+// into the released memory. Replay runs with --continue-on-error, since
+// events after a reset need not replay.
+// ---------------------------------------------------------------------------
+HRR_TEST_CASE(Unit_HRR_PinnedHost_RecordAfterReset) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_pinned_record_after_reset.hrr");
+  (void)capture_case("Unit_HRR_PinnedHost_Reset_Direct", cap.path);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  const auto kls = launches_of(arc);
+  REQUIRE(kls.size() >= 2);
+  REQUIRE(kls[0]->snapshots.size() == kResetABytes / kChunk);
+  REQUIRE(kls[1]->snapshots.size() == 2);
+  REQUIRE(kls[1]->snapshots[0].offset == 0);
+  REQUIRE(kls[1]->snapshots[0].length == kChunk);
+
+  // A chunk-sized range inside A that B does not cover, so that the record
+  // can only name A.
+  const uint64_t a = kls[0]->snapshots[0].ptr_handle;
+  const uint64_t b = kls[1]->snapshots[0].ptr_handle;
+  uint64_t stale = 0;
+  for (uint64_t p : {a, a + kResetABytes - kChunk})
+    if (stale == 0 && (p + kChunk <= b || p >= b + kPinnedBytes)) stale = p;
+  INFO("A 0x" << std::hex << a << ", B 0x" << b);
+  REQUIRE(stale != 0);
+
+  std::vector<uint8_t> events = read_bytes(archive / "events.bin");
+  const auto spans = launch_spans(events);
+  REQUIRE(spans.size() == kls.size());
+  patch_snapshot(events, spans, kls, 1, 0, /*ptr*/ 0, stale);
+  write_bytes(archive / "events.bin", events);
+
+  auto [rc, out] = replay(archive, "--continue-on-error");
+  INFO("Replay exit: " << rc << "\nReplay:\n" << out);
+  CHECK(rc < 128);
+  CHECK(count_of(out, "names no live allocation") == 1);
+  unsigned long long restored = 0, rejected = 0;
+  host_snapshot_summary(out, restored, rejected);
+  CHECK(rejected == 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -2937,8 +2992,10 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceRestoreAtExit) {
 }
 
 // ---------------------------------------------------------------------------
-// hipDeviceReset of the allocating device releases the buffer without waiting
-// for device 0's streams, so replay waits for every queued restore first.
+// Replay waits for every queued restore before a hipDeviceReset. With one GPU
+// the reset releases pinned host memory, and a restore still queued on the
+// null stream would write it afterwards. With two, as here, the reset frees
+// none, so the case checks only that replay waits.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceReset) {
   cross_device_free("5", "hipDeviceReset waits for a pinned host snapshot restore");
@@ -2954,8 +3011,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceReset) {
 HRR_TEST_CASE(Unit_HRR_PinnedHost_CrossDeviceFreeHeld) {
   cross_device_free("4",
                     "is not freed: a snapshot restore queued for it has not run after "
-                    "3000 ms",
-                    "--sync-watchdog-ms 3000");
+                    "1000 ms",
+                    "--sync-watchdog-ms 1000");
 }
 
 // ---------------------------------------------------------------------------

@@ -707,6 +707,7 @@ static hipError_t playback_hipDeviceReset(PlaybackContext& ctx, const uint8_t* p
     hrr_note_recorded_error(ctx, "hipDeviceReset", a->ret);
     return hipSuccess;
   }
+  if (_r == hipSuccess) hrr_forget_released_host_allocs(ctx);
   return _r;
 }
 

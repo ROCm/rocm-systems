@@ -327,6 +327,10 @@ struct PlaybackContext {
     // for them had still not run when the free came; see
     // hrr_host_release_ready.
     std::atomic<uint64_t> host_allocs_leaked{0};
+    // Set when the summary's wait for every restore ran out, or one teardown
+    // wait did: the teardown waits after it then do not wait, and leak what
+    // is still queued.
+    bool host_restore_no_wait = false;
     // The one-time pinned host snapshot notices: a wait for a queued restore,
     // restores not applied under graph capture, and a restore that could not
     // be queued on its stream. Cleared after the --kernel-filter warm-up, so
@@ -834,7 +838,7 @@ void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
 // device's stream. The wait is bounded by --sync-watchdog-ms when that is set and
 // by 10 s otherwise, because the stream may be held by work that only a later
 // replayed event releases. Returns false when restores are still queued after
-// that; for a null base it then says that replay goes on. `why` names the
+// that; for a null base it then says that `why` stops waiting. `why` names the
 // waiter in the one-time notice.
 bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* why);
 
@@ -846,6 +850,16 @@ bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* 
 // and drops the allocation from tracking, so that no later launch restores
 // into it.
 bool hrr_host_release_ready(PlaybackContext& ctx, const void* live);
+
+// Called after a replayed hipDeviceReset succeeds. Drops from tracking every
+// pinned host allocation the runtime no longer knows, as capture does: with
+// one GPU the reset frees hipHostMalloc memory and drops hipHostRegister
+// registrations. A later record naming one is then refused as naming no live
+// allocation, rather than restored into released memory. A registered range
+// keeps its backing buffer in host_reg_bufs: replay allocated it and it stays
+// valid, so teardown or the replayed unregister still frees it after the
+// usual wait.
+void hrr_forget_released_host_allocs(PlaybackContext& ctx);
 
 // Whether the event is a kernel launch whose payload carries pinned host
 // snapshot records. A multi-threaded replay orders such a launch against the
@@ -914,9 +928,8 @@ bool hrr_replayed_recorded_error(PlaybackContext& ctx, const char* api,
 // that capture shows failing that way fails the same way here.
 hipCtx_t hrr_live_ctx(uint64_t recorded);
 
-// Thread-local sequence ID — set by dispatch_event before calling any handler.
-// Kernel-launch handlers read this to wait for their submission turn at the
-// exact point of the HIP call, allowing preparation work to run in parallel.
+// Thread-local sequence ID — set by dispatch_event before calling any handler,
+// which reads it to name the event in diagnostics.
 extern thread_local uint64_t hrr_dispatch_seq;
 
 // The sequence id the current event hands on to the next one, when it is a

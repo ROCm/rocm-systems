@@ -112,7 +112,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--sync-after-launch` | `hipDeviceSynchronize` after every kernel launch |
 | `--sync-after-event` | Sync after every event (slow; pinpoints faults/hangs) |
 | `--continue-on-error` | Report each HIP API error and keep replaying instead of aborting; for surveying which APIs fail, not for reproducing a fault |
-| `--sync-watchdog-ms N` | Abort if any device sync exceeds `N` ms (`0` = disabled) |
+| `--sync-watchdog-ms N` | Abort if any device sync exceeds `N` ms (`0` = disabled). Also bounds every wait for queued pinned host restores: before a free, a `hipDeviceReset`, the summary and after the `--kernel-filter` warm-up (10 s when `0`). A free whose wait times out leaks the allocation; replay does not abort |
 | `--trace-kernels` | One compact line before every kernel launch |
 | `--trace-sync` | Log sync begin/done around kernel syncs |
 | `--progress-kernels N` | Heartbeat every `N` launched kernels |

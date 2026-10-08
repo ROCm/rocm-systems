@@ -52,9 +52,9 @@
 #include <unistd.h>   // _exit
 #endif
 
-// Thread-local sequence ID — set by dispatch_event before calling any handler.
-// Kernel-launch handlers use this to wait for their submission turn and then
-// immediately unblock the next thread before doing timing/sync.
+// Thread-local sequence ID — set by dispatch_event before calling any handler,
+// which reads it to name the event in diagnostics. An ordered launch hands its
+// turn on through hrr_dispatch_release_seq.
 thread_local uint64_t hrr_dispatch_seq = 0;
 thread_local uint64_t hrr_dispatch_release_seq = 0;
 
@@ -1105,7 +1105,9 @@ static void apply_host_snapshots(void* user) {
 }
 
 static unsigned host_restore_wait_ms(const PlaybackContext& ctx) {
-    return ctx.sync_watchdog_ms ? ctx.sync_watchdog_ms : 10000;
+    return ctx.host_restore_no_wait ? 0
+         : ctx.sync_watchdog_ms     ? ctx.sync_watchdog_ms
+                                    : 10000;
 }
 
 bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* why) {
@@ -1123,8 +1125,8 @@ bool hrr_wait_host_restores(PlaybackContext& ctx, const void* base, const char* 
     if (st.cv.wait_for(lk, std::chrono::milliseconds(ms), done)) return true;
     if (!base)
         fprintf(stderr,
-                "[HRR] %s: a pinned host snapshot restore is still queued after "
-                "%u ms; replay goes on without it\n", why, ms);
+                "[HRR] %s stops waiting: a pinned host snapshot restore is "
+                "still queued after %u ms\n", why, ms);
     return false;
 }
 
@@ -1134,12 +1136,42 @@ bool hrr_host_release_ready(PlaybackContext& ctx, const void* live) {
     void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
     (void)ctx.live_alloc_of(live, &abase, &asize, &arec);
     ctx.host_allocs_leaked.fetch_add(1, std::memory_order_relaxed);
+    char state[48];
+    if (ctx.host_restore_no_wait)
+        snprintf(state, sizeof(state), "is still queued at teardown");
+    else
+        snprintf(state, sizeof(state), "has not run after %u ms",
+                 host_restore_wait_ms(ctx));
     fprintf(stderr,
             "[HRR] pinned host allocation 0x%llx (live %p, %zu bytes) is not "
-            "freed: a snapshot restore queued for it has not run after %u ms, "
-            "and would write it once freed. Replay leaks it.\n",
-            (unsigned long long)arec, live, asize, host_restore_wait_ms(ctx));
+            "freed: a snapshot restore queued for it %s, and would write it "
+            "once freed. Replay leaks it.\n",
+            (unsigned long long)arec, live, asize, state);
     return false;
+}
+
+void hrr_forget_released_host_allocs(PlaybackContext& ctx) {
+    std::vector<std::pair<uint64_t, void*>> host;
+    {
+        std::shared_lock lk(ctx.map_mutex);
+        for (auto& [rec, e] : ctx.alloc_map)
+            if (e.kind == AllocKind::HostMalloc || e.kind == AllocKind::HostRegister)
+                host.emplace_back(rec, e.live_ptr);
+    }
+    std::vector<std::pair<uint64_t, void*>> gone;
+    for (auto& [rec, live] : host) {
+        hipPointerAttribute_t attr{};
+        const hipError_t r = hipPointerGetAttributes(&attr, live);
+        (void)hipGetLastError();
+        if (r == hipSuccess && attr.type == hipMemoryTypeUnregistered)
+            gone.emplace_back(rec, live);
+    }
+    std::unique_lock lk(ctx.map_mutex);
+    for (auto& [rec, live] : gone) {
+        auto it = ctx.alloc_map.find(rec);
+        if (it != ctx.alloc_map.end() && it->second.live_ptr == live)
+            ctx.alloc_map.erase(it);
+    }
 }
 
 static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* p,
@@ -1276,6 +1308,43 @@ static const uint8_t* skip_kernel_args(const uint8_t* p, const uint8_t* end,
     return p;
 }
 
+// The fixed part of a kernel launch payload, between the event header and the
+// arguments: stream, kernel name, the code object hash when there is room for
+// it, dimensions, then the argument and snapshot record counts. Returns the
+// byte after it, or nullptr when the payload is too short. Both
+// hrr_launch_has_host_snapshots and replay_kernel_launch read it here.
+struct LaunchHead {
+    uint64_t stream_rec;
+    const char* name;
+    uint16_t name_len;
+    uint64_t co_hash_lo = 0, co_hash_hi = 0;
+    uint32_t grid[3], block[3], shared_mem;
+    uint16_t num_args, num_snapshots;
+};
+
+static const uint8_t* read_launch_head(const uint8_t* p, const uint8_t* end,
+                                       LaunchHead& h) {
+    if (end - p < 10) return nullptr;
+    memcpy(&h.stream_rec, p, 8);
+    memcpy(&h.name_len, p + 8, 2);
+    p += 10;
+    if (end - p < h.name_len) return nullptr;
+    h.name = reinterpret_cast<const char*>(p);
+    p += h.name_len;
+    if (end - p >= 16) {
+        memcpy(&h.co_hash_lo, p, 8);
+        memcpy(&h.co_hash_hi, p + 8, 8);
+        p += 16;
+    }
+    if (end - p < 32) return nullptr;
+    memcpy(h.grid, p, 12);
+    memcpy(h.block, p + 12, 12);
+    memcpy(&h.shared_mem, p + 24, 4);
+    memcpy(&h.num_args, p + 28, 2);
+    memcpy(&h.num_snapshots, p + 30, 2);
+    return p + 32;
+}
+
 bool hrr_launch_has_host_snapshots(uint16_t etype, const uint8_t* pl, size_t size) {
     switch (etype) {
         case HRR_API_HIPMODULELAUNCHKERNEL:
@@ -1292,21 +1361,12 @@ bool hrr_launch_has_host_snapshots(uint16_t etype, const uint8_t* pl, size_t siz
         default:
             return false;
     }
-    // The fixed part of the payload as replay_kernel_launch reads it, up to
-    // the snapshot record count.
     if (size < sizeof(hrr_event_header)) return false;
     const auto* hdr = reinterpret_cast<const hrr_event_header*>(pl);
-    const uint8_t* p   = pl + sizeof(hrr_event_header);
-    const uint8_t* end = pl + std::min<size_t>(size, hdr->payload_length);
-    if (end - p < 10) return false;
-    uint16_t name_len; memcpy(&name_len, p + 8, 2);
-    p += 10;
-    if (end - p < name_len) return false;
-    p += name_len;
-    if (end - p >= 16) p += 16;  // code object hash
-    if (end - p < 32) return false;
-    uint16_t num_snapshots; memcpy(&num_snapshots, p + 30, 2);
-    return num_snapshots != 0;
+    LaunchHead h;
+    return read_launch_head(pl + sizeof(hrr_event_header),
+                            pl + std::min<size_t>(size, hdr->payload_length), h) &&
+           h.num_snapshots != 0;
 }
 
 static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
@@ -1315,17 +1375,16 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                                        bool cooperative = false) {
     // Skip the 32-byte header; kernel launch has a variable-length binary format.
     const auto* hdr = reinterpret_cast<const hrr_event_header*>(pl);
-    const uint8_t* p   = pl + sizeof(hrr_event_header);
     const uint8_t* end = pl + hdr->payload_length;
-
-    if (p + 8 > end) return hipErrorInvalidValue;
-    uint64_t stream_rec; memcpy(&stream_rec, p, 8); p += 8;
-
-    if (p + 2 > end) return hipErrorInvalidValue;
-    uint16_t name_len; memcpy(&name_len, p, 2); p += 2;
-    if (p + name_len > end) return hipErrorInvalidValue;
-    std::string kernel_name(reinterpret_cast<const char*>(p), name_len);
-    p += name_len;
+    LaunchHead h;
+    const uint8_t* p = read_launch_head(pl + sizeof(hrr_event_header), end, h);
+    if (!p) return hipErrorInvalidValue;
+    const std::string kernel_name(h.name, h.name_len);
+    const uint64_t stream_rec = h.stream_rec;
+    const uint32_t* grid = h.grid;
+    const uint32_t* block = h.block;
+    const uint32_t shared_mem = h.shared_mem;
+    const uint16_t num_args = h.num_args, num_snapshots = h.num_snapshots;
 
     // Workaround for recordings made before the capture side tagged Ext launches:
     // hipBLASLt/Tensile ("Cijk_*") StreamK kernels are launched via
@@ -1347,29 +1406,13 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         std::getenv("HIP_HRR_REPLAY_FORCE_EXT_CIJK"))
         ext_global_worksize = true;
 
-    uint64_t co_hash_lo = 0, co_hash_hi = 0;
-    if (p + 16 <= end) {
-        memcpy(&co_hash_lo, p, 8); p += 8;
-        memcpy(&co_hash_hi, p, 8); p += 8;
-    }
-
-    if (p + 32 > end) return hipErrorInvalidValue;
-    uint32_t grid[3], block[3], shared_mem;
-    memcpy(grid,       p, 12); p += 12;
-    memcpy(block,      p, 12); p += 12;
-    memcpy(&shared_mem, p, 4); p +=  4;
-
-    uint16_t num_args, num_snapshots;
-    memcpy(&num_args,       p, 2); p += 2;
-    memcpy(&num_snapshots,  p, 2); p += 2;
-
     // Apply kernel filter if set
     if (!ctx.kernel_filter.empty() &&
         kernel_name.find(ctx.kernel_filter) == std::string::npos)
         return hipSuccess;
 
     hipFunction_t func = resolve_kernel_function(ctx, kernel_name,
-                                                 co_hash_lo, co_hash_hi);
+                                                 h.co_hash_lo, h.co_hash_hi);
     if (!func) return hipErrorNotFound;
 
     // Build kernelParams[] from captured args, translating GPU pointers.
@@ -1753,8 +1796,9 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         return r;
     }
 
-    // Resolve any guarded blocks before the next event runs, so this launch is
-    // the only one whose memory was moved.
+    // Resolve any guarded blocks before this launch returns, so it is the only
+    // one whose memory was moved. Guarding needs region annotations, which a
+    // multi-threaded replay ignores, so no other thread runs an event meanwhile.
     if (hipError_t gr = hrr_block_guard_resolve(ctx, rls, kernel_name, kernel_ordinal);
         gr != hipSuccess)
         return gr;
