@@ -3,10 +3,8 @@
 
 """WEIGHTED_AVG composite metrics (AIPROFCOMP-865 Phase 2)."""
 
-from __future__ import annotations
-
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Tuple, Union
 
 import pandas as pd
 
@@ -15,6 +13,7 @@ from utils.metrics.collectable import (
     WEIGHTED_AVG_ATTR,
     CompositeDef,
     CompositeKind,
+    _evaluate_weighted_composite,
     apply_composite_metrics,
     cache_collectable_expressions,
 )
@@ -35,15 +34,13 @@ cache_weighted_avg_sub_expressions = cache_collectable_expressions
 
 
 def evaluate_weighted_avg_parent(
-    submetric_names: list[str],
-    weight_meta: dict[str, Any],
+    submetric_names: List[str],
+    weight_meta: Dict[str, Any],
     df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
-    sys_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
-) -> float | str:
-    from utils.metrics.collectable import _evaluate_weighted_composite
-
+    sys_vars: Dict[str, Any],
+    empirical_peaks: Dict[str, Any],
+) -> Union[float, str]:
     composite = CompositeDef(
         metric_id="",
         kind=CompositeKind.WEIGHTED_AVG,
@@ -57,12 +54,12 @@ def evaluate_weighted_avg_parent(
 
 def scan_weighted_avg_parents(
     config_arch_path: Path,
-) -> list[tuple[str, str, list[str]]]:
+) -> List[Tuple[str, str, List[str]]]:
     """Return (yaml file, metric key, submetric names) for WEIGHTED_AVG parents."""
     if not config_arch_path.is_dir():
         return []
 
-    found: list[tuple[str, str, list[str]]] = []
+    found: List[Tuple[str, str, List[str]]] = []
     for ypath in sorted(config_arch_path.glob("*.yaml")):
         try:
             with open(ypath, encoding="utf-8") as stream:
