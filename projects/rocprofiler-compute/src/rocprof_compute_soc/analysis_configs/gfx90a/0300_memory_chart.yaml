@@ -54,7 +54,7 @@ Panel Config:
           value: ROUND(100 * SUM(SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu), 0)
           unit: Percent
         VL1 Hit:
-          value: ROUND(100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum), 0)
+          value: COLLECT_SUM(_collect.vl1d_hit_non_rw, _collect.vl1d_hit_atom)
           unit: Percent
         VL1 Coalesce:
           value: ROUND(100 * 64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum)), 0)
@@ -95,6 +95,12 @@ Panel Config:
         L2-Fabric Write and Atomic BW:
           value: SUM(TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
+        _collect.vl1d_hit_non_rw:
+          value: 100 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          _collectable_id: collect.vl1d_hit_non_rw
+        _collect.vl1d_hit_atom:
+          value: -100 * SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          _collectable_id: collect.vl1d_hit_atom
       comparable: false
       cli_style: mem_chart
   metrics_description:

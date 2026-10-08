@@ -14,7 +14,7 @@ Panel Config:
         pct_of_peak: Percent of Peak
       metric:
         VALU FLOPs:
-          value: 64 * SUM(SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + 2 * SQ_INSTS_VALU_FMA_F64) / SUM(End_Timestamp - Start_Timestamp)
+          value: COLLECT_SUM(_collect.valu_flops_f16, _collect.valu_flops_f32, _collect.valu_flops_f64)
           unit: GFLOPs
           peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
           pct_of_peak: true
@@ -58,6 +58,15 @@ Panel Config:
           unit: GIOPs
           peak: $max_sclk * $cu_per_gpu * 8192 / 1000
           pct_of_peak: true
+        _collect.valu_flops_f16:
+          value: 64 * SUM(SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + 2 * SQ_INSTS_VALU_FMA_F16) / SUM(End_Timestamp - Start_Timestamp)
+          _collectable_id: collect.valu_flops_f16
+        _collect.valu_flops_f32:
+          value: 64 * SUM(SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + 2 * SQ_INSTS_VALU_FMA_F32) / SUM(End_Timestamp - Start_Timestamp)
+          _collectable_id: collect.valu_flops_f32
+        _collect.valu_flops_f64:
+          value: 64 * SUM(SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + 2 * SQ_INSTS_VALU_FMA_F64) / SUM(End_Timestamp - Start_Timestamp)
+          _collectable_id: collect.valu_flops_f64
   - metric_table:
       id: 1102
       title: Pipeline Statistics
@@ -74,9 +83,9 @@ Panel Config:
           max: MAX(SQ_INSTS / SQ_BUSY_CU_CYCLES)
           unit: Instructions per Cycle
         IPC (Issued):
-          avg: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
-          min: MIN((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SQ_ACTIVE_INST_ANY)
-          max: MAX((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SQ_ACTIVE_INST_ANY)
+          avg: COLLECT_SUM(_collect.ipc_issued_a, _collect.ipc_issued_b)
+          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
+          max: None
           unit: Instructions per Cycle
         SALU Utilization:
           avg: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
@@ -133,6 +142,12 @@ Panel Config:
           min: MIN(SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM)
           max: MAX(SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM)
           unit: Cycles
+        _collect.ipc_issued_a:
+          avg: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM) / SUM(SQ_ACTIVE_INST_ANY)
+          _collectable_id: collect.ipc_issued_a
+        _collect.ipc_issued_b:
+          avg: SUM(SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
+          _collectable_id: collect.ipc_issued_b
   - metric_table:
       id: 1103
       title: Arithmetic Operations
@@ -144,9 +159,9 @@ Panel Config:
         unit: Unit
       metric:
         FLOPs (Total):
-          avg: SUM(64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4) / SUM($denom)
-          min: MIN((64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4) / $denom)
-          max: MAX((64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4) / $denom)
+          avg: COLLECT_SUM(_collect.flops_total_a, _collect.flops_total_b, _collect.flops_total_c)
+          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
+          max: None
           unit: (FLOPs + $normUnit)
         IOPs (Total):
           avg: SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64) + SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / SUM($denom)
@@ -188,6 +203,15 @@ Panel Config:
           min: 512 * MIN(SQ_INSTS_VALU_MFMA_MOPS_I8 / $denom)
           max: 512 * MAX(SQ_INSTS_VALU_MFMA_MOPS_I8 / $denom)
           unit: (IOPS + $normUnit)
+        _collect.flops_total_a:
+          avg: SUM(64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16) / SUM($denom)
+          _collectable_id: collect.flops_total_a
+        _collect.flops_total_b:
+          avg: SUM(64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32) / SUM($denom)
+          _collectable_id: collect.flops_total_b
+        _collect.flops_total_c:
+          avg: SUM(64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4) / SUM($denom)
+          _collectable_id: collect.flops_total_c
   metrics_description:
     VALU FLOPs: >-
       The total floating-point operations executed per second on the VALU.
