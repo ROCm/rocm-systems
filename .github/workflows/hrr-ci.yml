@@ -133,8 +133,10 @@ jobs:
           python-version: "3.12"
 
       # api_matrix.yaml is read with PyYAML by the matrix scripts below.
+      # Install only when yaml does not import. A version pin makes pip
+      # uninstall a newer copy, which fails when site-packages is read-only.
       - name: Install PyYAML
-        run: python3 -m pip install --no-cache-dir PyYAML==6.0.1
+        run: python3 -c "import yaml" || python3 -m pip install --no-cache-dir PyYAML==6.0.1
 
       - name: Generate and compare
         run: |
@@ -267,7 +269,7 @@ jobs:
           # A case behind an #if leaves the binary with no signal at all -- not
           # failed, not skipped, absent -- so a fully green suite can hide it.
           # Assert the compiled set against the YAML before trusting the run.
-          python3 -m pip install --no-cache-dir PyYAML==6.0.1
+          python3 -c "import yaml" || python3 -m pip install --no-cache-dir PyYAML==6.0.1
           if [ "${RUNNER_OS}" = "Windows" ]; then
             PATH="$(cygpath -u "${ROCM_SDK}")/bin:${PATH}"
             export PATH
@@ -320,7 +322,7 @@ jobs:
       - name: Test the CI helper scripts
         if: ${{ runner.os == 'Linux' }}
         run: |
-          python3 -m pip install --no-cache-dir PyYAML==6.0.1
+          python3 -c "import yaml" || python3 -m pip install --no-cache-dir PyYAML==6.0.1
           python3 -m unittest discover -s projects/hrr/tests/scripts -p 'test_*.py' -v
 
       - name: Upload results
@@ -509,7 +511,7 @@ jobs:
           # and --list-tests never calls into HIP. Checked here rather than in
           # the integration jobs so a compiled-out case fails once, straight
           # away, instead of nine times after the fan-out.
-          python3 -m pip install --no-cache-dir PyYAML==6.0.1
+          python3 -c "import yaml" || python3 -m pip install --no-cache-dir PyYAML==6.0.1
           python3 projects/hrr/tests/scripts/hrr_test_config.py check \
             --binary build/hrr/tests/integration/hrr-integration-tests \
             --config projects/hrr/tests/config/integration.yaml
@@ -674,7 +676,9 @@ jobs:
         env:
           HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
         run: |
-          python3 -m pip install --no-cache-dir PyYAML==6.0.1
+          # Use a PyYAML that is already importable. Forcing 6.0.1 uninstalls
+          # 6.0.3 on runners whose site-packages is read-only.
+          python3 -c "import yaml" || python3 -m pip install --no-cache-dir PyYAML==6.0.1
           # hipamd/lib holds the amdhip64 carrying the capture shims and must
           # precede the SDK, which ships a plain build under the same soname.
           # No ROCr preload here: CLR was built against the SDK's ROCr, so the
