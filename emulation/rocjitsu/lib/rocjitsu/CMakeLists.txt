@@ -98,6 +98,8 @@ set_target_properties(
 # does not pull in the simulator implementation or the all-ISA registry.
 set(ROCJITSU_DBT_BASE_OBJECT_LIBS
     ${ROCJITSU_ANALYSIS_OBJECT_LIBS}
+    # ConSan fault admission uses counter policies without the checker driver.
+    rocjitsu_waitcheck_target
     rocjitsu_code
     ${ROCJITSU_CONSAN_OBJECT_LIBS}
 )

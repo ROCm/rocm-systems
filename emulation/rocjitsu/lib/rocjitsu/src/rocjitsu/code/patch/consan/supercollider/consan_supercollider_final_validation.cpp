@@ -6,6 +6,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 #include "rocjitsu/code/patch/consan/supercollider/consan_supercollider_perturbation_policy.h"
+#include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 
 #include <algorithm>

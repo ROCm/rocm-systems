@@ -2511,7 +2511,7 @@ make_rdna_workgroup_clause_release_code_object(rj_code_arch_t arch,
   };
   const uint64_t wait_text_offset = 5u * sizeof(uint32_t);
   if (!contiguous_wait_prefix)
-    words.push_back(build_s_nop(0, arch));
+    words.push_back(build_s_mov_b32(8u, scalar_positive_inline_u32(0u), arch));
   const uint64_t clause_text_offset = words.size() * sizeof(uint32_t);
   words.push_back(0xbf850001u); // s_clause 0x1: release plus relaxed atomic
   const uint64_t release_text_offset = words.size() * sizeof(uint32_t);

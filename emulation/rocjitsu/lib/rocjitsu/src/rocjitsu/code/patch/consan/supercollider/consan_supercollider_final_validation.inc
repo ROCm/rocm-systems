@@ -198,15 +198,12 @@ void validate_supercollider_final_semantics(const FinalValidationEnvironment &en
         errors.emplace_back("ConSan SuperCollider perturbation proof could not match its exact "
                             "overlapping mutation");
       } else if (patch.supercollider_perturbation_composite_removed_boundary) {
-        bool all_nops = true;
-        for (uint32_t offset = 0; offset < patch.original_size; offset += sizeof(uint32_t)) {
-          uint32_t word = 0;
-          std::memcpy(&word, body + offset, sizeof(word));
-          all_nops &= word == nop;
-        }
-        if (!all_nops)
+        if (!validate_atomic_order_boundary_rewrite(
+                arch, original_text.subspan(patch.anchor_offset, patch.original_size),
+                {body, patch.original_size}))
           errors.emplace_back(
-              "ConSan SuperCollider perturbation proof resurrected a removed cache operation");
+              "ConSan SuperCollider perturbation proof resurrected a removed cache operation "
+              "or changed required load completion");
       }
     } else if (std::memcmp(original_text.data() + anchor_event->text_offset(), body,
                            patch.original_size) != 0) {

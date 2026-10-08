@@ -105,7 +105,7 @@ rj_add_object_library(
 )
 target_link_libraries(
     rocjitsu_consan_transform
-    PRIVATE rocjitsu_consan_analysis
+    PRIVATE rocjitsu_consan_analysis rocjitsu_waitcheck_target
 )
 
 rj_add_object_library(

@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/kernel_scope.h"
 #include "rocjitsu/code/analysis/liveness.h"
+#include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_barrier_move_proof.h"
@@ -22,6 +23,7 @@
 #include "rocjitsu/code/patch/consan/consan_text_relocation.h"
 #include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops.h"
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -138,6 +140,7 @@ struct AtomicOrderBoundary {
   const SyncSequence *sequence = nullptr;
   const SyncEvent *fence = nullptr;
   std::optional<uint64_t> release_wait_text_offset;
+  std::optional<uint64_t> lds_release_wait_text_offset;
 };
 
 struct ResolvedFaultTargets {
@@ -168,6 +171,84 @@ static bool apply_resolved_fault_mutations(const AmdGpuCodeObject &code_object, 
                                            bool require_exactly_one,
                                            FaultApplicationState &transaction);
 
+// Removing LDS completion must not also remove the only wait for a register
+// result. Legacy LGKM includes SMEM, and generic FLAT loads can use DS/LGKM
+// on every target. Walk incoming paths to a retained zero wait or kernel entry;
+// reject pending results and paths whose calling context is unknown.
+[[nodiscard]] bool release_wait_preserves_register_readiness(const AmdGpuCodeObject &code_object,
+                                                             const ProgramInventory &inventory,
+                                                             uint64_t wait_begin,
+                                                             rj_code_arch_t arch) {
+  using namespace waitcheck_detail;
+  auto decoder = Decoder::create(arch);
+  if (!decoder)
+    return false;
+  const auto inputs = detail::build_cfg_inputs(code_object, inventory.containers());
+  const auto blocks =
+      BasicBlock::build(code_object, *decoder, arch, inputs.leaders, inputs.code_ranges);
+  // An unresolved edge elsewhere in the image may enter the suffix without
+  // appearing in its predecessor list. Calls also require contextual returns.
+  if (std::ranges::any_of(blocks, [](const auto &block) {
+        return !block || !block->call_edges().empty() ||
+               block->successor_issue() != BasicBlock::SuccessorIssue::None;
+      }))
+    return false;
+  const auto containing = std::ranges::find_if(blocks, [&](const auto &block) {
+    return block && block->start_offset() <= wait_begin && wait_begin < block->end_offset();
+  });
+  if (containing == blocks.end())
+    return false;
+  std::vector<std::pair<BasicBlock *, uint64_t>> pending{{containing->get(), wait_begin}};
+  std::set<std::pair<BasicBlock *, uint64_t>> visited;
+  while (!pending.empty()) {
+    const auto [block, before] = pending.back();
+    pending.pop_back();
+    if (!visited.emplace(block, before).second)
+      continue;
+    std::vector<const Instruction *> preceding;
+    for (const auto &instruction : block->instructions()) {
+      if (instruction.src_loc() >= before)
+        break;
+      preceding.push_back(&instruction);
+    }
+    bool completed = false;
+    for (auto it = preceding.rbegin(); it != preceding.rend(); ++it) {
+      const Instruction &instruction = **it;
+      const auto waits = WaitcheckTarget::explicit_wait_fields(instruction, arch);
+      const auto events = WaitcheckTarget::classify_events(instruction, arch);
+      if (waits.failed() || events.failed())
+        return false;
+      if (waits.value() &&
+          (*waits.value())[WaitcheckTarget::counter_index(WaitCounterKind::Ds)] == 0u) {
+        completed = true;
+        break;
+      }
+      for (const auto &event : events.value()) {
+        if (event.counter != WaitCounterKind::Ds || event.registers != TrackedRegisterSource::Defs)
+          continue;
+        if (event.special_reg)
+          return false;
+        for (int operand = 0; operand < instruction.num_dst_operands(); ++operand) {
+          const auto *destination = instruction.dst_operand(operand);
+          if (destination && destination->to_register_ref())
+            return false;
+        }
+      }
+    }
+    if (completed)
+      continue;
+    if (block->predecessors().empty()) {
+      if (std::ranges::find(inputs.kernel_entries, block->start_offset()) ==
+          inputs.kernel_entries.end())
+        return false;
+      continue;
+    }
+    for (auto *predecessor : block->predecessors())
+      pending.emplace_back(predecessor, predecessor->end_offset());
+  }
+  return true;
+}
+
 [[nodiscard]] AtomicOrderBoundary resolve_atomic_order_boundary(const ProgramInventory &inventory,
                                                                 const FaultSite &site,
                                                                 AtomicFaultEncoding encoding,
@@ -179,10 +260,14 @@ static bool apply_resolved_fault_mutations(const AmdGpuCodeObject &code_object, 
                                                            SemanticConfidence::Conservative)) {
     return {};
   }
-  if (edge != AtomicOrderEdge::Acquire)
+  if (edge != AtomicOrderEdge::Acquire) {
+    result.lds_release_wait_text_offset = result.sequence->lds_release_wait_text_offset;
     result.release_wait_text_offset = encoding == AtomicFaultEncoding::CdnaFlat
                                           ? result.sequence->lds_release_wait_text_offset
                                           : result.sequence->release_wait_text_offset;
+    if (!result.release_wait_text_offset)
+      result.release_wait_text_offset = result.lds_release_wait_text_offset;
+  }
   for (SyncEventId identity : result.sequence->member_event_ids) {
     const SyncEvent *event = sync.find_event(identity);
     if (event != nullptr && event->kind == SyncKind::Fence &&
@@ -766,6 +851,13 @@ void resolve_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_arch_t
                !atomic_order_boundary.release_wait_text_offset) {
       result.warnings.emplace_back(
           "ConSan fault dry run found no qualified atomic ordering boundary to weaken");
+    } else if (atomic_order_boundary.lds_release_wait_text_offset &&
+               !release_wait_preserves_register_readiness(
+                   code_object, program_inventory,
+                   *atomic_order_boundary.lds_release_wait_text_offset, arch)) {
+      reject_application(
+          "ConSan fault dry run cannot separate LDS completion from pending register results",
+          "ConSan atomic order fault cannot separate LDS completion from pending register results");
     } else {
       targets.atomic_order = true;
       FaultMutationPlan plan = make_plan(FaultMutationKind::AtomicWeakenOrder, *atomic);
@@ -1510,11 +1602,44 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
                                            SyncEventMutationKind::AtomicBoundaryRemoval);
       removed_boundary = fence_source->mnemonic;
     }
-    // Release lowering can pair a cache operation with an exact store wait
-    // or, on CDNA, a combined VM/LDS wait. Once either is selected, remove the complete
-    // independently sufficient ordering boundary so staged reinventory cannot re-admit it.
-    if (release_wait_text_offset) {
-      const uint64_t wait_text_offset = *release_wait_text_offset;
+    // Global and LDS completion can use separate waits, in either order.
+    // Removing only the global wait leaves LDS publication intact even if
+    // the replacement NOP interrupts the analyzer's original wait suffix.
+    // The inventory's LDS boundary starts a proven four-byte wait suffix
+    // (possibly containing NOPs and a leading scalar clause). Remove every
+    // release wait in that suffix while preserving the scheduling hints.
+    std::vector<uint64_t> release_wait_offsets;
+    if (release_wait_text_offset)
+      release_wait_offsets.push_back(*release_wait_text_offset);
+    if (const auto begin = order_boundary.lds_release_wait_text_offset) {
+      if (*begin >= source->text_offset() ||
+          (source->text_offset() - *begin) % sizeof(uint32_t) != 0u ||
+          source->decoded_file_offset() < source->text_offset() - *begin ||
+          source->decoded_file_offset() > original_bytes.size()) {
+        result.errors.emplace_back("ConSan atomic weaken-order found malformed LDS wait suffix");
+        return;
+      }
+      bool found_lds = false;
+      for (uint64_t offset = *begin; offset < source->text_offset(); offset += sizeof(uint32_t)) {
+        const uint64_t file_offset =
+            source->decoded_file_offset() - (source->text_offset() - offset);
+        uint32_t word = 0;
+        std::memcpy(&word, original_bytes.data() + file_offset, sizeof(word));
+        const auto wait = classify_wait_instruction({}, word, arch);
+        if (wait.release_boundary || wait.drains_lds)
+          release_wait_offsets.push_back(offset);
+        found_lds |= wait.drains_lds;
+      }
+      if (!found_lds) {
+        result.errors.emplace_back("ConSan atomic weaken-order LDS suffix has no completion wait");
+        return;
+      }
+    }
+    std::ranges::sort(release_wait_offsets);
+    const auto duplicates = std::ranges::unique(release_wait_offsets);
+    release_wait_offsets.erase(duplicates.begin(), duplicates.end());
+    auto wait_decoder = Decoder::create(arch);
+    for (const uint64_t wait_text_offset : release_wait_offsets) {
       if (wait_text_offset >= source->text_offset() ||
           source->decoded_file_offset() < source->text_offset() - wait_text_offset) {
         result.errors.emplace_back(
@@ -1532,13 +1657,26 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
       uint32_t wait_word = 0;
       std::memcpy(&wait_word, result.replacement.data() + wait_file_offset, sizeof(wait_word));
       const WaitInstructionEncoding wait = classify_wait_instruction({}, wait_word, arch);
-      if (!wait.release_boundary &&
-          !(encoding == AtomicFaultEncoding::CdnaFlat && wait.drains_lds)) {
+      if (!wait.release_boundary && !wait.drains_lds) {
         result.errors.emplace_back(
             "ConSan atomic weaken-order release wait no longer has its admitted encoding");
         return;
       }
-      std::memcpy(result.replacement.data() + wait_file_offset, &nop, sizeof(nop));
+      const auto replacement_wait = wait.drains_load
+                                        ? instrumentation::build_s_wait_global_load0(arch)
+                                        : std::optional<uint32_t>{nop};
+      if (!replacement_wait || !wait_decoder) {
+        result.errors.emplace_back("ConSan atomic weaken-order cannot preserve load completion");
+        return;
+      }
+      const auto original_instruction = wait_decoder->decode_window({&wait_word, 1u});
+      const auto replacement_instruction = wait_decoder->decode_window({&*replacement_wait, 1u});
+      if (original_instruction.failed() || replacement_instruction.failed()) {
+        result.errors.emplace_back("ConSan atomic weaken-order cannot decode release wait rewrite");
+        return;
+      }
+      std::memcpy(result.replacement.data() + wait_file_offset, &*replacement_wait,
+                  sizeof(*replacement_wait));
       PatchInfo wait_info = info;
       wait_info.anchor_offset = wait_text_offset;
       wait_info.trampoline_offset = wait_text_offset;
@@ -1547,12 +1685,11 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
       result.note_sequence_member_mutation(*sequence, wait_info.anchor_offset,
                                            wait_info.original_size,
                                            SyncEventMutationKind::AtomicBoundaryRemoval);
-      if (fence != nullptr)
+      if (!removed_boundary.empty())
         removed_boundary += "/";
-      removed_boundary += encoding == AtomicFaultEncoding::CdnaFlat ? "s_waitcnt"
-                          : encoding == AtomicFaultEncoding::Rdna3Flat
-                              ? "s_waitcnt_vscnt"
-                              : (wait.drains_lds ? "s_wait_storecnt_dscnt" : "s_wait_storecnt");
+      removed_boundary += original_instruction.value()->disassemble();
+      if (wait.drains_load)
+        removed_boundary += " (retained " + replacement_instruction.value()->disassemble() + ")";
     }
     result.warnings.emplace_back("ConSan atomic fault removed associated " + removed_boundary +
                                  " while preserving " + std::string(source->mnemonic_view()));

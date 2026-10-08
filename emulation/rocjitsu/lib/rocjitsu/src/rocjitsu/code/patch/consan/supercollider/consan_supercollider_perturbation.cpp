@@ -10,6 +10,7 @@
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 #include "rocjitsu/code/patch/consan/consan_text_relocation.h"
 #include "rocjitsu/code/patch/consan/supercollider/consan_supercollider_perturbation_policy.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
 
@@ -314,9 +315,12 @@ bool stage_supercollider_perturbation_patches(
       const bool all_nops = std::ranges::all_of(
           std::span<const uint32_t>(original_words.data(), plan.anchor_size / sizeof(uint32_t)),
           [&](uint32_t word) { return word == nop; });
-      if (!plan.overlaps_atomic_mutation || !all_nops) {
+      const auto load_only = instrumentation::build_s_wait_global_load0(arch);
+      const bool retained_load =
+          plan.anchor_size == sizeof(uint32_t) && load_only && original_words[0] == *load_only;
+      if (!plan.overlaps_atomic_mutation || (!all_nops && !retained_load)) {
         result.errors.emplace_back(
-            "ConSan carried removed-cache perturbation boundary is not the staged NOP range");
+            "ConSan carried atomic boundary is neither staged NOPs nor retained load completion");
         return false;
       }
     } else {

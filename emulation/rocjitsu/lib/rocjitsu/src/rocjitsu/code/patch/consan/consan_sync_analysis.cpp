@@ -1103,6 +1103,7 @@ exact_workgroup_release_wait_boundary(const SyncSequence &sequence,
                                       rj_code_arch_t arch) {
   const std::vector<const Instruction *> preceding = instructions_preceding(sequence, blocks);
   uint64_t boundary = sequence.begin_text_offset;
+  std::optional<uint64_t> wait_begin;
   bool saw_lds_zero = false;
   bool admitted_leading_clause = false;
   for (auto instruction = preceding.rbegin(); instruction != preceding.rend(); ++instruction) {
@@ -1111,6 +1112,12 @@ exact_workgroup_release_wait_boundary(const SyncSequence &sequence,
         (*instruction)->src_loc() + sizeof(uint32_t) != boundary ||
         (*instruction)->raw_encoding() == nullptr)
       break;
+    // Scheduling waits and NOPs do not issue memory traffic or change control
+    // flow. Preserve their constraints without hiding preceding completion.
+    if ((*instruction)->mnemonic() == "s_nop" || (*instruction)->mnemonic() == "s_wait_alu") {
+      boundary = (*instruction)->src_loc();
+      continue;
+    }
     // LLVM may group a release atomic with the immediately following relaxed
     // atomic. The release is still ordered by the exact zero-wait prefix, but
     // the scalar scheduling hint sits between that prefix and the first
@@ -1131,8 +1138,9 @@ exact_workgroup_release_wait_boundary(const SyncSequence &sequence,
       break;
     saw_lds_zero |= wait.drains_lds;
     boundary = (*instruction)->src_loc();
+    wait_begin = boundary;
   }
-  return saw_lds_zero ? std::optional<uint64_t>(boundary) : std::nullopt;
+  return saw_lds_zero ? wait_begin : std::nullopt;
 }
 
 [[nodiscard]] std::optional<uint64_t>
