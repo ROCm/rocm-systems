@@ -7,20 +7,20 @@ Counter grouping inspector for rocprofiler-compute.
 Parses GFX architecture YAML configs and outputs counter grouping analysis
 without requiring GPU, rocprofiler, or full rocprof-compute initialization.
 
-Counter discovery uses ``OmniSoC_Base.detect_counters``; perfmon layout and
-YAML emission use ``OmniSoC_Base.perfmon_coalesce`` (which calls
-``_allocate_perfmon_counter_files`` and writes under ``<workload>/perfmon/``),
-matching the profiling path in ``soc_base.py``. ``get_rocprof_supported_counters``
+Counter discovery uses `OmniSoC_Base.detect_counters`; perfmon layout and
+YAML emission use `OmniSoC_Base.perfmon_coalesce` (which calls
+`_allocate_perfmon_counter_files` and writes under `<workload>/perfmon/`),
+matching the profiling path in `soc_base.py`. `get_rocprof_supported_counters`
 is stubbed so the tool runs without rocprofiler. Bucket views reuse a second
-``_allocate_perfmon_counter_files`` call on the same counter set (same result as
+`_allocate_perfmon_counter_files` call on the same counter set (same result as
 the coalesce pass).
 
 Each bucket-plan Summary is followed by HW packing limits from the arch's
-``perfmon_config`` and notes that CPC/CPF/SQC/SQ table columns are
+`perfmon_config` and notes that CPC/CPF/SQC/SQ table columns are
 display-only name-prefix lanes (SQC remaps to SQ for packing; CPC/CPF keep
 their own caps).
 
-Usage (from the ``rocprofiler-compute`` project root):
+Usage (from the `rocprofiler-compute` project root):
     ./tools/counter_grouping_inspector.py --arch gfx942
     ./tools/counter_grouping_inspector.py --arch gfx942 --block 2 3 4
     ./tools/counter_grouping_inspector.py --arch gfx942 --output plan.txt
@@ -38,7 +38,7 @@ from collections.abc import Iterator
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from rich.console import Console
 
@@ -191,7 +191,7 @@ def run_soc_detect_and_coalesce(
 ) -> tuple[set[str], list[CounterFile]]:
     """Run SoC counter detection and perfmon coalesce.
 
-    Writes YAML under ``workload_root/perfmon/``.
+    Writes YAML under `workload_root/perfmon/`.
     """
     soc = _build_inspector_soc(
         arch, config_dir, filter_blocks, perfmon_config, workload_root
@@ -275,7 +275,7 @@ def _format_bucket_markdown(
 
 
 def _format_hw_limits_line(perfmon_config: dict[str, int]) -> str:
-    """Format packing slot caps from ``perfmon_config`` / mi_gpu_spec."""
+    """Format packing slot caps from `perfmon_config` / mi_gpu_spec."""
     limits = ", ".join(f"{block}: {cap}" for block, cap in perfmon_config.items())
     return f"HW counter limits (perfmon_config packing slots): {limits}"
 
@@ -303,8 +303,8 @@ def generate_bucket_plan(
     output_files: list[CounterFile],
     arch: str,
     *,
-    heading: str | None = None,
-    perfmon_config: dict[str, int] | None = None,
+    heading: Optional[str] = None,
+    perfmon_config: Optional[Dict[str, int]] = None,
 ) -> str:
     """Generate the bucket allocation plan as markdown tables."""
     buf = StringIO()
@@ -358,7 +358,7 @@ def generate_bucket_metrics(
     config_dir: Path,
     arch: str,
     *,
-    section_heading: str | None = None,
+    section_heading: Optional[str] = None,
 ) -> str:
     """Generate metrics that span multiple buckets as a string.
 
@@ -712,11 +712,11 @@ Examples:
         _emit_inspector_output(args, output_files, config_dir, arch)
 
 
-def _backup_compare_env() -> dict[str, str | None]:
+def _backup_compare_env() -> Dict[str, Optional[str]]:
     return {key: os.environ.get(key) for key in _COMPARE_ENV_KEYS}
 
 
-def _restore_compare_env(backup: dict[str, str | None]) -> None:
+def _restore_compare_env(backup: Dict[str, Optional[str]]) -> None:
     for key, value in backup.items():
         if value is None:
             os.environ.pop(key, None)
@@ -727,7 +727,7 @@ def _restore_compare_env(backup: dict[str, str | None]) -> None:
 def _prepare_inspector_soc_for_allocate(
     arch: str,
     config_dir: Path,
-    block_filter: list[str] | None,
+    block_filter: Optional[List[str]],
     perfmon_config: dict[str, int],
     workload_root: Path,
 ) -> tuple[OmniSoC_Base, set[str]]:
@@ -751,11 +751,11 @@ def _prepare_inspector_soc_for_allocate(
 def _allocate_under_env(
     arch: str,
     config_dir: Path,
-    block_filter: list[str] | None,
+    block_filter: Optional[List[str]],
     perfmon_config: dict[str, int],
     workload_root: Path,
     *,
-    env_updates: dict[str, str | None],
+    env_updates: Dict[str, Optional[str]],
 ) -> tuple[OmniSoC_Base, set[str], list[CounterFile]]:
     """Allocate under temporary env, restoring prior values afterward."""
     backup = _backup_compare_env()
