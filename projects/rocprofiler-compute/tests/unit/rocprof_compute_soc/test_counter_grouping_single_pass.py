@@ -5,6 +5,7 @@
 
 import pytest
 
+from rocprof_compute_soc.counter_file import flat_counters_in_perfmon_file
 from rocprof_compute_soc.counter_grouping_buckets import (
     iter_metric_groups,
     rebuild_counter_file,
@@ -18,7 +19,6 @@ from rocprof_compute_soc.counter_grouping_single_pass import (
     fill_multi_pass_metrics_into_existing_passes,
     try_allocate_single_pass_metrics,
 )
-from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
 from vendored import yaml
 
 TCC_BUDGET_CONFIG = {"TCC": 4, "SQ": 8}
@@ -409,7 +409,7 @@ def test_weighted_avg_weight_joins_the_sub_ratio_group():
         "SQ_INSTS_VALU_MUL_F32",
         "TCC_EA0_RDREQ_sum",
     }
-    rows = iter_metric_groups((), yaml_metrics, "MI300", profiled)
+    rows = iter_metric_groups(yaml_metrics, "MI300", profiled)
     groups = [counters for _key, counters, _label in rows]
     assert len(groups) == 1
     assert groups[0] == frozenset({
