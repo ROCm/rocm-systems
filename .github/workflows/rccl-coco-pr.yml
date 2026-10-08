@@ -122,7 +122,6 @@ jobs:
       mode: pr
       build_job: ${{ matrix.prefix }}-rccl-pr-build
       job: ${{ matrix.prefix }}-rccl-pr-smoke
-      baseline_stack: rocm-10.1-latest_rccl-develop-perf
       runs_on: ${{ matrix.runner }}
       pr_number: ${{ needs.setup.outputs.pr_number }}
       pr_sha: ${{ needs.setup.outputs.pr_sha }}

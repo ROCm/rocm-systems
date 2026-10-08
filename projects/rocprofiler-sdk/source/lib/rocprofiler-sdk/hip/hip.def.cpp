@@ -729,9 +729,6 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 35
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceFlushGPUDirectRDMAWrites, hipDeviceFlushGPUDirectRDMAWrites, hipDeviceFlushGPUDirectRDMAWrites_fn, target, scope);
 #endif
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 36
-HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelSetAttributeForDevice, hipKernelSetAttributeForDevice, hipKernelSetAttributeForDevice_fn, kernel, attr, value, device);
-#endif
 // clang-format on
 
 #else
