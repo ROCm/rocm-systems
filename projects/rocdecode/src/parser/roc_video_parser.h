@@ -194,14 +194,14 @@ protected:
     size_t              rbsp_size_; // size_t to match the parse functions it is passed to
     uint8_t             rbsp_buf_[RBSP_BUF_SIZE]; // to store parameter set or slice header RBSP
 
-    int                 num_slices_;
+    uint32_t            num_slices_;
     uint8_t*            pic_stream_data_ptr_;
     int                 pic_stream_data_size_;
 
     uint8_t             *sei_rbsp_buf_; // buffer to store SEI RBSP. Allocated at run time.
     uint32_t            sei_rbsp_buf_size_;
     std::vector<RocdecSeiMessage> sei_message_list_;
-    int                 sei_message_count_;  // total SEI playload message count of the current frame.
+    uint32_t            sei_message_count_;  // total SEI playload message count of the current frame.
     uint8_t             *sei_payload_buf_;  // buffer to store SEI playload. Allocated at run time.
     uint32_t            sei_payload_buf_size_;
     uint32_t            sei_payload_size_;  // total SEI payload size of the current frame

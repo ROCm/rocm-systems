@@ -420,7 +420,7 @@ int HevcVideoParser::SendPicForDecode() {
     if (num_slices_ > slice_param_list_.size()) {
         slice_param_list_.resize(num_slices_, {0});
     }
-    for (int slice_index = 0; slice_index < num_slices_; slice_index++) {
+    for (uint32_t slice_index = 0; slice_index < num_slices_; slice_index++) {
         RocdecHevcSliceParams *slice_params_ptr = &slice_param_list_[slice_index];
         HevcSliceInfo *p_slice_info = &slice_info_list_[slice_index];
         HevcSliceSegHeader *p_slice_header = &p_slice_info->slice_header;
@@ -3063,7 +3063,7 @@ void HevcVideoParser::PrintVappiBufInfo() {
     }
 
     MSG("Slice ref lists:")
-    for (int slice_index = 0; slice_index < num_slices_; slice_index++) {
+    for (uint32_t slice_index = 0; slice_index < num_slices_; slice_index++) {
         RocdecHevcSliceParams *p_slice_param = &slice_param_list_[slice_index];
         HevcSliceInfo *p_slice_info = &slice_info_list_[slice_index];
         MSG("Slice " << slice_index << " ref list 0:");

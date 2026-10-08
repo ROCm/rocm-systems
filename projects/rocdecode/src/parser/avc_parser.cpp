@@ -717,7 +717,7 @@ ParserResult AvcVideoParser::SendPicForDecode() {
     if (num_slices_ > slice_param_list_.size()) {
         slice_param_list_.resize(num_slices_, {0});
     }
-    for (int slice_index = 0; slice_index < num_slices_; slice_index++) {
+    for (uint32_t slice_index = 0; slice_index < num_slices_; slice_index++) {
         RocdecAvcSliceParams *p_slice_param = &slice_param_list_[slice_index];
         AvcSliceInfo *p_slice_info = &slice_info_list_[slice_index];
         AvcSliceHeader *p_slice_header = &p_slice_info->slice_header;
@@ -3741,7 +3741,7 @@ void AvcVideoParser::PrintVappiBufInfo() {
     }
 
     MSG("Slice ref lists:")
-    for (int slice_index = 0; slice_index < num_slices_; slice_index++) {
+    for (uint32_t slice_index = 0; slice_index < num_slices_; slice_index++) {
         RocdecAvcSliceParams *p_slice_param = &slice_param_list_[slice_index];
         AvcSliceInfo *p_slice_info = &slice_info_list_[slice_index];
         MSG("Slice " << slice_index << " ref list 0:");
