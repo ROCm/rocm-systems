@@ -1598,6 +1598,14 @@ int main(int argc, char** argv) {
   // implementation can drift. Not called on the fatal-HIP-error path, where the
   // device context may be dead and these calls could hang or error.
   auto cleanup = [&]() {
+    // Once one wait for a queued restore runs out here, the others would run
+    // out too, one bound per allocation: a divergence stop can skip the event
+    // that releases a held stream. The waits after it do not wait.
+    auto release_ready = [&](const void* live) {
+      if (hrr_host_release_ready(ctx, live)) return true;
+      ctx.host_restore_no_wait = true;
+      return false;
+    };
     for (auto& [rec, gexec] : ctx.graph_exec_map) (void)hipGraphExecDestroy(gexec);
     for (auto& [rec, graph] : ctx.graph_map)      (void)hipGraphDestroy(graph);
 
@@ -1611,7 +1619,7 @@ int main(int argc, char** argv) {
       switch (entry.kind) {
         case AllocKind::Device:        hrr_free_device_alloc(ctx, entry.live_ptr); break;
         case AllocKind::HostMalloc:
-          if (hrr_host_release_ready(ctx, entry.live_ptr)) (void)hipHostFree(entry.live_ptr);
+          if (release_ready(entry.live_ptr)) (void)hipHostFree(entry.live_ptr);
           break;
         case AllocKind::HostRegister:                                     break;
         case AllocKind::DevicePtrAlias:                                   break;
@@ -1622,7 +1630,7 @@ int main(int argc, char** argv) {
     // remaining backing buffer here to avoid leaking both the pinned registration
     // and the malloc'd buffer every run.
     for (auto& [rec, buf] : ctx.host_reg_bufs) {
-      if (!buf || !hrr_host_release_ready(ctx, buf)) continue;
+      if (!buf || !release_ready(buf)) continue;
       (void)hipHostUnregister(buf);
 #ifdef _WIN32
       _aligned_free(buf);

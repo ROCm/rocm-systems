@@ -718,7 +718,9 @@ summary, and after the `--kernel-filter` warm-up pass, replay waits the same
 bounded time for every queued restore: the pass's closing sync covers the
 current device only, and a restore still queued on another device would be
 missing from the count. When the summary's wait runs out, the teardown waits do
-not wait: they would run out again, once per allocation. The count and the
+not wait: they would run out again, once per allocation. Nor do the teardown
+waits after one that ran out, which a divergence stop can cause by skipping the
+event that releases a held stream. The count and the
 restored total live in state each host function holds a reference to, so one
 that runs after replay has exited does not touch a destroyed context.
 `--kernel-filter` resets the counters and the one-time notices after its warm-up
@@ -771,8 +773,9 @@ blob or event that cannot be written, and a restore `hipLaunchHostFunc` refuses.
 Each needs a fault injected into the capture or replay process, which no test
 hook provides. Of the leaks, only the one in `hipHostFree` is tested; those in
 `hipFree`, `hipHostUnregister` and `hipFreeHost` call the same check and are
-not. The waits at teardown are untested too: they matter only when a divergence
-stops replay before the summary's wait, or when that wait runs out. So is the
+not. The waits at teardown are untested too, and so is their giving up after
+the first one runs out: they matter only when a divergence stops replay before
+the summary's wait, or when that wait runs out. So is the
 ordering of a launch against a `hipStreamBeginCapture` on another thread; the
 case for a free on another thread covers the same ordering. Neither is the
 ordering of a `hipDeviceReset` against other threads' launches.

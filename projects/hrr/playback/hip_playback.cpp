@@ -1114,11 +1114,17 @@ bool hrr_host_release_ready(PlaybackContext& ctx, const void* live) {
     void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
     (void)ctx.live_alloc_of(live, &abase, &asize, &arec);
     ctx.host_allocs_leaked.fetch_add(1, std::memory_order_relaxed);
+    char state[48];
+    if (ctx.host_restore_no_wait)
+        snprintf(state, sizeof(state), "is still queued at teardown");
+    else
+        snprintf(state, sizeof(state), "has not run after %u ms",
+                 host_restore_wait_ms(ctx));
     fprintf(stderr,
             "[HRR] pinned host allocation 0x%llx (live %p, %zu bytes) is not "
-            "freed: a snapshot restore queued for it has not run after %u ms, "
-            "and would write it once freed. Replay leaks it.\n",
-            (unsigned long long)arec, live, asize, host_restore_wait_ms(ctx));
+            "freed: a snapshot restore queued for it %s, and would write it "
+            "once freed. Replay leaks it.\n",
+            (unsigned long long)arec, live, asize, state);
     return false;
 }
 
