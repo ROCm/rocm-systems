@@ -112,7 +112,7 @@ and neither writes the roofline HTML.
 | FR-17 | Every metric is evaluated for each kernel that survives the filters, and once for the workload, on every run. (D5) |
 | FR-18 | Unknown `--gpu-id`, `-d` or `-k` ids exit with today's messages before any file is written. (D6) |
 | FR-19 | Kernel and dispatch rows cover only what survives all filters. (D6) |
-| FR-20 | The workload's total duration after the `--gpu-id` and `-d` filters is stored. Top-stats Pct is a kernel's total duration divided by that total. |
+| FR-20 | The workload's total duration after the `--gpu-id` and `-d` filters is stored. Top-stats Pct is a kernel's total duration divided by the filtered workload's total duration. |
 | FR-21 | The memory-bandwidth guidance result is stored in the DB. |
 | FR-22 | Every evaluated metric is stored, whatever the display rules. (D7) |
 | FR-23 | Ceilings are stored per workload: one bandwidth ceiling per memory level and one compute ceiling per data type and pipe (VALU or matrix), for every positive benchmark mean in the row FR-13 selects. Roofline points are stored per kernel and memory level: the arithmetic intensity and performance the roofline plot-points table evaluates, mapped to memory levels in one place, gfx1250 GL2 and GL0 included. (D8) |
@@ -186,8 +186,7 @@ the DB schema independent of the config format.
 - **Points.** `compute_kernel_roofline_point` has one row per kernel and memory level, holding
   that level's arithmetic intensity and the kernel's performance. Each row is one plotted point.
   Memory levels are values, not columns, so each architecture's level set needs no schema
-  change. The values are what the roofline plot-points table evaluates, so the formulas live
-  only in the metric configs.
+  change.
 - **Metric rows.** The roofline rate and plot-points tables are also stored as ordinary metric
   rows per kernel and per workload, like every other table (FR-22). `--view table` renders the
   workload values from them.
