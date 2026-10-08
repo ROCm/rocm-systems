@@ -27,6 +27,7 @@
 #include "race_test_builder.h"
 #include <array>
 #include <gtest/gtest.h>
+#include <limits>
 
 using namespace rocjitsu::plugins::race_detector;
 namespace amdgpu = rocjitsu::amdgpu;
@@ -172,6 +173,101 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
     wait.add(amdgpu::WaitCounterType::DSCNT, 0);
     wave.dispatch(wait);
     wave.checkVgprReadLanes(2, 3, 0xf);
+    EXPECT_TRUE(violations.empty());
+  }
+}
+
+TEST(RaceDetector, LdsValidationRejectsNegativeAndOverflowingRanges) {
+  std::vector<RaceViolation> violations;
+  RaceDetector detector(
+      2, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
+      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5));
+  for (const auto type : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS}) {
+    IntervalSet intervals;
+    intervals.append(64, 68);
+    detector.allocateEventId(WaveId{0}, 0, type, {}, 1, 0xf, std::move(intervals),
+                             amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
+  }
+  struct Range {
+    int address;
+    int bytes;
+  };
+  for (const auto range :
+       {Range{std::numeric_limits<int>::min() + 64, 4}, Range{-1, 4},
+        Range{std::numeric_limits<int>::max() - 1, 4}, Range{64, 0}, Range{64, -1}}) {
+    SCOPED_TRACE(testing::Message() << "address=" << range.address << " bytes=" << range.bytes);
+    detector.validateRead(range.address, WaveId{1}, 0, range.bytes);
+    detector.validateWrite(range.address, WaveId{1}, 0, range.bytes);
+    EXPECT_TRUE(violations.empty());
+  }
+  detector.validateRead(64, WaveId{1}, 0, 4);
+  detector.validateWrite(64, WaveId{1}, 0, 4);
+  EXPECT_EQ(violations.size(), 2u);
+}
+
+TEST(RaceDetector, InvalidLdsAddressesKeepRegisterAndCounterDependencies) {
+  for (bool dual_access : {false, true}) {
+    SCOPED_TRACE(dual_access);
+    std::vector<RaceViolation> violations;
+    RaceDetector detector(
+        1, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
+        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5));
+    auto &wave = detector.getWaveRaceState(0);
+    const std::array<uint32_t, 4> addresses{0x80000040u, UINT32_MAX, 0x7ffffffeu, 64};
+    const std::array<uint32_t, 4> second_addresses{0x80000080u, UINT32_MAX, 0x7fffffffu, 96};
+    if (dual_access)
+      wave.registerLdsEvent(0, MemoryEventType::LDS_TO_VGPR, {1}, 0xf, 4, addresses,
+                            second_addresses, 4, 0xf, kMixedOrderGenericFlatLoadObligations,
+                            MemoryOrderClass::UNORDERED);
+    else
+      wave.registerLdsEvent(0, MemoryEventType::LDS_TO_VGPR, {1}, 0xf, 4, addresses, 4, 0xf,
+                            kMixedOrderGenericFlatLoadObligations, MemoryOrderClass::UNORDERED);
+    const auto &events = detector.events();
+    const EventId event{0};
+    ASSERT_EQ(events.totalAllocated(), 1);
+    EXPECT_EQ(events.execMask(event), 0xfu);
+    EXPECT_EQ(events.ldsIntervals(event).getTotalBytes(), dual_access ? 8 : 4);
+    EXPECT_TRUE(events.ldsIntervals(event).contains(64));
+    EXPECT_EQ(events.ldsIntervals(event).contains(96), dual_access);
+    EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::LOADCNT), 1);
+    EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::DSCNT), 1);
+    for (int lane = 0; lane < 4; ++lane)
+      wave.checkVgprRead(1, lane, 0xf);
+    EXPECT_EQ(violations.size(), 4u);
+    PendingWaitCount wait;
+    wait.add(amdgpu::WaitCounterType::LOADCNT, 0);
+    wave.dispatch(wait);
+    EXPECT_EQ(events.status(event), EventStatus::ACTIVE);
+    wait.updates.clear();
+    wait.add(amdgpu::WaitCounterType::DSCNT, 0);
+    wave.dispatch(wait);
+    EXPECT_EQ(events.status(event), EventStatus::WAVE_COMPLETE);
+    violations.clear();
+    wave.checkVgprReadLanes(1, 0xf, 0xf);
+    EXPECT_TRUE(violations.empty());
+  }
+}
+
+TEST(RaceDetector, LdsCounterAccountingIgnoresNegativeIntervals) {
+  for (const auto type : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS}) {
+    SCOPED_TRACE(static_cast<int>(type));
+    std::vector<RaceViolation> violations;
+    RaceDetector detector(
+        2, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
+        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5));
+    IntervalSet intervals;
+    intervals.append(std::numeric_limits<int>::min() + 64, std::numeric_limits<int>::min() + 68);
+    intervals.append(64, 68);
+    const auto event =
+        detector.allocateEventId(WaveId{0}, 0, type, {}, 1, 0xf, std::move(intervals),
+                                 amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
+    detector.validateRead(64, WaveId{1}, 0, 4);
+    detector.validateWrite(64, WaveId{1}, 0, 4);
+    EXPECT_EQ(violations.size(), 1u);
+    detector.retireEvent(event);
+    violations.clear();
+    detector.validateRead(64, WaveId{1}, 0, 4);
+    detector.validateWrite(64, WaveId{1}, 0, 4);
     EXPECT_TRUE(violations.empty());
   }
 }

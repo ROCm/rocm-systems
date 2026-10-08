@@ -5983,7 +5983,8 @@ TEST(RaceDetectorPluginTest, MixedFlatChecksAndRecordsOnlySharedLaneIntervals) {
         for (uint32_t probe : {0u, 1u, 2u}) {
           SCOPED_TRACE(testing::Message() << "local_lane=" << local_lane << " load=" << load
                                           << " flat_first=" << flat_first << " probe=" << probe);
-          PluginFixture f(2, "cdna5", 32, 128);
+          PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32,
+                          /*sgprs_per_wf=*/128);
           PluginSinkConfig sink_config;
           StringSink &sink = sink_config.emplace<StringSink>();
           auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -6064,6 +6065,83 @@ TEST(RaceDetectorPluginTest, MixedFlatChecksAndRecordsOnlySharedLaneIntervals) {
           EXPECT_EQ(sink.str().find("RACE ") != std::string::npos, probe == 0);
         }
       }
+    }
+  }
+}
+
+TEST(RaceDetectorPluginTest, FlatDdsLanesKeepDependenciesWithoutLdsIntervals) {
+  constexpr uint64_t shared_base = uint64_t{1} << 48;
+  constexpr uint64_t dds_address = shared_base + 0x80000040;
+  constexpr uint64_t lds_address = shared_base + 64;
+  struct Case {
+    std::array<uint64_t, 3> addresses;
+    uint64_t exec;
+    bool has_global;
+    bool has_lds;
+  };
+  const std::array cases = {Case{{0x2000, dds_address, 0}, 3, true, false},
+                            Case{{dds_address, 0x2000, 0}, 3, true, false},
+                            Case{{0x2000, dds_address, lds_address}, 7, true, true},
+                            Case{{dds_address, 0, 0}, 1, false, false}};
+  for (const auto &test : cases) {
+    for (bool load : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "first_address=" << test.addresses[0]
+                                      << " exec=" << test.exec << " load=" << load);
+      PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32,
+                      /*sgprs_per_wf=*/128);
+      PluginSinkConfig sink_config;
+      StringSink &sink = sink_config.emplace<StringSink>();
+      auto plugin = std::make_unique<RaceDetectorPlugin>();
+      auto *plugin_ptr = plugin.get();
+      f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+      ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+      f.soc->set_plugin_group(f.plugin_group_);
+      f.plugin_group_->onInit();
+      auto *cu = f.cu();
+      cu->set_apertures(shared_base, shared_base + 0xffffffff, 0, 0);
+      auto *wave = cu->dispatch_wf(0, 0x100, 128, 256, 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(test.exec);
+      cu->allocate_lds(256);
+      const uint32_t lds_base = cu->allocate_lds(256);
+      wave->set_lds_base(lds_base);
+      std::array<amdgpu::Wavefront *, 1> waves{wave};
+      f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
+      const uint32_t vb = wave->vgpr_alloc().base;
+      for (uint32_t lane = 0; lane < test.addresses.size(); ++lane) {
+        cu->write_vgpr(vb, lane, static_cast<uint32_t>(test.addresses[lane]));
+        cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(test.addresses[lane] >> 32));
+        cu->write_vgpr(vb + 8, lane, 1);
+      }
+      const auto words = cdna5::build_vflat(
+          load ? cdna5::kFlatLoadB32 : cdna5::kFlatStoreB32,
+          {.saddr = 124, .vdst = uint8_t(load ? 8 : 0), .vsrc = uint8_t(load ? 0 : 8), .vaddr = 0});
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, inst.release(), *wave);
+      auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(plugin_ptr->slot_index()));
+      auto &race = *state->race_state;
+      const auto &events = race.getDetector()->events();
+      const EventId event{0};
+      ASSERT_EQ(events.totalAllocated(), 1);
+      EXPECT_EQ(events.execMask(event), test.exec);
+      EXPECT_EQ(events.ldsIntervals(event).getTotalBytes(), test.has_lds ? 4 : 0);
+      EXPECT_EQ(events.ldsIntervals(event).contains(lds_base + 64), test.has_lds);
+      EXPECT_EQ(events.registers(event).size(), load ? 1u : 0u);
+      const auto global_counter = load ? WaitCounterType::LOADCNT : WaitCounterType::STORECNT;
+      EXPECT_EQ(events.pendingCounterIncrement(event, global_counter), test.has_global ? 1 : 0);
+      EXPECT_EQ(events.pendingCounterIncrement(event, WaitCounterType::DSCNT), 1);
+      EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
+      PendingWaitCount wait;
+      wait.add(global_counter, 0);
+      race.dispatch(wait);
+      EXPECT_EQ(events.status(event), EventStatus::ACTIVE);
+      wait.updates.clear();
+      wait.add(WaitCounterType::DSCNT, 0);
+      race.dispatch(wait);
+      EXPECT_EQ(events.status(event), EventStatus::WAVE_COMPLETE);
     }
   }
 }

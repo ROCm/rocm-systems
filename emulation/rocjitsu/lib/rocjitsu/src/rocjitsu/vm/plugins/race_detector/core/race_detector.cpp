@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
 #include <cassert>
+#include <limits>
 #include <sstream>
 
 namespace rocjitsu::plugins::race_detector {
@@ -88,12 +89,15 @@ void RaceDetector::retireEvent(EventId eventId) {
 
 void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
                                 MemoryOrderClass currentMemoryOrder) const {
+  if (addr < 0 || nBytes <= 0 || nBytes > std::numeric_limits<int>::max() - addr)
+    return;
+  const int end = addr + nBytes;
   bool anyWrites = false;
   int limit = static_cast<int>(byteWriteCounts.size());
   int cStart = addr / kCountGranularity;
-  int cEnd = (addr + nBytes + kCountGranularity - 1) / kCountGranularity;
+  int cEnd = std::min((end - 1) / kCountGranularity + 1, limit);
   for (int c = cStart; c < cEnd; ++c) {
-    if (c < limit && byteWriteCounts[c] > 0) {
+    if (byteWriteCounts[c] > 0) {
       anyWrites = true;
       break;
     }
@@ -114,7 +118,7 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
         continue;
       }
     }
-    if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
+    if (events_.ldsIntervals(eventId).overlapsRange(addr, end)) {
       raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, false, workgroupId, eventId});
     }
   }
@@ -122,12 +126,15 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
 
 void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
                                  MemoryOrderClass currentMemoryOrder) const {
+  if (addr < 0 || nBytes <= 0 || nBytes > std::numeric_limits<int>::max() - addr)
+    return;
+  const int end = addr + nBytes;
   bool anyReads = false;
   int limit = static_cast<int>(byteReadCounts.size());
   int cStart = addr / kCountGranularity;
-  int cEnd = (addr + nBytes + kCountGranularity - 1) / kCountGranularity;
+  int cEnd = std::min((end - 1) / kCountGranularity + 1, limit);
   for (int c = cStart; c < cEnd; ++c) {
-    if (c < limit && byteReadCounts[c] > 0) {
+    if (byteReadCounts[c] > 0) {
       anyReads = true;
       break;
     }
@@ -149,7 +156,7 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
       if (orderedWithCurrent || events_.status(eventId) == EventStatus::WAVE_COMPLETE)
         continue;
     }
-    if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
+    if (events_.ldsIntervals(eventId).overlapsRange(addr, end)) {
       raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, true, workgroupId, eventId});
     }
   }
@@ -157,14 +164,16 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
 
 void RaceDetector::adjustByteCounts(const IntervalSet &ivs, std::vector<int> &counts, int delta) {
   for (const auto &iv : ivs) {
+    if (iv.start < 0)
+      continue;
     int cStart = iv.start / kCountGranularity;
-    int cEnd = (iv.end + kCountGranularity - 1) / kCountGranularity;
+    int cEnd = (iv.end - 1) / kCountGranularity + 1;
     if (cEnd > static_cast<int>(counts.size()))
       counts.resize(cEnd, 0);
     for (int c = cStart; c < cEnd; ++c) {
       int byteStart = std::max(iv.start, c * kCountGranularity);
-      int byteEnd = std::min(iv.end, (c + 1) * kCountGranularity);
-      counts[c] += delta * (byteEnd - byteStart);
+      int nBytes = std::min(iv.end - byteStart, kCountGranularity - byteStart % kCountGranularity);
+      counts[c] += delta * nBytes;
     }
   }
 }

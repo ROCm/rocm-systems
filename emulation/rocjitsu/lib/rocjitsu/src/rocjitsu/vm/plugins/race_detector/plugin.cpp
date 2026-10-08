@@ -359,7 +359,9 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   if (inst.data()->tag() == amdgpu::LOCAL_MEM || mixedFlat) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
     const uint64_t execMask = d.exec_mask;
-    const uint64_t ldsMask = mixedFlat ? execMask & sharedLanes : execMask;
+    // DDS participates in the instruction's dependencies, but its addresses
+    // do not describe bytes in the ordinary LDS allocation.
+    const uint64_t ldsMask = mixedFlat ? execMask & access.flat_local_lane_mask : execMask;
     if (execMask == 0)
       return;
     auto type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
@@ -413,7 +415,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
                            byte_mask, obligations, memoryOrder, ldsMask);
     }
     // A mixed instruction has one counter entry, with all register lanes but
-    // only the shared lanes' LDS intervals. Do not also register a global event.
+    // only the ordinary LDS lanes' intervals. Do not also register a global event.
     return;
   }
 
