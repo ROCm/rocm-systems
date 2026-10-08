@@ -81,15 +81,14 @@ Mention, if relevant:
 - `--export-config=<file>.json` freezes the resolved preset+overrides into a
   reusable JSON config — this is the supported way to customize a preset, not
   hand-editing the shipped JSON files.
-- Full field-level detail lives in
-  `docs/how-to/using-preset-profiles.rst` and
-  `source/bin/common/presets/schema.json` — point the user there for anything
-  beyond preset selection.
+- `rocprof-sys-run --explain=<name>` prints exactly which `ROCPROFSYS_*`
+  settings a preset applies. The full file format for custom presets is the JSON
+  schema installed at `<install-prefix>/share/rocprofiler-systems/presets/schema.json`.
 
 ## Common Mistakes
 
 | Mistake | Fix |
 | --- | --- |
 | Confusing this with the CMake `--preset debug\|release\|ci` used to *build* rocprofiler-systems | Build presets configure compilation; profiling presets configure a profiling *run*. This skill only covers the latter. |
-| Assuming a preset must be customized by editing its JSON file in `source/bin/common/presets/` | Use `--export-config` to produce a customizable copy instead. |
+| Looking for the built-in preset JSON files to edit | The built-in presets are compiled into the binary and are not installed as files. Use `--explain=<name>` to inspect one and `--export-config` to produce an editable copy. |
 | Picking `detailed` by default for "just get me some data" | Default to `balanced` unless the user explicitly wants maximum depth and can tolerate higher overhead. |
