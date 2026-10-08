@@ -801,10 +801,14 @@ void VaPlacement::vmm_reserved(uint64_t rec, size_t size, bool held, uint64_t li
     if (held) restore_vmm_hold(rec, size);
 }
 
+// Placement never turns on in a Windows replay (hold() refuses), but the
+// unit tests adopt mappings there too, so only the placeholders, which need
+// mmap, are left out on Windows.
 void VaPlacement::release_all() {
-#ifndef _WIN32
     std::unique_lock<std::mutex> lk(mu_);
+#ifndef _WIN32
     for (const auto& r : denied_held_) drop_hold(r.base, r.end);
+#endif
     denied_held_.clear();
     if (!active_) return;
     cv_.wait(lk, [&] { return !any_unmapping(); });
@@ -826,13 +830,14 @@ void VaPlacement::release_all() {
 #endif
     }
     reserved_.clear();
+#ifndef _WIN32
     for (const auto& r : alloc_holds_) drop_hold(r.base, r.end);
-    alloc_holds_.clear();
     for (const auto& r : vmm_held_) drop_hold(r.base, r.end);
+#endif
+    alloc_holds_.clear();
     vmm_held_.clear();
     vmm_released_.clear();
     active_ = false;
-#endif
 }
 
 }  // namespace hrr
