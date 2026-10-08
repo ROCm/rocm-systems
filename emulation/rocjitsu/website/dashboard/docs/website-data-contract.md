@@ -29,10 +29,12 @@ publishing the updated index. Existing catalogs and runs are immutable.
 ## Manual publication rollout and rollback
 
 Before publishing manual topic-branch results, deploy the compatible dashboard
-and let older publisher jobs finish. Manual publication requires the current
-`develop` corpus pin; runs using experimental corpus revisions retain diagnostics
-artifacts but cannot publish. While manual topic-branch results remain indexed, retain
-compatible dashboard and publisher versions: older versions reject that history.
+and let older publisher jobs finish. Publication requires the run's benchmark
+workflow to match the copy checked out from canonical `develop`, including the
+corpus pin and publication steps. Runs with changed or outdated workflows retain
+diagnostics artifacts but cannot publish. While manual topic-branch results remain
+indexed, retain compatible dashboard and publisher versions: older versions reject
+that history.
 See the [publisher instructions](https://github.com/ROCm/rocjitsu-test-corpus/blob/8443bc956e889c0bebd2ee8663ec419df1a68cad/benchmarks/README.md#results-and-plugins)
 for the publication workflow.
 

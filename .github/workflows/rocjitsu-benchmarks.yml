@@ -162,6 +162,7 @@ jobs:
       - name: Checkout repository for publication
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
+          ref: ${{ github.sha }}
           path: publication
 
       - name: Checkout dashboard validator
@@ -175,17 +176,12 @@ jobs:
             emulation/rocjitsu/website/dashboard
             .github/workflows
 
-      - name: Check manual publication corpus
-        if: github.event_name == 'workflow_dispatch'
+      - name: Check publication workflow
         run: |
           OFFICIAL_WORKFLOW="${GITHUB_WORKSPACE}/dashboard/.github/workflows/rocjitsu-benchmarks.yml"
-          OFFICIAL_CORPUS_SHA="$(sed -nE 's/^  CORPUS_SHA: ([0-9a-f]{40})([[:space:]]+#.*)?[[:space:]]*$/\1/p' "${OFFICIAL_WORKFLOW}")"
-          if [[ ! "${OFFICIAL_CORPUS_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Cannot read the official corpus pin from develop."
-            exit 1
-          fi
-          if [[ "${CORPUS_SHA}" != "${OFFICIAL_CORPUS_SHA}" ]]; then
-            echo "::error::Manual publication requires develop's corpus pin ${OFFICIAL_CORPUS_SHA}; got ${CORPUS_SHA}. Benchmark diagnostics remain available as artifacts."
+          RUN_WORKFLOW="${GITHUB_WORKSPACE}/publication/.github/workflows/rocjitsu-benchmarks.yml"
+          if ! cmp -s "${RUN_WORKFLOW}" "${OFFICIAL_WORKFLOW}"; then
+            echo "::error::Publication requires the benchmark workflow to match canonical develop. Benchmark diagnostics remain available as artifacts."
             exit 1
           fi
 
