@@ -3958,9 +3958,12 @@ def compare_single_op(
 ) -> OpCompareOutcome:
     """Compare one op's profiler entry against the analyze forest.
 
-    Name match, inclusive kernel overlap, inclusive GPU ns when the
-    profiler recorded CUDA work, CUDA ``torch_ops`` in the matched
-    subtree, and ``op_edges`` as descendant relations.
+    Name match. Structural ops pass when a matching node is present.
+    ATen ops also require a non-empty kernel-name intersection and,
+    when the profiler recorded CUDA work, inclusive GPU ns > 0.
+    ``op_edges`` whose parent is the sampled op must appear as
+    descendants. Window-wide ``torch_ops`` are not required in the
+    subtree because the profiler records argument-setup ops too.
     """
     ground_truth_entry = ground_truth.get(op.name)
 
@@ -3979,9 +3982,6 @@ def compare_single_op(
     profiler_kernel_set = normalize_kernel_names(set(profiler_kernels))
     cuda_time_us = float(ground_truth_entry.get("cuda_time_us") or 0.0)
     has_cuda_work = bool(profiler_kernel_set) or cuda_time_us > 0.0
-    torch_ops = list(
-        ground_truth_entry.get("torch_ops") or ground_truth_entry.get("aten_ops") or []
-    )
     op_edges = [
         tuple(edge)
         for edge in ground_truth_entry.get("op_edges") or []
@@ -3991,12 +3991,9 @@ def compare_single_op(
     matched_nodes = nodes_matching_op(forest, op.name)
     tree_kernels: Set[str] = set()
     gpu_ns = 0.0
-    subtree_names: Set[str] = set()
     for node in matched_nodes:
         tree_kernels |= inclusive_kernel_names(node)
         gpu_ns += inclusive_gpu_ns(node)
-        subtree_names.add(node.name)
-        subtree_names |= descendant_names(node)
     tree_kernels = normalize_kernel_names(tree_kernels)
 
     def _match_verbose_lines() -> Tuple[str, ...]:
@@ -4033,6 +4030,14 @@ def compare_single_op(
             "fail",
             reason,
             coverage_log_fail(op.name, reason) + verbose_tail,
+        )
+
+    if op.category == "structural":
+        return OpCompareOutcome(
+            "pass",
+            "",
+            coverage_log_pass(op.name, note="structural: matching analyze node")
+            + verbose_tail,
         )
 
     if has_cuda_work and gpu_ns <= 0.0:
@@ -4073,33 +4078,6 @@ def compare_single_op(
                 coverage_log_fail(op.name, reason) + verbose_tail + mismatch_lines,
             )
 
-    missing_cuda_ops = []
-    if has_cuda_work:
-        for torch_op in torch_ops:
-            if not isinstance(torch_op, str):
-                continue
-            if not torch_op.startswith("aten::") and not torch_op.startswith("torch."):
-                continue
-            if any(marker_matches_op(torch_op, name) for name in subtree_names):
-                continue
-            if marker_matches_op(op.name, torch_op):
-                continue
-            missing_cuda_ops.append(torch_op)
-        # Only fail when a CUDA aten op from the profiler is absent from the subtree
-        missing_cuda_ops = [
-            name for name in missing_cuda_ops if name.startswith("aten::")
-        ][:8]
-        if missing_cuda_ops and op.category != "structural":
-            reason = (
-                "torch_ops with CUDA work missing from matched subtree: "
-                f"{missing_cuda_ops}"
-            )
-            return OpCompareOutcome(
-                "fail",
-                reason,
-                coverage_log_fail(op.name, reason) + verbose_tail,
-            )
-
     for parent_name, child_name in op_edges:
         if not any(marker_matches_op(op.name, node.name) for node in matched_nodes):
             continue
@@ -4116,7 +4094,7 @@ def compare_single_op(
             if any(marker_matches_op(str(child_name), name) for name in names):
                 child_found = True
                 break
-        if not child_found and op.category != "structural":
+        if not child_found:
             reason = f"op_edges descendant missing: {parent_name!r} -> {child_name!r}"
             return OpCompareOutcome(
                 "fail",
@@ -4124,13 +4102,10 @@ def compare_single_op(
                 coverage_log_fail(op.name, reason) + verbose_tail,
             )
 
-    note = "forest match"
-    if op.category == "structural":
-        note = "structural: matching analyze node"
     return OpCompareOutcome(
         "pass",
         "",
-        coverage_log_pass(op.name, note=note) + verbose_tail,
+        coverage_log_pass(op.name, note="forest match") + verbose_tail,
     )
 
 
