@@ -36,14 +36,12 @@
 //      offered as NCCL_PTR_CUDA exactly as a real plugin does -- so the test
 //      reproduces the reported failure, not just the wrong argument value.
 //
-// Its own binary (rccl-UnitTestsMicroRmaProxy), not rccl-UnitTestsMicro: that
-// target already resolves ncclRmaProxyConnectOnce / ncclRmaProxyRegister /
-// ncclRmaProxyDeregister from fakes/dev_runtime_micro_fakes.cc, and rma_proxy.cc
-// defines all three. Linking the unit under test there is a duplicate symbol.
+// Why this has its own binary rather than joining rccl-UnitTestsMicro: see the
+// rccl-UnitTestsMicroRmaProxy entry in MICROTEST_README.md.
 
 #include <gtest/gtest.h>
 
-#include <hsa/hsa.h>  // hsa_status_t, for the hsa_status_string stub below.
+#include <hsa/hsa.h>
 
 #include <cstdint>
 #include <cstring>
@@ -54,16 +52,15 @@
 
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
-#include "fakes/nccl_fakes.h"  // g_loadParam, used by param_redirect.h
+#include "fakes/nccl_fakes.h"
 #include "fakes/rma_fakes.h"
 
-// rma_proxy.cc defines four params of its own (RMA_PROXY_DUMP_SIGNAL,
-// RMA_PROXY_QUEUE_SIZE, RCCL_RMA_USE_DMABUF, NUM_RMA_INT_CTX). Route the
-// generated bodies through g_loadParam so they stay per-test controllable and
-// the real ncclLoadParam is never linked. Must precede the unit under test.
+// rma_proxy.cc declares params of its own. Route the generated bodies through
+// g_loadParam so they stay per-test controllable and the real ncclLoadParam is
+// never linked. Must precede the unit under test.
 #include "fakes/param_redirect.h"
 
-#include "gin/gin_host.h"  // NCCL_GIN_MAX_CONNECTIONS before comm.h's RMA declarations.
+#include "gin/gin_host.h"
 #include "nccl.h"
 #include "comm.h"
 #include "rma/rma_proxy.h"
@@ -83,7 +80,7 @@ int64_t g_paramDmaBufEnable = 0;
 // reasoning as p2p-test.cc's allocTracker and ras-test.cc's ncclSetThreadName).
 // They must precede the #include of the unit under test.
 int64_t ncclParamDmaBufEnable() { return g_paramDmaBufEnable; }
-// src/transport/net_ib/init.cc:15 -- NCCL_PARAM(IbDataDirect, "IB_DATA_DIRECT", 1).
+// NCCL_PARAM(IbDataDirect, "IB_DATA_DIRECT", 1), declared by src/transport/net_ib/init.cc.
 int64_t ncclParamIbDataDirect() { return 1; }
 // src/debug.cc. ncclRmaProxyConnectOnce names its progress thread; no behaviour to assert.
 void ncclSetThreadName(std::thread&, const char*, ...) {}
@@ -102,7 +99,7 @@ extern "C" hsa_status_t hsa_status_string(hsa_status_t, const char** status_stri
     if (status_string != nullptr) *status_string = "fake HSA status (host microtest)";
     return HSA_STATUS_SUCCESS;
 }
-// src/init.cc:245. Not a hook: allocMemCPUAccessible() is a header-static
+// Defined by src/init.cc. Not a hook: allocMemCPUAccessible() is a header-static
 // template, so this global is the only way to steer it. NULL is production's
 // default (NCCL_GDRCOPY_ENABLE defaults to 0) and selects host-NUMA memory.
 gdr_t ncclGdrCopy = NULL;
@@ -145,9 +142,11 @@ struct FakeRma {
     // When true, reject a registration whose declared type contradicts the
     // pointer's provenance -- what the net plugin in NVIDIA/nccl PR #2187 did.
     bool             strictMemType = false;
-    // Refuse every registration, whatever its type. Used to prove the success
-    // the tests above assert is a real oracle and not an unconditional pass.
-    bool             rejectAll     = false;
+    // Refuse every registration past the first `rejectAfterNReg`. Used to prove
+    // the success the other tests assert is a real oracle and not an
+    // unconditional pass. -1 disables.
+    int              rejectAfterNReg = -1;
+    int              regAttempts     = 0;
     std::set<void*>* hostAddrs     = nullptr;
     int              destroyCtxCalls = 0;
 
@@ -159,8 +158,10 @@ struct FakeRma {
     }
 
     ncclResult_t reg(void* data, size_t size, int type, uint64_t mrFlags, void** mhandle) {
-        if (rejectAll || (strictMemType && type == NCCL_PTR_CUDA && hostAddrs != nullptr &&
-                          hostAddrs->count(data) != 0)) {
+        ++regAttempts;
+        if ((rejectAfterNReg >= 0 && regAttempts > rejectAfterNReg) ||
+            (strictMemType && type == NCCL_PTR_CUDA && hostAddrs != nullptr &&
+             hostAddrs->count(data) != 0)) {
             // Mirror a real plugin: the registration is refused, nothing is
             // recorded, and no handle comes back.
             *mhandle = nullptr;
@@ -174,6 +175,7 @@ struct FakeRma {
 
     ncclRma_t vtable() {
         ncclRma_t v{};
+        v.createContext  = &FakeRma::TrampCreateContext;
         v.regMrSym       = &FakeRma::TrampRegMrSym;
         v.regMrSymDmaBuf = &FakeRma::TrampRegMrSymDmaBuf;
         v.deregMrSym     = &FakeRma::TrampDeregMrSym;
@@ -190,6 +192,10 @@ struct FakeRma {
 
 private:
     static FakeRma* Rma(void* h) { return static_cast<Handle*>(h)->rma; }
+    static ncclResult_t TrampCreateContext(void* collComm, ncclRmaConfig_t*, void** rmaCtx) {
+        *rmaCtx = &Rma(collComm)->ctxH;
+        return ncclSuccess;
+    }
     static ncclResult_t TrampRegMrSym(void* collComm, void* data, size_t size, int type,
                                       uint64_t mrFlags, void** mhandle) {
         return Rma(collComm)->reg(data, size, type, mrFlags, mhandle);
@@ -210,8 +216,9 @@ private:
 };
 
 // ===========================================================================
-// Fixture: hand-builds the minimum ncclComm + ncclRmaProxyCtx that
-// ncclRmaProxyCtxAllocGraph reads, then calls it directly.
+// Fixture: builds the minimum ncclComm a context needs, then drives the public
+// lifecycle a production client uses -- ncclRmaProxyCreateContext, which runs
+// ncclRmaProxyCtxAllocGraph, and ncclRmaProxyDestroyContext.
 // ===========================================================================
 class RmaProxyAllocGraphTest : public ::testing::Test {
 protected:
@@ -223,10 +230,13 @@ protected:
         static_cast<size_t>(kNRanks) * kNumRmaSig * sizeof(uint64_t);
     static constexpr size_t kFlushBufSize = static_cast<size_t>(kNRanks) * sizeof(uint64_t);
 
-    std::unique_ptr<ncclComm>         comm_;
-    std::unique_ptr<ncclRmaProxyCtx>  ctx_;
-    FakeRma                           rmaNet_;
-    ncclRma_t                         rma_{};
+    std::unique_ptr<ncclComm>  comm_;
+    // Owned by production: allocated in ncclRmaProxyCreateContext, released in
+    // ncclRmaProxyDestroyContext.
+    ncclRmaProxyCtx*           ctx_ = nullptr;
+    ncclNetProperties_t        props_{};
+    FakeRma                    rmaNet_;
+    ncclRma_t                  rma_{};
 
     // Every pointer hipHostMalloc handed out during the test. FakeRma consults
     // this to decide whether a NCCL_PTR_CUDA registration is a lie.
@@ -256,8 +266,8 @@ protected:
         g_hipStreamSynchronize       = [](hipStream_t) { return hipSuccess; };
         // Keep ncclCudaCalloc off the cuMem arm, which needs a real driver.
         g_cuMemEnable = [] { return 0; };
-        // FreeGraph()'s GDR arm reaches ncclCudaFree, which queries the
-        // allocation range for its accounting before calling cudaFree.
+        // ncclRmaProxyDestroyContext's GDR arm reaches ncclCudaFree, which
+        // queries the allocation range for its accounting before cudaFree.
         g_hipMemGetAddressRange = [](hipDeviceptr_t* pbase, std::size_t* psize,
                                      hipDeviceptr_t dptr) {
             if (pbase != nullptr) *pbase = dptr;
@@ -281,69 +291,22 @@ protected:
         comm_->memManager        = nullptr;
         ncclMemoryStackConstruct(&comm_->memPermanent);
 
-        ctx_ = std::make_unique<ncclRmaProxyCtx>();  // value-initialised: all fields zero
-        ctx_->comm        = comm_.get();
-        ctx_->rmaCtx      = &rmaNet_.ctxH;
-        ctx_->rmaCollComm = &rmaNet_.collH;
         // A capable NIC, so no registration below can be steered by a missing
         // capability. The DMA-BUF bit is nonetheless never consulted here:
         // ncclRmaProxyRegMrSym tests ncclParamDmaBufEnable() first, and the
         // fixture pins that to 0 (see the note on g_paramDmaBufEnable above).
-        ctx_->props.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA | NCCL_PTR_DMABUF;
+        props_.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA | NCCL_PTR_DMABUF;
+        // Drives maxInflightRequests and the circular-buffer queue size; 0
+        // would leave production sanitizing down to a zero-length queue.
+        props_.maxRecvs   = 1;
 
         rmaNet_.hostAddrs = &hostAddrs_;
         rma_ = rmaNet_.vtable();
-    }
-
-    // Undo ncclRmaProxyCtxAllocGraph's heap allocations. Production's
-    // counterpart is ncclRmaProxyDestroyContext, which cannot be used here: it
-    // ends in free(rmaProxyCtx), and ctx_ is owned by a unique_ptr. So the four
-    // allocations are released by hand, in reverse order, each null-guarded so
-    // a partially completed (failed) AllocGraph is still cleaned up. Called
-    // from TearDown and between the arms of the two looping tests, which would
-    // otherwise overwrite these pointers on their second AllocGraph() call.
-    void FreeGraph() {
-        if (ctx_->flushBufMhandle != nullptr) {
-            rma_.deregMrSym(ctx_->rmaCollComm, ctx_->flushBufMhandle);
-            ctx_->flushBufMhandle = nullptr;
-        }
-        if (ctx_->cpuAccessSignalsMhandle != nullptr) {
-            rma_.deregMrSym(ctx_->rmaCollComm, ctx_->cpuAccessSignalsMhandle);
-            ctx_->cpuAccessSignalsMhandle = nullptr;
-        }
-        if (ctx_->flushBufDev != nullptr) {
-            hipFree(ctx_->flushBufDev);
-            ctx_->flushBufDev = nullptr;
-        }
-        std::free(ctx_->cpuAccessSignalsHost);
-        ctx_->cpuAccessSignalsHost = nullptr;
-        if (ctx_->cpuAccessSignals != nullptr) {
-            // The real counterpart of the real allocator: hipHostFree on the
-            // host arm, ncclGdrCudaFree on the GDR arm, selected by the same
-            // handle the unit under test branches on.
-            freeMemCPUAccessible(ctx_->cpuAccessSignals, ctx_->cpuAccessSignalsGdrHandle,
-                                 comm_->memManager);
-            // Drop the provenance record too: the allocator may hand the same
-            // address back on the next arm, and a stale entry would then make
-            // the GDR-arm "not host memory" check fail for the wrong reason.
-            hostAddrs_.erase(ctx_->cpuAccessSignalsDev);
-            ctx_->cpuAccessSignals          = nullptr;
-            ctx_->cpuAccessSignalsDev       = nullptr;
-            ctx_->cpuAccessSignalsGdrHandle = nullptr;
-        }
-        // The registration log now refers to freed pointers.
-        rmaNet_.regs.clear();
+        comm_->rmaState.rmaProxyState.ncclRma = &rma_;
     }
 
     void TearDown() override {
-        // ncclRmaProxyCtxAllocGraph must never tear the context down itself:
-        // its own header comment delegates failure cleanup to the caller's
-        // ncclRmaProxyDestroyContext. Checking the counter here is also what
-        // gives the destroyContext vtable slot a purpose -- it stays installed
-        // so an unexpected call is counted rather than dispatched through a
-        // null pointer.
-        EXPECT_EQ(0, rmaNet_.destroyCtxCalls);
-        FreeGraph();
+        DestroyCtx();
         // persistentQueues / inProgressQueues live on this stack, not the heap.
         ncclMemoryStackDestruct(&comm_->memPermanent);
         hostMallocHook_.reset();
@@ -354,19 +317,41 @@ protected:
         ResetNcclFakes();
     }
 
-    ncclResult_t AllocGraph() {
-        return ncclRmaProxyCtxAllocGraph(comm_.get(), &rma_, ctx_.get());
+    // The entry point a production client calls. On failure production destroys
+    // the partial context itself, so ctx_ is only adopted on success.
+    ncclResult_t CreateCtx() {
+        void* out = nullptr;
+        const int destroysBefore = rmaNet_.destroyCtxCalls;
+        ncclResult_t res =
+            ncclRmaProxyCreateContext(comm_.get(), &rmaNet_.collH, props_, 0, &out);
+        if (res == ncclSuccess) {
+            ctx_ = static_cast<ncclRmaProxyCtx*>(out);
+            // A successful create must not have torn the context back down.
+            EXPECT_EQ(destroysBefore, rmaNet_.destroyCtxCalls);
+        }
+        return res;
+    }
+
+    void DestroyCtx() {
+        if (ctx_ == nullptr) return;
+        EXPECT_EQ(ncclSuccess, ncclRmaProxyDestroyContext(&rma_, ctx_));
+        ctx_ = nullptr;
+        // Production has released every CPU-accessible buffer it allocated, so
+        // no recorded address is live. Stale entries would otherwise make the
+        // next arm's provenance check fire on a recycled pointer.
+        hostAddrs_.clear();
+        // The registration log now refers to freed pointers.
+        rmaNet_.regs.clear();
     }
 
     // Preamble shared by the two tests that sweep both GDR arms in a loop:
-    // select the arm, release the previous pass's allocations before
-    // AllocGraph overwrites the pointers (a no-op on the first pass), and
-    // rebuild. Wrap call sites in ASSERT_NO_FATAL_FAILURE -- a failed ASSERT
-    // here only returns from this helper.
-    void ReAllocGraphForArm(gdr_t gdr) {
+    // select the arm, tear the previous pass's context down (a no-op on the
+    // first pass), and rebuild. Wrap call sites in ASSERT_NO_FATAL_FAILURE --
+    // a failed ASSERT here only returns from this helper.
+    void ReCreateCtxForArm(gdr_t gdr) {
+        DestroyCtx();
         ncclGdrCopy = gdr;
-        FreeGraph();
-        ASSERT_EQ(ncclSuccess, AllocGraph()) << "gdr=" << (void*)gdr;
+        ASSERT_EQ(ncclSuccess, CreateCtx()) << "gdr=" << (void*)gdr;
     }
 
     // The cpuAccessSignals registration, located by the address production
@@ -385,7 +370,7 @@ protected:
 TEST_F(RmaProxyAllocGraphTest, GdrCopyOff_RegistersCpuAccessSignalsAsHost) {
     ncclGdrCopy = NULL;
 
-    ASSERT_EQ(ncclSuccess, AllocGraph());
+    ASSERT_EQ(ncclSuccess, CreateCtx());
 
     // Premise check: the allocator really did take the host arm. Without this,
     // a change that made allocMemCPUAccessible always return device memory
@@ -408,7 +393,7 @@ TEST_F(RmaProxyAllocGraphTest, GdrCopyOff_RegistersCpuAccessSignalsAsHost) {
 TEST_F(RmaProxyAllocGraphTest, GdrCopyOn_RegistersCpuAccessSignalsAsCuda) {
     ncclGdrCopy = kGdrEnabled;
 
-    ASSERT_EQ(ncclSuccess, AllocGraph());
+    ASSERT_EQ(ncclSuccess, CreateCtx());
 
     ASSERT_NE(nullptr, ctx_->cpuAccessSignalsGdrHandle)
         << "GDRCopy path did not produce a handle; the premise of this test is gone";
@@ -432,7 +417,7 @@ TEST_F(RmaProxyAllocGraphTest, StrictPluginRejectsWrongMemoryType_AllocGraphStil
     ncclGdrCopy          = NULL;
     rmaNet_.strictMemType = true;
 
-    EXPECT_EQ(ncclSuccess, AllocGraph())
+    ASSERT_EQ(ncclSuccess, CreateCtx())
         << "net plugin rejected the cpuAccessSignals registration due to wrong memory type "
            "(NVIDIA/nccl PR #2187)";
 
@@ -442,20 +427,26 @@ TEST_F(RmaProxyAllocGraphTest, StrictPluginRejectsWrongMemoryType_AllocGraphStil
 }
 
 // ---------------------------------------------------------------------------
-// Negative control for the three tests above. They all assert
-// ncclRmaProxyCtxAllocGraph returns ncclSuccess, which is only evidence if a
-// refused registration can still make it fail -- i.e. if the NCCLCHECK around
-// the cpuAccessSignals registration really does propagate. Pin that oracle.
+// Negative control for the three tests above. They all assert context creation
+// returns ncclSuccess, which is only evidence if a refused cpuAccessSignals
+// registration can still make it fail -- i.e. if the NCCLCHECK around that
+// registration really does propagate. Pin that oracle.
+//
+// Registration order under ncclRmaProxyCreateContext is signalsDev (from
+// ncclRmaProxyCtxAlloc), then cpuAccessSignals, then flushBuf. Allowing exactly
+// one registration therefore refuses the cpuAccessSignals one specifically; the
+// size check below fails loudly if that order ever changes.
 // ---------------------------------------------------------------------------
-TEST_F(RmaProxyAllocGraphTest, PluginRefusesEveryRegistration_AllocGraphFails) {
-    ncclGdrCopy        = NULL;
-    rmaNet_.rejectAll  = true;
+TEST_F(RmaProxyAllocGraphTest, PluginRefusesCpuAccessSignalsRegistration_CreateContextFails) {
+    ncclGdrCopy             = NULL;
+    rmaNet_.rejectAfterNReg = 1;
 
-    EXPECT_NE(ncclSuccess, AllocGraph())
+    EXPECT_NE(ncclSuccess, CreateCtx())
         << "a refused MR registration did not propagate out of "
            "ncclRmaProxyCtxAllocGraph; the ncclSuccess assertions in the other "
            "tests prove nothing";
-    EXPECT_EQ(nullptr, ctx_->cpuAccessSignalsMhandle);
+    // Production stopped at the refusal: signalsDev got through, nothing after.
+    EXPECT_EQ(1u, rmaNet_.regs.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -466,7 +457,7 @@ TEST_F(RmaProxyAllocGraphTest, PluginRefusesEveryRegistration_AllocGraphFails) {
 // ---------------------------------------------------------------------------
 TEST_F(RmaProxyAllocGraphTest, FlushBufferStaysCudaOnBothGdrArms) {
     for (gdr_t gdr : {(gdr_t)NULL, kGdrEnabled}) {
-        ASSERT_NO_FATAL_FAILURE(ReAllocGraphForArm(gdr));
+        ASSERT_NO_FATAL_FAILURE(ReCreateCtxForArm(gdr));
 
         const Registration* reg = FlushBufReg();
         ASSERT_NE(nullptr, reg) << "flushBufDev was never registered, gdr=" << (void*)gdr;
@@ -481,7 +472,7 @@ TEST_F(RmaProxyAllocGraphTest, FlushBufferStaysCudaOnBothGdrArms) {
 // ---------------------------------------------------------------------------
 TEST_F(RmaProxyAllocGraphTest, ForceStrongOrderingPreservedOnBothGdrArms) {
     for (gdr_t gdr : {(gdr_t)NULL, kGdrEnabled}) {
-        ASSERT_NO_FATAL_FAILURE(ReAllocGraphForArm(gdr));
+        ASSERT_NO_FATAL_FAILURE(ReCreateCtxForArm(gdr));
 
         const Registration* reg = CpuAccessSignalsReg();
         ASSERT_NE(nullptr, reg) << "cpuAccessSignalsDev was never registered, gdr="
