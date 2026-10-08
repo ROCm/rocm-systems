@@ -655,19 +655,34 @@ jobs:
           name: hrr-build
           path: build
 
-      # In a container the workspace moves (/__w/...), which would leave the
-      # baked-in HRR_TEST_EXE and HRR_PLAYBACK_EXE pointing nowhere.
+      - name: Restore executable bits
+        run: chmod +x build/hrr/playback/hrr-playback build/hrr/tests/*/hrr-*tests
+
+      # In a container the workspace is /__w/..., while HRR_TEST_EXE and
+      # HRR_PLAYBACK_EXE were baked on the build machine. Some images already
+      # have that path as a real directory. ln -sfn will not replace one: it
+      # nests the link inside it, and every workload then dies in execvp
+      # with 127.
       - name: Recreate build path
         env:
           BUILD_WORKSPACE: ${{ needs.build.outputs.workspace }}
         run: |
           if [ -n "${BUILD_WORKSPACE}" ] && [ "${BUILD_WORKSPACE}" != "${PWD}" ]; then
             mkdir -p "$(dirname "${BUILD_WORKSPACE}")"
-            ln -sfn "${PWD}" "${BUILD_WORKSPACE}"
+            if [ -d "${BUILD_WORKSPACE}" ] && [ ! -L "${BUILD_WORKSPACE}" ] \
+                && [ "$(stat -c '%d:%i' "${BUILD_WORKSPACE}")" != "$(stat -c '%d:%i' "${PWD}")" ]; then
+              rm -rf "${BUILD_WORKSPACE}"
+            fi
+            if [ ! -e "${BUILD_WORKSPACE}" ] || [ -L "${BUILD_WORKSPACE}" ]; then
+              ln -sfn "${PWD}" "${BUILD_WORKSPACE}"
+            fi
           fi
-
-      - name: Restore executable bits
-        run: chmod +x build/hrr/playback/hrr-playback build/hrr/tests/*/hrr-*tests
+          exe="${BUILD_WORKSPACE:-${PWD}}/build/hrr/tests/integration/hrr-integration-tests"
+          if [ ! -x "${exe}" ]; then
+            echo "::error::baked test binary is not executable: ${exe} (PWD=${PWD})"
+            ls -ld "${BUILD_WORKSPACE}" "${PWD}/build/hrr/tests/integration" || true
+            exit 1
+          fi
 
       # CMake gives the binaries a RUNPATH to the SDK's lib directory, where
       # the plain amdhip64 lives. LD_LIBRARY_PATH is searched before RUNPATH, so
