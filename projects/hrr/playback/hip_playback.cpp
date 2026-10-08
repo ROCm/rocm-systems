@@ -3361,9 +3361,15 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
             buf = it->second;
             ctx.host_reg_bufs.erase(it);
         }
+        // A buffer no longer tracked as this range's registration was
+        // unregistered by a replayed reset: mark_host_unregistered changed its
+        // kind, or an allocation over it dropped it, which record_alloc does
+        // only to such a range.
         auto ai = ctx.alloc_map.find(a->hostPtr);
-        reset_unregistered = ai != ctx.alloc_map.end() &&
-                             ai->second.kind == AllocKind::HostUnregistered;
+        const bool registered = ai != ctx.alloc_map.end() &&
+                                ai->second.kind == AllocKind::HostRegister &&
+                                ai->second.live_ptr == buf;
+        reset_unregistered = buf && !registered;
     }
 
     void* live = buf ? buf : ctx.translate_ptr(a->hostPtr);

@@ -497,7 +497,9 @@ At playback:
   `hipHostRegister` on the new buffer, and records `(recorded_ptr → live_ptr)` in `alloc_map`
   (for kernel-arg pointer translation) and `host_reg_bufs` (for cleanup at Unregister).
 - `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, frees the
-  backing buffer, and removes both map entries.
+  backing buffer, and removes both map entries. If a replayed `hipDeviceReset` already
+  unregistered the range, which happens only when replay sees fewer GPUs than capture did,
+  the call fails, and replay returns success as the application's call did.
 
 ### Pinned Host Snapshots
 
