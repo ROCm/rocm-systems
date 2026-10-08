@@ -9,9 +9,13 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
@@ -29,6 +33,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -114,6 +119,43 @@ std::array<uint32_t, 2> build_gws(rj_code_arch_t arch, uint16_t op, uint8_t gds,
   }
 }
 
+// Build a plain workgroup s_barrier (SOPP) for the given arch. GFX9/GFX10 use
+// opcode 10; GFX11 uses 61.
+std::array<uint32_t, 1> build_s_barrier(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::build_sopp(cdna1::kSBarrierSopp);
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::build_sopp(cdna2::kSBarrierSopp);
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_sopp(cdna3::kSBarrierSopp);
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::build_sopp(rdna1::kSBarrierSopp);
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::build_sopp(rdna2::kSBarrierSopp);
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::build_sopp(rdna3::kSBarrierSopp);
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::build_sopp(rdna3_5::kSBarrierSopp);
+  default:
+    ADD_FAILURE() << "unsupported arch for s_barrier build: " << unsigned(arch);
+    return {};
+  }
+}
+
+// Build a GWS op carrying the DS acc bit (CDNA2/3 only, where the field exists).
+std::array<uint32_t, 2> build_gws_acc(rj_code_arch_t arch, uint16_t op, uint8_t acc, uint8_t addr) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::build_ds(op, {.gds = 1, .acc = acc, .addr = addr});
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_ds(op, {.gds = 1, .acc = acc, .addr = addr});
+  default:
+    ADD_FAILURE() << "DS acc bit only exists on CDNA2/3: " << unsigned(arch);
+    return {};
+  }
+}
+
 // ADDR VGPR that carries the resource count for INIT/SEMA_BR/BARRIER.
 constexpr uint8_t kAddrVgpr = 4;
 
@@ -149,8 +191,8 @@ TEST_P(DsGwsTest, StructuralModelExecutesAndAccounts) {
 
   const auto wait_counter = expected_wait_counter(arch);
   for (const auto &variant : kGwsVariants) {
-    const auto words =
-        build_gws(arch, gws_opcode(arch, variant.op), /*gds=*/1, gws_has_addr(variant.op) ? 4 : 0);
+    const auto words = build_gws(arch, gws_opcode(arch, variant.op), /*gds=*/1,
+                                 gws_has_addr(variant.op) ? kAddrVgpr : 0);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr) << variant.mnemonic << " failed to decode on arch " << unsigned(arch);
     EXPECT_EQ(inst->mnemonic(), variant.mnemonic);
@@ -198,8 +240,8 @@ TEST_P(DsGwsTest, DecodesWithoutGdsBit) {
   const auto arch = GetParam();
   auto decoder = Decoder::create(arch);
   for (const auto &variant : kGwsVariants) {
-    const auto words =
-        build_gws(arch, gws_opcode(arch, variant.op), /*gds=*/0, gws_has_addr(variant.op) ? 4 : 0);
+    const auto words = build_gws(arch, gws_opcode(arch, variant.op), /*gds=*/0,
+                                 gws_has_addr(variant.op) ? kAddrVgpr : 0);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr) << variant.mnemonic << " failed to decode on arch " << unsigned(arch);
     EXPECT_EQ(inst->mnemonic(), variant.mnemonic);
@@ -301,6 +343,51 @@ TEST_P(DsGwsTest, BarrierReusesCounterAcrossPhases) {
 
   wf0->halt();
   wf1->halt();
+}
+
+// The releasing arrival reloads the counter from its own value, so consecutive
+// phases may use different participant counts. init(2) sizes the first phase for
+// three arrivals; the releasing barrier(1) then resizes the next phase to two.
+// (A fixed reload would keep requiring three arrivals and hang the second phase.)
+TEST_P(DsGwsTest, BarrierChangingPhaseSizeReusesArrivalCount) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_resize_mem");
+  amdgpu::L2Cache l2("ds_gws_resize_l2");
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto decoder = Decoder::create(arch);
+  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  auto *wf2 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  ASSERT_NE(wf2, nullptr);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/3);
+  for (auto *wf : {wf0, wf1, wf2}) {
+    wf->set_exec(0x1);
+    wf->set_m0(0);
+  }
+
+  // Phase 1: three participants (init value 2). Two park, the third releases.
+  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/2);
+  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
+  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf2, /*count=*/1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(wf2->state(), amdgpu::WfState::RUNNING);
+
+  // Phase 2: the reloaded counter (1) now needs only two arrivals.
+  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
+  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
+
+  wf0->halt();
+  wf1->halt();
+  wf2->halt();
 }
 
 // When the participant set (count + 1) exceeds the resident set, the barrier
@@ -522,96 +609,107 @@ TEST_P(DsGwsTest, DeadlockEscapeReleasesParkedBarrierWaves) {
 // Mixed deadlock: one wave parks at a GWS barrier while its sibling stalls at an
 // s_barrier. Neither can signal the other, so the escape scan (which treats an
 // s_barrier stall as a blocked state) releases the parked GWS wave.
-TEST(DsGwsMixedTest, EscapeReleasesGwsWaveStalledAgainstSBarrier) {
-  for (const auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3}) {
-    amdgpu::GpuMemory mem("ds_gws_mixed_mem");
-    amdgpu::L2Cache l2("ds_gws_mixed_l2");
-    auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-    constexpr uint64_t kPc = 0x200000;
-    constexpr uint32_t kSEndpgm = 0xBF810000u;
-    mem.write32(kPc, kSEndpgm);
-    auto decoder = Decoder::create(arch);
-    auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-    auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-    ASSERT_NE(wf0, nullptr);
-    ASSERT_NE(wf1, nullptr);
-    cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-    for (auto *wf : {wf0, wf1}) {
-      wf->set_exec(0x1);
-      wf->set_m0(0);
-    }
-
-    // wf0 parks at a two-participant GWS barrier.
-    run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
-    ASSERT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT) << "arch " << unsigned(arch);
-
-    // wf1 executes a plain workgroup s_barrier and stalls (wf0 never arrives).
-    const auto words =
-        (arch == ROCJITSU_CODE_ARCH_CDNA1)
-            ? cdna1::build_sopp(cdna1::kSBarrierSopp)
-            : (arch == ROCJITSU_CODE_ARCH_CDNA2 ? cdna2::build_sopp(cdna2::kSBarrierSopp)
-                                                : cdna3::build_sopp(cdna3::kSBarrierSopp));
-    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-    ASSERT_NE(inst, nullptr) << "arch " << unsigned(arch);
-    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf1).succeeded());
-    ASSERT_EQ(wf1->state(), amdgpu::WfState::BARRIER) << "arch " << unsigned(arch);
-
-    // The escape scan releases the GWS-parked wave even though its sibling is
-    // stalled at an s_barrier rather than a GWS op.
-    for (int i = 0; i < 4 && wf0->state() == amdgpu::WfState::GWS_WAIT; ++i)
-      cu->step();
-    EXPECT_NE(wf0->state(), amdgpu::WfState::GWS_WAIT) << "arch " << unsigned(arch);
+TEST_P(DsGwsTest, MixedBarrierSBarrierEscapeReleasesGwsWave) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_mixed_mem");
+  amdgpu::L2Cache l2("ds_gws_mixed_l2");
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  constexpr uint64_t kPc = 0x200000;
+  constexpr uint32_t kSEndpgm = 0xBF810000u;
+  mem.write32(kPc, kSEndpgm);
+  auto decoder = Decoder::create(arch);
+  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
+  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
+  for (auto *wf : {wf0, wf1}) {
+    wf->set_exec(0x1);
+    wf->set_m0(0);
   }
+
+  // wf0 parks at a two-participant GWS barrier.
+  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+  ASSERT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
+
+  // wf1 executes a plain workgroup s_barrier and stalls (wf0 never arrives).
+  const auto words = build_s_barrier(arch);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf1).succeeded());
+  ASSERT_EQ(wf1->state(), amdgpu::WfState::BARRIER);
+
+  // The escape scan releases the GWS-parked wave even though its sibling is
+  // stalled at an s_barrier rather than a GWS op.
+  for (int i = 0; i < 4 && wf0->state() == amdgpu::WfState::GWS_WAIT; ++i)
+    cu->step();
+  EXPECT_NE(wf0->state(), amdgpu::WfState::GWS_WAIT);
 }
 
 // On CDNA2/CDNA3 the DS acc bit selects the AGPR bank for the count operand.
 // Writing a parking count to the AGPR slot and a non-parking count to the VGPR
-// slot proves acc routes the read to the AGPR.
-TEST(DsGwsAccTest, AccBitSelectsAgprCountOperand) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3}) {
-    amdgpu::GpuMemory mem("ds_gws_acc_mem");
-    amdgpu::L2Cache l2("ds_gws_acc_l2");
-    auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-    auto decoder = Decoder::create(arch);
-    auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-    auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-    ASSERT_NE(wf0, nullptr);
-    ASSERT_NE(wf1, nullptr);
-    cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-    for (auto *wf : {wf0, wf1}) {
-      wf->set_exec(0x1);
-      wf->set_m0(0);
-    }
-
-    const uint16_t op = gws_opcode(arch, GwsOp::kBarrier);
-    // wf0: acc=1 reads the AGPR slot (count 1 -> participants 2 <= resident 2 ->
-    // parks). The VGPR slot holds a non-parking value to prove it is ignored.
-    cu->write_vgpr(wf0->vgpr_alloc().base + kAddrVgpr, /*lane=*/0, /*vgpr=*/5);
-    cu->write_vgpr(wf0->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET + kAddrVgpr, /*lane=*/0,
-                   /*agpr=*/1);
-    const auto acc_words = (arch == ROCJITSU_CODE_ARCH_CDNA2)
-                               ? cdna2::build_ds(op, {.gds = 1, .acc = 1, .addr = kAddrVgpr})
-                               : cdna3::build_ds(op, {.gds = 1, .acc = 1, .addr = kAddrVgpr});
-    std::unique_ptr<Instruction> acc_inst(decode_valid(*decoder, acc_words.data()));
-    ASSERT_NE(acc_inst, nullptr) << "arch " << unsigned(arch);
-    ASSERT_TRUE(cu->execute_instruction(acc_inst.get(), *wf0).succeeded());
-    EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT) << "arch " << unsigned(arch);
-
-    // wf1: acc=0 reads the VGPR slot (count 5 -> participants 6 > resident 2 ->
-    // structural no-op, keeps running) before touching the parked resource.
-    cu->write_vgpr(wf1->vgpr_alloc().base + kAddrVgpr, /*lane=*/0, /*vgpr=*/5);
-    const auto vgpr_words = (arch == ROCJITSU_CODE_ARCH_CDNA2)
-                                ? cdna2::build_ds(op, {.gds = 1, .acc = 0, .addr = kAddrVgpr})
-                                : cdna3::build_ds(op, {.gds = 1, .acc = 0, .addr = kAddrVgpr});
-    std::unique_ptr<Instruction> vgpr_inst(decode_valid(*decoder, vgpr_words.data()));
-    ASSERT_NE(vgpr_inst, nullptr) << "arch " << unsigned(arch);
-    ASSERT_TRUE(cu->execute_instruction(vgpr_inst.get(), *wf1).succeeded());
-    EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING) << "arch " << unsigned(arch);
-
-    wf0->halt();
-    wf1->halt();
+// slot proves acc routes the read to the AGPR. Other arches have no acc field.
+TEST_P(DsGwsTest, AccBitSelectsAgprCountOperand) {
+  const auto arch = GetParam();
+  if (arch != ROCJITSU_CODE_ARCH_CDNA2 && arch != ROCJITSU_CODE_ARCH_CDNA3)
+    GTEST_SKIP() << "DS acc bit only exists on CDNA2/3";
+  amdgpu::GpuMemory mem("ds_gws_acc_mem");
+  amdgpu::L2Cache l2("ds_gws_acc_l2");
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto decoder = Decoder::create(arch);
+  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
+  for (auto *wf : {wf0, wf1}) {
+    wf->set_exec(0x1);
+    wf->set_m0(0);
   }
+
+  const uint16_t op = gws_opcode(arch, GwsOp::kBarrier);
+  // wf0: acc=1 reads the AGPR slot (count 1 -> participants 2 <= resident 2 ->
+  // parks). The VGPR slot holds a non-parking value to prove it is ignored.
+  cu->write_vgpr(wf0->vgpr_alloc().base + kAddrVgpr, /*lane=*/0, /*vgpr=*/5);
+  cu->write_vgpr(wf0->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET + kAddrVgpr, /*lane=*/0,
+                 /*agpr=*/1);
+  const auto acc_words = build_gws_acc(arch, op, /*acc=*/1, kAddrVgpr);
+  std::unique_ptr<Instruction> acc_inst(decode_valid(*decoder, acc_words.data()));
+  ASSERT_NE(acc_inst, nullptr);
+  // Decoded metadata must name the AGPR, not just the execute path: acc=1 makes
+  // the ADDR source operand resolve to acc<kAddrVgpr> for disassembly and
+  // register-analysis consumers.
+  const Operand *acc_addr = acc_inst->src_operand(0);
+  ASSERT_NE(acc_addr, nullptr);
+  const auto acc_ref = acc_addr->to_register_ref();
+  ASSERT_TRUE(acc_ref.has_value());
+  EXPECT_EQ(*acc_ref, (RegisterRef{RegClass::ACC_VGPR, kAddrVgpr, 1}));
+  EXPECT_EQ(acc_addr->name(), "acc" + std::to_string(kAddrVgpr));
+  EXPECT_NE(acc_inst->disassemble().find("acc" + std::to_string(kAddrVgpr)), std::string::npos)
+      << acc_inst->disassemble();
+  ASSERT_TRUE(cu->execute_instruction(acc_inst.get(), *wf0).succeeded());
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
+
+  // wf1: acc=0 reads the VGPR slot (count 5 -> participants 6 > resident 2 ->
+  // structural no-op, keeps running) before touching the parked resource.
+  cu->write_vgpr(wf1->vgpr_alloc().base + kAddrVgpr, /*lane=*/0, /*vgpr=*/5);
+  const auto vgpr_words = build_gws_acc(arch, op, /*acc=*/0, kAddrVgpr);
+  std::unique_ptr<Instruction> vgpr_inst(decode_valid(*decoder, vgpr_words.data()));
+  ASSERT_NE(vgpr_inst, nullptr);
+  // acc=0 keeps the ADDR source operand on the VGPR bank.
+  const Operand *vgpr_addr = vgpr_inst->src_operand(0);
+  ASSERT_NE(vgpr_addr, nullptr);
+  const auto vgpr_ref = vgpr_addr->to_register_ref();
+  ASSERT_TRUE(vgpr_ref.has_value());
+  EXPECT_EQ(*vgpr_ref, (RegisterRef{RegClass::VGPR, kAddrVgpr, 1}));
+  EXPECT_EQ(vgpr_addr->name(), "v" + std::to_string(kAddrVgpr));
+  EXPECT_NE(vgpr_inst->disassemble().find("v" + std::to_string(kAddrVgpr)), std::string::npos)
+      << vgpr_inst->disassemble();
+  ASSERT_TRUE(cu->execute_instruction(vgpr_inst.get(), *wf1).succeeded());
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
+
+  wf0->halt();
+  wf1->halt();
 }
 
 } // namespace
