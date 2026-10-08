@@ -32,6 +32,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from membw_analysis.summary import active_stall_leaves
 from memory_chart.loader import Layout, LayoutArrow, LayoutBlock, Layouts
 from memory_chart.units import PLAIN, DisplayUnit, display_unit, format_value, numeric
 
@@ -568,19 +569,10 @@ class _StallRow:
 
 def _stall_rows(membw: Any, level: Optional[str]) -> list[_StallRow]:  # noqa: ANN401
     """Active leaf bottlenecks of membw at *level*, in tree order."""
-    rows: list[_StallRow] = []
-    if membw is None or level is None:
-        return rows
-    for node in membw.nodes:
-        _collect_stall_rows(node, level, rows)
-    return rows
-
-
-def _collect_stall_rows(node: Any, level: str, rows: list[_StallRow]) -> None:  # noqa: ANN401
-    if node.state != "active":
-        return
-    if node.level == level and not any(c.state == "active" for c in node.children):
-        value = node.supporting[0].value if node.supporting else None
-        rows.append(_StallRow(f"[!] {node.label}", value))
-    for child in node.children:
-        _collect_stall_rows(child, level, rows)
+    return [
+        _StallRow(
+            f"[!] {node.label}",
+            node.supporting[0].value if node.supporting else None,
+        )
+        for node in active_stall_leaves(membw, level)
+    ]
