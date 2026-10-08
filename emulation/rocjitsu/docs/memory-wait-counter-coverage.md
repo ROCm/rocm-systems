@@ -17,12 +17,8 @@ memory effects are still computed eagerly.
 
 The [CDNA4 ISA](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf),
 sections 3.1 and 4.4, specifies EXPCNT as unused. CDNA4 memory
-instructions therefore do not acquire an EXPCNT obligation. For example, a
-returning GLOBAL atomic followed by `s_waitcnt vmcnt(0)` makes its returned
-VGPR readable; an EXP-only wait does not establish that readiness. This does
-not change the separate VMCNT/LGKMCNT obligations of generic FLAT operations.
-A FLAT write to LDS followed by those waits and a workgroup barrier must also
-be visible to another wave without an EXP wait.
+instructions therefore do not acquire an EXPCNT obligation, and static
+waitcheck omits the legacy GDS EXP event for this architecture.
 
 Only instructions present in a target's ISA produce entries. Counter names do not imply
 that every target has every instruction associated with that family. The GFX10 legacy
@@ -71,6 +67,56 @@ capacity constraints after routing, before checking result writeback. The instru
 cannot use an unused domain's full counter to prove an older request complete. Address
 and other source operands are read before this inference is available.
 
+## VMEM completion and EXP source protection
+
+The dynamic race detector treats each `MemoryIssueInfo` counter obligation as
+a completion requirement. `EventRegistry::allWaitCountersSatisfied` requires
+every obligation attached to an event before that event can complete and
+release its destination-register or memory dependency. These obligations do
+not express a separate source-register lifetime.
+
+Generated VMEM store and atomic metadata therefore omits EXP completion
+obligations on all supported CDNA and RDNA targets. Source-data release must
+not gate a returning atomic's destination or memory completion. On legacy-counter
+targets such as gfx942, gfx950 and gfx1151, a returning GLOBAL atomic followed
+by `s_waitcnt vmcnt(0)` releases its result; no wait or an EXP-only wait leaves
+that result pending. Generic FLAT retains its separate
+VMEM/DS obligations for the resolved request domains. The FLAT-to-LDS tests
+wait for LGKM and the target's VMEM/store counters before a workgroup barrier,
+making the write visible to other waves without an EXP wait. The counter waits
+alone do not replace that barrier.
+
+LLVM's
+[`vmemWriteNeedsExpWaitcnt`](https://github.com/ROCm/llvm-project/blob/32fb4582f0be6df5437ee1cdb9a38724215ede80/llvm/lib/Target/AMDGPU/GCNSubtarget.h#L431)
+restricts VMEM source-register locks to architectures before Sea Islands,
+predating every supported profile. Its
+[`getEventsForImpl`](https://github.com/ROCm/llvm-project/blob/32fb4582f0be6df5437ee1cdb9a38724215ede80/llvm/lib/Target/AMDGPU/AMDGPUHWEvents.cpp#L107)
+also classifies FLAT/GLOBAL operations without an EXP source-lock event.
+However, the CDNA1/CDNA2 and RDNA1/RDNA2 register summaries still describe
+EXPCNT as counting VMEM writes whose write-data has not yet been sent to the
+cache. For example, see the register-state tables in the
+[CDNA1 ISA](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/instinct-mi100-cdna1-shader-instruction-set-architecture.pdf)
+and [CDNA2 ISA](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/instinct-mi200-cdna2-instruction-set-architecture.pdf).
+These summaries and LLVM disagree about VMEM source-data accounting. The
+completion policy above does not resolve that hardware question or establish
+source-reuse guarantees on every target. The narrower rule is that a
+source-only obligation cannot serve as a destination or memory-completion
+requirement.
+
+Static waitcheck separately protects GDS source VGPRs and EXEC until an EXP
+wait on legacy targets other than CDNA4. Generated GDS metadata retains its
+LGKM and EXP obligations on those targets, but the dynamic detector's
+whole-event obligations do not implement this source-only protection. GDS
+execution is unimplemented, so decoded-metadata and static-checker coverage
+do not establish dynamic GDS source/EXEC protection.
+
+HIP race-detector tests run compiler-generated returning atomics and explicit
+VM-only, no-wait and EXP-only sequences on gfx942, gfx950 and gfx1151. They
+also check synchronized FLAT-to-LDS exchanges and missing-barrier controls on
+all three targets. These are emulation tests. Generator tests cover the VMEM
+metadata contract across all ten profiles, while decoded C++ tests retain
+older-target GDS obligations and check the CDNA4 exception.
+
 ## FLAT register readiness
 
 FLAT contributes to VMEM when at least one lane requests global/scratch memory and
@@ -111,7 +157,8 @@ wait requirements on untested architectures or under all schedules.
 | Global, scratch, buffer, typed buffer, image loads and returning atomics | Load queue; track returned registers |
 | Stores and atomics without return | Store queue, or the shared legacy VMEM queue; no destination register |
 | Generic FLAT loads, stores and atomics | Only the VMEM/DS queues used by resolved requests; returned lanes depend on DS for the shared aperture and VMEM for global/scratch |
-| LDS/GDS, including permutation, swizzle and DS no-op | DS/legacy LGKM queue; returning forms track registers. GDS also contributes to EXP on legacy targets other than CDNA4 |
+| LDS, including permutation, swizzle and DS no-op | DS/legacy LGKM queue; returning forms track registers |
+| GDS (decoded metadata; execution unimplemented) | LGKM and, on legacy targets other than CDNA4, EXP. Static waitcheck separately protects source VGPRs and EXEC |
 | Scalar loads, atomics, cache operations, timestamps, barrier-state and wave-ID queries | KM/legacy LGKM queue; returned scalar registers are tracked |
 | Messages, including message returns | KM/legacy LGKM queue. Return forms contribute two units, with the result pending through the return unit |
 | Barrier signal with an `isfirst` result | KM queue and pending SCC result |
@@ -171,35 +218,3 @@ with real instruction execution for scalar/vector loads, inline DS results, coun
 producers, zero EXEC, message return units, and FLAT's lane-specific dependencies and
 both counter positions. Real-kernel checks supplement these tests; they do not prove
 complete recall across all kernel families.
-
-### VMEM completion and EXP source protection
-
-VMEM stores and atomics do not contribute to EXPCNT on any supported CDNA or
-RDNA architecture. LLVM's
-[`vmemWriteNeedsExpWaitcnt`](https://github.com/ROCm/llvm-project/blob/32fb4582f0be6df5437ee1cdb9a38724215ede80/llvm/lib/Target/AMDGPU/GCNSubtarget.h#L431)
-restricts VMEM source-register locks to architectures before Sea Islands, which
-predate all supported profiles. Its
-[`getEventsForImpl`](https://github.com/ROCm/llvm-project/blob/32fb4582f0be6df5437ee1cdb9a38724215ede80/llvm/lib/Target/AMDGPU/AMDGPUHWEvents.cpp#L107)
-also classifies FLAT/GLOBAL operations without an EXP source-lock event.
-The [CDNA3 ISA](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf),
-sections 4.4 and 10.4, distinguishes EXP's GWS source-VGPR reads from GLOBAL's
-VM_CNT completion. CDNA4 makes EXP entirely unused; it is not the first
-architecture whose GLOBAL atomics need no EXP wait.
-
-Incorrect inherited VMEM EXP flags caused the
-[returning-atomic false positives reported on gfx942 and gfx1151](https://github.com/ROCm/rocm-systems/pull/12583#discussion_r4150892377).
-The dynamic race detector waits for every counter obligation on an event before
-retiring it. Attaching an EXP obligation to a returning GLOBAL atomic therefore
-kept its destination pending after the required `s_waitcnt vmcnt(0)`.
-The profiles now omit that unsupported obligation while retaining the atomic's
-VMEM completion counter. This correction does not alter GDS source-register or
-EXEC protection on targets that require it, or generic FLAT's separate
-VMEM/DS obligations.
-
-HIP race-detector tests compile `o[i] = atomicAdd(p + i, 1u) * 3u` for gfx942,
-gfx1151 and gfx950 and check both the returned values and atomic updates.
-Explicit instruction sequences verify that a VM-only wait releases the result,
-while no wait and an EXP-only wait still report the missing VM dependency.
-Generator tests cover VMEM metadata across all ten profiles and retain GDS EXP
-obligations. Static waitcheck source-overwrite tests separately require EXP for
-CDNA3/RDNA3 GDS sources.

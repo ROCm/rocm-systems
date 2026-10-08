@@ -1572,16 +1572,6 @@ class _AmdgpuProfileBase(IsaProfile):
         return True
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        """Whether vector-memory writes also contribute to EXPCNT.
-
-        VMEM source-register locks apply only before Sea Islands (LLVM's
-        GCNSubtarget::vmemWriteNeedsExpWaitcnt), predating every supported
-        CDNA/RDNA profile. GDS source-register protection is independent.
-        """
-        return False
-
-    @property
     def gds_uses_expcnt(self) -> bool:
         """Whether GDS operations also contribute to EXPCNT."""
         return False
