@@ -62,8 +62,11 @@ Buffer::Buffer(const void *_buffer, size_t _length, int _flags, const PassKey<Bu
     if (_attrs.type != hipMemoryTypeDevice && _attrs.type != hipMemoryTypeHost) {
         throw InvalidMemoryType();
     }
-    type   = _attrs.type;
-    gpu_id = _attrs.type == hipMemoryTypeHost ? -1 : _attrs.device;
+    type = _attrs.type;
+
+    if (type != hipMemoryTypeHost) {
+        gpu_id = _attrs.device;
+    }
 
     if (type == hipMemoryTypeDevice && !isValidBufferRegion(buffer, length)) {
         throw InvalidPointerRange();
@@ -81,12 +84,13 @@ Buffer::Buffer(const void *_buffer, const PassKey<BufferMap> &)
     if (_attrs.type != hipMemoryTypeDevice && _attrs.type != hipMemoryTypeHost) {
         throw InvalidMemoryType();
     }
-    type   = _attrs.type;
-    gpu_id = _attrs.type == hipMemoryTypeHost ? -1 : _attrs.device;
+    type = _attrs.type;
 
     if (type == hipMemoryTypeHost) {
         throw std::invalid_argument("Host buffer must be registered with an explicit size.");
     }
+
+    gpu_id = _attrs.device;
 
     HipMemAddressRange range{Context<Hip>::get()->hipMemGetAddressRange(buffer)};
     length = range.size - (reinterpret_cast<uintptr_t>(buffer) - reinterpret_cast<uintptr_t>(range.base));
@@ -119,6 +123,8 @@ Buffer::getType() const
 int
 Buffer::getGpuId() const
 {
+    if (type == hipMemoryTypeHost)
+        throw std::logic_error("Host buffers are not bound to any GPU device");
     return gpu_id;
 }
 

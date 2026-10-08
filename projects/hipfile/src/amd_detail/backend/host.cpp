@@ -54,16 +54,6 @@ Host::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &
 
 namespace {
 
-bool
-paramsValid(const AsyncOpHost &op)
-{
-    if (std::get<size_t>(op.size) > op.submitted_size) {
-        return false;
-    }
-    return paramsValid(op.buffer, std::get<size_t>(op.size), std::get<const hoff_t>(op.file_offset),
-                       std::get<const hoff_t>(op.buffer_offset));
-}
-
 template <typename CopyFn> struct CopyOp : CopyFn {
     CopyOp(IFile &file, IBuffer &buffer, size_t size, hoff_t file_offset, hoff_t buffer_offset);
     size_t run();
@@ -175,9 +165,15 @@ Host::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer
 }
 
 void
-Host::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t *size_p,
-               hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
-               std::shared_ptr<IStream> stream)
+Host::async_io(IoType, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t *, hoff_t *, hoff_t *,
+               ssize_t *, std::shared_ptr<IStream>)
 {
     throw std::runtime_error("Host::async_io is not implemented");
+}
+
+void
+Host::enqueueAsyncIo(IoType, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t *, hoff_t *, hoff_t *,
+                     ssize_t *, std::shared_ptr<IStream>, std::shared_ptr<AsyncFailoverState>)
+{
+    throw std::runtime_error("Host::enqueueAsyncIo is not implemented");
 }

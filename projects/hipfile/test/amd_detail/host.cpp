@@ -288,7 +288,7 @@ TEST_P(HostParam, HostIoTruncatesSizeToMAX_RW_COUNT)
                 .WillRepeatedly(testing::Invoke([](int, void *, size_t count, hoff_t) -> ssize_t {
                     return static_cast<ssize_t>(count);
                 }));
-            EXPECT_CALL(msys, fdatasync).Times(AnyNumber());
+            EXPECT_CALL(msys, fdatasync).Times(1);
             break;
         default:
             FAIL();
@@ -332,7 +332,7 @@ struct HostWrite : public HostIo {
     {
         EXPECT_CALL(mcfg, host()).WillOnce(testing::Return(true));
         EXPECT_CALL(msys, pwrite).WillRepeatedly(testing::Invoke(this, &HostWrite::fake_pwrite));
-        EXPECT_CALL(msys, fdatasync).Times(AnyNumber());
+        EXPECT_CALL(msys, fdatasync).Times(1);
         EXPECT_CALL(mstats, addIo).Times(1);
     }
 
@@ -362,6 +362,24 @@ TEST_F(HostWrite, HostWriteThrowsOnPwriteException)
     ASSERT_THROW(Host().io(IoType::Write, file, buffer, buffer->getLength(), 0, 0), std::system_error);
 }
 
+TEST_F(HostWrite, HostWriteHandlesShortPwrites)
+{
+    size_t size{buffer->getLength()};
+    randomize_host_buffer();
+
+    EXPECT_CALL(mcfg, host()).WillOnce(testing::Return(true));
+    EXPECT_CALL(msys, pwrite)
+        .WillOnce(testing::Invoke([this](int fd, void *buf, size_t count, hoff_t offset) -> ssize_t {
+            return this->fake_pwrite(fd, buf, count / 2, offset);
+        }))
+        .WillRepeatedly(testing::Invoke(this, &HostWrite::fake_pwrite));
+    EXPECT_CALL(msys, fdatasync).Times(1);
+    EXPECT_CALL(mstats, addIo).Times(1);
+
+    ASSERT_EQ(size, Host().io(IoType::Write, file, buffer, size, 0, 0));
+    ASSERT_TRUE(file_contains_expected_data(0, 0, size));
+}
+
 TEST_F(HostWrite, HostWriteHandlesInterruptedPwrite)
 {
     size_t size{buffer->getLength()};
@@ -371,7 +389,7 @@ TEST_F(HostWrite, HostWriteHandlesInterruptedPwrite)
     EXPECT_CALL(msys, pwrite)
         .WillOnce(testing::Throw(std::system_error(EINTR, std::generic_category())))
         .WillRepeatedly(testing::Invoke(this, &HostWrite::fake_pwrite));
-    EXPECT_CALL(msys, fdatasync).Times(AnyNumber());
+    EXPECT_CALL(msys, fdatasync).Times(1);
     EXPECT_CALL(mstats, addIo).Times(1);
 
     ASSERT_EQ(size, Host().io(IoType::Write, file, buffer, size, 0, 0));
