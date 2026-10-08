@@ -26,7 +26,6 @@
 #include <hip/hip_runtime.h>
 #include <algorithm>
 #include <cctype>
-#include <set>
 #include <string>
 
 #ifdef MPI_TESTS_ENABLED
@@ -48,7 +47,9 @@ constexpr size_t kPipelinedTotalBytes = 512ull * 1024 * 1024;
 constexpr size_t kCeOnlyTotalBytes = 128ull * 1024 * 1024;
 constexpr size_t kCeOnlyRankStride = 517;   // per-rank offset so every rank wins some elements of Max/Min
 constexpr size_t kCeOnlyValueRange = 4096;  // keeps fill values exact in float32
-constexpr int    kCeOnlyIters      = 3;     // first call can be CE registered, later ones CE 2-shot once ceARTmpBuf exists
+constexpr int    kCeOnlyIters      = 3;     // first call is CE registered, later ones CE 2-shot once ceARTmpBuf exists
+// A shard spans 8 default staging slots (128 MiB / nRanks vs 16 MiB / nRanks), so the CE pipeline must run.
+constexpr size_t kCeOnlyMinChunksPerShard = 2;
 constexpr int    kMinRanks2       = 2;
 constexpr int    kMinRanks4       = 4;
 constexpr int    kMinRanks8       = 8;
@@ -255,35 +256,46 @@ protected:
         }
     }
 
-    // True when RCCL picks the symmetric kernel for these operands; symk beats registered CE when both are eligible.
-    bool isSymkAllReduceSelected(const void* sendbuff, void* recvbuff, size_t count, ncclRedOp_t op)
+    // True when rank 0's log names exactly this AllReduce backend (so "CE" does not match "CE2").
+    static bool logShowsAllReduceAlgo(const std::string& log, const std::string& algoName)
     {
-        int algo = 0, proto = 0, nChannels = 0;
-        EXPECT_EQ(ncclSuccess,
-                  rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, count, ncclFloat32, op,
-                                      sendbuff, recvbuff, /*graphCapturing=*/0, &algo, &proto, &nChannels));
-        return algo == static_cast<int>(RCCL_SYMMETRIC);
+        const std::string key = "AllReduce impl selected: algo " + algoName;
+        for(size_t p = log.find(key); p != std::string::npos; p = log.find(key, p + 1))
+        {
+            const size_t end = p + key.size();
+            if(end == log.size() || !(std::isalnum(static_cast<unsigned char>(log[end])) || log[end] == '-'))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
-    bool isCeAllReduceExpected(bool symkSelected) const
+    static bool isCeAllReduceAlgo(int algo)
+    {
+        return algo == static_cast<int>(RCCL_CE_REGISTERED) || algo == static_cast<int>(RCCL_CE_2SHOT);
+    }
+
+    // CE AR is expected only when RCCL itself predicts a CE variant, so a declined symk query (RING) never demands CE.
+    bool isCeAllReduceExpected(int predictedAlgo) const
     {
         // CE AllReduce is single-node only (ceAllReduceFits / nNodes>1 gate).
-        return isCeAllReduceDispatchConfigured() && !isMultiNodeTest() && !symkSelected;
+        return isCeAllReduceDispatchConfigured() && !isMultiNodeTest() && isCeAllReduceAlgo(predictedAlgo);
     }
 
-    void assertCEAllReducePathTaken(bool symkSelected, const char* context)
+    void assertCEAllReducePathTaken(int predictedAlgo, const char* context)
     {
         const std::string log = readAllLogs();
 
         int rank = -1;
         ncclCommUserRank(getActiveCommunicator(), &rank);
         // Only rank 0 logs the selected AllReduce backend.
-        if(symkSelected && rank == 0)
+        if(predictedAlgo == static_cast<int>(RCCL_SYMMETRIC) && rank == 0)
         {
-            EXPECT_NE(log.find("AllReduce impl selected: algo SYM"), std::string::npos)
+            EXPECT_TRUE(logShowsAllReduceAlgo(log, "SYM"))
                 << context << ": symk was predicted but the live AllReduce did not log \"algo SYM\"";
         }
-        if(isCeAllReduceExpected(symkSelected))
+        if(isCeAllReduceExpected(predictedAlgo))
         {
             EXPECT_TRUE(ceLogShowsAllReducePath(log))
                 << context
@@ -299,8 +311,9 @@ protected:
                 << ": CE AllReduce log marker found but CE AR was not expected";
             if(!ceLogShowsAllReducePath(log))
             {
-                TEST_INFO("%s: assertion passed: %s", context,
-                          symkSelected ? "symk selected over CE AR" : "non-CE-AR path (CE AR prerequisites not met)");
+                const char* name = "?";
+                (void)rcclGetAlgoName(predictedAlgo, &name);
+                TEST_INFO("%s: assertion passed: non-CE-AR path, predicted algo %s", context, name);
             }
         }
     }
@@ -739,10 +752,12 @@ protected:
     // own INFO line. minChunksPerShard = 0 skips the check; >= 2 requires the
     // multi-chunk pipeline to have run rather than the single-shot path, which
     // logs the same CE marker and would otherwise pass unnoticed.
-    void assertCEAllReduceChunking(bool symkSelected, size_t minChunksPerShard, const char* context)
+    void assertCEAllReduceChunking(int predictedAlgo, size_t minChunksPerShard, const char* context)
     {
-        if(!isCeAllReduceExpected(symkSelected) || minChunksPerShard == 0)
+        if(!isCeAllReduceExpected(predictedAlgo) || minChunksPerShard == 0)
+        {
             return;
+        }
 
         const size_t chunksPerShard = ceLogChunksPerShard(readAllLogs());
         EXPECT_GE(chunksPerShard, minChunksPerShard)
@@ -772,7 +787,11 @@ protected:
         ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, recvSym));
 
         fillRankScalar(sendSym.ptr, alignedCount, rank);
-        const bool symkSelected = isSymkAllReduceSelected(sendSym.ptr, recvSym.ptr, alignedCount, op);
+        int predictedAlgo = -1, proto = 0, nChannels = 0;
+        ASSERT_EQ(ncclSuccess,
+                  rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, alignedCount, ncclFloat32, op,
+                                      sendSym.ptr, recvSym.ptr, /*graphCapturing=*/0, &predictedAlgo, &proto,
+                                      &nChannels));
 
         ASSERT_EQ(ncclSuccess,
                   ncclAllReduce(sendSym.ptr, recvSym.ptr, alignedCount, ncclFloat32, op,
@@ -787,23 +806,8 @@ protected:
                 << "Rank " << rank << ": CE AllReduce Sum verification failed";
         }
 
-        assertCEAllReducePathTaken(symkSelected, testId);
-        assertCEAllReduceChunking(symkSelected, minChunksPerShard, testId);
-    }
-
-    // True when rank 0's log names exactly this AllReduce backend (so "CE" does not match "CE2").
-    static bool logShowsAllReduceAlgo(const std::string& log, const std::string& algoName)
-    {
-        const std::string key = "AllReduce impl selected: algo " + algoName;
-        for(size_t p = log.find(key); p != std::string::npos; p = log.find(key, p + 1))
-        {
-            const size_t end = p + key.size();
-            if(end == log.size() || !(std::isalnum(static_cast<unsigned char>(log[end])) || log[end] == '-'))
-            {
-                return true;
-            }
-        }
-        return false;
+        assertCEAllReducePathTaken(predictedAlgo, testId);
+        assertCEAllReduceChunking(predictedAlgo, minChunksPerShard, testId);
     }
 
     // Max/Min on symmetric windows: symk only takes Sum and DDA IPC only Sum, so RCCL_CE_ALLREDUCE=1 must pick a CE variant.
@@ -813,19 +817,20 @@ protected:
         {
             GTEST_SKIP() << "Need >= " << kMinRanks2 << " MPI ranks";
         }
-        if(!isCeAllReduceDispatchConfigured() || isMultiNodeTest())
-        {
-            GTEST_SKIP() << "Needs single-node CE AllReduce dispatch (NCCL_CTA_POLICY=2 NCCL_CUMEM_ENABLE=1 "
-                            "NCCL_LOCAL_REGISTER=0 RCCL_CE_ALLREDUCE=1)";
-        }
         int             device = 0;
         hipDeviceProp_t prop{};
         ASSERT_EQ(hipSuccess, hipGetDevice(&device));
         ASSERT_EQ(hipSuccess, hipGetDeviceProperties(&prop, device));
         const std::string arch(prop.gcnArchName);
-        if(arch.find("gfx942") == std::string::npos && arch.find("gfx950") == std::string::npos)
+        const bool archOk = arch.find("gfx942") != std::string::npos || arch.find("gfx950") != std::string::npos;
+        const bool ceOk   = isCeAllReduceDispatchConfigured() && !isMultiNodeTest();
+        const std::string skipReason = mpiCoordinatedSkipReason(
+            !archOk || !ceOk, !ceOk ? "Needs single-node CE AllReduce dispatch (NCCL_CTA_POLICY=2 NCCL_CUMEM_ENABLE=1 "
+                                      "NCCL_LOCAL_REGISTER=0 RCCL_CE_ALLREDUCE=1)"
+                                    : "CE AllReduce caps for this case are tuned for gfx942/gfx950 only");
+        if(!skipReason.empty())
         {
-            GTEST_SKIP() << "CE AllReduce caps for this case are tuned for gfx942/gfx950, not " << arch;
+            GTEST_SKIP() << skipReason;
         }
 
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
@@ -854,15 +859,14 @@ protected:
             return acc;
         };
 
-        std::set<int> algosRun;
         for(int iter = 0; iter < kCeOnlyIters; ++iter)
         {
-            int algo = 0, proto = 0, nChannels = 0;
+            // Fresh comm: no CE staging before the first call, so registered CE runs first and allocates it for 2-shot.
+            const int wantAlgo = (iter == 0) ? static_cast<int>(RCCL_CE_REGISTERED) : static_cast<int>(RCCL_CE_2SHOT);
+            int       algo = -1, proto = 0, nChannels = 0;
             ASSERT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllReduce, count, ncclFloat32, op, sendSym.ptr,
                                                        recvSym.ptr, /*graphCapturing=*/0, &algo, &proto, &nChannels));
-            ASSERT_TRUE(algo == static_cast<int>(RCCL_CE_REGISTERED) || algo == static_cast<int>(RCCL_CE_2SHOT))
-                << testId << ": iteration " << iter << " predicted algo " << algo << ", expected a CE AllReduce variant";
-            algosRun.insert(algo);
+            ASSERT_EQ(wantAlgo, algo) << testId << ": iteration " << iter << " predicted the wrong AllReduce backend";
 
             // NaN-fill the output so a skipped or partial reduction cannot match the expected values.
             ASSERT_EQ(hipSuccess, hipMemset(recvSym.ptr, 0xFF, bytes));
@@ -878,11 +882,12 @@ protected:
                 << ": expected " << want << ", got " << got;
         }
 
-        assertCEAllReducePathTaken(/*symkSelected=*/false, testId);
+        assertCEAllReducePathTaken(static_cast<int>(RCCL_CE_2SHOT), testId);
+        assertCEAllReduceChunking(static_cast<int>(RCCL_CE_2SHOT), kCeOnlyMinChunksPerShard, testId);
         if(rank == 0)
         {
             const std::string log = readAllLogs();
-            for(int algo : algosRun)
+            for(int algo : {static_cast<int>(RCCL_CE_REGISTERED), static_cast<int>(RCCL_CE_2SHOT)})
             {
                 const char* name = nullptr;
                 ASSERT_EQ(ncclSuccess, rcclGetAlgoName(algo, &name));
@@ -923,16 +928,8 @@ TEST_F(CeMPI_AllReduce, LargeMessage)
     runAllReduce(kMinRanks4, largeCount, ncclSum, "CeMPI_AllReduce/LargeMessage");
 }
 
-// CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2).
-//
-// ncclCeAllReduce() pipelines only when a shard does not fit one staging slot,
-// i.e. once the message passes NCCL_CE_AR_MAX_MSG_BYTES.
-// On gfx942/gfx950 symk wins for Sum on symmetric windows and 512 MiB exceeds ceRegMax[AR], so there this case expects SYM.
-//
-// This exercises the persistent reduce kernel's double-buffered slot recycling,
-// the cross-rank signal doorbells and the Phase 3 drain loop, none of which run
-// on the single-shot path. At a non-power-of-two rank count it additionally hits
-// the partial tail chunk and the slotChunkBytes rounding from ce75b9a1.
+// CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2) when RCCL predicts CE for a 512 MiB Sum.
+// On gfx942/gfx950 symk wins every eligible Sum before CE registered is considered, so this expects SYM; AR-07/08 cover the pipeline there.
 TEST_F(CeMPI_AllReduce, PipelinedMultiChunk)
 {
     const size_t pipelinedCount = kPipelinedTotalBytes / sizeof(float);
