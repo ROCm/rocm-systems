@@ -152,18 +152,6 @@ set_metadata_environment_json(const std::string& _environment_json)
     trace_cache::get_metadata_registry().set_process(process_info);
 }
 
-std::string
-escape_quotes(std::string str)
-{
-    std::string::size_type pos = 0;
-    while((pos = str.find('"', pos)) != std::string::npos)
-    {
-        str.replace(pos, 1, "\"\"");
-        pos += 2;
-    }
-    return str;
-}
-
 bool
 ensure_initialization(bool _offset, std::int64_t _glob_n, std::int64_t _offset_n)
 {
@@ -417,14 +405,13 @@ rocprofsys_preinit_cache()
     std::stringstream _extdata_stream;
     config::print_settings_json(_extdata_stream);
 
-    trace_cache::get_metadata_registry().set_process(
-        { .pid         = getpid(),
-          .ppid        = getppid(),
-          .command     = _command,
-          .environment = "",
-          .extdata     = escape_quotes(_extdata_stream.str()),
-          .start       = 0,
-          .end         = 0 });
+    trace_cache::get_metadata_registry().set_process({ .pid         = getpid(),
+                                                       .ppid        = getppid(),
+                                                       .command     = _command,
+                                                       .environment = "",
+                                                       .extdata = _extdata_stream.str(),
+                                                       .start   = 0,
+                                                       .end     = 0 });
 }
 
 void
@@ -755,7 +742,7 @@ rocprofsys_init_tooling_hidden(void)
             _environment_json["MPI_COMM_WORLD_SIZE"] = size;
             _environment_json["MPI_COMM_WORLD_RANK"] = rank;
 
-            set_metadata_environment_json(escape_quotes(_environment_json.dump()));
+            set_metadata_environment_json(_environment_json.dump());
         });
 #endif
 

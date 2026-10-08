@@ -290,18 +290,7 @@ def apply_filters(
     Apply user's filters to the raw_pmc df.
     """
 
-    # TODO: error out properly if filters out of bound
-    filtered_df = workload.raw_pmc
-
-    # Apply GPU ID filter
-    if workload.filter_gpu_ids:
-        filtered_df = filtered_df.loc[
-            filtered_df["GPU_ID"]
-            .astype(str)
-            .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
-        ]
-        if filtered_df.empty:
-            console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
+    filtered_df = _apply_gpu_filter(workload)
 
     # Apply kernel filter
     # NB:
@@ -392,6 +381,23 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
         df = df[df["Dispatch_ID"].astype(int).isin(selected_dispatches)]
 
     return df
+
+
+def _apply_gpu_filter(workload: schema.Workload) -> pd.DataFrame:
+    """Apply the requested GPU IDs before other row filters."""
+    # TODO: error out properly if filters out of bound
+    filtered_df = workload.raw_pmc
+
+    if workload.filter_gpu_ids:
+        filtered_df = filtered_df.loc[
+            filtered_df["GPU_ID"]
+            .astype(str)
+            .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
+        ]
+        if filtered_df.empty:
+            console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
+
+    return filtered_df
 
 
 def _build_pc_sampling_partial_frame(

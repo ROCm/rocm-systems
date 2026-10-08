@@ -2872,6 +2872,17 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     for(uint64_t i = 0; i < context_ids_length; ++i)
     {
+        // In selected-regions mode, these profiling contexts intentionally start stopped.
+        // Reference-counted mode retains its existing attach behavior until its process-lifetime
+        // state can be reset safely at an attachment-session boundary.
+        if(tool::get_config().selected_regions && !tool::get_config().selected_regions_ref_count &&
+           pause_resume_contexts.count(context_ids[i]) > 0)
+        {
+            ROCP_INFO << "Attach mode: leaving selected-regions context ID "
+                      << context_ids[i].handle << " stopped until roctxProfilerResume";
+            continue;
+        }
+
         if(int status = 0;
            rocprofiler_context_is_active(context_ids[i], &status) == ROCPROFILER_STATUS_SUCCESS &&
            status == 0)
