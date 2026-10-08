@@ -1198,7 +1198,7 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapInCapture) {
   auto [rc, out] = hrr_playback_merged(hrr_single_process_archive(cap.path), "--verbose");
   INFO("Replay:\n" << out);
   CHECK(rc == 0);
-  CHECK(out.find("hipErrorStreamCaptureInvalidated") == std::string::npos);
+  CHECK(out.find("hipStreamEndCapture failed") == std::string::npos);
   CHECK(out.find("Graphs launched : 1") != std::string::npos);
   int pass = 0, fail = 0;
   REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
