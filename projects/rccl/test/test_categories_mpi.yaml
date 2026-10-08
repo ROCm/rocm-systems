@@ -236,6 +236,17 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "NCCL_P2P_DISABLE=1"
       - "RCCL_DDA_ENABLE=0"
+  quick_env_profiler_kernelch_net:
+    description: "KernelCh profiling on a plan with proxy ops when every rank is on one node: P2P and SHM are disabled so the network transport carries the collective. Both variables are cached for the process lifetime, so they are set before launch. DDA is disabled as in quick_env_profiler_kernelch."
+    test_patterns:
+      - "ProfilerKernelChMPITest.ProxyPathKernelChOffProxyThread"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_P2P_DISABLE=1"
+      - "NCCL_SHM_DISABLE=1"
+      - "RCCL_DDA_ENABLE=0"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
@@ -448,6 +459,7 @@ execution_settings:
     quick_env_pat_shared_qps_off: 1200
     quick_env_profiler_kernelch: 1200
     quick_env_profiler_kernelch_shm: 1200
+    quick_env_profiler_kernelch_net: 1200
     standard: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200
