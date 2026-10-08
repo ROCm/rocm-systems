@@ -342,7 +342,8 @@ TEST(DevrGetWinOffsetTest, OffsetIsWindowPositionWithinBackingMemory) {
 }
 
 // NCCL_PARAM caches the first read. Drive WindowRegisterInGroup in a child so
-// reverting CheckRegistrationSupport fails this test (a helper-direct call would not).
+// reverting the CheckRegistrationSupport call in rcclDevrProbeNonSymWindow fails this test (a helper-direct call
+// would not).
 TEST(DevrRegistrationSupportTest, DisabledElasticRejectsHostSegment) {
   using RcclUnitTesting::ProcessIsolatedTestRunner;
 

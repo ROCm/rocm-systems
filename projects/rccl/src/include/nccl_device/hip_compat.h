@@ -43,28 +43,12 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA driver memory-location enum shim (host-NUMA)
-//
-// CU_MEM_LOCATION_TYPE_HOST_NUMA is a CUDA driver enumerator (CUmemLocationType,
-// value 3) with no ROCm equivalent: hipMemLocationType has no host-NUMA member,
-// CLR rejects host-NUMA VMM locations, and there is no <cuda.h> on the AMD build
-// (CUDA headers are hipified away), so the enumerator is undeclared in every AMD
-// translation unit. RCCL gates all host-NUMA VMM allocation paths behind
-// `CUDART_VERSION >= 12020 || ROCM_VERSION >= 71200`, so on a ROCm < 7.12 build the
-// only live references are the *ungated* v2.30.4 elastic-buffer-for-GIN comparisons
-// in dev_runtime.cc (host) and nccl_device/impl/gin__funcs.h (device). Define the
-// macro to its genuine CUDA value so those comparisons compile and stay inert: AMD
-// GIN segments are always device-backed (memType == CU_MEM_LOCATION_TYPE_DEVICE),
-// never host-NUMA, so every comparison evaluates false and the host-NUMA branches
-// never execute. A #define is collision-free precisely because no <cuda.h> declares
-// the enumerator on AMD; the guard leaves NVIDIA and ROCm >= 7.12 builds (which
-// provide the real API) untouched.
+// The GIN put-fence compares memType to HOST_NUMA, which dev_runtime.cc writes for host VMM segments.
+// HIP below 7.12 has no such enumerator, so define it here; NVIDIA and ROCm >= 7.12 are untouched.
 ////////////////////////////////////////////////////////////////////////////////
 
-// AMD: the 7.0.2.x backport provides hipMemLocationTypeHostNuma; its hipify does
-// not rename the CUDA spelling, so alias the real enumerator there. Stock 7.0.2
-// has the same HIP_VERSION without it, so the CMake probe picks the branch.
-// Spelled with HIP_VERSION; this header is included before rocmwrap.h. Host tests
-// pin ROCM_VERSION below 7.12 and are not hipified, so they need the alias too.
+// 7.0.2.x backport: alias the real HostNuma (hipify does not map it); the CMake probe tells it from stock 7.0.2.
+// HIP_VERSION because rocmwrap.h is not included yet; unhipified host tests pin ROCM_VERSION < 7.12.
 #if defined(__HIP_PLATFORM_AMD__) && ((HIP_VERSION) < 71260540 || (defined(ROCM_VERSION) && ROCM_VERSION < 71200)) && \
     !defined(CU_MEM_LOCATION_TYPE_HOST_NUMA)
 #if (HIP_VERSION) >= 70051831 && (HIP_VERSION) < 70060000 && defined(RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)

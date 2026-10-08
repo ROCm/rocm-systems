@@ -1091,7 +1091,8 @@ TEST_F(SymImportAndMapForRankTest, LocalRank_ReusesCallerHandles) {
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
 
-  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(), kMaxSegments, 0),
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(import.calls, 0);
   ASSERT_EQ(mapped.size(), 2u);
@@ -1107,7 +1108,8 @@ TEST_F(SymImportAndMapForRankTest, RemoteRank_ImportsInsteadOfReusing) {
                       return hipSuccess;
                     });
 
-  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(), kMaxSegments, 0),
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(import.calls, 1);
 }
@@ -1123,7 +1125,8 @@ TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentWithReuseParam_ReusesHandles
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
 
-  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(), kMaxSegments, 0),
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(import.calls, 0);
 }
@@ -1156,7 +1159,8 @@ TEST_F(SymImportAndMapForRankTest, RemoteDeviceSegmentWithReuseParam_StillImport
                       return hipSuccess;
                     });
 
-  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(), kMaxSegments, 0),
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(import.calls, 1);
 }
@@ -1187,7 +1191,8 @@ TEST_F(SymImportAndMapForRankTest, ZeroSegments_MapsNothing) {
   ScopedHook map(g_hipMemMap,
                  [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) { return hipSuccess; });
 
-  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 0, memHandles.data(), kMaxSegments, 0),
+  EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 0, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(map.calls, 0);
 }
@@ -1199,7 +1204,8 @@ TEST_F(SymImportAndMapForRankTest, SegmentFails_StopsWithoutMappingTheRest) {
                    return hipErrorInvalidValue;
                  });
 
-  EXPECT_NE(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(), kMaxSegments, 0),
+  EXPECT_NE(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(),
+                                                 kMaxSegments, 0),
             ncclSuccess);
   EXPECT_EQ(map.calls, 1);  // stopped after the first, did not attempt the second
 }
@@ -2098,6 +2104,35 @@ TEST_F(SymMemoryRegisterGinElasticTest, SingleHostSegment_RequiresDmabuf) {
   // ptrType and needDmabuf are decided before this write. The put-fence
   // compares memType to HOST_NUMA, so the recorded type is the contract.
   EXPECT_EQ(mem.ginSegmentInfos[0].memType, kLocHostNuma);
+}
+
+// Host VMM has no ibv_reg_mr fallback, so NCCL_DMABUF_ENABLE=0 must fail before any GIN registration.
+TEST_F(SymMemoryRegisterGinElasticTest, HostSegment_DmabufDisabled_FailsClosed) {
+  mem.numSegments = 1;
+  mem.maxGlobalNumSegments = 1;
+  segmentSizes.assign({4096});
+  mem.segmentSizes = segmentSizes.data();
+  memHandles.assign(1, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
+  mem.memHandles = memHandles.data();
+
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "DMABUF_ENABLE" ? 0 : deftVal;
+  });
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook reg(g_devrGinRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(reg.calls, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
 }
 #endif
 
@@ -3959,6 +3994,40 @@ TEST_F(DevrWindowRegisterInGroupTest, ProbeFailure_AllgathersBeforeReturning) {
   EXPECT_EQ(gather.calls, 1);
   EXPECT_EQ(out, nullptr);
 }
+
+#if NCCL_VER_GE(HIP_VERSION, ROCM_VER_7_12_60540)
+// An address range can report base 0; the IPC-capability query must then use userPtr, not address 0.
+TEST_F(DevrWindowRegisterInGroupTest, ProbeZeroBase_QueriesUserPtr) {
+  comm->devrState.lsaSize = 2;
+  comm->devrState.lsaSelf = 0;
+  lsaRankList.assign({0, 1});
+  comm->devrState.lsaRankList = lsaRankList.data();
+  comm->cuMemSupport = 1;
+
+  ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t) {
+    if (pbase) *pbase = 0;
+    if (psize) *psize = 4096;
+    return hipSuccess;
+  });
+  ScopedHook ptrAttr(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t ptr) {
+    if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) *static_cast<hipMemoryType*>(data) = hipMemoryTypeDevice;
+    if (attr == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) {
+      if (ptr == 0) return hipErrorInvalidValue;
+      if (data) *static_cast<int*>(data) = 1;
+    }
+    return hipSuccess;
+  });
+  int localKind = -1;
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, [&](void*, int*, int self, int, void* buf, int) {
+    localKind = static_cast<int*>(buf)[self];
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(rcclDevrProbeNonSymWindow(comm, kUserPtr, 4096, 0), ncclSuccess);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(localKind, 0);
+}
+#endif
 
 #if NCCL_VER_GE(HIP_VERSION, ROCM_VER_7_12_60540) && NCCL_CUMEM_HOST_GATE
 // The retain walk, not the first page, decides a mixed window. A device page
