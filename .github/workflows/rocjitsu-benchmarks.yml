@@ -171,7 +171,23 @@ jobs:
           ref: develop
           path: dashboard
           persist-credentials: false
-          sparse-checkout: emulation/rocjitsu/website/dashboard
+          sparse-checkout: |
+            emulation/rocjitsu/website/dashboard
+            .github/workflows
+
+      - name: Check manual publication corpus
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          OFFICIAL_WORKFLOW="${GITHUB_WORKSPACE}/dashboard/.github/workflows/rocjitsu-benchmarks.yml"
+          OFFICIAL_CORPUS_SHA="$(sed -nE 's/^  CORPUS_SHA: ([0-9a-f]{40})([[:space:]]+#.*)?[[:space:]]*$/\1/p' "${OFFICIAL_WORKFLOW}")"
+          if [[ ! "${OFFICIAL_CORPUS_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Cannot read the official corpus pin from develop."
+            exit 1
+          fi
+          if [[ "${CORPUS_SHA}" != "${OFFICIAL_CORPUS_SHA}" ]]; then
+            echo "::error::Manual publication requires develop's corpus pin ${OFFICIAL_CORPUS_SHA}; got ${CORPUS_SHA}. Benchmark diagnostics remain available as artifacts."
+            exit 1
+          fi
 
       - name: Set up publisher Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0

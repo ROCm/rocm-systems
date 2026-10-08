@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "emulation/rocjitsu/website/dashboard/**"
+      - ".github/workflows/rocjitsu-benchmarks.yml"
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
   push:
@@ -11,6 +12,7 @@ on:
       - develop
     paths:
       - "emulation/rocjitsu/website/dashboard/**"
+      - ".github/workflows/rocjitsu-benchmarks.yml"
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
   workflow_dispatch:
