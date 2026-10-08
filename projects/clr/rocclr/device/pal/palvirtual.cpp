@@ -3504,14 +3504,30 @@ void VirtualGPU::waitEventLock(CommandBatch* cb) {
 
   // Find the timestamp object of the last command in the batch
   if (cb->lastTS_ != nullptr) {
-    // If earlyDone is TRUE, then CPU didn't wait for GPU.
-    // Thus the sync point between CPU and GPU is unclear and runtime
-    // will use an older adjustment value to maintain the same timeline
-    if (!earlyDone ||
-        //! \note Workaround for APU(s).
-        //! GPU-CPU timelines may go off too much, thus always
-        //! force calibration with the last batch in the list
-        (cbQueue_.size() <= 1) || (readjustTimeGPU_ == 0)) {
+    // Prefer an atomic GPU/CPU timestamp pair. The fallback below measures the CPU time after
+    // the wait returns, so its offset contains the wake-up latency, which differs per batch.
+    // A start event and a stop event in different batches then get different offsets, and
+    // hipEventElapsedTime can return values that are too short, too long, or negative.
+    Pal::CalibratedTimestamps ts = {};
+    if (dev().iDev()->GetCalibratedTimestamps(&ts) == Pal::Result::Success) {
+      const double nsPerGpuTick = 1e9 / dev().properties().timestampFrequency;
+#ifdef _WIN32
+      LARGE_INTEGER qpcFrequency;
+      QueryPerformanceFrequency(&qpcFrequency);
+      const uint64_t cpuNs = static_cast<uint64_t>(
+          static_cast<double>(ts.cpuQueryPerfCounterTimestamp) * 1e9 / qpcFrequency.QuadPart);
+#else
+      const uint64_t cpuNs = ts.cpuClockMonotonicTimestamp;  // Os::timeNanos() domain
+#endif
+      readjustTimeGPU_ = static_cast<uint64_t>(ts.gpuTimestamp * nsPerGpuTick) - cpuNs;
+    } else if (!earlyDone ||
+               //! \note Workaround for APU(s).
+               //! GPU-CPU timelines may go off too much, thus always
+               //! force calibration with the last batch in the list
+               (cbQueue_.size() <= 1) || (readjustTimeGPU_ == 0)) {
+      // If earlyDone is TRUE, then CPU didn't wait for GPU.
+      // Thus the sync point between CPU and GPU is unclear and runtime
+      // will use an older adjustment value to maintain the same timeline
       uint64_t startTimeStampGPU = 0;
       uint64_t endTimeStampGPU = 0;
 
