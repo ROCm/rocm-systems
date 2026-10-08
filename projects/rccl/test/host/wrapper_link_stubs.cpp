@@ -29,12 +29,13 @@ typedef enum { NCCL_LOG_NONE=0, NCCL_LOG_ERROR=1, NCCL_LOG_VERSION=2,
                NCCL_LOG_TRACE=6 } ncclDebugLogLevel;
 
 // --- debug.cc ---
-int ncclDebugLevel = 3;  // NCCL_LOG_WARN
+// Levels ERROR..WARN, matching the pre-2.32 scalar level NCCL_LOG_WARN.
+uint32_t ncclDebugLevelMask = (1u << 1) | (1u << 2) | (1u << 3);
 uint64_t ncclDebugMask = 0x7fffffffffffffffULL;
 
 void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags,
                   const char* filefunc, int line, const char* fmt, ...) {
-    if (level > ncclDebugLevel) return;
+    if (!(ncclDebugLevelMask & (1u << level))) return;
     va_list args;
     va_start(args, fmt);
     vfprintf(stderr, fmt, args);
@@ -154,3 +155,7 @@ ncclResult_t ncclProxyClientGetFdBlocking(ncclComm*, int, void*, int*) { return 
 int ncclCuMemEnable() { return 0; }
 int ncclCuMemHandleType = 0;
 ncclResult_t getBusId(int, int64_t* busId) { if (busId) *busId = 0; return ncclSuccess; }
+
+// Return type is int64_t (no ncclResult_t), so this can live here. ncclMgmtTaskEnqueue
+// uses the real ncclResult_t enum and is defined in init_stubs.cpp.
+int64_t ncclParamEnqueueRearchEnable() { return 0; }

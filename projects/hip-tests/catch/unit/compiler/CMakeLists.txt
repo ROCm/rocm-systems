@@ -26,10 +26,12 @@ if(HIP_PLATFORM MATCHES "amd")
     --offload-arch=gfx9-generic
     --offload-arch=gfx9-4-generic:sramecc+:xnack-
     --offload-arch=gfx9-4-generic:sramecc-:xnack-
-    --offload-arch=gfx9-4-generic:xnack+
+    --offload-arch=gfx9-4-generic:sramecc+:xnack+
+    --offload-arch=gfx9-4-generic:sramecc-:xnack+
     --offload-arch=gfx10-1-generic
     --offload-arch=gfx10-3-generic
     --offload-arch=gfx11-generic
+    --offload-arch=gfx11-7-generic
     --offload-arch=gfx12-generic
     --offload-arch=gfx12-5-generic)
 

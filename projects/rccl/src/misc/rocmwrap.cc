@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <sys/utsname.h>
 #include <fstream>
+#include <mutex>
 
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
@@ -99,9 +100,13 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
     int legacyIpcCap = 0;
     if (CUPFN(cuMemGetAddressRange(&base, &baseSize, ptr)) != hipSuccess) goto cleanup;
     if (CUPFN(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, ptr)) != hipSuccess) goto cleanup;
+#if HIP_VERSION >= 71260540
     if (CUPFN(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, base)) !=
         hipSuccess)
       goto cleanup;
+#else
+    (void)legacyIpcCap;
+#endif
   }
 
   ok = 1;
@@ -175,15 +180,28 @@ int ncclIsCuMemSupported() {
 
 // Runtime cuMem capability without the gfx1250 auto-enable gate. Used when
 // NCCL_CUMEM_ENABLE=1 forces the VMM path on non-gfx1250 platforms.
+// Memoized because ncclCuMemEnable() calls this on every allocation and the
+// check runs a full VMM create/map/unmap cycle.
+#if defined(__GNUC__)
+__attribute__((visibility("default")))
+#endif
 int ncclCuMemRuntimeSupported() {
-  return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0);
+  static std::once_flag once;
+  static int supported = 0;
+  std::call_once(once, []() { supported = ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0); });
+  return supported;
 }
 
 int ncclCuMemEnable() {
 #if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
   // NCCL_CUMEM_ENABLE=-2 means auto-detect CUMEM support
   int param = ncclParamCuMemEnable();
-  return param >= 0 ? param : (param == -2 && ncclCuMemSupported);
+  if (param == 0) return 0;
+  // Force-on (param>0) still requires a usable VMM/dma-buf stack. Returning 1
+  // here on a kernel without DMA-BUF (e.g. 5.15) made P2P/CUMEM paths
+  // dereference uninitialized state and SIGSEGV.
+  if (param > 0) return ncclCuMemRuntimeSupported();
+  return param == -2 && ncclCuMemSupported;
 #else
   if (ncclParamCuMemEnable() > 0)
     WARN(

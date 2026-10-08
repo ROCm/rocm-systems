@@ -63,7 +63,7 @@ quiet_warnings=false
 #                   Does NOT enable alltoall_wg offload.
 build_rocshmem_support=false
 build_rocshmem_gin=false
-rocshmem_mono_hash="33d980d7ca1f0bf90cfe4ff9106310abcf47b550"
+rocshmem_mono_hash="f636cc5be66716349dd9ed42eebb7b4d651fbb20"
 custom_cmake_options=""
 
 # #################################################
@@ -119,7 +119,7 @@ function display_help()
     echo "       --verbose               Show compile commands"
     echo ""
     echo "  Available RCCL-specific CMake options for --cmake-options:"
-    echo "    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env (default: OFF)"
+    echo "    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env, gin, mixed, proxytrace, accl (default: OFF)"
     echo "    -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)"
     echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
@@ -328,11 +328,13 @@ fi
 # rocSHMEM worktree setup (must run before cd-ing into the build directory)
 # #################################################
 rocshmem_source_dir=""
+rocshmem_is_monorepo=false
 if [[ "${build_rocshmem_support}" == true || "${build_rocshmem_gin}" == true ]] && [[ -z "${ROCSHMEM_INSTALL_DIR}" ]]; then
     # Prefer mono-repo layout (projects/rocshmem alongside projects/rccl)
     mono_root=$(git rev-parse --show-toplevel 2>/dev/null)
     if [[ -n "$mono_root" ]] && [[ -f "$mono_root/projects/rocshmem/CMakeLists.txt" ]]; then
         rocshmem_source_dir="$mono_root/projects/rocshmem"
+        rocshmem_is_monorepo=true
         echo "=== Using rocSHMEM from mono-repo: ${rocshmem_source_dir} ==="
     else
         setup_rocshmem_worktree
@@ -511,14 +513,14 @@ if [[ "${build_rocshmem_support}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=ON"
     if [[ -n "${ROCSHMEM_INSTALL_DIR}" ]]; then
         cmake_common_options="${cmake_common_options} -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
-    elif [[ -n "${rocshmem_source_dir}" ]]; then
+    elif [[ -n "${rocshmem_source_dir}" ]] && [[ "${rocshmem_is_monorepo}" == false ]]; then
         cmake_common_options="${cmake_common_options} -DROCSHMEM_SOURCE_DIR=${rocshmem_source_dir}"
     fi
 elif [[ "${build_rocshmem_gin}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF -DENABLE_ROCSHMEM_GIN=ON"
     if [[ -n "${ROCSHMEM_INSTALL_DIR}" ]]; then
         cmake_common_options="${cmake_common_options} -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
-    elif [[ -n "${rocshmem_source_dir}" ]]; then
+    elif [[ -n "${rocshmem_source_dir}" ]] && [[ "${rocshmem_is_monorepo}" == false ]]; then
         cmake_common_options="${cmake_common_options} -DROCSHMEM_SOURCE_DIR=${rocshmem_source_dir}"
     fi
 else

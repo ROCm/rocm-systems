@@ -51,8 +51,8 @@ def reg_values_of(coll, proto):
   # SendRecv is generated as two latency-protocol kernel variants, selected on the
   # host by ncclDevFuncId_P2p(useLL128) (see src/enqueue.cc / src/include/device.h):
   #   reg "0" = legacy LL latency path (built on every arch; the default)
-  #   reg "1" = LL128 latency path (activated on gfx942/gfx950 only; used when
-  #             NCCL_ALLOC_P2P_NET_LL_BUFFERS=1). The reg value is threaded into the
+  #   reg "1" = LL128 latency path (gfx942/gfx950 via NCCL_ALLOC_P2P_NET_LL_BUFFERS,
+  #             gfx1250 via NCCL_P2P_LL128_ENABLE). The reg value is threaded into the
   #             SendRecv RunWorkBatch specialization as UserRegMode to pick LL vs LL128.
   if coll == "SendRecv":
     return ["0", "1"]
@@ -110,6 +110,20 @@ else:
 #                         --- or ---
 # make ONLY_FUNCS="AllReduce RING SIMPLE|ReduceScatter RING LL * f32"
 # make ONLY_FUNCS="AllReduce RING/TREE LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|AllGather RING LL/SIMPLE Sum i8|AlltoAllPivot RING SIMPLE Sum i8|Broadcast RING LL/SIMPLE Sum i8|Reduce RING LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|ReduceScatter RING LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|SendRecv RING SIMPLE Sum i8"
+
+################################################################################
+# NCCL_EXACT_KERNEL_NAMES selects upstream's exact kernel naming, which only
+# applies to the representative-ncclDevKernel mapping. RCCL emits one
+# ncclDevFunc_* per primary variant plus a per-function specialized kernel, so
+# every variant already has a distinct name and the option has no effect here.
+def str_to_bool(s):
+  s = s.lower()
+  if s in ("1", "true", "on", "yes"):
+    return True
+  if s in ("", "0", "false", "off", "no"):
+    return False
+  raise ValueError("Invalid boolean value: " + s)
+exact_kernel_names = str_to_bool(os.environ.get("NCCL_EXACT_KERNEL_NAMES", "0"))
 
 # Paste all non-None arguments together with `sep`.
 def paste(sep, *args):
@@ -279,7 +293,7 @@ def calc_unroll_and_pipeline_for_local_arch():
       return (["1", "2"], ["0"])  # Disable pipelining for gfx950
     elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
       return (["2"], all_pipelines)
-    elif "gfx1250" == gfx_name:
+    elif gfx_name.startswith("gfx1250"):
       # gfx1250 (MI450/MI455) runs unroll 32. Unroll 8 was once noted as required for the FP8
       # launch; nothing in src/ depends on it now. Use --all_unrolls to build 8 and 16.
       return (unrolls_requiring_arch("gfx1250"), all_pipelines)
@@ -433,19 +447,21 @@ def get_arch_guard(fn):
   cond = None
 
   if fn.coll == "SendRecv" and fn.reg == "1":
-      # LL128 SendRecv kernel. Only gfx942/gfx950 activate it, but gfx1250 builds it too
-      # or its unroll-32 slot would be a nullptr in the one table gfx1250 indexes.
-      cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
+      # LL128 SendRecv kernel. gfx942/gfx950 activate it via ALLOC_P2P_NET_LL_BUFFERS;
+      # gfx1250 activates it via NCCL_P2P_LL128_ENABLE. Built for all three so the
+      # unroll-32 slot is not a nullptr in the table gfx1250 indexes.
+      cond = "(defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && defined(ENABLE_LL128)"
   elif fn.unroll in unroll_arch_requirement:
-      cond = "defined(__%s__)" % unroll_arch_requirement[fn.unroll]
+      arch = unroll_arch_requirement[fn.unroll]
+      cond = "(defined(__%s__) || defined(__%s_strict__))" % (arch, arch)
       if fn.proto == "LL128":
         cond += " && defined(ENABLE_LL128)"
   elif fn.proto == "LL128" and fn.acc == "1":
-      cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
+      cond = "(defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && defined(ENABLE_LL128)"
   elif fn.proto == "LL128":
-      cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
+      cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && defined(ENABLE_LL128)"
   elif fn.acc == "1":
-      cond = "defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)"
+      cond = "defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))"
   return cond
 
 # Build the mangled function symbol suffix. The user-buffer registration mode is
@@ -558,6 +574,14 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
 
   out = f.write
   out('#include "device.h"\n')
+  out("\n")
+
+  # funcId travels in an NCCL_DEV_WORK_BATCH_FUNC_ID_BITS-wide ncclDevWorkBatch
+  # field. RCCL indexes a per-unroll table, so the largest per-unroll function
+  # count must fit.
+  max_funcs_per_unroll = max([sum(1 for fn in primary_funcs if fn.unroll == u) for u in all_unrolls] + [0])
+  out("static_assert(%d <= (1 << NCCL_DEV_WORK_BATCH_FUNC_ID_BITS), " % max_funcs_per_unroll)
+  out('"Device function IDs must fit in ncclDevWorkBatch");\n')
   out("\n")
   out("// The key for the ncclDevFuncNameToId map is a 64-bit unsigned integer.\n")
   out("// Each field (coll, algo, proto, redop, ty, acc, pipeline) is packed into 4 bits,\n")
@@ -701,7 +725,7 @@ for name in name_to_funcs.keys():
 
     out = f.write
     out(
-      '#include "common.h"\n'
+      '#include "device/common.h"\n'
       '#include "{lower_coll}.h"\n'
       .format(lower_coll=coll_camel_to_lower[coll])
     )
@@ -747,7 +771,7 @@ for fn in primary_funcs:
 
   with open(filepath, "w") as f:
     out = f.write
-    out('#include "common.h"\n')
+    out('#include "device/common.h"\n')
     out('#include "%s.h"\n\n' % lower_coll)
     if guard:
       out("#if %s\n" % guard)

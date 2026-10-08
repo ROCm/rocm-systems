@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from amdisa.codegen._generator import CodeGenerator
+from amdisa.codegen._generator import CodeGenerator, _Literal32Widening
 from amdisa.codegen.execute.simd_codegen import (
     SIMD_VOP2_TERNARY,
     simd_ternary_literal_operand_name,
@@ -166,7 +166,8 @@ def test_gfx1250_packed_f32_reader_has_no_unreachable_literal64_branch():
     reader_end = source.index('\n}', reader_start)
     reader = source[reader_start:reader_end]
     assert 'literal64_value' not in reader
-    assert 'read_lane_pair32(operand, lane)' in reader
+    assert 'read_lane_pair32(' in reader
+    assert 'operand, lane, amdgpu::ScalarPairMode::Replicate32' in reader
     assert 'return {pair.lo, pair.hi};' in reader
 
 
@@ -272,12 +273,35 @@ def test_f64_simm32_literal_operand_uses_extension_word_as_double_high_bits():
     ) == stmt
 
 
+def test_128bit_packed_f64_widens_simm32_but_packed_u64_does_not():
+    packed_f64 = _operand(
+        'src0', 'OPR_SRC', size=128, data_format_name='FMT_NUM_PK2_F64'
+    )
+    packed_u64 = _operand(
+        'src0', 'OPR_SRC', size=128, data_format_name='FMT_NUM_PK2_U64'
+    )
+
+    assert (
+        CodeGenerator._literal_operand_simm32_widening(
+            packed_f64, 'OPR_SIMM32', 'cdna5', 'V_PK_ADD_F64', 'ENC_VOP3P'
+        )
+        is _Literal32Widening.F64_HIGH_BITS
+    )
+    assert (
+        CodeGenerator._literal_operand_simm32_widening(
+            packed_u64, 'OPR_SIMM32', 'cdna5', 'V_PK_ADD_U64', 'ENC_VOP3P'
+        )
+        is None
+    )
+
+
 def test_64bit_simm32_literal_operand_requires_data_format():
     with pytest.raises(
         ValueError,
         match=(
             "architecture 'rdna4', instruction 'V_FMAC_F64', encoding 'ENC_VOP2': "
-            "64-bit SIMM32 input operand 'src0' has unsupported data format '<missing>'"
+            "SIMM32 input operand 'src0' has no widening policy for size 64 and "
+            "data format '<missing>'"
         ),
     ):
         CodeGenerator._literal_operand_fixup_stmt(
@@ -400,7 +424,8 @@ def test_64bit_simm32_literal_operand_rejects_unrecognized_data_format():
         ValueError,
         match=(
             "architecture 'cdna4', instruction 'S_FAKE_I64', encoding 'ENC_SOP2': "
-            "64-bit SIMM32 input operand 'ssrc0' has unsupported data format 'FMT_NUM_X64'"
+            "SIMM32 input operand 'ssrc0' has no widening policy for size 64 and "
+            "data format 'FMT_NUM_X64'"
         ),
     ):
         CodeGenerator._literal_operand_fixup_stmt(

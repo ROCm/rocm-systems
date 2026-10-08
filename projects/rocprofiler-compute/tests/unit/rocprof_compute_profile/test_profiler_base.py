@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -44,7 +45,7 @@ def _make_sanitize_args(remaining, torch_trace=False, **overrides):
         attach_duration_msec=None,
         remaining=["--"] + remaining,
         torch_trace=torch_trace,
-        dispatch=None,
+        kernel_iteration_range=None,
         kernel=None,
     )
     defaults.update(overrides)
@@ -218,14 +219,14 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
         ),
         pytest.param(
             ["2", "21"],
-            {"torch_trace": True},
+            {"torch_trace": True, "pc_sampling": True, "experimental": True},
             False,
             {"torch"},
             id="mixed_torch_trace_preserved",
         ),
         pytest.param(
             ["21"],
-            {},
+            {"pc_sampling": True, "experimental": True},
             False,
             set(),
             id="pc_only_no_trace_flag",
@@ -348,7 +349,7 @@ def test_attach_library_resolution_with_fallback():
         attach_duration_msec=None,
         kokkos_trace=False,
         kernel=None,
-        dispatch=None,
+        kernel_iteration_range=None,
         torch_trace=False,
     )
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
@@ -400,7 +401,7 @@ def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypa
         attach_duration_msec=None,
         kokkos_trace=False,
         kernel=None,
-        dispatch=None,
+        kernel_iteration_range=None,
         torch_trace=False,
     )
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
@@ -442,6 +443,29 @@ def test_rocprofv3_live_attach_uses_sync_output():
     duration_idx = options.index("--attach-duration-msec")
     assert options[duration_idx + 1] == "500"
     assert "--" not in options
+
+
+def test_kernel_iteration_range_translated_for_both_backends(tmp_path):
+    """Both backends turn '3:5' into '3-5' and bracket the joined tokens."""
+    args = _make_sanitize_args(
+        ["/bin/true"],
+        kernel_iteration_range=["1", "3:5"],
+        output_directory=str(tmp_path),
+        rocprofiler_sdk_tool_path="sdk_tool",
+        kokkos_trace=False,
+    )
+    args.remaining = "-- /bin/true"
+
+    v3_profiler = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
+    v3_options = v3_profiler.get_profiler_options()
+    range_idx = v3_options.index("--kernel-iteration-range")
+    assert v3_options[range_idx + 1] == "[1,3-5]"
+
+    sdk_profiler = rocprofiler_sdk_profiler(
+        args, profiler_mode="rocprofiler-sdk", soc=None
+    )
+    sdk_options = sdk_profiler.get_profiler_options()
+    assert sdk_options["ROCPROF_KERNEL_FILTER_RANGE"] == "[1,3-5]"
 
 
 # ---------------------------------------------------------------------------
@@ -551,7 +575,7 @@ def _make_rpc_args(
     experimental=False,
     mode="profile",
 ) -> argparse.Namespace:
-    """Build a minimal Namespace for RocProfCompute.sanitize() unit tests."""
+    """Build a minimal Namespace for sanitize() unit tests."""
     return argparse.Namespace(
         mode=mode,
         list_metrics=None,
@@ -572,6 +596,15 @@ def _make_rpc_args(
         no_roof=False,
         name="unit-test",
         output_directory="/tmp/unit-test",
+        no_native_tool=False,
+        iteration_multiplexing=None,
+        attach_pid=None,
+        attach_duration_msec=None,
+        torch_trace=False,
+        triton_trace=False,
+        ml_api_trace=False,
+        kernel_iteration_range=None,
+        remaining=["--", "./myapp"],
     )
 
 
@@ -581,6 +614,14 @@ def _make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
     # Name-mangled private attributes consumed by sanitize().
     instance._RocProfCompute__args = args
     instance._RocProfCompute__mode = args.mode
+    return instance
+
+
+def _make_profiler_with_args(args: argparse.Namespace) -> RocProfCompute_Base:
+    """Construct a RocProfCompute_Base without invoking __init__."""
+    instance = RocProfCompute_Base.__new__(RocProfCompute_Base)
+    # Name-mangled private attribute consumed by sanitize().
+    instance._RocProfCompute_Base__args = args
     return instance
 
 
@@ -648,15 +689,59 @@ def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> PCSamplingLimi
         ),
     ],
 )
-def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_blocks):
+def test_sanitize_block_experimental_gating(
+    args, expect_error, expected_filter_blocks, monkeypatch
+):
     """Unit test: block 21 and block 30 require their experimental flags."""
-    instance = _make_rpc_with_args(args)
+    # sanitize() resolves the workload binary; the gating runs before that.
+    monkeypatch.setattr(shutil, "which", lambda cmd: f"/usr/bin/{cmd}")
+    instance = _make_profiler_with_args(args)
     if expect_error:
         with pytest.raises(SystemExit):
             instance.sanitize()
     else:
         instance.sanitize()
         assert args.filter_blocks == expected_filter_blocks
+
+
+@pytest.mark.parametrize(
+    "args, expected_filter_blocks",
+    [
+        pytest.param(
+            _make_rpc_args(membw_analysis=True, experimental=True, filter_blocks=[]),
+            [],
+            id="membw_analysis_empty_filter_stays_empty",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["3"], membw_analysis=True, experimental=True),
+            ["3", "30"],
+            id="membw_analysis_with_existing_blocks_appends_30",
+        ),
+        pytest.param(
+            _make_rpc_args(
+                filter_blocks=["3.1"], membw_analysis=True, experimental=True
+            ),
+            ["3.1", "30"],
+            id="membw_analysis_with_sub_block_appends_30",
+        ),
+        pytest.param(
+            _make_rpc_args(
+                filter_blocks=["30.13"], membw_analysis=True, experimental=True
+            ),
+            ["30.13"],
+            id="membw_analysis_with_block_30_sub_no_duplicate",
+        ),
+    ],
+)
+def test_sanitize_membw_analysis_injects_block_30(
+    args, expected_filter_blocks, monkeypatch
+):
+    """Block 30 is injected into filter_blocks when --membw-analysis is set."""
+    # sanitize() resolves the workload binary; the injection runs before that.
+    monkeypatch.setattr(shutil, "which", lambda cmd: f"/usr/bin/{cmd}")
+    instance = _make_profiler_with_args(args)
+    instance.sanitize()
+    assert args.filter_blocks == expected_filter_blocks
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +781,50 @@ def test_pre_processing_persists_membw_analysis_config(
     )
     assert profiling_config["membw_analysis"] is True
     assert profiling_config["filter_blocks"] == effective_filter_blocks
+
+
+@pytest.mark.parametrize(
+    "perf_level, expect_warning",
+    [
+        pytest.param("AUTO", True, id="auto"),
+        pytest.param("AmdSmiDevPerfLevel.AUTO", True, id="enum_repr"),
+        pytest.param("STABLE_STD", False, id="stable_std"),
+        pytest.param("AmdSmiDevPerfLevel.STABLE_PEAK", False, id="stable_peak"),
+        pytest.param(None, False, id="unreadable_or_unaffected_arch"),
+    ],
+)
+def test_pre_processing_pmc_power_gating_warning(
+    tmp_path: Path, perf_level, expect_warning
+) -> None:
+    """Warn about perfmon gating only when the GPU profiled at AUTO."""
+    profiling_args = argparse.Namespace(
+        attach_pid=None,
+        config_dir=tmp_path / "analysis_configs",
+        experimental=True,
+        filter_blocks=[],
+        membw_analysis=False,
+        no_roof=True,
+        output_directory=str(tmp_path),
+        remaining="./app",
+    )
+    mock_soc = Mock()
+    mock_soc._mspec = SimpleNamespace(perf_level=perf_level)
+    mock_soc.profiling_setup.return_value = []
+    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
+    profiler = rocprof_v3_profiler(
+        profiling_args,
+        profiler_mode="rocprofv3",
+        soc=mock_soc,
+    )
+
+    with patch("rocprof_compute_profile.profiler_base.gen_sysinfo"), patch(
+        "rocprof_compute_profile.profiler_base.console_warning"
+    ) as warning_mock:
+        profiler.pre_processing()
+
+    warnings = [str(call.args[0]) for call in warning_mock.call_args_list]
+    gating_warnings = [message for message in warnings if "TCP_REQ" in message]
+    assert bool(gating_warnings) is expect_warning
 
 
 # ---------------------------------------------------------------------------
@@ -970,9 +1099,9 @@ def _make_sdk_run_profiling_profiler(
     mock_finder_cls = Mock()
     finder_instance = mock_finder_cls.return_value
     if native_finder_raises:
-        finder_instance.get_collector_library_path.side_effect = RuntimeError("boom")
+        finder_instance.get_artifact_path.side_effect = RuntimeError("boom")
     else:
-        finder_instance.get_collector_library_path.return_value = "/n/native.so"
+        finder_instance.get_artifact_path.return_value = "/n/native.so"
 
     mock_profile = Mock(return_value=0.0)
 
