@@ -736,6 +736,10 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
   // plugin contract, and finalize() is only ever called after a successful init().
   NCCLCHECK(IbCastInitDevices(logFunction, profFunction));
   // After IbCastInitDevices: the probe QPs must use the final IbCastUseInline, like the resiliency QPs.
+  // IbCastCapProbeDevices() always returns ncclSuccess today (probe failures are cached per-device and
+  // WARN-logged, not propagated) and each probe fully tears down its own QP/MR/CQ/PD in its own cleanup
+  // path before returning, so finalize here never has to unwind a half-built per-port resource. This
+  // check is defensive: it stays correct if the probe ever gains a real failure path.
   if ((ret = IbCastCapProbeDevices()) != ncclSuccess) {
     IbCastFinalizeDevices();
     return ret;
