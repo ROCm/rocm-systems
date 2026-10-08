@@ -37,9 +37,9 @@ def ml_api_trace_profiled_workload(
         workload_dir = common.get_output_dir(param_id="ml_api_trace")
         ml_api_trace_workload_state["dir"] = workload_dir
         profile_config = dict(config)
-        profile_config["torch_compile_test_app"] = [
+        profile_config["ml_api_test_app"] = [
             sys.executable,
-            *config["torch_compile_test_app"][1:],
+            *config["ml_api_test_app"][1:],
         ]
         returncode = binary_handler_profile_rocprof_compute(
             profile_config,
@@ -50,7 +50,7 @@ def ml_api_trace_profiled_workload(
                 "--iteration-multiplexing",
             ],
             check_success=True,
-            app_name="torch_compile_test_app",
+            app_name="ml_api_test_app",
         )
         assert returncode == 0, "Profiling the ml-api application failed"
         ml_api_trace_workload_state["profiled"] = True

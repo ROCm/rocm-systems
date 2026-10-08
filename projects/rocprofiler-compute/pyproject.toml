@@ -98,9 +98,9 @@ markers = [
     "iteration_multiplexing_1",
     "iteration_multiplexing_2",
     "iteration_multiplexing_stochastic",
-    "torch_trace: live GPU tests that profile or analyze with --torch-trace",
-    "triton_trace: live GPU tests that profile or analyze with --triton-trace",
-    "ml_api_trace: live GPU tests that profile or analyze with --ml-api-trace",
+    "torch_trace: Tests run profiling and analysis on sample/simple_net.py with --torch-trace",
+    "triton_trace: Tests run profiling and analysis on sample/triton_ffn.py with --triton-trace",
+    "ml_api_trace: Tests run profiling and analysis on sample/torch_triton_net.py with --ml-api-trace",
     "torch_trace_coverage: live GPU torch.profiler vs analyze call-tree coverage",
     "experimental_feature",
 ]

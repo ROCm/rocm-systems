@@ -37,7 +37,7 @@ def triton_trace_profiled_workload(
         profile_config = dict(config)
         profile_config["triton_test_app"] = [
             sys.executable,
-            "./sample/triton_ffn.py",
+            *config["triton_test_app"][1:],
         ]
         returncode = binary_handler_profile_rocprof_compute(
             profile_config,
