@@ -156,7 +156,20 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
   if (!IsSystem() && !is_windxg && (size > max_single_alloc_size_)) {
-    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    // max_single_alloc_size_ is derived from the topology size published when the
+    // agent was discovered. That figure is captured once and is not refreshed when
+    // the device's effective per-node allocation cap changes underneath a running
+    // process, so a request that the device can satisfy is refused here without the
+    // driver ever being asked. Re-check against the driver's live figure before
+    // failing. This path only ever admits a request the static check would have
+    // rejected; it never introduces a new refusal, and it costs an ioctl only on a
+    // request that was about to fail anyway.
+    uint64_t available_size = 0;
+    if (owner()->driver().AvailableMemory(owner()->node_id(), &available_size) !=
+            HSA_STATUS_SUCCESS ||
+        size > available_size) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
   }
 
   size = AlignUp(size, GetPageSize());
