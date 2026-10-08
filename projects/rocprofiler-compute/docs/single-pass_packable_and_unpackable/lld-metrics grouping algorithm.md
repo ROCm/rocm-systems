@@ -15,7 +15,7 @@ A **PMC set** is the counters of one metric that must share one perfmon pass. A 
 
 Why this allocator: the shipping pack minimizes passes for the whole counter list, so metrics whose PMC sets fit one pass stay split. Largest-first gives a large set a bucket before smaller sets fragment the open passes.
 
-1. Collect each **Single-pass packable (SPP)** metric's PMC set and keep the unique sets (skip **Single-pass unpackable (SPU)** parents). An SPU parent is a metric whose in-profile PMC set does not fit one empty bucket (`counters_fit_one_bucket` is false). Allocation does not read a YAML flag, a collectable operator, or a metric-id list. A metric with no profile PMCs is omitted before this step and is not an SPU parent.
+1. Collect each **Single-pass packable (SPP)** metric's PMC set and keep the unique sets (skip **Single-pass unpackable (SPU)** parents). `iter_metric_groups` drops metrics with no profile PMCs before that split, so those metrics are not SPU parents. `collect_unique_packable_unions` keeps a metric only when `counters_fit_one_bucket`. `collect_unique_slot_limit_unions` keeps the rest. No YAML flag.
 2. Largest-first: place each PMC set with the existing-bucket and per-block slot checks in §2 (copy a PMC into another pass when two sets cannot share a bucket).
 3. Run **SPU residual fill** so leftover SPU counters appear somewhere. Try the open buckets, then open one new bucket for the largest subset that fits an empty bucket (+0 extra passes on gfx942). If no remaining counter fits even that empty bucket, residual fill raises `ValueError` and does not drop the counter or keep looping.
 4. Harden **TCC series affinity + coverage** (and ACCUM slot charging where required). See §3.
@@ -42,11 +42,14 @@ A **bucket** is one perfmon pass. Flow — Single-pass packable (SPP) placement 
 
 Overlap-first keeps the new counters in a pass that already has the rest of the set, so another pass does not replay them unless two PMC sets cannot share a bucket. The per-block check is why a mixed GRBM and SQ set is still one pass: a full SQ budget skips that bucket even when GRBM still has room. None of the 16 SPU metrics on gfx942 include GRBM.
 
+**How an SPU parent is recognized.** `iter_metric_groups` drops metrics with no profile PMCs before that split, so those metrics are not SPU parents. `collect_unique_packable_unions` keeps a metric only when `counters_fit_one_bucket`. `collect_unique_slot_limit_unions` keeps the rest. No YAML flag.
+
 ```mermaid
 flowchart TD
   A[Profile PMC set] --> B{LEGACY_HEURISTIC=1<br/>or SINGLE_PASS_PACKABLE=0?}
   B -->|yes| SH[Legacy path:<br/>heuristic coalesce + first-fit]
-  B -->|no default| U[Unique SPP PMC sets<br/>skip a set that does not fit<br/>one empty bucket]
+  B -->|no default| DROP[iter_metric_groups drops<br/>metrics with no profile PMCs]
+  DROP --> U[collect_unique_packable_unions<br/>keeps a metric only when<br/>counters_fit_one_bucket]
   U --> O[Order by size:<br/>largest PMC sets first]
   O --> L[Next SPP PMC set]
   L --> H{An existing bucket<br/>already holds that PMC set?}
@@ -59,7 +62,7 @@ flowchart TD
   M -->|yes| L
   M -->|no| FF[First-fit PMCs<br/>not in any bucket yet]
   FF --> R[Merge bucket pairs while each SPP<br/>PMC set still fits one bucket<br/>under the same block limits]
-  R --> S[SPU residual fill:<br/>each unique SPU PMC set]
+  R --> S[SPU residual fill:<br/>collect_unique_slot_limit_unions<br/>keeps the rest, no YAML flag]
   S --> S1{Every PMC already<br/>in some bucket?}
   S1 -->|yes| G[pmc_perf buckets<br/>gfx942: 14 total, +0 for SPU fill]
   S1 -->|no| S2{Fit remaining PMCs<br/>into an existing bucket?}
