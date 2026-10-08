@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Shared admission and output-publication rules for the AMDF entry points.
 //!
 //! The imported C contract requires each handle to come from this provider and

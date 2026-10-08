@@ -1323,9 +1323,17 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  */
 typedef struct {
-  char driver_version[AMDSMI_MAX_STRING_LENGTH];
-  char driver_date[AMDSMI_MAX_STRING_LENGTH];
-  char driver_name[AMDSMI_MAX_STRING_LENGTH];
+  char driver_version[AMDSMI_MAX_STRING_LENGTH];         //!< Driver version, such as
+                                                         //!< 6.19.14.31400000
+  char driver_date[AMDSMI_MAX_STRING_LENGTH];            //!< Driver release date
+  char driver_name[AMDSMI_MAX_STRING_LENGTH];            //!< Driver name
+  char driver_kernel_version[AMDSMI_MAX_STRING_LENGTH];  //!< amdgpu kernel source version,
+                                                         //!< such as 6.19.14
+  char amdgpu_driver_version[AMDSMI_MAX_STRING_LENGTH];  //!< amdgpu module version, such
+                                                         //!< as 31400000
+  char driver_build_version[AMDSMI_MAX_STRING_LENGTH];   //!< DKMS build, such as 2370381
+  char driver_full_version[AMDSMI_MAX_STRING_LENGTH];    //!< Full version, such
+                                                         //!< as 6.19.14.31400000-2370381
 } amdsmi_driver_info_t;
 
 /**
@@ -3198,7 +3206,8 @@ typedef struct {
  *
  *  @details This function initializes the library and the internal data structures,
  *  including those corresponding to sources of information that SMI provides.
- *  Singleton Design, requires the same number of inits as shutdowns.
+ *  Singleton Design, requires the same number of inits as shutdowns. Threads may call
+ *  ::amdsmi_init and ::amdsmi_shut_down concurrently; the calls are serialized.
  *
  *  The @p init_flags decides which type of processor
  *  can be discovered by ::amdsmi_get_socket_handles(). AMDSMI_INIT_AMD_GPUS returns
@@ -3224,7 +3233,8 @@ amdsmi_status_t amdsmi_init(uint64_t init_flags);
  *
  *  @details This function shuts down the library and internal data structures and
  *  performs any necessary clean ups. Singleton Design, requires the same number
- *  of inits as shutdowns.
+ *  of inits as shutdowns. The call that releases the last reference frees every
+ *  handle, so no other thread may still be using one.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3418,16 +3428,15 @@ amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_hand
  *  totals. Counts are derived purely from ::amdsmi_get_processor_type and do not require
  *  ENABLE_ESMI_LIB; on builds without ESMI, @p nr_cpusockets and @p nr_cpucores will be 0.
  *
- *  @param[in] processor_handles A pointer to a block of memory to which the
- *  ::amdsmi_processor_handle values will be written. This value may be NULL.
+ *  @param[in] processor_handles The processor handles to classify. Must not be NULL.
  *
- *  @param[in] processor_count total processor count per socket
+ *  @param[in] processor_count Number of handles in @p processor_handles. Must not be NULL.
  *
- *  @param[out] nr_cpusockets Total number of cpu sockets
+ *  @param[out] nr_cpusockets Total number of cpu sockets. Must not be NULL.
  *
- *  @param[out] nr_cpucores Total number of cpu cores
+ *  @param[out] nr_cpucores Total number of cpu cores. Must not be NULL.
  *
- *  @param[out] nr_gpus Total number of gpu devices
+ *  @param[out] nr_gpus Total number of gpu devices. Must not be NULL.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -7528,6 +7537,14 @@ amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle proce
  *
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
  *  @platform{guest_windows}
+ *
+ *  @details On Linux, driver_version is /sys/module/amdgpu/version, such as
+ *           6.19.14.31400000, or N/A. driver_kernel_version (6.19.14) and
+ *           amdgpu_driver_version (31400000) are its parts,
+ *           driver_build_version is the active DKMS build, and
+ *           driver_full_version is driver_version-build, or driver_version
+ *           when there is no build. The other fields are empty when
+ *           unavailable.
  *
  *  @param[in] processor_handle Device which to query
  *

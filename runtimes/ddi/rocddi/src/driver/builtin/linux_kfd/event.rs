@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Owned KFD signal events used by interrupt-capable HSA signals.
 //!
 //! Creation validates every identifier and mailbox field returned by KFD before
@@ -24,10 +27,12 @@ impl KfdSignalEvent {
         kfd: Shared<sys::Kfd>,
         event_page_handle: Option<u64>,
         allocator: Allocator,
+        page_offered: &mut bool,
     ) -> Result<Owned<Self>, Error> {
+        *page_offered = false;
         let storage = Owned::try_new_uninit(allocator)?;
         let mut args = uapi::CreateEvent::default();
-        if let Err(source) = kfd.create_signal_event(event_page_handle, &mut args) {
+        if let Err(source) = kfd.create_signal_event(event_page_handle, &mut args, page_offered) {
             if args.event_id != 0 && kfd.destroy_event(args.event_id).is_err() {
                 std::mem::forget(kfd);
             }
@@ -114,10 +119,11 @@ fn signal_event_error(operation: &'static str, source: std::io::Error) -> Error 
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::panic)]
+#[allow(unsafe_code, clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
     use crate::driver::builtin::linux_kfd::sys::{Call, IoctlHook, Kfd};
+    use std::ffi::c_void;
     use std::fs::File;
     use std::sync::{Arc, Mutex};
 
@@ -151,7 +157,11 @@ mod tests {
             }
             Ok(())
         }));
-        let mut event = KfdSignalEvent::create(kfd, Some(0x1234), Allocator::default()).unwrap();
+        let mut page_offered = false;
+        let mut event =
+            KfdSignalEvent::create(kfd, Some(0x1234), Allocator::default(), &mut page_offered)
+                .unwrap();
+        assert!(page_offered);
         assert_eq!(
             event.info(),
             SignalEventInfo {
@@ -162,6 +172,72 @@ mod tests {
         event.destroy().unwrap();
         drop(event);
         assert_eq!(*calls.lock().unwrap(), [(0, 0x1234), (19, 0)]);
+    }
+
+    #[test]
+    fn first_event_failure_can_return_without_an_event_id() {
+        let calls = Arc::new(Mutex::new(0));
+        let observed = calls.clone();
+        let kfd = endpoint(Arc::new(move |call| match call {
+            Call::CreateEvent(args) => {
+                assert_eq!(args.page_offset, 0x1234);
+                *observed.lock().unwrap() += 1;
+                Err(std::io::Error::from_raw_os_error(12))
+            }
+            _ => panic!("unexpected event call"),
+        }));
+        let mut page_offered = false;
+        let error =
+            KfdSignalEvent::create(kfd, Some(0x1234), Allocator::default(), &mut page_offered)
+                .err()
+                .unwrap();
+        assert!(page_offered);
+        assert_eq!(error.kind(), ErrorKind::ResourceExhausted);
+        assert_eq!(*calls.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn invalid_page_handle_is_rejected_before_offer() {
+        let kfd = endpoint(Arc::new(|_| panic!("invalid page reached KFD")));
+        let mut page_offered = true;
+        assert!(
+            KfdSignalEvent::create(kfd, Some(0), Allocator::default(), &mut page_offered).is_err()
+        );
+        assert!(!page_offered);
+    }
+
+    #[test]
+    fn closed_kfd_rejects_event_before_page_offer() {
+        let mut kfd = endpoint(Arc::new(|_| panic!("closed KFD reached ioctl")));
+        Shared::get_mut(&mut kfd).unwrap().close().unwrap();
+        let mut page_offered = true;
+        assert!(
+            KfdSignalEvent::create(kfd, Some(0x1234), Allocator::default(), &mut page_offered)
+                .is_err()
+        );
+        assert!(!page_offered);
+    }
+
+    #[test]
+    fn metadata_failure_does_not_offer_the_page() {
+        unsafe extern "C" fn reject(_: *mut c_void, _: u64, _: u64) -> *mut c_void {
+            std::ptr::null_mut()
+        }
+        unsafe extern "C" fn unused_free(_: *mut c_void, _: *mut c_void) {}
+
+        let kfd = endpoint(Arc::new(|_| panic!("allocation failure reached KFD")));
+        // SAFETY: The rejection callback is valid for this call and never
+        // publishes storage; free cannot be invoked.
+        let allocator = unsafe {
+            Allocator::from_callbacks(std::ptr::null_mut(), Some(reject), None, Some(unused_free))
+                .unwrap()
+        };
+        let mut page_offered = true;
+        let error = KfdSignalEvent::create(kfd, Some(0x1234), allocator, &mut page_offered)
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::ResourceExhausted);
+        assert!(!page_offered);
     }
 
     #[test]
@@ -183,7 +259,10 @@ mod tests {
             }
             _ => panic!("unexpected event call"),
         }));
-        let mut event = KfdSignalEvent::create(kfd, None, Allocator::default()).unwrap();
+        let mut page_offered = false;
+        let mut event =
+            KfdSignalEvent::create(kfd, None, Allocator::default(), &mut page_offered).unwrap();
+        assert!(!page_offered);
         assert_eq!(event.destroy().unwrap_err().kind(), ErrorKind::Driver);
         assert_eq!(
             event.destroy().unwrap_err().kind(),

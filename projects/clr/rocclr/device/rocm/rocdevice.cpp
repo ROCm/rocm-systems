@@ -123,7 +123,7 @@ bool NullDevice::create(const amd::Isa& isa) {
   std::stringstream ss;
   ss << AMD_BUILD_STRING " (HSA,LC) [Offline]";
   ::strncpy(info_.driverVersion_, ss.str().c_str(), sizeof(info_.driverVersion_) - 1);
-  info_.version_ = "OpenCL " OPENCL_VERSION_STR " ";
+  info_.version_ = "OpenCL " OPENCL_VERSION_STR " " AMD_PLATFORM_INFO;
   return true;
 }
 
@@ -1447,12 +1447,12 @@ bool Device::populateOCLDeviceConstants() {
     info_.version_ =
         "OpenCL " /*OPENCL_VERSION_STR*/
         "2.0"
-        " ";
+        " " AMD_PLATFORM_INFO;
   } else {
     info_.version_ =
         "OpenCL " /*OPENCL_VERSION_STR*/
         "1.2"
-        " ";
+        " " AMD_PLATFORM_INFO;
   }
 
   info_.builtInKernels_ = "";

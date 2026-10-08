@@ -562,7 +562,9 @@ private:
   /// notifications and schedules them for the following tick so they cannot starve
   /// device work already queued there. Internal test queues have no poll thread and
   /// are driven by engine->run()/step(), so there the re-check must be kept alive by
-  /// rescheduling the doorbell event at @p now + 1.
+  /// one engine-owned stall event at @p now plus the current backoff. A shorter
+  /// deadline supersedes that event; repeated later requests are coalesced. Real
+  /// doorbells remain independent so they can wake the CP immediately.
   void arm_stall_recheck(simdojo::Tick now);
 
   /// @brief Re-arm a re-check while this CP holds a shard whose grid is still
@@ -618,6 +620,8 @@ private:
   /// is returned. The caller must then fault the dispatch without retaining a
   /// reference into the queue entry container across that operation.
   [[nodiscard]] DispatchWorkgroupResult dispatch_workgroups(DispatchEntry &entry);
+  [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
+                                     simdojo::Tick now);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
   void dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
@@ -935,6 +939,9 @@ private:
   /// @brief Read a uint32 through the queue's lifetime-safe GPU address space.
   [[nodiscard]] AtomicLoadResult read_gpu_u32(AddressSpaceHandle address_space, uint64_t va) const;
 
+  /// @brief Read a uint32 through one already-captured address-space binding.
+  [[nodiscard]] AtomicLoadResult read_gpu_u32(const GpuVmAccess &access, uint64_t va) const;
+
   /// @brief Read a block of bytes from GPU virtual address space into a buffer.
   [[nodiscard]] VmAccessOutcome read_gpu_block(AddressSpaceHandle address_space, uint64_t va,
                                                void *dst, size_t size) const;
@@ -991,6 +998,12 @@ private:
   /// re-checks on its poll thread's own cadence instead.
   simdojo::Tick stall_recheck_backoff_ = 1;
   static constexpr simdojo::Tick kMaxStallRecheckBackoff = 4096;
+  // Owned by the CP's engine thread, unlike the external poller retry below.
+  // The generation rejects superseded deadlines without duplicating live retries.
+  bool stall_recheck_pending_ = false;
+  simdojo::Tick stall_recheck_tick_ = simdojo::TICK_MAX;
+  uintptr_t stall_recheck_generation_ = 0;
+  simdojo::Event stall_recheck_event_{this, simdojo::EventType::TIMER_CALLBACK};
 
   // Set when a queue stalls on a barrier or another unsatisfied dependency --
   // progress external to the current engine pass (a peer rank's kernel completion

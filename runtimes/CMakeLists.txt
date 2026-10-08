@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 cmake_minimum_required(VERSION 3.25)
 project(ROCmRuntimes LANGUAGES C CXX)
 
@@ -24,6 +27,7 @@ add_subdirectory(api-headers)
 include(cmake/RuntimeRust.cmake)
 runtime_rust_initialize()
 add_subdirectory(ddi)
+include(cmake/SharedImage.cmake)
 add_subdirectory(hsa)
 runtime_rust_finalize()
 # ============================================================================

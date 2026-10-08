@@ -162,6 +162,7 @@ struct Event {
 struct Archive {
   std::string path;
   uint16_t    version = 0;        // format version from hrr_file_header
+  uint16_t    flags = 0;          // HRR_FILE_FLAG_* bits from hrr_file_header
   std::vector<Event> events;
 
   // Crash-resilience status, set by load_archive:
@@ -219,10 +220,12 @@ RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out);
 // Open a record stream and validate its 8-byte header. `expected_magic` selects
 // the stream kind (HRR_MAGIC for events.bin, HRR_REGION_MAGIC for a region
 // sidecar). On success returns the open FILE* positioned at the first record
-// and stores the file's format version in *version; returns nullptr and logs on
-// a missing file, bad magic, or version mismatch.
+// and stores the file's format version in *version and its header flags in
+// *flags (either may be null); returns nullptr and logs on a missing file, bad
+// magic, or version mismatch.
 FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
-                         uint16_t expected_version, uint16_t* version);
+                         uint16_t expected_version, uint16_t* version,
+                         uint16_t* flags = nullptr);
 
 // Sidecar region streams for a resolved archive directory: every
 // <archive_dir>/regions/*.hrrr, sorted by name for a deterministic merge order.
