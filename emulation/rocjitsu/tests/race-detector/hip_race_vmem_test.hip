@@ -17,7 +17,8 @@ int main(int argc, char **argv) {
 
 namespace {
 
-using VmemAtomicRaceTest = rocjitsu::test::RaceTestBase;
+// Cases ending in _race must report a race; all other cases must remain clean.
+using VmemRaceTest = rocjitsu::test::RaceTestBase;
 
 __global__ void compiler_atomic_kernel(unsigned *values, unsigned *output) {
   const unsigned lane = threadIdx.x;
@@ -73,7 +74,7 @@ template <typename Launch> void check_atomic_values(Launch launch) {
   EXPECT_EQ(hipFree(values), hipSuccess);
 }
 
-TEST_F(VmemAtomicRaceTest, compiler_generated) {
+TEST_F(VmemRaceTest, compiler_generated) {
   ASSERT_NO_FATAL_FAILURE(
       check_atomic_values([](unsigned *values, unsigned *output, unsigned lanes) {
         compiler_atomic_kernel<<<1, lanes>>>(values, output);
@@ -81,7 +82,7 @@ TEST_F(VmemAtomicRaceTest, compiler_generated) {
   ExpectNoRace();
 }
 
-TEST_F(VmemAtomicRaceTest, vmcnt_only) {
+TEST_F(VmemRaceTest, vmcnt_only) {
   ASSERT_NO_FATAL_FAILURE(
       check_atomic_values([](unsigned *values, unsigned *output, unsigned lanes) {
         explicit_atomic_kernel<true, false><<<1, lanes>>>(values, output);
@@ -99,7 +100,7 @@ static constexpr rocjitsu::test::RaceExpectation kMissingVmWait{
     .consumer = "v_mov_b32",
 };
 
-TEST_F(VmemAtomicRaceTest, no_wait) {
+TEST_F(VmemRaceTest, no_wait_race) {
   ASSERT_NO_FATAL_FAILURE(
       check_atomic_values([](unsigned *values, unsigned *output, unsigned lanes) {
         explicit_atomic_kernel<false, false><<<1, lanes>>>(values, output);
@@ -107,12 +108,76 @@ TEST_F(VmemAtomicRaceTest, no_wait) {
   ExpectRace(kMissingVmWait);
 }
 
-TEST_F(VmemAtomicRaceTest, expcnt_only) {
+TEST_F(VmemRaceTest, expcnt_only_race) {
   ASSERT_NO_FATAL_FAILURE(
       check_atomic_values([](unsigned *values, unsigned *output, unsigned lanes) {
         explicit_atomic_kernel<false, true><<<1, lanes>>>(values, output);
       }));
   ExpectRace(kMissingVmWait);
+}
+
+// Exchange data across waves through generic FLAT accesses. Drain the memory
+// counters without waiting on EXP; the synchronized case must retire its LDS
+// writes at the barrier, while the missing-barrier case must still report.
+template <bool Synchronized> __global__ void flat_lds_exchange_kernel(unsigned *output) {
+  __shared__ unsigned tile[128];
+  const unsigned tid = threadIdx.x;
+  const uint64_t write_address = reinterpret_cast<uint64_t>(&tile[tid]);
+#if defined(__gfx1151__)
+  asm volatile("flat_store_b32 %[address], %[value]\n"
+               "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(7)\n"
+               "s_waitcnt_vscnt null, 0\n"
+#else
+  asm volatile("flat_store_dword %[address], %[value]\n"
+               "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(7)\n"
+#endif
+               :
+               : [address] "v"(write_address), [value] "v"(tid + 11)
+               : "memory");
+  if constexpr (Synchronized)
+    __syncthreads();
+  const uint64_t read_address = reinterpret_cast<uint64_t>(&tile[127 - tid]);
+  unsigned value;
+#if defined(__gfx1151__)
+  asm volatile("flat_load_b32 %[value], %[address]\n"
+#else
+  asm volatile("flat_load_dword %[value], %[address]\n"
+#endif
+               "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(7)\n"
+               : [value] "=v"(value)
+               : [address] "v"(read_address)
+               : "memory");
+  output[tid] = value;
+}
+
+template <bool Synchronized> void check_flat_lds_exchange() {
+  unsigned *output = nullptr;
+  std::vector<unsigned> result(128);
+  ASSERT_EQ(hipMalloc(&output, result.size() * sizeof(unsigned)), hipSuccess);
+  flat_lds_exchange_kernel<Synchronized><<<1, 128>>>(output);
+  ASSERT_EQ(hipGetLastError(), hipSuccess);
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  ASSERT_EQ(
+      hipMemcpy(result.data(), output, result.size() * sizeof(unsigned), hipMemcpyDeviceToHost),
+      hipSuccess);
+  if constexpr (Synchronized) {
+    for (unsigned tid = 0; tid < result.size(); ++tid)
+      EXPECT_EQ(result[tid], 127 - tid + 11);
+  }
+  EXPECT_EQ(hipFree(output), hipSuccess);
+}
+
+TEST_F(VmemRaceTest, flat_lds_exchange) {
+  ASSERT_NO_FATAL_FAILURE(check_flat_lds_exchange<true>());
+  ExpectNoRace();
+}
+
+TEST_F(VmemRaceTest, flat_lds_exchange_race) {
+  ASSERT_NO_FATAL_FAILURE(check_flat_lds_exchange<false>());
+  ExpectRace({.kernel = "flat_lds_exchange_kernel",
+              .type = "LDS",
+              .access = "read",
+              .consumer = "flat_load"});
 }
 
 } // namespace

@@ -188,62 +188,6 @@ TEST_F(Gfx950RaceTest, global_atomic_masked_expcnt_only_race) {
   ExpectRace(kGlobalAtomicWaitRaceExpectation);
 }
 
-// --- FLAT writes to LDS do not need EXPCNT ---
-
-// Exchange data between two waves through generic FLAT accesses. Explicitly
-// drain both FLAT counters, leaving EXPCNT untouched. The store must be retired
-// at the barrier; a spurious EXPCNT obligation would keep its LDS write pending.
-template <bool Synchronized> __global__ void flat_lds_exchange_kernel(unsigned *output) {
-  __shared__ unsigned tile[128];
-  const unsigned tid = threadIdx.x;
-  const uint64_t write_address = reinterpret_cast<uint64_t>(&tile[tid]);
-  asm volatile("flat_store_dword %[address], %[value]\n"
-               "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(7)\n"
-               :
-               : [address] "v"(write_address), [value] "v"(tid + 11)
-               : "memory");
-  if constexpr (Synchronized)
-    __syncthreads();
-  const uint64_t read_address = reinterpret_cast<uint64_t>(&tile[127 - tid]);
-  unsigned value;
-  asm volatile("flat_load_dword %[value], %[address]\n"
-               "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(7)\n"
-               : [value] "=v"(value)
-               : [address] "v"(read_address)
-               : "memory");
-  output[tid] = value;
-}
-
-template <bool Synchronized> void check_flat_lds_exchange() {
-  unsigned *output = nullptr;
-  std::vector<unsigned> result(128);
-  ASSERT_EQ(hipMalloc(&output, result.size() * sizeof(unsigned)), hipSuccess);
-  flat_lds_exchange_kernel<Synchronized><<<1, 128>>>(output);
-  ASSERT_EQ(hipGetLastError(), hipSuccess);
-  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-  ASSERT_EQ(
-      hipMemcpy(result.data(), output, result.size() * sizeof(unsigned), hipMemcpyDeviceToHost),
-      hipSuccess);
-  if constexpr (Synchronized) {
-    for (unsigned tid = 0; tid < result.size(); ++tid)
-      EXPECT_EQ(result[tid], 127 - tid + 11);
-  }
-  EXPECT_EQ(hipFree(output), hipSuccess);
-}
-
-TEST_F(Gfx950RaceTest, flat_lds_exchange) {
-  ASSERT_NO_FATAL_FAILURE(check_flat_lds_exchange<true>());
-  ExpectNoRace();
-}
-
-TEST_F(Gfx950RaceTest, flat_lds_exchange_race) {
-  ASSERT_NO_FATAL_FAILURE(check_flat_lds_exchange<false>());
-  ExpectRace({.kernel = "flat_lds_exchange_kernel",
-              .type = "LDS",
-              .access = "read",
-              .consumer = "flat_load_dword"});
-}
-
 // --- Generic FLAT result waits ---
 
 // Generic FLAT uses the counters for its resolved memory domains: VMCNT for
