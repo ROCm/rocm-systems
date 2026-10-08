@@ -45,8 +45,8 @@ namespace TraceChunk
 {
 
 /// "QueueInfo" RDF chunk identifier & version
-constexpr char        QueueInfoChunkId[TextIdentifierSize] = "QueueInfo";
-constexpr Pal::uint32 QueueInfoChunkVersion                = 1;
+constexpr TraceChunkId QueueInfoChunkId      = TraceChunkId("QueueInfo");
+constexpr Pal::uint32  QueueInfoChunkVersion = 1;
 
 /// Enum describing logical queue types
 enum class QueueType : Pal::uint8
@@ -93,8 +93,8 @@ struct QueueInfo
 // ------------------------------------------------------------------------------------------- //
 
 /// "QueueEvent" RDF chunk identifier & version
-constexpr char        QueueEventChunkId[TextIdentifierSize] = "QueueEvent";
-constexpr Pal::uint32 QueueEventChunkVersion                = 1;
+constexpr TraceChunkId QueueEventChunkId      = TraceChunkId("QueueEvent");
+constexpr Pal::uint32  QueueEventChunkVersion = 1;
 
 /// The type of queue-level timings event
 enum class QueueEventType : Pal::uint32

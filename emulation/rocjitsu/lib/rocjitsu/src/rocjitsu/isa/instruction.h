@@ -7,12 +7,16 @@
 #ifndef ROCJITSU_ISA_INSTRUCTION_H_
 #define ROCJITSU_ISA_INSTRUCTION_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/result.h"
 #include "util/intrusive_list.h"
 
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -60,7 +64,24 @@ enum InstFlags : uint64_t {
   /// @brief The destination value is the scalar bitwise pure OR of the source operands
   /// (e.g. s_or, s_or_saveexec). Pure OR with an all-ones operand is all-ones
   /// regardless of the others.
-  RESULT_OR = (1ULL << 15)
+  RESULT_OR = (1ULL << 15),
+  /// @brief Candidate for an asynchronous memory completion counter, including
+  /// instructions with no memory payload or register result.
+  MEMORY_WAIT_PRODUCER = (1ULL << 16),
+  /// @brief Instruction contains an embedded memory-completion wait field.
+  EMBEDDED_MEMORY_WAIT = (1ULL << 17),
+  /// @brief Non-control-flow instruction that implicitly drains gfx1250 XCNT.
+  XCNT_DRAIN = (1ULL << 19),
+  /// @brief This ISA suppresses issue of this instruction while MODE.VSKIP is set.
+  VSKIP_AFFECTED = (1ULL << 20),
+  /// @brief Listed operands cover all possible VGPR accesses, including partial writes.
+  DIRECT_REGISTER_ACCESSES = (1ULL << 21),
+  /// @brief Unconditional full-dword memory results described by the decoded destinations.
+  SIMPLE_MEMORY_RESULT = (1ULL << 22),
+  /// @brief Memory result lanes depend on controls beyond EXEC and issue masking.
+  CONDITIONAL_MEMORY_LANES = (1ULL << 24),
+  /// @brief Matrix execution accesses register lanes independently of EXEC.
+  MATRIX_REGISTER_ACCESSES = (1ULL << 25)
 };
 
 class BasicBlock;
@@ -100,9 +121,10 @@ public:
   virtual ~Instruction() = default;
 
   /// @brief Pool allocator hooks, set by the decoder's enable_pool().
-  /// Thread-local because each CU partition thread has its own decoder/pool.
-  /// Instructions are wholly owned by their CU and always allocated/freed
-  /// on the same thread.
+  /// @details Pool users must allocate and free on the bound thread while their
+  /// pool is active, with the decoder outliving its pooled instructions.
+  /// CU execution instead forces heap allocation so instructions can survive
+  /// quanta and worker migration.
   using AllocFn = void *(*)(void *pool, size_t size);
   using DeallocFn = void (*)(void *pool, void *ptr);
   static thread_local inline AllocFn alloc_fn_;
@@ -190,6 +212,14 @@ public:
   /// Each derived instruction class sets this to a trampoline that calls
   /// its ``execute_impl()`` method. In a model-only DBT image this is nullptr
   /// and must not be called. No virtual dispatch.
+  /// This is a low-level backend callback. AMDGPU callers should use the CU's
+  /// execute_instruction() API to reset and check simulator execution failures.
+  /// @details Decoded non-memory instructions without DynamicInstState may be
+  /// reused across waves without a reset. Executors must read register values,
+  /// EXEC and other execution state from the current context, and restore any
+  /// temporary operand delegates before returning. Put persistent per-issue
+  /// state in DynamicInstState; its presence excludes decoded reuse. Any
+  /// per-execution member flags must be assigned on every execution.
   const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
@@ -212,11 +242,12 @@ public:
   }
 
   /// @brief Attach dynamic state to this instruction (transfers ownership).
+  /// @details An instruction retaining this state cannot enter a decoded cache.
   /// @param[in] d Dynamic state (ownership transferred).
   void set_data(std::unique_ptr<DynamicInstState> d) { data_ = std::move(d); }
 
-  /// @brief The instruction's human-readable mnemonic.
-  /// @returns Reference to the mnemonic string.
+  /// @brief The instruction's canonical semantic mnemonic.
+  /// @returns Reference to the mnemonic used by analysis and execution consumers.
   std::string_view mnemonic() const { return mnemonic_; }
 
   /// @brief The instruction's total number of operands.
@@ -282,6 +313,19 @@ public:
   /// @retval true The instruction has the MEMORY_OP flag set.
   /// @retval false The instruction is not a memory operation.
   bool is_memory_op() const { return flags_ & MEMORY_OP; }
+  /// @brief Whether MODE.VSKIP prevents this instruction from being issued.
+  bool is_vskip_affected() const { return flags_ & VSKIP_AFFECTED; }
+  /// @brief Whether this instruction can increment a memory completion counter.
+  bool is_memory_wait_producer() const { return flags_ & MEMORY_WAIT_PRODUCER; }
+  /// @brief Whether the instruction includes a memory completion wait field.
+  bool has_embedded_memory_wait() const { return flags_ & EMBEDDED_MEMORY_WAIT; }
+
+  /// @brief Return decoded AMDGPU memory-issue metadata, when present.
+  /// @details AMDGPU generated memory-instruction constructors populate this
+  /// descriptor. Other architectures and non-memory instructions return nullptr.
+  [[nodiscard]] const amdgpu::MemoryIssueInfo *amdgpu_memory_issue_info() const {
+    return memory_issue_info_.empty() ? nullptr : &memory_issue_info_;
+  }
 
   uint64_t flags() const { return flags_; }
 
@@ -319,6 +363,9 @@ public:
   /// instruction's lifetime.
   virtual void implicit_use_operands(std::vector<const Operand *> & /*operands*/) const {}
 
+  /// @brief Query already-decoded modifiers only when a register may be pending.
+  virtual void amdgpu_register_modifiers(amdgpu::RegisterModifiers & /*modifiers*/) const {}
+
   /// @brief Add registers implicitly written by this instruction.
   virtual void implicit_defs(RegisterSet & /*defs*/) const {}
 
@@ -332,6 +379,13 @@ public:
   /// @brief Opcode within the encoding format.
   [[nodiscard]] uint16_t opcode() const { return opcode_; }
 
+  /// @brief Target feature bits required to decode this instruction form.
+  ///
+  /// The generated constructor records both mnemonic-wide and encoding-form
+  /// requirements. Decoder instances compare this mask with the immutable
+  /// feature set of their concrete GPU target before exposing the instruction.
+  [[nodiscard]] uint64_t required_isa_features() const { return required_isa_features_; }
+
   /// @brief Produce the disassembly string for this instruction.
   ///
   /// @details On first call, generates and caches the disassembly string. Subsequent
@@ -339,20 +393,27 @@ public:
   /// @returns Reference to the disassembly string.
   const std::string &disassemble() const {
     if (disassembly_.empty()) {
-      disassembly_ += mnemonic_;
+      append_mnemonic(disassembly_);
       bool first = true;
       // TODO: Include explicit fieldless operands (and/or implicit ones too).
       for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
         if (dst_operands_[operand_index]->is_fieldless())
           continue;
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += dst_operands_[operand_index]->name();
+        append_dst_operand(disassembly_, operand_index);
         first = false;
       }
       for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
         if (src_operands_[operand_index]->size_bits() == 0 ||
             src_operands_[operand_index]->is_fieldless())
           continue;
+        if (omit_repeated_destination_sources_) {
+          bool repeats_dst = false;
+          for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index)
+            repeats_dst |= src_operands_[operand_index] == dst_operands_[dst_index];
+          if (repeats_dst)
+            continue;
+        }
         disassembly_ += (first ? " " : ", ");
         append_src_operand(disassembly_, operand_index);
         first = false;
@@ -365,6 +426,26 @@ public:
 protected:
   friend class Decoder;
 
+  void
+  set_memory_issue_info(std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
+                        bool exec_masked = true) {
+    memory_issue_info_ = {};
+    memory_issue_info_.exec_masked = exec_masked;
+    for (const auto obligation : counter_obligations) {
+      if (!obligation.valid())
+        continue;
+      if (memory_issue_info_.num_counter_obligations_ ==
+          amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS) {
+        assert(false && "too many memory counter obligations");
+        break;
+      }
+      memory_issue_info_.counter_obligations_[memory_issue_info_.num_counter_obligations_++] =
+          obligation;
+    }
+    assert(!memory_issue_info_.empty());
+    flags_ |= MEMORY_OP;
+  }
+
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;
   /// @brief Instruction's source operands (max 6). KEEP IN SYNC with
@@ -376,10 +457,23 @@ protected:
   /// CodeGenerator._DST_OPERANDS_CAPACITY; resize both together.
   std::array<Operand *, 3> dst_operands_{};
   uint8_t num_dst_ = 0;
-  /// @brief Append modifier flags to the disassembly string (e.g. " sc0 sc1").
-  /// Overridden by memory encoding bases that have flag bits to display.
+  /// @brief Whether read/write operands are rendered only in destination position.
+  bool omit_repeated_destination_sources_ = false;
+  static_assert(sizeof(amdgpu::MemoryIssueInfo) <= 6,
+                "memory issue metadata must fit Instruction's existing padding");
+  /// @brief AMDGPU issue metadata; kept here to use padding before disassembly_.
+  amdgpu::MemoryIssueInfo memory_issue_info_;
+  /// @brief Append the encoding-specific mnemonic spelling used by disassembly.
+  /// The default matches mnemonic(); encoding decorations may override it.
+  virtual void append_mnemonic(std::string &out) const { out += mnemonic_; }
+  /// @brief Append encoding attributes to the disassembly string (e.g. cache flags or DPP state).
+  /// Overridden by encoding bases that have instruction attributes to display.
   /// Default: no modifiers. Called lazily by disassemble().
   virtual void build_modifiers(std::string & /*out*/) const {}
+  /// @brief Append one destination operand to textual disassembly.
+  virtual void append_dst_operand(std::string &out, uint8_t operand_index) const {
+    out += dst_operands_[operand_index]->name();
+  }
   /// @brief Append one source operand to textual disassembly.
   virtual void append_src_operand(std::string &out, uint8_t operand_index) const {
     out += src_operands_[operand_index]->name();
@@ -395,6 +489,11 @@ protected:
   uint16_t encoding_id_ = 0;
   /// @brief Opcode within the encoding format.
   uint16_t opcode_ = 0;
+  /// @brief Feature mask emitted from the ISA-variant manifest.
+  // A 32-bit mask fits in the alignment padding before src_loc_. Keep this
+  // compact: Instruction is on decode/simulation hot paths and every generated
+  // instruction derives from it.
+  uint32_t required_isa_features_ = 0;
   /// @brief Source byte offset assigned at construction or by Decoder::decode().
   uint64_t src_loc_ = 0;
 
@@ -418,6 +517,12 @@ public:
   /// @param[in] mnemonic Human-readable mnemonic string.
   IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn, uint64_t src_loc = 0)
       : Instruction(mnemonic, exec_fn, src_loc) {}
+
+  /// @brief Accept encodings for formats without additional validation.
+  template <typename... Args>
+  static constexpr Result validate_encoding([[maybe_unused]] Args &&...args) noexcept {
+    return Result::success();
+  }
 
   /// @brief Helper to create an execute dispatch trampoline for a concrete type.
   ///

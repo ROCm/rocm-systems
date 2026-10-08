@@ -173,7 +173,8 @@ if it would result in a better performance.
 
 NCCL_IB_HCA
 -----------
-The ``NCCL_IB_HCA`` variable specifies which Host Channel Adapter (RDMA) interfaces to use for communication.
+The ``NCCL_IB_HCA`` variable specifies which Host Channel Adapter (RDMA) interfaces to use for communication. On Windows,
+NetworkDirect reuses it to select adapters by Windows interface alias.
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -203,7 +204,33 @@ Examples:
 Note: using ``mlx5_1`` without a preceding ``=`` will select ``mlx5_1`` as well as ``mlx5_10`` to ``mlx5_19``, if they exist.
 It is therefore always recommended to add the ``=`` prefix to ensure an exact match.
 
+For NetworkDirect, specify comma-separated Windows interface aliases without IB port, rail, or plane fields. For example,
+``=Ethernet 4,Ethernet 10`` selects exactly those two interfaces.
+
 Note: There is a fixed upper limit of 32 Host Channel Adapter (HCA) devices supported in NCCL.
+
+NCCL_IB_RAIL_POLICY
+-------------------
+(since 2.30.5)
+
+Controls automatic rail and plane assignment for supported ConnectX SuperNIC devices. This can be used with
+``NCCL_NET_MERGE_POLICY=RAIL`` to fuse only ports that belong to the same auto-detected rail.
+The automatic rail and plane assignment will not overwrite the rails or planes given by the user (see ``NCCL_IB_HCA``).
+
+Values accepted
+^^^^^^^^^^^^^^^
+
+``NONE`` : Disable automatic rail and plane assignment.
+
+``CX9`` (default) : Currently only supported on aarch64 systems with CX9 HCAs, NCCL will assign the rails and planes assuming the reference architecture configuration.
+
+The per-socket rail layout can be selected explicitly with a suffix:
+
+``CX9:FLIP`` : Flipped layout ``[0 1 | 1 0]``. Same as ``CX9``.
+
+``CX9:ALT`` : Alternate layout ``[0 1 0 1]``.
+
+``CX9:BLOCK`` : Block layout ``[0 0 1 1]``.
 
 NCCL_IB_TIMEOUT
 ---------------
@@ -326,6 +353,45 @@ Values accepted
 ^^^^^^^^^^^^^^^
 The default value is 2.
 
+NCCL_IB_PKEY
+------------
+(since 2.1.4)
+
+The ``NCCL_IB_PKEY`` variable selects the InfiniBand partition key (PKey) used by
+NCCL's queue pairs by its **index** into the local port's PKey table.
+
+On a partitioned fabric the subnet manager may place the same PKey at a different
+table index on different hosts, so a fixed index is not necessarily portable
+across the fabric. In that case, select the partition by value with
+``NCCL_IB_PKEY_VALUE`` instead.
+
+For more information, see the InfiniBand specification Volume 1
+or vendor documentation.
+
+Values accepted
+^^^^^^^^^^^^^^^
+The default value is 0 (the first entry of the PKey table).
+
+NCCL_IB_PKEY_VALUE
+------------------
+(since 2.31)
+
+The ``NCCL_IB_PKEY_VALUE`` variable selects the InfiniBand partition key (PKey)
+by its **value** (for example ``0x8111``) rather than by its table index. At
+connection setup NCCL scans the local port's PKey table with ``ibv_query_pkey()``
+and resolves the value to the matching index, so the same setting is portable
+across hosts even when the subnet manager places the PKey at different indices.
+The membership bit (``0x8000``) is masked out during the comparison, so full and
+limited members of a partition both match.
+
+When both ``NCCL_IB_PKEY_VALUE`` and ``NCCL_IB_PKEY`` are set,
+``NCCL_IB_PKEY_VALUE`` takes precedence. If the requested value is not present in
+the local PKey table, NCCL fails the connection with a warning.
+
+Values accepted
+^^^^^^^^^^^^^^^
+The default value is -1 (unset), in which case the ``NCCL_IB_PKEY`` index is used.
+
 NCCL_IB_SL
 ----------
 (since 2.1.4)
@@ -367,6 +433,25 @@ Values accepted
 ^^^^^^^^^^^^^^^
 The default value is the traffic class set by NCCL_IB_TC, which defaults to 0 if not set.
 
+NCCL_GIN_IB_TC
+--------------
+(since 2.30.7)
+
+Defines the InfiniBand traffic class for GPU-initiated networking (GIN)
+connections, independently of NCCL_IB_TC. GIN traffic can then use a different
+RoCE traffic class from the collective and point-to-point connections, which
+keep using NCCL_IB_TC. The one-sided host RMA operations run on the same IB
+proxy backend and therefore also use this traffic class.
+
+In RCCL, only the IB proxy GIN backend (``NCCL_GIN_TYPE=2``) reads this variable.
+The RCCL device API and GIN how-to describes the other backends.
+
+Values accepted
+^^^^^^^^^^^^^^^
+The default value is the traffic class set by NCCL_IB_TC. If neither is set, GIN
+uses the device communicator ``ginTrafficClass``, then the communicator traffic
+class, and 0 if none is set.
+
 NCCL_IB_RETURN_ASYNC_EVENTS
 ---------------------------
 (since 2.23)
@@ -377,6 +462,28 @@ If enabled, NCCL will also stop IB communications upon fatal IB asynchronous eve
 Values accepted
 ^^^^^^^^^^^^^^^
 The default value is 1, set to 0 to disable
+
+NCCL_IB_EVENT_BASED_LB
+----------------------
+(since 2.31)
+
+Enables event-based load balancing across the physical devices of a fused (virtual) IB device (see ``NCCL_IB_MERGE_NICS``).
+By default, NCCL splits each message equally across the devices of a fused device. When this variable is enabled, NCCL
+instead splits messages proportionally to the current link speed of each device. The current link speed of a device is
+queried with the ``ibv_query_port_speed`` API whenever that device reports an ``IBV_EVENT_DEVICE_SPEED_CHANGE``
+asynchronous event, and the distribution is recomputed at runtime from the new speeds.
+
+This feature is intended for NICs that expose a single interface with multiple planes underneath, where the interface
+can continue to operate at a reduced speed when a subset of its planes goes down. A full interface or NIC going down
+is considered a failure and is handled by the failover-recovery feature.
+
+Detecting speed changes requires ``IBV_EVENT_DEVICE_SPEED_CHANGE`` and ``ibv_query_port_speed`` support in the
+InfiniBand verbs library (``IBVERBS_1.16`` or newer). This variable has no effect on non-fused devices, since all data
+is sent on their single physical device regardless of its speed.
+
+Values accepted
+^^^^^^^^^^^^^^^
+The default value is 0 (data is split equally across devices), set to 1 to enable.
 
 NCCL_OOB_NET_ENABLE
 -------------------
@@ -446,7 +553,7 @@ Forces NCCL to use a specific network, for example to make sure NCCL uses an ext
 
 Values accepted
 ^^^^^^^^^^^^^^^
-The value of NCCL_NET has to match exactly the name of the NCCL network used (case-insensitive). Internal network names are "IB" (generic IB verbs) and "Socket" (TCP/IP sockets). External network plugins define their own names. Default value is undefined.
+The value of NCCL_NET has to match exactly the name of the NCCL network used (case-insensitive). On Linux, internal network names are "IB" (generic IB verbs) and "Socket" (TCP/IP sockets). On Windows, internal network names are "NetworkDirect" and "Socket"; when NCCL_NET is unset, NCCL tries NetworkDirect before falling back to Socket. External network plugins define their own names. Default value is undefined.
 
 NCCL_NET_PLUGIN
 ---------------
@@ -454,28 +561,73 @@ NCCL_NET_PLUGIN
 
 Set it to either a suffix string or to a library name to choose among multiple NCCL net plugins. This setting will cause NCCL to look for the net plugin library using the following strategy:
  - If NCCL_NET_PLUGIN is set, attempt loading the library with name specified by NCCL_NET_PLUGIN;
- - If NCCL_NET_PLUGIN is set and previous failed, attempt loading libnccl-net-<NCCL_NET_PLUGIN>.so;
- - If NCCL_NET_PLUGIN is not set, attempt loading libnccl-net.so;
+ - If NCCL_NET_PLUGIN is set and previous failed, attempt loading librccl-net-<NCCL_NET_PLUGIN>.so;
+ - If NCCL_NET_PLUGIN is not set, attempt loading librccl-net.so;
  - If no plugin was found (neither user defined nor default), use internal network plugin.
 
-For example, setting ``NCCL_NET_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``libnccl-net-foo.so`` (provided that it exists on the system).
+For example, setting ``NCCL_NET_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-net-foo.so`` (provided that it exists on the system).
 
 Values accepted
 ^^^^^^^^^^^^^^^
 
 Plugin suffix, plugin file name, or "none".
 
+.. _NCCL_GIN_PLUGIN:
+
+NCCL_GIN_PLUGIN
+---------------
+(since 2.29.3)
+
+Set it to either a suffix string or to a library name to choose among multiple NCCL GIN (GPU-Initiated Networking) plugins; GIN is used by the device API. It also accepts a comma-separated list which are all considered. This setting will cause NCCL to look for the GIN plugin library using the following strategy, applied to each entry of the list:
+ - If NCCL_GIN_PLUGIN is set, attempt loading the library with name specified by NCCL_GIN_PLUGIN;
+ - If NCCL_GIN_PLUGIN is set and previous failed, attempt loading libnccl-gin-<NCCL_GIN_PLUGIN>.so;
+ - If NCCL_GIN_PLUGIN is not set, attempt loading libnccl-gin.so;
+ - Additionally, look for the GIN symbols in the NET plugin;
+ - Additionally, use NCCL's internal GIN implementations.
+
+For example, setting ``NCCL_GIN_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``libnccl-gin-foo.so`` (provided that it exists on the system).
+
+NCCL does not stop at the first plugin that initializes successfully: every GIN implementation it manages to initialize stays available, and the one to use is picked when a device communicator is created. Only one implementation is chosen per backend using the rank-order from above.
+
+Values accepted
+^^^^^^^^^^^^^^^
+
+Comma-separated list of plugin suffixes and/or plugin file names, or "none".
+
+
+.. _NCCL_RMA_PLUGIN:
+
+NCCL_RMA_PLUGIN
+---------------
+(since 2.30.7)
+
+Set it to either a suffix string or to a library name to choose among multiple NCCL RMA plugins. The RMA plugin implements host-driven, one-sided network operations; it is used by the host RMA API and by the GIN proxy implementation. It also accepts a comma-separated list, which are tried in order. This setting will cause NCCL to look for the RMA plugin library using the following strategy:
+ - If NCCL_RMA_PLUGIN is set, attempt loading the library with name specified by NCCL_RMA_PLUGIN;
+ - If NCCL_RMA_PLUGIN is set and previous failed, attempt loading libnccl-rma-<NCCL_RMA_PLUGIN>.so;
+ - If NCCL_RMA_PLUGIN is not set, attempt loading libnccl-rma.so;
+ - If no plugin was found look for the RMA symbols in the GIN plugin, then in the NET plugin;
+ - If no plugin was found (neither user defined nor default), use the internal RMA plugin over InfiniBand.
+
+For example, setting ``NCCL_RMA_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``libnccl-rma-foo.so`` (provided that it exists on the system).
+
+The first plugin that initializes successfully and reports at least one usable device is the one that is used; the remaining external plugins are then disabled for the lifetime of the process.
+
+Values accepted
+^^^^^^^^^^^^^^^
+
+Comma-separated list of plugin suffixes and/or plugin file names, or "none".
+
 NCCL_TUNER_PLUGIN
 -----------------
 
 Set it to either a suffix string or to a library name to choose among multiple NCCL tuner plugins. This setting will cause NCCL to look for the tuner plugin library using the following strategy:
  - If NCCL_TUNER_PLUGIN is set, attempt loading the library with name specified by NCCL_TUNER_PLUGIN;
- - If NCCL_TUNER_PLUGIN is set and previous failed, attempt loading libnccl-net-<NCCL_TUNER_PLUGIN>.so;
- - If NCCL_TUNER_PLUGIN is not set, attempt loading libnccl-tuner.so;
+ - If NCCL_TUNER_PLUGIN is set and previous failed, attempt loading librccl-tuner-<NCCL_TUNER_PLUGIN>.so;
+ - If NCCL_TUNER_PLUGIN is not set, attempt loading librccl-tuner.so;
  - If no plugin was found look for the tuner symbols in the net plugin (refer to ``NCCL_NET_PLUGIN``);
  - If no plugin was found (neither through NCCL_TUNER_PLUGIN nor NCCL_NET_PLUGIN), use internal tuner plugin.
 
-For example, setting ``NCCL_TUNER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``libnccl-tuner-foo.so`` (provided that it exists on the system).
+For example, setting ``NCCL_TUNER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-tuner-foo.so`` (provided that it exists on the system).
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -487,12 +639,18 @@ NCCL_PROFILER_PLUGIN
 
 Set it to either a suffix string or to a library name to choose among multiple NCCL profiler plugins. This setting will cause NCCL to look for the profiler plugin library using the following strategy:
  - If NCCL_PROFILER_PLUGIN is set, attempt loading the library with name specified by NCCL_PROFILER_PLUGIN;
- - If NCCL_PROFILER_PLUGIN is set and previous failed, attempt loading libnccl-profiler-<NCCL_PROFILER_PLUGIN>.so;
- - If NCCL_PROFILER_PLUGIN is not set, attempt loading libnccl-profiler.so;
+ - If NCCL_PROFILER_PLUGIN is set and previous failed, attempt loading librccl-profiler-<NCCL_PROFILER_PLUGIN>.so;
+ - If NCCL_PROFILER_PLUGIN is not set, attempt loading librccl-profiler.so;
  - If no plugin was found (neither user defined nor default), do not enable profiling.
  - If NCCL_PROFILER_PLUGIN is set to ``STATIC_PLUGIN``, the plugin symbols are searched in the program binary.
 
-For example, setting ``NCCL_PROFILER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``libnccl-profiler-foo.so`` (provided that it exists on the system).
+For example, setting ``NCCL_PROFILER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-profiler-foo.so`` (provided that it exists on the system).
+
+The RCCL Inspector plugin (since RCCL 2.29) is loaded by pointing this variable
+at ``librccl-profiler-inspector.so`` and setting ``NCCL_INSPECTOR_ENABLE=1``.
+Prometheus textfile mode is ``NCCL_INSPECTOR_PROM_DUMP=1``. Metric names stay
+``nccl_*``; ``# HELP`` text and the ``gpu`` label are RCCL/HIP. See
+``docs/how-to/using-rccl-inspector-plugin.rst``.
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -506,9 +664,9 @@ NCCL_ENV_PLUGIN
 The ``NCCL_ENV_PLUGIN`` variable can be used to let NCCL load an external environment plugin. Set it to either a library name or a suffix string to choose among multiple NCCL environment plugins. This setting will cause NCCL to look for the environment plugin library using the following strategy:
  - If ``NCCL_ENV_PLUGIN`` is set to a library name, attempt loading that library (e.g.
    ``NCCL_ENV_PLUGIN=/path/to/library/libfoo.so`` will cause NCCL to try to load ``/path/to/library/libfoo.so``);
- - If ``NCCL_ENV_PLUGIN`` is set to a suffix string, attempt loading ``libnccl-env-<NCCL_ENV_PLUGIN>.so`` (e.g.
-   ``NCCL_ENV_PLUGIN=foo`` will cause NCCL to try to load ``libnccl-env-foo.so`` from the system library path);
- - If ``NCCL_ENV_PLUGIN`` is not set, attempt loading the default ``libnccl-env.so`` library from the system library path;
+ - If ``NCCL_ENV_PLUGIN`` is set to a suffix string, attempt loading ``librccl-env-<NCCL_ENV_PLUGIN>.so`` (e.g.
+   ``NCCL_ENV_PLUGIN=foo`` will cause NCCL to try to load ``librccl-env-foo.so`` from the system library path);
+ - If ``NCCL_ENV_PLUGIN`` is not set, attempt loading the default ``librccl-env.so`` library from the system library path;
  - If ``NCCL_ENV_PLUGIN`` is set to "none", explicitly disable the external plugin and use the internal one;
  - If no plugin was found (neither user defined nor default) or the variable is set to "none", use the internal environment
    plugin.
@@ -518,11 +676,20 @@ Values accepted
 
 Plugin library name (e.g., ``/path/to/library/libfoo.so``), suffix (e.g., ``foo``), or "none".
 
+.. _NCCL_IGNORE_CPU_AFFINITY:
+
 NCCL_IGNORE_CPU_AFFINITY
 ------------------------
 (since 2.4.6)
 
-The ``NCCL_IGNORE_CPU_AFFINITY`` variable can be used to cause NCCL to ignore the job's supplied CPU affinity and instead use the GPU affinity only.
+The ``NCCL_IGNORE_CPU_AFFINITY`` variable controls whether NCCL honors the CPU affinity inherited from the launcher or parent process.
+By default, NCCL uses the intersection of the inherited CPU affinity and the CPU affinity associated with the GPU.
+If the intersection is empty, NCCL leaves the inherited CPU affinity unchanged.
+Setting this variable to 1 makes NCCL ignore the inherited affinity and use the GPU affinity only.
+NCCL still cannot use CPUs excluded by cpuset, cgroup, or container restrictions.
+
+This setting does not change process placement or memory binding.
+See :ref:`cpu_memory_affinity` for placement guidance.
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -550,11 +717,41 @@ Values accepted
 ^^^^^^^^^^^^^^^
 VERSION - Prints the NCCL version at the start of the program.
 
-WARN - Prints an explicit error message whenever any NCCL call errors out.
+WARN - Prints error messages when NCCL calls return an error code.
+
+ATTN (Attention) - Prints WARN messages plus informational notices (cleanup failures, configuration overrides, error backtraces, async event notifications). (since 2.32)
 
 INFO - Prints debug information.
 
 TRACE - Prints replayable trace information on every call.
+
+.. _NCCL_DEBUG_LEVELS:
+
+NCCL_DEBUG_LEVELS
+-----------------
+(since 2.32)
+
+The ``NCCL_DEBUG_LEVELS`` variable adds individual levels to the inclusive
+selection made by ``NCCL_DEBUG``. The effective selection is the logical union
+of the levels selected by both variables. The value is a comma-separated list
+of ``VERSION``, ``WARN``, ``ATTN``, ``INFO``, ``ABORT``, ``TRACE``, or ``ALL``.
+
+For example, the following maintains ``WARN`` as the baseline while adding
+``ATTN`` on NCCL versions that support this variable. ``NCCL_DEBUG=WARN``
+selects ``VERSION`` and ``WARN``; adding ``ATTN`` produces an effective
+selection of ``VERSION,WARN,ATTN``:
+
+.. code:: shell
+
+    NCCL_DEBUG=WARN NCCL_DEBUG_LEVELS=ATTN ./my_app
+
+Older NCCL versions ignore ``NCCL_DEBUG_LEVELS`` and retain the ``WARN``
+baseline. Unknown level names are ignored so a site-wide setting can include
+levels introduced by a newer NCCL version without disabling recognized levels.
+
+Do not set ``NCCL_DEBUG=ATTN`` as a site-wide setting in a mixed-version
+deployment. NCCL versions before 2.32 do not recognize ``ATTN`` and fall back
+to no debug logging. Use ``NCCL_DEBUG=WARN NCCL_DEBUG_LEVELS=ATTN`` instead.
 
 .. _NCCL_DEBUG_FILE:
 
@@ -651,13 +848,13 @@ which log lines get a timestamp depending upon the level of the log.
 Value accepted
 ^^^^^^^^^^^^^^
 The value should be a comma separated list of the levels which should
-have the timestamp. Valid levels are: ``VERSION``, ``WARN``, ``INFO``,
-``ABORT``, and ``TRACE``. In addition, ``ALL`` can be used to turn it
-on for all levels. Setting it to an empty value disables it for all
-levels. If the value is prefixed with a caret (``^``) then the listed
-levels will NOT log a timestamp, and the rest will.
-The default is to enable timestamps for ``WARN``, but disable it for
-the rest.
+have the timestamp. Valid levels are: ``VERSION``, ``WARN``, ``ATTN``,
+``INFO``, ``ABORT``, and ``TRACE``. In addition, ``ALL`` can be used to
+turn it on for all levels. Setting it to an empty value disables it for
+all levels. If the value is prefixed with a caret (``^``) then the
+listed levels will NOT log a timestamp, and the rest will.
+The default is to enable timestamps for ``WARN`` and ``ATTN``, but
+disable it for the rest.
 
 For example, ``NCCL_DEBUG_TIMESTAMP_LEVELS=WARN,INFO,TRACE`` will turn
 it on for warnings, info logs, and traces. Or,
@@ -701,6 +898,39 @@ Set multiple non-legacy policies with the ``|`` operator.
 
 For more explanation about NCCL policies, please see :ref:`cta_policy_flags`.
 
+NCCL_CE_CHUNK_SIZE
+------------------
+(since 2.32)
+
+Chunk size, in bytes, used by copy-engine (CE) collectives when a batched copy requests round-robin chunking.
+Chunking is opt-in per batch, so this only affects batches that ask for it.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 8388608 (8 MiB).
+
+NCCL_CE_INTRA_GPU_MEMCPY_ENABLE
+-------------------------------
+(since 2.32)
+
+When ``NCCL_CTA_POLICY`` is ``ZERO``, copy-engine collectives request that intra-GPU copies overlap with compute, which
+offloads those self-copies to the copy engine. Set to 0 to leave intra-GPU copies on the compute units instead.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 1 (enabled); set to 0 to disable. RCCL always requested the overlap before this variable existed, so the
+default keeps that behavior.
+
+NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE
+-------------------------------------
+(since 2.32)
+
+Selects the inter-node rail algorithm of the hierarchical copy-engine AllGather.
+
+Values accepted
+^^^^^^^^^^^^^^^
+A positive value selects the ring algorithm. 0 or a negative value keeps the direct algorithm. Default is -1 (direct).
+
 NCCL_NETDEVS_POLICY
 -------------------
 (since 2.28)
@@ -711,11 +941,10 @@ For each GPU, NCCL detects automatically available network devices, taking into 
 Value accepted
 ^^^^^^^^^^^^^^
 
-If set to ``AUTO`` (default), NCCL also takes into account the other GPUs in the same communicator in order to assign network devices.
+By default, NCCL assigns each GPU to network devices by considering the set of available devices, as well as other GPUs in the same communicator.
 In specific scenarios, this policy might lead to different GPUs from different communicators sharing the same network devices, and therefore impacts performance.
 
 If set to ``MAX:N``, NCCL uses up to N of the network devices available to each GPU.
-This is intended to be used when device sharing happens with ``AUTO`` and impacts the performance.
 
 If set to ``ALL``, NCCL will use all the available network devices for each GPU, disregarding other GPUs.
 
@@ -740,8 +969,10 @@ multiple ranks per GPU are detected. If ``NCCL_NVLS_ENABLE`` is set to 2 (the de
 be silently disabled.
 
 Disclaimer: This is currently an experimental feature, and is still being tuned. It is not
-compatible with all configurations. It may exhaust resources and lock NCCL. If erroring or hanging,
-NCCL may benefit from lower limits on NCCL_MAX_CTAS and NCCL_NET_GDR_LEVEL=LOC.
+compatible with all configurations. It may exhaust resources and lock NCCL.
+Multiple threads in the same process controlling different ranks of the same communicator which
+are on the same device is not currently supported.
+If erroring or hanging, NCCL may benefit from lower limits on NCCL_MAX_CTAS and NCCL_NET_GDR_LEVEL=LOC.
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -759,7 +990,14 @@ Value accepted
 ^^^^^^^^^^^^^^
 A path to an accessible file describing part or all of the topology.
 
-Note: For multi-node NVLink systems, despite NCCL_TOPO_DUMP_FILE producing a file with the full NVLink domain topology, NCCL_TOPO_FILE should only include the single node topology.
+The topology file must describe the topology of a single host (even for multi-node NVLink
+systems).
+
+``NCCL_TOPO_DUMP_FILE`` produces a file containing the topology of the NVLink domain.
+For multi-node NVLink systems, such a file should not be used directly as input to ``NCCL_TOPO_FILE`` without first
+trimming it to a single host's topology.
+To obtain a suitable topology file, either use ``NCCL_TOPO_DUMP_FILE`` from a single-host run or
+manually extract a single host's portion from a multi-host dump.
 
 NCCL_TOPO_DUMP_FILE
 -------------------
@@ -771,7 +1009,11 @@ Value accepted
 ^^^^^^^^^^^^^^
 A path to a file which will be created or overwritten.
 
-Note: For multi-node NVLink systems, the dumped file will contain the full NVLink domain topology.
+The dumped file reflects the topology as seen by NCCL. For multi-node NVLink systems, the file
+contains the topology from all the hosts that are part of the same NVLink domain. This file is
+useful for debugging and inspection, but should be reduced to a sigle host before use with
+``NCCL_TOPO_FILE`` (see the notes above).
+
 
 NCCL_SET_THREAD_NAME
 --------------------
@@ -977,12 +1219,13 @@ This is deprecated in 2.9 and may be removed in future versions.
 NCCL_IB_DISABLE
 ---------------
 
-The ``NCCL_IB_DISABLE`` variable prevents the IB/RoCE transport from being used by NCCL. Instead, NCCL will fall back to
-using IP sockets.
+The ``NCCL_IB_DISABLE`` variable prevents the IB/RoCE transport from being used by NCCL. On Windows, the same variable
+also disables the NetworkDirect transport. NCCL will instead fall back to another available transport such as IP sockets.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-Define and set to 1 to disable the use of InfiniBand Verbs for communication (and force another method, e.g. IP sockets).
+Define and set to 1 to disable the use of InfiniBand Verbs and NetworkDirect for communication (and force another method,
+e.g. IP sockets).
 
 NCCL_IB_AR_THRESHOLD
 --------------------
@@ -1014,6 +1257,7 @@ NCCL_IB_QPS_PER_CONNECTION
 
 Number of IB queue pairs to use for each connection between two ranks. This can be useful on multi-level fabrics which need multiple queue pairs to have good routing entropy.
 See ``NCCL_IB_SPLIT_DATA_ON_QPS`` for different ways to split data on multiple QPs, as it can affect performance.
+NetworkDirect reuses this variable as the QP count per physical adapter in a connection.
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -1165,6 +1409,46 @@ Values accepted
 0 or 1. Define and set to 1 to use GPU Direct RDMA to send data to the NIC directly (bypassing CPU).
 
 Before 2.4.2, the default value is 0 for all platforms. Since 2.4.2, the default value is 1 for NVLink-based platforms and 0 otherwise.
+
+NCCL_GDRCOPY_ENABLE
+-------------------
+The ``NCCL_GDRCOPY_ENABLE`` variable enables GDRCopy support for CPU-accessible CUDA memory used by NCCL internal control structures.
+
+When enabled, NCCL first tries to load ``libgdrapi.so``. If the library is not available or cannot initialize, NCCL can use its internal Linux CUDA DMA-BUF mmap backend when the CUDA driver and GPU support it.
+
+Values accepted
+^^^^^^^^^^^^^^^
+0 or 1. Default value is 0 (disabled).
+
+NCCL_GDRCOPY_FIFO_ENABLE
+------------------------
+The ``NCCL_GDRCOPY_FIFO_ENABLE`` variable controls whether the communicator work FIFO is allocated in GDRCopy-mapped CUDA memory when GDRCopy support is enabled.
+
+When disabled, NCCL allocates the work FIFO in CUDA host memory instead.
+
+Values accepted
+^^^^^^^^^^^^^^^
+0 or 1. Default value is 1 (enabled).
+
+NCCL_GDRCOPY_SYNC_ENABLE
+------------------------
+The ``NCCL_GDRCOPY_SYNC_ENABLE`` variable controls whether NCCL uses GDRCopy-mapped CUDA memory for network proxy synchronization words such as connection head and tail pointers.
+
+On platforms where NIC writes use PCIe and GPU control synchronization uses a C2C path, enabling this option can avoid an additional network flush when NCCL can map the synchronization word through PCIe. When disabled, NCCL uses the regular host-memory control path and will still issue network flushes when topology requires them.
+
+Values accepted
+^^^^^^^^^^^^^^^
+0 or 1. Default value is 1 (enabled).
+
+NCCL_GDRCOPY_FLUSH_ENABLE
+-------------------------
+The ``NCCL_GDRCOPY_FLUSH_ENABLE`` variable controls whether NCCL uses a GDRCopy-mapped CUDA memory read as the receive-side GDRDMA visibility flush.
+
+When disabled, NCCL uses the network transport ``iflush`` callback for receive buffers that require a flush. When enabled, NCCL uses a CPU read from GDRCopy-mapped CUDA memory to force PCIe write visibility.
+
+Values accepted
+^^^^^^^^^^^^^^^
+0 or 1. Default value is 0 (disabled).
 
 NCCL_NET_SHARED_BUFFERS
 -----------------------
@@ -1494,12 +1778,14 @@ CUDA graph capture.
 .. warning::
 
    ``NCCL_GRAPH_STREAM_ORDERING=0`` together with **graph mixing** (communicator
-   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. If stream
-   ordering is disabled for a communicator, **graph mixing must be off**—use
-   ``graphUsageMode`` ``0`` or ``1`` (and note that :ref:`NCCL_GRAPH_MIXING_SUPPORT`
-   ``1`` forces ``graphUsageMode=2`` at init, overriding an explicit lower mode).
-   Workloads that require mixing must keep the default ``1``. The same rule applies
-   to per-communicator :c:macro:`graphStreamOrdering` ``0``.
+   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. NCCL emits
+   a warning, forces ``graphStreamOrdering`` to ``1``, and continues communicator
+   creation successfully. If stream ordering is disabled for a communicator,
+   **graph mixing must be off**—use ``graphUsageMode`` ``0`` or ``1`` (and note
+   that :ref:`NCCL_GRAPH_MIXING_SUPPORT` ``1`` forces ``graphUsageMode=2`` at init,
+   overriding an explicit lower mode). Workloads that require mixing must keep the
+   default ``1``. The same rule applies to per-communicator
+   :c:macro:`graphStreamOrdering` ``0``.
 
 When set to 1 (default), NCCL guarantees that communication kernels are executed
 in a serialized and deterministic order across graphs and communicators that share
@@ -1511,12 +1797,20 @@ The application is responsible for ensuring correct ordering of communication
 kernels.
 
 The same bypass can be selected per communicator with the
-:c:macro:`graphStreamOrdering` field in :ref:`ncclconfig`. When that
-field is ``0`` or ``1``, it overrides ``NCCL_GRAPH_STREAM_ORDERING`` for that
-communicator. Communicators on the same GPU may still set this option
+:c:macro:`graphStreamOrdering` field in :ref:`ncclconfig`. That field takes
+effect unless ``NCCL_GRAPH_STREAM_ORDERING`` is set to ``0`` or ``1``, which
+overrides the field on every communicator; any other value of the environment
+variable is ignored and leaves the field in
+effect. Communicators on the same GPU may still set this option
 differently; NCCL does not order them with respect to each other in that case,
 so the application's obligations below apply whenever the bypass is in effect
 for a communicator—see :c:macro:`graphStreamOrdering` for details.
+
+Communicators created by ``ncclCommSplit`` with ``splitShare`` share one
+internal serialization event with their parent. Ordering ``0`` on one such
+communicator must not be combined with ``graphUsageMode=2`` on another that
+shares those resources: the mixing guarantee depends on that shared event, and
+NCCL does not detect the conflict across communicators.
 
 .. admonition:: Application responsibilities
 
@@ -1546,6 +1840,36 @@ Value accepted
 ^^^^^^^^^^^^^^
 0 or 1. Default is 1 (enabled).
 
+.. _NCCL_RMA_EAGER_INIT:
+
+NCCL_RMA_EAGER_INIT
+-------------------
+(since 2.31)
+
+Controls when the collective one-sided RMA signal setup is initialized. When set
+to 0 (default), it is initialized at the first :c:func:`ncclCommWindowRegister`.
+Set to 1 to initialize it at communicator-init time instead; this is required if
+the communicator issues :c:func:`ncclSignal` or :c:func:`ncclWaitSignal` without
+first registering a window, which otherwise returns ``ncclInvalidUsage``.
+
+This can also be set per communicator with the :c:macro:`rmaEagerInit` field in
+:ref:`ncclconfig`; the environment variable takes precedence when set.
+
+Value accepted
+^^^^^^^^^^^^^^
+0 or 1. Default is 0 (init at first window registration).
+
+NCCL_RMA_IB_WR_BATCHSIZE
+------------------------
+(since 2.32)
+
+Maximum number of InfiniBand work requests the RMA proxy posts to a queue pair in one batch.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 64, which is also the maximum. Values below 2 are raised to 2, because one RMA operation can need two work
+requests (put and signal).
+
 NCCL_DMABUF_ENABLE
 ------------------
 (since 2.13)
@@ -1574,18 +1898,38 @@ NCCL_P2P_LL_THRESHOLD
 ---------------------
 (since 2.14)
 
-The ``NCCL_P2P_LL_THRESHOLD`` is the maximum message size that NCCL will use the LL protocol for P2P operations.
+The ``NCCL_P2P_LL_THRESHOLD`` is the maximum per-channel message size (in bytes) at or below which RCCL uses the legacy LL low-latency protocol for P2P (send/recv) operations. Above this size, RCCL uses the SIMPLE protocol. This threshold applies when the P2P latency path uses the legacy LL protocol (i.e. when the LL128 path is not active for the communicator). Because legacy LL carries roughly 2x wire overhead, it stops beating SIMPLE at relatively small sizes, so this defaults lower than ``NCCL_P2P_LL128_THRESHOLD``.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Decimal number. Default is 4096.
+
+NCCL_P2P_LL128_THRESHOLD
+------------------------
+(since 2.28)
+
+The ``NCCL_P2P_LL128_THRESHOLD`` is the maximum per-channel message size (in bytes) at or below which RCCL uses the LL128 low-latency protocol for P2P (send/recv) operations. Above this size, RCCL uses the SIMPLE protocol. This threshold is used instead of ``NCCL_P2P_LL_THRESHOLD`` whenever the LL128 P2P send/recv path is active (gfx942/gfx950 with ``NCCL_ALLOC_P2P_NET_LL_BUFFERS=1``, or gfx1250 with ``NCCL_P2P_LL128_ENABLE=1`` on rank counts that have no SendRecv window). On gfx1250 with ``ENABLE=1`` and 4, 8, or 16 ranks, ``ncclSend``/``ncclRecv`` use the message-size caps documented under ``NCCL_P2P_LL128_ENABLE`` instead of this per-channel threshold. LL128's much lower per-line flag overhead (~1/8 on gfx9, ~1/16 on gfx1250) keeps it faster than SIMPLE to larger per-channel sizes than legacy LL, so it can be set higher than ``NCCL_P2P_LL_THRESHOLD``. A value of 0 means no upper bound.
 
 Values accepted
 ^^^^^^^^^^^^^^^
 Decimal number. Default is 16384.
 
+NCCL_P2P_LL128_ENABLE
+---------------------
+(since 2.28)
+
+``NCCL_P2P_LL128_ENABLE`` controls gfx1250 LL128 send/recv. Default ``-1`` keeps the usual P2P path: legacy LL up to ``NCCL_P2P_LL_THRESHOLD`` (4 KiB per channel) and SIMPLE above it. Set to ``1`` to use LL128 for ``ncclSend``/``ncclRecv`` only (not AlltoAll) from 0 through these inclusive caps on 4 GPU/node: 1-node 4 GPU 1 MiB, 2-node 8 GPU 512 KiB, 4-node 16 GPU 256 KiB. Above the cap uses SIMPLE. Protocol is a function of message size, so mixed send/recv sizes under the cap are both LL128 and share one kernel. On other rank counts, ``ENABLE=1`` still uses ``NCCL_P2P_LL128_THRESHOLD``. Set to ``0`` to disable. gfx942/gfx950 do not use this flag; they select LL128 via ``NCCL_ALLOC_P2P_NET_LL_BUFFERS``. Internodal gfx1250 LL128 still needs the net staging buffer; RCCL allocates it when ``ENABLE=1`` even if ``NCCL_ALLOC_P2P_NET_LL_BUFFERS`` is unset.
+
+Values accepted
+^^^^^^^^^^^^^^^
+-1 (default: legacy LL then SIMPLE, no LL128), 0 (disabled), or 1 (force on). Default value is -1.
+
 NCCL_ALLOC_P2P_NET_LL_BUFFERS
 -----------------------------
 (since 2.14)
 
-``NCCL_ALLOC_P2P_NET_LL_BUFFERS`` instructs communicators to allocate dedicated LL buffers for all P2P network connections. This enables all ranks to use the LL protocol for latency-bound send and receive operations below ``NCCL_P2P_LL_THRESHOLD`` sizes.
-Intranode P2P transfers always have dedicated LL buffers allocated. If running all-to-all workloads with high numbers of ranks, this will result in a high scaling memory overhead.
+``NCCL_ALLOC_P2P_NET_LL_BUFFERS`` instructs communicators to allocate dedicated low-latency buffers for all P2P network connections. This enables all ranks to use the low-latency (LL128) protocol for latency-bound send and receive operations below ``NCCL_P2P_LL128_THRESHOLD`` sizes over the network.
+Intranode P2P transfers always have dedicated low-latency buffers allocated. If running all-to-all workloads with high numbers of ranks, this will result in a high scaling memory overhead.
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -1601,6 +1945,8 @@ Values accepted
 ^^^^^^^^^^^^^^^
 0 or 1. 1 indicates blocking communicators, and 0 indicates nonblocking communicators. The default value is undefined.
 
+.. _NCCL_CGA_CLUSTER_SIZE:
+
 NCCL_CGA_CLUSTER_SIZE
 ---------------------
 (since 2.16)
@@ -1615,6 +1961,8 @@ automatically choose the best value.
 Values accepted
 ^^^^^^^^^^^^^^^
 0 to 8. Default value is undefined.
+
+.. _NCCL_MAX_CTAS:
 
 NCCL_MAX_CTAS
 -------------
@@ -1643,6 +1991,8 @@ Values accepted
 ^^^^^^^^^^^^^^^
 Set to a positive integer value up to 64 (32 prior to 2.25). Default value is
 undefined.
+
+.. _NCCL_MIN_CTAS:
 
 NCCL_MIN_CTAS
 -------------
@@ -1701,6 +2051,17 @@ Values accepted
 ^^^^^^^^^^^^^^^
 Default is 1 (enabled), define and set to 0 to disable NIC merging
 
+NCCL_IB_SORT_MERGE_NICS
+-----------------------
+(since 2.32)
+
+When NICs are merged into one virtual device, sort the merged sub-devices by plane, so that sub-device indices line
+up by plane across all merged devices.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 0 (disabled) in RCCL; set to 1 to enable. Upstream NCCL enables it by default.
+
 NCCL_NET_MERGE_POLICY
 ---------------------
 (since 2.30.5)
@@ -1754,8 +2115,10 @@ NCCL_RAS_ENABLE
 ---------------
 (since 2.24)
 
-Enable NCCL's reliability, availability, and serviceability (RAS) subsystem, which can be used to query the health of
-NCCL jobs during execution (see :doc:`troubleshooting/ras`).
+Enable RCCL's reliability, availability, and serviceability (RAS) subsystem, which can be used to query the health of
+RCCL jobs during execution (see :doc:`troubleshooting/ras`).  The client binary is ``rcclras``.  Use ``rcclras -f json``
+for machine-parsable output; JSON key names follow the NCCL schema (``cuda_*``) but the values are HIP/amd-smi (see
+the mapping table in that page).
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -1768,9 +2131,10 @@ NCCL_RAS_ADDR
 (since 2.24)
 
 Specify the IP address and port number of a socket that the RAS subsystem will listen on for client connections. RAS
-can share this socket between multiple processes but that would not be desirable if multiple independent NCCL jobs share
+can share this socket between multiple processes but that would not be desirable if multiple independent RCCL jobs share
 a single node (and if those jobs belong to different users, the OS will not allow the socket to be shared). In such
-cases, each job should be started with a different value (e.g., ``localhost:12345``, ``localhost:12346``, etc.). Since
+cases, each job should be started with a different value (e.g., ``localhost:12345``, ``localhost:12346``, etc.) and
+queried with ``rcclras -p <port>``. The default ``28028`` is often already in use on shared cluster nodes. Since
 ``localhost`` is normally used, only those with access to the nodes where the job is running can connect to the socket.
 If desired, the address of an externally accessible network interface can be specified instead, which will make RAS
 accessible from other nodes (such as a cluster's head node), but that has security implications that should be
@@ -1788,14 +2152,68 @@ NCCL_RAS_TIMEOUT_FACTOR
 
 Specify the multiplier factor to apply to all the timeouts of the RAS subsystem. RAS relies on multiple timeouts,
 ranging from 5 to 60 seconds, to determine the state of the application and to maintain its internal communication, with
-complex interdependencies between different timeouts. This variable can be used to scale up all these timeouts in a
-safe, consistent manner, should any of the defaults turn out to be too small; e.g., if the NCCL application is subject
-to high-overhead debugging/tracing/etc., which makes its execution less predictable. If one wants to use the
-``ncclras`` client in such circumstances, its timeout may need to be increased as well (or disabled).
+complex interdependencies between different timeouts. This variable can be used to scale all these timeouts in a
+safe, consistent manner. Values greater than 1 increase the timeouts; e.g., if the RCCL application is subject
+to high-overhead debugging/tracing/etc., which makes its execution less predictable. Values between 0 and 1 reduce
+the timeouts and are primarily intended for testing. The ``rcclras`` client applies the same factor to its default
+socket timeouts.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-Default is 1; define and set to larger values to increase the timeouts.
+Default is 1. A positive floating-point number. Values less than or equal to 0 are ignored and replaced with 1.
+
+NCCL_PROGRESS_COUNTERS
+----------------------
+(since 2.32)
+
+Enable GPU-resident progress counters, which RAS uses to report how far each rank's collectives have progressed.
+Counters are only allocated when RAS is also enabled (``NCCL_RAS_ENABLE=1``).
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 0 (disabled); set to 1 to enable.
+
+NCCL_PROGRESS_COUNTER_MONITOR_POLL_MS
+-------------------------------------
+(since 2.32)
+
+Interval, in milliseconds, at which a per-GPU monitor thread copies the progress counters to host memory. Only used
+when ``NCCL_PROGRESS_COUNTERS`` is enabled.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 1000. Values below 50 are raised to 50.
+
+NCCL_PROGRESS_COUNTER_MONITOR_STALE_MS
+--------------------------------------
+(since 2.32)
+
+Time, in milliseconds, after which an unfinished progress-counter copy is reported as stale.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 5000. Values below 1000 are raised to 1000.
+
+NCCL_PROGRESS_COUNTER_MONITOR_STALE_WARN_SEC
+--------------------------------------------
+(since 2.32)
+
+Minimum time, in seconds, between two stale-copy messages for the same GPU.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 600. 0 or a negative value disables the messages.
+
+NCCL_DIAGNOSTICS_IB_BW_TIMEOUT
+------------------------------
+(since 2.32)
+
+Time limit, in seconds, for the network bandwidth check that ``NCCL_RUN_DIAGNOSTICS=1`` runs at communicator
+initialization. The check only runs when the communicator spans at least two nodes over the network transport.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Default is 5. Values below 1 are replaced with 5.
 
 .. _NCCL_LAUNCH_ORDER_IMPLICIT:
 
@@ -1804,6 +2222,10 @@ NCCL_LAUNCH_ORDER_IMPLICIT
 (since 2.26)
 
 Implicitly order NCCL operations from different communicators on the same device using the host program order. This ensures the operations will not deadlock. When the CUDA runtime and driver are 12.3+, overlapped execution is permitted. On older CUDA versions the operations will be serialized.
+
+For per-communicator configuration, see the :c:macro:`launchOrderImplicit`
+field in :ref:`ncclconfig`. If this environment variable is set, it overrides
+that communicator config field before initialization.
 
 Values accepted
 ^^^^^^^^^^^^^^^

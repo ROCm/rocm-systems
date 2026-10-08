@@ -1,24 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import ctypes
 import json
@@ -1732,8 +1714,9 @@ class TestGpuBenchmark(unittest.TestCase):
 
     def test_performance_get_gpu_reg_table_info(self):
         self.common.print_func_name("")
-        if self.TODO_SKIP_FAIL:
-            self.skipTest("Skipping test_performance_get_gpu_reg_table_info as it fails on MI300.")
+        self.skipTest(
+            "Skipping test_performance_get_gpu_reg_table_info as it causes resets on some MI3x systems."
+        )
 
         for i, processor in enumerate(self.processors):
             for reg_type_name, reg_type, reg_type_cond in common.REG_TYPES:

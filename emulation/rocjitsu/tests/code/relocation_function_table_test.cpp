@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "amdgpu_elf_test_support.h"
+#include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -172,7 +174,7 @@ std::vector<uint8_t> make_relocation_function_table_elf(std::span<const uint32_t
   return image;
 }
 
-std::vector<uint32_t> make_table_dispatch_text() {
+std::vector<uint32_t> make_table_dispatch_text(uint8_t soffset = 124, uint32_t ioffset = 0) {
   std::vector<uint32_t> words;
   auto append32 = [&](uint32_t word) { words.push_back(word); };
   auto append64 = [&](uint64_t encoding) {
@@ -194,6 +196,8 @@ std::vector<uint32_t> make_table_dispatch_text() {
   auto got_load = std::bit_cast<cdna5::SmemMachineInst>(uint64_t{0xf4002000u});
   got_load.sbase = 0;
   got_load.sdata = 2;
+  got_load.soffset = soffset;
+  got_load.ioffset = ioffset;
   append64(std::bit_cast<uint64_t>(got_load));
 
   auto table_load = got_load;
@@ -391,6 +395,30 @@ TEST(RelocationFunctionTable, DiscoversGotReferencedRelativeTextPointers) {
   EXPECT_EQ(tables[0].entries[1].target_text_offset, 12u);
 }
 
+TEST(RelocationFunctionTable, PreservesSizedTextFunctionGaps) {
+  const std::vector<uint32_t> text_words(12, 0xbf800000u);
+  const std::vector<test_support::TestTextFunction> functions = {
+      {.offset_word = 0, .words = 1},
+      {.offset_word = 4, .words = 2},
+      {.offset_word = 9, .words = 1},
+  };
+  const auto image = test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+      text_words, /*kernel1_entry_word=*/8, functions);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  const auto ranges = discover_text_function_symbol_ranges(object);
+  ASSERT_EQ(ranges.size(), functions.size());
+  EXPECT_EQ(ranges[0].start_offset, 0u);
+  EXPECT_EQ(ranges[0].size, 4u);
+  EXPECT_EQ(ranges[1].start_offset, 16u);
+  EXPECT_EQ(ranges[1].size, 8u);
+  EXPECT_EQ(ranges[2].start_offset, 36u);
+  EXPECT_EQ(ranges[2].size, 4u);
+  EXPECT_LT(ranges[0].start_offset + ranges[0].size, ranges[1].start_offset);
+  EXPECT_LT(ranges[1].start_offset + ranges[1].size, ranges[2].start_offset);
+}
+
 TEST(RelocationFunctionTable, IgnoresExplicitNonAllocatedRelocations) {
   auto image = make_relocation_function_table_elf();
   const std::array<Elf64_Rela, 2> metadata_relocations = {
@@ -535,10 +563,10 @@ TEST(RelocationFunctionTable, ResolvesDynamicDispatchThroughGotAndTableLoads) {
   const auto tables = discover_relocation_function_tables(object);
   ASSERT_EQ(tables.size(), 1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{40};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
   const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);
@@ -547,6 +575,25 @@ TEST(RelocationFunctionTable, ResolvesDynamicDispatchThroughGotAndTableLoads) {
   EXPECT_EQ(dispatches[0].source_getpc_offset, 0u);
   EXPECT_EQ(dispatches[0].source_address_add_offset, 4u);
   EXPECT_EQ(dispatches[0].source_table_address_vaddr, 0x3000u);
+}
+
+TEST(RelocationFunctionTable, GotSlotLoadRequiresAConstantZeroOffset) {
+  for (uint8_t soffset : {0, 4, 124})
+    for (uint32_t ioffset : {0u, 8u}) {
+      SCOPED_TRACE(unsigned(soffset));
+      SCOPED_TRACE(ioffset);
+      const auto text_words = make_table_dispatch_text(soffset, ioffset);
+      const auto image = make_relocation_function_table_elf(text_words);
+      const AmdGpuCodeObject object(image.data(), image.size());
+      ASSERT_TRUE(object.is_valid());
+      const auto tables = discover_relocation_function_tables(object);
+      ASSERT_EQ(tables.size(), 1u);
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      std::array<uint64_t, 1> leaders{40};
+      const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
+      const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
+      EXPECT_EQ(dispatches.size(), soffset == 124 && ioffset == 0 ? 1u : 0u);
+    }
 }
 
 TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
@@ -560,10 +607,10 @@ TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
   ASSERT_EQ(tables.size(), 1u);
   EXPECT_TRUE(tables[0].got_slot_vaddrs.empty());
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
   const auto analysis = analyze_relocation_pairs(blocks, tables, 0x1000);
   const auto &dispatches = analysis.dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
@@ -599,10 +646,10 @@ TEST(RelocationFunctionTable, RejectsChainedAddressAddDispatch) {
   const auto tables = discover_relocation_function_tables(object);
   ASSERT_EQ(tables.size(), 1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{44};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
   const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
   // The base is built with two literal adds; only one add offset can be relocated,
   // so the dispatch must fail closed rather than resolve to a value whose first
@@ -628,10 +675,10 @@ TEST(RelocationFunctionTable, ResolvesBackwardTableAddress) {
   const auto tables = discover_relocation_function_tables(object);
   ASSERT_EQ(tables.size(), 1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
   const auto dispatches = analyze_relocation_pairs(blocks, tables, kAssumedTextVaddr).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);

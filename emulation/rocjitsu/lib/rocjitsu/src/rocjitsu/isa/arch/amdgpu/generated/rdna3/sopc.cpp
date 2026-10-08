@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/sopc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -35,7 +34,11 @@ SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpEqI32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpEqI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_eq_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpEqI32Sopc>(opcode);
 }
 } // namespace detail
@@ -63,7 +66,11 @@ SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpLgI32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpLgI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_lg_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpLgI32Sopc>(opcode);
 }
 } // namespace detail
@@ -91,7 +98,11 @@ SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpGtI32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpGtI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_gt_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpGtI32Sopc>(opcode);
 }
 } // namespace detail
@@ -119,7 +130,11 @@ SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpGeI32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpGeI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_ge_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpGeI32Sopc>(opcode);
 }
 } // namespace detail
@@ -147,7 +162,11 @@ SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpLtI32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpLtI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_lt_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpLtI32Sopc>(opcode);
 }
 } // namespace detail
@@ -175,7 +194,11 @@ SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpLeI32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpLeI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_le_i32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpLeI32Sopc>(opcode);
 }
 } // namespace detail
@@ -203,7 +226,11 @@ SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpEqU32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpEqU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_eq_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpEqU32Sopc>(opcode);
 }
 } // namespace detail
@@ -231,7 +258,11 @@ SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpLgU32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpLgU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_lg_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpLgU32Sopc>(opcode);
 }
 } // namespace detail
@@ -259,7 +290,11 @@ SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpGtU32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpGtU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_gt_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpGtU32Sopc>(opcode);
 }
 } // namespace detail
@@ -287,7 +322,11 @@ SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpGeU32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpGeU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_ge_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpGeU32Sopc>(opcode);
 }
 } // namespace detail
@@ -315,7 +354,11 @@ SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpLtU32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpLtU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_lt_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpLtU32Sopc>(opcode);
 }
 } // namespace detail
@@ -343,7 +386,11 @@ SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpLeU32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpLeU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_le_u32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpLeU32Sopc>(opcode);
 }
 } // namespace detail
@@ -371,7 +418,12 @@ SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBitcmp0B32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSBitcmp0B32Sopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_bitcmp0_b32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBitcmp0B32Sopc>(opcode);
 }
 } // namespace detail
@@ -399,7 +451,12 @@ SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBitcmp1B32Sopc(const MachineInst *opcode) {
+DecodeResult decodeSBitcmp1B32Sopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_bitcmp1_b32", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBitcmp1B32Sopc>(opcode);
 }
 } // namespace detail
@@ -428,7 +485,12 @@ SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBitcmp0B64Sopc(const MachineInst *opcode) {
+DecodeResult decodeSBitcmp0B64Sopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_bitcmp0_b64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBitcmp0B64Sopc>(opcode);
 }
 } // namespace detail
@@ -457,7 +519,12 @@ SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBitcmp1B64Sopc(const MachineInst *opcode) {
+DecodeResult decodeSBitcmp1B64Sopc(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_bitcmp1_b64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBitcmp1B64Sopc>(opcode);
 }
 } // namespace detail
@@ -487,7 +554,11 @@ SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpEqU64Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpEqU64Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_eq_u64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpEqU64Sopc>(opcode);
 }
 } // namespace detail
@@ -517,7 +588,11 @@ SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmpLgU64Sopc(const MachineInst *opcode) {
+DecodeResult decodeSCmpLgU64Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopc::validate_encoding(
+      "s_cmp_lg_u64", reinterpret_cast<const Sopc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmpLgU64Sopc>(opcode);
 }
 } // namespace detail

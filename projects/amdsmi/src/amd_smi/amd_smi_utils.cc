@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/amd_smi_utils.h"
 
@@ -38,19 +19,18 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <limits>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 
+#include "amd_smi/impl/amd_smi_clk_testing.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
@@ -102,7 +82,8 @@ std::string_view trim(std::string_view str) {
   auto last_itr = std::find_if_not(str.rbegin(), str.rend(),
                                    [](unsigned char character) { return std::isspace(character); });
 
-  return str.substr(first_itr - str.begin(), last_itr.base() - first_itr);
+  return str.substr(static_cast<size_t>(first_itr - str.begin()),
+                    static_cast<size_t>(last_itr.base() - first_itr));
 }
 
 // Given original string and string to remove (removeMe)
@@ -246,8 +227,7 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
                                           AMDSMI_MAX_STRING_LENGTH, false);
 
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "[Before correction] "
-     << "Returning status = AMDSMI_STATUS_SUCCESS"
+  ss << __PRETTY_FUNCTION__ << "[Before correction] " << "Returning status = AMDSMI_STATUS_SUCCESS"
      << " | model_number_path = |" << model_number_path << "|\n"
      << "; info->model_number: |" << info->model_number << "|\n"
      << "; ret_mod = " << ret_mod << "|\n"
@@ -261,8 +241,8 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
      << "; info->manufacturer_name: |" << info->manufacturer_name << "|\n"
      << "; ret_man = " << ret_man << "|\n"
      << "\n product_name_path = |" << product_name_path << "|\n"
-     << "; info->product_name: |" << info->product_name << "|"
-     << "; ret_prod = " << ret_prod << "|\n";
+     << "; info->product_name: |" << info->product_name << "|" << "; ret_prod = " << ret_prod
+     << "|\n";
   LOG_INFO(ss);
 
   return AMDSMI_STATUS_SUCCESS;
@@ -296,6 +276,138 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint
   return AMDSMI_STATUS_SUCCESS;
 }
 
+bool smi_amdgpu_parse_od_clk_range(std::istream& od_stream, amdsmi_clk_type_t domain,
+                                   unsigned int* max_freq, unsigned int* min_freq) {
+  // Section header (and its GFXCLK/MCLK/FCLK alias) whose levels feed this
+  // domain's user-defined range.
+  const char* od_header = nullptr;
+  const char* alias_header = nullptr;
+  switch (domain) {
+    case AMDSMI_CLK_TYPE_GFX:
+      od_header = "OD_SCLK:";
+      alias_header = "GFXCLK:";
+      break;
+    case AMDSMI_CLK_TYPE_MEM:
+      od_header = "OD_MCLK:";
+      alias_header = "MCLK:";
+      break;
+    case AMDSMI_CLK_TYPE_DF:
+      od_header = "OD_FCLK:";
+      alias_header = "FCLK:";
+      break;
+    default:
+      return false;
+  }
+
+  unsigned int max = 0;
+  unsigned int min = UINT_MAX;
+  bool in_domain = false;
+  bool found = false;
+  char str[10];
+  unsigned int dpm_level, freq;
+  for (std::string line; getline(od_stream, line);) {
+    // Section headers end with ':'. This domain's header (or its alias) starts
+    // capture; any other header ends it, so an adjacent section such as
+    // OD_VDDC_CURVE is not folded into the range.
+    if (!line.empty() && line.back() == ':') {
+      in_domain = line.compare(od_header) == 0 || line.compare(alias_header) == 0;
+      continue;
+    }
+    if (!in_domain) {
+      continue;
+    }
+    if (sscanf(line.c_str(), "%u: %u%9s", &dpm_level, &freq, str) <= 2) {
+      continue;  // skip lines that don't conform to the format
+    }
+    found = true;
+    if (freq > max) max = freq;
+    if (freq < min) min = freq;
+  }
+
+  if (!found || max == 0) {
+    return false;
+  }
+  *max_freq = max;
+  *min_freq = min;
+  return true;
+}
+
+// Finish smi_amdgpu_get_ranges() from an already-open pp_dpm_* stream: fold the
+// dpm levels (and the optional "S:" sleep line) into the SmiAmdgpuClkRanges
+// output. Split out as a library-local test seam (see amd_smi_clk_testing.h) so
+// the folding and the bounds guard can be exercised over in-memory streams.
+//
+// od_range carries the pp_od_clk_voltage range the caller parsed; when it is not
+// present, min/max are derived from the dpm levels instead. A domain with no
+// minimum level or no sleep state keeps its UINT_MAX "unavailable" sentinel,
+// which callers surface as the unavailable marker; only genuinely out-of-range
+// (> INT_MAX and not the sentinel) values are rejected.
+amdsmi_status_t smi_amdgpu_parse_dpm_ranges(std::istream& dpm_stream,
+                                            const SmiAmdgpuOdClkRange& od_range,
+                                            SmiAmdgpuClkRanges& ranges) {
+  unsigned int max = od_range.present ? od_range.max : 0;
+  unsigned int min = od_range.present ? od_range.min : UINT_MAX;
+  unsigned int dpm = 0;
+  unsigned int sleep_freq = UINT_MAX;
+  unsigned int current_freq = 0;
+  char str[10];
+  char single_char;
+  for (std::string line; getline(dpm_stream, line);) {
+    unsigned int dpm_level, freq;
+
+    char firstChar = line[0];
+    if (firstChar == 'S') {
+      if (sscanf(line.c_str(), "%c: %u%9s", &single_char, &sleep_freq, str) <= 2) {
+        return AMDSMI_STATUS_NO_DATA;
+      }
+    } else {
+      /**
+       * if the first line contains '*', then
+       * we are saving that value as current_freq then checking
+       * for other dpm levels if none are found then we
+       * set min and max to current_freq as per Driver
+       * We then skip to the next line to avoid getting
+       * incorrect min value.
+       */
+
+      if (sscanf(line.c_str(), "%u: %u%c", &dpm_level, &freq, str) <= 2) {
+        return AMDSMI_STATUS_IO;
+      }
+
+      char lastChar = line.back();
+      if (lastChar == '*') {
+        current_freq = freq;
+      }
+
+      // Domains without an OD range derive min/max from the dpm levels here.
+      if (!od_range.present) {
+        max = freq > max ? freq : max;
+        min = freq < min ? freq : min;
+      }
+      dpm = dpm_level > dpm ? dpm_level : dpm;
+    }
+  }
+  if (dpm == 0 && current_freq > 0) {
+    // if the dpm level is 0, then the current frequency is the min/max frequency
+    max = current_freq;
+    min = current_freq;
+  }
+  // Reject genuinely out-of-range values, but let the UINT_MAX "unavailable"
+  // sentinel through: a domain with no minimum level or no sleep state keeps it,
+  // and callers (e.g. amdsmi_get_clock_info) surface it as the unavailable marker.
+  if ((dpm != UINT_MAX && dpm > static_cast<unsigned int>(INT_MAX)) ||
+      (max != UINT_MAX && max > static_cast<unsigned int>(INT_MAX)) ||
+      (min != UINT_MAX && min > static_cast<unsigned int>(INT_MAX)) ||
+      (sleep_freq != UINT_MAX && sleep_freq > static_cast<unsigned int>(INT_MAX))) {
+    return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+  }
+  ranges.max_freq = static_cast<int>(max);
+  ranges.min_freq = static_cast<int>(min);
+  ranges.num_dpm = static_cast<int>(dpm);
+  ranges.sleep_state_freq = static_cast<int>(sleep_freq);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_clk_type_t domain,
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq) {
@@ -304,19 +416,17 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
 
   std::string smclk_min_max_fullpath = "";
 
-  bool sclk = false;
-  bool mclk = false;
-  bool fclk = false;
+  bool use_od_range = false;
   switch (domain) {
     case AMDSMI_CLK_TYPE_GFX:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_sclk";
-      sclk = true;
+      use_od_range = true;
       break;
     case AMDSMI_CLK_TYPE_MEM:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_mclk";
-      mclk = true;
+      use_od_range = true;
       break;
     case AMDSMI_CLK_TYPE_VCLK0:
       fullpath += "/pp_dpm_vclk";
@@ -336,7 +446,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
     case AMDSMI_CLK_TYPE_DF:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_fclk";
-      fclk = true;
+      use_od_range = true;
       break;
     default:
       return AMDSMI_STATUS_INVAL;
@@ -347,125 +457,24 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  unsigned int max, min, dpm, sleep_freq, current_freq;
-  char str[10];
-  char single_char;
-  max = 0;
-  min = UINT_MAX;
-  dpm = 0;
-  sleep_freq = UINT_MAX;
-  current_freq = 0;
-  // if getting sclk, mclk or fclk info, read pp_od_clk_voltage for min and max info
-  if (sclk || mclk || fclk) {
+  SmiAmdgpuOdClkRange od_range;
+  // GFX/MEM/DF expose a user-defined range in pp_od_clk_voltage; when it omits
+  // this domain's section (e.g. no OD_FCLK on MI45x) fall back to the pp_dpm_*
+  // levels parsed by smi_amdgpu_parse_dpm_ranges().
+  if (use_od_range) {
     std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
-    unsigned int smax = 0;
-    unsigned int mmax = 0;
-    unsigned int fmax = 0;
-    unsigned int smin = UINT_MAX;
-    unsigned int mmin = UINT_MAX;
-    unsigned int fmin = UINT_MAX;
-
-    // if pp_od_clk_voltage is not found, then go back to using the original pp_dpm files
-    if (!smclk_ranges.is_open()) {
-      sclk = false;
-      mclk = false;
-      fclk = false;
-    } else {
-      // using enum to switch between recording for sclk, mclk, or fclk
-      enum ClkType { PARSING_SCLK = 0, PARSING_MCLK = 1, PARSING_FCLK = 2 };
-      ClkType current_clk_type = PARSING_SCLK;
-      unsigned int dpm_level, freq;
-      for (std::string line; getline(smclk_ranges, line);) {
-        if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0) {
-          current_clk_type = PARSING_SCLK;
-          continue;
-        } else if (line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0) {
-          current_clk_type = PARSING_MCLK;
-          continue;
-        } else if (line.compare("FCLK:") == 0 || line.compare("OD_FCLK:") == 0) {
-          current_clk_type = PARSING_FCLK;
-          continue;
-        }
-        if (sscanf(line.c_str(), "%u: %d%9s", &dpm_level, &freq, str) <= 2) {
-          // skip lines that don't conform to the format
-          continue;
-        }
-        if (current_clk_type == PARSING_SCLK) {
-          if (freq > smax) smax = freq;
-          if (freq < smin) smin = freq;
-        } else if (current_clk_type == PARSING_MCLK) {
-          if (freq > mmax) mmax = freq;
-          if (freq < mmin) mmin = freq;
-        } else if (current_clk_type == PARSING_FCLK) {
-          if (freq > fmax) fmax = freq;
-          if (freq < fmin) fmin = freq;
-        }
-      }
-
-      if (sclk) {
-        max = smax;
-        min = smin;
-      } else if (mclk) {
-        max = mmax;
-        min = mmin;
-      } else if (fclk) {
-        max = fmax;
-        min = fmin;
-      }
-
-      smclk_ranges.close();
-    }
+    od_range.present =
+        smi_amdgpu_parse_od_clk_range(smclk_ranges, domain, &od_range.max, &od_range.min);
   }
-  // obtain rest of info from regular pp_dpm_* files.
-  for (std::string line; getline(ranges, line);) {
-    unsigned int dpm_level, freq;
-
-    char firstChar = line[0];
-    if (firstChar == 'S') {
-      if (sscanf(line.c_str(), "%c: %d%9s", &single_char, &sleep_freq, str) <= 2) {
-        ranges.close();
-        return AMDSMI_STATUS_NO_DATA;
-      }
-    } else {
-      /**
-       * if the first line contains '*', then
-       * we are saving that value as current_freq then checking
-       * for other dpm levels if none are found then we
-       * set min and max to current_freq as per Driver
-       * We then skip to the next line to avoid getting
-       * incorrect min value.
-       */
-
-      if (sscanf(line.c_str(), "%u: %d%c", &dpm_level, &freq, str) <= 2) {
-        ranges.close();
-        return AMDSMI_STATUS_IO;
-      }
-
-      char lastChar = line.back();
-      if (lastChar == '*') {
-        current_freq = freq;
-      }
-
-      // not * was detected so check for the min max if not sclk, mclk, or fclk, which are user
-      // defined
-      if (!sclk && !mclk && !fclk) {
-        max = freq > max ? freq : max;
-        min = freq < min ? freq : min;
-      }
-      dpm = dpm_level > dpm ? dpm_level : dpm;
-    }
+  SmiAmdgpuClkRanges parsed;
+  amdsmi_status_t status = smi_amdgpu_parse_dpm_ranges(ranges, od_range, parsed);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
   }
-  if (dpm == 0 && current_freq > 0) {
-    // if the dpm level is 0, then the current frequency is the min/max frequency
-    max = current_freq;
-    min = current_freq;
-  }
-  if (num_dpm) *num_dpm = dpm;
-  if (max_freq) *max_freq = max;
-  if (min_freq) *min_freq = min;
-  if (sleep_state_freq) *sleep_state_freq = sleep_freq;
-
-  ranges.close();
+  if (max_freq) *max_freq = parsed.max_freq;
+  if (min_freq) *min_freq = parsed.min_freq;
+  if (num_dpm) *num_dpm = parsed.num_dpm;
+  if (sleep_state_freq) *sleep_state_freq = parsed.sleep_state_freq;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -816,7 +825,7 @@ amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* devic
   std::string line;
   if (std::getline(fs, line)) {
     try {
-      uint32_t line_value = std::stoul(std::string(trim(line)));
+      uint32_t line_value = static_cast<uint32_t>(std::stoul(std::string(trim(line))));
       if (line_value > 100) {
         // max of uint32_t is used to indicate the erroneous value
         *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
@@ -1451,60 +1460,297 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type) 
   }
 }
 
-// Gfx activity can be silenced (forced to the uint-max N/A sentinel). The
-// affected graphics/RLC-firmware combo is flagged once per handle and cached.
+void init_asic_info_defaults(amdsmi_asic_info_t* info) {
+  if (info == nullptr) {
+    return;
+  }
+  std::memset(info, 0, sizeof(*info));
+  info->vendor_id = std::numeric_limits<uint32_t>::max();
+  info->subvendor_id = std::numeric_limits<uint32_t>::max();
+  info->device_id = std::numeric_limits<uint64_t>::max();
+  info->rev_id = std::numeric_limits<uint32_t>::max();
+  std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "ffffffffffffffff");
+  info->oam_id = std::numeric_limits<uint32_t>::max();
+  info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
+  info->target_graphics_version = std::numeric_limits<uint64_t>::max();
+  info->subsystem_id = std::numeric_limits<uint32_t>::max();
+  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+  info->chip_rev_id = std::numeric_limits<uint32_t>::max();
+  info->external_rev_id = std::numeric_limits<uint32_t>::max();
+}
+
 namespace {
-constexpr uint64_t kFlaggedGfxVersion = 0x1250;  // gfx1250
-constexpr uint64_t kFlaggedRlcFwMin = 0x18;      // RLC fw 24..29
-constexpr uint64_t kFlaggedRlcFwMax = 0x1d;
 
-bool has_flagged_gfx_fw(amdsmi_processor_handle processor_handle) {
-  static std::unordered_map<amdsmi_processor_handle, bool> cache;
-  static std::mutex mtx;
-  std::lock_guard<std::mutex> lock(mtx);
-  auto it = cache.find(processor_handle);
-  if (it != cache.end()) return it->second;
+namespace fs = std::filesystem;
 
-  bool flagged = false;
-  amdsmi_asic_info_t asic{};
-  if (amdsmi_get_gpu_asic_info(processor_handle, &asic) == AMDSMI_STATUS_SUCCESS &&
-      asic.target_graphics_version == kFlaggedGfxVersion) {
-    amdsmi_fw_info_t fw{};
-    if (amdsmi_get_fw_info(processor_handle, &fw) == AMDSMI_STATUS_SUCCESS) {
-      for (uint8_t i = 0; i < fw.num_fw_info; ++i) {
-        if (fw.fw_info_list[i].fw_id == AMDSMI_FW_ID_RLC) {
-          uint64_t rlc = fw.fw_info_list[i].fw_version;
-          flagged = rlc >= kFlaggedRlcFwMin && rlc <= kFlaggedRlcFwMax;
-          break;
-        }
+/** DKMS registers amdgpu under /var/lib/dkms/amdgpu/<version>/; package
+ * metadata lives in source/dkms.conf behind the source symlink
+ */
+constexpr std::string_view kAmdgpuDkmsPackageName = "amdgpu";
+constexpr std::string_view kAmdgpuDkmsSourceSymlinkName = "source";
+constexpr std::string_view kDkmsAmdgpuKernelPrefix = "kernel-";
+constexpr std::string_view kDkmsAmdgpuDkmsConfName = "dkms.conf";
+constexpr std::string_view kDkmsAmdgpuDkmsConfPackageName = "PACKAGE_NAME";
+constexpr std::string_view kDkmsAmdgpuDkmsConfPackageVersion = "PACKAGE_VERSION";
+
+// Ubuntu appends ".<os_release>" (e.g. "-2370381.24.04"); other distros'
+// PACKAGE_VERSION may end at the build number, so only that part is required.
+const auto kAmdgpuDkmsVersionDirRegex = std::regex{R"(^\d+\.\d+\.\d+-\d+(\..*)?$)"};
+// Custom and older amdgpu builds report only major.minor.patch.
+const auto kAmdgpuModuleVersionRegex = std::regex{R"(^(\d+\.\d+\.\d+)(?:\.(\d+))?$)"};
+
+using smi_amdgpu_dkms_conf_t = std::pair<std::string, std::string>;
+
+auto log_dkms_debug(std::string_view caller, std::string_view message) -> void {
+  auto outstream = std::ostringstream{};
+  outstream << caller << " | " << message;
+  LOG_DEBUG(outstream);
+}
+
+auto is_amdgpu_dkms_version_dir_name(std::string_view dir_name) -> bool {
+  return std::regex_match(dir_name.begin(), dir_name.end(), kAmdgpuDkmsVersionDirRegex);
+}
+
+auto has_prefix(std::string_view str, std::string_view prefix) -> bool {
+  return ((str.size() >= prefix.size()) && (str.compare(0, prefix.size(), prefix) == 0));
+}
+
+auto try_parse_dkms_conf_assignment(std::string_view line, std::string_view key)
+    -> std::optional<std::string_view> {
+  const auto trimmed_line = trim(line);
+  if ((trimmed_line.size() <= (key.size() + 1)) || (!has_prefix(trimmed_line, key))) {
+    return std::nullopt;
+  }
+
+  if (trimmed_line[key.size()] != '=') {
+    return std::nullopt;
+  }
+
+  const auto value_part = trim(trimmed_line.substr((key.size() + 1)));
+  if ((value_part.size() < 2) || (value_part.front() != '"') || (value_part.back() != '"')) {
+    return std::nullopt;
+  }
+
+  return value_part.substr(1, (value_part.size() - 2));
+}
+
+auto resolve_symlink_target_path(const fs::path& source_link, const fs::path& target,
+                                 std::error_code& err_code) -> fs::path {
+  if (target.is_absolute()) {
+    return fs::weakly_canonical(target, err_code);
+  }
+  return fs::weakly_canonical(source_link.parent_path() / target, err_code);
+}
+
+auto read_dkms_conf(std::string_view caller, const fs::path& conf_path)
+    -> std::optional<smi_amdgpu_dkms_conf_t> {
+  auto instream = std::ifstream{conf_path};
+  if (instream.is_open()) {
+    auto package_name = std::string{};
+    auto package_version = std::string{};
+    auto line_str = std::string{};
+
+    while (std::getline(instream, line_str)) {
+      if ((!line_str.empty()) && (line_str.back() == '\r')) {
+        line_str.pop_back();
+      }
+
+      if (const auto parsed_name =
+              try_parse_dkms_conf_assignment(line_str, kDkmsAmdgpuDkmsConfPackageName)) {
+        package_name = std::string{*parsed_name};
+        continue;
+      }
+
+      if (const auto parsed_version =
+              try_parse_dkms_conf_assignment(line_str, kDkmsAmdgpuDkmsConfPackageVersion)) {
+        package_version = std::string{*parsed_version};
       }
     }
+
+    if ((!package_name.empty()) && (!package_version.empty())) {
+      return std::make_pair(package_name, package_version);
+    }
+
+    auto outstream = std::ostringstream{};
+    outstream << kDkmsAmdgpuDkmsConfName << " at: " << conf_path << " has no "
+              << kDkmsAmdgpuDkmsConfPackageName << " or " << kDkmsAmdgpuDkmsConfPackageVersion;
+    log_dkms_debug(caller, outstream.str());
+    return std::nullopt;
   }
-  cache[processor_handle] = flagged;
-  return flagged;
+
+  auto outstream = std::ostringstream{};
+  outstream << "Cannot open " << kDkmsAmdgpuDkmsConfName << " at: " << conf_path;
+  log_dkms_debug(caller, outstream.str());
+  return std::nullopt;
 }
+
+auto make_kernel_symlink_name(std::string_view release, std::string_view machine) -> std::string {
+  auto name = std::string{kDkmsAmdgpuKernelPrefix};
+  name.append(release);
+  name.push_back('-');
+  name.append(machine);
+  return name;
+}
+
+auto package_version_from_kernel_symlink(std::string_view caller, const fs::path& dkms_root,
+                                         const fs::path& kernel_link)
+    -> std::optional<std::string> {
+  auto err_code = std::error_code{};
+  if ((!fs::is_symlink(kernel_link, err_code)) || (err_code)) {
+    auto outstream = std::ostringstream{};
+    outstream << "No kernel symlink at: " << kernel_link;
+    log_dkms_debug(caller, outstream.str());
+    return std::nullopt;
+  }
+
+  const auto target = fs::read_symlink(kernel_link, err_code);
+  if ((err_code) || (target.empty())) {
+    auto outstream = std::ostringstream{};
+    outstream << "Cannot read kernel symlink at: " << kernel_link << ": " << err_code.message();
+    log_dkms_debug(caller, outstream.str());
+    return std::nullopt;
+  }
+
+  auto version = std::string{};
+  if (target.is_relative()) {
+    version = target.begin()->string();
+  } else {
+    const auto resolved = resolve_symlink_target_path(kernel_link, target, err_code);
+    if (err_code) {
+      auto outstream = std::ostringstream{};
+      outstream << "Cannot resolve kernel symlink at: " << kernel_link << ": "
+                << err_code.message();
+      log_dkms_debug(caller, outstream.str());
+      return std::nullopt;
+    }
+
+    const auto relative = fs::relative(resolved, dkms_root, err_code);
+    if ((err_code) || (relative.empty()) || (relative.has_root_path())) {
+      auto outstream = std::ostringstream{};
+      outstream << "Kernel symlink at: " << kernel_link
+                << " is outside the DKMS root: " << dkms_root;
+      log_dkms_debug(caller, outstream.str());
+      return std::nullopt;
+    }
+    version = relative.begin()->string();
+  }
+
+  if (!is_amdgpu_dkms_version_dir_name(version)) {
+    auto outstream = std::ostringstream{};
+    outstream << "Kernel symlink at: " << kernel_link
+              << " target is not version-shaped: " << target;
+    log_dkms_debug(caller, outstream.str());
+    return std::nullopt;
+  }
+  return version;
+}
+
+auto is_valid_dkms_package(std::string_view caller, const fs::path& version_dir,
+                           std::string_view dir_name) -> bool {
+  // DKMS source_tree is configurable, so follow the source symlink instead of assuming /usr/src.
+  const auto dkms_conf_path =
+      (version_dir / kAmdgpuDkmsSourceSymlinkName / kDkmsAmdgpuDkmsConfName);
+  const auto package_info = read_dkms_conf(caller, dkms_conf_path);
+  if (!package_info.has_value()) {
+    return false;
+  }
+
+  const auto& package_name = package_info->first;
+  const auto& package_version = package_info->second;
+  if (std::string_view{package_name} != kAmdgpuDkmsPackageName) {
+    auto outstream = std::ostringstream{};
+    outstream << kDkmsAmdgpuDkmsConfName << " at: " << dkms_conf_path
+              << " sets PACKAGE_NAME to: " << package_name
+              << "; expected: " << kAmdgpuDkmsPackageName;
+    log_dkms_debug(caller, outstream.str());
+    return false;
+  }
+
+  if (package_version != dir_name) {
+    auto outstream = std::ostringstream{};
+    outstream << kDkmsAmdgpuDkmsConfName << " at: " << dkms_conf_path << " sets PACKAGE_VERSION to "
+              << package_version << "; directory name is " << dir_name;
+    log_dkms_debug(caller, outstream.str());
+    return false;
+  }
+
+  return true;
+}
+
 }  // namespace
 
-bool is_gfx_activity_silenced(amdsmi_processor_handle processor_handle) {
-  const char* v = std::getenv("AMDSMI_SILENCE_GFX_ACTIVITY");
-  if (v != nullptr) return std::string(v) == "1";
-  return has_flagged_gfx_fw(processor_handle);
-}
+auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
+                                      std::string_view package_version, amdsmi_driver_info_t* info)
+    -> amdsmi_status_t {
+  if (info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
 
-void apply_gfx_activity_overrides(amdsmi_processor_handle processor_handle,
-                                  amdsmi_gpu_metrics_t* metrics) {
-  if (metrics == nullptr) return;
-  if (!is_gfx_activity_silenced(processor_handle)) return;
+  const auto module_version_string = std::string{module_version};
+  smi_clear_char_and_reinitialize(info->driver_version, AMDSMI_MAX_STRING_LENGTH,
+                                  module_version_string);
+  info->driver_kernel_version[0] = '\0';
+  info->amdgpu_driver_version[0] = '\0';
+  info->driver_build_version[0] = '\0';
+  info->driver_full_version[0] = '\0';
 
-  metrics->average_gfx_activity = std::numeric_limits<uint16_t>::max();
-  metrics->gfx_activity_acc = std::numeric_limits<uint32_t>::max();
-  // Per-XCP busy fields read the same source as the whole-GPU value.
-  for (auto& xcp : metrics->xcp_stats) {
-    for (auto& busy_inst : xcp.gfx_busy_inst) {
-      busy_inst = std::numeric_limits<uint32_t>::max();
-    }
-    for (auto& busy_acc : xcp.gfx_busy_acc) {
-      busy_acc = std::numeric_limits<uint64_t>::max();
+  if (module_version.empty() || (module_version == "N/A")) {
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  auto full_version = module_version_string;
+  auto match = std::smatch{};
+  if (std::regex_match(module_version_string, match, kAmdgpuModuleVersionRegex)) {
+    const auto kernel_version = match[1].str();
+    smi_clear_char_and_reinitialize(info->driver_kernel_version, AMDSMI_MAX_STRING_LENGTH,
+                                    kernel_version);
+    smi_clear_char_and_reinitialize(info->amdgpu_driver_version, AMDSMI_MAX_STRING_LENGTH,
+                                    match[2].str());
+    // A module built outside this DKMS package (custom kernel) must not report its build.
+    if (is_amdgpu_dkms_version_dir_name(package_version) &&
+        (package_version.substr(0, package_version.find('-')) == kernel_version)) {
+      const auto build_start = (package_version.find('-') + 1);
+      const auto build_end = package_version.find('.', build_start);
+      const auto build_version =
+          std::string{package_version.substr(build_start, (build_end - build_start))};
+      smi_clear_char_and_reinitialize(info->driver_build_version, AMDSMI_MAX_STRING_LENGTH,
+                                      build_version);
+      full_version.push_back('-');
+      full_version.append(build_version);
     }
   }
+  smi_clear_char_and_reinitialize(info->driver_full_version, AMDSMI_MAX_STRING_LENGTH,
+                                  full_version);
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_view release,
+                                        std::string_view machine, std::string* active_version)
+    -> amdsmi_status_t {
+  if (active_version == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  active_version->clear();
+
+  if ((release.empty()) || (machine.empty())) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  const auto root = fs::path{std::string{dkms_root}};
+  const auto kernel_link = root / make_kernel_symlink_name(release, machine);
+  const auto selected = package_version_from_kernel_symlink(__func__, root, kernel_link);
+  if (!selected.has_value()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  if (!is_valid_dkms_package(__func__, root / *selected, *selected)) {
+    auto outstream = std::ostringstream{};
+    outstream << "Kernel symlink package " << *selected << " is not a validated DKMS package";
+    log_dkms_debug(__func__, outstream.str());
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  *active_version = *selected;
+  return AMDSMI_STATUS_SUCCESS;
 }

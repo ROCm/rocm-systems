@@ -22,7 +22,10 @@
 
 #include <dlfcn.h>
 #include <pthread.h>
+#include <array>
+#include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -84,10 +87,60 @@ run_threads(unsigned long n)
     return n;
 }
 
+namespace
+{
+constexpr auto logging_environment_names = std::array{
+    "GLOG_minloglevel",
+    "GLOG_logtostderr",
+    "GLOG_alsologtostderr",
+    "GLOG_stderrthreshold",
+    "GOOGLE_LOG_DIR",
+    "GLOG_log_dir",
+    "GLOG_vmodule",
+};
+
+using environment_value_t = std::optional<std::string>;
+using environment_snapshot_t =
+    std::array<environment_value_t, logging_environment_names.size()>;
+
+environment_snapshot_t
+snapshot_logging_environment()
+{
+    auto snapshot = environment_snapshot_t{};
+    for(size_t i = 0; i < logging_environment_names.size(); ++i)
+    {
+        if(const auto* value = std::getenv(logging_environment_names.at(i)))
+            snapshot.at(i) = value;
+    }
+    return snapshot;
+}
+
+bool
+logging_environment_matches(const environment_snapshot_t& expected)
+{
+    const auto actual = snapshot_logging_environment();
+    for(size_t i = 0; i < logging_environment_names.size(); ++i)
+    {
+        if(actual.at(i) != expected.at(i))
+        {
+            fprintf(stderr,
+                    "rocprofiler-register changed environment variable %s during "
+                    "initialization\n",
+                    logging_environment_names.at(i));
+            return false;
+        }
+    }
+    return true;
+}
+}  // namespace
+
+auto logging_environment = snapshot_logging_environment();
 auto run_n = run_threads(4);
 
 int
 main()
 {
-    return (run_n == 4) ? EXIT_SUCCESS : EXIT_FAILURE;
+    return (run_n == 4 && logging_environment_matches(logging_environment))
+               ? EXIT_SUCCESS
+               : EXIT_FAILURE;
 }

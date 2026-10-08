@@ -1,498 +1,245 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Resolve and load the ``roctx_recordfn`` pybind11 extension.
+"""Load the generic torch_trace_collector.so through its plain-C ABI.
 
-The loader first looks for a prebuilt ``.so`` under the install
-prefix, then falls back to a cached cmake build under
-``~/.cache/rocprofiler-compute/``. Cache entries are keyed by the
-Python and torch versions in use and a fingerprint of the C++
-inputs. Set ``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` to force a fresh
-build.
+The collector intentionally has no PyTorch DT_NEEDED entry. The workload's
+libtorch_cpu.so is therefore promoted to the process-wide symbol scope
+before the collector is loaded.
 """
 
-import hashlib
-import importlib.util
+import ctypes
 import os
-import shutil
-import subprocess
-import sys
-import types
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Dict, FrozenSet, Optional, Tuple
+
+from utils.logger import console_log, console_warning
+from utils.native_tool_finder import find_prebuilt_artifacts
 
 _THIS_DIR = Path(__file__).resolve().parent
-# parents[2] resolves to <repo>/src in dev and <install>/libexec/<project>
-# in installed layouts; both host the roctx_recordfn sources at lib/.
-_SO_SOURCE_DIR = _THIS_DIR.parents[2] / "lib" / "roctx_recordfn"
-_SO_SOURCE = _SO_SOURCE_DIR / "roctx_recordfn.cpp"
-_SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
+_PACKAGE_ROOT = _THIS_DIR.parents[2]
 
-_INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
+_ARTIFACT_NAME = "torch_trace_collector.so"
+_TORCH_CPU_LIBRARY_NAME = "libtorch_cpu.so"
+_EXPECTED_COLLECTOR_ABI_REVISION = 1
 
-TIER_PREBUILT = "prebuilt"
-TIER_JIT = "jit"
+_UNKNOWN_TORCH_VERSION = ""
 
-C_TIER_NAMES = frozenset((TIER_PREBUILT, TIER_JIT))
+# The collector reads PyTorch types by byte offset, so it is enabled only for
+# the minor versions whose layouts torch_abi.h records.
+_SUPPORTED_TORCH_VERSIONS: FrozenSet[str] = frozenset({"2.13", "2.14"})
 
-_FINGERPRINT_INPUTS = (_SO_SOURCE, _SO_BUILDFILE)
+_TORCH_LIBRARY_LOAD_MODE = os.RTLD_GLOBAL | os.RTLD_LAZY | os.RTLD_NODELETE
+_COLLECTOR_LOAD_MODE = ctypes.RTLD_LOCAL | os.RTLD_NOW | os.RTLD_NODELETE
 
-_REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_ROCTX"
-
-_Diagnostics = list[tuple[str, str]]
+_torch_cpu_library: Optional[ctypes.CDLL] = None
 
 
-@dataclass
-class LoadResult:
-    """Outcome of a ``load()`` attempt: the module (or ``None`` for the Python
-    fallback), the tier that produced it, and the diagnostic trail.
-    """
+class _CollectorStats(ctypes.Structure):
+    _fields_ = [
+        ("struct_size", ctypes.c_uint32),
+        ("installed", ctypes.c_uint32),
+        ("pushes", ctypes.c_uint64),
+        ("pops", ctypes.c_uint64),
+        ("user_scope_pushes", ctypes.c_uint64),
+        ("user_scope_pops", ctypes.c_uint64),
+        ("user_scope_inherits", ctypes.c_uint64),
+        ("snapshots_saved", ctypes.c_uint64),
+        ("snapshots_consumed", ctypes.c_uint64),
+        ("snapshots_dropped", ctypes.c_uint64),
+        ("snapshots_overwritten", ctypes.c_uint64),
+        ("callback_errors", ctypes.c_uint64),
+        ("snapshots_pending", ctypes.c_uint64),
+    ]
 
-    module: Optional[types.ModuleType]
-    tier: Optional[str]
-    diagnostics: _Diagnostics
+
+class CollectorUnavailableError(RuntimeError):
+    """No torch_trace_collector is usable for this workload."""
 
 
-def _safe_log(
-    level: str,
-    msg: str,
-    diagnostics: Optional[_Diagnostics] = None,
-) -> None:
-    """Log via ``utils.logger`` if importable, otherwise stderr; also append the
-    line to ``diagnostics`` when provided.
-    """
-    if diagnostics is not None:
-        diagnostics.append((level, msg))
-    try:
-        from utils.logger import console_error, console_log, console_warning
+class CollectorNotBuiltError(CollectorUnavailableError):
+    """This installation has no generic torch_trace_collector.so."""
 
-        emit = {"log": console_log, "warning": console_warning, "error": console_error}[
-            level
+    def __init__(self, workload_torch_version: str) -> None:
+        super().__init__(
+            "torch_trace_collector was not built for this installation, so "
+            f"PyTorch {workload_torch_version} cannot be traced."
+        )
+
+
+class UnsupportedTorchVersionError(CollectorUnavailableError):
+    """The workload PyTorch minor version has no recorded ABI layout."""
+
+    def __init__(self, workload_torch_version: str) -> None:
+        super().__init__(
+            "torch_trace_collector does not support PyTorch "
+            f"{workload_torch_version or 'unknown'}. Supported versions: "
+            f"{', '.join(sorted(_SUPPORTED_TORCH_VERSIONS))}."
+        )
+
+
+class CollectorLoadError(CollectorUnavailableError):
+    """The generic collector exists but could not be loaded safely."""
+
+    def __init__(self, so_path: Path, cause: Exception) -> None:
+        super().__init__(f"torch_trace_collector at {so_path} failed to load: {cause}")
+
+
+class TorchTraceCollector:
+    """Python facade preserving the former extension module's method API."""
+
+    def __init__(self, library: ctypes.CDLL, path: Path) -> None:
+        self._library = library
+        self._path = path
+        self._bind_interface()
+
+    def _bind_interface(self) -> None:
+        self._library.torch_trace_collector_abi_revision.argtypes = []
+        self._library.torch_trace_collector_abi_revision.restype = ctypes.c_uint32
+        revision = self._library.torch_trace_collector_abi_revision()
+        if revision != _EXPECTED_COLLECTOR_ABI_REVISION:
+            raise RuntimeError(
+                "torch_trace_collector has incompatible interface revision "
+                f"{revision}; expected {_EXPECTED_COLLECTOR_ABI_REVISION}"
+            )
+
+        self._library.torch_trace_collector_install.argtypes = []
+        self._library.torch_trace_collector_install.restype = ctypes.c_int32
+        self._library.torch_trace_collector_uninstall.argtypes = []
+        self._library.torch_trace_collector_uninstall.restype = ctypes.c_int32
+        self._library.torch_trace_collector_is_installed.argtypes = []
+        self._library.torch_trace_collector_is_installed.restype = ctypes.c_int32
+        self._library.torch_trace_collector_push_user_scope.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.c_char_p,
         ]
-        emit("ml api trace loader", msg)
-    except Exception:
-        sys.stderr.write(f"[ml api trace loader] {level.upper()}: {msg}\n")
+        self._library.torch_trace_collector_push_user_scope.restype = ctypes.c_int32
+        self._library.torch_trace_collector_pop_user_scope.argtypes = []
+        self._library.torch_trace_collector_pop_user_scope.restype = ctypes.c_int32
+        self._library.torch_trace_collector_get_stats.argtypes = [
+            ctypes.POINTER(_CollectorStats)
+        ]
+        self._library.torch_trace_collector_get_stats.restype = ctypes.c_int32
+
+    def install(self) -> None:
+        """Install the global RecordFunction callback. Idempotent."""
+        self._require_success(
+            self._library.torch_trace_collector_install(),
+            "install",
+        )
+
+    def uninstall(self) -> None:
+        """Remove the registered callback."""
+        self._require_success(
+            self._library.torch_trace_collector_uninstall(),
+            "uninstall",
+        )
+
+    def is_installed(self) -> bool:
+        """Return True if the callback is installed."""
+        return self._library.torch_trace_collector_is_installed() == 1
+
+    def push_user_scope(self, marker: str, context: str, backend: str = "") -> None:
+        """Push a marker frame, emit a ROCTX range, and publish the stack to
+        ThreadLocalDebugInfo.
+        """
+        result = self._library.torch_trace_collector_push_user_scope(
+            marker.encode("utf-8"),
+            context.encode("utf-8"),
+            backend.encode("utf-8"),
+        )
+        self._require_success(result, "push_user_scope")
+
+    def pop_user_scope(self) -> None:
+        """Pop the most recent push_user_scope frame on this thread."""
+        self._require_success(
+            self._library.torch_trace_collector_pop_user_scope(),
+            "pop_user_scope",
+        )
+
+    def dump_stats(self) -> Dict[str, object]:
+        """Return collector counters."""
+        stats = _CollectorStats()
+        stats.struct_size = ctypes.sizeof(_CollectorStats)
+        self._require_success(
+            self._library.torch_trace_collector_get_stats(ctypes.byref(stats)),
+            "get_stats",
+        )
+        return {
+            "installed": bool(stats.installed),
+            "pushes": stats.pushes,
+            "pops": stats.pops,
+            "user_scope_pushes": stats.user_scope_pushes,
+            "user_scope_pops": stats.user_scope_pops,
+            "user_scope_inherits": stats.user_scope_inherits,
+            "snapshots_saved": stats.snapshots_saved,
+            "snapshots_consumed": stats.snapshots_consumed,
+            "snapshots_dropped": stats.snapshots_dropped,
+            "snapshots_overwritten": stats.snapshots_overwritten,
+            "callback_errors": stats.callback_errors,
+            "snapshots_pending": stats.snapshots_pending,
+        }
+
+    def _require_success(self, result: int, operation: str) -> None:
+        if result != 0:
+            raise RuntimeError(
+                f"torch_trace_collector {operation} failed for {self._path}"
+            )
 
 
-def format_load_diagnostic_trail(
-    diagnostics: _Diagnostics,
-    *,
-    max_lines: int = 24,
-) -> str:
-    """Render diagnostics as indented lines, capped at ``max_lines``."""
-    if not diagnostics:
-        return ""
-    rendered = [f"  [{lvl}] {msg}" for lvl, msg in diagnostics[-max_lines:]]
-    return "\n".join(rendered)
-
-
-def _source_fingerprint() -> str:
-    """First 12 hex chars of a SHA-256 over the source inputs, or ``"missing"``."""
-    h = hashlib.sha256()
-    seen = 0
-    for path in _FINGERPRINT_INPUTS:
-        try:
-            data = path.read_bytes()
-        except OSError:
-            continue
-        h.update(f"{path.name}:{len(data)}\n".encode("ascii"))
-        h.update(data)
-        seen += 1
-    if seen == 0:
-        return "missing"
-    return h.hexdigest()[:12]
-
-
-def compute_tag() -> Optional[str]:
-    """Return the cache tag for the active Python and torch versions, or ``None``."""
+def _workload_torch_version() -> str:
+    """Return the workload PyTorch version as major.minor."""
     try:
         import torch
-    except Exception:
-        return None
+        from torch.torch_version import Version
 
-    py_major = sys.version_info.major
-    py_minor = sys.version_info.minor
-    torch_version = torch.__version__
-    fingerprint = _source_fingerprint()
-    return f"py{py_major}.{py_minor}_torch{torch_version}_src{fingerprint}"
-
-
-def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
-    """Import a shared object from a filesystem path."""
-    spec = importlib.util.spec_from_file_location(name, str(path))
-    if spec is None or spec.loader is None:
-        raise ImportError(f"failed to build importlib spec for {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
-    """Packager-baked .so candidates under <install-prefix>/lib*/<project>/."""
-    # parents[4] reaches the install prefix from this file's location in
-    # both layouts: <repo>/src/utils/inject_roctx/_backends in dev, and
-    # <prefix>/libexec/<project>/utils/inject_roctx/_backends when installed.
-    install_root = _THIS_DIR.parents[4]
-    so_name = f"roctx_recordfn-{tag}.so"
-    pattern = f"lib*/{_INSTALL_TREE_PROJECT_NAME}/{so_name}"
-    return sorted(install_root.glob(pattern))
-
-
-def _try_prebuilt(
-    tag: str,
-    diagnostics: Optional[_Diagnostics] = None,
-) -> Optional[types.ModuleType]:
-    for so_path in _install_tree_prebuilt_candidates(tag):
-        if not so_path.exists():
-            continue
-        try:
-            mod = _import_module_from_path("roctx_recordfn", so_path)
-            _safe_log("log", f"loaded pre-built .so: {so_path}", diagnostics)
-            return mod
-        except Exception as e:
-            _safe_log(
-                "warning",
-                f"pre-built .so at {so_path} failed to load: {e}",
-                diagnostics,
-            )
-    return None
-
-
-def _jit_cache_dir(diagnostics: Optional[_Diagnostics] = None) -> Optional[Path]:
-    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
-    d = Path(base) / "rocprofiler-compute" / "roctx_recordfn"
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        _safe_log(
-            "log",
-            f"jit cache dir unavailable ({d}): {type(e).__name__}: {e}",
-            diagnostics,
+        release: Tuple[int, ...] = Version(torch.__version__).release
+        return f"{release[0]}.{release[1]}"
+    except Exception as error:
+        console_warning(
+            "ml api trace",
+            "Could not determine the PyTorch version "
+            f"({type(error).__name__}: {error}).",
         )
-        return None
-    return d
+        return _UNKNOWN_TORCH_VERSION
 
 
-_PREBUILT_HINT = (
-    "ship a prebuilt roctx_recordfn-<tag>.so under "
-    "<install-prefix>/lib*/" + _INSTALL_TREE_PROJECT_NAME + "/"
-)
+def _discover_collector_artifact() -> Optional[Path]:
+    """Return the generic collector installed with rocprofiler-compute."""
+    artifacts = find_prebuilt_artifacts(_PACKAGE_ROOT, _ARTIFACT_NAME)
+    return artifacts[0] if artifacts else None
 
 
-def _explain_cmake_failure(
-    phase: str, err: Exception, stderr_tail: str
-) -> tuple[str, str]:
-    """Classify a cmake-tier failure into ``(reason, hint)``."""
-    text = (str(err) + "\n" + (stderr_tail or "")).lower()
-    if "could not find torch" in text or "torch_dir" in text:
-        return (
-            f"cmake {phase}: libtorch package not visible to cmake",
-            "ensure the running interpreter's torch wheel is fully "
-            "installed; alternatively, " + _PREBUILT_HINT,
-        )
-    if "rocprofiler-sdk-roctx" in text or "roctx.h" in text:
-        return (
-            f"cmake {phase}: rocprofiler-sdk-roctx headers/library not found",
-            "set ROCM_PATH to your ROCm install root (default: "
-            "/opt/rocm); alternatively, " + _PREBUILT_HINT,
-        )
-    if any(
-        tok in text
-        for tok in (
-            "no cmake_cxx_compiler",
-            "is not able to compile",
-            "no such file",
-            "command not found",
-        )
-    ):
-        return (
-            f"cmake {phase}: host C++ compiler not found or non-functional",
-            "ensure a working g++ or clang is on PATH; alternatively, "
-            + _PREBUILT_HINT,
-        )
-    return (
-        f"cmake {phase} failed",
-        "see the cmake stderr above; if the failure is environmental, "
-        + _PREBUILT_HINT,
+def _promote_torch_cpu() -> ctypes.CDLL:
+    """Expose the workload's libtorch_cpu symbols to the native collector."""
+    import torch
+
+    torch_library = (
+        Path(torch.__file__).resolve().parent / "lib" / _TORCH_CPU_LIBRARY_NAME
     )
+    return ctypes.CDLL(str(torch_library), mode=_TORCH_LIBRARY_LOAD_MODE)
 
 
-def _log_cmake_failure(
-    phase: str,
-    err: Exception,
-    stderr_tail: str,
-    diagnostics: Optional[_Diagnostics] = None,
-) -> None:
-    """Log a classified cmake failure, including a stderr tail."""
-    reason, hint = _explain_cmake_failure(phase, err, stderr_tail or "")
-    _safe_log("log", f"cmake build failed: {reason}: {err}", diagnostics)
-    if stderr_tail:
-        tail = "\n".join(stderr_tail.strip().splitlines()[-12:])
-        if tail:
-            _safe_log("log", f"cmake stderr (tail):\n{tail}", diagnostics)
-    _safe_log("log", f"to enable the C++ tier, {hint}", diagnostics)
+def load() -> TorchTraceCollector:
+    """Load the generic collector for a supported workload PyTorch version."""
+    global _torch_cpu_library
 
+    torch_version = _workload_torch_version()
+    if torch_version not in _SUPPORTED_TORCH_VERSIONS:
+        raise UnsupportedTorchVersionError(torch_version)
 
-def _jit_failure_marker(
-    tag: str,
-    diagnostics: Optional[_Diagnostics] = None,
-) -> Optional[Path]:
-    """Return the failure-marker path for ``tag``, or ``None`` if no cache dir."""
-    cache_dir = _jit_cache_dir(diagnostics)
-    if cache_dir is None:
-        return None
-    return cache_dir / f"roctx_recordfn-{tag}.build-failed"
-
-
-def _record_jit_failure(
-    tag: str,
-    err: Exception,
-    reason: str = TIER_JIT,
-    stderr: str = "",
-    diagnostics: Optional[_Diagnostics] = None,
-) -> None:
-    """Write a failure marker for the JIT tier."""
-    try:
-        marker = _jit_failure_marker(tag, diagnostics)
-        if marker is None:
-            return
-        payload = f"{reason}: {type(err).__name__}: {err}\n"
-        if stderr:
-            tail = "\n".join(stderr.strip().splitlines()[-20:])
-            if tail:
-                payload += f"--- stderr tail ---\n{tail}\n"
-        marker.write_text(payload)
-    except Exception as exc:
-        _safe_log(
-            "log",
-            f"jit failure-marker write skipped ({tag}): {type(exc).__name__}: {exc}",
-            diagnostics,
-        )
-
-
-def _previous_jit_failure(
-    tag: str,
-    diagnostics: Optional[_Diagnostics] = None,
-) -> Optional[str]:
-    """Return the recorded failure summary for ``tag``, if any."""
-    try:
-        marker = _jit_failure_marker(tag, diagnostics)
-        if marker is not None and marker.exists():
-            return marker.read_text().strip() or None
-    except Exception as exc:
-        _safe_log(
-            "log",
-            f"jit failure-marker read skipped ({tag}): {type(exc).__name__}: {exc}",
-            diagnostics,
-        )
-    return None
-
-
-def _clear_jit_failure(tag: str) -> None:
-    """Remove the failure marker for ``tag``."""
-    marker = _jit_failure_marker(tag)
-    if marker is None:
-        return
-    try:
-        marker.unlink()
-    except FileNotFoundError:
-        pass
-    except Exception:
-        pass
-
-
-def _install_cached_so(
-    src_so: Path,
-    cached_so: Path,
-    diagnostics: Optional[_Diagnostics] = None,
-) -> None:
-    """Copy ``src_so`` onto ``cached_so`` for the next-run cache hit."""
-    if not src_so.exists():
-        return
-    try:
-        shutil.copy2(src_so, cached_so)
-    except Exception as exc:
-        _safe_log(
-            "log",
-            f"jit cache install skipped ({cached_so}): {type(exc).__name__}: {exc}",
-            diagnostics,
-        )
-
-
-def _cmake_executable() -> Optional[str]:
-    """Return the cmake executable from ``$CMAKE`` or ``PATH``."""
-    return shutil.which(os.environ.get("CMAKE", "cmake"))
-
-
-def _try_jit(
-    tag: str,
-    *,
-    force_rebuild: bool = False,
-    diagnostics: Optional[_Diagnostics] = None,
-) -> Optional[types.ModuleType]:
-    """Return the cached or freshly cmake-built ``roctx_recordfn`` module."""
-    cache_dir = _jit_cache_dir(diagnostics)
-    if cache_dir is None:
-        return None
-    cached_so = cache_dir / f"roctx_recordfn-{tag}.so"
-
-    if not force_rebuild and cached_so.exists():
-        try:
-            mod = _import_module_from_path("roctx_recordfn", cached_so)
-            _safe_log("log", f"loaded JIT-cached .so: {cached_so}", diagnostics)
-            return mod
-        except Exception as e:
-            _safe_log(
-                "warning",
-                f"JIT-cached .so at {cached_so} failed to load: {e}",
-                diagnostics,
-            )
-            try:
-                cached_so.unlink()
-            except Exception:
-                pass
-
-    if not _SO_SOURCE.exists() or not _SO_BUILDFILE.exists():
-        _safe_log(
-            "log",
-            f"sources missing under {_SO_SOURCE_DIR}; skipping cmake tier",
-            diagnostics,
-        )
-        return None
-
-    cmake_exe = _cmake_executable()
-    if cmake_exe is None:
-        _safe_log("log", "cmake not on PATH; skipping cmake tier", diagnostics)
-        return None
-
-    prior = _previous_jit_failure(tag, diagnostics)
-    if prior is not None:
-        _safe_log(
-            "log",
-            f"skipping cmake build (prior failure cached for tag {tag}): {prior}",
-            diagnostics,
-        )
-        return None
-
-    build_dir = cache_dir / f"cmake-build-{tag}"
-    try:
-        build_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        _log_cmake_failure("setup", e, "", diagnostics)
-        _record_jit_failure(tag, e, diagnostics=diagnostics)
-        return None
-
-    configure_argv = [
-        cmake_exe,
-        "-S",
-        str(_SO_SOURCE_DIR),
-        "-B",
-        str(build_dir),
-        f"-DTORCH_TRACE_PYTHON={sys.executable}",
-        "-DCMAKE_BUILD_TYPE=Release",
-    ]
-    try:
-        configure = subprocess.run(
-            configure_argv,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as e:
-        _log_cmake_failure("invoke", e, "", diagnostics)
-        _record_jit_failure(tag, e, diagnostics=diagnostics)
-        return None
-
-    if configure.returncode != 0:
-        err = RuntimeError(f"cmake configure exited with rc={configure.returncode}")
-        _log_cmake_failure("configure", err, configure.stderr, diagnostics)
-        _record_jit_failure(tag, err, stderr=configure.stderr, diagnostics=diagnostics)
-        return None
+    so_path = _discover_collector_artifact()
+    if so_path is None:
+        raise CollectorNotBuiltError(torch_version)
 
     try:
-        build = subprocess.run(
-            [cmake_exe, "--build", str(build_dir), "-j"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as e:
-        _log_cmake_failure("invoke", e, "", diagnostics)
-        _record_jit_failure(tag, e, diagnostics=diagnostics)
-        return None
+        if _torch_cpu_library is None:
+            _torch_cpu_library = _promote_torch_cpu()
+        library = ctypes.CDLL(str(so_path), mode=_COLLECTOR_LOAD_MODE)
+        collector = TorchTraceCollector(library, so_path)
+    except Exception as error:
+        raise CollectorLoadError(so_path, error) from error
 
-    if build.returncode != 0:
-        err = RuntimeError(f"cmake --build exited with rc={build.returncode}")
-        _log_cmake_failure("build", err, build.stderr, diagnostics)
-        _record_jit_failure(tag, err, stderr=build.stderr, diagnostics=diagnostics)
-        return None
-
-    produced = build_dir / f"roctx_recordfn-{tag}.so"
-    if not produced.is_file():
-        err = RuntimeError(
-            f"cmake build succeeded but expected .so missing at {produced}"
-        )
-        _log_cmake_failure("missing-output", err, "", diagnostics)
-        _record_jit_failure(tag, err, diagnostics=diagnostics)
-        return None
-
-    _install_cached_so(produced, cached_so, diagnostics)
-
-    try:
-        mod = _import_module_from_path("roctx_recordfn", cached_so)
-    except Exception as e:
-        _log_cmake_failure("load", e, "", diagnostics)
-        _record_jit_failure(tag, e, diagnostics=diagnostics)
-        return None
-
-    _clear_jit_failure(tag)
-    shutil.rmtree(build_dir, ignore_errors=True)
-
-    _safe_log("log", f"cmake-built roctx_recordfn.so for {tag}", diagnostics)
-    return mod
-
-
-def load(force_python_fallback: bool = False) -> LoadResult:
-    """Resolve the ``roctx_recordfn`` module and return a ``LoadResult``."""
-    diagnostics: _Diagnostics = []
-
-    if force_python_fallback:
-        _safe_log(
-            "log", "force_python_fallback=True; declining to load .so", diagnostics
-        )
-        return LoadResult(None, None, diagnostics)
-
-    tag = compute_tag()
-    if tag is None:
-        _safe_log(
-            "warning", "torch not importable; using Python-only injector", diagnostics
-        )
-        return LoadResult(None, None, diagnostics)
-
-    if os.environ.get(_REBUILD_ENV_VAR) == "1":
-        _safe_log(
-            "warning",
-            f"{_REBUILD_ENV_VAR}=1: bypassing prebuilt and JIT cache, "
-            f"forcing fresh build for tag {tag}",
-            diagnostics,
-        )
-        _clear_jit_failure(tag)
-        mod = _try_jit(tag, force_rebuild=True, diagnostics=diagnostics)
-        tier = TIER_JIT if mod is not None else None
-        return LoadResult(mod, tier, diagnostics)
-
-    for tier_name, step in (
-        (TIER_PREBUILT, _try_prebuilt),
-        (TIER_JIT, _try_jit),
-    ):
-        mod = step(tag, diagnostics=diagnostics)
-        if mod is not None:
-            return LoadResult(mod, tier_name, diagnostics)
-
-    _safe_log(
-        "log",
-        "no roctx_recordfn .so available; using Python-only injector",
-        diagnostics,
-    )
-    return LoadResult(None, None, diagnostics)
+    console_log("ml api trace", f"loaded prebuilt .so: {so_path}")
+    return collector

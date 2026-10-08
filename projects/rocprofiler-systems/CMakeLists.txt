@@ -222,6 +222,11 @@ rocprofiler_systems_add_option(CMAKE_CXX_STANDARD_REQUIRED
 rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
     "Enable AI NIC profiling through AMD SMI" ON
 )
+rocprofiler_systems_add_tristate_option(
+    ROCPROFSYS_USE_HIPFILE
+    "Enable hipFile's AMD Infinity Storage I/O telemetry (ON, OFF, or AUTO)"
+    "AUTO"
+)
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
     "Compiler specific language extensions" OFF
 )
@@ -257,9 +262,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from su
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
     OFF
 )
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TBB "Build tbb from submodule"
-    OFF
-)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
     "Build libunwind from submodule" ON
 )
@@ -273,6 +275,10 @@ rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
 
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SPDLOG
     "Enable building spdlog library internally" ON
+)
+
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FMT
+    "Enable building fmt library internally" ON
 )
 
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST

@@ -43,7 +43,7 @@ using runtime_registration_vec_t = std::vector<rocprofiler_runtime_registration_
 // invokes `rocprofiler_register_iterate_registration_info` and converts
 // `rocprofiler_register_registration_info_t` to `rocprofiler_runtime_registration_info_t`.
 std::optional<runtime_registration_vec_t>
-get_runtime_registrations();
+get_runtime_registrations(void* handle);
 }  // namespace iterate
 }  // namespace registration
 }  // namespace rocprofiler

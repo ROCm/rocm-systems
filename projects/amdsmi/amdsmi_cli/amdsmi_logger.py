@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import csv
 import json
@@ -348,7 +331,10 @@ class AMDSMILogger:
         for key, value in tabbed_dictionary.items():
             del capitalized_json[key]
 
-        capitalized_json["AMDSMI_SPACING_REMOVAL"] = tabbed_dictionary
+        # Only set when non-empty: an empty dict now renders "KEY: N/A", which the
+        # literal strip below would miss, leaking the marker into the output.
+        if tabbed_dictionary:
+            capitalized_json["AMDSMI_SPACING_REMOVAL"] = tabbed_dictionary
 
         # Convert the capitalized JSON to a YAML-like string
         yaml_output = self.custom_dump(capitalized_json)
@@ -381,7 +367,10 @@ class AMDSMILogger:
         yaml_string = ""
         for key, value in data.items():
             if isinstance(value, dict):
-                yaml_string += "  " * indent + f"{key}:\n" + self.custom_dump(value, indent + 1)
+                if not value:
+                    yaml_string += "  " * indent + f"{key}: N/A\n"
+                else:
+                    yaml_string += "  " * indent + f"{key}:\n" + self.custom_dump(value, indent + 1)
             elif isinstance(value, list):
                 if not value:
                     yaml_string += "  " * indent + f"{key}: N/A\n"
@@ -1260,21 +1249,11 @@ class AMDSMILogger:
         rocm_version = "N/A"
         if output["version_info"]["rocm version"][0]:
             rocm_version = str(output["version_info"]["rocm version"][1]).ljust(8)
-        driver_version = output["version_info"]["amdgpu version"]
-        if driver_version == "N/A":
-            amdgpu_version = "N/A".ljust(8)
+        driver_info = output["version_info"]["amdgpu version"]
+        if driver_info == "N/A":
+            amdgpu_version = "N/A"
         else:
-            # Example driver version string for amdgpu: 6.8.0-60 : 'Linuxversion6.8.0-60-generic(buildd@lcy02-amd64-098)(x86_64-linux-gnu-gcc-12(Ubuntu12.3.0-1ubuntu1~22.04)12.3.0,GNUld(GNUBinutilsforUbuntu)2.38)#63~22.04.1-UbuntuSMPPREEMPT_DYNAMICTueApr2219:00:15UTC2'
-            # Extract version before "-generic" if it exists
-            if "-generic" in driver_version["driver_version"]:
-                # Extract version using regex to find pattern like "6.8.0-60"
-                match = re.search(r"(\d+\.\d+\.\d+-\d+)", driver_version["driver_version"])
-                if match:
-                    amdgpu_version = match.group(1)[:80]
-                else:
-                    amdgpu_version = "N/A"
-            else:
-                amdgpu_version = str(driver_version["driver_version"])[:80]
+            amdgpu_version = str(driver_info["driver_full_version"])
         fw_pldm_version = str(output["version_info"]["fw pldm version"])
         vbios_version = str(output["version_info"]["vbios version"])
         kernel_version = str(output["version_info"]["kernel version"])
@@ -1301,10 +1280,9 @@ class AMDSMILogger:
         print(default_line_1)
         print("| AMD-SMI            {0:<{w}s} |".format(amd_smi_version, w=_COL_WIDTH))
 
-        # Print amdgpu or kernel version based on availability, if neither then don't print
-        if amdgpu_version.strip() != "N/A":
+        if amdgpu_version != "N/A":
             print("| amdgpu Version:    {0:<{w}s} |".format(amdgpu_version, w=_COL_WIDTH))
-        elif kernel_version.strip() != "N/A":
+        elif kernel_version != "N/A":
             print("| OS kernel Version: {0:<{w}s} |".format(kernel_version, w=_COL_WIDTH))
 
         if rocm_version != "N/A":

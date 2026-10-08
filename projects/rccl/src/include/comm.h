@@ -23,14 +23,22 @@
 #include "allocator.h"
 #include "dev_runtime.h"
 #include "sym_kernels.h"
+#include "algorithms/gin/gin_alltoall.h"
+#include "algorithms/gin/gin_all_reduce.h"
 #include "ce_coll.h"
 #include "rma/rma.h"
 #include "argcheck.h"
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "mem_manager.h"
+#include "tuning.h"
+#include "enqueue/raw_task.h"
+#include "enqueue/task_pretuning.h"
+#include "enqueue/task_classify.h"
+#include "enqueue/task_posttuning.h"
+#include "enqueue/mgmt_task_enq.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -131,6 +139,18 @@ struct ncclCommEventCallback {
   ncclResult_t (*fn)(struct ncclComm* comm, struct ncclCommEventCallback* cb);
 };
 
+struct ncclUncapturedStreamPoolNode {
+  cudaStream_t stream;
+  struct ncclUncapturedStreamPoolNode* next;
+};
+
+struct ncclUncapturedStreamPool {
+  struct ncclUncapturedStreamPoolNode* head;
+};
+
+ncclResult_t ncclUncapturedStreamPoolAcquire(struct ncclUncapturedStreamPool* pool, cudaStream_t* stream);
+ncclResult_t ncclUncapturedStreamPoolDestroy(struct ncclUncapturedStreamPool* pool);
+
 struct ncclSharedResources {
   int refCount;
   struct ncclComm* owner; /* comm which creates this shared res. */
@@ -153,6 +173,7 @@ struct ncclSharedResources {
   struct ncclStrongStream deviceStream, hostStream;
   int persistentRefs;
   cudaEvent_t launchEvent, scratchEvent;
+  struct ncclUncapturedStreamPool uncapturedStreamPool;
 
   /* proxy related shared res */
   struct ncclProxyState* proxyState;
@@ -240,12 +261,14 @@ struct ncclTaskColl {
   uint32_t devFuncId:29;
   int regBufType;
   uint64_t opCount;
+  cudaEvent_t launchCompletionEvent;
   // number of elements in planner->ipcMemQueue associated with this collective
   int nCleanupQueueElts;
 
   struct ncclDevrWindow* sendWin;
   struct ncclDevrWindow* recvWin;
   ncclSymRegType_t winRegType;
+  rcclSymkExtract symkExtract;
   void*
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
   size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
@@ -267,8 +290,27 @@ struct ncclTaskColl {
   void* groupApiEventHandle;
   void* collApiEventHandle;
   void* eventHandle;
-  // 16-bit so MAXCHANNELS=256 fits without wrap-to-zero.
+  // 16-bit so MAXCHANNELS=256 (512 with ENABLE_WARP_SPEED) fits without wrap-to-zero.
   uint16_t nChannels;
+  // Inclusive channel range this task ran on; mirrors devWork->channelLo/Hi.
+  // uint16_t: ENABLE_WARP_SPEED widens device channelLo/Hi to 16 bits (MAXCHANNELS=512).
+  uint16_t channelLo;
+  uint16_t channelHi;
+
+  // Per-collective config related members
+  bool aggIsolate; // Whether task needs to be isolated from aggregation because of config options.
+                   // Config options related to resource and algorithm usually need the isolation.
+  int minCTAs;
+  int maxCTAs;
+  int nvlsCTAs;
+  int cgaClusterSize;
+  // Resolved algorithm selection, captured at append time for the same reason.
+  uint64_t algMask;    // set bit == algorithm allowed by the filter; 0 == automatic (no filter)
+  int forceAlgSelection; // 1 (default) == error on unsatisfiable selection; 0 == fall back to automatic
+  int CTAPolicy;  // resolved effective CTAPolicy for this task
+  // Per-call profiler annotation (0 == untagged), resolved at task-append time and
+  // delivered verbatim to profiler plugins.
+  uint64_t profilerTag;
 };
 
 struct ncclTaskBcast {
@@ -290,6 +332,7 @@ struct ncclTaskBcast {
   void* collApiEventHandle;
   void* eventHandle;
   uint8_t nChannels;
+  uint64_t profilerTag; // Per-call profiler annotation (0 == untagged)
 };
 
 struct ncclTaskP2p {
@@ -303,6 +346,7 @@ struct ncclTaskP2p {
   size_t bytes;
   uint64_t opCount;
   bool allowUB;
+  cudaEvent_t launchCompletionEvent;
 
   // Profiler plugin
   int eActivationMask;
@@ -310,6 +354,12 @@ struct ncclTaskP2p {
   void* p2pApiEventHandle;
   void* eventHandle;
   uint8_t nChannels;
+  uint64_t profilerTag; // Per-call profiler annotation (0 == untagged)
+  // Per-direction channels used by this task; read by the profiler to emit and
+  // advertise KernelCh per direction (StartTaskEvents / PostPlanWork).
+  uint64_t channelMask;
+  // Shared by both tasks of an addP2pToPlan() pair; 0 = unassigned.
+  uint16_t p2pPairId;
 };
 
 struct ncclTaskRma {
@@ -330,8 +380,12 @@ struct ncclTaskRma {
 
   // Signal operations
   ncclSignalMode_t signalMode;
+  int signalIdx;
+
+  // WaitSignal operations
   int* peers;
   int* nsignals;
+  int* signalIdxs;
   int npeers;
 
   // Profiler plugin
@@ -368,7 +422,13 @@ struct ncclKernelPlan {
   size_t kernelArgsSize;
   struct channelMasks channelMask;
   bool hasProxyOps; // does any channel have a non-empty proxyOpQueue
+  // Any task with ncclProfileKernelCh; gates the captured host callback.
+  bool hasProfilerOps;
+  // Source of ncclTaskP2p::p2pPairId; incremented per addP2pToPlan() call.
+  uint16_t p2pPairCounter;
   int threadPerBlock;
+  int cgaClusterSize;  // per-launch CGA cluster size; defaults to comm->config.cgaClusterSize
+  cudaEvent_t launchCompletionEvent;
 
   int collOpCount; // Number of collectives in this plan.
   int nWorkBatches; // Number of work batches.
@@ -479,6 +539,7 @@ struct ncclKernelPlanner {
   struct Peer* peers /*[nRanks]*/;
   int nTasksColl, nTasksP2p, nTasksBcast, nTasksRma;
   int nTasksP2pSend, nTasksP2pRecv;
+  int nCollConfigLaunchCompletionEvents; // Original event-bearing collective requests in this group.
 
   struct {
     int minBcastPeer; /* initialized to INT_MAX */
@@ -575,12 +636,23 @@ struct ncclPeerInfo {
   bool rmaPluginAvailable;
   bool cuMemGdrSupport;
   int mloPart; // MLOPart partition index, or -1 if not an MLOPart GPU
+  // NCCL 2.31 additions, appended at the same tail position for the same reason.
+  int fabricHandleSupport;
+  int gpuCftSupport;
+  uint32_t supportedGinTypeBitMask;
+  // NCCL 2.32 additions, appended at the tail for the same reason.
+  int cudaDriverVersion;
+  bool gpuCftMulticastSupport;
+  bool gpuCftCountedSupport;
+  uint32_t gitVersionHash;
 };
 
 typedef enum ncclGroupTaskType {
   ncclGroupTaskTypeCollective = 0,
   ncclGroupTaskTypeSymRegister = 1,
-  ncclGroupTaskTypeNum = 2,
+  ncclGroupTaskTypeRawTask = 2,
+  ncclGroupTaskTypeMgmtTask = 3,
+  ncclGroupTaskTypeNum = 4,
 } ncclGroupTaskType_t;
 
 struct ncclCommSymTeams;
@@ -614,14 +686,13 @@ struct ncclComm {
   struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next> legacyRegCleanupQueue;
   bool peerInfoValid;
   int minNetCount; // Minimum number of network devices local to a rank
+  float minLocalNetBw; // Minimum total network bandwidth local to a GPU
   float minNetBw; // Minimum bw of any network device local to a rank
 
   ncclNet_t* ncclNet;
   void* netContext;
-  void* ginContext;
   void* rmaContext;
   int netPluginIndex;
-  int ginPluginIndex;
   int rmaPluginIndex;
   int ncclNetVer;
   ncclNetDeviceType netDeviceType;
@@ -675,6 +746,9 @@ struct ncclComm {
   ncclAffinity cpuAffinity; // CPU affinity of the GPU
   int WarpSize;
   int cudaArch; // matches __CUDA_ARCH__ of device
+  int maxSharedMemOptin; // cudaDevAttrMaxSharedMemoryPerBlockOptin for cudaDev
+  int minDriverVersion; // min CUDA driver version
+  bool cuMemGdrSupport;  // global cuMem GDR support
 
   int cpuArch; // architecture - As defined in src/include/graph.h, e.g. x86/arm/ppc/mixed
   int cpuVendor; // vendor - As defined in src/include/graph.h
@@ -683,6 +757,9 @@ struct ncclComm {
   int nNodes;
   int rcclUseOneSlice; // RCCL: true if this comm is using one slice per primitive
   int cheapPostSendFenceOff; // RCCL: true if cheap post-send fence is disabled
+#if ENABLE_TDM_SIMPLE
+  int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+#endif
   int localRank;
   int localRanks;
   int maxLocalRanks;
@@ -697,6 +774,12 @@ struct ncclComm {
   struct ncclComm* hierarchicalIntraComm;
   struct ncclComm* hierarchicalInterComm;
   bool hierarchicalCommsInitialized;
+  // Set at init when a hierarchical collective is enabled and the topology permits
+  // it; cleared if building the sub-communicators fails. Eligible but not yet
+  // initialized means RCCL_HIERARCHICAL_LAZY_INIT deferred them.
+  bool hierarchicalEligible;
+  // Eligible AllGathers seen while the deferred setup is pending.
+  uint64_t hierarchicalLazyCalls;
 
   // Hierarchical temporary buffer
   // Both hierarchical AG and RS use the same temp buffer,
@@ -706,10 +789,14 @@ struct ncclComm {
   // Force PAT algorithm for this communicator
   bool forcePatEnable;
 
+  // PAT ReduceScatter and AllGather share one connection set; must match on every rank
+  bool patSharedQps;
+
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
   struct cliqueInfo clique; // Our MNNVL clique information
   int cliqueRank; // Our rank within the MNNVL clique
+  int contiguousRanksPerHost; // Number contiguous ranks per host. INT_MAX if non-uniform.
 
   // NVL Domain info
   ncclNvlDomainInfo_v5_t nvlDomainInfo;
@@ -761,6 +848,11 @@ struct ncclComm {
   uint64_t minMaxChannelThresholds
     [RCCL_TUNABLE_COLLS][RCCL_CHANNELS_TUNABLE_ENTRIES]
     [3]; // for each collective, set for 5 channel-counts: 32,40,48,56,64, the two values for min/max size-threshold
+  struct ncclTuningContext_t tuningContext;
+
+  // Per-arch DDA/CE dispatch thresholds -- populated at comm init from rcclGetArchThresholds().
+  // NULL on architectures without a dedicated threshold table (falls back to env-var params).
+  const struct rcclArchThresholds* archThresholds;
 
   /* This attribute can indicate the states of communicators and return code of
    * asynchronous NCCL operations. */
@@ -813,14 +905,14 @@ struct ncclComm {
   int* collNetHeads;
   int collNetHeadsNum;
   int collNetChainSupport;
-  int* collNetDenseToUserRank;
-  int* collNetUserToDenseRank;
+  // Node-major rank order with transport heads first on each node.
+  int* denseToUserRank;
   /* sharable collNet proxy progress resource. */
   struct ncclCollNetSharedRes* collNetSharedRes;
 
   // NVLink SHARP (NVLS) support
-  int nvlsSupport;
-  int nvlsRegSupport;
+  int nvlsSupport; // NVLS multicast capability, including device runtime use. NCCL_NVLS_ENABLE can override.
+  int nvlsRegSupport; // host NVLS user-buffer registration supported
   /* sharable NVLS resource. */
   struct ncclNvlsSharedRes* nvlsResources;
 
@@ -829,6 +921,7 @@ struct ncclComm {
   struct ncclMemoryPool memPool_ncclTaskColl;
   struct ncclMemoryPool memPool_ncclTaskP2p;
   struct ncclMemoryPool memPool_ncclTaskRma;
+  struct ncclMemoryPool memPool_ncclRawTask;
   struct ncclMemoryPool memPool_ncclProxyOp;
   struct ncclMemoryPool memPool_ncclKernelPlan;
 
@@ -849,6 +942,12 @@ struct ncclComm {
   }* p2pSchedule;
 
   struct ncclKernelPlanner planner;
+  struct ncclRawTaskQueue rawTaskQueue;
+  struct ncclClassifiedTaskQueues classifiedTaskQueues;
+  // Queue of management tasks (comm init/destroy/finalize/etc.) enqueued for this
+  // comm during a ncclGroup[Start|End]() scope.
+  struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next> mgmtTaskQueue;
+  bool simulationMode;
   void* ringTasks; // An array of nRanks pointers used in ring sorting rooted collectives (bcast)
 
   cudaMemPool_t memPool;
@@ -867,11 +966,19 @@ struct ncclComm {
   struct ncclIntruQueueMpsc<struct ncclCommCallback, &ncclCommCallback::next> callbackQueue;
 
   hipEvent_t doneEvent;
-  hipStream_t lastStream;
-  // False until the first kernel launch on this comm. Distinguishes "no prior launch"
-  // from "prior launch on the default stream (lastStream==nullptr)" so ncclLaunchPrepare
-  // can correctly detect a stream change in either case.
-  bool lastStreamValid;
+  // Opaque tag identifying the last launch stream, for stream-change detection only; 0 means
+  // no launch yet, which keeps "launched on the default stream" distinguishable. Not a
+  // hipStream_t: the app may destroy that stream while the comm lives on and HIP gives no
+  // notification, so this is compared, never passed to a HIP API.
+  //
+  // If the handle is recycled onto a new stream, tag equality deliberately skips the wait:
+  // hipStreamDestroy defers reuse until the stream's work completes, so a matching tag
+  // implies the prior kernel already finished.
+  uintptr_t lastStreamTag;
+  // The event the addon collective's last kernel carries as its stopEvent, in place of a standalone
+  // record. Non-null only between rcclAddonLaunchBegin, which sets it to doneEvent, and
+  // rcclTakeAddonStopEvent, which hands it out.
+  hipEvent_t addonStopEvent;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_WARP_SPEED
@@ -902,8 +1009,20 @@ struct ncclComm {
 
   // Profiler plugin
   void* profilerContext;
+  // Host-side collective sequence counters maintained by profiler support and
+  // also used by RAS; they are independent of GPU completed-work counters.
   uint64_t seqNumber[NCCL_NUM_FUNCTIONS];
-  struct ncclProfilerProxy profiler;
+  struct ncclProfilerCommState profiler;
+
+  // RAS GPU-resident counters support
+  // Pinned host mirror of the NCCL progress counters.
+  struct ncclProgressCountersBlock* hostCountersBlock;
+  // Device counters written by kernels.
+  struct ncclProgressCountersBlock* deviceCountersBlock;
+  // CPU/GPU timer offset cached per device.
+  int64_t gpuTimerOffsetNs;
+  // Intrusive link in the per-device progress-counter registration list.
+  struct ncclComm* nextProgressRegistration;
 
   // RMA state
   struct ncclRmaState rmaState;
@@ -923,6 +1042,9 @@ struct ncclComm {
   bool isAllCudaP2p; // Raw CUDA capability (for local ranks only).
   bool isAllDirectNvlink; // All GPUs are directly connected to each other through NVLink.
   int symmetricSupport;
+  int gpuCftSupport;
+  bool gpuCftMulticastSupport;
+  bool gpuCftCountedSupport;
   bool useNetPXN;
   bool useGdr;
   bool hasMloPart; // if mlopart is used
@@ -935,6 +1057,8 @@ struct ncclComm {
 
   struct ncclDevrState devrState; // The symmetric runtime state
   struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
+  struct ncclGinA2AState ginA2AState; // GIN-SDMA alltoall state (private devComm)
+  struct ncclGinAllReduceState ginAllReduceState; // GIN-SDMA AllReduce state (private devComm)
 
   struct ncclMemManager* memManager; // Memory manager
   struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> suspendTaskQueue;
@@ -954,6 +1078,8 @@ struct ncclComm {
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   int ll128LineElems;
   int ll128DataElems;
+  // [RCCL] Host mirror of device side NCCL_LL128_SHMEM_ELEMS_PER_THREAD
+  int ll128ShmemElemsPerThread;
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
@@ -983,6 +1109,14 @@ struct ncclComm {
 
   uint64_t endMagic;
 };
+
+inline bool ncclNvlsTransportEnabled(const struct ncclComm* comm) {
+  return comm->nvlsSupport && !(comm->config.nvlsHostMode & ncclNvlsHostModeDisableTransport);
+}
+
+inline bool ncclNvlsSymmetricMultimemEnabled(const struct ncclComm* comm) {
+  return comm->nvlsSupport && !(comm->config.nvlsHostMode & ncclNvlsHostModeDisableSymmetricMultimem);
+}
 
 static_assert(offsetof(struct ncclComm, startMagic) == 0, "startMagic must be the first field of ncclComm");
 static_assert(offsetof(struct ncclComm, endMagic) == sizeof(struct ncclComm) - sizeof(uint64_t),
@@ -1093,7 +1227,20 @@ static inline ncclRedOp_t ncclUserRedOpMangle(ncclComm* comm, ncclRedOp_t op) {
   return op1 < int(ncclNumOps) ? op : ncclRedOp_t(op1);
 }
 
+// Returns the stop event for the collective's last stream operation. The result is nullptr while
+// capturing, and after an earlier launch in the same collective has taken it. Only the launch that
+// ends the collective may call this: rcclAddonLaunchEnd reads the cleared field as "a kernel will
+// record it" and skips the standalone record.
+static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
+  hipEvent_t stopEvent = comm->addonStopEvent;
+  comm->addonStopEvent = nullptr;
+  return stopEvent;
+}
+
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);
 ncclResult_t ncclCommSetAsyncError(ncclComm_t comm, ncclResult_t nextState);
+
+// Process-wide NCCL_CTA_POLICY env override, or NCCL_CONFIG_UNDEF_INT when unset/invalid.
+int ncclGetEnvCtaPolicy();
 
 #endif

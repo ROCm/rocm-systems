@@ -164,11 +164,6 @@ void Sysfs::cleanup() {
   }
 }
 
-void Sysfs::release_after_fork() {
-  topology_dir_.clear();
-  drm_dir_.clear();
-}
-
 void Sysfs::setup_environment() {}
 
 void Sysfs::write_generation_id() { write_file(topology_dir_ + "/generation_id", "1\n"); }
@@ -191,6 +186,8 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links)
     make_dir(node_dir + "/io_links/" + std::to_string(i));
 
   write_file(node_dir + "/gpu_id", "0\n");
+  // KFD publishes a name file for every topology node.
+  write_file(node_dir + "/name", "\n");
 
   long nproc = sysconf(_SC_NPROCESSORS_ONLN);
   if (nproc < 1)
@@ -327,7 +324,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "hive_id " << gpu.hive_id << "\n"
         << "num_sdma_engines " << gpu.num_sdma_engines << "\n"
         << "num_sdma_xgmi_engines " << gpu.num_sdma_xgmi_engines << "\n"
-        << "num_sdma_queues_per_engine 2\n"
+        << "num_sdma_queues_per_engine " << gpu.num_sdma_queues_per_engine << "\n"
         << "num_cp_queues " << gpu.num_cp_queues << "\n"
         << "max_engine_clk_fcompute " << gpu.max_engine_clk_fcompute << "\n"
         << "max_engine_clk_ccompute 0\n"
@@ -488,6 +485,14 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
       write_file(device_dir + "/revision", revision_hex.str());
       write_file(device_dir + "/subsystem_vendor", vendor_hex.str());
       write_file(device_dir + "/subsystem_device", device_hex.str());
+      for (const auto &block : gpu.ip_versions) {
+        std::string instance_dir =
+            device_dir + "/ip_discovery/die/0/" + std::to_string(block.hardware_id) + "/0";
+        make_dir(instance_dir);
+        write_file(instance_dir + "/major", std::to_string(block.major) + "\n");
+        write_file(instance_dir + "/minor", std::to_string(block.minor) + "\n");
+        write_file(instance_dir + "/revision", std::to_string(block.revision) + "\n");
+      }
     }
   }
 
@@ -549,6 +554,7 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.debug_prop = dev.debug_prop;
   gpu.drm_render_minor = dev.drm_render_minor;
   gpu.marketing_name = dev.marketing_name;
+  gpu.ip_versions = dev.ip_versions;
   gpu.revision_id = dev.revision_id;
   gpu.pci_revision_id = dev.pci_revision_id;
   gpu.simd_count = dev.simd_count;
@@ -572,6 +578,7 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.l2_assoc = dev.l2_assoc;
   gpu.num_sdma_engines = dev.num_sdma_engines;
   gpu.num_sdma_xgmi_engines = dev.num_sdma_xgmi_engines;
+  gpu.num_sdma_queues_per_engine = dev.num_sdma_queues_per_engine;
   gpu.num_cp_queues = dev.num_cp_queues;
   gpu.max_engine_clk_fcompute = dev.max_engine_clk_fcompute;
   gpu.num_xcc = num_xcc;

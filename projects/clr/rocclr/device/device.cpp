@@ -242,11 +242,16 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       {"gfx1151", true, true, 11, 5, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1152", true, true, 11, 5, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1153", true, true, 11, 5, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1170", true, true, 11, 7, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1171", true, true, 11, 7, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx11-generic", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx11-7-generic", true, true, 11, 7, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1200", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1201", true, true, 12, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1250", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
+      {"gfx1250-strict", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
       {"gfx12-generic", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx12-5-generic", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
   };
   return std::make_pair(std::begin(supportedIsas_), std::end(supportedIsas_));
 }
@@ -1368,7 +1373,8 @@ std::vector<amd::CommandQueue*> Device::getActiveQueues() {
 }
 
 // =================================================================================================
-bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) {
+bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                      unsigned long long flags) {
   // Check if the ptr is created through VMM APIs, if true we use different ROCr APIs.
   amd::Memory* amd_base_obj = amd::MemObjMap::FindVirtualMemObj(dev_ptr);
   bool VmmPtr = (amd_base_obj != nullptr) ? true : false;
@@ -1381,9 +1387,9 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) 
              "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
     return false;
   }
-
+  
   device::Memory* dev_mem = amd_mem_obj->getDeviceMemory(*this);
-  return dev_mem->GetFDHandleForMem(dev_ptr, size, VmmPtr, handle);
+  return dev_mem->GetFDHandleForMem(dev_ptr, size, VmmPtr, handle, flags);
 }
 
 // ================================================================================================

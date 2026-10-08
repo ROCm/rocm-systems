@@ -89,9 +89,14 @@ bool getGenericTarget(const std::string& agentTarget, std::string& genericTarget
       {"gfx1103", "gfx11-generic"},
       {"gfx1150", "gfx11-generic"},
       {"gfx1151", "gfx11-generic"},
+      // "gfx11-7-generic"
+      {"gfx1170", "gfx11-7-generic"},
+      {"gfx1171", "gfx11-7-generic"},
       // "gfx12-generic"
       {"gfx1200", "gfx12-generic"},
       {"gfx1201", "gfx12-generic"},
+      // "gfx12-5-generic"
+      {"gfx1250", "gfx12-5-generic"},
   };
   auto search = genericTargetMap.find(agentTarget);
   if (search == genericTargetMap.end()) return false;
@@ -110,6 +115,10 @@ The specific arches have the following mapping to generic targets,
 Generic GFX11
 
 --offload-arch=gfx11-generic - includes [gfx1100-gfx1103], gfx1150, gfx1151
+
+Generic GFX11.7
+
+--offload-arch=gfx11-7-generic - includes gfx1170, gfx1171
 
 Generic GFX10.3
 

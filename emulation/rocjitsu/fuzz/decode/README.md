@@ -6,7 +6,7 @@ accepts an exact 16-byte little-endian instruction window. Sixteen bytes cover
 the largest supported encoding while letting the decoder report the actual 4,
 8, 12, or 16-byte instruction length. The registry contains AMDGPU targets
 only. Canonical target IDs and their registered aliases are accepted, including
-`gfx950`, `gfx1201`, and `gfx1250`.
+`gfx950`, `gfx1201`, `gfx1250`, and `gfx1251`.
 
 The fuzz executable links the model-only AMDGPU registry. It therefore carries
 the generated decoder and disassembler code for every AMDGPU target without
@@ -77,7 +77,7 @@ ninja -C build-decode-afl rj_decode_fuzz
   build-decode-afl/fuzz/decode/rj_decode_fuzz --afl --target gfx1250
 ```
 
-`InvalidInst` is an ordinary rejection. Other exceptions, signals, sanitizer
+Decoder failure is an ordinary rejection. Exceptions from unrelated failures, signals, sanitizer
 findings, and decoder invariant failures remain crashes for AFL++ to retain.
 
 ## Offline LLVM comparison

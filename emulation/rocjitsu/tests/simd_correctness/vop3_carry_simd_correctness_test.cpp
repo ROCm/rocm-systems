@@ -19,6 +19,7 @@
 /// lanes must keep the sentinel. Inputs deliberately seed the 32-bit
 /// carry/borrow boundary on the low lanes.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -174,7 +175,7 @@ template <int WaveSize> struct WaveFixture {
   Result run(Instruction *inst, uint64_t seed, uint64_t exec, uint64_t vcc_in, uint64_t sdst_in,
              uint32_t sdst_sgpr, uint64_t cin_word, uint32_t cin_sgpr_pair) {
     seed_inputs(seed, exec, vcc_in, sdst_in, sdst_sgpr, cin_word, cin_sgpr_pair);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     Result res;
     uint32_t vbase = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WaveSize; ++lane)
@@ -246,7 +247,7 @@ void check_case(const char *mem_label, const char *l2_label, const char *cu_labe
     uint32_t words[2] = {0u, 0u};
     vop3_sdstenc_encode(c.opcode, /*vdst=*/2, /*sdst=*/sb,
                         /*src0=*/256, /*src1=*/257, /*src2=*/src2_field, encoding_marker, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
     auto out = fx.run(inst, SEED, exec, vcc_in, SDST_SEED, sb, cin_word, cin_pair);
     delete inst;
@@ -305,8 +306,7 @@ void run_rdna4_wave64(uint64_t exec) {
 void run_gfx1250_wave32(uint64_t exec) {
   for (const auto &c : kRdnaCases)
     check_case<32>("vop3_carry_simd_gfx1250_mem", "vop3_carry_simd_gfx1250_l2",
-                   "cu_vop3_carry_simd_gfx1250", ROCJITSU_CODE_ARCH_GFX1250, c, kRdna3Encoding,
-                   exec);
+                   "cu_vop3_carry_simd_gfx1250", ROCJITSU_CODE_ARCH_CDNA5, c, kRdna3Encoding, exec);
 }
 
 void check_rdna4_wave64_carry_in_oracle() {
@@ -325,7 +325,7 @@ void check_rdna4_wave64_carry_in_oracle() {
     uint32_t words[2] = {0u, 0u};
     vop3_sdstenc_encode(/*op=*/288, /*vdst=*/2, /*sdst=*/sb,
                         /*src0=*/256, /*src1=*/257, /*src2=*/cin_pair, kRdna3Encoding, words);
-    std::unique_ptr<Instruction> inst(fx.decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
     ASSERT_NE(inst, nullptr);
 
     const uint32_t vbase = fx.wf->vgpr_alloc().base;
@@ -337,7 +337,7 @@ void check_rdna4_wave64_carry_in_oracle() {
     fx.wf->set_exec(~0ULL);
     fx.cu->write_sgpr(cin_pair, static_cast<uint32_t>(kCarryIn));
     fx.cu->write_sgpr(cin_pair + 1u, static_cast<uint32_t>(kCarryIn >> 32));
-    fx.cu->execute_instruction(inst.get(), *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
 
     for (uint32_t lane = 0; lane < 64; ++lane) {
       const uint32_t expected = static_cast<uint32_t>((kCarryIn >> lane) & 1u);

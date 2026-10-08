@@ -135,6 +135,17 @@ TEST(FailureOrTest, RepresentsValueOrFailureWithoutThrowing) {
   static_assert(std::is_same_v<rocjitsu::FailureOr<int>, IntResult>);
 }
 
+TEST(FailureOrTest, DeducesValueType) {
+  constexpr auto int_result = util::FailureOr(42);
+  auto pointer_result = util::FailureOr(std::make_unique<int>(42));
+
+  static_assert(std::is_same_v<std::remove_cv_t<decltype(int_result)>, util::FailureOr<int>>);
+  static_assert(std::is_same_v<decltype(pointer_result), util::FailureOr<std::unique_ptr<int>>>);
+  static_assert(int_result.succeeded() && int_result.value() == 42);
+  ASSERT_TRUE(pointer_result.succeeded());
+  EXPECT_EQ(*pointer_result.value(), 42);
+}
+
 TEST(FailureOrTest, RejectsSuccessfulResult) {
   EXPECT_DEBUG_DEATH(
       { [[maybe_unused]] util::FailureOr<int> result(util::Result::success()); }, "");

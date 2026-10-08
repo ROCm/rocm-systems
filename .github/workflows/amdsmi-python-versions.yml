@@ -33,17 +33,23 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Group by PR number so a new push supersedes the previous run. Pushes to
+  # develop fall back to the commit sha, which is unique, so post-merge runs
+  # never cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   python-version-tests:
     name: Python ${{matrix.python-version}}
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     # 3.6/3.7 run inside official python images because actions/setup-python no
-    # longer provides those EOL interpreters on a supported hosted runner (they
-    # were only on ubuntu-20.04, itself being retired). The images are archived,
-    # not deleted, so this stays green after the runner EOL. Newer minors run
-    # natively via setup-python. Empty matrix.container = no container.
-    container: ${{matrix.container}}
+    # longer provides those EOL interpreters on a supported hosted runner. The
+    # checkout happens on the host and the image only runs the tests, so nothing
+    # is installed from the (EOL, archived) Debian mirrors. Newer minors run
+    # natively via setup-python. Empty matrix.container = host interpreter.
     strategy:
       fail-fast: false
       matrix:
@@ -59,13 +65,6 @@ jobs:
           - { python-version: '3.14', container: '' }
 
     steps:
-      # The slim python images ship without git; actions/checkout needs it.
-      - name: Install git (container legs only)
-        if: matrix.container != ''
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git ca-certificates
-
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # rocm-systems is a large monorepo; only the amdsmi tests are needed.
@@ -82,6 +81,13 @@ jobs:
           python-version: ${{matrix.python-version}}
 
       - name: Run loader tests under this interpreter
+        if: matrix.container == ''
         run: |
           python3 projects/amdsmi/tests/run_amdsmi_python_versions_test.py \
             --interpreters "$(command -v python3)"
+
+      - name: Run loader tests under this interpreter (container)
+        if: matrix.container != ''
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src ${{matrix.container}} \
+            sh -c 'python3 projects/amdsmi/tests/run_amdsmi_python_versions_test.py --interpreters "$(command -v python3)"'

@@ -160,7 +160,7 @@ function(ROCPROFILER_SYSTEMS_STRIP_TARGET)
                     --keep-symbol="rocprofsys_set_env" --keep-symbol="rocprofsys_set_mpi"
                     --keep-symbol="rocprofsys_reset_preload"
                     --keep-symbol="rocprofsys_set_instrumented"
-                    --keep-symbol="rocprofsys_user_*" --keep-symbol="ompt_start_tool"
+                    --keep-symbol="rocprofsys_causal_*" --keep-symbol="ompt_start_tool"
                     --keep-symbol="kokkosp_*" --keep-symbol="OnLoad"
                     --keep-symbol="OnUnload" --keep-symbol="OnLoadToolProp"
                     --keep-symbol="OnUnloadTool" --keep-symbol="__libc_start_main"
@@ -449,6 +449,33 @@ macro(ROCPROFILER_SYSTEMS_ADD_INTERFACE_LIBRARY _TARGET)
     endif()
 endmacro()
 
+# ----------------------------------------------------------------------------------------#
+# function install_public_headers(<header>...) stage public headers into the build tree and
+# install them.
+#
+# Each header is copied to ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/, keeping its
+# path relative to the calling directory, so an uninstalled build tree presents the same
+# include layout as an install. The same headers are then installed.
+#
+function(ROCPROFILER_SYSTEMS_INSTALL_PUBLIC_HEADERS)
+    foreach(_HEADER ${ARGN})
+        string(
+            REPLACE
+            "${CMAKE_CURRENT_SOURCE_DIR}/"
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/"
+            _DEST
+            "${_HEADER}"
+        )
+        configure_file("${_HEADER}" "${_DEST}" COPYONLY)
+    endforeach()
+
+    install(
+        FILES ${ARGN}
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
+        COMPONENT core
+    )
+endfunction()
+
 # -----------------------------------------------------------------------
 # function add_feature(<NAME> <DOCSTRING>) Add a project feature, whose activation is
 # specified by the existence of the variable <NAME>, to the list of enabled/disabled
@@ -555,6 +582,55 @@ function(ROCPROFILER_SYSTEMS_ADD_CACHE_OPTION _NAME _MESSAGE _TYPE _DEFAULT)
     if("CMAKE_DEFINE" IN_LIST ARGN)
         set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES ${_NAME})
     endif()
+endfunction()
+
+# ----------------------------------------------------------------------------------------#
+# function rocprofiler_systems_add_tristate_option(<OPTION_NAME> <DOCSRING>
+# <DEFAULT_VALUE> [NO_FEATURE] [ADVANCED] [CMAKE_DEFINE])
+#
+# Add an option whose value is ON, OFF, or AUTO, where AUTO means "enable when the
+# dependency is available, otherwise skip quietly" and ON means "enable, and fail
+# configure when the dependency is missing". Pair with
+# rocprofiler_systems_resolve_tristate_option() where the value is consumed; the cache
+# entry itself is left holding whatever the user passed.
+#
+function(ROCPROFILER_SYSTEMS_ADD_TRISTATE_OPTION _NAME _MESSAGE _DEFAULT)
+    rocprofiler_systems_add_cache_option(
+        ${_NAME}
+        "${_MESSAGE}"
+        STRING
+        "${_DEFAULT}"
+        ${ARGN}
+    )
+    set_property(CACHE ${_NAME} PROPERTY STRINGS ON OFF AUTO)
+endfunction()
+
+# ----------------------------------------------------------------------------------------#
+# function rocprofiler_systems_resolve_tristate_option(<OPTION_NAME> <OUTPUT_VARIABLE>)
+#
+# Normalize a tri-state option into exactly ON, OFF, or AUTO and store it in
+# <OUTPUT_VARIABLE>, so callers can compare with STREQUAL instead of repeating the
+# boolean spellings CMake accepts. Anything outside the three states is a hard error:
+# a typo such as -DROCPROFSYS_USE_XYZ=AUTOO would otherwise silently behave like OFF.
+#
+function(ROCPROFILER_SYSTEMS_RESOLVE_TRISTATE_OPTION _NAME _OUTPUT_VARIABLE)
+    string(TOUPPER "${${_NAME}}" _value)
+
+    if(_value STREQUAL "TRUE" OR _value STREQUAL "1")
+        set(_value "ON")
+    elseif(_value STREQUAL "FALSE" OR _value STREQUAL "0")
+        set(_value "OFF")
+    endif()
+
+    if(
+        NOT _value STREQUAL "ON"
+        AND NOT _value STREQUAL "OFF"
+        AND NOT _value STREQUAL "AUTO"
+    )
+        message(FATAL_ERROR "${_NAME} must be ON, OFF, or AUTO, got '${${_NAME}}'")
+    endif()
+
+    set(${_OUTPUT_VARIABLE} "${_value}" PARENT_SCOPE)
 endfunction()
 
 # ----------------------------------------------------------------------------------------#

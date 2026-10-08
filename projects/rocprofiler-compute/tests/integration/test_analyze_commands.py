@@ -355,7 +355,7 @@ def test_dispatch_1(binary_handler_analyze_rocprof_compute):
             "--path",
             workload_dir,
             "--dispatch",
-            "0",
+            "1",
         ])
         assert code == 0
 
@@ -371,7 +371,7 @@ def test_dispatch_2(binary_handler_analyze_rocprof_compute):
             "--path",
             workload_dir,
             "--dispatch",
-            "1",
+            "2",
         ])
         assert code == 0
 
@@ -387,7 +387,7 @@ def test_dispatch_3(binary_handler_analyze_rocprof_compute):
             "--path",
             workload_dir,
             "--dispatch",
-            "2",
+            "3",
         ])
         assert code == 0
 
@@ -403,8 +403,8 @@ def test_dispatch_4(binary_handler_analyze_rocprof_compute):
             "--path",
             workload_dir,
             "--dispatch",
-            "1",
-            "4",
+            "2",
+            "5",
         ])
         assert code == 1
 
@@ -420,8 +420,8 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
             "--path",
             workload_dir,
             "--dispatch",
-            "5",
             "6",
+            "7",
         ])
         assert code == 1
 
@@ -751,118 +751,6 @@ def test_g(binary_handler_analyze_rocprof_compute):
         common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.kernel_verbose
-def test_kernel_verbose_0(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--kernel-verbose",
-            "0",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.kernel_verbose
-def test_kernel_verbose_1(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--kernel-verbose",
-            "1",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.kernel_verbose
-def test_kernel_verbose_2(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--kernel-verbose",
-            "2",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.kernel_verbose
-def test_kernel_verbose_3(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--kernel-verbose",
-            "3",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.kernel_verbose
-def test_kernel_verbose_4(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--kernel-verbose",
-            "4",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.kernel_verbose
-def test_kernel_verbose_5(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--kernel-verbose",
-            "5",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.kernel_verbose
-def test_kernel_verbose_6(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--kernel-verbose",
-            "6",
-        ])
-        assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
 @pytest.mark.misc
 def test_baseline(binary_handler_analyze_rocprof_compute):
     code = binary_handler_analyze_rocprof_compute([
@@ -982,7 +870,7 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--dispatch",
-        "0",
+        "1",
         "--path",
         workload_dir,
     ])
@@ -1110,20 +998,23 @@ def test_analyze_per_kernel_export_output_format(
         ),
     }
 
-    # Each ISA folder is one kernel of kernel.csv, named by its recorded uuid.
+    # Each ISA folder is one kernel of kernel.csv, named by its short name and
+    # its recorded uuid.
     isa_paths = sorted(workload_export_path.rglob("isa_*.csv"))
     assert isa_paths
     kernel_frame = pd.read_csv(output_path / "kernel.csv")
     assert {isa_path.parent.name for isa_path in isa_paths} <= {
-        f"kernel_{kernel_uuid}" for kernel_uuid in kernel_frame["kernel_uuid"]
+        f"{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
+        for kernel_row in kernel_frame.itertuples()
     }
 
     with isa_paths[0].open(newline="", encoding="utf-8") as isa_file:
         header, *rows = list(csv.reader(isa_file))
-    assert header[:3] == [
+    assert header[:4] == [
         "Instruction line number",
         "Code object offset",
         "Instruction line",
+        "Instruction type",
     ]
     assert header[-3:] == ["Source", "Code object id", "Pid"]
     assert [row[0] for row in rows] == [

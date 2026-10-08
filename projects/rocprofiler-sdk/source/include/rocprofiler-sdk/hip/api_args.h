@@ -3632,6 +3632,29 @@ typedef union rocprofiler_hip_api_args_t
         hipDevice_t   device;
     } hipDeviceGetLuid;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 33
+    struct
+    {
+        int          device;
+        unsigned int deviceFlags;
+        unsigned int flags;
+    } hipInitDevice;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
+    struct
+    {
+        hipFunction_t* functions;
+        unsigned int   numFunctions;
+        hipModule_t    mod;
+    } hipModuleEnumerateFunctions;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 35
+    struct
+    {
+        enum hipFlushGPUDirectRDMAWritesTarget target;
+        enum hipFlushGPUDirectRDMAWritesScope  scope;
+    } hipDeviceFlushGPUDirectRDMAWrites;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

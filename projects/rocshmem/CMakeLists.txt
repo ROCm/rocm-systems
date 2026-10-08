@@ -71,16 +71,37 @@ option(BUILD_DEBUG_TRACE_DEVICE "Compile in device-side trace logging (LOGD_API/
 option(BUILD_DEBUG_DEVICE "Compile in device-side logging (LOGD_WARN/INFO and GDA error checking)" OFF)
 
 option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
-option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
+option(GDA_BNXT "Build for Broadcom BNXT RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
 option(ASAN "Enable AddressSanitizer" ${ASAN})
 
-if (ASAN)
-  execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
-    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
-  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
-  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
+set(GDA_PROVIDERS "")
+foreach(gda_provider IN ITEMS IONIC BNXT MLX5)
+  if(GDA_${gda_provider})
+    list(APPEND GDA_PROVIDERS "${gda_provider}")
+  endif()
+endforeach()
+list(LENGTH GDA_PROVIDERS GDA_PROVIDER_COUNT)
+
+# default to provider multiplexer only when multiple providers enabled
+if(GDA_PROVIDER_COUNT GREATER 1)
+  set(GDA_MUX_DEFAULT ON)
+else()
+  set(GDA_MUX_DEFAULT OFF)
+endif()
+option(GDA_MUX "Build provider multiplexer with runtime dispatch to hardware-specific provider"
+       ${GDA_MUX_DEFAULT})
+
+if(USE_GDA)
+  if(GDA_PROVIDER_COUNT EQUAL 0)
+    message(WARNING "GDA support requested, but no GDA provider enabled - disabling GDA")
+    set(USE_GDA OFF)
+    set(GDA_MUX OFF)
+  elseif(GDA_PROVIDER_COUNT EQUAL 1 AND GDA_MUX)
+    message(WARNING "GDA provider multiplexer enabled, but only ${GDA_PROVIDERS} provider enabled")
+  elseif(GDA_PROVIDER_COUNT GREATER 1 AND NOT GDA_MUX)
+    message(FATAL_ERROR "Multiple GDA providers enabled, but provider multiplexer support disabled")
+  endif()
 endif()
 
 set(USE_EXTERNAL_MPI AUTO CACHE STRING "Link with an external MPI (required if used MPI is ABI incompatible with Open MPI v5)")
@@ -92,10 +113,21 @@ set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 
 ## Setup VERSION
-set(VERSION_STRING 3.7.0)
+set(VERSION_STRING 3.8.0)
 message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
+
+# Must run after project(... LANGUAGES CXX) so CMAKE_CXX_COMPILER is populated;
+# querying it any earlier silently returns an empty path here, which then
+# corrupts the -Wl,-rpath, link flag added for ASAN builds below.
+if (ASAN)
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
+    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
+endif()
 
 find_package(ROCmCMakeBuildTools)
 include(ROCMCreatePackage)
@@ -123,9 +155,17 @@ if(TARGET amd_smi)
   check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_FABRIC_FUNC)
   cmake_pop_check_state()
 
-  # Check if HIP runtime has hipMemFabricHandle_t
+  find_path(_hip_include_dir
+    hip/hip_runtime_api.h
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
+  )
   cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})
+  if(_hip_include_dir)
+    set(CMAKE_REQUIRED_INCLUDES ${_hip_include_dir})
+  endif()
+  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
   check_cxx_source_compiles("
     #include <hip/hip_runtime_api.h>
     int main() {
@@ -168,7 +208,7 @@ if(${ROCM_MAJOR_VERSION} GREATER 6)
 endif()
 
 if(${ROCM_MAJOR_VERSION} GREATER 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 14))
-  list(APPEND DEFAULT_GPUS gfx1250)
+  list(APPEND DEFAULT_GPUS gfx1250 gfx1250-strict)
 endif()
 
 if($ENV{BUILD_LOCAL_GPU_TARGET_ONLY})
@@ -189,60 +229,78 @@ set(DEFAULT_GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING
 
 # When the user supplies GPU_TARGETS:
 #   - Normalise comma/semicolon separators
-#   - Build a base→full map so feature suffixes (e.g. gfx950:sramecc+:xnack-)
-#     can be restored after validation
-#   - Produce a bare-arch list for rocm_check_target_ids and HIP compilation,
-#     which both reject feature-suffixed entries in --offload-arch
+#   - Dedupe on the exact string, since the same base arch may legitimately
+#     appear more than once with different feature suffixes (e.g.
+#     gfx90a:xnack+;gfx90a:xnack-) to fat-binary both variants
+# rocm_check_target_ids validates each entry with a real compiler-flag check
+# (-xhip --offload-arch=<entry>), so feature-suffixed entries like
+# gfx950:sramecc+:xnack- are validated natively and echoed back verbatim on
+# success — no separate bare/full bookkeeping is needed.
 if(GPU_TARGETS)
   string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
-  set(_bare_targets "")
-  foreach(_t ${GPU_TARGETS})
-    string(REGEX REPLACE ":.*" "" _base "${_t}")
-    set(_USER_FULL_${_base} "${_t}")
-    list(APPEND _bare_targets "${_base}")
-  endforeach()
-  list(REMOVE_DUPLICATES _bare_targets)
+  list(REMOVE_DUPLICATES GPU_TARGETS)
+endif()
+
+include(cmake/AsanGpuTargets.cmake)
+
+# GPU_TARGETS is FORCE-written from SUPPORTED_GPUS below, so the policy would
+# otherwise feed on its own output and a later -DASAN=OFF would never bring
+# back the dropped families. Re-derive from the request instead; still matching
+# what we wrote last time means nobody edited it.
+if(DEFINED ROCSHMEM_GPU_TARGETS_DERIVED AND GPU_TARGETS STREQUAL ROCSHMEM_GPU_TARGETS_DERIVED)
+  set(GPU_TARGETS "${ROCSHMEM_GPU_TARGETS_REQUESTED}")
+else()
+  set(ROCSHMEM_GPU_TARGETS_REQUESTED "${GPU_TARGETS}" CACHE INTERNAL
+      "GPU_TARGETS as requested, before ASAN normalisation and validation")
+endif()
+
+if(ASAN)
+  if(GPU_TARGETS)
+    rocshmem_asan_adjust_gpu_targets(GPU_TARGETS ${GPU_TARGETS})
+  else()
+    rocshmem_asan_adjust_gpu_targets(DEFAULT_GPU_TARGETS ${DEFAULT_GPU_TARGETS})
+  endif()
+endif()
+
+if(GPU_TARGETS)
+  set(_requested_gpus ${GPU_TARGETS})
+else()
+  set(_requested_gpus ${DEFAULT_GPU_TARGETS})
 endif()
 
 if(COMMAND rocm_check_target_ids)
-  if(GPU_TARGETS)
-    message(STATUS "Checking for ROCm support for GPU targets: " "${_bare_targets}")
-    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${_bare_targets})
-  else()
-    message(STATUS "Checking for ROCm support for GPU targets: " "${DEFAULT_GPU_TARGETS}")
-    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${DEFAULT_GPU_TARGETS})
-  endif()
+  message(STATUS "Checking for ROCm support for GPU targets: " "${_requested_gpus}")
+  rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${_requested_gpus})
 else()
   message(WARNING "Unable to check for supported GPU targets.")
-  if(GPU_TARGETS)
-    set(SUPPORTED_GPUS ${_bare_targets})
-  else()
-    set(SUPPORTED_GPUS ${DEFAULT_GPU_TARGETS})
-  endif()
+  set(SUPPORTED_GPUS ${_requested_gpus})
 endif()
 
-# GPU_TARGETS_FULL: validated arch strings with feature suffixes restored.
+# The ASAN policy already failed if it kept nothing; this catches the compiler
+# rejecting everything it kept, e.g. because of conflicting CXXFLAGS.
+if(ASAN AND NOT SUPPORTED_GPUS)
+  message(FATAL_ERROR
+    "ASAN requires a GPU target that supports xnack, but none of the "
+    "requested GPU targets passed rocm_check_target_ids: ${_requested_gpus}")
+endif()
+
+# GPU_TARGETS_FULL: validated arch strings with feature suffixes intact.
 # Consumed by DeviceBitcode.cmake to embed correct amdhsa.target metadata in
-# HSACOs — HIP error 209 occurs if the suffix in the HSACO metadata does not
-# match the active feature configuration of the GPU.
-# Explicitly cleared when GPU_TARGETS is not set so a stale cached value from a
-# previous -DGPU_TARGETS=... configure run cannot persist into the defaults path.
-if(GPU_TARGETS)
-  set(_full_validated "")
-  foreach(_base ${SUPPORTED_GPUS})
-    if(DEFINED _USER_FULL_${_base})
-      list(APPEND _full_validated "${_USER_FULL_${_base}}")
-    else()
-      list(APPEND _full_validated "${_base}")
-    endif()
-  endforeach()
-  set(GPU_TARGETS_FULL "${_full_validated}" CACHE STRING
+# the device bitcode — HIP error 209 occurs if the suffix in the bitcode
+# metadata does not match the active feature configuration of the GPU.
+# Keyed on whether SUPPORTED_GPUS carries a suffix, not on whether the user set
+# GPU_TARGETS: under ASAN the defaults path produces :xnack+ too. Cleared
+# otherwise, which costs nothing since the fallback is the same bare list.
+if(SUPPORTED_GPUS MATCHES ":")
+  set(GPU_TARGETS_FULL "${SUPPORTED_GPUS}" CACHE STRING
     "Validated GPU arch strings with feature suffixes (consumed by DeviceBitcode.cmake)" FORCE)
 else()
   unset(GPU_TARGETS_FULL CACHE)
 endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}" CACHE STRING "GPU architectures to compile for" FORCE)
+set(ROCSHMEM_GPU_TARGETS_DERIVED "${GPU_TARGETS}" CACHE INTERNAL
+    "Last value written to GPU_TARGETS above, so the next configure can tell a user edit from this project's own output")
 
 message(STATUS "Compiling for ${GPU_TARGETS}")
 
@@ -283,6 +341,9 @@ if (NOT BUILD_TESTS_ONLY)
       set(GDA_IONIC OFF)
       set(GDA_BNXT OFF)
       set(GDA_MLX5 OFF)
+      set(GDA_MUX OFF)
+      set(GDA_PROVIDERS "")
+      set(GDA_PROVIDER_COUNT 0)
     endif()
   endif()
 
@@ -304,6 +365,36 @@ if (NOT BUILD_TESTS_ONLY)
     if(NOT HAVE_EXTERNAL_MPI)
       message(FATAL_ERROR "External MPI support requested but MPI support not found. Build Aborted")
     endif()
+  endif()
+
+  # hip-config-amd.cmake caches GPU_BUILD_TARGETS without FORCE, so on a
+  # reconfigure of an existing build directory it can retain a stale value
+  # (e.g. from before ASAN was enabled, or from a previous GPU_TARGETS) even
+  # though GPU_TARGETS itself was correctly refreshed above. Force it to match
+  # on every configure so hip::device's --offload-arch flags stay in sync.
+  set(GPU_BUILD_TARGETS "${GPU_TARGETS}" CACHE STRING "GPU targets to compile for" FORCE)
+
+  # DeviceBitcode.cmake caches this without FORCE too, so it goes stale the
+  # same way in both directions: a pre-ASAN directory loses the :xnack+, and
+  # without the else arm a suffixed value outlives a bare-arch configure.
+  if(GPU_TARGETS_FULL)
+    set(BITCODE_GPU_ARCHS_FULL "${GPU_TARGETS_FULL}" CACHE STRING
+      "Full GPU arch strings with feature suffixes for device bitcode" FORCE)
+  else()
+    unset(BITCODE_GPU_ARCHS_FULL CACHE)
+  endif()
+
+  # Same staleness, and this is the list DeviceBitcode.cmake iterates: a
+  # pre-ASAN directory keeps the dropped families and builds them instrumented.
+  set(_bitcode_archs "")
+  foreach(_target ${GPU_TARGETS})
+    string(REGEX REPLACE ":.*" "" _bare "${_target}")
+    list(APPEND _bitcode_archs "${_bare}")
+  endforeach()
+  if(_bitcode_archs)
+    list(REMOVE_DUPLICATES _bitcode_archs)
+    set(BITCODE_GPU_ARCHS "${_bitcode_archs}" CACHE STRING
+      "GPU architectures for device bitcode (semicolon-separated)" FORCE)
   endif()
 
   find_package(hip REQUIRED)
@@ -371,26 +462,23 @@ if (NOT BUILD_TESTS_ONLY)
 
   string(REPLACE ";" " " ROCSHMEM_OFFLOAD_TARGETS "${GPU_TARGETS}")
 
-  set(_backends "")
+  set(backends "")
   if(USE_GDA)
-    set(_gda_nics "")
-    foreach(_nic IN ITEMS IONIC BNXT MLX5)
-      if(GDA_${_nic})
-        list(APPEND _gda_nics "${_nic}")
-      endif()
-    endforeach()
-    list(JOIN _gda_nics "/" _gda_providers)
-    list(APPEND _backends "GDA(${_gda_providers})")
+    list(JOIN GDA_PROVIDERS "/" gda_provider_string)
+    if(GDA_MUX)
+      string(PREPEND gda_provider_string "MUX:")
+    endif()
+    list(APPEND backends "GDA(${gda_provider_string})")
   endif()
   if(USE_RO)
-    list(APPEND _backends "RO")
+    list(APPEND backends "RO")
   endif()
   if(USE_IPC)
-    list(APPEND _backends "IPC")
+    list(APPEND backends "IPC")
   endif()
 
-  if(_backends)
-    list(JOIN _backends "+" ROCSHMEM_BACKEND)
+  if(backends)
+    list(JOIN backends "+" ROCSHMEM_BACKEND)
   else()
     set(ROCSHMEM_BACKEND "NONE")
   endif()
@@ -456,9 +544,6 @@ if (NOT BUILD_TESTS_ONLY)
   )
 
   if (ASAN)
-    message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
-    list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
-
     # Add ASAN runtime directory to RPATH so executables can find libclang_rt.asan at runtime
     target_link_options(
       ${PROJECT_NAME}

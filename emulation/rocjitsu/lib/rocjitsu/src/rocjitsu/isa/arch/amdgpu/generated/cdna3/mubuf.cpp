@@ -8,7 +8,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -35,19 +34,33 @@ BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadFormatXMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadFormatXMubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadFormatXMubuf>(opcode);
 }
 } // namespace detail
@@ -63,19 +76,33 @@ BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadFormatXyMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadFormatXyMubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_xy", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadFormatXyMubuf>(opcode);
 }
 } // namespace detail
@@ -91,19 +118,33 @@ BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadFormatXyzMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadFormatXyzMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_xyz", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadFormatXyzMubuf>(opcode);
 }
 } // namespace detail
@@ -119,19 +160,33 @@ BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadFormatXyzwMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadFormatXyzwMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_xyzw", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadFormatXyzwMubuf>(opcode);
 }
 } // namespace detail
@@ -147,19 +202,32 @@ BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreFormatXMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreFormatXMubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreFormatXMubuf>(opcode);
 }
 } // namespace detail
@@ -175,19 +243,32 @@ BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreFormatXyMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreFormatXyMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_xy", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreFormatXyMubuf>(opcode);
 }
 } // namespace detail
@@ -203,19 +284,32 @@ BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreFormatXyzMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreFormatXyzMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_xyz", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreFormatXyzMubuf>(opcode);
 }
 } // namespace detail
@@ -231,19 +325,32 @@ BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreFormatXyzwMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreFormatXyzwMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_xyzw", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreFormatXyzwMubuf>(opcode);
 }
 } // namespace detail
@@ -259,29 +366,36 @@ BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadFormatD16XMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadFormatD16XMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_d16_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadFormatD16XMubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadFormatD16XMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -294,19 +408,33 @@ BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadFormatD16XyMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadFormatD16XyMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_d16_xy", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadFormatD16XyMubuf>(opcode);
 }
 } // namespace detail
@@ -322,29 +450,37 @@ BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadFormatD16XyzMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadFormatD16XyzMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_load_format_d16_xyz",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadFormatD16XyzMubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadFormatD16XyzMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
-}
 
 BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -357,19 +493,34 @@ BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *in
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadFormatD16XyzwMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadFormatD16XyzwMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_load_format_d16_xyzw",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadFormatD16XyzwMubuf>(opcode);
 }
 } // namespace detail
@@ -385,19 +536,31 @@ BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreFormatD16XMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreFormatD16XMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_d16_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreFormatD16XMubuf>(opcode);
 }
 } // namespace detail
@@ -413,19 +576,32 @@ BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreFormatD16XyMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreFormatD16XyMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_xy",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreFormatD16XyMubuf>(opcode);
 }
 } // namespace detail
@@ -441,19 +617,32 @@ BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *in
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreFormatD16XyzMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreFormatD16XyzMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_xyz",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreFormatD16XyzMubuf>(opcode);
 }
 } // namespace detail
@@ -469,19 +658,32 @@ BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreFormatD16XyzwMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreFormatD16XyzwMubuf(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_xyzw",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreFormatD16XyzwMubuf>(opcode);
 }
 } // namespace detail
@@ -497,19 +699,35 @@ BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(8, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (!inst_.lds)
+    flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadUbyteMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadUbyteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ubyte", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadUbyteMubuf>(opcode);
 }
 } // namespace detail
@@ -525,19 +743,35 @@ BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(8, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (!inst_.lds)
+    flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadSbyteMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadSbyteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sbyte", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadSbyteMubuf>(opcode);
 }
 } // namespace detail
@@ -553,19 +787,35 @@ BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(16, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (!inst_.lds)
+    flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadUshortMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadUshortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ushort", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadUshortMubuf>(opcode);
 }
 } // namespace detail
@@ -581,19 +831,35 @@ BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(16, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (!inst_.lds)
+    flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadSshortMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadSshortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sshort", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadSshortMubuf>(opcode);
 }
 } // namespace detail
@@ -609,19 +875,35 @@ BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (!inst_.lds)
+    flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadDwordMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadDwordMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dword", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadDwordMubuf>(opcode);
 }
 } // namespace detail
@@ -637,19 +919,35 @@ BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (!inst_.lds)
+    flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadDwordx2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadDwordx2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dwordx2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadDwordx2Mubuf>(opcode);
 }
 } // namespace detail
@@ -665,19 +963,35 @@ BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (!inst_.lds)
+    flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadDwordx3Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadDwordx3Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dwordx3", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadDwordx3Mubuf>(opcode);
 }
 } // namespace detail
@@ -693,19 +1007,35 @@ BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (!inst_.lds)
+    flags_ |= SIMPLE_MEMORY_RESULT;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadDwordx4Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadDwordx4Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dwordx4", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadDwordx4Mubuf>(opcode);
 }
 } // namespace detail
@@ -721,19 +1051,33 @@ BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  vdata.set_register_byte_mask(0x1);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreByteMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreByteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_byte", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreByteMubuf>(opcode);
 }
 } // namespace detail
@@ -749,19 +1093,33 @@ BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  vdata.set_register_byte_mask(0x4);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreByteD16HiMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreByteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_byte_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreByteD16HiMubuf>(opcode);
 }
 } // namespace detail
@@ -777,19 +1135,33 @@ BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  vdata.set_register_byte_mask(0x3);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreShortMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreShortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_short", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreShortMubuf>(opcode);
 }
 } // namespace detail
@@ -805,19 +1177,33 @@ BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  vdata.set_register_byte_mask(0xc);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreShortD16HiMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreShortD16HiMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_short_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreShortD16HiMubuf>(opcode);
 }
 } // namespace detail
@@ -833,19 +1219,32 @@ BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreDwordMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreDwordMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dword", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreDwordMubuf>(opcode);
 }
 } // namespace detail
@@ -861,19 +1260,32 @@ BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreDwordx2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreDwordx2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dwordx2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreDwordx2Mubuf>(opcode);
 }
 } // namespace detail
@@ -889,19 +1301,32 @@ BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreDwordx3Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreDwordx3Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dwordx3", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreDwordx3Mubuf>(opcode);
 }
 } // namespace detail
@@ -917,19 +1342,32 @@ BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreDwordx4Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreDwordx4Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dwordx4", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreDwordx4Mubuf>(opcode);
 }
 } // namespace detail
@@ -945,29 +1383,36 @@ BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(8, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadUbyteD16Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadUbyteD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ubyte_d16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadUbyteD16Mubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadUbyteD16Mubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_ubyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -980,29 +1425,36 @@ BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(8, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadUbyteD16HiMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadUbyteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ubyte_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadUbyteD16HiMubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadUbyteD16HiMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sbyte_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1015,29 +1467,36 @@ BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(8, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadSbyteD16Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadSbyteD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sbyte_d16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadSbyteD16Mubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadSbyteD16Mubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sbyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -1050,29 +1509,36 @@ BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(8, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadSbyteD16HiMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadSbyteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sbyte_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadSbyteD16HiMubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadSbyteD16HiMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_short_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1085,29 +1551,36 @@ BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(16, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadShortD16Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadShortD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_short_d16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadShortD16Mubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadShortD16Mubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -1120,29 +1593,36 @@ BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(16, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadShortD16HiMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadShortD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_short_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadShortD16HiMubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadShortD16HiMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -1155,29 +1635,37 @@ BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_[0] = &vdata;
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
-  num_dst_ = 1;
-  flags_ |= MEMORY_OP;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
+  num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdata;
+  gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferLoadFormatD16HiXMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferLoadFormatD16HiXMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_load_format_d16_hi_x",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferLoadFormatD16HiXMubuf>(opcode);
 }
 } // namespace detail
-
-void BufferLoadFormatD16HiXMubuf::implicit_uses(RegisterSet &uses) const {
-  Mubuf::implicit_uses(uses);
-  if (!inst_.lds)
-    if (auto r = vdata.to_register_ref())
-      uses.expand(*r);
-}
 
 BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -1190,19 +1678,32 @@ BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *in
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
-  flags_ |= MEMORY_OP;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferStoreFormatD16HiXMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferStoreFormatD16HiXMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_hi_x",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferStoreFormatD16HiXMubuf>(opcode);
 }
 } // namespace detail
@@ -1212,10 +1713,16 @@ BufferWbl2Mubuf::BufferWbl2Mubuf(const MachineInst *inst)
             selected_exec_fn(InstructionExecutionId::BufferWbl2Mubuf)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferWbl2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferWbl2Mubuf(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_wbl2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferWbl2Mubuf>(opcode);
 }
 } // namespace detail
@@ -1225,10 +1732,15 @@ BufferInvMubuf::BufferInvMubuf(const MachineInst *inst)
             selected_exec_fn(InstructionExecutionId::BufferInvMubuf)) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferInvMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferInvMubuf(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_inv", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferInvMubuf>(opcode);
 }
 } // namespace detail
@@ -1244,21 +1756,36 @@ BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicSwapMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicSwapMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_swap", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicSwapMubuf>(opcode);
 }
 } // namespace detail
@@ -1279,21 +1806,36 @@ BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata_return;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicCmpswapMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicCmpswapMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_cmpswap", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicCmpswapMubuf>(opcode);
 }
 } // namespace detail
@@ -1309,21 +1851,36 @@ BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicAddMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicAddMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicAddMubuf>(opcode);
 }
 } // namespace detail
@@ -1339,21 +1896,36 @@ BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicSubMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicSubMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_sub", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicSubMubuf>(opcode);
 }
 } // namespace detail
@@ -1369,21 +1941,36 @@ BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicSminMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicSminMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smin", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicSminMubuf>(opcode);
 }
 } // namespace detail
@@ -1399,21 +1986,36 @@ BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicUminMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicUminMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umin", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicUminMubuf>(opcode);
 }
 } // namespace detail
@@ -1429,21 +2031,36 @@ BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicSmaxMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicSmaxMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smax", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicSmaxMubuf>(opcode);
 }
 } // namespace detail
@@ -1459,21 +2076,36 @@ BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicUmaxMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicUmaxMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umax", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicUmaxMubuf>(opcode);
 }
 } // namespace detail
@@ -1489,21 +2121,36 @@ BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicAndMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicAndMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_and", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicAndMubuf>(opcode);
 }
 } // namespace detail
@@ -1519,21 +2166,36 @@ BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicOrMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicOrMubuf(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_or", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicOrMubuf>(opcode);
 }
 } // namespace detail
@@ -1549,21 +2211,36 @@ BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicXorMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicXorMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_xor", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicXorMubuf>(opcode);
 }
 } // namespace detail
@@ -1579,21 +2256,36 @@ BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicIncMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicIncMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_inc", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicIncMubuf>(opcode);
 }
 } // namespace detail
@@ -1609,21 +2301,36 @@ BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicDecMubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicDecMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_dec", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicDecMubuf>(opcode);
 }
 } // namespace detail
@@ -1639,21 +2346,36 @@ BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicAddF32Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicAddF32Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add_f32", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicAddF32Mubuf>(opcode);
 }
 } // namespace detail
@@ -1669,21 +2391,36 @@ BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicPkAddF16Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicPkAddF16Mubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_pk_add_f16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicPkAddF16Mubuf>(opcode);
 }
 } // namespace detail
@@ -1699,21 +2436,36 @@ BufferAtomicAddF64Mubuf::BufferAtomicAddF64Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicAddF64Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicAddF64Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add_f64", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicAddF64Mubuf>(opcode);
 }
 } // namespace detail
@@ -1729,21 +2481,36 @@ BufferAtomicMinF64Mubuf::BufferAtomicMinF64Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicMinF64Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicMinF64Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_min_f64", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicMinF64Mubuf>(opcode);
 }
 } // namespace detail
@@ -1759,21 +2526,36 @@ BufferAtomicMaxF64Mubuf::BufferAtomicMaxF64Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicMaxF64Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicMaxF64Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_max_f64", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicMaxF64Mubuf>(opcode);
 }
 } // namespace detail
@@ -1789,21 +2571,36 @@ BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicSwapX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicSwapX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_swap_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicSwapX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -1824,21 +2621,36 @@ BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata_return;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicCmpswapX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicCmpswapX2Mubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_cmpswap_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicCmpswapX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -1854,21 +2666,36 @@ BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicAddX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicAddX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicAddX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -1884,21 +2711,36 @@ BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicSubX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicSubX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_sub_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicSubX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -1914,21 +2756,36 @@ BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicSminX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicSminX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smin_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicSminX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -1944,21 +2801,36 @@ BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicUminX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicUminX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umin_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicUminX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -1974,21 +2846,36 @@ BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicSmaxX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicSmaxX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smax_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicSmaxX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -2004,21 +2891,36 @@ BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicUmaxX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicUmaxX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umax_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicUmaxX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -2034,21 +2936,36 @@ BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicAndX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicAndX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_and_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicAndX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -2064,21 +2981,36 @@ BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicOrX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicOrX2Mubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_or_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicOrX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -2094,21 +3026,36 @@ BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicXorX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicXorX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_xor_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicXorX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -2124,21 +3071,36 @@ BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicIncX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicIncX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_inc_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicIncX2Mubuf>(opcode);
 }
 } // namespace detail
@@ -2154,21 +3116,36 @@ BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
-  num_src_ = 4;
-  num_dst_ = 0;
+  dst_operands_[0] = &gpumem;
+  src_operands_[4] = &gpumem_in;
+  num_src_ = 5;
+  num_dst_ = 1;
   if ((inst_.sc0 != 0))
     dst_operands_[num_dst_++] = &vdata;
-  flags_ |= MEMORY_OP;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicDecX2Mubuf(const MachineInst *opcode) {
+DecodeResult decodeBufferAtomicDecX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_dec_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<BufferAtomicDecX2Mubuf>(opcode);
 }
 } // namespace detail

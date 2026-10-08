@@ -158,8 +158,9 @@ class ScratchLoadD16U8Vscratch : public Vscratch {
 public:
   ScratchLoadD16U8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -170,8 +171,9 @@ class ScratchLoadD16I8Vscratch : public Vscratch {
 public:
   ScratchLoadD16I8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -182,8 +184,9 @@ class ScratchLoadD16B16Vscratch : public Vscratch {
 public:
   ScratchLoadD16B16Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -194,8 +197,9 @@ class ScratchLoadD16HiU8Vscratch : public Vscratch {
 public:
   ScratchLoadD16HiU8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -206,8 +210,9 @@ class ScratchLoadD16HiI8Vscratch : public Vscratch {
 public:
   ScratchLoadD16HiI8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -218,8 +223,9 @@ class ScratchLoadD16HiB16Vscratch : public Vscratch {
 public:
   ScratchLoadD16HiB16Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;

@@ -43,3 +43,7 @@ hipTexRefGetBorderColor  # runtime assert(false) aborts the binary; no stored st
 # The AMD Linux runtime rejects a device-side bind with hipErrorInvalidTexture; the
 # positive path is Windows-only (the in-tree unit test guards behind #if defined(_WIN32)).
 hipBindTextureToMipmappedArray  # Windows-only positive path; Linux device-side bind rejects
+
+# --- Device management (2) ---
+hipChooseDeviceR0600  # This is covered via contract tests for hipChooseDevice
+hipGetDevicePropertiesR0600 # This is covered via contract tests for hipGetDeviceProperties
