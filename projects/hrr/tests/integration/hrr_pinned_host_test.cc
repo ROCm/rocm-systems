@@ -1369,15 +1369,16 @@ TEST_CASE("Unit_HRR_PinnedHost_CaptureElsewhere_Direct", "[.][hrr-direct]") {
 // A pinned buffer freed while a launch on another device still waits to use
 // it. Needs two devices; skips with fewer.
 //
-//   -  hipHostMalloc on device 0, host filled pattern 1
-//   0  slow write on device 1, non-blocking stream S: spins for kSpinMs, then
+//   -  hipHostMalloc on device 1, host filled pattern 1
+//   0  slow write on device 0, non-blocking stream S: spins for kSpinMs, then
 //      writes device scratch
 //   1  read      on S, n = 0, with the pinned buffer as its argument: capture
 //      snapshots the buffer, but the kernel reads none of it
-//   -  hipHostFree on device 1 at once; it syncs device 0 only, so launch 0
+//   -  hipHostFree on device 0 at once; it syncs device 1 only, so launch 0
 //      is still spinning
 // Replay queues the restore for launch 1 behind launch 0. If it then freed the
-// buffer straight away, the restore would write freed memory.
+// buffer straight away, the restore would write freed memory. The kernels run
+// on device 0 because replay loads code objects for device 0 only.
 // ===========================================================================
 TEST_CASE("Unit_HRR_PinnedHost_CrossDeviceFree_Direct", "[.][hrr-direct]") {
   int ndev = 0;
@@ -1389,15 +1390,15 @@ TEST_CASE("Unit_HRR_PinnedHost_CrossDeviceFree_Direct", "[.][hrr-direct]") {
   constexpr int kSpinMs = 500;
   constexpr int kSeed   = 0x6e6e;
 
-  HRR_HIP_CHECK(hipSetDevice(0));
+  HRR_HIP_CHECK(hipSetDevice(1));
   int* h = nullptr;
   HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h), kPinnedBytes,
                               hipHostMallocPortable));
   fill(h, 1);
 
-  HRR_HIP_CHECK(hipSetDevice(1));
+  HRR_HIP_CHECK(hipSetDevice(0));
   int rate_khz = 0;
-  HRR_HIP_CHECK(hipDeviceGetAttribute(&rate_khz, hipDeviceAttributeWallClockRate, 1));
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&rate_khz, hipDeviceAttributeWallClockRate, 0));
   REQUIRE(rate_khz > 0);
   const unsigned long long ticks = static_cast<unsigned long long>(rate_khz) * kSpinMs;
   int* scratch = nullptr;
