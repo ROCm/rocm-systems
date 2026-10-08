@@ -230,7 +230,8 @@ int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs, uni
     strncpy(ifNames + found * ifNameMaxSize, interface->ifa_name, ifNameMaxSize);
 
     LOG_TRACE("NET : Found interface %s:%s in the same subnet as remote address %s",
-          interface->ifa_name, SocketToString(localAddrs + found, line, sizeof(line)), SocketToString(remoteAddr, line_a, sizeof(line_a)));
+          interface->ifa_name, SocketToString(localAddrs + found, line, sizeof(line)),
+          SocketToString(remoteAddr, line_a, sizeof(line_a)));
     found++;
     if (found == maxIfs) break;
   }
