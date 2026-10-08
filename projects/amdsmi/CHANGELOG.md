@@ -24,6 +24,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi set --memory-partition` no longer advises a driver reload when the partition is already current**.  
   - Requesting the current partition does not cancel a different partition set earlier, so a reload would apply that one. amd-smi now reports that nothing changed and notes that an earlier request still applies at the next reload.
 
+- **Fixed a one-byte overrun when reading the memory partition into a small buffer**.  
+  - A buffer too small for the partition name had the byte after its end overwritten. The name is now truncated inside the buffer, and the call still reports that the buffer is too small.
+
+- **Fixed crashes when several threads start or stop AMD SMI at the same time**.  
+  - Programs that initialize and shut down the library from more than one thread could crash, find no GPUs, or leave the library initialized after every thread had shut it down.
+
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
 
