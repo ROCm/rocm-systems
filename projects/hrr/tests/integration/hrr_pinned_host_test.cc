@@ -1335,6 +1335,11 @@ std::string capture_case(const char* direct_case, const fs::path& cap,
        << (ret == hrr::test::SpawnProc::kKilledOnTimeout ? " (hung, killed)" : "")
        << "\nWorkload output:\n" << proc.getOutput());
   REQUIRE(ret == 0);
+  if (std::strstr(direct_case, "EntryPoints") || std::strstr(direct_case, "Reset") ||
+      std::strstr(direct_case, "NoNullBarrier")) {
+    WARN("cross-diag: " << direct_case << " skip file " << fs::exists(skip_file)
+         << "\nWorkload output:\n" << proc.getOutput());
+  }
   if (!fs::exists(skip_file)) return {};
   std::string why = read_text_file(skip_file);
   fs::remove(skip_file);
