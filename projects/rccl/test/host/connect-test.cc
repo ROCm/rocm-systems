@@ -23,7 +23,7 @@
 // Fakes for the symbols connect.cc takes from the rest of RCCL
 // ---------------------------------------------------------------------------
 
-int ncclDebugLevel = 0;
+uint32_t ncclDebugLevelMask = 0;
 uint64_t ncclDebugMask = 0;
 thread_local int ncclDebugNoWarn = 0;
 

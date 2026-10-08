@@ -10472,9 +10472,9 @@ TEST_F(InitMicrotest, InitTransportsRank_GraphInfoIsMarshalledPerAlgorithm_NotFr
   EXPECT_EQ(kRingChannels, c.get()->graphs[NCCL_ALGO_RING].nChannels);
 }
 
-// Shrinking the count after AllGather3 must leave the channel structs alone: the stubbed Postset stops the run, so
-// this only proves nothing relocates channels 1-3 (the deleted loop would copy channel 2 over channel 1).
-TEST_F(InitMicrotest, InitTransportsRank_FoldShrinksTheChannelCount_LeavesTheChannelsToPostset) {
+// nChannelsOrig is captured at :1988 and only read by the :2192 guard, so the relocation loop is the
+// one place a wrong capture shows up. The fold has to shrink nChannels below it for that to happen.
+TEST_F(InitMicrotest, InitTransportsRank_FoldShrinksTheChannelCount_RelocatesTheSpareChannels) {
   const int kRingChannels = 6;
   const int kTreeChannels = 2;
   const int kFoldedTreeChannels = 1;
@@ -10495,12 +10495,12 @@ TEST_F(InitMicrotest, InitTransportsRank_FoldShrinksTheChannelCount_LeavesTheCha
   std::memset(&comm->channels[3], kGuard, sizeof(struct ncclChannel));
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(comm, nullptr, c.timers()));
   EXPECT_EQ(kFoldedTreeChannels, comm->nChannels);
-  const auto* ch1 = reinterpret_cast<const unsigned char*>(&comm->channels[1]);
-  const auto* ch2 = reinterpret_cast<const unsigned char*>(&comm->channels[2]);
-  const auto* ch3 = reinterpret_cast<const unsigned char*>(&comm->channels[3]);
-  EXPECT_TRUE(AllBytesAre(ch1, sizeof(struct ncclChannel), kPoison));
-  EXPECT_TRUE(AllBytesAre(ch2, sizeof(struct ncclChannel), kSource));
-  EXPECT_TRUE(AllBytesAre(ch3, sizeof(struct ncclChannel), kGuard));
+  const auto* dst = reinterpret_cast<const unsigned char*>(&comm->channels[1]);
+  const auto* src = reinterpret_cast<const unsigned char*>(&comm->channels[2]);
+  const auto* guard = reinterpret_cast<const unsigned char*>(&comm->channels[3]);
+  EXPECT_TRUE(AllBytesAre(dst, sizeof(struct ncclChannel), kSource));
+  EXPECT_TRUE(AllBytesAre(src, sizeof(struct ncclChannel), kSource));  // the source is not consumed
+  EXPECT_TRUE(AllBytesAre(guard, sizeof(struct ncclChannel), kGuard));  // one iteration, not two
 }
 
 // nc starts from rank 0's contribution, so a lower value on a LATER rank is what proves the reduction

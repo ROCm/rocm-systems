@@ -48,7 +48,7 @@ ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
  * ncclTopoPreset: Maps high-level topology graphs to local channel resources.
  *
  * This function bridges the gap between hardware discovery and active communication.
- * It records the local rank's neighbor info (ring prev/next/send/recv, tree endpoints) in topoRanks
+ * It populates the local rank's neighbor info (prev/next for Rings, up/down for Trees)
  * for every communication channel based on pre-calculated optimal paths.
  *
  * PRE-CONDITIONS & ASSUMPTIONS:
@@ -62,11 +62,12 @@ ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
  * channel duplication (typically 2 * nChannels).
  *
  * LOGIC DETAILS:
- * - Intra-node Mapping: Iterates through local GPUs to identify Ring neighbors and
- * Tree endpoints, and records the number of channels filled in topoRanks->nChannels.
- * - Channel Links: Only poisons comm->channels. ncclTopoPostset maps the final channel
- * count onto the recorded channels, sets the ring, tree and CollNet chain links, and
- * duplicates the channels.
+ * - Intra-node Mapping: Iterates through local GPUs to identify neighbors for Ring,
+ * Tree, and CollNet algorithms.
+ * - Channel Duplication (Factor of 2): Clones the first N channels into the next N
+ * slots. This maximizes bandwidth by utilizing multiple SMs and hardware paths
+ * for the same logical operation, pushing utilization closer to physical limits
+ * without over-congesting hardware command queues.
  * - NVLS Setup: Identifies unique "Head" ranks for NVLink Switch groups to coordinate
  * multi-GPU data movement.
  *
@@ -186,12 +187,15 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
   }
 
   for (int c = 0; c < nChannels; c++) {
+    struct ncclChannel* channel = comm->channels + c;
+
     int* ringIntra = graphs[NCCL_ALGO_RING]->intra + c * localRanks;
     // Permute only when we need diversity in rings
     if ( intraGraphGen && !disableRingDiversity) {
       permute_array_inplace(ringIntra,localRanks,localRankOrder + c*localRanks); 
     }
     int* treeIntra = graphs[NCCL_ALGO_TREE]->intra + c * localRanks;
+    int* collNetIntra = graphs[NCCL_ALGO_COLLNET_CHAIN]->intra + c * localRanks;
 
     for (int i = 0; i < localRanks; i++) {
       if (ringIntra[i] == rank) {
@@ -214,9 +218,23 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
         topoRanks->treeToParent[c] = treeIntra[parentIndex];
         topoRanks->treeToChild0[c] = treeIntra[child0Index];
         topoRanks->treeToChild1[c] = treeIntra[child1Index];
+        channel->tree.up = (i == 0) ? -1 : treeIntra[i - 1];
+        channel->tree.down[0] = (i == localRanks - 1) ? -1 : treeIntra[i + 1];
+      }
+      if (collNetIntra[i] == rank) {
+        channel->collnetChain.up = (i == 0) ? comm->nRanks : collNetIntra[i - 1];
+        channel->collnetChain.down[0] = (i == localRanks - 1) ? -1 : collNetIntra[i + 1];
       }
     }
   }
+  // Duplicate channels trees
+  {
+    struct ncclChannel* channel0 = comm->channels;
+    struct ncclChannel* channel1 = (nChannels > MAXCHANNELS / 2) ? 0 : channel0 + nChannels;
+    if (channel1) memcpy(channel1, channel0, nChannels * sizeof(struct ncclChannel));
+  }
+  // The channel count can change before ncclTopoPostset, which sets the final ring, tree and CollNet chain links on
+  // every channel from these nChannels preset channels.
   topoRanks->nChannels = nChannels;
 
   // Get nvls heads and the number of heads. Duplicate head is not allowed.
