@@ -220,6 +220,68 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_Verify_Capture) {
   HIP_CHECK(hipEventDestroy(stop));
 }
 
+#if HT_AMD
+// Spins for at least `ticks` wall-clock ticks and stores the ticks it measured.
+static __global__ void SpinKernel(uint64_t ticks, uint64_t* measured_ticks) {
+  const uint64_t start = wall_clock64();
+  uint64_t now;
+  do {
+    now = wall_clock64();
+  } while (now - start < ticks);
+  *measured_ticks = now - start;
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Records two events around a kernel that times itself with wall_clock64() and
+ *    checks that the elapsed time is never shorter than the kernel. The events bracket
+ *    the kernel, so a shorter or negative value means the start and stop timestamps
+ *    were converted to the host timeline with different offsets.
+ * Test source
+ * ------------------------
+ *  - unit/event/Unit_hipEventElapsedTime.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+HIP_TEST_CASE(Unit_hipEventElapsedTime_NotShorterThanBracketedKernel) {
+  int ticks_per_ms = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0));
+  REQUIRE(ticks_per_ms > 0);
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  hipEvent_t start, stop;
+  HIP_CHECK(hipEventCreate(&start));
+  HIP_CHECK(hipEventCreate(&stop));
+  uint64_t* measured_ticks = nullptr;
+  HIP_CHECK(hipHostMalloc(&measured_ticks, sizeof(*measured_ticks)));
+
+  // The failure is intermittent (a few percent of samples), so take many short samples.
+  constexpr int kSamples = 300;
+  const uint64_t spin_ticks = ticks_per_ms / 50;  // 20 us
+  for (int i = 0; i < kSamples; ++i) {
+    HIP_CHECK(hipEventRecord(start, stream));
+    SpinKernel<<<1, 1, 0, stream>>>(spin_ticks, measured_ticks);
+    HIP_CHECK(hipEventRecord(stop, stream));
+    HIP_CHECK(hipEventSynchronize(stop));
+
+    float elapsed_ms = 0.0f;
+    HIP_CHECK(hipEventElapsedTime(&elapsed_ms, start, stop));
+    const float kernel_ms = static_cast<float>(*measured_ticks) / ticks_per_ms;
+    INFO("sample " << i << ": elapsed " << elapsed_ms << " ms, kernel " << kernel_ms << " ms");
+    // Allow 1% for float rounding and clock-rate truncation.
+    REQUIRE(elapsed_ms >= kernel_ms * 0.99f);
+  }
+
+  HIP_CHECK(hipHostFree(measured_ticks));
+  HIP_CHECK(hipEventDestroy(start));
+  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+#endif  // HT_AMD
+
 /**
  * End doxygen group EventTest.
  * @}
