@@ -17,8 +17,9 @@ open question.
 
 ## Grill
 
-Interview before writing. The output of the interview is a resolved design
-tree, not a draft.
+Grill the whole tree, then write the HLD once. A settled section stays in
+the interview until the frontier is empty. Do not write that section when
+its own questions end.
 
 Map the HLD as a design tree. Every decision branches into the decisions that
 hang off it. The branches follow the template, and later branches wait on
@@ -69,8 +70,8 @@ Work these in where they apply. Skip a branch that this design does not have.
 - What you are deliberately leaving open.
 
 Be a direct technical partner. Find the weak decision. Short sentences. No
-filler, and no praise before the next question. Do not write the HLD, and
-do not start implementation, during the interview.
+filler, and no praise before the next question. Do not write a section, and
+do not start implementation, while any branch is still open.
 
 When the frontier is empty and nothing is silently assumed:
 
@@ -78,15 +79,16 @@ When the frontier is empty and nothing is silently assumed:
 2. List what is out of scope and what stays open.
 3. Ask whether that shared understanding is right.
 
-Write `docs/design/hld-<topic>.md` only after the author says it is. Use
-their decisions and the facts you verified. Leave the rest under Open
-questions.
+Write `docs/design/hld-<topic>.md` once, after the author says the summary
+is right. Use their decisions and the facts you verified. Leave the rest
+under Open questions. That write covers every section. It does not resume
+the interview between sections.
 
 ## Order
 
-System Context, Problem statement, and Requirements come before Design. The
-design is only as good as those three. Do not draft Design until they say what
-is in scope, which problem it solves, and why that problem matters.
+System Context, Problem statement, and Requirements are the first branches
+of the interview. Design questions wait until those answers are settled.
+The file still waits until the whole tree is confirmed.
 
 ## Where it goes
 
