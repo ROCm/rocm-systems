@@ -19,6 +19,7 @@ from amdisa.__main__ import (
 from amdisa.codegen import CodeGenerator
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute import ExecuteContext
+from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_cvt_scalef32,
@@ -656,6 +657,25 @@ def test_generated_execution_helper_includes_are_scoped(
 
     shared = execute_shared_path.read_text()
     assert fp_include in shared
+
+
+def test_generated_flush_nearest_f32_keeps_modifiers_in_nearest_environment(
+    execute_shared_path: Path,
+):
+    shared = execute_shared_path.read_text()
+    for instruction in sorted(FLUSH_NEAREST_F32_OPS):
+        for encoding in ('vop1', 'vop3'):
+            body = _generated_function_body(
+                shared,
+                f'inline void execute_{instruction.lower()}_{encoding}',
+            )
+            assert body.count('fp_mode::ScopedEnvironment environment(0);') == 1
+
+    for encoding in ('vop1', 'vop3'):
+        sin_body = _generated_function_body(
+            shared, f'inline void execute_v_sin_f32_{encoding}'
+        )
+        assert 'fp_mode::ScopedEnvironment environment(0);' not in sin_body
 
 
 def test_gfx1250_model_include_graph_does_not_reach_vm(
