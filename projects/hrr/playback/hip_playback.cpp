@@ -3295,7 +3295,8 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     // stream-ordered free into a device-wide sync the recording never had. So
     // the unmap is deferred to the next replayed device synchronization. An
     // allocation recorded from the same first page on the same device, no
-    // larger, takes the mapping back without unmapping it, ordered after this
+    // larger and close enough in size, takes the mapping back without
+    // unmapping it, ordered after this
     // free when it is on another stream (VaPlacement::map_at). One that only
     // overlaps it unmaps it first, unless a capture is open, in which case
     // that allocation falls back.

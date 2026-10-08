@@ -683,10 +683,11 @@ class VaPlacement {
     // hipMalloc, hipExtMallocWithFlags and region segments.
     //
     // A freed mapping still waiting for its unmap that starts at the same page
-    // on the same device and covers every page asked for, as a stream-ordered
-    // pool hands a block back for a request up to 12.5% smaller, is taken back
-    // as it is, keeping its own end: no unmap, no new map. The allocation is
-    // ordered after the free first:
+    // on the same device and ends where the allocation's pages do is taken
+    // back as it is: no unmap, no new map. A stream-ordered allocation also
+    // takes back one up to 9/8 of its own pages, keeping the mapping's end, as
+    // the pool hands a block back for a request up to 12.5% smaller. The
+    // allocation is ordered after the free first:
     //  - freed by hipFreeAsync on `stream` itself: nothing to wait for;
     //  - otherwise, with an event recorded after the free and no capture
     //    open: `stream` waits for that event, or the host does for an

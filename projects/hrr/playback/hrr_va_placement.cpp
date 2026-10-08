@@ -437,18 +437,24 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
         if (freed.size() == 1) {
             auto it = deferred_.find(freed[0]);
             const PlacedMapping& d = it->second;
-            // Freed from the same first page on this device, and big enough:
-            // a stream-ordered pool hands a block back for a request up to
-            // 12.5% smaller. Take the mapping back as it is, keeping its end,
-            // as the pool kept the whole block. That needs no unmap, so no
-            // device-wide wait. The recording's pool reused the block only
+            // Freed from the same first page on this device, and the same
+            // size. A stream-ordered pool also hands a block back for a
+            // request up to 12.5% smaller (FindMemory), so a stream-ordered
+            // allocation takes back a mapping up to 9/8 of its own pages too.
+            // An allocation with no stream does not come from that pool, and
+            // keeping a larger mapping would only make a later allocation in
+            // its tail fall back. Take the mapping back as it is, keeping its
+            // end, as the pool kept the whole block. That needs no unmap, so
+            // no device-wide wait. The recording's pool reused the block only
             // once the free was done, or ordered after it, so replay orders
             // the allocation after the free too: nothing to do on the stream
             // that freed it; on another, or for an allocation with no stream,
             // wait for the event the free left, unless a capture is open,
             // where that wait would sync inside it.
+            const bool fits = stream ? pe <= d.end && (d.end - pb) * 8 <= (pe - pb) * 9
+                                     : pe == d.end;
             const bool same_stream = stream && d.on_stream && d.stream == *stream;
-            if (it->first == pb && pe <= d.end && d.device == device &&
+            if (it->first == pb && fits && d.device == device &&
                 (same_stream || (!capturing && d.event))) {
                 PlacedMapping m = d;
                 const hipEvent_t ev = d.event;

@@ -715,7 +715,8 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_UnmapRunsOutsideTheLock) {
 
 HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
   // hipFreeAsync defers the unmap, and a stream-ordered pool hands the block
-  // straight back, for a request up to 12.5% smaller too. The allocation
+  // straight back, for a request up to 12.5% smaller too; hipMalloc only for
+  // the same size. The allocation
   // recorded there takes the mapping back as it is: no device-wide wait for
   // an unmap the recording never had. The pool reused the block only once
   // the free was done, or ordered after it, so on another stream the
@@ -776,14 +777,37 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_FreedRangeTakenBack) {
     REQUIRE(pl.fallbacks() == 0);
     REQUIRE(g_destroyed == 1);
   }
-  SECTION("a smaller request from the same page keeps the whole mapping") {
+  SECTION("up to 12.5% smaller from the same page keeps the whole mapping") {
+    const uint64_t C = B + 4 * P;
+    REQUIRE(pl.map_at(C, 9 * P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(pl.unmap_async(at(C), S1, /*capturing=*/false));
+    REQUIRE(pl.map_at(C, 8 * P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(live == at(C));
+    REQUIRE(g_maps == 2);
+    REQUIRE(g_unmaps == 0);
+    REQUIRE(pl.unmap(at(C)));
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_unmap_bytes == 9 * P);
+  }
+  SECTION("much smaller: unmapped, then mapped") {
     REQUIRE(pl.map_at(B, P, 0, "hipMallocAsync", &live, false, &S1));
     REQUIRE(live == at(B));
-    REQUIRE(g_maps == 1);
-    REQUIRE(g_unmaps == 0);
-    REQUIRE(pl.unmap(at(B)));
     REQUIRE(g_unmaps == 1);
     REQUIRE(g_unmap_bytes == 2 * P);
+    REQUIRE(g_maps == 2);
+  }
+  SECTION("hipMalloc smaller: not taken back") {
+    // hipMalloc does not come from the pool, so only the same size is
+    // taken back.
+    const uint64_t C = B + 4 * P;
+    REQUIRE(pl.map_at(C, 9 * P, 0, "hipMallocAsync", &live, false, &S1));
+    REQUIRE(pl.unmap_async(at(C), S1, /*capturing=*/false));
+    REQUIRE(pl.map_at(C, 8 * P, 0, "hipMalloc", &live));
+    REQUIRE(live == at(C));
+    REQUIRE(g_host_waits == 0);
+    REQUIRE(g_unmaps == 1);
+    REQUIRE(g_unmap_bytes == 9 * P);
+    REQUIRE(g_maps == 3);
   }
   SECTION("its stream destroyed: a new stream with the same handle waits") {
     pl.stream_destroyed(S1);
