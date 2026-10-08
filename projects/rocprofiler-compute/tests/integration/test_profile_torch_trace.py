@@ -760,7 +760,7 @@ def test_torch_trace_user_range_in_marker_csv(binary_handler_profile_rocprof_com
     profile_config = dict(config)
     profile_config["simple_net_user_range"] = [
         sys.executable,
-        "./sample/simple_net.py",
+        *config["torch_test_app"][1:],
         "--user-range",
     ]
     try:
@@ -800,7 +800,7 @@ def test_torch_trace_backward_thread_in_marker_csv(
     profile_config = dict(config)
     profile_config["simple_net_backward_thread"] = [
         sys.executable,
-        "./sample/simple_net.py",
+        *config["torch_test_app"][1:],
         "--backward-thread",
     ]
     try:
