@@ -1,0 +1,141 @@
+name: profiler-hub Windows CI
+run-name: profiler-hub-windows-ci
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/profiler-hub-windows-ci.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/profiler-hub-windows-ci.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }} / msvc / ${{ matrix.build-type }}
+    runs-on: ${{ matrix.os }}
+    # Windows is slower than the Linux job and additionally fetches fmt, spdlog
+    # and GTest via FetchContent plus the SQLite amalgamation zip.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022]
+        build-type: [Debug, Release]
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            profilers/profiler-hub
+            .github/workflows
+
+      - name: Pin cmake to the project's minimum
+        run: |
+          python -m pip install 'cmake==3.25'
+          # The runner image ships its own cmake; prepend the pinned one so it
+          # wins regardless of the image's PATH order.
+          python -c "import cmake; print(cmake.CMAKE_BIN_DIR)" >> $env:GITHUB_PATH
+
+      # The default Visual Studio generator is deliberate: it is the
+      # configuration the Windows support was developed and documented against,
+      # so CI exercises the same multi-config layout the README describes
+      # (build\bin\<config>, build\lib\<config>).
+      #
+      # No vcpkg or system SQLite is installed: PROFILER_HUB_FETCH_DEPENDENCIES
+      # makes the Windows path download the official SQLite amalgamation zip and
+      # build it as profiler-hub-sqlite3.dll.
+      - name: Configure
+        working-directory: profilers/profiler-hub
+        run: |
+          cmake --version
+          cmake -S . -B build -A x64 `
+            -DPROFILER_HUB_BUILD_TESTS=ON `
+            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF `
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
+
+      - name: Build
+        working-directory: profilers/profiler-hub
+        run: cmake --build build --config ${{ matrix.build-type }} --parallel
+
+      - name: Verify library artifacts
+        working-directory: profilers/profiler-hub
+        run: |
+          $cfg = "${{ matrix.build-type }}"
+          # profiler-hub-sqlite3.dll must sit beside profiler-hub.dll: the DLL
+          # is loaded from the executable's directory at run time, so losing
+          # that co-location breaks consumers without breaking the build.
+          $expected = @(
+            "build\bin\$cfg\profiler-hub.dll",
+            "build\bin\$cfg\profiler-hub-sqlite3.dll",
+            "build\lib\$cfg\profiler-hub.lib",
+            "build\lib\$cfg\profiler-hub-static.lib"
+          )
+          $missing = $false
+          foreach ($path in $expected) {
+            if (Test-Path -LiteralPath $path) {
+              Write-Host "found    $path"
+            } else {
+              Write-Host "::error::missing expected artifact $path"
+              $missing = $true
+            }
+          }
+          # Tolerate a missing directory here: GitHub runs pwsh with
+          # $ErrorActionPreference = 'Stop', and this listing exists to diagnose
+          # exactly the case where an output directory was never produced.
+          Get-ChildItem -Recurse -ErrorAction SilentlyContinue `
+            "build\bin\$cfg", "build\lib\$cfg" |
+            Select-Object -ExpandProperty FullName
+          if ($missing) { exit 1 }
+
+      - name: Test
+        working-directory: profilers/profiler-hub
+        run: >
+          ctest --test-dir build
+          -C ${{ matrix.build-type }}
+          --output-on-failure
+          --output-junit test-results.xml
+
+      # A DLL that loads but exports nothing produces zero executed tests while
+      # ctest itself can still report success, so assert the suite actually ran.
+      - name: Verify tests executed
+        working-directory: profilers/profiler-hub
+        run: |
+          [xml]$results = Get-Content build\test-results.xml
+          $total = [int]$results.testsuite.tests
+          Write-Host "tests executed: $total"
+          if ($total -lt 1) {
+            Write-Host "::error::ctest reported success but executed no tests"
+            exit 1
+          }
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.os }}-msvc-${{ matrix.build-type }}
+          path: profilers/profiler-hub/build/test-results.xml
+          if-no-files-found: warn
