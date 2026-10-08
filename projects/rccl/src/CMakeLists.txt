@@ -573,6 +573,8 @@ set(SRC_FILES
   transport/net_ib/gdr.cc
   transport/net_ib/gin.cc
   transport/net_ib/gin.h
+  transport/net_ib/gin_multiseg.h
+  transport/net_ib/rma_multiseg.h
   transport/net_ib/init.cc
   transport/net_ib/net_ib_gid_inspect.cc
   transport/net_ib/net_ib_wqe_lat_inspect.cc
