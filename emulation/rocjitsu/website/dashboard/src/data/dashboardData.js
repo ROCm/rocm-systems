@@ -391,6 +391,8 @@ export async function loadDashboardDataFiles({
     }
     throw error;
   } finally {
+    // Promise.all may reject while a sibling request or retry still belongs to this load.
+    loadController.abort();
     if (loadTimer) clearTimeout(loadTimer);
     signal?.removeEventListener('abort', forwardAbort);
   }

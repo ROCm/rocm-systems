@@ -14,6 +14,20 @@ test('accepts historical environment changes in an otherwise valid publication',
   expect(result.sourceData.runs).toHaveLength(index.runFiles.length);
 });
 
+test('accepts an empty publication without run or catalog directories', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'dashboard-empty-'));
+  try {
+    await cp(path.join(fixtureDataDirectory, 'metadata.json'), path.join(directory, 'metadata.json'));
+    const index = JSON.parse(await readFile(path.join(fixtureDataDirectory, 'index.json'), 'utf8'));
+    await writeFile(path.join(directory, 'index.json'), JSON.stringify({ ...index, runFiles: [] }));
+    const result = await validateDashboardDataDirectory(directory);
+    expect(result.sourceData.runs).toEqual([]);
+    expect(result.data.runs).toEqual([]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('rejects generated data that the website also rejects', async () => {
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'rocjitsu-dashboard-data-'));
   try {

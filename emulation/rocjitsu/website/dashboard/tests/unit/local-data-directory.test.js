@@ -1,4 +1,5 @@
 import { Writable } from 'node:stream';
+import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -39,6 +40,46 @@ test('parses a data directory and leftover Vite arguments', () => {
     preview: true,
     viteArgs: ['--port', '4173'],
   });
+});
+
+test('a file removed after stat fails only its request and leaves the server alive', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'dashboard-stream-'));
+  try {
+    await writeFile(path.join(directory, 'removed.json'), '{}');
+    await writeFile(path.join(directory, 'healthy.json'), '{"healthy":true}');
+    const middlewareUrl = new URL('../../scripts/dashboard-data-dir.mjs', import.meta.url).href;
+    const output = execFileSync(process.execPath, ['--input-type=module', '--eval', `
+      import fs from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      import { createServer } from 'node:http';
+      import { once } from 'node:events';
+      const originalStat = fs.stat;
+      // Force a real open failure after the middleware's successful stat.
+      fs.stat = (file, callback) => originalStat(file, (error, info) => {
+        if (!error && file.endsWith('/removed.json')) fs.unlinkSync(file);
+        callback(error, info);
+      });
+      syncBuiltinESMExports();
+      const { createDashboardDataMiddleware } = await import(${JSON.stringify(middlewareUrl)});
+      const middleware = createDashboardDataMiddleware(${JSON.stringify(directory)});
+      const server = createServer((req, res) => middleware(req, res, () => res.end()));
+      server.listen(0, '127.0.0.1');
+      await once(server, 'listening');
+      try {
+        const base = 'http://127.0.0.1:' + server.address().port;
+        const failed = await fetch(base + '/data/removed.json');
+        await failed.text();
+        const healthy = await fetch(base + '/data/healthy.json');
+        console.log(JSON.stringify({ failed: failed.status, healthy: healthy.status, body: await healthy.json() }));
+      } finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      }
+    `], { encoding: 'utf8', timeout: 10_000 });
+    expect(JSON.parse(output)).toEqual({ failed: 500, healthy: 200, body: { healthy: true } });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 class ResponseStub extends Writable {

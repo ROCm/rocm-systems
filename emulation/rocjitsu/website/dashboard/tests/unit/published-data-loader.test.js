@@ -413,6 +413,36 @@ test('an external abort cancels the whole load instead of skipping runs', async 
   expect(state.urls.length).toBeLessThan(dataset.runCount);
 });
 
+test.each(['metadata', 'index'])('a fatal %s failure aborts its pending sibling without retrying', async (failedManifest) => {
+  const controller = new AbortController();
+  const failedUrl = failedManifest === 'metadata' ? dataset.metadataUrl : dataset.indexUrl;
+  let siblingSignal;
+  let settleSibling;
+  const { fetchImpl, state } = createFetchDouble({
+    behavior: (url, { signal }) => {
+      if (url === failedUrl) return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found' });
+      siblingSignal = signal;
+      return new Promise((resolve, reject) => {
+        settleSibling = () => resolve(jsonResponse(dataset.bodies.get(url)));
+        signal.addEventListener('abort', () => reject(new TypeError('Request aborted')), { once: true });
+      });
+    },
+  });
+  try {
+    const failure = await loadSynthetic(fetchImpl, { signal: controller.signal, retryDelaysMs: [0] })
+      .catch((error) => error);
+    expect(failure.dashboardDataErrorCode).toBe('missing');
+    expect(isLoadCancelled(failure)).toBe(false);
+    expect(siblingSignal.aborted).toBe(true);
+    controller.abort();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(state.urls).toHaveLength(2);
+    expect(state.active).toBe(0);
+  } finally {
+    settleSibling();
+  }
+});
+
 test('a failing index is fatal rather than a warning', async () => {
   const { fetchImpl } = createFetchDouble({
     behavior: (url) => (url === dataset.indexUrl

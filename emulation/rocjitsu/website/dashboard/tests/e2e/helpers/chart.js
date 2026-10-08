@@ -32,18 +32,25 @@ export async function clickLastCompletedChartPoint(chart) {
   await chart.scrollIntoViewIfNeeded();
   let previous;
   let position;
+  let selectedMode;
   await expect.poll(async () => {
-    position = await readChart(chart, (instance) => {
+    const point = await readChart(chart, (instance) => {
       const option = instance.getOption();
       const seriesIndex = option.series.findIndex((series) => series.type === 'line'
         && series.data.some((point) => point?.record && Number.isFinite(point.value)));
       const series = option.series[seriesIndex];
       const index = series.data.findLastIndex((point) => point?.record && Number.isFinite(point.value));
-      return instance.convertToPixel({ seriesIndex }, [option.xAxis[0].data[index], series.data[index].value]);
+      return {
+        position: instance.convertToPixel({ seriesIndex }, [option.xAxis[0].data[index], series.data[index].value]),
+        mode: series.data[index].record.test.mode,
+      };
     });
+    position = point.position;
+    selectedMode = point.mode;
     const stable = previous && Math.abs(previous[0] - position[0]) < 0.5 && Math.abs(previous[1] - position[1]) < 0.5;
     previous = position;
     return Boolean(stable);
   }).toBe(true);
   await chart.click({ position: { x: position[0], y: position[1] } });
+  return { mode: selectedMode };
 }

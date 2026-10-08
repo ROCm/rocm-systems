@@ -20,12 +20,14 @@ import { problemDetails } from '../../data/problemDetails';
 import { runEnvironmentDetails } from '../../data/provenance';
 import { formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { hasDisplayValue } from '../../utils/values';
+import { commitUrl } from '../../utils/commitUrl';
 
 export default function BenchmarkResultDialog({ record, repository, onClose }) {
   const run = record?.run;
   const test = record?.test;
   const provenance = run?.provenance ?? {};
   const commitSha = provenance.rocjitsuCommitSha;
+  const sourceUrl = commitUrl(repository, commitSha);
   const testProblemDetails = problemDetails(test?.problem);
   const environmentDetails = [...runEnvironmentDetails({ provenance, environment: run?.environment }).values()];
 
@@ -85,10 +87,10 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
 
           </DialogContent>
           <DialogActions sx={{ px: 3, py: 1.5 }}>
-            {repository && commitSha && (
+            {sourceUrl && (
               <Button
                 component={Link}
-                href={`${repository}/commit/${commitSha}`}
+                href={sourceUrl}
                 target="_blank"
                 rel="noreferrer"
                 endIcon={<OpenInNewRoundedIcon />}

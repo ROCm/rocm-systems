@@ -112,10 +112,12 @@ test('grid point selection survives timeframe and scope changes without legacy m
   await ensureGridBenchmark(page, gemm);
   const chart = card(page, gemm).getByRole('img', { name: `${gemm} duration history` });
   await expect(page.getByRole('button', { name: /^(Single|Grid|Aggregate)$/ })).toHaveCount(0);
-  await clickLastCompletedChartPoint(chart);
+  const clickedPoint = await clickLastCompletedChartPoint(chart);
   let dialog = page.getByRole('dialog');
   await expect(dialog.getByText('fictional-develop-23', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('Simulator threads', { exact: true }).locator('..')).toContainText('1');
+  expect(['ST', 'MT']).toContain(clickedPoint.mode);
+  await expect(dialog.getByText('Execution mode', { exact: true }).locator('..')).toContainText(clickedPoint.mode);
+  await expect(dialog.getByText('Simulator threads', { exact: true })).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Close details', exact: true }).click();
   expect(await selectedRunIds(chart)).toEqual(['fictional-develop-23']);
   await page.getByRole('button', { name: 'Trailing 7 days' }).click();

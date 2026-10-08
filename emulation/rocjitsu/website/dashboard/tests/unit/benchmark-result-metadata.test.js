@@ -3,6 +3,18 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, test, vi } from 'vitest';
 import BenchmarkResultDialog from '../../src/components/benchmarks/BenchmarkResultDialog.jsx';
 import { formatDuration } from '../../src/utils/formatters.js';
+test.each(['', '?view=source', '#readme', '/'])('result commit links append to the repository pathname (%s)', (suffix) => {
+  const sha = 'a'.repeat(40);
+  const record = {
+    run: { runId: 'commit-link', timestamp: '2026-10-05T14:00:00Z', commitTimestamp: '2026-10-05T13:00:00Z', provenance: { rocjitsuCommitSha: sha } },
+    test: { name: 'Fictional workload', target: 'gfx1250', mode: 'ST', suite: 'Triton', status: 'completed', durationSeconds: 1 },
+  };
+  const html = renderToStaticMarkup(createElement(BenchmarkResultDialog, {
+    record, repository: `https://github.com/ROCm/rocm-systems${suffix}`, onClose() {},
+  }));
+  expect(html).toContain(`href="https://github.com/ROCm/rocm-systems/commit/${sha}"`);
+});
+
 vi.mock('@mui/material', async (importOriginal) => {
   const original = await importOriginal();
   return { ...original, Dialog: ({ open, children }) => open ? createElement('div', { role: 'dialog' }, children) : null };

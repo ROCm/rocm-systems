@@ -6,23 +6,14 @@ import { selectRecentRunAttempts, selectRecentRunSummaries } from '../../data/se
 import { commitTimestampFor } from '../../data/runOrdering';
 import { formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { recentRunsPage } from './overviewPresentation';
+import { commitUrl } from '../../utils/commitUrl';
 
 
 function sourceCommitUrl(run, publicationRepository) {
   const sha = run.source?.commit ?? run.provenance?.rocjitsuCommitSha;
   // Legacy records lack source metadata; only those inherit the publication repository.
   const repository = run.source?.repository ?? publicationRepository;
-  if (typeof sha !== 'string' || !/^[a-fA-F0-9]{7,40}$/.test(sha) || typeof repository !== 'string') return null;
-  try {
-    const url = new URL(repository);
-    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return null;
-    url.pathname = `${url.pathname.replace(/\/$/, '')}/commit/${sha}`;
-    url.search = '';
-    url.hash = '';
-    return url.href;
-  } catch {
-    return null;
-  }
+  return commitUrl(repository, sha);
 }
 
 function RunTime({ timestamp }) {
@@ -54,10 +45,10 @@ export default function RecentRuns({ data, filters }) {
               const status = statusFor(row);
               const full = row.total > 0 && row.completed === row.total;
               const commitSha = row.run.source?.commit ?? row.run.provenance?.rocjitsuCommitSha;
-              const commitUrl = sourceCommitUrl(row.run, data.repository);
+              const sourceUrl = sourceCommitUrl(row.run, data.repository);
               return <TableRow key={row.run.runId} hover data-run-id={row.run.runId}>
                 <TableCell>
-                  {commitUrl ? <Link href={commitUrl} target="_blank" rel="noopener noreferrer" color="primary" underline="hover" title={commitSha} aria-label={`Open source commit ${commitSha} (opens in new tab)`} sx={{ display: 'block', fontSize: 12, fontFamily: monoFont, lineHeight: '18px' }}>{commitSha.slice(0, 8)}</Link> : <Typography component="code" variant="body2" title={row.run.runId} sx={{ display: 'block', fontSize: 12, fontFamily: monoFont, color: 'text.secondary', lineHeight: '18px' }}>{shortSha(row.run)}</Typography>}
+                  {sourceUrl ? <Link href={sourceUrl} target="_blank" rel="noopener noreferrer" color="primary" underline="hover" title={commitSha} aria-label={`Open source commit ${commitSha} (opens in new tab)`} sx={{ display: 'block', fontSize: 12, fontFamily: monoFont, lineHeight: '18px' }}>{commitSha.slice(0, 8)}</Link> : <Typography component="code" variant="body2" title={row.run.runId} sx={{ display: 'block', fontSize: 12, fontFamily: monoFont, color: 'text.secondary', lineHeight: '18px' }}>{shortSha(row.run)}</Typography>}
                   <Typography variant="caption" component="span" title={row.run.provenance?.commitMessage} sx={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11, lineHeight: '18px', color: 'text.secondary' }}>{row.run.provenance?.commitMessage ?? 'No commit message provided'}</Typography>
                 </TableCell>
                 <TableCell><RunTime timestamp={row.run.timestamp} /></TableCell>

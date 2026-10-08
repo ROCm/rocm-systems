@@ -33,7 +33,9 @@ fixture preview always uses port 4174; the production preview uses port 4173.
 
 The production build writes application files to `dist/` without dummy data and loads
 JSON from the [`gh-pages-rocjitsu` branch](https://github.com/ROCm/rocm-systems/tree/gh-pages-rocjitsu/rocjitsu-dashboard/data).
-The data directory must contain `metadata.json`, `index.json`, `test-catalogs/`, and `runs/`.
+The data directory must contain `metadata.json`, `index.json`, and all run and catalog
+resources referenced by the publication. An empty publication with no indexed runs
+does not require `test-catalogs/` or `runs/` directories.
 Before any future data publication, validate the complete staged data directory:
 
 ```bash

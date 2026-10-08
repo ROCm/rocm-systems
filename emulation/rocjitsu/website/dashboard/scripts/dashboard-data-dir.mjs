@@ -105,7 +105,21 @@ export function createDashboardDataMiddleware(dataDirectory) {
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
         }
         res.setHeader('Cache-Control', 'no-store');
-        createReadStream(resolvedFile).pipe(res);
+        if (res.destroyed) return;
+        const stream = createReadStream(resolvedFile);
+        res.once('close', () => stream.destroy());
+        res.once('error', () => stream.destroy());
+        stream.once('error', () => {
+          stream.unpipe(res);
+          if (res.destroyed) return;
+          if (res.headersSent) {
+            res.destroy();
+          } else {
+            res.statusCode = 500;
+            res.end();
+          }
+        });
+        stream.pipe(res);
       });
     });
   };
