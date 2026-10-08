@@ -176,23 +176,20 @@ protected:
         if(handle_) dlclose(handle_);
     }
 
-    // Create the fixture communicator and confirm RCCL loaded the recorder. RCCL
-    // remembers a failed profiler load for the life of the process and never
-    // retries, so a communicator created earlier in this binary without the
-    // plugin configured leaves this one without it.
-    std::string createCommWithRecorder()
+    // Create a default communicator and stream, and confirm RCCL loaded the
+    // recorder. RCCL remembers a failed profiler load for the life of the process
+    // and never retries, so a communicator created earlier in this binary without
+    // the plugin configured leaves this one without it.
+    std::string createCommWithRecorder(ncclComm_t* comm, hipStream_t* stream)
     {
-        bool failed = createTestCommunicator() != ncclSuccess;
-        if(onAnyRank(failed))
-        {
-            ADD_FAILURE() << (failed ? "createTestCommunicator failed" : "createTestCommunicator failed on another rank");
-            return "no communicator";
-        }
-        return recorderNotLoadedReason();
+        ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+        return createConfiguredCommWithRecorder(&config, comm, stream);
     }
 
-    // The same for a communicator built from a config the test controls, plus a
-    // stream of its own; both are released in TearDown.
+    // The same for a communicator built from a config the test controls. The vote
+    // on failure comes before any barrier (MPITestCore::createTestCommunicator has
+    // one that only succeeding ranks reach), so a rank that fails cannot strand
+    // the others. Both are released in TearDown.
     std::string createConfiguredCommWithRecorder(ncclConfig_t* config, ncclComm_t* comm, hipStream_t* stream)
     {
         bool failed = createConfiguredComm(config, comm) != ncclSuccess ||
@@ -235,8 +232,13 @@ protected:
 
     ncclResult_t destroyOwnedComm(ncclComm_t comm)
     {
-        ownedComms_.erase(std::remove(ownedComms_.begin(), ownedComms_.end(), comm), ownedComms_.end());
+        forgetOwnedComm(comm);
         return ncclCommDestroy(comm);
+    }
+
+    void forgetOwnedComm(ncclComm_t comm)
+    {
+        ownedComms_.erase(std::remove(ownedComms_.begin(), ownedComms_.end(), comm), ownedComms_.end());
     }
 
     std::vector<long> proxyThreadIds()
@@ -459,9 +461,9 @@ TEST_F(ProfilerKernelChMPITest, EagerAllReduceIsBalanced)
 {
     KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
-    KCH_SKIP_IF_NEEDED(createCommWithRecorder());
-    ncclComm_t comm = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
+    ncclComm_t comm = nullptr;
+    hipStream_t stream = nullptr;
+    KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
     ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
 
     constexpr int kIters = 16;
@@ -482,9 +484,9 @@ TEST_F(ProfilerKernelChMPITest, ProxyLessIntraNodeIsTimed)
     KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kRequireSingleNode))
         GTEST_SKIP() << "needs at least 2 ranks on a single node";
-    KCH_SKIP_IF_NEEDED(createCommWithRecorder());
-    ncclComm_t comm = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
+    ncclComm_t comm = nullptr;
+    hipStream_t stream = nullptr;
+    KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
     ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
 
     constexpr int kIters = 8;
@@ -512,9 +514,9 @@ TEST_F(ProfilerKernelChMPITest, ProxyPathKernelChOffProxyThread)
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
     if(detectNodeCount() < 2 && !(envIsOne("NCCL_P2P_DISABLE") && envIsOne("NCCL_SHM_DISABLE")))
         GTEST_SKIP() << "needs ranks on 2 nodes, or NCCL_P2P_DISABLE=1 and NCCL_SHM_DISABLE=1 on one";
-    KCH_SKIP_IF_NEEDED(createCommWithRecorder());
-    ncclComm_t comm = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
+    ncclComm_t comm = nullptr;
+    hipStream_t stream = nullptr;
+    KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
     ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
 
     constexpr int kIters = 8;
@@ -541,9 +543,9 @@ TEST_F(ProfilerKernelChMPITest, ShmTransportIsTimed)
     if(!p2pOff || atoi(p2pOff) == 0) GTEST_SKIP() << "set NCCL_P2P_DISABLE=1 to force the SHM transport";
     if(!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kRequireSingleNode))
         GTEST_SKIP() << "needs at least 2 ranks on a single node";
-    KCH_SKIP_IF_NEEDED(createCommWithRecorder());
-    ncclComm_t comm = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
+    ncclComm_t comm = nullptr;
+    hipStream_t stream = nullptr;
+    KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
     ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
 
     constexpr int kIters = 8;
@@ -576,9 +578,9 @@ TEST_F(ProfilerKernelChMPITest, SendRecvRingIsBalanced)
 {
     KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
-    KCH_SKIP_IF_NEEDED(createCommWithRecorder());
-    ncclComm_t comm = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
+    ncclComm_t comm = nullptr;
+    hipStream_t stream = nullptr;
+    KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
     ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 18));
     const int rank = MPIEnvironment::world_rank, n = MPIEnvironment::world_size;
 
@@ -604,9 +606,9 @@ TEST_F(ProfilerKernelChMPITest, GraphReplaysAreEachTimed)
 {
     KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
-    KCH_SKIP_IF_NEEDED(createCommWithRecorder());
-    ncclComm_t comm = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
+    ncclComm_t comm = nullptr;
+    hipStream_t stream = nullptr;
+    KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
     ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 20));
 
     constexpr int kPerGraph = 4, kReplays = 6;
@@ -714,9 +716,9 @@ TEST_F(ProfilerKernelChMPITest, BurstPastSlotRingIsBalanced)
 {
     KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
-    KCH_SKIP_IF_NEEDED(createCommWithRecorder());
-    ncclComm_t comm = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
+    ncclComm_t comm = nullptr;
+    hipStream_t stream = nullptr;
+    KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
     ASSERT_NO_FATAL_FAILURE(allocBuffers(1024));
 
     constexpr int kIters = 512;
@@ -806,9 +808,9 @@ TEST_F(ProfilerKernelChMPITest, AbortWithWorkInFlightReturns)
 {
     KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
-    KCH_SKIP_IF_NEEDED(createCommWithRecorder());
-    ncclComm_t comm = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
+    ncclComm_t comm = nullptr;
+    hipStream_t stream = nullptr;
+    KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
     ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 22));
 
     // Shows the communicator is timed at all, which the abort itself cannot.
@@ -823,7 +825,7 @@ TEST_F(ProfilerKernelChMPITest, AbortWithWorkInFlightReturns)
     auto t0 = std::chrono::steady_clock::now();
     EXPECT_EQ(ncclSuccess, ncclCommAbort(comm));
     double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-    test_comm_ = nullptr;  // aborted; cleanup must not destroy it again
+    forgetOwnedComm(comm);  // aborted; TearDown must not destroy it again
     EXPECT_LT(secs, 60.0) << "ncclCommAbort took " << secs << " s with KernelCh work in flight";
     EXPECT_EQ(0u, anomalies_()) << "recorder saw unbalanced calls around abort";
     size_t unstopped = 0;
@@ -847,9 +849,9 @@ TEST_F(ProfilerKernelChMPITest, TimersAreWallClockTicks)
 {
     KCH_REQUIRE_RECORDER();
     if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
-    KCH_SKIP_IF_NEEDED(createCommWithRecorder());
-    ncclComm_t comm = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
+    ncclComm_t comm = nullptr;
+    hipStream_t stream = nullptr;
+    KCH_SKIP_IF_NEEDED(createCommWithRecorder(&comm, &stream));
     ASSERT_NO_FATAL_FAILURE(allocBuffers(1 << 22));
 
     int dev = 0, rateKHz = 0;
