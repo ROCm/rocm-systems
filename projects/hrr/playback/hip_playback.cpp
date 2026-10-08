@@ -2958,6 +2958,7 @@ static bool hrr_stream_capturing(hipStream_t stream) {
            st != hipStreamCaptureStatusNone;
 }
 
+// A negative `device` means the stream's own.
 static bool hrr_place_async_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
                                   const char* api, hipStream_t stream, bool capturing,
                                   int device, void** live) {
@@ -2967,6 +2968,7 @@ static bool hrr_place_async_alloc(PlaybackContext& ctx, uint64_t rec, size_t siz
         pl->fell_back(rec, size, api, "it was allocated inside a graph capture");
         return false;
     }
+    if (device < 0) device = hrr::hrr_stream_device(stream);
     return hrr_place_alloc(ctx, rec, size, api, live, device, &stream);
 }
 
@@ -3000,7 +3002,7 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     hipError_t r = hipSuccess;
     const bool capturing = hrr_stream_capturing(stream);
     if (hrr_place_async_alloc(ctx, a->dev_ptr, orig_sz, "hipMallocAsync", stream, capturing,
-                              hrr::hrr_stream_device(stream), &live))
+                              /*device=*/-1, &live))
         pad_sz = orig_sz;
     else {
         r = hipMallocAsync(&live, pad_sz, stream);

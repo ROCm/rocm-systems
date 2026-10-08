@@ -143,7 +143,10 @@ hipError_t hrr_vmm_map_into(void* va, size_t len, int device,
 int hrr_stream_device(hipStream_t stream) {
     int dev = 0;
     hipDevice_t sd = 0;
-    if (stream && hipStreamGetDevice(stream, &sd) == hipSuccess) return static_cast<int>(sd);
+    if (stream) {
+        if (hipStreamGetDevice(stream, &sd) == hipSuccess) return static_cast<int>(sd);
+        (void)hipGetLastError();  // the failure would stick
+    }
     (void)hipGetDevice(&dev);
     return dev;
 }
