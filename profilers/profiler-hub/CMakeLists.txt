@@ -18,7 +18,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # ------------------------------------------------------------ #
 
 option(PROFILER_HUB_BUILD_TESTS "Build unit tests" ON)
-option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
+option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" ON)
+option(PROFILER_HUB_BUILD_EXAMPLES "Build examples" ON)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(
@@ -88,14 +89,12 @@ add_subdirectory(source)
 # Public API
 # ------------------------------------------------------------ #
 
-set(profiler-hub_public_headers
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/version.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/shared_types.hpp
+add_subdirectory(include/cpp)
+
+list(
+    APPEND profiler-hub_public_headers
+    ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub_types.h
 )
 
 foreach(HEADER_FILE ${profiler-hub_public_headers})
@@ -199,7 +198,20 @@ endif()
 
 add_library(profiler-hub SHARED $<TARGET_OBJECTS:profiler-hub-objects>)
 add_library(profiler-hub-static STATIC $<TARGET_OBJECTS:profiler-hub-objects>)
-set_target_properties(profiler-hub-static PROPERTIES OUTPUT_NAME profiler-hub)
+if(WIN32)
+    set_target_properties(profiler-hub PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    # On MSVC, profiler-hub.lib is the DLL import library; keep the static
+    # archive under a distinct name so consumers link the shared library.
+    set_target_properties(
+        profiler-hub-static
+        PROPERTIES OUTPUT_NAME profiler-hub-static
+    )
+else()
+    set_target_properties(
+        profiler-hub-static
+        PROPERTIES OUTPUT_NAME profiler-hub
+    )
+endif()
 
 if(TARGET profiler-hub-sqlite3-shared)
     set_target_properties(profiler-hub PROPERTIES INSTALL_RPATH "$ORIGIN")
@@ -347,6 +359,7 @@ install(
     COMPONENT profiler-hub
     FILES_MATCHING
     PATTERN "*.hpp"
+    PATTERN "*.h"
 )
 
 install(
@@ -459,6 +472,7 @@ if(CLANG_TIDY_EXE)
         clang-tidy
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+            --extra-arg=-I${CMAKE_BINARY_DIR}/include
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -471,6 +485,7 @@ if(CLANG_TIDY_EXE)
         clang-tidy-fix
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+            --extra-arg=-I${CMAKE_BINARY_DIR}/include
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy --fix --fix-errors
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -490,4 +505,8 @@ endif()
 
 if(PROFILER_HUB_BUILD_TESTS OR PROFILER_HUB_BUILD_BENCHMARKS)
     add_subdirectory(tests)
+endif()
+
+if(PROFILER_HUB_BUILD_EXAMPLES)
+    add_subdirectory(examples/clients)
 endif()

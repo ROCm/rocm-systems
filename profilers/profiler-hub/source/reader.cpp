@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "profiler-hub/reader.hpp"
-#include "profiler-hub/storage.hpp"
+#include "profiler-hub/cpp/reader.hpp"
+#include "profiler-hub/cpp/storage.hpp"
 #include "reader_impl.hpp"
 
 #include <memory>
@@ -15,7 +15,18 @@ reader_t::reader_t(std::unique_ptr<profiler_hub::storage_t> storage)
 : m_impl(std::make_unique<impl>(std::move(storage)))
 {}
 
+reader_t::reader_t(std::unique_ptr<profiler_hub::storage_t> storage,
+                   std::shared_ptr<reader_catalog_t>        catalog)
+: m_impl(std::make_unique<impl>(std::move(storage), std::move(catalog)))
+{}
+
 reader_t::~reader_t() = default;
+
+void
+reader_t::build_catalog_category(catalog_category_t category, reader_catalog_t& catalog)
+{
+    m_impl->build_catalog_category(category, catalog);
+}
 
 reader_types::node_info_list_t
 reader_t::get_all_nodes() const
@@ -82,6 +93,13 @@ reader_t::get_events_for_track(reader_types::track_info_ptr_t      track,
                                const reader_types::event_filter_t& filter) const
 {
     return m_impl->get_events_for_track(std::move(track), filter);
+}
+
+reader_types::counter_timeline_event_list_t
+reader_t::get_counter_events_for_track(reader_types::track_info_ptr_t      track,
+                                       const reader_types::event_filter_t& filter) const
+{
+    return m_impl->get_counter_events_for_track(std::move(track), filter);
 }
 
 reader_types::timeline_event_list_t

@@ -8,10 +8,11 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
-#include <profiler-hub/shared_types.hpp>
+#include <profiler-hub/cpp/shared_types.hpp>
 
 namespace profiler_hub::reader_types
 {
@@ -262,10 +263,53 @@ struct kernel_symbol_info_t
 using kernel_symbol_info_ptr_t  = std::shared_ptr<kernel_symbol_info_t>;
 using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
 
+/** @brief Distinguishes the identity columns a track was derived from.
+ *         Needed because `agent_id` alone can't tell a kernel-dispatch
+ *         per-agent+queue track apart from a PMC per-agent track once both
+ *         set it. */
+enum class track_kind_t
+{
+    thread,                       ///< (nid,pid,tid)-based; derived from the
+                                  ///< duration-event tables, untagged rows only.
+    thread_sample,                ///< Same (nid,pid,tid) family, but events
+                                  ///< explicitly tagged with a named
+                                  ///< rocpd_sample.track_id.
+    pmc_agent,                    ///< PMC/counter samples split by agent_id.
+    kernel_dispatch_agent_queue,  ///< Kernel dispatches, by (nid,agent_id,queue_id).
+    memory_allocate_agent_queue,  ///< Memory allocations, by (nid,agent_id,queue_id).
+    memory_copy_agent_queue,      ///< Memory copies, by (nid,dst_agent_id,queue_id).
+    // One merged track per (nid,pid,stream_id), combining kernel-dispatch +
+    // memory-allocate + memory-copy events on that stream -- matches optiq's
+    // actual behavior (a single kRocProfVisDmStreamTrack per stream, not one
+    // per event type; confirmed against a real roc_optiq_track_info cache).
+    stream,
+};
+
 struct track_info_t
 {
-    std::string name{};
-    std::string extdata{};
+    size_t       id{};
+    std::string  name{};
+    std::string  extdata{};
+    size_t       event_count{};
+    size_t       agent_id{};
+    size_t       queue_id{};
+    size_t       stream_id{};
+    track_kind_t category{ track_kind_t::thread };
+
+    // Raw rocpd_info_process.id (FK), as stored in the event tables' pid
+    // column -- distinct from process_info->pid (the OS pid). Only set for
+    // track_kind_t::stream, where it's needed to filter event queries;
+    // process_info->pid can't be used for that since it's the resolved OS
+    // pid, not the FK.
+    size_t db_pid{};
+
+    // rocpd_info_pmc.id -- which counter this track represents. Only set
+    // for track_kind_t::pmc_agent (derived directly from the counter-sample
+    // tables, not a rocpd_track row); needed to filter sample queries.
+    size_t pmc_id{};
+
+    size_t start_ts{};  ///< Nanosecond timestamp of the track's earliest event.
+    size_t end_ts{};    ///< Nanosecond timestamp of the track's latest event.
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -480,8 +524,8 @@ struct timeline_event_t
     timestamp_ns_t start_timestamp;
     timestamp_ns_t end_timestamp;
 
-    std::string display_name;
-    std::string category;
+    std::string_view display_name;
+    std::string_view category;
 
     track_info_ptr_t track;
 };
@@ -493,7 +537,7 @@ struct counter_timeline_event_t
     unique_timeline_event_id_t unique_identifier;
 
     timestamp_ns_t timestamp;
-    size_t         value;
+    double         value;
 
     track_info_ptr_t track;
 };
