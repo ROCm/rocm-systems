@@ -3949,6 +3949,18 @@ def descendant_names(node: Any) -> Set[str]:
     return names
 
 
+def _op_edge_child_is_operator(child_name: str) -> bool:
+    """True when a profiler edge child is an operator name, not a kernel."""
+    name = str(child_name)
+    if name.startswith("aten::"):
+        return True
+    if name.startswith("torch."):
+        return True
+    if name.startswith("nn.") or name.startswith("Optimizer."):
+        return True
+    return False
+
+
 def compare_single_op(
     op: OpEntry,
     ground_truth: Dict[str, Any],
@@ -4078,6 +4090,8 @@ def compare_single_op(
                 marker_matches_op(str(parent_name), node.name) for node in matched_nodes
             )
         ):
+            continue
+        if not _op_edge_child_is_operator(str(child_name)):
             continue
         child_found = False
         for node in matched_nodes:
