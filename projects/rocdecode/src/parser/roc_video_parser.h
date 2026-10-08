@@ -77,7 +77,7 @@ typedef struct {
 #define RBSP_BUF_SIZE 1024  // enough to parse any parameter sets or slice headers
 #define INIT_SLICE_LIST_NUM 16 // initial slice/tile information/parameter struct list size
 #define INIT_SEI_MESSAGE_COUNT 16  // initial SEI message count
-#define INIT_SEI_PAYLOAD_BUF_SIZE 1024 * 1024  // initial SEI payload buffer size, 1 MB
+#define INIT_SEI_PAYLOAD_BUF_SIZE (1024u * 1024u)  // initial SEI payload buffer size, 1 MB
 #define DECODE_BUF_POOL_EXTENSION 2
 
 #define CHECK_ALLOWED_RANGE(str, val, min, max) { \
