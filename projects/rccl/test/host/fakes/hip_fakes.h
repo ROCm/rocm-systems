@@ -108,6 +108,8 @@ extern hipError_t g_hipDeviceGetPCIBusIdResult;
 // device index (drives busIdToCudaDev's per-device resolution).
 extern std::function<hipError_t(char* /*pciBusId*/, int /*len*/, int /*device*/)>
     g_hipDeviceGetPCIBusId;
+// Backs hipDeviceGetByPCIBusId. The default fails, as for a BDF this process cannot see.
+extern std::function<hipError_t(int* /*device*/, const char* /*pciBusId*/)> g_hipDeviceGetByPCIBusId;
 extern hipError_t g_hipEventCreateResult;
 extern hipError_t g_hipMemPoolResult;
 extern hipError_t g_hipStreamCreateResult;

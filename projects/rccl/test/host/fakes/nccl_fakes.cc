@@ -87,14 +87,15 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/,
     std::fputc('\n', stderr);
 }
 
-void ncclLoadParam(char const* /*env*/,
-                   int64_t     /*deftVal*/,
-                   int64_t     /*uninitialized*/,
-                   int64_t*    /*cache*/)
-{
-    // No-op: leaves cache untouched so NCCL_PARAM callers in non-shimmed
-    // TUs see the default. The NCCL_PARAM bodies that p2p-test.cc
-    // redirects through g_loadParam bypass this entirely.
+// Every param sits at its default. The NCCL_PARAM bodies that p2p-test.cc redirects through g_loadParam bypass this.
+int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
+  if (cache) {
+    *cache = deftVal;
+  }
+  if (noCache) {
+    *noCache = 0;
+  }
+  return deftVal;
 }
 
 // Default returns deftVal verbatim -- preserves the pre-hook contract that
@@ -260,6 +261,8 @@ static ncclResult_t DefaultTopoCheckP2p(int /*rank1*/, int /*rank2*/, int* p2p,
 std::function<ncclResult_t(int, int, int*, int*, int*, int*, int*)>
     g_ncclTopoCheckP2p = DefaultTopoCheckP2p;
 
+// rccl-UnitTestsMicroGraph links the real src/graph/paths.cc and search.cc, which define these.
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
 ncclResult_t ncclTopoCheckP2p(struct ncclComm*       /*comm*/,
                               struct ncclTopoSystem* /*system*/,
                               int                    rank1,
@@ -276,6 +279,7 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm*       /*comm*/,
     if (isCrossClique) *isCrossClique = 0;
     return g_ncclTopoCheckP2p(rank1, rank2, p2p, read, intermediateRank, cudaP2p, isCrossClique);
 }
+#endif
 
 // --- Controllable seam: ncclTopoCheckNet ----------------------------------
 // Default preserves the old stub: report NET is not better (net = 0).
@@ -287,6 +291,7 @@ static ncclResult_t DefaultTopoCheckNet(int /*rank1*/, int /*rank2*/, int* net)
 std::function<ncclResult_t(int, int, int*)>
     g_ncclTopoCheckNet = DefaultTopoCheckNet;
 
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
 ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* /*system*/,
                               int                    rank1,
                               int                    rank2,
@@ -294,6 +299,7 @@ ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* /*system*/,
 {
     return g_ncclTopoCheckNet(rank1, rank2, net);
 }
+#endif
 
 // --- Controllable seam: ncclCommGraphRegister ---------------------------
 // Default preserves the old stub: fail with a null handle. Graph-register
@@ -418,6 +424,7 @@ ncclResult_t DefaultTopoGetLinkType(int, int, bool* isXGMI, int)
 std::function<ncclResult_t(int, int, bool*, int)> g_ncclTopoGetLinkType = DefaultTopoGetLinkType;
 int g_ncclTopoGetLinkTypeCalls = 0;
 
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
 ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
                                  int                    cudaDev1,
                                  int                    cudaDev2,
@@ -429,6 +436,7 @@ ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
     g_ncclTopoGetLinkTypeCalls++;
     return g_ncclTopoGetLinkType(cudaDev1, cudaDev2, isXGMI, maxInter);
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // Memory-manager tracking stubs.

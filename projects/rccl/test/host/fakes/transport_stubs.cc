@@ -57,7 +57,9 @@ bool rcclUseAinic() { return g_useAinic(); }
 
 static int DefaultPxnDisable(struct ncclComm*) { return 0; }
 std::function<int(struct ncclComm*)> g_pxnDisable = DefaultPxnDisable;
+#ifndef RCCL_TRANSPORT_STUBS_OMIT_ncclPxnDisable
 int ncclPxnDisable(struct ncclComm* comm) { return g_pxnDisable(comm); }
+#endif
 
 // src/proxy.cc: comm teardown stops the proxy through this, so it needs a working default, not a fail-loud one.
 static ncclResult_t DefaultNcclProxyStop(struct ncclComm*) { return ncclSuccess; }
@@ -134,3 +136,12 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
 // a definition even though the code path that uses it is dead.
 #include "transport.h"
 struct ncclTransport netTransport = {};
+
+// src/transport.cc's table. ncclTopoComputePaths asks P2P, then SHM, whether a peer is reachable; both say yes.
+static ncclResult_t ReachableCanConnect(int* ret, struct ncclComm*, struct ncclTopoGraph*, struct ncclPeerInfo*,
+                                        struct ncclPeerInfo*) {
+  *ret = 1;
+  return ncclSuccess;
+}
+static struct ncclTransport reachableTransport = {"fake", ReachableCanConnect};
+struct ncclTransport* ncclTransports[NTRANSPORTS] = {&reachableTransport, &reachableTransport};

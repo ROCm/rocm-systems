@@ -30,8 +30,31 @@ ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabr
 ncclResult_t g_amdSmiInitResult = ncclSuccess;
 ncclResult_t amd_smi_init() { return g_amdSmiInitResult; }
 
+static ncclResult_t DefaultAmdSmiGetNumDevice(uint32_t* numDevs) {
+  *numDevs = 0;
+  return ncclSuccess;
+}
+std::function<ncclResult_t(uint32_t*)> g_amdSmiGetNumDevice = DefaultAmdSmiGetNumDevice;
+ncclResult_t amd_smi_getNumDevice(uint32_t* numDevs) { return g_amdSmiGetNumDevice(numDevs); }
+
+static ncclResult_t DefaultAmdSmiGetDevicePciBusIdString(uint32_t, char*, size_t) { return ncclInternalError; }
+std::function<ncclResult_t(uint32_t, char*, size_t)> g_amdSmiGetDevicePciBusIdString =
+    DefaultAmdSmiGetDevicePciBusIdString;
+ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* pciBusId, size_t len) {
+  return g_amdSmiGetDevicePciBusIdString(deviceIndex, pciBusId, len);
+}
+
+static ncclResult_t DefaultAmdSmiGetLinkInfo(int, int, amdsmi_link_type_t*, int*, int*) { return ncclInternalError; }
+std::function<ncclResult_t(int, int, amdsmi_link_type_t*, int*, int*)> g_amdSmiGetLinkInfo = DefaultAmdSmiGetLinkInfo;
+ncclResult_t amd_smi_getLinkInfo(int srcDev, int dstDev, amdsmi_link_type_t* type, int* hops, int* count) {
+  return g_amdSmiGetLinkInfo(srcDev, dstDev, type, hops, count);
+}
+
 void ResetAmdSmiFakes() {
   g_amdSmiGetDeviceIndexByPciBusId = DefaultAmdSmiGetDeviceIndexByPciBusId;
   g_amdSmiGetFabricDeviceInfo = DefaultAmdSmiGetFabricDeviceInfo;
   g_amdSmiInitResult = ncclSuccess;
+  g_amdSmiGetNumDevice = DefaultAmdSmiGetNumDevice;
+  g_amdSmiGetDevicePciBusIdString = DefaultAmdSmiGetDevicePciBusIdString;
+  g_amdSmiGetLinkInfo = DefaultAmdSmiGetLinkInfo;
 }

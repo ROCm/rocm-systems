@@ -3764,6 +3764,29 @@ TEST_F(P2pSetupMicrotest, SendSetup_LinkTypeQueryFails_ReturnsInternalError)
     p2pTransport.send.free(&comm_, &send_);
 }
 
+TEST_F(P2pSetupMicrotest, SendSetup_QueriesLinkTypeByRankNotByProcessLocalOrdinal)
+{
+    // One GPU per process: both peers are HIP ordinal 0, so only the ranks tell them apart.
+    peer_.cudaDev = myInfo_.cudaDev;
+    int first = -1, second = -1;
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+    link_.emplace(g_ncclTopoGetLinkType,
+        [&first, &second](int a, int b, bool*, int) -> ncclResult_t {
+            first = a;
+            second = b;
+            return ncclInternalError;
+        });
+
+    EXPECT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclInternalError);
+    EXPECT_EQ(first, myInfo_.rank);
+    EXPECT_EQ(second, peer_.rank);
+
+    p2pTransport.send.free(&comm_, &send_);
+}
+
 TEST_F(P2pSetupMicrotest, RecvSetup_CollNetScatterConn_ForcesWriteDespiteReadTopology)
 {
     InstallTopo(/*read=*/1);

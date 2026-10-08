@@ -471,7 +471,7 @@ ncclResult_t p2pSendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
 
   resources->next_hdp_reg = 0;
   bool isXGMI;
-  if (ncclTopoGetLinkType(comm->topo, myInfo->cudaDev, peerInfo->cudaDev, &isXGMI) != ncclSuccess) {
+  if (ncclTopoGetLinkType(comm->topo, myInfo->rank, peerInfo->rank, &isXGMI) != ncclSuccess) {
     INFO(NCCL_INIT | NCCL_P2P, "Ring %02d : %d -> %d failed to get link type and hop count", channelId, myInfo->rank,
          peerInfo->rank);
     return ncclInternalError;

@@ -1191,12 +1191,12 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
 
   // detect if all GPUs are connected by XGMI
   for (int i = 0; i < system->nodes[GPU].count && allXgmi; i++) {
-    int cudaDev1 = system->nodes[GPU].nodes[i].gpu.dev;
+    int rank1 = system->nodes[GPU].nodes[i].gpu.rank;
     for (int j = 0; j < system->nodes[GPU].count && allXgmi; j++) {
       if (i == j) continue;
-      int cudaDev2 = system->nodes[GPU].nodes[j].gpu.dev;
+      int rank2 = system->nodes[GPU].nodes[j].gpu.rank;
       bool isXGMI;
-      NCCLCHECKGOTO(ncclTopoGetLinkType(comm->topo, cudaDev1, cudaDev2, &isXGMI), ret, fail);
+      NCCLCHECKGOTO(ncclTopoGetLinkType(comm->topo, rank1, rank2, &isXGMI), ret, fail);
       allXgmi &= isXGMI;
     }
   }
