@@ -1140,18 +1140,11 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   desc.location.id   = 0;
   desc.flags         = hipMemAccessFlagsProtReadWrite;
   HRR_HIP_CHECK(hipMemPoolSetAccess(pool1, &desc, 1));
-  // Allocated while device 0 is current, on device 1's stream: it lives on
-  // device 1, and replay has to map it there.
-  int* async1 = nullptr;
-  HRR_HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&async1), kBytes, s1));
-  HRR_HIP_CHECK(hipStreamSynchronize(s1));
-  hipPointerAttribute_t attr{};
-  HRR_HIP_CHECK(hipPointerGetAttributes(&attr, async1));
-  REQUIRE(attr.device == 1);
-
-  // A large one on device 1's stream, still with device 0 current, between
-  // hipMemGetInfo calls on both devices. Replay under --verbose prints what
-  // each call says there, which shows which device's memory it took.
+  // A large allocation on device 1's stream, made with device 0 current,
+  // between hipMemGetInfo calls on both devices. Replay under --verbose
+  // prints what each call says there, which shows whose memory it took. It
+  // comes first and is freed at once, because the pool packs its blocks
+  // together, and one sharing a granule with a live block falls back.
   size_t free_b = 0, total_b = 0;
   HRR_HIP_CHECK(hipSetDevice(1));
   HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
@@ -1164,6 +1157,18 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
   HRR_HIP_CHECK(hipSetDevice(0));
   HRR_HIP_CHECK(hipMemGetInfo(&free_b, &total_b));
+  HRR_HIP_CHECK(hipFreeAsync(big1, s1));
+  HRR_HIP_CHECK(hipStreamSynchronize(s1));
+
+  // Allocated while device 0 is current, on device 1's stream: it lives on
+  // device 1, and replay has to map it there.
+  int* async1 = nullptr;
+  HRR_HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&async1), kBytes, s1));
+  HRR_HIP_CHECK(hipStreamSynchronize(s1));
+  hipPointerAttribute_t attr{};
+  HRR_HIP_CHECK(hipPointerGetAttributes(&attr, async1));
+  REQUIRE(attr.device == 1);
+
 
   // Device 0 reads its own buffer and both of device 1's through stored
   // pointers. Without peer access in replay, the last two fault.
@@ -1183,7 +1188,6 @@ TEST_CASE("Unit_HRR_VaPlacement_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(cella));
   HRR_HIP_CHECK(hipFree(cell1));
   HRR_HIP_CHECK(hipFree(cell0));
-  HRR_HIP_CHECK(hipFreeAsync(big1, s1));
   HRR_HIP_CHECK(hipFreeAsync(async1, s1));
   HRR_HIP_CHECK(hipStreamSynchronize(s1));
   HRR_HIP_CHECK(hipFree(buf0));
