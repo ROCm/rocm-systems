@@ -28,10 +28,12 @@
 #include "hrr_test_common.hh"
 #include "hrr_test_process.hh"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -983,6 +985,111 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_Lifetimes) {
     REQUIRE(hrr_place_counts(out, &placed, &fell));
     CHECK(fell == 0);
   }
+}
+
+// ===========================================================================
+// A freed mapping taken back on another stream waits for the free.
+// ===========================================================================
+// The pool hands a block freed on one stream to another only once the free is
+// done, or ordered after it. Replay takes the placed mapping back at once, so
+// the new stream has to wait for the free there, or its writes race the old
+// stream's last kernel. The recording sleeps, which is not a HIP call and is
+// not replayed, so in replay that kernel is still running when the second
+// stream takes the memory.
+namespace {
+#define HRR_ORDER_MARKER "HRR_PLACE_ORDER"
+constexpr int kOldFill = 0x0a0a0a0a;
+constexpr int kNewFill = 0x0b0b0b0b;
+}  // namespace
+
+// Spins for `ticks` of the constant-rate wall clock, then fills `p` with `v`.
+__global__ void hrr_place_late_fill(int* p, int v, unsigned long long ticks, int n) {
+  const unsigned long long t0 = wall_clock64();
+  while (wall_clock64() - t0 < ticks) {
+  }
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) p[i] = v;
+}
+
+__global__ void hrr_place_fill(int* p, int v, int n) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) p[i] = v;
+}
+
+TEST_CASE("Unit_HRR_VaPlacement_StreamOrder_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipFree(nullptr));
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int khz = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&khz, hipDeviceAttributeWallClockRate, 0));
+  REQUIRE(khz > 0);
+  const unsigned long long one_second = static_cast<unsigned long long>(khz) * 1000;
+
+  hipStream_t s1 = nullptr, s2 = nullptr;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s1, hipStreamNonBlocking));
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s2, hipStreamNonBlocking));
+
+  // The old stream's last kernel writes x a second after it starts, and x is
+  // freed behind it.
+  int* x = nullptr;
+  HRR_HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&x), kBytes, s1));
+  hipLaunchKernelGGL(hrr_place_late_fill, dim3(kElems / 256), dim3(256), 0, s1, x,
+                     kOldFill, one_second, kElems);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipFreeAsync(x, s1));
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+
+  // By now that kernel is done, so the pool hands x's block to s2.
+  int* y = nullptr;
+  HRR_HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&y), kBytes, s2));
+  hipLaunchKernelGGL(hrr_place_fill, dim3(kElems / 256), dim3(256), 0, s2, y, kNewFill,
+                     kElems);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  std::vector<int> got(kElems);
+  HRR_HIP_CHECK(hipMemcpy(got.data(), y, kBytes, hipMemcpyDeviceToHost));
+  for (int i = 0; i < kElems; ++i) REQUIRE(got[i] == kNewFill);
+
+  printf(HRR_ORDER_MARKER " x=0x%llx y=0x%llx\n", u64(x), u64(y));
+  fflush(stdout);
+
+  HRR_HIP_CHECK(hipFreeAsync(y, s2));
+  HRR_HIP_CHECK(hipStreamSynchronize(s2));
+  HRR_HIP_CHECK(hipStreamDestroy(s2));
+  HRR_HIP_CHECK(hipStreamDestroy(s1));
+}
+
+HRR_TEST_CASE(Unit_HRR_VaPlacement_StreamOrder) {
+  hrr_place_require_vmm();
+  ScopedDir cap(fs::temp_directory_path() / "hrr_va_placement_order.hrr");
+  std::string cout_;
+  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_VaPlacement_StreamOrder_Direct\"");
+    cout_ = proc.getOutput();
+    INFO("Capture exit: " << ret << "\n" << cout_);
+    REQUIRE(ret == 0); }
+  const size_t at = cout_.find(HRR_ORDER_MARKER);
+  REQUIRE(at != std::string::npos);
+  unsigned long long x = 0, y = 0;
+  REQUIRE(sscanf(cout_.c_str() + at, HRR_ORDER_MARKER " x=0x%llx y=0x%llx", &x, &y) == 2);
+  if (x != y)
+    SKIP("the pool did not hand x's block to the second stream (" << hex(x) << " then "
+         << hex(y) << "), so no mapping is taken back across streams");
+
+  // Unordered, the second stream fills y at once, and the old kernel then
+  // overwrites it a second later: the D2H check of y fails.
+  auto [rc, out] = hrr_playback_merged(hrr_single_process_archive(cap.path), "");
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  int pass = 0, fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+  CHECK(pass >= 1);
+  CHECK(fail == 0);
+  int placed = 0, fell = -1;
+  REQUIRE(hrr_place_counts(out, &placed, &fell));
+  CHECK(placed >= 2);
+  CHECK(fell == 0);
 }
 
 // ===========================================================================

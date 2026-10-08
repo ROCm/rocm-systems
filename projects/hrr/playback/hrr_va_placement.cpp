@@ -132,6 +132,19 @@ hipError_t hrr_vmm_map_into(void* va, size_t len, int device,
     return hipSuccess;
 }
 
+hipError_t hrr_record_free_event(hipStream_t stream, hipEvent_t* event) {
+    hipEvent_t e = nullptr;
+    hipError_t r = hipEventCreateWithFlags(&e, hipEventDisableTiming);
+    if (r != hipSuccess) return r;
+    r = hipEventRecord(e, stream);
+    if (r != hipSuccess) {
+        (void)hipEventDestroy(e);
+        return r;
+    }
+    *event = e;
+    return hipSuccess;
+}
+
 bool VaPlacement::hold(PlacementPlan plan) {
 #ifdef _WIN32
     (void)plan;
@@ -340,6 +353,30 @@ void VaPlacement::clear_error() {
 #endif
 }
 
+void VaPlacement::drop_event(hipEvent_t e) {
+    if (!e) return;
+#ifdef HRR_VA_PLACEMENT_TESTING
+    const hipError_t r = ops_.destroy_event(e);
+#else
+    const hipError_t r = hipEventDestroy(e);
+#endif
+    if (r != hipSuccess) clear_error();
+}
+
+void VaPlacement::wait_for_free(hipEvent_t e, const hipStream_t* stream) {
+#ifdef HRR_VA_PLACEMENT_TESTING
+    hipError_t (*wait)(hipStream_t, hipEvent_t, unsigned int) = ops_.wait_event;
+    hipError_t (*sync)(hipEvent_t) = ops_.sync_event;
+#else
+    hipError_t (*wait)(hipStream_t, hipEvent_t, unsigned int) = hipStreamWaitEvent;
+    hipError_t (*sync)(hipEvent_t) = hipEventSynchronize;
+#endif
+    // A stream that cannot be made to wait is waited for by the host instead.
+    if (stream && wait(*stream, e, 0) == hipSuccess) return;
+    if (stream) clear_error();
+    if (sync(e) != hipSuccess) clear_error();
+}
+
 bool VaPlacement::any_unmapping() const {
     for (const auto& kv : deferred_)
         if (kv.second.unmapping) return true;
@@ -347,7 +384,7 @@ bool VaPlacement::any_unmapping() const {
 }
 
 bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
-                         void** live, bool capturing) {
+                         void** live, bool capturing, const hipStream_t* stream) {
     if (!active_ || size == 0 || rec > UINT64_MAX - size) return false;
     const uint64_t pb = va_floor(rec, gran_);
     const uint64_t pe = va_ceil(rec + size, gran_);
@@ -391,19 +428,38 @@ bool VaPlacement::map_at(uint64_t rec, size_t size, int device, const char* api,
         }
         if (freed.size() == 1) {
             auto it = deferred_.find(freed[0]);
-            if (it->first == pb && it->second.end == pe && it->second.device == device) {
-                // Freed over exactly these pages on this device, as a
-                // stream-ordered pool hands the same address back: take the
-                // mapping back as it is. That needs no unmap, so no
-                // device-wide wait, and it works inside a capture too.
-                PlacedMapping m = it->second;
+            const PlacedMapping& d = it->second;
+            // Freed from the same first page on this device, and big enough:
+            // a stream-ordered pool hands a block back for a request up to
+            // 12.5% smaller. Take the mapping back as it is, keeping its end,
+            // as the pool kept the whole block. That needs no unmap, so no
+            // device-wide wait. The recording's pool reused the block only
+            // once the free was done, or ordered after it, so replay orders
+            // the allocation after the free too: nothing to do on the stream
+            // that freed it; on another, or for an allocation with no stream,
+            // wait for the event the free left, unless a capture is open,
+            // where that wait would sync inside it.
+            const bool same_stream = stream && d.on_stream && d.stream == *stream;
+            if (it->first == pb && pe <= d.end && d.device == device &&
+                (same_stream || (!capturing && d.event))) {
+                PlacedMapping m = d;
+                const hipEvent_t ev = d.event;
                 m.rec = rec;
+                m.on_stream = false;
+                m.stream = nullptr;
+                m.event = nullptr;
                 deferred_.erase(it);
                 mapped_[pb] = m;
-                *live = reinterpret_cast<void*>(rec);
                 ++placed_;
+                lk.unlock();
+                if (ev && !same_stream) wait_for_free(ev, stream);
+                drop_event(ev);
+                *live = reinterpret_cast<void*>(rec);
                 return true;
             }
+            // Anything else over it is an ordinary overlap, below: unmapped
+            // first, since hipMemUnmap waits for every stream, or a fallback
+            // while a capture is open.
         }
         if (!freed.empty()) {
             // Never map over a freed mapping: a capture or a stream may still
@@ -501,7 +557,12 @@ size_t VaPlacement::drain_locked(std::unique_lock<std::mutex>& lk,
     if (work.empty()) return 0;
     lk.unlock();
     std::vector<char> ok(work.size());
-    for (size_t i = 0; i < work.size(); ++i) ok[i] = unmap_one(work[i].first, work[i].second);
+    for (size_t i = 0; i < work.size(); ++i) {
+        ok[i] = unmap_one(work[i].first, work[i].second);
+        // The unmap waited for every stream, the freeing one included. A
+        // failed one keeps its event for the next try.
+        if (ok[i]) drop_event(work[i].second.event);
+    }
     lk.lock();
     size_t n = 0;
     for (size_t i = 0; i < work.size(); ++i) {
@@ -515,7 +576,8 @@ size_t VaPlacement::drain_locked(std::unique_lock<std::mutex>& lk,
     return n;
 }
 
-bool VaPlacement::unmap(void* live, bool defer) {
+bool VaPlacement::unmap_impl(void* live, bool defer, bool on_stream, hipStream_t stream,
+                             bool capturing) {
     if (!active_ || !live) return false;
     const uint64_t v = reinterpret_cast<uint64_t>(live);
     std::unique_lock<std::mutex> lk(mu_);
@@ -524,7 +586,25 @@ bool VaPlacement::unmap(void* live, bool defer) {
     --it;
     if (it->second.rec != v) return false;
     const uint64_t pb = it->first;
-    deferred_[pb] = it->second;
+    PlacedMapping m = it->second;
+    m.on_stream = on_stream;
+    m.stream = stream;
+    m.event = nullptr;
+    // An event on the freeing stream, recorded now, marks the end of the
+    // stream's work on this memory. Recording one inside a capture would add
+    // it to the graph, so a free made then keeps none.
+    if (on_stream && !capturing) {
+#ifdef HRR_VA_PLACEMENT_TESTING
+        const hipError_t r = ops_.record_event(stream, &m.event);
+#else
+        const hipError_t r = hrr_record_free_event(stream, &m.event);
+#endif
+        if (r != hipSuccess) {
+            m.event = nullptr;
+            clear_error();
+        }
+    }
+    deferred_[pb] = m;
     mapped_.erase(it);
     if (defer) {
         ++deferred_total_;
@@ -532,6 +612,23 @@ bool VaPlacement::unmap(void* live, bool defer) {
     }
     (void)drain_locked(lk, {pb});
     return true;
+}
+
+bool VaPlacement::unmap(void* live, bool defer) {
+    return unmap_impl(live, defer, false, nullptr, false);
+}
+
+bool VaPlacement::unmap_async(void* live, hipStream_t stream, bool capturing) {
+    return unmap_impl(live, true, true, stream, capturing);
+}
+
+void VaPlacement::stream_destroyed(hipStream_t stream) {
+    std::lock_guard<std::mutex> lk(mu_);
+    for (auto& kv : deferred_)
+        if (kv.second.on_stream && kv.second.stream == stream) {
+            kv.second.on_stream = false;
+            kv.second.stream = nullptr;
+        }
 }
 
 size_t VaPlacement::drain_deferred() {
@@ -654,10 +751,18 @@ void VaPlacement::release_all() {
     mapped_.clear();
     deferred_.clear();
     lk.unlock();
-    for (const auto& [pb, mm] : left) (void)unmap_one(pb, mm);
+    for (const auto& [pb, mm] : left) {
+        (void)unmap_one(pb, mm);
+        drop_event(mm.event);
+    }
     lk.lock();
-    for (const auto& r : reserved_)
+    for (const auto& r : reserved_) {
+#ifdef HRR_VA_PLACEMENT_TESTING
+        (void)ops_.address_free(reinterpret_cast<void*>(r.base), r.end - r.base);
+#else
         (void)hipMemAddressFree(reinterpret_cast<void*>(r.base), r.end - r.base);
+#endif
+    }
     reserved_.clear();
     for (const auto& r : alloc_holds_) drop_hold(r.base, r.end);
     alloc_holds_.clear();

@@ -2248,12 +2248,15 @@ static hrr::VaPlacement* hrr_placing(PlaybackContext& ctx) {
     return p && p->active() ? p : nullptr;
 }
 
+// `stream` is the live stream of a stream-ordered allocation, nullptr for the
+// others: taking back a mapping freed on another stream orders after its free.
 static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size,
-                            const char* api, void** live, int device = -1) {
+                            const char* api, void** live, int device = -1,
+                            const hipStream_t* stream = nullptr) {
     hrr::VaPlacement* pl = hrr_placing(ctx);
     if (!pl) return false;
     if (device < 0) (void)hipGetDevice(&device);
-    return pl->map_at(rec, size, device, api, live, ctx.in_graph_capture.any());
+    return pl->map_at(rec, size, device, api, live, ctx.in_graph_capture.any(), stream);
 }
 
 // An allocation that did not go through placement returned `r`: say whether
@@ -2942,7 +2945,7 @@ static bool hrr_place_async_alloc(PlaybackContext& ctx, uint64_t rec, size_t siz
         pl->fell_back(rec, size, api, "it was allocated inside a graph capture");
         return false;
     }
-    return hrr_place_alloc(ctx, rec, size, api, live, device);
+    return hrr_place_alloc(ctx, rec, size, api, live, device, &stream);
 }
 
 // The device a recorded pool allocates on, or a reason it cannot be placed.
@@ -3263,12 +3266,14 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     // A placed allocation is a VMM mapping that the stream may still be using.
     // hipMemUnmap waits for every stream on the device, which would turn each
     // stream-ordered free into a device-wide sync the recording never had. So
-    // the unmap is deferred to the next replayed device synchronization. An allocation recorded at exactly the same range on
-    // the same device takes the mapping back without unmapping it. One that
-    // only overlaps it unmaps it first, unless a capture is open, in which
-    // case that allocation falls back.
+    // the unmap is deferred to the next replayed device synchronization. An
+    // allocation recorded from the same first page on the same device, no
+    // larger, takes the mapping back without unmapping it, ordered after this
+    // free when it is on another stream (VaPlacement::map_at). One that only
+    // overlaps it unmaps it first, unless a capture is open, in which case
+    // that allocation falls back.
     hrr::VaPlacement* placing = hrr_placing(ctx);
-    if (placing && placing->unmap(live, /*defer=*/true)) {
+    if (placing && placing->unmap_async(live, stream, ctx.in_graph_capture.any())) {
         ctx.remove_alloc(a->dev_ptr);
         return hipSuccess;
     }
@@ -3782,6 +3787,9 @@ hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
     const auto* a  = reinterpret_cast<const hrr_args_hipStreamDestroy*>(pl);
     hipStream_t stream = ctx.translate_stream(a->stream);
     hipError_t r = hipSuccess;
+    // A free deferred on this stream no longer matches a new stream that
+    // gets the same handle.
+    if (hrr::VaPlacement* pl = hrr_placing(ctx); pl && stream) pl->stream_destroyed(stream);
     if (stream) r = hipStreamDestroy(stream);
     ctx.remove_stream(a->stream);
     // Destroying a capturing stream ends its capture. The recording shows no
