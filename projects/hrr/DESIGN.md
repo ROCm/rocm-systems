@@ -497,7 +497,9 @@ At playback:
   `hipHostRegister` on the new buffer, and records `(recorded_ptr → live_ptr)` in `alloc_map`
   (for kernel-arg pointer translation) and `host_reg_bufs` (for cleanup at Unregister).
 - `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, frees the
-  backing buffer, and removes both map entries.
+  backing buffer, and removes both map entries. If a replayed `hipDeviceReset` already
+  unregistered the range, which happens only when replay sees fewer GPUs than capture did,
+  the call fails, and replay returns success as the application's call did.
 
 ### Pinned Host Snapshots
 
@@ -771,12 +773,14 @@ replay waits before it. Another case captures and replays with only the first
 visible GPU, points a record after a reset at the `hipHostMalloc` buffer the
 reset freed, and checks that replay refuses it. Its `hipHostRegister`
 counterpart does the same with a registered range the reset unregistered, and
-also checks that a pointer into the range still translates. Untested are a
-reset with two or more GPUs keeping every pinned allocation, since those cases
-never see two, and a replayed `hipHostUnregister` of a range the reset
-unregistered, which only a replay that sees fewer GPUs than its capture
-reaches. Three paths are untested by design: the fork
-handlers, a blob or event that cannot be written, and a restore
+also checks that a pointer into the range still translates. A last case
+captures with every visible GPU and replays with only the first, so capture's
+reset keeps a registered range registered and replay's unregisters it; it
+checks that the replayed `hipHostUnregister` of the range still succeeds, and
+skips with one GPU. Untested is a reset with two or more GPUs keeping every
+pinned allocation, since the first-GPU cases never see two. Three paths are
+untested by design: the fork handlers, a blob or event that cannot be written,
+and a restore
 `hipLaunchHostFunc` refuses. Each needs a fault injected into the capture or
 replay process, which no test hook provides. Of the leaks, only the one in
 `hipHostFree` is tested; those in `hipFree`, `hipHostUnregister` and
