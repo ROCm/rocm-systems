@@ -123,6 +123,7 @@ protected:
 
     // configure() always finishes by subscribing code_object, with every operation, on
     // its own always-on context.
+    template <typename Externals = externals>
     void expect_code_object_domain_configured()
     {
         expect_create_context(k_code_object_context);
@@ -130,7 +131,7 @@ protected:
             k_code_object_context,
             static_cast<mock_sdk::callback_tracing_kind_t>(
                 mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
-            domains::callback::k_code_object<mock_sdk, externals>.on_record, {});
+            domains::callback::k_code_object<mock_sdk, Externals>.on_record, {});
         expect_start_context(k_code_object_context);
     }
 
@@ -194,6 +195,7 @@ private:
     // sequence hands out context ids in the order the expectations are declared.
     Sequence m_create_context_sequence;
 
+protected:
     void expect_roctx_enabled(bool pause_resume_enabled)
     {
         EXPECT_CALL(*g_externals_mock, is_roctx_enabled()).WillOnce(Return(true));
@@ -231,25 +233,26 @@ private:
                                    const mock_sdk::context_id_t& roctx_context)
     {
         expect_roctx_enabled(false);
+        expect_code_object_domain_configured<externals_with_roctx_config>();
         expect_create_context(roctx_context);
         expect_roctx_core_configured(roctx_context);
 
         service.configure(std::vector<domain_selection>{});
     }
 
-    // The SDK must report code_object before the service is constructed: the
+    // The SDK must report hip_runtime_api before the service is constructed: the
     // constructor snapshots the supported domains.
-    static void report_code_object_domain()
+    static void report_main_context_domain()
     {
         g_callback_table = mock_sdk::tracing_names_t{
-            .entries = { { .name       = "code_object",
+            .entries = { { .name       = "hip_runtime_api",
                            .operations = {},
-                           .value      = mock_sdk::CALLBACK_TRACING_CODE_OBJECT } }
+                           .value      = mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API } }
         };
     }
 
-    // Selects code_object (main context) and enables roctx (core only), so the service
-    // owns two distinct contexts: @p main_context and @p roctx_context.
+    // Selects hip_runtime_api (main context) and enables roctx (core only), so the
+    // service owns the main, always-on code_object and roctx contexts.
     void configure_main_and_roctx(roctx_sut_t&                  service,
                                   const mock_sdk::context_id_t& main_context,
                                   const mock_sdk::context_id_t& roctx_context)
@@ -258,18 +261,21 @@ private:
         {
             const InSequence seq;
             expect_create_context(main_context);
+            expect_code_object_domain_configured<externals_with_roctx_config>();
             expect_create_context(roctx_context);
         }
         expect_configure_callback(
             main_context,
             static_cast<mock_sdk::callback_tracing_kind_t>(
-                mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
-            domains::callback::k_code_object<mock_sdk, externals_with_roctx_config>.on_record,
+                mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API),
+            domains::callback::hip::k_runtime_api<mock_sdk, externals_with_roctx_config>.on_record,
             {});
         expect_roctx_core_configured(roctx_context);
 
-        service.configure(std::vector<domain_selection>{ domain_selection{
-            .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
+        service.configure(std::vector<domain_selection>{
+            domain_selection{ .name       = "hip_runtime_api",
+                              .group      = std::nullopt,
+                              .operations = std::nullopt } });
     }
 };
 
@@ -837,6 +843,7 @@ TEST_F(domain_service_test, configure_creates_no_roctx_context_when_roctx_disabl
     roctx_sut_t service;
 
     EXPECT_CALL(*g_externals_mock, is_roctx_enabled()).WillOnce(Return(false));
+    expect_code_object_domain_configured<externals_with_roctx_config>();
 
     service.configure(std::vector<domain_selection>{});
 }
@@ -860,6 +867,7 @@ TEST_F(domain_service_test,
     const mock_sdk::context_id_t roctx_context{ 8 };
 
     expect_roctx_enabled(true);
+    expect_code_object_domain_configured<externals_with_roctx_config>();
     expect_create_context(roctx_context);
     expect_roctx_core_configured(roctx_context);
     expect_roctx_control_configured(roctx_context);
@@ -869,7 +877,7 @@ TEST_F(domain_service_test,
 
 TEST_F(domain_service_test, roctx_context_is_separate_from_the_main_context)
 {
-    report_code_object_domain();
+    report_main_context_domain();
     roctx_sut_t service;
 
     const mock_sdk::context_id_t main_context{ 1 };
@@ -910,6 +918,7 @@ TEST_F(domain_service_test, start_roctx_is_noop_when_roctx_was_not_configured)
     roctx_sut_t service;
 
     EXPECT_CALL(*g_externals_mock, is_roctx_enabled()).WillOnce(Return(false));
+    expect_code_object_domain_configured<externals_with_roctx_config>();
     service.configure(std::vector<domain_selection>{});
 
     EXPECT_CALL(*g_mock, context_is_valid(Eq(mock_sdk::context_id_t{})))
@@ -920,7 +929,7 @@ TEST_F(domain_service_test, start_roctx_is_noop_when_roctx_was_not_configured)
 
 TEST_F(domain_service_test, pause_stops_only_the_main_context_not_the_roctx_context)
 {
-    report_code_object_domain();
+    report_main_context_domain();
     roctx_sut_t service;
 
     const mock_sdk::context_id_t main_context{ 1 };
@@ -936,7 +945,7 @@ TEST_F(domain_service_test, pause_stops_only_the_main_context_not_the_roctx_cont
 
 TEST_F(domain_service_test, start_starts_only_the_main_context_not_the_roctx_context)
 {
-    report_code_object_domain();
+    report_main_context_domain();
     roctx_sut_t service;
 
     const mock_sdk::context_id_t main_context{ 1 };
