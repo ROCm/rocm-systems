@@ -31,6 +31,16 @@ from BDF import BDF
 
 import amdsmi_cli_exceptions
 
+# Drivers whose absence the CLI explains: driver -> (device label, PCI vendor ID, PCI base
+# classes). The CPU's HSMP interface is an ACPI device, not a PCI function.
+DRIVER_DEVICES = {
+    "amdgpu": ("GPU", 0x1002, (0x03, 0x12)),  # display, processing accelerator
+    "hsmp_acpi": ("CPU", None, ()),
+    "ionic": ("AI NIC", 0x1DD8, (0x02,)),  # network controller
+    "bnxt_en": ("NIC", 0x14E4, (0x02,)),
+}
+HSMP_ACPI_DEVICES = Path("/sys/bus/acpi/devices")
+
 
 class AMDSMIHelpers:
     """Helper functions that aren't apart of the AMDSMI API
@@ -237,6 +247,70 @@ class AMDSMIHelpers:
                 result = False
         self._brcm_switch_initialized_cached = result
         return result
+
+    def is_driver_loaded(self, driver):
+        """Returns True if *driver* (a DRIVER_DEVICES key) is loaded, even if the CLI did
+        not initialize it (e.g. CPU init turned off with AMDSMI_DISABLE_CPU_INIT)."""
+        if driver == "amdgpu":
+            return bool(self.is_amdgpu_initialized()) or self._is_module_live("amdgpu")
+        if driver == "hsmp_acpi":
+            # Either CPU driver (hsmp_acpi or amd_hsmp) creates /dev/hsmp
+            return bool(self.is_amd_hsmp_initialized()) or os.path.exists("/dev/hsmp")
+        return self._is_module_live(driver)
+
+    @staticmethod
+    def _is_module_live(module):
+        try:
+            return (Path("/sys/module") / module / "initstate").read_text().strip() == "live"
+        except OSError:
+            return False
+
+    def get_devices_without_driver(self, driver):
+        """Returns the devices present for *driver* while it is not loaded.
+
+        PCI addresses for GPUs and NICs, ACPI device names for the CPU; empty when the
+        driver is loaded or none of its hardware is present.
+        """
+        cache = self.__dict__.setdefault("_devices_without_driver", {})
+        if driver not in cache:
+            if self.is_driver_loaded(driver):
+                devices = []
+            elif driver == "hsmp_acpi":
+                devices = sorted(path.name for path in HSMP_ACPI_DEVICES.glob("AMDI0097:*"))
+            else:
+                _, vendor_id, base_classes = DRIVER_DEVICES[driver]
+                devices = self.get_pci_devices_without_driver(vendor_id, base_classes, driver)
+            cache[driver] = devices
+        return cache[driver]
+
+    def get_missing_drivers(self):
+        """Returns the drivers that are not loaded although their hardware is present."""
+        return [driver for driver in DRIVER_DEVICES if self.get_devices_without_driver(driver)]
+
+    def get_driver_notes(self, args):
+        """Returns a note for each missing driver of the command in *args*.
+
+        Only drivers for the device types the user selected (-g, -U/-O, -N) count, if any.
+        """
+        selected = set()
+        for option, drivers in (
+            ("gpu", ("amdgpu",)),
+            ("cpu", ("hsmp_acpi",)),
+            ("core", ("hsmp_acpi",)),
+            ("nic", ("ionic", "bnxt_en")),
+        ):
+            if getattr(args, option, None) is not None:
+                selected.update(drivers)
+        notes = []
+        for driver in getattr(args, "note_drivers", ()):
+            devices = self.get_devices_without_driver(driver)
+            if devices and (not selected or driver in selected):
+                label = DRIVER_DEVICES[driver][0]
+                notes.append(
+                    f"Note: {label} {' '.join(devices)}: {driver} driver not loaded"
+                    f" (sudo modprobe {driver})"
+                )
+        return notes
 
     def get_handles_by_processor_type(self, processor_type):
         """Get all processor handles of a given type across all sockets."""
@@ -2203,27 +2277,28 @@ class AMDSMIHelpers:
         return pci_devices
 
     @staticmethod
-    def is_amd_gpu_present(pci_devices_path: Path = Path("/sys/bus/pci/devices")) -> bool:
-        """Return True if sysfs lists an AMD display or processing-accelerator PCI function.
-
-        Needs no driver, so it tells "no AMD GPU" apart from "amdgpu not loaded".
+    def get_pci_devices_without_driver(
+        vendor_id, base_classes, driver, pci_devices_path=Path("/sys/bus/pci/devices")
+    ):
+        """Returns PCI addresses of *vendor_id* functions in *base_classes* that are not
+        bound to a driver other than *driver*. Reads sysfs, so it works without the driver.
         """
-        # sysfs "class" is 0xBBSSPP; Instinct GPUs (e.g. MI300, MI450) use base class 0x12
-        gpu_base_classes = (0x03, 0x12)  # display controller, processing accelerator
-        for device in pci_devices_path.glob("*"):
+        devices = []
+        for device in sorted(pci_devices_path.glob("*")):
             try:
-                if int((device / "vendor").read_text(encoding="ascii"), 16) != AMD_VENDOR_ID:
+                if int((device / "vendor").read_text(encoding="ascii"), 16) != vendor_id:
                     continue
                 pci_class = int((device / "class").read_text(encoding="ascii"), 16)
             except (OSError, ValueError):
                 continue
-            if (pci_class >> 16) not in gpu_base_classes:
+            # sysfs "class" is 0xBBSSPP; Instinct GPUs (e.g. MI300, MI450) use base class 0x12
+            if (pci_class >> 16) not in base_classes:
                 continue
-            driver = device / "driver"
-            if driver.exists() and driver.resolve().name != "amdgpu":
+            bound = device / "driver"
+            if bound.exists() and bound.resolve().name != driver:
                 continue  # owned by another driver, e.g. vfio-pci
-            return True
-        return False
+            devices.append(device.name)
+        return devices
 
     def progressbar(self, it, prefix="", size=60, out=sys.stdout, add_newline=False):
         count = len(it)

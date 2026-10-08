@@ -27,6 +27,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
 
+- **Fixed misleading errors when a GPU, CPU, or AI NIC driver is not loaded**.  
+  - When the device is present, `amd-smi` now names the missing driver (exit code 206) instead of reporting "not supported" or an invalid parameter, and `list`, `static`, and `metric` show the available devices with a note about the rest.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
@@ -245,9 +248,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amdsmi_get_gpu_asic_info()` reporting `rev_id` as a real revision when it is not available**.  
   - The WSL backend returned success with a zeroed structure, so `rev_id` read as `0x0`, and where it did report the not-supported value Python rendered it as the raw `0xffffffff`. Python and the CLI now render it as `N/A`.
   - `amdsmi_asic_info_t` is now reset through one shared initializer used by every backend, so a field a backend cannot supply keeps its not-supported value rather than a plausible zero.
-
-- **Fixed `amd-smi list` and other amdgpu-dependent subcommands reporting "not supported on the system" when the amdgpu driver is not loaded**.  
-  - When an AMD GPU is present, these subcommands now report that the amdgpu driver is not loaded and suggest `sudo modprobe amdgpu`, with error code `-12` (exit status 12) instead of `-7`.
 
 ### Upcoming Changes
 

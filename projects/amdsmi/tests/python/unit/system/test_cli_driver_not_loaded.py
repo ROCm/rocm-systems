@@ -2,85 +2,124 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for amdgpu-gated subcommands invoked while amdgpu is not loaded.
+"""A missing driver is named when its device is present, for every device type.
 
-When another driver (e.g. an AI NIC) lets the CLI initialize without amdgpu, the
-subparsers that need amdgpu are never registered. On a host with an AMD GPU,
-invoking one must report that amdgpu is not loaded instead of claiming the
-command is unsupported. Loads the installed ``amdsmi_parser`` and
-``amdsmi_helpers`` with their init-time dependencies stubbed, so no GPU
-hardware is needed.
+The CLI starts with whichever of amdgpu (GPU), the CPU HSMP driver, ionic (AI NIC) and
+bnxt_en (Broadcom NIC) are loaded. Input that needs a missing driver reports that driver
+(exit code 206) when the hardware is present, and keeps the generic "not supported" or
+"invalid parameter" error when it is not.
 """
 
-import argparse
-import csv
-import functools
-import importlib.util
 import inspect
-import io
 import json
+import os
 import sys
 import tempfile
 import types
 import unittest
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
-from common.common import amdsmi_path
+from common.common import (
+    cli_search_order,
+    fake_module,
+    find_cli_dir,
+    generated_version_stub,
+    stub_modules_at_import,
+)
 
-_CLI_DIR = Path(amdsmi_path).parents[1] / "libexec" / "amdsmi_cli"
-PARSER_PATH = _CLI_DIR / "amdsmi_parser.py"
-HELPERS_PATH = _CLI_DIR / "amdsmi_helpers.py"
-_SWAPPED_MODULES = ("amdsmi_init", "amdsmi_helpers", "amdsmi_cli_exceptions", "_version")
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+if _CLI_DIR and _CLI_DIR not in sys.path:
+    sys.path.append(_CLI_DIR)
+
+cli_exc: Any = None
+helpers_module: Any = None
+parser_module: Any = None
+_restore_stubs = None
+
+
+def setUpModule() -> None:
+    global cli_exc, helpers_module, parser_module, _restore_stubs
+    if _CLI_DIR is None:
+        raise unittest.SkipTest("amd-smi CLI not found")
+    # amdsmi_helpers does ``from amdsmi_init import *``, which initializes the library, and
+    # _version is generated at build time. Stub them unless another module already has:
+    # generated_version_stub() cannot look past a stub that is already installed.
+    stubs = {}
+    if "amdsmi_init" not in sys.modules:
+        from amdsmi import amdsmi_exception, amdsmi_interface
+
+        stubs["amdsmi_init"] = fake_module(
+            "amdsmi_init",
+            AMDSMI_INIT_FLAG=0,
+            AMDSMI_INITIALIZED=True,
+            amdsmi_interface=amdsmi_interface,
+            amdsmi_exception=amdsmi_exception,
+        )
+    if "_version" not in sys.modules:
+        stubs.update(generated_version_stub())
+    _restore_stubs = stub_modules_at_import(stubs)
+    try:
+        import amdsmi_cli_exceptions as cli_exc
+        import amdsmi_helpers as helpers_module
+        import amdsmi_parser as parser_module
+    except ImportError as error:  # no CLI in this layout
+        _restore_stubs()
+        _restore_stubs = None
+        raise unittest.SkipTest(f"amd-smi CLI not importable: {error}")
+
+
+def tearDownModule() -> None:
+    if _restore_stubs:
+        _restore_stubs()
+
+
+_DRIVERS = ("amdgpu", "hsmp_acpi", "ionic", "bnxt_en")
+# GPU, CPU and AI NIC, as on an MI450 Helios node
+_HELIOS = ("amdgpu", "hsmp_acpi", "ionic")
 
 
 class _FakeHelpers:
-    """Helper surface the parser reads while building subparsers without amdgpu.
-
-    Defaults model the reported system: Linux baremetal with an AMD GPU present,
-    the AI NIC driver live and amdgpu not loaded.
-    """
+    """AMDSMIHelpers stand-in: which drivers are loaded and which hardware is present."""
 
     def __init__(
         self,
-        amdgpu: bool = False,
-        gpu_present: bool = True,
+        loaded=_HELIOS,
+        present=_HELIOS,
         baremetal: bool = True,
         hypervisor: bool = False,
         output_format: str = "human_readable",
     ) -> None:
-        self._amdgpu = amdgpu
-        self._gpu_present = gpu_present
+        self.loaded = set(loaded)
+        self.present = set(present)
         self._baremetal = baremetal
         self._hypervisor = hypervisor
         self._output_format = output_format
 
     def is_amdgpu_initialized(self) -> bool:
-        return self._amdgpu
+        return "amdgpu" in self.loaded
 
-    def is_amd_gpu_present(self) -> bool:
-        return self._gpu_present
+    def is_amd_hsmp_initialized(self) -> bool:
+        return "hsmp_acpi" in self.loaded
 
     def is_ainic_initialized(self) -> bool:
-        return True
+        return bool({"ionic", "bnxt_en"} & self.loaded)
 
     def is_brcm_nic_initialized(self) -> bool:
-        return False
+        return "bnxt_en" in self.loaded
 
     def is_brcm_switch_initialized(self) -> bool:
         return False
 
-    def is_amd_hsmp_initialized(self) -> bool:
-        return False
+    def is_driver_loaded(self, driver: str) -> bool:
+        return driver in self.loaded
 
-    def get_gpu_choices(self) -> tuple:
-        return {}, ""
+    def get_devices_without_driver(self, driver: str) -> list:
+        return ["0000:01:00.0"] if driver in self.present - self.loaded else []
 
-    def get_nic_choices(self) -> tuple:
-        return {}, ""
-
-    def get_clock_types(self) -> tuple:
-        # static builds its --clock help from these even without amdgpu
-        return ["SYS", "MEM", "PCIE"], [0, 1, 2]
+    def get_missing_drivers(self) -> list:
+        return [driver for driver in _DRIVERS if self.get_devices_without_driver(driver)]
 
     def is_linux(self) -> bool:
         return True
@@ -97,8 +136,26 @@ class _FakeHelpers:
     def is_virtual_os(self) -> bool:
         return not self._baremetal
 
+    def get_gpu_choices(self):
+        return {"0": "gpu0"}, "0"
+
+    def get_cpu_choices(self):
+        return {"0": "cpu0"}, "0"
+
+    def get_core_choices(self):
+        return {"0": "core0"}, "0"
+
+    def get_nic_choices(self):
+        return {"0": "nic0"}, "0"
+
+    def get_switch_choices(self):
+        return {}, ""
+
+    def get_clock_types(self):
+        return ["SYS", "MEM", "PCIE"], [0, 1, 2]
+
     def os_info(self) -> str:
-        return "Linux Baremetal" if self._baremetal else "Linux Guest"
+        return "Linux Baremetal"
 
     def get_rocm_version(self) -> str:
         return "N/A"
@@ -107,199 +164,225 @@ class _FakeHelpers:
         return self._output_format
 
 
-def _load_module(name: str, path: Path) -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location(name, str(path))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-@functools.lru_cache(maxsize=None)
-def _import_cli_modules() -> tuple:
-    """Import the installed helpers and parser against the real exceptions module.
-
-    ``amdsmi_init`` initializes the library on import, so it is stubbed with the
-    names the helpers bind. Sibling suites may leave stubs in ``sys.modules``, so
-    these entries and ``sys.path`` are changed only for the imports.
-    """
-    saved = {name: sys.modules.pop(name, None) for name in _SWAPPED_MODULES}
-    added_path = str(_CLI_DIR) not in sys.path
-    try:
-        init_stub = types.ModuleType("amdsmi_init")
-        init_stub.AMD_VENDOR_ID = 0x1002
-        init_stub.amdsmi_interface = types.SimpleNamespace()
-        init_stub.amdsmi_exception = types.SimpleNamespace()
-        sys.modules["amdsmi_init"] = init_stub
-        if not (_CLI_DIR / "_version.py").is_file():  # generated at build time
-            version_stub = types.ModuleType("_version")
-            version_stub.__version__ = "0.0.0-test"
-            sys.modules["_version"] = version_stub
-        if added_path:
-            sys.path.insert(0, str(_CLI_DIR))
-        helpers_mod = _load_module("amdsmi_helpers", HELPERS_PATH)
-        sys.modules["amdsmi_helpers"] = helpers_mod
-        parser_mod = _load_module("amdsmi_parser_under_test", PARSER_PATH)
-    finally:
-        if added_path:
-            sys.path.remove(str(_CLI_DIR))
-        for name, module in saved.items():
-            if module is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
-    return helpers_mod, parser_mod
-
-
-class TestCliDriverNotLoaded(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if not PARSER_PATH.is_file():
-            raise unittest.SkipTest(f"amdsmi_parser not installed at {PARSER_PATH}")
-        _, cls.parser_mod = _import_cli_modules()
-        cls.exceptions = cls.parser_mod.amdsmi_cli_exceptions
-
-    def _make_parser(self, command: str, **helper_kwargs: object) -> argparse.ArgumentParser:
-        """Build the parser as amdsmi_cli.py does for ``amd-smi <command>``."""
-        parser_cls = self.parser_mod.AMDSMIParser
-        callbacks = {
-            name: (lambda _args: None)
-            for name in inspect.signature(parser_cls.__init__).parameters
-            if name not in ("self", "sys_argv", "helpers")
-        }
-        return parser_cls(
-            **callbacks, sys_argv=["amd-smi", command], helpers=_FakeHelpers(**helper_kwargs)
+def _parse(argv, **state):
+    """Parse ``amd-smi <argv>`` the way amdsmi_cli.py does, on fake driver state."""
+    names = [
+        name
+        for name in inspect.signature(parser_module.AMDSMIParser.__init__).parameters
+        if name not in ("self", "sys_argv", "helpers")
+    ]
+    funcs = {name: (lambda args: "ran") for name in names}
+    sys_argv = ["amd-smi", *argv]
+    with mock.patch.object(sys, "argv", sys_argv):
+        parser = parser_module.AMDSMIParser(
+            **funcs, sys_argv=sys_argv, helpers=_FakeHelpers(**state)
         )
+        return parser.parse_args(list(argv))
 
-    def _parse_error(self, command: str, **helper_kwargs: object) -> Exception:
-        parser = self._make_parser(command, **helper_kwargs)
-        with self.assertRaises(self.exceptions.AmdSmiException) as ctx:
-            parser.parse_args([command])
+
+class TestMissingDriverErrors(unittest.TestCase):
+    def _error(self, *argv, **state):
+        with self.assertRaises(cli_exc.AmdSmiException) as ctx:
+            _parse(argv, **state)
         return ctx.exception
 
-    def test_every_parser_skipped_without_amdgpu_is_recorded(self) -> None:
-        # -h builds every subparser; without amdgpu the gated ones return early.
-        # profile is Windows-hypervisor only and default is not built for -h.
-        parser = self._make_parser("-h")
-        skipped = set(parser.possible_commands) - set(parser.subparsers.choices)
-        self.assertEqual(
-            skipped - {"profile", "default"},
-            parser.amdgpu_skipped_commands,
-            "gate the parser with _skip_without_amdgpu, or exclude a non-amdgpu gate here",
-        )
-
-    def test_amdgpu_skipped_commands_report_driver_not_loaded(self) -> None:
-        for command in self._make_parser("-h").amdgpu_skipped_commands:
+    def test_gpu_commands_name_amdgpu_when_a_gpu_is_present(self) -> None:
+        for command in (
+            "process",
+            "event",
+            "reset",
+            "xgmi",
+            "partition",
+            "fabric",
+            "bad-pages",
+            "firmware",
+            "ucode",
+            "topology",
+            "monitor",
+            "dmon",
+        ):
             with self.subTest(command=command):
-                exc = self._parse_error(command)
-                self.assertIsInstance(exc, self.exceptions.AmdSmiGpuDriverNotLoadedException)
-                self.assertEqual(exc.value, int(self.exceptions.AmdSmiExitCode.GPU_DRIVER_NOT_LOADED))
-                message = str(exc)
-                self.assertIn(f"Command '{command}' requires the amdgpu driver", message)
-                self.assertIn("sudo modprobe amdgpu", message)
+                exc = self._error(command, loaded=("hsmp_acpi", "ionic"))
+                self.assertIsInstance(exc, cli_exc.AmdSmiDriverNotLoadedException)
+                self.assertEqual(exc.value, int(cli_exc.AmdSmiExitCode.DRIVERS_NOT_LOADED))
+                self.assertEqual(exc.drivers, ["amdgpu"])
+                self.assertIn(f"Command '{command}' requires the amdgpu driver", str(exc))
+                self.assertIn("sudo modprobe amdgpu", str(exc))
 
-    def test_driver_not_loaded_json_and_csv_are_well_formed(self) -> None:
-        payload = json.loads(str(self._parse_error("list", output_format="json")))
-        self.assertEqual(
-            payload["code"], int(self.exceptions.AmdSmiExitCode.GPU_DRIVER_NOT_LOADED)
-        )
-        self.assertIn("sudo modprobe amdgpu", payload["error"])
+    def test_gpu_commands_stay_not_supported_without_a_gpu(self) -> None:
+        exc = self._error("process", loaded=("hsmp_acpi", "ionic"), present=("hsmp_acpi", "ionic"))
+        self.assertIsInstance(exc, cli_exc.AmdSmiCommandNotSupportedException)
 
-        rows = list(csv.reader(io.StringIO(str(self._parse_error("list", output_format="csv")))))
-        self.assertEqual(rows[0], ["error", "code", "error_type"])
-        self.assertEqual(len(rows[1]), 3, rows[1])
-        self.assertEqual(
-            rows[1][1].strip(), str(int(self.exceptions.AmdSmiExitCode.GPU_DRIVER_NOT_LOADED))
-        )
-
-    def test_host_without_amd_gpu_still_reports_not_supported(self) -> None:
-        # e.g. a CPU-only host: loading amdgpu would not enable GPU subcommands.
-        exc = self._parse_error("list", gpu_present=False)
-        self.assertIsInstance(exc, self.exceptions.AmdSmiCommandNotSupportedException)
-        self.assertEqual(exc.value, int(self.exceptions.AmdSmiExitCode.COMMAND_NOT_SUPPORTED))
-
-    def test_platform_unsupported_command_still_reports_not_supported(self) -> None:
-        # profile is Windows-hypervisor only, so loading amdgpu would not enable it.
-        exc = self._parse_error("profile")
-        self.assertIsInstance(exc, self.exceptions.AmdSmiCommandNotSupportedException)
-        self.assertEqual(exc.value, int(self.exceptions.AmdSmiExitCode.COMMAND_NOT_SUPPORTED))
-
-    def test_platform_gate_before_amdgpu_keeps_not_supported(self) -> None:
-        # A platform check skips these parsers before their amdgpu gate runs, so they
-        # report "not supported" rather than a missing driver.
+    def test_platform_restrictions_keep_not_supported(self) -> None:
+        # Loading amdgpu would not enable these, so the driver is not the reason.
         for command, platform in (
             ("process", {"hypervisor": True}),
             ("bad-pages", {"baremetal": False}),
         ):
             with self.subTest(command=command):
-                exc = self._parse_error(command, **platform)
-                self.assertIsInstance(exc, self.exceptions.AmdSmiCommandNotSupportedException)
-                self.assertEqual(
-                    exc.value, int(self.exceptions.AmdSmiExitCode.COMMAND_NOT_SUPPORTED)
-                )
+                exc = self._error(command, loaded=("hsmp_acpi", "ionic"), **platform)
+                self.assertIsInstance(exc, cli_exc.AmdSmiCommandNotSupportedException)
+
+    def test_list_runs_with_only_a_nic_driver(self) -> None:
+        args = _parse(["list"], loaded=("hsmp_acpi", "ionic"))
+        self.assertIsNone(args.gpu)
+        self.assertEqual(args.note_drivers, ("amdgpu", "ionic", "bnxt_en"))
+
+    def test_list_names_every_missing_driver_with_hardware(self) -> None:
+        exc = self._error("list", loaded=("hsmp_acpi",))
+        self.assertIsInstance(exc, cli_exc.AmdSmiDriverNotLoadedException)
+        self.assertEqual(exc.drivers, ["amdgpu", "ionic"])
+        self.assertIn("requires the amdgpu or ionic driver but none is loaded", str(exc))
+
+    def test_options_name_their_driver(self) -> None:
+        for argv, loaded, driver in (
+            (("static", "-g", "0"), ("hsmp_acpi", "ionic"), "amdgpu"),
+            (("static", "--asic"), ("hsmp_acpi", "ionic"), "amdgpu"),
+            (("static", "-U", "all"), ("amdgpu", "ionic"), "hsmp_acpi"),
+            (("metric", "-O", "all"), ("amdgpu", "ionic"), "hsmp_acpi"),
+            (("static", "-N", "all"), ("amdgpu", "hsmp_acpi"), "ionic"),
+        ):
+            with self.subTest(argv=argv):
+                exc = self._error(*argv, loaded=loaded)
+                self.assertIsInstance(exc, cli_exc.AmdSmiDriverNotLoadedException)
+                self.assertEqual(exc.drivers, [driver])
+                self.assertIn(f"Parameter '{argv[1]}' requires the {driver} driver", str(exc))
+
+    def test_options_stay_invalid_without_their_hardware(self) -> None:
+        exc = self._error(
+            "static", "-U", "all", loaded=("amdgpu", "ionic"), present=("amdgpu", "ionic")
+        )
+        self.assertIsInstance(exc, cli_exc.AmdSmiInvalidParameterException)
+
+    def test_unknown_options_stay_invalid(self) -> None:
+        exc = self._error("static", "--no-such-option", loaded=("hsmp_acpi", "ionic"))
+        self.assertIsInstance(exc, cli_exc.AmdSmiInvalidParameterException)
+
+    def test_failed_rebuild_keeps_the_generic_error(self) -> None:
+        with mock.patch.object(parser_module, "_AssumeDriverLoaded", side_effect=RuntimeError):
+            exc = self._error("process", loaded=("hsmp_acpi", "ionic"))
+        self.assertIsInstance(exc, cli_exc.AmdSmiCommandNotSupportedException)
+
+    def test_broadcom_only_systems_run_the_broadcom_options(self) -> None:
+        args = _parse(["firmware", "--brcm_nic"], loaded=("bnxt_en",))
+        self.assertEqual(args.func(args), "ran")
+
+    def test_broadcom_only_systems_explain_gpu_output(self) -> None:
+        for present, expected in (
+            (("amdgpu", "bnxt_en"), cli_exc.AmdSmiDriverNotLoadedException),
+            (("bnxt_en",), cli_exc.AmdSmiCommandNotSupportedException),
+        ):
+            with self.subTest(present=present):
+                args = _parse(["firmware"], loaded=("bnxt_en",), present=present)
+                with self.assertRaises(expected):
+                    args.func(args)
+
+    def test_error_reports_the_driver_in_json(self) -> None:
+        exc = cli_exc.AmdSmiDriverNotLoadedException("Command 'list'", ["amdgpu"], "json")
+        payload = json.loads(str(exc))
+        self.assertEqual(payload["code"], 206)
+        self.assertEqual(
+            payload["error"],
+            "Command 'list' requires the amdgpu driver but it is not loaded."
+            " Check amdgpu version and module status (sudo modprobe amdgpu).",
+        )
 
 
-class TestAmdGpuPresence(unittest.TestCase):
+class TestDriverNotes(unittest.TestCase):
+    def _notes(self, note_drivers, **selected):
+        missing = {
+            "amdgpu": ["0001:01:00.0", "0002:01:00.0"],
+            "hsmp_acpi": ["AMDI0097:00"],
+            "ionic": ["0000:04:00.0"],
+        }
+        helpers = types.SimpleNamespace(
+            get_devices_without_driver=lambda driver: missing.get(driver, [])
+        )
+        args = types.SimpleNamespace(note_drivers=note_drivers, **selected)
+        return helpers_module.AMDSMIHelpers.get_driver_notes(helpers, args)
+
+    def test_one_note_per_missing_driver_of_the_command(self) -> None:
+        self.assertEqual(
+            self._notes(_DRIVERS),
+            [
+                "Note: GPU 0001:01:00.0 0002:01:00.0: amdgpu driver not loaded"
+                " (sudo modprobe amdgpu)",
+                "Note: CPU AMDI0097:00: hsmp_acpi driver not loaded (sudo modprobe hsmp_acpi)",
+                "Note: AI NIC 0000:04:00.0: ionic driver not loaded (sudo modprobe ionic)",
+            ],
+        )
+
+    def test_selected_device_types_limit_the_notes(self) -> None:
+        for selected, driver in (({"cpu": ["cpu0"]}, "hsmp_acpi"), ({"nic": ["nic0"]}, "ionic")):
+            with self.subTest(selected=selected):
+                notes = self._notes(_DRIVERS, **selected)
+                self.assertEqual(len(notes), 1)
+                self.assertIn(f"{driver} driver not loaded", notes[0])
+
+    def test_commands_without_note_drivers_have_no_notes(self) -> None:
+        self.assertEqual(self._notes(()), [])
+
+    def test_cpu_hardware_is_the_acpi_hsmp_device(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "AMDI0097:00").mkdir()
+            (Path(tmp) / "PNP0A08:00").mkdir()
+            with mock.patch.object(helpers_module, "HSMP_ACPI_DEVICES", Path(tmp)):
+                for loaded, expected in ((False, ["AMDI0097:00"]), (True, [])):
+                    with self.subTest(loaded=loaded):
+                        helpers = types.SimpleNamespace(is_driver_loaded=lambda _d: loaded)
+                        self.assertEqual(
+                            helpers_module.AMDSMIHelpers.get_devices_without_driver(
+                                helpers, "hsmp_acpi"
+                            ),
+                            expected,
+                        )
+
+
+class TestPciDevicesWithoutDriver(unittest.TestCase):
     """Fixtures mirror sysfs: /sys/bus/pci/devices holds symlinks to device dirs."""
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        if not HELPERS_PATH.is_file():
-            raise unittest.SkipTest(f"amdsmi_helpers not installed at {HELPERS_PATH}")
-        helpers_mod, _ = _import_cli_modules()
-        cls.helpers_cls = helpers_mod.AMDSMIHelpers
 
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
+        self.bus = self.root / "bus"
+        self.bus.mkdir()
 
-    def _bus(self, name: str) -> Path:
-        bus = self.root / name
-        bus.mkdir()
-        return bus
-
-    def _add_function(self, bus: Path, bdf: str, vendor: str, pci_class: str) -> None:
-        device = self.root / "devices" / bus.name / bdf
+    def _add(self, bdf: str, vendor: str, pci_class: str, driver: str = "") -> None:
+        device = self.root / "devices" / bdf
         device.mkdir(parents=True)
-        (device / "vendor").write_text(vendor + "\n", encoding="ascii")
-        (device / "class").write_text(pci_class + "\n", encoding="ascii")
-        (bus / bdf).symlink_to(device)
+        (device / "vendor").write_text(vendor + "\n")
+        (device / "class").write_text(pci_class + "\n")
+        if driver:
+            target = self.root / "drivers" / driver
+            target.mkdir(parents=True, exist_ok=True)
+            (device / "driver").symlink_to(target)
+        (self.bus / bdf).symlink_to(device)
 
-    def _present(self, bus: Path) -> bool:
-        return self.helpers_cls.is_amd_gpu_present(pci_devices_path=bus)
+    def _find(self, driver: str, bus=None) -> list:
+        _, vendor_id, base_classes = helpers_module.DRIVER_DEVICES[driver]
+        return helpers_module.AMDSMIHelpers.get_pci_devices_without_driver(
+            vendor_id, base_classes, driver, bus or self.bus
+        )
 
-    def test_non_gpu_functions_do_not_count(self) -> None:
-        bus = self._bus("bus")
-        self._add_function(bus, "0000:01:00.0", "0x1dd8", "0x020000")  # AI NIC
-        self._add_function(bus, "0000:02:00.0", "0x1a03", "0x030000")  # BMC VGA
-        self._add_function(bus, "0000:03:00.1", "0x1002", "0x040300")  # GPU HDMI audio
-        self._add_function(bus, "0000:04:00.0", "0x1022", "0x120000")  # AMD CPU-vendor IP
-        self._add_function(bus, "0000:05:00.0", "garbage", "0x030000")
-        (bus / "0000:06:00.0").symlink_to(self.root / "unplugged")
-        self.assertFalse(self._present(bus))
+    def test_gpus_match_display_and_accelerator_classes(self) -> None:
+        self._add("0000:03:00.0", "0x1002", "0x030000")  # display
+        self._add("0001:01:00.0", "0x1002", "0x120000")  # accelerator, e.g. MI450
+        self._add("0000:05:00.0", "0x1002", "0x120000", "amdgpu")
+        self._add("0000:06:00.0", "0x1002", "0x120000", "vfio-pci")  # passed through
+        self._add("0000:03:00.1", "0x1002", "0x040300")  # GPU audio function
+        self._add("0000:00:18.0", "0x1022", "0x060000")  # CPU host bridge
+        self.assertEqual(self._find("amdgpu"), ["0000:03:00.0", "0000:05:00.0", "0001:01:00.0"])
 
-    def test_gpu_bound_to_another_driver_does_not_count(self) -> None:
-        # modprobe amdgpu cannot claim a GPU that e.g. vfio-pci already owns
-        for driver_name, expected in (("vfio-pci", False), ("amdgpu", True)):
-            with self.subTest(driver=driver_name):
-                bus = self._bus(driver_name)
-                self._add_function(bus, "0000:03:00.0", "0x1002", "0x120000")
-                driver = self.root / "drivers" / driver_name
-                driver.mkdir(parents=True)
-                (bus / "0000:03:00.0" / "driver").symlink_to(driver)
-                self.assertEqual(self._present(bus), expected)
+    def test_nics_match_their_vendor(self) -> None:
+        self._add("0000:04:00.0", "0x1dd8", "0x020000")  # Pensando AI NIC
+        self._add("0000:07:00.0", "0x14e4", "0x020000", "tg3")  # not a bnxt_en NIC
+        self._add("0000:08:00.0", "0x14e4", "0x020000")
+        self.assertEqual(self._find("ionic"), ["0000:04:00.0"])
+        self.assertEqual(self._find("bnxt_en"), ["0000:08:00.0"])
 
-    def test_amd_gpu_base_classes_count(self) -> None:
-        # VGA, other display (e.g. MI200), processing accelerator (e.g. MI300, MI450)
-        for pci_class in ("0x030000", "0x038000", "0x120000"):
-            with self.subTest(pci_class=pci_class):
-                bus = self._bus(pci_class)
-                self._add_function(bus, "0000:03:00.0", "0x1002", pci_class)
-                self.assertTrue(self._present(bus))
-
-    def test_missing_sysfs_reports_no_gpu(self) -> None:
-        self.assertFalse(self._present(self.root / "absent"))
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_unreadable_entries_and_missing_sysfs_are_skipped(self) -> None:
+        self._add("0000:09:00.0", "garbage", "0x120000")
+        (self.bus / "0000:0a:00.0").symlink_to(self.root / "gone")  # dangling link
+        self.assertEqual(self._find("amdgpu"), [])
+        self.assertEqual(self._find("amdgpu", bus=self.root / "absent"), [])

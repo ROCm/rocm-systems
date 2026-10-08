@@ -118,6 +118,10 @@ def configure_logging_and_execute(args, amd_smi_commands):
         amd_smi_commands.rocm_smi(args)
         return
 
+    # stderr keeps JSON/CSV output parseable
+    for note in amd_smi_commands.helpers.get_driver_notes(args):
+        print(note, file=sys.stderr)
+
     # Execute subcommands
     args.func(args)
 

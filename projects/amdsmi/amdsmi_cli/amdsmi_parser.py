@@ -4,6 +4,7 @@
 
 import argparse
 import errno
+import logging
 import os
 import sys
 import time
@@ -88,6 +89,38 @@ class AMDSMISubParser(argparse.ArgumentParser):
             )
 
 
+class _AssumeDriverLoaded:
+    """AMDSMIHelpers stand-in that reports one more driver as loaded, with no devices.
+
+    error() rebuilds the parser with it to learn whether rejected input needs that driver.
+    """
+
+    _FLAGS = {
+        "amdgpu": ("is_amdgpu_initialized",),
+        "hsmp_acpi": ("is_amd_hsmp_initialized",),
+        "ionic": ("is_ainic_initialized",),
+        "bnxt_en": ("is_ainic_initialized", "is_brcm_nic_initialized"),
+    }
+    _CHOICES = {
+        "amdgpu": ("get_gpu_choices",),
+        "hsmp_acpi": ("get_cpu_choices", "get_core_choices"),
+        "ionic": ("get_nic_choices",),
+        "bnxt_en": ("get_nic_choices",),
+    }
+
+    def __init__(self, helpers, driver):
+        self._helpers = helpers
+        self._flags = self._FLAGS[driver]
+        self._choices = self._CHOICES[driver]
+
+    def __getattr__(self, name):
+        if name in self._flags:
+            return lambda: True
+        if name in self._choices:
+            return lambda: ({}, "")
+        return getattr(self._helpers, name)
+
+
 class AMDSMIParser(argparse.ArgumentParser):
     """Unified Parser for AMDSMI CLI.
         This parser doesn't access amdsmi's lib directly,but via AMDSMIHelpers,
@@ -122,6 +155,12 @@ class AMDSMIParser(argparse.ArgumentParser):
         sys_argv=None,
         helpers=None,
     ):
+        # error() rebuilds the parser from these to explain rejected input
+        self._rebuild_kwargs = {
+            name: value
+            for name, value in locals().items()
+            if name not in ("self", "helpers", "__class__")
+        }
 
         # Helper variables
         if helpers is None:
@@ -228,9 +267,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             "fabric",
             "default",
         ]
-        # Subcommands and aliases whose parser the amdgpu gate skipped; error() uses this to
-        # tell "amdgpu not loaded" from "not supported"
-        self.amdgpu_skipped_commands = set()
 
         # Add all subparsers
         if sys_argv is not None:
@@ -293,12 +329,41 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # If no subcommand is given, add the default parser
                 self._add_default_parser(self.subparsers, default)
 
-    def _skip_without_amdgpu(self, *commands: str) -> bool:
-        """Return True if amdgpu is not initialized, recording ``commands`` for error()."""
+    def _without_amdgpu_only(self, func, command, nic_options):
+        """Return *func*, or without amdgpu a wrapper that runs it only for its NIC options.
+
+        The rest of the command reports GPUs, so without amdgpu it explains why it cannot.
+        """
         if self.helpers.is_amdgpu_initialized():
-            return False
-        self.amdgpu_skipped_commands.update(commands)
-        return True
+            return func
+
+        def run_nic_options(args):
+            if any(getattr(args, option, False) for option in nic_options):
+                return func(args)
+            outputformat = self.helpers.get_output_format()
+            if self.helpers.get_devices_without_driver("amdgpu"):
+                raise amdsmi_cli_exceptions.AmdSmiDriverNotLoadedException(
+                    f"Command '{command}'", ["amdgpu"], outputformat
+                )
+            raise amdsmi_cli_exceptions.AmdSmiCommandNotSupportedException(command, outputformat)
+
+        return run_nic_options
+
+    def _rebuilt_subparsers(self, command):
+        """Map each missing driver whose hardware is present to the *command* subparser of a
+        parser rebuilt with that driver assumed loaded (None if the command is still absent).
+        """
+        subparsers = {}
+        for driver in self.helpers.get_missing_drivers():
+            try:
+                parser = AMDSMIParser(
+                    **self._rebuild_kwargs, helpers=_AssumeDriverLoaded(self.helpers, driver)
+                )
+            except Exception:  # best effort: without a rebuild the generic error stands
+                logging.debug("Could not rebuild the parser with %s loaded", driver, exc_info=True)
+                continue
+            subparsers[driver] = parser.subparsers.choices.get(command)
+        return subparsers
 
     def _not_negative_int(self, int_value, sub_arg=None):
         # Argument type validator
@@ -1476,8 +1541,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
 
     def _add_list_parser(self, subparsers: argparse._SubParsersAction, func):
-        if self._skip_without_amdgpu("list"):
-            # The list subcommand is only applicable to systems with amdgpu initialized
+        if not (self.helpers.is_amdgpu_initialized() or self.helpers.is_ainic_initialized()):
+            # The list subcommand needs a GPU or NIC driver
             return
 
         # Subparser help text
@@ -1496,7 +1561,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         list_parser._optionals.title = list_optionals_title
         list_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        list_parser.set_defaults(func=func)
+        list_parser.set_defaults(func=func, gpu=None, note_drivers=("amdgpu", "ionic", "bnxt_en"))
 
         # Create -e subparser
         list_parser.add_argument("-e", "--enumeration", action="store_true", help=enumeration_help)
@@ -1558,7 +1623,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         static_parser._optionals.title = static_optionals_title
         static_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        static_parser.set_defaults(func=func)
+        static_parser.set_defaults(
+            func=func, note_drivers=("amdgpu", "hsmp_acpi", "ionic", "bnxt_en")
+        )
 
         # Handle GPU Options
         if self.helpers.is_amdgpu_initialized():
@@ -1671,8 +1738,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(static_parser)
 
     def _add_firmware_parser(self, subparsers: argparse._SubParsersAction, func):
-        if self._skip_without_amdgpu("firmware", "ucode"):
-            # The firmware subcommand is only applicable to systems with amdgpu initialized
+        if not (self.helpers.is_amdgpu_initialized() or self.helpers.is_brcm_nic_initialized()):
+            # The firmware subcommand needs amdgpu, or a Broadcom NIC for --brcm_nic
             return
 
         # Subparser help text
@@ -1691,7 +1758,11 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         firmware_parser._optionals.title = firmware_optionals_title
         firmware_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        firmware_parser.set_defaults(func=func)
+        firmware_parser.set_defaults(
+            func=self._without_amdgpu_only(func, "firmware", ("brcm_nic",)),
+            gpu=None,
+            note_drivers=("amdgpu", "bnxt_en"),
+        )
 
         # Optional Args
         firmware_parser.add_argument(
@@ -1724,7 +1795,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             # The bad_pages subcommand is only applicable to Linux Baremetal systems
             return
 
-        if self._skip_without_amdgpu("bad-pages"):
+        if not self.helpers.is_amdgpu_initialized():
             # The bad_pages subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -1879,7 +1950,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         metric_parser._optionals.title = metric_optionals_title
         metric_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        metric_parser.set_defaults(func=func)
+        metric_parser.set_defaults(
+            func=func, note_drivers=("amdgpu", "hsmp_acpi", "ionic", "bnxt_en")
+        )
 
         # Optional Args for Linux Virtual OS and Baremetal systems
         if not self.helpers.is_hypervisor() and not self.helpers.is_windows():
@@ -2222,7 +2295,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             # This subparser is only available to Guest and Baremetal systems
             return
 
-        if self._skip_without_amdgpu("process"):
+        if not self.helpers.is_amdgpu_initialized():
             # The process subcommand is currently only applicable to systems with amdgpu initialized
             return
 
@@ -2311,7 +2384,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(profile_parser)
 
     def _add_event_parser(self, subparsers: argparse._SubParsersAction, func):
-        if self._skip_without_amdgpu("event"):
+        if not self.helpers.is_amdgpu_initialized():
             # The event subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -2333,8 +2406,12 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(event_parser)
 
     def _add_topology_parser(self, subparsers: argparse._SubParsersAction, func):
-        if self._skip_without_amdgpu("topology"):
-            # The topology subcommand is only applicable to systems with amdgpu initialized
+        if not (
+            self.helpers.is_amdgpu_initialized()
+            or self.helpers.is_brcm_nic_initialized()
+            or self.helpers.is_brcm_switch_initialized()
+        ):
+            # The topology subcommand needs amdgpu, or a Broadcom NIC or switch for its NIC options
             return
 
         # Subparser help text
@@ -2362,7 +2439,11 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         topology_parser._optionals.title = topology_optionals_title
         topology_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        topology_parser.set_defaults(func=func)
+        topology_parser.set_defaults(
+            func=self._without_amdgpu_only(func, "topology", ("nic_topo", "nic_switch")),
+            gpu=None,
+            note_drivers=("amdgpu", "bnxt_en"),
+        )
 
         # Add Universal Arguments
         self._add_command_modifiers(topology_parser)
@@ -2929,7 +3010,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             # This subparser is only applicable to Linux
             return
 
-        if self._skip_without_amdgpu("reset"):
+        if not self.helpers.is_amdgpu_initialized():
             # The reset subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -3018,8 +3099,12 @@ class AMDSMIParser(argparse.ArgumentParser):
             # This subparser is only applicable to Linux
             return
 
-        if self._skip_without_amdgpu("monitor", "dmon"):
-            # The monitor subcommand is only applicable to systems with amdgpu initialized
+        if not (
+            self.helpers.is_amdgpu_initialized()
+            or self.helpers.is_brcm_nic_initialized()
+            or self.helpers.is_brcm_switch_initialized()
+        ):
+            # The monitor subcommand needs amdgpu, or a Broadcom NIC or switch for its NIC options
             return
 
         # Subparser help text
@@ -3054,7 +3139,11 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         monitor_parser._optionals.title = monitor_optionals_title
         monitor_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        monitor_parser.set_defaults(func=func)
+        monitor_parser.set_defaults(
+            func=self._without_amdgpu_only(func, "monitor", ("brcm_nic", "brcm_switch")),
+            gpu=None,
+            note_drivers=("amdgpu", "bnxt_en"),
+        )
 
         # Add monitor arguments
         monitor_parser.add_argument(
@@ -3127,7 +3216,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(monitor_parser)
 
     def _add_xgmi_parser(self, subparsers: argparse._SubParsersAction, func):
-        if self._skip_without_amdgpu("xgmi"):
+        if not self.helpers.is_amdgpu_initialized():
             # The xgmi subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -3170,7 +3259,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(xgmi_parser)
 
     def _add_partition_parser(self, subparsers: argparse._SubParsersAction, func):
-        if self._skip_without_amdgpu("partition"):
+        if not self.helpers.is_amdgpu_initialized():
             # The partition subcommand is only applicable to systems with amdgpu initialized
             return
 
@@ -3329,7 +3418,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(node_parser)
 
     def _add_fabric_parser(self, subparsers: argparse._SubParsersAction, func):
-        if self._skip_without_amdgpu("fabric"):
+        if not self.helpers.is_amdgpu_initialized():
             return
 
         # Subparser help text
@@ -3371,9 +3460,11 @@ class AMDSMIParser(argparse.ArgumentParser):
             message = message.split("'")[0]
             # Check if the command is possible in other system configurations and error accordingly
             if message in self.possible_commands:
-                if message in self.amdgpu_skipped_commands and self.helpers.is_amd_gpu_present():
-                    raise amdsmi_cli_exceptions.AmdSmiGpuDriverNotLoadedException(
-                        message, outputformat
+                rebuilt = self._rebuilt_subparsers(message)
+                drivers = [driver for driver, subparser in rebuilt.items() if subparser]
+                if drivers:
+                    raise amdsmi_cli_exceptions.AmdSmiDriverNotLoadedException(
+                        f"Command '{message}'", drivers, outputformat
                     )
                 raise amdsmi_cli_exceptions.AmdSmiCommandNotSupportedException(
                     message, outputformat
@@ -3382,6 +3473,19 @@ class AMDSMIParser(argparse.ArgumentParser):
         elif "unrecognized arguments: " in message:
             l = len("unrecognized arguments: ")
             message = message[l:]
+            command = next((arg for arg in sys.argv[1:] if arg in self.possible_commands), "")
+            options = [token.split("=")[0] for token in message.split() if token.startswith("-")]
+            rebuilt = self._rebuilt_subparsers(command) if options else {}
+            for option in options:
+                drivers = [
+                    driver
+                    for driver, subparser in rebuilt.items()
+                    if subparser and option in subparser._option_string_actions
+                ]
+                if drivers:
+                    raise amdsmi_cli_exceptions.AmdSmiDriverNotLoadedException(
+                        f"Parameter '{option}'", drivers, outputformat
+                    )
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
                 sys.argv[1], message, outputformat
             )
