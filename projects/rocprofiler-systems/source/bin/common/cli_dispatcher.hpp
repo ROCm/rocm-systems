@@ -33,7 +33,9 @@ struct subcommand_spec
     bool             requires_app = true;
     // Set only for in-process verbs. Exec verbs leave this empty.
     std::optional<common_utils::tool_mode> mode;
-    // Inserted after argv0 when forwarding (for example "-o" for rewrite).
+    // Arguments inserted after tool's executable (for example,
+    // "rewrite" will add "-o" to "rocprof-sys-instrument",
+    // becoming "rocprof-sys-instrument -o").
     std::string_view extra_flag;
 };
 
@@ -46,7 +48,7 @@ struct forward_options
 
 // The first row is the implicit default. parse_dispatch uses it when argv
 // has flags or "--" and no subcommand token.
-constexpr auto k_subcommands = std::to_array<subcommand_spec>({
+inline constexpr auto k_subcommands = std::to_array<subcommand_spec>({
     {
         .name         = "profile",
         .description  = "Full trace profile (default)",
@@ -112,10 +114,11 @@ struct dispatch_result
 
 /**
  * Classify a `rocsys` invocation into help, version, in-process tool, exec, or
- * error. Does not execute anything.
+ * error. Does not execute anything. @p program is the basename used in error
+ * text; the caller computes it once so help and errors use the same name.
  */
 [[nodiscard]] dispatch_result
-parse_dispatch(int argc, char** argv);
+parse_dispatch(int argc, char** argv, std::string_view program);
 
 /**
  * Build the argument strings for the selected tool. When

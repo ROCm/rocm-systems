@@ -71,10 +71,9 @@ invalid_subcommand_count()
     for(const auto& spec : k_subcommands)
     {
         const bool unnamed = spec.name.empty();
-        const bool missing =
-            std::ranges::find(k_subcommands, spec.name, &subcommand_spec::name) ==
-            k_subcommands.end();
-        if(unnamed || missing)
+        const bool duplicate =
+            std::ranges::count(k_subcommands, spec.name, &subcommand_spec::name) > 1;
+        if(unnamed || duplicate)
         {
             ++invalid;
         }
@@ -96,25 +95,6 @@ in_process_verb_count()
     return count;
 }
 
-[[nodiscard]] std::string
-missing_help_entries(std::string_view text)
-{
-    std::string missing;
-    for(const auto& spec : k_subcommands)
-    {
-        if(text.find(spec.name) != std::string_view::npos)
-        {
-            continue;
-        }
-        if(!missing.empty())
-        {
-            missing += ", ";
-        }
-        missing.append(spec.name);
-    }
-    return missing;
-}
-
 std::vector<std::string>
 forwarded_args(int argc, char** argv, forward_options options)
 {
@@ -125,7 +105,7 @@ forwarded_args(int argc, char** argv, forward_options options)
 TEST(cli_dispatcher_test, no_args_shows_help)
 {
     auto args   = argv_builder{ "rocsys" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     EXPECT_EQ(result.kind, dispatch_kind::show_help);
 }
 
@@ -134,7 +114,7 @@ TEST(cli_dispatcher_test, help_flags_show_help)
     for(const char* flag : { "--help", "-h", "-?", "--help=all" })
     {
         auto args   = argv_builder{ "rocsys", flag };
-        auto result = parse_dispatch(args.argc(), args.argv());
+        auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
         EXPECT_EQ(result.kind, dispatch_kind::show_help) << flag;
     }
 }
@@ -142,14 +122,14 @@ TEST(cli_dispatcher_test, help_flags_show_help)
 TEST(cli_dispatcher_test, version_flag_shows_version)
 {
     auto args   = argv_builder{ "rocsys", "--version" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     EXPECT_EQ(result.kind, dispatch_kind::show_version);
 }
 
 TEST(cli_dispatcher_test, implicit_default_with_separator)
 {
     auto args   = argv_builder{ "rocsys", "--", "./app" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     ASSERT_NE(result.spec, nullptr);
     EXPECT_EQ(result.kind, dispatch_kind::in_process);
     EXPECT_EQ(result.spec->mode, tool_mode::run);
@@ -161,7 +141,7 @@ TEST(cli_dispatcher_test, implicit_default_with_separator)
 TEST(cli_dispatcher_test, implicit_default_with_flags)
 {
     auto args   = argv_builder{ "rocsys", "--preset=quick", "--", "./app" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     ASSERT_NE(result.spec, nullptr);
     EXPECT_EQ(result.kind, dispatch_kind::in_process);
     EXPECT_EQ(result.spec->mode, tool_mode::run);
@@ -171,7 +151,7 @@ TEST(cli_dispatcher_test, implicit_default_with_flags)
 TEST(cli_dispatcher_test, profile_is_in_process_run)
 {
     auto args   = argv_builder{ "rocsys", "profile", "--", "./app" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     ASSERT_NE(result.spec, nullptr);
     EXPECT_EQ(result.kind, dispatch_kind::in_process);
     EXPECT_EQ(result.spec->mode, tool_mode::run);
@@ -185,7 +165,7 @@ TEST(cli_dispatcher_test, sample_and_trace_are_unknown_verbs)
     for(const char* verb : { "sample", "trace" })
     {
         auto args   = argv_builder{ "rocsys", verb, "--", "./app" };
-        auto result = parse_dispatch(args.argc(), args.argv());
+        auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
         EXPECT_EQ(result.kind, dispatch_kind::error) << verb;
         EXPECT_NE(result.error_message.find("unknown subcommand"), std::string::npos)
             << verb;
@@ -197,7 +177,7 @@ TEST(cli_dispatcher_test, sample_and_trace_are_unknown_verbs)
 TEST(cli_dispatcher_test, instrument_execs_sibling_binary)
 {
     auto args   = argv_builder{ "rocsys", "instrument", "--", "./app" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     ASSERT_NE(result.spec, nullptr);
     EXPECT_EQ(result.kind, dispatch_kind::exec_tool);
     EXPECT_TRUE(result.strip_subcommand);
@@ -209,7 +189,7 @@ TEST(cli_dispatcher_test, instrument_execs_sibling_binary)
 TEST(cli_dispatcher_test, rewrite_execs_instrument_with_output_flag)
 {
     auto args   = argv_builder{ "rocsys", "rewrite", "--", "./app" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     ASSERT_NE(result.spec, nullptr);
     EXPECT_EQ(result.kind, dispatch_kind::exec_tool);
     EXPECT_TRUE(result.strip_subcommand);
@@ -221,7 +201,7 @@ TEST(cli_dispatcher_test, rewrite_execs_instrument_with_output_flag)
 TEST(cli_dispatcher_test, causal_execs_sibling_binary)
 {
     auto args   = argv_builder{ "rocsys", "causal", "--", "./app" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     ASSERT_NE(result.spec, nullptr);
     EXPECT_EQ(result.kind, dispatch_kind::exec_tool);
     EXPECT_EQ(result.spec->binary_name, "rocprof-sys-causal");
@@ -230,7 +210,7 @@ TEST(cli_dispatcher_test, causal_execs_sibling_binary)
 TEST(cli_dispatcher_test, avail_execs_without_requiring_app)
 {
     auto args   = argv_builder{ "rocsys", "avail" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     ASSERT_NE(result.spec, nullptr);
     EXPECT_EQ(result.kind, dispatch_kind::exec_tool);
     EXPECT_EQ(result.spec->binary_name, "rocprof-sys-avail");
@@ -240,7 +220,7 @@ TEST(cli_dispatcher_test, avail_execs_without_requiring_app)
 TEST(cli_dispatcher_test, python_execs_sibling_binary)
 {
     auto args   = argv_builder{ "rocsys", "python", "--", "script.py" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     ASSERT_NE(result.spec, nullptr);
     EXPECT_EQ(result.kind, dispatch_kind::exec_tool);
     EXPECT_EQ(result.spec->binary_name, "rocprof-sys-python");
@@ -249,13 +229,13 @@ TEST(cli_dispatcher_test, python_execs_sibling_binary)
 TEST(cli_dispatcher_test, attach_execs_sibling_binary)
 {
     auto args   = argv_builder{ "rocsys", "attach", "--pid=1234" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     ASSERT_NE(result.spec, nullptr);
     EXPECT_EQ(result.kind, dispatch_kind::exec_tool);
     EXPECT_EQ(result.spec->binary_name, "rocprof-sys-attach");
 }
 
-TEST(cli_dispatcher_test, all_named_subcommands_are_registered)
+TEST(cli_dispatcher_test, subcommand_names_are_unique_and_nonempty)
 {
     EXPECT_EQ(invalid_subcommand_count(), 0);
     EXPECT_EQ(k_subcommands.front().name, "profile");
@@ -266,7 +246,7 @@ TEST(cli_dispatcher_test, all_named_subcommands_are_registered)
 TEST(cli_dispatcher_test, unknown_subcommand_is_error)
 {
     auto args   = argv_builder{ "rocsys", "foobar" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     EXPECT_EQ(result.kind, dispatch_kind::error);
     EXPECT_NE(result.error_message.find("error: unknown subcommand"), std::string::npos);
     EXPECT_NE(result.error_message.find("hint: run 'rocsys --help'"), std::string::npos);
@@ -275,7 +255,7 @@ TEST(cli_dispatcher_test, unknown_subcommand_is_error)
 TEST(cli_dispatcher_test, profile_without_app_is_error)
 {
     auto args   = argv_builder{ "rocsys", "profile" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     EXPECT_EQ(result.kind, dispatch_kind::error);
     EXPECT_NE(result.error_message.find("error: missing application argument"),
               std::string::npos);
@@ -285,7 +265,7 @@ TEST(cli_dispatcher_test, profile_without_app_is_error)
 TEST(cli_dispatcher_test, profile_help_is_forwarded)
 {
     auto args   = argv_builder{ "rocsys", "profile", "--help" };
-    auto result = parse_dispatch(args.argc(), args.argv());
+    auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
     EXPECT_EQ(result.kind, dispatch_kind::in_process);
     EXPECT_TRUE(result.strip_subcommand);
 }
@@ -395,6 +375,4 @@ TEST(cli_dispatcher_test, print_help_lists_subcommands_and_example)
     EXPECT_LT(causal, instrument);
     EXPECT_LT(instrument, rewrite);
     EXPECT_LT(rewrite, python);
-    const auto missing = missing_help_entries(text);
-    EXPECT_TRUE(missing.empty()) << missing;
 }

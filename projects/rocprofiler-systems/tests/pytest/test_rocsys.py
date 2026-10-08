@@ -5,25 +5,14 @@
 
 from __future__ import annotations
 
-import os
-import shutil
 from pathlib import Path
 
 import pytest
 from conftest import RocprofsysTest
+from rocprofsys.commands import get_ls_command
 from rocprofsys.config import RocprofsysConfig
 
 pytestmark = [pytest.mark.rocsys, pytest.mark.rocprof_binary]
-
-
-def _ls_command() -> list[str]:
-    """Return argv for ``ls``, handling the Red Hat coreutils wrapper."""
-    if os.path.exists("/usr/bin/coreutils"):
-        return ["coreutils", "--coreutils-prog=ls"]
-    ls_cmd = shutil.which("ls")
-    if not ls_cmd:
-        pytest.skip("ls command not found")
-    return [ls_cmd]
 
 
 def _sibling_exists(config: RocprofsysConfig, name: str) -> bool:
@@ -209,7 +198,7 @@ class TestRocsys(RocprofsysTest):
         dl_lib = rocprof_config.rocprofsys_lib_dir / "librocprof-sys-dl.so"
         if not dl_lib.is_file():
             pytest.skip("librocprof-sys-dl.so not built")
-        ls_cmd = _ls_command()
+        ls_name, ls_args = get_ls_command()
         result = self.run_test(
             "baseline",
             target=self.target,
@@ -220,7 +209,7 @@ class TestRocsys(RocprofsysTest):
                 "ROCPROFSYS_TIME_OUTPUT": "OFF",
                 "ROCPROFSYS_FILE_OUTPUT": "ON",
             },
-            run_args=["profile", "--", *ls_cmd],
+            run_args=["profile", "--", ls_name, *ls_args],
             fail_on_not_found=True,
         )
         assert result.success, result.test_output
@@ -239,7 +228,7 @@ class TestRocsys(RocprofsysTest):
         dl_lib = rocprof_config.rocprofsys_lib_dir / "librocprof-sys-dl.so"
         if not dl_lib.is_file():
             pytest.skip("librocprof-sys-dl.so not built")
-        ls_cmd = _ls_command()
+        ls_name, ls_args = get_ls_command()
         result = self.run_test(
             "baseline",
             target=self.target,
@@ -250,7 +239,7 @@ class TestRocsys(RocprofsysTest):
                 "ROCPROFSYS_TIME_OUTPUT": "OFF",
                 "ROCPROFSYS_FILE_OUTPUT": "ON",
             },
-            run_args=["--", *ls_cmd],
+            run_args=["--", ls_name, *ls_args],
             fail_on_not_found=True,
         )
         assert result.success, result.test_output
