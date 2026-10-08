@@ -124,7 +124,8 @@ class TestRocsys(RocprofsysTest):
         self.assert_regex(
             result,
             pass_regex=[
-                r"rocsys v\d+\.\d+\.\d+ \(rev: [^,]+, .+, compiler: .+, rocm: v.+\)",
+                r"rocsys v\d+\.\d+\.\d+ \(rev: [^,]+(?:, [^,]+){0,2}, "
+                r"compiler: .+, rocm: v.+\)",
             ],
         )
 

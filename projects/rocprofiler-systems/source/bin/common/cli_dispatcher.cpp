@@ -25,7 +25,9 @@ constexpr std::string_view k_output_long      = "--output";
 constexpr std::string_view k_output_long_eq   = "--output=";
 constexpr std::string_view k_output_short_eq  = "-o=";
 constexpr std::size_t      k_name_column      = 14;
-constexpr int              k_index_after_verb = 2;
+constexpr std::string_view k_docs_url =
+    "https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/";
+constexpr int k_index_after_verb = 2;
 
 [[nodiscard]] std::string
 help_hint(std::string_view program)
@@ -109,7 +111,7 @@ parse_dispatch(int argc, char** argv)
         {
             return make_error(
                 fmt::format("error: missing application argument\n"
-                            "Usage: {} [subcommand] [flags] [--] <app> [app-args]\n"
+                            "Usage: {} [subcommand] [options] -- <app> [app-args]\n"
                             "{}",
                             program, help_hint(program)));
         }
@@ -194,9 +196,11 @@ void
 print_help(std::ostream& out, std::string_view program)
 {
     out << "Usage:\n"
-        << "  " << program << " [subcommand] [flags] [--] <app> [app-args]\n"
+        << "  " << program << " [subcommand] [options] -- <app> [app-args]\n"
         << "\n"
-        << "ROCm Systems Profiler unified command-line entry point.\n"
+        << "ROCm Systems Profiler.\n"
+        << "Experimental: This is a preview of the rocsys command-line tool.\n"
+        << "Commands and workflows are subject to change.\n"
         << "\n"
         << "Subcommands:\n";
 
@@ -214,7 +218,9 @@ print_help(std::ostream& out, std::string_view program)
         << "  " << program << " rewrite -- ./app\n"
         << "\n"
         << "Use '" << program
-        << " <subcommand> --help' for subcommand-specific options.\n";
+        << " <subcommand> --help' for subcommand-specific options.\n"
+        << "\n"
+        << "Documentation: " << k_docs_url << "\n";
 }
 
 }  // namespace rocprofsys::cli

@@ -23,7 +23,7 @@ Usage
 
    rocsys -- ./app
    rocsys profile -- ./app
-   rocsys <subcommand> [flags] [--] <app> [app-args]
+   rocsys <subcommand> [options] -- <app> [app-args]
    rocsys --help
    rocsys <subcommand> --help
 
