@@ -63,10 +63,8 @@ class Workload(Base):
     sys_info_extdata = Column(JSON)
     roofline_bench_extdata = Column(JSON)
     profiling_config_extdata = Column(JSON)
-    # Memory chart layout for ROCm Optiq (see memory_chart.extdata); NULL when
-    # the workload's architecture has no layout, or its panel 300 config (for
-    # example from --config-dir) lacks a metric the layout shows
-    memory_chart_extdata = Column(JSON, nullable=True)
+    # Memory chart rendering specification for ROCm Optiq (see memory_chart.extdata)
+    memory_chart_render_extdata = Column(JSON)
 
     # Workload can have multiple kernels
     kernels = relationship("Kernel", back_populates="workload")

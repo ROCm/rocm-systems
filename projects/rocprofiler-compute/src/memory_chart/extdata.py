@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""The memory chart layout as stored in the analysis database for ROCm Optiq.
+"""The memory chart rendering specification stored in the analysis database.
 
 The format is a superset of Optiq's memory chart layout: metrics are referenced
 by metric_id, and description, scope, note, host, and group are extra keys.
