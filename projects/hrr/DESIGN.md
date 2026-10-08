@@ -692,7 +692,21 @@ different bytes, and calls no HIP API. The kernel waits for it. Replay never
 blocks on the host for the restore, so a launch stream held back by a wait that
 later replayed work releases does not hang the replay. When the host function
 cannot be queued, replay warns once and restores at once, without waiting. The
-summary prints the chunks restored and the records rejected. Snapshot blobs are
+host functions run on the HSA async handler thread, which every host callback
+and completion handler of the process shares. A launch with many chunks copies
+them all there, up to `HIP_HRR_HOST_SNAPSHOT_MAX_MB` per allocation, and
+delays the other handlers while it does.
+
+A host function that has not run yet still writes its allocation later.
+`hipHostFree` and `hipHostUnregister` sync the streams of the allocating device
+only, and a restore can be queued on another device's stream. So replay counts
+the restores queued for each allocation, and waits for that count to reach zero
+before it frees or unregisters the allocation, including at teardown. The first
+such wait is printed. The count and the restored total live in state each host
+function holds a reference to, so one that runs after replay has exited does
+not touch a destroyed context. `--kernel-filter` resets the counters after its
+warm-up pass. The summary prints the chunks restored and the records rejected.
+Snapshot blobs are
 held in a cache of at most 256 MiB, oldest out first, rather than the unbounded
 blob cache.
 
@@ -770,6 +784,16 @@ exists to put chosen bytes in front of those kernels.
   there too. Replay of `hipStreamBatchMemOp` waits for real, so a launch stream
   can stay blocked until later replayed work releases it; the restore waits
   with the kernel rather than hanging the replay.
+- A free or unregister waits for the restores queued for its allocation. When
+  such a restore's stream is held by work that only later replayed events
+  release, replay waits for it. It prints a line after 10 s. CLR's own
+  `hipHostFree` waits the same way for the streams of the allocating device.
+- A replayed `hipDeviceReset` releases the device's pinned allocations without
+  waiting for restores queued for them on another device's stream.
+- Replay exits after a fatal HIP error without syncing the device or draining
+  queued restores. A host function that still runs keeps its own state alive,
+  but the pinned memory it writes is torn down as the process exits, so it can
+  fault during exit.
 - A by-value scalar whose value happens to fall inside a pinned allocation the
   launch recorded, at an aligned word, is rewritten on replay as if it were a
   pointer. So is one inside a pinned allocation the launch did not record,

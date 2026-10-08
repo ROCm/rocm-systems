@@ -1582,7 +1582,10 @@ int main(int argc, char** argv) {
     for (auto& [rec, entry] : ctx.alloc_map) {
       switch (entry.kind) {
         case AllocKind::Device:        hrr_free_device_alloc(ctx, entry.live_ptr); break;
-        case AllocKind::HostMalloc:    (void)hipHostFree(entry.live_ptr); break;
+        case AllocKind::HostMalloc:
+          hrr_wait_host_restores(ctx, entry.live_ptr);
+          (void)hipHostFree(entry.live_ptr);
+          break;
         case AllocKind::HostRegister:                                     break;
         case AllocKind::DevicePtrAlias:                                   break;
       }
@@ -1593,6 +1596,7 @@ int main(int argc, char** argv) {
     // and the malloc'd buffer every run.
     for (auto& [rec, buf] : ctx.host_reg_bufs) {
       if (!buf) continue;
+      hrr_wait_host_restores(ctx, buf);
       (void)hipHostUnregister(buf);
 #ifdef _WIN32
       _aligned_free(buf);
@@ -1714,7 +1718,7 @@ int main(int argc, char** argv) {
   }
 
   {
-    const uint64_t applied  = ctx.host_snapshots_applied.load();
+    const uint64_t applied  = ctx.host_restores->applied.load();
     const uint64_t rejected = ctx.host_snapshots_rejected.load();
     const uint64_t in_graph = ctx.host_snapshots_in_graph.load();
     if (applied || rejected)
