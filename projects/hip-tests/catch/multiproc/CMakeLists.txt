@@ -13,6 +13,7 @@ set(TEST_SRC
   hipGetDevicePropertiesMproc.cc
   hipSetGetDeviceMproc.cc
   hipIpcMemAccessTest.cc
+  hipIpcMemVisibility.cc
   hipMallocConcurrencyMproc.cc
   hipMemCoherencyTstMProc.cc
   hipIpcEventHandle.cc

@@ -17,6 +17,10 @@ multiproc:
   Unit_hipGetDeviceProperties_MaskedDevices: *level_2
   Unit_hipIpcEventHandle_Functional: *level_2
   Unit_hipIpcEventHandle_ParameterValidation: *level_2
+  Unit_hipIpcOpenMemHandle_VisibleDevices:
+    <<: *level_2
+    tags: [multigpu]
+    disabled: [amd_wsl]
   Unit_hipIpcMemAccess_Semaphores:
     <<: *level_2
     # Below tests soft hang in stress test on 13/09/23

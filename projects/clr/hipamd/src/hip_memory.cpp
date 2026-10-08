@@ -3838,12 +3838,10 @@ hipError_t hipIpcOpenMemHandle(void** dev_ptr, hipIpcMemHandle_t handle, unsigne
     HIP_RETURN(hipErrorInvalidContext);
   }
 
-  if (ihandle->owners_device_id >= g_devices.size()) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  amd::Device* peer_device = g_devices[ihandle->owners_device_id]->asContext()->devices()[0];
-  device->enableP2P(peer_device);
+  // owners_device_id is an ordinal in the exporting process. Visibility masks
+  // can change both device count and ordering, so it cannot index g_devices here.
+  // IpcAttach grants access through the ROCr IPC handle and the importing
+  // device's IPC agent list. No process-local peer ordinal is needed.
 
   amd_mem_obj = amd::MemObjMap::FindIpcHandleMemObj(*ihandle);
   if (amd_mem_obj == nullptr) {
