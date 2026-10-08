@@ -341,6 +341,14 @@ void DsWriteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
+  if (exec) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+    if (data.valid()) {
+      data.copy_dwords_lane_major(d->store_data, exec);
+      set_data(std::move(d));
+      return;
+    }
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1671,6 +1679,14 @@ void DsWriteB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
+  if (exec) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
+    if (data.valid()) {
+      data.copy_dwords_lane_major(d->store_data, exec);
+      set_data(std::move(d));
+      return;
+    }
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2687,6 +2703,14 @@ void DsWriteAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 4);
+  if (exec) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+    if (data.valid()) {
+      data.copy_dwords_lane_major(d->store_data, exec);
+      set_data(std::move(d));
+      return;
+    }
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2744,6 +2768,14 @@ void DsWriteB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 12);
+  if (exec) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
+    if (data.valid()) {
+      data.copy_dwords_lane_major(d->store_data, exec);
+      set_data(std::move(d));
+      return;
+    }
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2770,6 +2802,14 @@ void DsWriteB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   d->store_data.resize(wf.wf_size() * 16);
+  if (exec) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
+    if (data.valid()) {
+      data.copy_dwords_lane_major(d->store_data, exec);
+      set_data(std::move(d));
+      return;
+    }
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;

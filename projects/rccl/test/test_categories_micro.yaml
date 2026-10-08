@@ -43,6 +43,8 @@ test_categories:
       - "RasDiagnosticsMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
+      # ras/ras_param.cc
+      - "RasParamMicrotest.*"
       # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"
