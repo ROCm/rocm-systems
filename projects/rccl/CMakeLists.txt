@@ -901,6 +901,12 @@ endif()
 ## tuner/*.csv is compiled into librccl.so (see rccl_embedded_tuner_configs above),
 ## so nothing is copied to the build tree or installed. A CSV placed in
 ## <libdir>/tuner/ or share/rccl/tuner/ still overrides the embedded defaults.
+##
+## Migration: dropping these rules does not delete copies an earlier build or
+## install already wrote, and those still win over the embedded map. Package
+## upgrades remove the installed copy, but `cmake --install` over an existing
+## prefix does not, and an incremental build tree keeps <builddir>/tuner/ next
+## to librccl.so. Delete those by hand to pick up the embedded defaults.
 rocm_export_targets(
   NAMESPACE roc::
   TARGETS   rccl

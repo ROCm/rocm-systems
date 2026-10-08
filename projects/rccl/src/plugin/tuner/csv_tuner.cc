@@ -49,6 +49,9 @@
 
 #define RCCL_CSV_TUNER_MAX_LINE_LENGTH 256
 
+// A tuner config is a few KB; anything past this is not one.
+#define RCCL_CSV_TUNER_MAX_CONFIG_BYTES (1 << 20)
+
 // CSV field indices for configuration parsing
 // Format: colltype,minbytes,maxbytes,algorithm,protocol,channels,nNodes,nRanks,numPipeOps,regBuff
 #define CONFIG_FIELD_COLLTYPE 0
@@ -403,10 +406,25 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
     return ncclSuccess; // Not finding config file is not an error
   }
 
+  // Bound the accumulation: the old fgets loop never held more than one line,
+  // so a wrong path (a log, a device node) could not grow the allocation. The
+  // cap is checked per chunk rather than up front because fseek/ftell report
+  // nothing useful for a non-regular file.
   std::string contents;
   char chunk[4096];
   size_t n;
-  while ((n = fread(chunk, 1, sizeof(chunk), file)) > 0) contents.append(chunk, n);
+  while ((n = fread(chunk, 1, sizeof(chunk), file)) > 0) {
+    if (contents.size() + n > RCCL_CSV_TUNER_MAX_CONFIG_BYTES) {
+      if (ctx->logFunction) {
+        ctx->logFunction(NCCL_LOG_WARN, NCCL_TUNING, __FILE__, __LINE__,
+                         "TUNER/CsvTuner: Ignoring config %s, larger than %d bytes", filename,
+                         RCCL_CSV_TUNER_MAX_CONFIG_BYTES);
+      }
+      fclose(file);
+      return ncclSuccess; // A bad config file is not an error, same as a missing one
+    }
+    contents.append(chunk, n);
+  }
   fclose(file);
 
   return loadConfigFromBuffer(ctx, contents.c_str(), filename);

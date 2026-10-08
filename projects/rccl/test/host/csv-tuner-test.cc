@@ -251,14 +251,19 @@ TEST_F(CsvTunerMicrotest, SharePathCsvOverridesEmbedded) {
   EXPECT_STREQ(path.c_str(), source);
 }
 
-// Same directory, generic name, and an arch the embedded map does not carry.
+// Same directory, generic name, on an arch the embedded map does carry: a
+// generic disk CSV still beats an arch-specific embedded entry. Using an arch
+// with no embedded entry would pass even with the embedded map probed first.
 TEST_F(CsvTunerMicrotest, GenericSharePathCsvOverridesEmbedded) {
+  const std::map<std::string, std::string>& embedded = rcclCsvTunerEmbeddedConfigs();
+  if (!embedded.count("rccl_tuner_gfx950.csv")) GTEST_SKIP() << "no gfx950 config embedded";
+
   ASSERT_FALSE(emptyDir_.empty());
   MakeDirsUnder(emptyDir_, "share/rccl/tuner");
   const std::string path = WriteCsvAt(emptyDir_ + "/share/rccl/tuner/rccl_tuner.csv", kTwoConfigCsv);
   ASSERT_FALSE(path.empty());
 
-  const char* source = rcclCsvTunerFindConfig("gfx000");
+  const char* source = rcclCsvTunerFindConfig("gfx950");
   ASSERT_NE(nullptr, source);
   EXPECT_STREQ(path.c_str(), source);
 }
