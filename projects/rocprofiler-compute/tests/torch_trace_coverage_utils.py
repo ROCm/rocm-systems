@@ -3984,7 +3984,7 @@ def multiline_coverage_failure_warning(
     lines = [
         f"{len(failure_detail)} operator(s) failed ROCTX/kernel coverage.",
         f"Re-run with -s: pytest tests/integration/test_torch_trace_coverage.py -m "
-        f"torch_trace --coverage-seed={seed} --coverage-n={sample_budget} -s",
+        f"torch_trace_coverage --coverage-seed={seed} --coverage-n={sample_budget} -s",
         "",
     ]
     shown = failure_detail[:max_ops]
@@ -4187,7 +4187,7 @@ def print_torch_trace_coverage_session_header(
         )
     print()
     reproduce_cmd = (
-        "pytest tests/integration/test_torch_trace_coverage.py -m torch_trace "
+        "pytest tests/integration/test_torch_trace_coverage.py -m torch_trace_coverage "
         f"--coverage-seed={seed} --coverage-n={sample_budget}"
     )
     warnings.warn(
