@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Queue requests, transport descriptions, and owned native queues.
@@ -13,6 +14,32 @@ use crate::driver::{self, QueueDriver};
 use crate::gpu::GpuDevice;
 use crate::host_storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
+
+/// Drains host packet stores before notifying a GPU queue through its doorbell.
+///
+/// CPU mappings of local rings can be write-combined. An ordinary release
+/// fence does not drain those writes on x86, so the engine could observe the
+/// doorbell before the packet. On the x86-64 host path, this
+/// operation orders earlier stores before the 64-bit notification, including
+/// stores to write-combined ring memory. Other hosts use a sequentially
+/// consistent fence and require native queue-publication qualification.
+///
+/// # Safety
+/// `address` must be a live, aligned, writable 64-bit queue doorbell mapping.
+/// The caller must own the queue's packet-publication protocol and keep its
+/// ring, index storage, and doorbell mapping live through this call.
+#[allow(unsafe_code)]
+pub unsafe fn ring_doorbell(address: usize, value: u64) {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: x86-64 has SSE2, and SFENCE drains earlier write-combined stores.
+    unsafe {
+        std::arch::x86_64::_mm_sfence();
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+    // SAFETY: The caller retains the live, aligned MMIO mapping.
+    unsafe { (address as *mut u64).write_volatile(value) };
+}
 
 /// Provider-owned queue transport and cleanup state, independent of the
 /// selected GPU backend's native queue representation.
@@ -394,6 +421,7 @@ mod provider_contract_tests {
             ring_host_address: 0x1000,
             ring_device_address: 0x2000,
             ring_size_bytes: 4096,
+            sdma_engine_id: None,
             read_index_host_address: 0x3000,
             read_index_device_address: 0x4000,
             write_index_host_address: 0x5000,
@@ -416,6 +444,10 @@ mod provider_contract_tests {
     }
 
     impl QueueDriver for FakeGpu {
+        fn supports_expert_scheduling(&self, _: &FakeDevice) -> Result<bool, Error> {
+            Ok(false)
+        }
+
         fn check_queue(queue: &FakeQueue) -> Result<(), Error> {
             if queue.released {
                 Err(failure("fake queue released"))

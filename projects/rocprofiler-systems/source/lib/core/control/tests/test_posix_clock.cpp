@@ -6,12 +6,10 @@
 
 #include "core/control/clock.hpp"
 #include "core/control/triggers/time_window.hpp"
-#include <memory>
-
 #include <atomic>
 #include <chrono>
 #include <gtest/gtest.h>
-#include <string>
+#include <memory>
 #include <thread>
 
 namespace

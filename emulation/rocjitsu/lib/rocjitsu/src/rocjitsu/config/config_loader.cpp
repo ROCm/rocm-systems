@@ -574,6 +574,14 @@ std::unordered_map<std::string, FactoryFn> &factories() {
         else
           throw std::invalid_argument("memory_wait_diagnostics must be warn or off");
       }
+      if (auto it = cfg.find("xcnt_diagnostics"); it != cfg.end()) {
+        if (it->second == "off")
+          cc.xcnt_diagnostics = amdgpu::MemoryWaitDiagnostics::Off;
+        else if (it->second == "warn")
+          cc.xcnt_diagnostics = amdgpu::MemoryWaitDiagnostics::Warn;
+        else
+          throw std::invalid_argument("xcnt_diagnostics must be warn or off");
+      }
       return amdgpu::ComputeUnitCore::create(n, cc, mem, nullptr, mode);
     };
   }
