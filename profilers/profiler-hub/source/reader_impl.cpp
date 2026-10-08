@@ -3,13 +3,14 @@
 
 #include "reader_impl.hpp"
 #include "json_serializers.hpp"
-#include "profiler-hub/reader.hpp"
-#include "profiler-hub/storage.hpp"
+#include "profiler-hub/cpp/reader.hpp"
+#include "profiler-hub/cpp/storage.hpp"
 #include "storage_impl.hpp"
 
 #include "queries/select/table_select_query.hpp"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -17,6 +18,186 @@
 
 namespace profiler_hub
 {
+
+namespace
+{
+
+class timeline_event_builder
+{
+public:
+    explicit timeline_event_builder(const reader_catalog_t& catalog)
+    : m_catalog{ catalog }
+    {}
+
+    [[nodiscard]] reader_types::timeline_event_t operator()(
+        const data_storage::schema_v3::timeline_event_result& row,
+        reader_types::event_type_t                            type)
+    {
+        reader_types::timeline_event_t event;
+        event.unique_identifier = { .id = row.id, .type = type };
+        event.start_timestamp   = row.start_timestamp;
+        event.end_timestamp     = row.end_timestamp;
+        event.display_name      = resolve_string(row.display_name_id, m_display_name);
+        event.category          = resolve_string(row.category_id, m_category);
+        event.track             = resolve_track(row);
+        return event;
+    }
+
+private:
+    struct cached_string
+    {
+        std::optional<size_t> id;
+        std::string_view      value;
+    };
+
+    std::string_view resolve_string(const std::optional<size_t>& id,
+                                    cached_string&               cache) const
+    {
+        if(!id.has_value()) return {};
+        if(cache.id == id) return cache.value;
+
+        const auto it = m_catalog.strings_by_id.find(id.value());
+        cache         = { id,
+                  it != m_catalog.strings_by_id.end() ? std::string_view{ it->second }
+                                                              : std::string_view{} };
+        return cache.value;
+    }
+
+    reader_types::track_info_ptr_t resolve_track(
+        const data_storage::schema_v3::timeline_event_result& row)
+    {
+        if(row.track_id.has_value())
+        {
+            const auto it = m_catalog.sample_track_by_db_id.find(row.track_id.value());
+            if(it != m_catalog.sample_track_by_db_id.end() && it->second)
+            {
+                return it->second;
+            }
+        }
+
+        const topology_key_t topology{ row.nid,
+                                       row.pid.value_or(0),
+                                       row.tid.value_or(0) };
+        if(m_last_topology != topology)
+        {
+            const auto it = m_catalog.track_by_topology.find(topology);
+            m_last_topology_track =
+                it != m_catalog.track_by_topology.end() ? it->second : nullptr;
+            m_last_topology = topology;
+        }
+        return m_last_topology_track;
+    }
+
+    const reader_catalog_t&        m_catalog;
+    cached_string                  m_display_name;
+    cached_string                  m_category;
+    std::optional<topology_key_t>  m_last_topology;
+    reader_types::track_info_ptr_t m_last_topology_track;
+};
+
+using reader_types::event_type_t;
+
+constexpr std::array event_types{ event_type_t::region,
+                                  event_type_t::kernel_dispatch,
+                                  event_type_t::memory_allocate,
+                                  event_type_t::memory_copy };
+
+struct time_range
+{
+    size_t start;
+    size_t end;
+};
+
+std::optional<time_range>
+range_of(const reader_types::time_window_t& window)
+{
+    if(!window.start.has_value() || !window.end.has_value()) return std::nullopt;
+    return time_range{ window.start.value(), window.end.value() };
+}
+
+template <typename Fn>
+void
+for_each_selected_type(const reader_types::event_filter_t& filter, Fn&& fn)
+{
+    for(const auto type : event_types)
+    {
+        if(filter.types.empty() ||
+           std::find(filter.types.begin(), filter.types.end(), type) !=
+               filter.types.end())
+        {
+            fn(type);
+        }
+    }
+}
+
+const data_storage::schema_v3::read_statements::timeline_event_statement_set&
+statements_for(const data_storage::schema_v3::read_statements& stmts,
+               reader_types::event_type_t                      type)
+{
+    if(type == reader_types::event_type_t::kernel_dispatch)
+        return stmts.kernel_dispatch_statements();
+    if(type == reader_types::event_type_t::memory_allocate)
+        return stmts.memory_allocate_statements();
+    if(type == reader_types::event_type_t::memory_copy)
+        return stmts.memory_copy_statements();
+    return stmts.region_statements();
+}
+
+bool
+serves_events_of(reader_types::track_kind_t kind, event_type_t type)
+{
+    switch(kind)
+    {
+        case reader_types::track_kind_t::kernel_dispatch_agent_queue:
+            return type == event_type_t::kernel_dispatch;
+        case reader_types::track_kind_t::memory_allocate_agent_queue:
+            return type == event_type_t::memory_allocate;
+        case reader_types::track_kind_t::memory_copy_agent_queue:
+            return type == event_type_t::memory_copy;
+        case reader_types::track_kind_t::stream: return type != event_type_t::region;
+        case reader_types::track_kind_t::thread:
+        case reader_types::track_kind_t::thread_sample:
+        case reader_types::track_kind_t::pmc_agent: return false;
+    }
+    return false;
+}
+
+template <typename Base, typename Timed>
+size_t
+run_count(const Base& base, const Timed& timed, const std::optional<time_range>& range)
+{
+    auto results =
+        range ? timed(range->end, range->start).to_vector() : base().to_vector();
+    return results.empty() ? 0 : results.front().count;
+}
+
+size_t
+count_events(const data_storage::schema_v3::read_statements& stmts,
+             event_type_t                                    type,
+             const std::optional<time_range>&                range)
+{
+    switch(type)
+    {
+        case event_type_t::region:
+            return run_count(
+                stmts.region_count(), stmts.region_count_time_filtered(), range);
+        case event_type_t::kernel_dispatch:
+            return run_count(stmts.kernel_dispatch_count(),
+                             stmts.kernel_dispatch_count_time_filtered(),
+                             range);
+        case event_type_t::memory_copy:
+            return run_count(stmts.memory_copy_count(),
+                             stmts.memory_copy_count_time_filtered(),
+                             range);
+        case event_type_t::memory_allocate:
+            return run_count(stmts.memory_alloc_count(),
+                             stmts.memory_alloc_count_time_filtered(),
+                             range);
+        default: return 0;
+    }
+}
+
+}  // namespace
 
 reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
 : m_storage(storage ? std::move(storage)
@@ -26,569 +207,130 @@ reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
 , m_read_statements(
       std::make_shared<data_storage::schema_v3::read_statements>(m_backend,
                                                                  m_backend->get_uuid()))
+, m_catalog(std::make_shared<reader_catalog_t>())
 {
-    initialize_all_info_lists();
+    ensure_track_topology_indexes();
+    m_catalog->build_all(*m_read_statements);
+}
+
+reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage,
+                     std::shared_ptr<reader_catalog_t>        catalog)
+: m_storage(storage ? std::move(storage)
+                    : throw std::invalid_argument(
+                          "Provided pointer to a non-existing storage!"))
+, m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
+, m_read_statements(
+      std::make_shared<data_storage::schema_v3::read_statements>(m_backend,
+                                                                 m_backend->get_uuid()))
+, m_catalog(std::move(catalog))
+{}
+
+void
+reader_t::impl::ensure_track_topology_indexes()
+{
+    m_read_statements->create_track_topology_indexes();
 }
 
 void
-reader_t::impl::initialize_string_list()
+reader_t::impl::build_catalog_category(reader_t::catalog_category_t category,
+                                       reader_catalog_t&            catalog)
 {
-    const auto& statement   = m_read_statements->string_statement();
-    const auto  string_list = statement().to_vector();
-
-    m_string_info_utility.reserve(string_list.size());
-    for(const auto& string : string_list)
+    switch(category)
     {
-        m_string_info_utility.emplace(string.id, string.value);
+        case reader_t::catalog_category_t::string_list:
+            catalog.build_string_list(*m_read_statements);
+            break;
+        case reader_t::catalog_category_t::nodes:
+            catalog.build_nodes(*m_read_statements);
+            break;
+        case reader_t::catalog_category_t::processes:
+            catalog.build_processes(*m_read_statements);
+            break;
+        case reader_t::catalog_category_t::threads:
+            catalog.build_threads(*m_read_statements);
+            break;
+        case reader_t::catalog_category_t::agents:
+            catalog.build_agents(*m_read_statements);
+            break;
+        case reader_t::catalog_category_t::tracks:
+            catalog.build_tracks(*m_read_statements);
+            break;
+        case reader_t::catalog_category_t::code_objects:
+            catalog.build_code_objects(*m_read_statements);
+            break;
+        case reader_t::catalog_category_t::kernel_symbols:
+            catalog.build_kernel_symbols(*m_read_statements);
+            break;
+        case reader_t::catalog_category_t::streams:
+            catalog.build_streams(*m_read_statements);
+            break;
+        case reader_t::catalog_category_t::queues:
+            catalog.build_queues(*m_read_statements);
+            break;
+        case reader_t::catalog_category_t::pmc_infos:
+            catalog.build_pmc_infos(*m_read_statements);
+            break;
     }
-}
-
-void
-reader_t::impl::initialize_all_info_lists()
-{
-    initialize_string_list();
-    m_node_info_list          = get_all_nodes();
-    m_process_info_list       = get_all_processes();
-    m_thread_info_list        = get_all_threads();
-    m_agent_info_list         = get_all_agents();
-    m_code_object_info_list   = get_all_code_objects();
-    m_kernel_symbol_info_list = get_all_kernel_symbols();
-    m_stream_info_list        = get_all_streams();
-    m_queue_info_list         = get_all_queues();
-    m_pmc_info_list           = get_all_pmc_infos();
-    m_track_info_list         = get_all_tracks();
 }
 
 reader_types::node_info_list_t
 reader_t::impl::get_all_nodes()
 {
-    if(m_node_info_list.empty())
-    {
-        const auto& statement      = m_read_statements->node_info_statement();
-        const auto  node_info_list = statement().to_vector();
-
-        m_node_info_list.reserve(node_info_list.size());
-        for(const auto& node_info : node_info_list)
-        {
-            auto node_info_ptr           = std::make_shared<reader_types::node_info_t>();
-            node_info_ptr->node_id       = node_info.node_id;
-            node_info_ptr->hash          = node_info.hash;
-            node_info_ptr->machine_id    = node_info.machine_id;
-            node_info_ptr->system_name   = node_info.system_name;
-            node_info_ptr->hostname      = node_info.hostname;
-            node_info_ptr->release       = node_info.release;
-            node_info_ptr->version       = node_info.version;
-            node_info_ptr->hardware_name = node_info.hardware_name;
-            node_info_ptr->domain_name   = node_info.domain_name;
-
-            m_node_info_list.push_back(node_info_ptr);
-            m_node_info_utility.emplace(node_info.node_id, node_info_ptr);
-        }
-    }
-
-    return m_node_info_list;
+    return m_catalog->nodes;
 }
 
 reader_types::process_info_list_t
 reader_t::impl::get_all_processes()
 {
-    if(m_process_info_list.empty())
-    {
-        const auto& statement         = m_read_statements->process_info_statement();
-        const auto  process_info_list = statement().to_vector();
-
-        m_process_info_list.reserve(process_info_list.size());
-        for(const auto& process_info : process_info_list)
-        {
-            auto process_info_ptr     = std::make_shared<reader_types::process_info_t>();
-            process_info_ptr->ppid    = process_info.ppid;
-            process_info_ptr->pid     = process_info.pid;
-            process_info_ptr->init    = process_info.init;
-            process_info_ptr->fini    = process_info.fini;
-            process_info_ptr->start   = process_info.start;
-            process_info_ptr->end     = process_info.end;
-            process_info_ptr->command = process_info.command.value_or("");
-            process_info_ptr->environment = process_info.environment;
-            process_info_ptr->extdata     = process_info.extdata;
-
-            const auto node_it = m_node_info_utility.find(process_info.nid);
-            if(node_it != m_node_info_utility.end() && node_it->second)
-            {
-                process_info_ptr->node_info = node_it->second;
-            }
-
-            m_process_info_list.push_back(process_info_ptr);
-            m_process_info_utility.emplace(process_info.id, process_info_ptr);
-        }
-    }
-
-    return m_process_info_list;
+    return m_catalog->processes;
 }
 
 reader_types::thread_info_list_t
 reader_t::impl::get_all_threads()
 {
-    if(m_thread_info_list.empty())
-    {
-        const auto& statement        = m_read_statements->thread_info_statement();
-        const auto  thread_info_list = statement().to_vector();
-
-        m_thread_info_list.reserve(thread_info_list.size());
-        for(const auto& thread_info : thread_info_list)
-        {
-            auto thread_info_ptr = std::make_shared<reader_types::thread_info_t>();
-            thread_info_ptr->parent_process_id = thread_info.ppid;
-            thread_info_ptr->thread_id         = thread_info.tid;
-            thread_info_ptr->name              = thread_info.name.value_or("");
-            thread_info_ptr->start             = thread_info.start;
-            thread_info_ptr->end               = thread_info.end;
-            thread_info_ptr->extdata           = thread_info.extdata;
-
-            const auto node_it = m_node_info_utility.find(thread_info.nid);
-            if(node_it != m_node_info_utility.end() && node_it->second)
-            {
-                thread_info_ptr->node_info = node_it->second;
-            }
-
-            const auto process_it = m_process_info_utility.find(thread_info.pid);
-            if(process_it != m_process_info_utility.end() && process_it->second)
-            {
-                thread_info_ptr->process_info = process_it->second;
-            }
-
-            m_thread_info_list.push_back(thread_info_ptr);
-            m_thread_info_utility.emplace(thread_info.id, thread_info_ptr);
-        }
-    }
-
-    return m_thread_info_list;
+    return m_catalog->threads;
 }
+
 reader_types::agent_info_list_t
 reader_t::impl::get_all_agents()
 {
-    if(m_agent_info_list.empty())
-    {
-        const auto& statement       = m_read_statements->agent_info_statement();
-        const auto  agent_info_list = statement().to_vector();
-
-        m_agent_info_list.reserve(agent_info_list.size());
-        for(const auto& agent_info : agent_info_list)
-        {
-            if(!agent_info.type.has_value() || !agent_info.type_index.has_value())
-            {
-                LOG_ERROR("Corrupted database detected. Agent type or type index is not "
-                          "available for agent info with id: {}",
-                          agent_info.id);
-                continue;
-            }
-
-            auto agent_info_ptr        = std::make_shared<reader_types::agent_info_t>();
-            agent_info_ptr->agent_type = agent_info.type.value();
-            agent_info_ptr->type_index = agent_info.type_index.value();
-            agent_info_ptr->absolute_index = agent_info.absolute_index;
-            agent_info_ptr->logical_index  = agent_info.logical_index;
-            agent_info_ptr->uuid           = agent_info.uuid;
-            agent_info_ptr->name           = agent_info.name.value_or("");
-            agent_info_ptr->model_name     = agent_info.model_name.value_or("");
-            agent_info_ptr->vendor_name    = agent_info.vendor_name.value_or("");
-            agent_info_ptr->product_name   = agent_info.product_name.value_or("");
-            agent_info_ptr->user_name      = agent_info.user_name.value_or("");
-            agent_info_ptr->extdata        = agent_info.extdata;
-
-            auto node_it = m_node_info_utility.find(agent_info.nid);
-            if(node_it != m_node_info_utility.end() && node_it->second)
-            {
-                agent_info_ptr->node_info = node_it->second;
-            }
-
-            auto process_it = m_process_info_utility.find(agent_info.pid);
-            if(process_it != m_process_info_utility.end() && process_it->second)
-            {
-                agent_info_ptr->process_info = process_it->second;
-            }
-
-            m_agent_info_list.push_back(agent_info_ptr);
-            m_agent_info_utility.emplace(agent_info.id, agent_info_ptr);
-        }
-    }
-
-    return m_agent_info_list;
+    return m_catalog->agents;
 }
 
 reader_types::track_info_list_t
 reader_t::impl::get_all_tracks()
 {
-    if(m_track_info_list.empty())
-    {
-        const auto& statement       = m_read_statements->track_info_statement();
-        const auto  track_info_list = statement().to_vector();
-
-        m_track_info_list.reserve(track_info_list.size());
-        for(const auto& track_info : track_info_list)
-        {
-            const char* track_name = nullptr;
-            if(track_info.name_id.has_value())
-            {
-                const auto track_name_ptr =
-                    m_string_info_utility.find(track_info.name_id.value());
-                if(track_name_ptr == m_string_info_utility.end())
-                {
-                    LOG_ERROR(
-                        "Corrupted database detected. Track name is not available for "
-                        "track info with id: {}",
-                        track_info.id);
-                }
-                else
-                {
-                    track_name = track_name_ptr->second.c_str();
-                }
-            }
-
-            auto track_info_ptr     = std::make_shared<reader_types::track_info_t>();
-            track_info_ptr->name    = track_name != nullptr ? track_name : "";
-            track_info_ptr->extdata = track_info.extdata;
-
-            auto node_it = m_node_info_utility.find(track_info.nid);
-            if(node_it != m_node_info_utility.end() && node_it->second)
-            {
-                track_info_ptr->node_info = node_it->second;
-            }
-
-            if(track_info.pid.has_value())
-            {
-                auto process_it = m_process_info_utility.find(track_info.pid.value());
-                if(process_it != m_process_info_utility.end() && process_it->second)
-                {
-                    track_info_ptr->process_info = process_it->second;
-                }
-            }
-
-            if(track_info.tid.has_value())
-            {
-                auto thread_it = m_thread_info_utility.find(track_info.tid.value());
-                if(thread_it != m_thread_info_utility.end() && thread_it->second)
-                {
-                    track_info_ptr->thread_info = thread_it->second;
-                }
-            }
-
-            m_track_info_list.push_back(track_info_ptr);
-            m_track_info_utility.emplace(track_info.id, track_info_ptr);
-            m_track_ptr_to_db_id.emplace(track_info_ptr, track_info.id);
-
-            topology_key_t topo{ track_info.nid,
-                                 track_info.pid.value_or(0),
-                                 track_info.tid.value_or(0) };
-            m_track_ptr_to_topology.emplace(track_info_ptr, topo);
-            m_topology_to_track_ptr.emplace(topo, track_info_ptr);
-        }
-    }
-
-    return m_track_info_list;
+    return m_catalog->tracks;
 }
 
 reader_types::kernel_symbol_info_list_t
 reader_t::impl::get_all_kernel_symbols()
 {
-    if(m_kernel_symbol_info_list.empty())
-    {
-        const auto& statement = m_read_statements->kernel_symbol_info_statement();
-        const auto  kernel_symbol_info_list = statement().to_vector();
-
-        m_kernel_symbol_info_list.reserve(kernel_symbol_info_list.size());
-        for(const auto& kernel_symbol_info : kernel_symbol_info_list)
-        {
-            auto kernel_symbol_info_ptr =
-                std::make_shared<reader_types::kernel_symbol_info_t>();
-            kernel_symbol_info_ptr->id   = kernel_symbol_info.id;
-            kernel_symbol_info_ptr->name = kernel_symbol_info.kernel_name.value_or("");
-            kernel_symbol_info_ptr->display_name =
-                kernel_symbol_info.display_name.value_or("");
-            kernel_symbol_info_ptr->kernel_object = kernel_symbol_info.kernel_object;
-            kernel_symbol_info_ptr->kernarg_segment_size =
-                kernel_symbol_info.kernarg_segment_size;
-            kernel_symbol_info_ptr->kernarg_segment_alignment =
-                kernel_symbol_info.kernarg_segment_alignment;
-            kernel_symbol_info_ptr->group_segment_size =
-                kernel_symbol_info.group_segment_size;
-            kernel_symbol_info_ptr->private_segment_size =
-                kernel_symbol_info.private_segment_size;
-            kernel_symbol_info_ptr->sgpr_count      = kernel_symbol_info.sgpr_count;
-            kernel_symbol_info_ptr->arch_vgpr_count = kernel_symbol_info.arch_vgpr_count;
-            kernel_symbol_info_ptr->accum_vgpr_count =
-                kernel_symbol_info.accum_vgpr_count;
-            kernel_symbol_info_ptr->extdata = kernel_symbol_info.extdata;
-
-            auto node_it = m_node_info_utility.find(kernel_symbol_info.nid);
-            if(node_it != m_node_info_utility.end() && node_it->second)
-            {
-                kernel_symbol_info_ptr->node_info = node_it->second;
-            }
-
-            auto process_it = m_process_info_utility.find(kernel_symbol_info.pid);
-            if(process_it != m_process_info_utility.end() && process_it->second)
-            {
-                kernel_symbol_info_ptr->process_info = process_it->second;
-            }
-
-            auto code_object_it =
-                m_code_object_info_utility.find(kernel_symbol_info.code_object_id);
-            if(code_object_it != m_code_object_info_utility.end() &&
-               code_object_it->second)
-            {
-                kernel_symbol_info_ptr->code_object_info = code_object_it->second;
-            }
-
-            m_kernel_symbol_info_list.push_back(kernel_symbol_info_ptr);
-            m_kernel_symbol_info_utility.emplace(kernel_symbol_info.id,
-                                                 kernel_symbol_info_ptr);
-        }
-    }
-
-    return m_kernel_symbol_info_list;
+    return m_catalog->kernel_symbols;
 }
 
 reader_types::code_object_info_list_t
 reader_t::impl::get_all_code_objects()
 {
-    if(m_code_object_info_list.empty())
-    {
-        const auto& statement = m_read_statements->code_object_info_statement();
-        const auto  code_object_info_list = statement().to_vector();
-
-        m_code_object_info_list.reserve(code_object_info_list.size());
-        for(const auto& code_object_info : code_object_info_list)
-        {
-            auto code_object_info_ptr =
-                std::make_shared<reader_types::code_object_info_t>();
-            code_object_info_ptr->id         = code_object_info.id;
-            code_object_info_ptr->uri        = code_object_info.uri.value_or("");
-            code_object_info_ptr->load_base  = code_object_info.load_base;
-            code_object_info_ptr->load_size  = code_object_info.load_size;
-            code_object_info_ptr->load_delta = code_object_info.load_delta;
-            code_object_info_ptr->storage_type =
-                code_object_info.storage_type.value_or("");
-            code_object_info_ptr->extdata = code_object_info.extdata;
-
-            auto node_it = m_node_info_utility.find(code_object_info.nid);
-            if(node_it != m_node_info_utility.end() && node_it->second)
-            {
-                code_object_info_ptr->node_info = node_it->second;
-            }
-
-            auto process_it = m_process_info_utility.find(code_object_info.pid);
-            if(process_it != m_process_info_utility.end() && process_it->second)
-            {
-                code_object_info_ptr->process_info = process_it->second;
-            }
-
-            if(code_object_info.agent_id.has_value())
-            {
-                auto agent_it =
-                    m_agent_info_utility.find(code_object_info.agent_id.value());
-                if(agent_it != m_agent_info_utility.end() && agent_it->second)
-                {
-                    code_object_info_ptr->agent_info = agent_it->second;
-                }
-            }
-
-            m_code_object_info_list.push_back(code_object_info_ptr);
-            m_code_object_info_utility.emplace(code_object_info.id, code_object_info_ptr);
-        }
-    }
-
-    return m_code_object_info_list;
+    return m_catalog->code_objects;
 }
 
 reader_types::stream_info_list_t
 reader_t::impl::get_all_streams()
 {
-    if(m_stream_info_list.empty())
-    {
-        const auto& statement        = m_read_statements->stream_info_statement();
-        const auto  stream_info_list = statement().to_vector();
-
-        m_stream_info_list.reserve(stream_info_list.size());
-        for(const auto& stream_info : stream_info_list)
-        {
-            auto stream_info_ptr       = std::make_shared<reader_types::stream_info_t>();
-            stream_info_ptr->stream_id = stream_info.id;
-            stream_info_ptr->name      = stream_info.name.value_or("");
-            stream_info_ptr->extdata   = stream_info.extdata;
-
-            auto node_it = m_node_info_utility.find(stream_info.nid);
-            if(node_it != m_node_info_utility.end() && node_it->second)
-            {
-                stream_info_ptr->node_info = node_it->second;
-            }
-
-            auto process_it = m_process_info_utility.find(stream_info.pid);
-            if(process_it != m_process_info_utility.end() && process_it->second)
-            {
-                stream_info_ptr->process_info = process_it->second;
-            }
-
-            m_stream_info_list.push_back(stream_info_ptr);
-            m_stream_info_utility.emplace(stream_info.id, stream_info_ptr);
-        }
-    }
-
-    return m_stream_info_list;
+    return m_catalog->streams;
 }
 
 reader_types::queue_info_list_t
 reader_t::impl::get_all_queues()
 {
-    if(m_queue_info_list.empty())
-    {
-        const auto& statement       = m_read_statements->queue_info_statement();
-        const auto  queue_info_list = statement().to_vector();
-
-        m_queue_info_list.reserve(queue_info_list.size());
-        for(const auto& queue_info : queue_info_list)
-        {
-            auto queue_info_ptr      = std::make_shared<reader_types::queue_info_t>();
-            queue_info_ptr->queue_id = queue_info.id;
-            queue_info_ptr->name     = queue_info.name.value_or("");
-            queue_info_ptr->extdata  = queue_info.extdata;
-
-            auto node_it = m_node_info_utility.find(queue_info.nid);
-            if(node_it != m_node_info_utility.end() && node_it->second)
-            {
-                queue_info_ptr->node_info = node_it->second;
-            }
-
-            auto process_it = m_process_info_utility.find(queue_info.pid);
-            if(process_it != m_process_info_utility.end() && process_it->second)
-            {
-                queue_info_ptr->process_info = process_it->second;
-            }
-
-            m_queue_info_list.push_back(queue_info_ptr);
-            m_queue_info_utility.emplace(queue_info.id, queue_info_ptr);
-        }
-    }
-
-    return m_queue_info_list;
+    return m_catalog->queues;
 }
 
 reader_types::pmc_info_list_t
 reader_t::impl::get_all_pmc_infos()
 {
-    if(m_pmc_info_list.empty())
-    {
-        const auto& statement     = m_read_statements->pmc_info_statement();
-        const auto  pmc_info_list = statement().to_vector();
-
-        m_pmc_info_list.reserve(pmc_info_list.size());
-        for(const auto& pmc_info : pmc_info_list)
-        {
-            auto pmc_info_ptr  = std::make_shared<reader_types::pmc_info_t>();
-            pmc_info_ptr->name = pmc_info.name;
-
-            pmc_info_ptr->target_arch      = pmc_info.target_arch.value_or("");
-            pmc_info_ptr->event_code       = pmc_info.event_code;
-            pmc_info_ptr->instance_id      = pmc_info.instance_id;
-            pmc_info_ptr->symbol           = pmc_info.symbol;
-            pmc_info_ptr->description      = pmc_info.description.value_or("");
-            pmc_info_ptr->long_description = pmc_info.long_description.value_or("");
-            pmc_info_ptr->component        = pmc_info.component.value_or("");
-            pmc_info_ptr->units            = pmc_info.units.value_or("");
-            pmc_info_ptr->value_type       = pmc_info.value_type.value_or("");
-            pmc_info_ptr->block            = pmc_info.block.value_or("");
-            pmc_info_ptr->expression       = pmc_info.expression.value_or("");
-            pmc_info_ptr->is_constant      = pmc_info.is_constant;
-            pmc_info_ptr->is_derived       = pmc_info.is_derived;
-            pmc_info_ptr->extdata          = pmc_info.extdata;
-
-            auto node_it = m_node_info_utility.find(pmc_info.nid);
-            if(node_it != m_node_info_utility.end() && node_it->second)
-            {
-                pmc_info_ptr->node_info = node_it->second;
-            }
-
-            auto process_it = m_process_info_utility.find(pmc_info.pid);
-            if(process_it != m_process_info_utility.end() && process_it->second)
-            {
-                pmc_info_ptr->process_info = process_it->second;
-            }
-
-            if(pmc_info.agent_id.has_value())
-            {
-                auto agent_it = m_agent_info_utility.find(pmc_info.agent_id.value());
-                if(agent_it != m_agent_info_utility.end() && agent_it->second)
-                {
-                    pmc_info_ptr->agent_info = agent_it->second;
-                }
-            }
-
-            m_pmc_info_list.push_back(pmc_info_ptr);
-            m_pmc_info_utility.emplace(pmc_info.id, pmc_info_ptr);
-        }
-    }
-
-    return m_pmc_info_list;
-}
-
-reader_types::timeline_event_list_t
-reader_t::impl::build_timeline_events(
-    const std::vector<data_storage::schema_v3::timeline_event_result>& results,
-    reader_types::event_type_t                                         type)
-{
-    reader_types::timeline_event_list_t events;
-    events.reserve(results.size());
-
-    for(const auto& result : results)
-    {
-        reader_types::timeline_event_t event;
-        event.unique_identifier = { result.id, type };
-        event.start_timestamp   = result.start_timestamp;
-        event.end_timestamp     = result.end_timestamp;
-
-        if(result.display_name_id.has_value())
-        {
-            auto it = m_string_info_utility.find(result.display_name_id.value());
-            if(it != m_string_info_utility.end())
-            {
-                event.display_name = it->second;
-            }
-        }
-
-        if(result.category_id.has_value())
-        {
-            auto it = m_string_info_utility.find(result.category_id.value());
-            if(it != m_string_info_utility.end())
-            {
-                event.category = it->second;
-            }
-        }
-
-        // Track resolution: try sample-based track_id first, fall back to topology
-        if(result.track_id.has_value())
-        {
-            auto it = m_track_info_utility.find(result.track_id.value());
-            if(it != m_track_info_utility.end())
-            {
-                event.track = it->second;
-            }
-        }
-
-        if(!event.track)
-        {
-            topology_key_t topo{ result.nid,
-                                 result.pid.value_or(0),
-                                 result.tid.value_or(0) };
-            auto           it = m_topology_to_track_ptr.find(topo);
-            if(it != m_topology_to_track_ptr.end())
-            {
-                event.track = it->second;
-            }
-        }
-
-        events.push_back(std::move(event));
-    }
-
-    return events;
+    return m_catalog->pmc_infos;
 }
 
 void
@@ -621,61 +363,25 @@ reader_t::impl::get_events(const reader_types::event_filter_t& filter)
 {
     reader_types::timeline_event_list_t all_events;
 
-    bool query_all    = filter.types.empty();
-    auto should_query = [&](reader_types::event_type_t t) {
-        return query_all || std::find(filter.types.begin(), filter.types.end(), t) !=
-                                filter.types.end();
-    };
+    const auto             range = range_of(filter.time_window);
+    timeline_event_builder build_event{ *m_catalog };
 
-    bool has_time =
-        filter.time_window.start.has_value() && filter.time_window.end.has_value();
+    for_each_selected_type(filter, [&](event_type_t type) {
+        const auto append =
+            [&](const data_storage::schema_v3::timeline_event_result& row) {
+                all_events.push_back(build_event(row, type));
+            };
 
-    auto query_event_type =
-        [&](const data_storage::schema_v3::read_statements::timeline_event_statement_set&
-                                       stmts,
-            reader_types::event_type_t type) {
-            std::vector<data_storage::schema_v3::timeline_event_result> results;
-            if(has_time)
-            {
-                results = stmts
-                              .time_filtered(filter.time_window.end.value(),
-                                             filter.time_window.start.value())
-                              .to_vector();
-            }
-            else
-            {
-                results = stmts.base().to_vector();
-            }
-
-            auto events = build_timeline_events(results, type);
-            all_events.insert(all_events.end(),
-                              std::make_move_iterator(events.begin()),
-                              std::make_move_iterator(events.end()));
-        };
-
-    if(should_query(reader_types::event_type_t::region))
-    {
-        query_event_type(m_read_statements->region_statements(),
-                         reader_types::event_type_t::region);
-    }
-
-    if(should_query(reader_types::event_type_t::kernel_dispatch))
-    {
-        query_event_type(m_read_statements->kernel_dispatch_statements(),
-                         reader_types::event_type_t::kernel_dispatch);
-    }
-
-    if(should_query(reader_types::event_type_t::memory_allocate))
-    {
-        query_event_type(m_read_statements->memory_allocate_statements(),
-                         reader_types::event_type_t::memory_allocate);
-    }
-
-    if(should_query(reader_types::event_type_t::memory_copy))
-    {
-        query_event_type(m_read_statements->memory_copy_statements(),
-                         reader_types::event_type_t::memory_copy);
-    }
+        const auto& stmts = statements_for(*m_read_statements, type);
+        if(range)
+        {
+            stmts.time_filtered(range->end, range->start).for_each(append);
+        }
+        else
+        {
+            stmts.base().for_each(append);
+        }
+    });
 
     apply_pagination(all_events, filter.pagination);
     return all_events;
@@ -687,123 +393,222 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
 {
     if(!track) return {};
 
-    auto topo_it = m_track_ptr_to_topology.find(track);
-    if(topo_it == m_track_ptr_to_topology.end()) return {};
+    switch(track->category)
+    {
+        case reader_types::track_kind_t::kernel_dispatch_agent_queue:
+        case reader_types::track_kind_t::memory_allocate_agent_queue:
+        case reader_types::track_kind_t::memory_copy_agent_queue:
+        case reader_types::track_kind_t::stream:
+            return get_category_track_events(track, filter);
+        case reader_types::track_kind_t::thread:
+        case reader_types::track_kind_t::thread_sample:
+        case reader_types::track_kind_t::pmc_agent: break;
+    }
 
-    auto db_id_it = m_track_ptr_to_db_id.find(track);
-    if(db_id_it == m_track_ptr_to_db_id.end()) return {};
+    auto topo_it = m_catalog->topology_by_track.find(track);
+    if(topo_it == m_catalog->topology_by_track.end()) return {};
+
+    auto db_id_it = m_catalog->db_id_by_track.find(track);
+    if(db_id_it == m_catalog->db_id_by_track.end()) return {};
 
     const auto& topo  = topo_it->second;
     auto        db_id = db_id_it->second;
 
     reader_types::timeline_event_list_t all_events;
 
-    bool query_all    = filter.types.empty();
-    auto should_query = [&](reader_types::event_type_t t) {
-        return query_all || std::find(filter.types.begin(), filter.types.end(), t) !=
-                                filter.types.end();
-    };
-
-    bool has_time =
-        filter.time_window.start.has_value() && filter.time_window.end.has_value();
-
-    auto query_event_type =
-        [&](const data_storage::schema_v3::read_statements::timeline_event_statement_set&
-                                       stmts,
-            reader_types::event_type_t type) {
-            std::vector<data_storage::schema_v3::timeline_event_result> results;
-            if(has_time)
-            {
-                results = stmts
-                              .track_and_time_filtered(topo.nid,
-                                                       topo.pid,
-                                                       topo.tid,
-                                                       db_id,
-                                                       filter.time_window.end.value(),
-                                                       filter.time_window.start.value())
-                              .to_vector();
-            }
-            else
-            {
-                results =
-                    stmts.track_filtered(topo.nid, topo.pid, topo.tid, db_id).to_vector();
-            }
-
-            auto events = build_timeline_events(results, type);
-            all_events.insert(all_events.end(),
-                              std::make_move_iterator(events.begin()),
-                              std::make_move_iterator(events.end()));
-        };
-
-    if(should_query(reader_types::event_type_t::region))
+    const auto range = range_of(filter.time_window);
+    if(!range)
     {
-        query_event_type(m_read_statements->region_statements(),
-                         reader_types::event_type_t::region);
+        all_events.reserve(track->event_count);
     }
 
-    if(should_query(reader_types::event_type_t::kernel_dispatch))
-    {
-        query_event_type(m_read_statements->kernel_dispatch_statements(),
-                         reader_types::event_type_t::kernel_dispatch);
-    }
+    timeline_event_builder build_event{ *m_catalog };
 
-    if(should_query(reader_types::event_type_t::memory_allocate))
-    {
-        query_event_type(m_read_statements->memory_allocate_statements(),
-                         reader_types::event_type_t::memory_allocate);
-    }
+    for_each_selected_type(filter, [&](event_type_t type) {
+        const auto append =
+            [&](const data_storage::schema_v3::timeline_event_result& row) {
+                all_events.push_back(build_event(row, type));
+            };
 
-    if(should_query(reader_types::event_type_t::memory_copy))
-    {
-        query_event_type(m_read_statements->memory_copy_statements(),
-                         reader_types::event_type_t::memory_copy);
-    }
+        const auto& stmts = statements_for(*m_read_statements, type);
+        if(range)
+        {
+            stmts
+                .track_and_time_filtered(topo.nid,
+                                         topo.pid,
+                                         topo.tid,
+                                         range->end,
+                                         range->start,
+                                         db_id,
+                                         range->end,
+                                         range->start)
+                .for_each(append);
+        }
+        else
+        {
+            stmts.track_filtered(topo.nid, topo.pid, topo.tid, db_id).for_each(append);
+        }
+    });
 
     apply_pagination(all_events, filter.pagination);
     return all_events;
 }
 
-size_t
-reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
+std::optional<std::pair<size_t, size_t>>
+reader_t::impl::get_event_id_span(reader_types::event_type_t type)
 {
-    const bool query_all    = filter.types.empty();
-    auto       should_count = [&](reader_types::event_type_t t) {
-        return query_all || std::find(filter.types.begin(), filter.types.end(), t) !=
-                                filter.types.end();
-    };
+    const auto rows = statements_for(*m_read_statements, type).id_span().to_vector();
+    if(rows.empty() || !rows.front().min_id.has_value() ||
+       !rows.front().max_id.has_value())
+        return std::nullopt;
+    return std::pair{ rows.front().min_id.value(), rows.front().max_id.value() };
+}
+
+void
+reader_t::impl::visit_track_events_in_id_range(
+    const reader_types::track_info_ptr_t& track,
+    reader_types::event_type_t            type,
+    size_t                                id_begin,
+    size_t                                id_end,
+    reader_t::event_visitor_t             visitor,
+    void*                                 context)
+{
+    const auto topo_it = m_catalog->topology_by_track.find(track);
+    if(topo_it == m_catalog->topology_by_track.end()) return;
+    const auto& topo = topo_it->second;
+
+    std::optional<size_t> last_id;
+    std::string_view      last_name;
+
+    statements_for(*m_read_statements, type)
+        .track_range_filtered(topo.nid, topo.pid, topo.tid, id_begin, id_end)
+        .for_each([&](const data_storage::schema_v3::event_range_result& row) {
+            std::string_view name;
+            if(row.display_name_id.has_value())
+            {
+                if(last_id != row.display_name_id)
+                {
+                    const auto it = m_catalog->strings_by_id.find(*row.display_name_id);
+                    last_name     = it != m_catalog->strings_by_id.end()
+                                        ? std::string_view{ it->second }
+                                        : std::string_view{};
+                    last_id       = row.display_name_id;
+                }
+                name = last_name;
+            }
+            visitor(context, row.start_timestamp, row.end_timestamp, name);
+        });
+}
+
+reader_types::timeline_event_list_t
+reader_t::impl::get_category_track_events(const reader_types::track_info_ptr_t& track,
+                                          const reader_types::event_filter_t&   filter)
+{
+    if(!track->node_info) return {};
+    const auto nid = track->node_info->node_id;
+
+    reader_types::timeline_event_list_t all_events;
+
+    const auto range     = range_of(filter.time_window);
+    const bool is_stream = track->category == reader_types::track_kind_t::stream;
+    timeline_event_builder build_event{ *m_catalog };
+
+    for_each_selected_type(filter, [&](event_type_t type) {
+        if(!serves_events_of(track->category, type)) return;
+
+        const auto append =
+            [&](const data_storage::schema_v3::timeline_event_result& row) {
+                all_events.push_back(build_event(row, type));
+            };
+
+        const auto& stmts = statements_for(*m_read_statements, type);
+        if(is_stream)
+        {
+            if(range && stmts.stream_time_filtered)
+            {
+                stmts
+                    .stream_time_filtered(
+                        nid, track->db_pid, track->stream_id, range->end, range->start)
+                    .for_each(append);
+            }
+            else if(!range && stmts.stream_filtered)
+            {
+                stmts.stream_filtered(nid, track->db_pid, track->stream_id)
+                    .for_each(append);
+            }
+        }
+        else if(range && stmts.agent_queue_time_filtered)
+        {
+            stmts
+                .agent_queue_time_filtered(
+                    nid, track->agent_id, track->queue_id, range->end, range->start)
+                .for_each(append);
+        }
+        else if(!range && stmts.agent_queue_filtered)
+        {
+            stmts.agent_queue_filtered(nid, track->agent_id, track->queue_id)
+                .for_each(append);
+        }
+    });
+
+    apply_pagination(all_events, filter.pagination);
+    return all_events;
+}
+
+reader_types::counter_timeline_event_list_t
+reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t      track,
+                                             const reader_types::event_filter_t& filter)
+{
+    if(!track || !track->node_info) return {};
+    if(track->category != reader_types::track_kind_t::pmc_agent) return {};
+
+    const auto nid = track->node_info->node_id;
 
     const bool has_time =
         filter.time_window.start.has_value() && filter.time_window.end.has_value();
 
-    auto run_count = [&](const auto& base_stmt, const auto& time_stmt) -> size_t {
-        auto results = has_time ? time_stmt(filter.time_window.end.value(),
-                                            filter.time_window.start.value())
-                                      .to_vector()
-                                : base_stmt().to_vector();
-        return results.empty() ? 0 : results.front().count;
-    };
+    std::vector<data_storage::schema_v3::pmc_sample_result> results;
+    if(has_time)
+    {
+        results =
+            m_read_statements
+                ->pmc_sample_time_filtered_statement()(nid,
+                                                       track->agent_id,
+                                                       track->pmc_id,
+                                                       filter.time_window.start.value(),
+                                                       filter.time_window.end.value())
+                .to_vector();
+    }
+    else
+    {
+        results =
+            m_read_statements->pmc_sample_statement()(nid, track->agent_id, track->pmc_id)
+                .to_vector();
+    }
+
+    reader_types::counter_timeline_event_list_t events;
+    events.reserve(results.size());
+    for(const auto& result : results)
+    {
+        events.push_back(
+            reader_types::counter_timeline_event_t{ .unique_identifier = {},
+                                                    .timestamp         = result.timestamp,
+                                                    .value             = result.value,
+                                                    .track             = track });
+    }
+
+    return events;
+}
+
+size_t
+reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
+{
+    const auto range = range_of(filter.time_window);
 
     size_t total = 0;
-    if(should_count(reader_types::event_type_t::region))
-    {
-        total += run_count(m_read_statements->region_count(),
-                           m_read_statements->region_count_time_filtered());
-    }
-    if(should_count(reader_types::event_type_t::kernel_dispatch))
-    {
-        total += run_count(m_read_statements->kernel_dispatch_count(),
-                           m_read_statements->kernel_dispatch_count_time_filtered());
-    }
-    if(should_count(reader_types::event_type_t::memory_copy))
-    {
-        total += run_count(m_read_statements->memory_copy_count(),
-                           m_read_statements->memory_copy_count_time_filtered());
-    }
-    if(should_count(reader_types::event_type_t::memory_allocate))
-    {
-        total += run_count(m_read_statements->memory_alloc_count(),
-                           m_read_statements->memory_alloc_count_time_filtered());
-    }
+    for_each_selected_type(filter, [&](event_type_t type) {
+        total += count_events(*m_read_statements, type, range);
+    });
     return total;
 }
 
@@ -850,8 +655,8 @@ reader_t::impl::build_event_data(
 
     if(event_meta.category_id.has_value())
     {
-        auto it = m_string_info_utility.find(event_meta.category_id.value());
-        if(it != m_string_info_utility.end())
+        auto it = m_catalog->strings_by_id.find(event_meta.category_id.value());
+        if(it != m_catalog->strings_by_id.end())
         {
             event_data->event_category = it->second;
         }
@@ -893,8 +698,8 @@ reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
 
     if(r.name_id.has_value())
     {
-        auto it = m_string_info_utility.find(r.name_id.value());
-        if(it != m_string_info_utility.end())
+        auto it = m_catalog->strings_by_id.find(r.name_id.value());
+        if(it != m_catalog->strings_by_id.end())
         {
             data.name = it->second;
         }
@@ -940,14 +745,14 @@ reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t
 
     if(r.region_name_id.has_value())
     {
-        auto it = m_string_info_utility.find(r.region_name_id.value());
-        if(it != m_string_info_utility.end()) data.name = it->second;
+        auto it = m_catalog->strings_by_id.find(r.region_name_id.value());
+        if(it != m_catalog->strings_by_id.end()) data.name = it->second;
     }
 
     if(r.kernel_id.has_value())
     {
-        auto it = m_kernel_symbol_info_utility.find(r.kernel_id.value());
-        if(it != m_kernel_symbol_info_utility.end())
+        auto it = m_catalog->kernel_symbols_by_id.find(r.kernel_id.value());
+        if(it != m_catalog->kernel_symbols_by_id.end())
         {
             data.kernel_symbol_info = it->second;
             if(it->second && it->second->code_object_info)
@@ -955,19 +760,19 @@ reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t
         }
     }
 
-    auto node_it = m_node_info_utility.find(r.nid);
-    if(node_it != m_node_info_utility.end()) data.node_info = node_it->second;
+    auto node_it = m_catalog->nodes_by_id.find(r.nid);
+    if(node_it != m_catalog->nodes_by_id.end()) data.node_info = node_it->second;
 
     if(r.pid.has_value())
     {
-        auto it = m_process_info_utility.find(r.pid.value());
-        if(it != m_process_info_utility.end()) data.process_info = it->second;
+        auto it = m_catalog->processes_by_id.find(r.pid.value());
+        if(it != m_catalog->processes_by_id.end()) data.process_info = it->second;
     }
 
     if(r.tid.has_value())
     {
-        auto it = m_thread_info_utility.find(r.tid.value());
-        if(it != m_thread_info_utility.end()) data.thread_info = it->second;
+        auto it = m_catalog->threads_by_id.find(r.tid.value());
+        if(it != m_catalog->threads_by_id.end()) data.thread_info = it->second;
     }
 
     if(r.event_id.has_value())
@@ -1001,41 +806,41 @@ reader_t::impl::get_memory_copy_details(const reader_types::timeline_event_t& ev
 
     if(r.name_id.has_value())
     {
-        auto it = m_string_info_utility.find(r.name_id.value());
-        if(it != m_string_info_utility.end()) data.name = it->second;
+        auto it = m_catalog->strings_by_id.find(r.name_id.value());
+        if(it != m_catalog->strings_by_id.end()) data.name = it->second;
     }
 
     if(r.region_name_id.has_value())
     {
-        auto it = m_string_info_utility.find(r.region_name_id.value());
-        if(it != m_string_info_utility.end()) data.region_name = it->second;
+        auto it = m_catalog->strings_by_id.find(r.region_name_id.value());
+        if(it != m_catalog->strings_by_id.end()) data.region_name = it->second;
     }
 
     if(r.dst_agent_id.has_value())
     {
-        auto it = m_agent_info_utility.find(r.dst_agent_id.value());
-        if(it != m_agent_info_utility.end()) data.dst_agent_id = it->second;
+        auto it = m_catalog->agents_by_id.find(r.dst_agent_id.value());
+        if(it != m_catalog->agents_by_id.end()) data.dst_agent_id = it->second;
     }
 
     if(r.src_agent_id.has_value())
     {
-        auto it = m_agent_info_utility.find(r.src_agent_id.value());
-        if(it != m_agent_info_utility.end()) data.src_agent_id = it->second;
+        auto it = m_catalog->agents_by_id.find(r.src_agent_id.value());
+        if(it != m_catalog->agents_by_id.end()) data.src_agent_id = it->second;
     }
 
-    auto node_it = m_node_info_utility.find(r.nid);
-    if(node_it != m_node_info_utility.end()) data.node_info = node_it->second;
+    auto node_it = m_catalog->nodes_by_id.find(r.nid);
+    if(node_it != m_catalog->nodes_by_id.end()) data.node_info = node_it->second;
 
     if(r.pid.has_value())
     {
-        auto it = m_process_info_utility.find(r.pid.value());
-        if(it != m_process_info_utility.end()) data.process_info = it->second;
+        auto it = m_catalog->processes_by_id.find(r.pid.value());
+        if(it != m_catalog->processes_by_id.end()) data.process_info = it->second;
     }
 
     if(r.tid.has_value())
     {
-        auto it = m_thread_info_utility.find(r.tid.value());
-        if(it != m_thread_info_utility.end()) data.thread_info = it->second;
+        auto it = m_catalog->threads_by_id.find(r.tid.value());
+        if(it != m_catalog->threads_by_id.end()) data.thread_info = it->second;
     }
 
     if(r.event_id.has_value())
@@ -1068,19 +873,19 @@ reader_t::impl::get_memory_alloc_details(const reader_types::timeline_event_t& e
     data.size            = r.size;
     data.extdata         = r.extdata;
 
-    auto node_it = m_node_info_utility.find(r.nid);
-    if(node_it != m_node_info_utility.end()) data.node_info = node_it->second;
+    auto node_it = m_catalog->nodes_by_id.find(r.nid);
+    if(node_it != m_catalog->nodes_by_id.end()) data.node_info = node_it->second;
 
     if(r.pid.has_value())
     {
-        auto it = m_process_info_utility.find(r.pid.value());
-        if(it != m_process_info_utility.end()) data.process_info = it->second;
+        auto it = m_catalog->processes_by_id.find(r.pid.value());
+        if(it != m_catalog->processes_by_id.end()) data.process_info = it->second;
     }
 
     if(r.tid.has_value())
     {
-        auto it = m_thread_info_utility.find(r.tid.value());
-        if(it != m_thread_info_utility.end()) data.thread_info = it->second;
+        auto it = m_catalog->threads_by_id.find(r.tid.value());
+        if(it != m_catalog->threads_by_id.end()) data.thread_info = it->second;
     }
 
     if(r.event_id.has_value())
@@ -1151,12 +956,13 @@ reader_t::impl::get_correlated_events(const reader_types::timeline_event_t& even
 
     const auto& stmts = m_read_statements->correlated_event_statements();
 
+    timeline_event_builder build_event{ *m_catalog };
+
     auto query_type = [&](const auto& stmt, reader_types::event_type_t type) {
-        auto results = stmt(stack_id, excluded_event_id).to_vector();
-        auto events  = build_timeline_events(results, type);
-        all_events.insert(all_events.end(),
-                          std::make_move_iterator(events.begin()),
-                          std::make_move_iterator(events.end()));
+        stmt(stack_id, excluded_event_id)
+            .for_each([&](const data_storage::schema_v3::timeline_event_result& row) {
+                all_events.push_back(build_event(row, type));
+            });
     };
 
     query_type(stmts.region, reader_types::event_type_t::region);
@@ -1209,28 +1015,13 @@ reader_t::impl::get_data_time_range()
 reader_types::event_counts_t
 reader_t::impl::get_event_counts(const reader_types::time_window_t& window)
 {
-    const bool has_time = window.start.has_value() && window.end.has_value();
-
-    auto get_count = [&](const auto& base_stmt, const auto& time_stmt) -> size_t {
-        auto results =
-            has_time ? time_stmt(window.end.value(), window.start.value()).to_vector()
-                     : base_stmt().to_vector();
-        return results.empty() ? 0 : results.front().count;
-    };
+    const auto range = range_of(window);
 
     reader_types::event_counts_t counts;
-    counts[reader_types::event_type_t::region] =
-        get_count(m_read_statements->region_count(),
-                  m_read_statements->region_count_time_filtered());
-    counts[reader_types::event_type_t::kernel_dispatch] =
-        get_count(m_read_statements->kernel_dispatch_count(),
-                  m_read_statements->kernel_dispatch_count_time_filtered());
-    counts[reader_types::event_type_t::memory_copy] =
-        get_count(m_read_statements->memory_copy_count(),
-                  m_read_statements->memory_copy_count_time_filtered());
-    counts[reader_types::event_type_t::memory_allocate] =
-        get_count(m_read_statements->memory_alloc_count(),
-                  m_read_statements->memory_alloc_count_time_filtered());
+    for(const auto type : event_types)
+    {
+        counts[type] = count_events(*m_read_statements, type, range);
+    }
     return counts;
 }
 

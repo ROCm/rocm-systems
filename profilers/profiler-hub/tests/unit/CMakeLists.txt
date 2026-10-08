@@ -11,7 +11,20 @@ set(UNIT_TEST_SOURCES
     json_serializer_test.cpp
     writer_test.cpp
     reader_test.cpp
+    reader_id_range_test.cpp
     sqlite_backend_impl_test.cpp
+    ph_ctx_test.cpp
+    populate_reader_catalog_test.cpp
+    c_api_test.cpp
+    c_api_track_test.cpp
+    c_api_future_test.cpp
+    cached_track_reader_test.cpp
+    connection_pool_test.cpp
+    connection_source_test.cpp
+    event_partitions_test.cpp
+    natural_merge_sort_test.cpp
+    thread_pool_test.cpp
+    track_window_test.cpp
 )
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})
@@ -27,6 +40,7 @@ target_link_libraries(
     PRIVATE
         profiler-hub
         profiler-hub_queries
+        profiler-hub-sqlite3
         GTest::gtest
         GTest::gtest_main
         GTest::gmock
@@ -42,6 +56,20 @@ target_compile_definitions(
     PUBLIC ROCPD_DB_PATH="${ROCPD_DB_PATH}"
 )
 
+if(PH_USE_NOMUTEX_OPTIMIZATION)
+    target_compile_definitions(
+        profiler-hub_unit_tests
+        PRIVATE PH_USE_NOMUTEX_OPTIMIZATION
+    )
+endif()
+
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE
+        PROFILER_HUB_VERSION_MAJOR=${profiler-hub_VERSION_MAJOR}
+        PROFILER_HUB_VERSION_MINOR=${profiler-hub_VERSION_MINOR}
+        PROFILER_HUB_VERSION_PATCH=${profiler-hub_VERSION_PATCH}
+)
 add_dependencies(profiler-hub_unit_tests profiler-hub)
 
 target_include_directories(

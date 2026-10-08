@@ -161,6 +161,18 @@ database_backend<SqlitePolicy>::database_backend(std::string    db_path,
                                 "database open failed!");
     }
 
+    for(const auto* pragma : { "PRAGMA cache_size = -16384",    // ~16MB page cache
+                               "PRAGMA temp_store = MEMORY" })  // no disk temp b-trees
+    {
+        try
+        {
+            execute(pragma);
+        } catch(const std::exception& err)
+        {
+            LOG_ERROR("Failed to apply '{}': {}", pragma, err.what());
+        }
+    }
+
     validate_sqlite3_result(
         SqlitePolicy::prepare(m_sqlite3, "BEGIN TRANSACTION", &m_begin_stmt),
         "BEGIN TRANSACTION",

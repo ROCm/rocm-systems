@@ -1,16 +1,19 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "profiler-hub/reader.hpp"
-#include "profiler-hub/storage.hpp"
-#include "profiler-hub/writer.hpp"
-#include "profiler-hub/writer_types.hpp"
+#include "profiler-hub/cpp/reader.hpp"
+#include "profiler-hub/cpp/storage.hpp"
+#include "profiler-hub/cpp/writer.hpp"
+#include "profiler-hub/cpp/writer_types.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace
 {
@@ -39,6 +42,63 @@ protected:
     [[nodiscard]] std::unique_ptr<reader_t> make_reader() const
     {
         return std::make_unique<reader_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
+    }
+
+    [[nodiscard]] static reader_types::track_info_ptr_t find_pmc_track(
+        const std::vector<reader_types::track_info_ptr_t>& tracks)
+    {
+        const auto it =
+            std::ranges::find_if(tracks, [](const reader_types::track_info_ptr_t& track) {
+                return track->category == reader_types::track_kind_t::pmc_agent;
+            });
+        return it == tracks.end() ? nullptr : *it;
+    }
+
+    static void seed_pmc_samples(writer_t&                  writer,
+                                 std::string_view           counter_name,
+                                 const std::vector<double>& values)
+    {
+        const writer_types::node_info_t node_info{ 1, 42, "machine-1" };
+        writer.register_node_info(node_info);
+
+        writer_types::process_info_t process_info;
+        process_info.pid     = 100;
+        process_info.node_id = 1;
+        writer.register_process_info(process_info);
+
+        writer_types::agent_info_t agent_info;
+        agent_info.unique_id.agent_type = "GPU";
+        agent_info.unique_id.type_index = 0;
+        agent_info.uuid                 = 456;
+        agent_info.node_id              = 1;
+        agent_info.process_id           = 100;
+        writer.register_agent_info(agent_info);
+
+        writer_types::pmc_info_t pmc_info;
+        pmc_info.unique_id.name     = counter_name;
+        pmc_info.unique_id.agent_id = agent_info.unique_id;
+        pmc_info.symbol             = counter_name;
+        pmc_info.node_id            = 1;
+        pmc_info.process_id         = 100;
+        writer.register_pmc_info(pmc_info);
+
+        writer_types::track_info_t track_info;
+        track_info.name       = "counter-track";
+        track_info.node_id    = 1;
+        track_info.process_id = 100;
+        writer.register_track_info(track_info);
+
+        size_t timestamp = 1000;
+        for(const double value : values)
+        {
+            writer_types::pmc_event_data_t pmc_event_data;
+            pmc_event_data.event.emplace();
+            pmc_event_data.value            = value;
+            pmc_event_data.sample.timestamp = timestamp;
+            pmc_event_data.sample.track     = track_info;
+            timestamp += 1000;
+            writer.insert_pmc_event_data(pmc_event_data, pmc_info.unique_id);
+        }
     }
 
     // Registers node/process/thread and inserts one region event with a call stack,
@@ -81,6 +141,62 @@ protected:
         region_data.event           = event_data;
         region_data.args.push_back(arg);
         writer.insert_region_data(region_data, trace_environment);
+    }
+
+    // Registers node/process/thread (same topology as seed_region_with_full_event)
+    // and inserts two region events for that thread: one untagged (main), one
+    // registered against a named track (sample) -- so get_all_tracks() should
+    // split them into a "thread" track and a "thread_sample" track.
+    void seed_region_with_main_and_sample_events(writer_t& writer) const
+    {
+        const writer_types::node_info_t node_info{ 1, 42, "machine-1" };
+        writer.register_node_info(node_info);
+
+        writer_types::process_info_t process_info;
+        process_info.pid     = 100;
+        process_info.node_id = 1;
+        writer.register_process_info(process_info);
+
+        writer_types::thread_info_t thread_info;
+        thread_info.thread_id  = 200;
+        thread_info.node_id    = 1;
+        thread_info.process_id = 100;
+        writer.register_thread_info(thread_info);
+
+        writer_types::trace_environment_t trace_environment;
+        trace_environment.node_id    = 1;
+        trace_environment.process_id = 100;
+        trace_environment.thread_id  = 200;
+
+        writer_types::event_data_t main_event_data;
+        main_event_data.stack_id = 1;
+
+        writer_types::region_data_t main_region;
+        main_region.name            = "main-region";
+        main_region.start_timestamp = 1000;
+        main_region.end_timestamp   = 2000;
+        main_region.event           = main_event_data;
+        writer.insert_region_data(main_region, trace_environment);
+
+        writer_types::track_info_t track_info;
+        track_info.name       = "my-track";
+        track_info.node_id    = 1;
+        track_info.process_id = 100;
+        track_info.thread_id  = 200;
+        writer.register_track_info(track_info);
+
+        writer_types::trace_environment_t sample_environment = trace_environment;
+        sample_environment.track_name                        = "my-track";
+
+        writer_types::event_data_t sample_event_data;
+        sample_event_data.stack_id = 2;
+
+        writer_types::region_data_t sample_region;
+        sample_region.name            = "sample-region";
+        sample_region.start_timestamp = 3000;
+        sample_region.end_timestamp   = 4000;
+        sample_region.event           = sample_event_data;
+        writer.insert_region_data(sample_region, sample_environment);
     }
 
     std::string m_db_path;
@@ -127,17 +243,10 @@ TEST_F(reader_test, get_events_for_track_returns_empty_for_null_track)
     EXPECT_TRUE(reader->get_events_for_track(nullptr).empty());
 }
 
-TEST_F(reader_test, get_events_for_track_returns_events_for_registered_track)
+TEST_F(reader_test, get_events_for_track_returns_events_for_track_with_data)
 {
     auto writer = make_writer();
-
-    const writer_types::node_info_t node_info{ 1, 42, "machine-1" };
-    writer->register_node_info(node_info);
-
-    writer_types::track_info_t track_info;
-    track_info.node_id = 1;
-    writer->register_track_info(track_info);
-
+    seed_region_with_full_event(*writer);
     writer->flush_in_memory_data_to_disk();
     writer.reset();
 
@@ -145,7 +254,107 @@ TEST_F(reader_test, get_events_for_track_returns_events_for_registered_track)
     auto tracks = reader->get_all_tracks();
     ASSERT_EQ(tracks.size(), 1);
 
-    EXPECT_TRUE(reader->get_events_for_track(tracks[0]).empty());
+    EXPECT_EQ(reader->get_events_for_track(tracks[0]).size(), 1);
+}
+
+TEST_F(reader_test, get_all_tracks_pmc_track_reports_min_max_sample_value)
+{
+    auto writer = make_writer();
+    seed_pmc_samples(*writer, "device_temp", { 5.0, -2.5, 10.0 });
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    auto       reader = make_reader();
+    const auto tracks = reader->get_all_tracks();
+
+    const auto pmc_track = find_pmc_track(tracks);
+    ASSERT_NE(pmc_track, nullptr);
+    ASSERT_TRUE(pmc_track->value_range.has_value());
+    EXPECT_DOUBLE_EQ(pmc_track->value_range->min, -2.5);
+    EXPECT_DOUBLE_EQ(pmc_track->value_range->max, 10.0);
+}
+
+TEST_F(reader_test, get_all_tracks_pmc_track_single_sample_has_equal_min_max)
+{
+    auto writer = make_writer();
+    seed_pmc_samples(*writer, "device_temp", { 42.0 });
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    auto       reader = make_reader();
+    const auto tracks = reader->get_all_tracks();
+
+    const auto pmc_track = find_pmc_track(tracks);
+    ASSERT_NE(pmc_track, nullptr);
+    ASSERT_TRUE(pmc_track->value_range.has_value());
+    EXPECT_DOUBLE_EQ(pmc_track->value_range->min, 42.0);
+    EXPECT_DOUBLE_EQ(pmc_track->value_range->max, 42.0);
+}
+
+TEST_F(reader_test, get_all_tracks_pmc_track_zero_values_is_valid_range)
+{
+    auto writer = make_writer();
+    seed_pmc_samples(*writer, "device_busy_mm", { 0.0, 0.0, 0.0 });
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    auto       reader = make_reader();
+    const auto tracks = reader->get_all_tracks();
+
+    const auto pmc_track = find_pmc_track(tracks);
+    ASSERT_NE(pmc_track, nullptr);
+    ASSERT_TRUE(pmc_track->value_range.has_value());
+    EXPECT_DOUBLE_EQ(pmc_track->value_range->min, 0.0);
+    EXPECT_DOUBLE_EQ(pmc_track->value_range->max, 0.0);
+}
+
+TEST_F(reader_test, get_all_tracks_thread_track_has_no_value_range)
+{
+    auto writer = make_writer();
+    seed_region_with_full_event(*writer);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    auto       reader = make_reader();
+    const auto tracks = reader->get_all_tracks();
+    ASSERT_EQ(tracks.size(), 1);
+
+    ASSERT_EQ(tracks[0]->category, reader_types::track_kind_t::thread);
+    EXPECT_FALSE(tracks[0]->value_range.has_value());
+}
+
+TEST_F(reader_test, get_all_tracks_splits_main_and_sample_events)
+{
+    auto writer = make_writer();
+    seed_region_with_main_and_sample_events(*writer);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    auto reader = make_reader();
+    auto tracks = reader->get_all_tracks();
+    ASSERT_EQ(tracks.size(), 2);
+
+    reader_types::track_info_ptr_t main_track;
+    reader_types::track_info_ptr_t sample_track;
+    for(const auto& track : tracks)
+    {
+        if(track->category == reader_types::track_kind_t::thread)
+        {
+            main_track = track;
+        }
+        else if(track->category == reader_types::track_kind_t::thread_sample)
+        {
+            sample_track = track;
+        }
+    }
+    ASSERT_TRUE(main_track);
+    ASSERT_TRUE(sample_track);
+
+    EXPECT_EQ(main_track->event_count, 1);
+    EXPECT_EQ(sample_track->event_count, 1);
+
+    EXPECT_EQ(reader->get_events_for_track(main_track).size(), 1);
+    EXPECT_EQ(reader->get_events_for_track(sample_track).size(), 1);
 }
 
 TEST_F(reader_test, get_region_details_returns_matching_data)

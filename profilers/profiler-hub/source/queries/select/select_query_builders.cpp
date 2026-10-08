@@ -238,6 +238,16 @@ join_clause_builder::left_join(std::string_view table,
 }
 
 join_clause_builder&
+join_clause_builder::join_in_order(std::string_view table,
+                                   std::string_view alias,
+                                   std::string_view on_condition)
+{
+    m_stream << " CROSS JOIN " << table << " AS " << alias << " ON " << on_condition;
+    m_base_pos = m_stream.tellp();
+    return *this;
+}
+
+join_clause_builder&
 join_clause_builder::right_join(std::string_view table, std::string_view on_condition)
 {
     m_stream << " RIGHT JOIN " << table << " ON " << on_condition;

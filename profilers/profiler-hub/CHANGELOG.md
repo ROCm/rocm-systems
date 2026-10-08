@@ -20,6 +20,94 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+### Added
+
+- New public C ABI (`c/profiler_hub.h`, `c/profiler_hub_types.h`):
+  `ph_ctx_create`/`ph_ctx_free`, `ph_get_library_version`, `ph_get_schema_version`,
+  `ph_get_track_list`, `ph_get_node`, `ph_get_track_events`, `ph_get_track_samples`,
+  and stub declarations for a planned async task API (`ph_future_get`/`ph_future_wait`/
+  `ph_future_cancel`/`ph_future_free`, not yet implemented).
+- `reader_types.hpp`: `track_info_t` now carries `id`, `event_count`, and `agent_id`.
+- `reader_types.hpp`: new `track_kind_t` enum, and `track_info_t` gains
+  `category`, `queue_id`, `stream_id` fields. `reader_t::get_all_tracks()`
+  now also returns per-agent+queue tracks for kernel dispatch, memory
+  allocate, and memory copy, plus one merged per-host-stream track
+  combining all three operation kinds per stream (optiq discovery parity,
+  including its "one stream track per stream, not per event type"
+  behavior; previously only thread-based `(nid,pid,tid)` tracks and
+  per-agent PMC tracks were derived).
+- `c/profiler_hub_types.h`: new `ph_track_category_t` enum;
+  `ph_track_t` gains `category`, `queue_id`, `stream_id` fields (mirrors
+  `reader_types::track_kind_t`). New `ph_process_t`/`ph_process_list_t`;
+  `ph_node_t` gains a `process_list` field.
+- `reader_t::get_events_for_track()` (and `ph_get_track_events()`) now
+  return real events for the 4 optiq-parity category tracks
+  (`kernel_dispatch_agent_queue`/`memory_allocate_agent_queue`/
+  `memory_copy_agent_queue`/`stream`); previously always empty for these.
+  Time-window filtering is supported for these categories too.
+- `ph_track_t`/`track_info_t` now carry `start_ts`/`end_ts` nanosecond
+  timestamps spanning each track's events, computed for every track
+  category (thread, pmc_agent, the 3 agent+queue categories, and stream —
+  the latter combined across kernel-dispatch/memory-allocate/memory-copy).
+- `track_info_t::value_range` and `ph_track_t::value_range` (`ph_value_range_t { min, max, is_valid }`)
+  expose the smallest and largest sample value of PMC counter tracks. Other
+  tracks, and counters with no non-NULL sample, have `value_range.is_valid == 0`.
+- New `PH_TRACK_CATEGORY_THREAD_SAMPLE`/`track_kind_t::thread_sample`
+  category: duration events explicitly tagged with a named track (via
+  `writer_t::register_track_info()` + `trace_environment_t::track_name`)
+  are now split out of the plain `thread` track into their own
+  `thread_sample` track instead of being merged into it.
+
+### Changed
+
+- **Breaking:** public C++ headers moved from `<prefix>/include/profiler-hub/*.hpp`
+  to `<prefix>/include/profiler-hub/cpp/*.hpp` (e.g.
+  `#include <profiler-hub/storage.hpp>` becomes
+  `#include <profiler-hub/cpp/storage.hpp>`). Groups the public C++ API
+  headers under their own subdirectory, mirroring the language-scoped
+  layout other public interfaces (e.g. a future C ABI) will use.
+- `reader_types.hpp`: `counter_timeline_event_t::value` is now `double` (was `size_t`).
+- `reader_types.hpp`: `timeline_event_t::display_name`/`category` are now
+  `std::string_view` (were `std::string`).
+- `ph_ctx_create()` is significantly faster when its internal connection
+  pool has more than one connection: trace metadata (nodes/processes/
+  threads/agents/tracks/code objects/kernel symbols/streams/queues/pmc
+  info) is now built once and shared across all pooled connections,
+  instead of every connection independently rebuilding its own copy. The
+  independent categories are additionally fetched in parallel across the
+  pool's own connections. Measured ~5x faster `ph_ctx_create()` on a
+  5-connection pool against a 1.8GB trace (~780ms -> ~160ms
+  steady-state).
+- **Breaking (reader behavior):** `reader_t::get_all_tracks()` (and
+  `ph_get_track_list()`) no longer derive `thread`/`pmc_agent` tracks from
+  the trace's `rocpd_track` table. They're now derived directly from
+  `GROUP BY` queries over the raw event/counter-sample tables, matching
+  optiq's own discovery philosophy — a track only exists if it actually
+  has events. A `writer_t::register_track_info()`-registered track with
+  zero events is no longer reader-visible until it has data. Track ids are
+  also now assigned densely in discovery order (`0,1,2,...`) instead of
+  reusing the trace's own (sparse) `rocpd_track.id`. As a side effect,
+  duplicate `rocpd_track` rows that happened to share the same
+  `(nid,pid,tid)` (observed in real traces, previously exposed as
+  separate, redundant tracks reporting identical event counts) now
+  correctly collapse into a single track.
+
+### Fixed
+
+- `ph_ctx::initialize_track_list()` no longer crashes on tracks with no
+  associated process (e.g. the new per-agent+queue category tracks, which
+  have no `pid`) — `node_info`/`process_info` are now null-checked the same
+  way `thread_info` already was.
+
+### Fixed
+
+- `storage_t::get_storage_version()` now reads the schema version actually
+  stamped in the opened trace's `rocpd_metadata` table, instead of returning
+  the profiler-hub library's own version (which can legitimately differ from
+  the trace's schema version).
+- Windows/MSVC build support. When SQLite is fetched, Windows downloads the
+  official amalgamation zip instead of running `./configure`.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

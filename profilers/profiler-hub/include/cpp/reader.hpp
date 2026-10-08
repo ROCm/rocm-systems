@@ -3,15 +3,25 @@
 
 #pragma once
 
-#include <profiler-hub/reader_types.hpp>
-#include <profiler-hub/storage.hpp>
+#include <profiler-hub/cpp/reader_types.hpp>
+#include <profiler-hub/cpp/storage.hpp>
 
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace profiler_hub
 {
+
+class reader_catalog_t;
+
+namespace common
+{
+class connection;
+class connection_pool;
+class thread_pool;
+}  // namespace common
 
 // ============================================================================
 // Reader Interface
@@ -121,6 +131,31 @@ struct reader_t
     [[nodiscard]] reader_types::timeline_event_list_t get_events_for_track(
         reader_types::track_info_ptr_t      track,
         const reader_types::event_filter_t& filter = {}) const;
+
+    [[nodiscard]] std::optional<std::pair<size_t, size_t>> get_event_id_span(
+        reader_types::event_type_t type) const;
+
+    using event_visitor_t = void (*)(void*                        context,
+                                     reader_types::timestamp_ns_t start,
+                                     reader_types::timestamp_ns_t end,
+                                     std::string_view             name);
+
+    void visit_track_events_in_id_range(const reader_types::track_info_ptr_t& track,
+                                        reader_types::event_type_t            type,
+                                        size_t                                id_begin,
+                                        size_t                                id_end,
+                                        event_visitor_t                       visitor,
+                                        void* context) const;
+
+    /**
+     * @brief Get PMC/counter samples for a track within an optional time window
+     * @param track Track to query samples for (must be a PMC track)
+     * @param filter Optional filter for time window
+     * @return List of lightweight counter events for display
+     */
+    [[nodiscard]] reader_types::counter_timeline_event_list_t
+    get_counter_events_for_track(reader_types::track_info_ptr_t      track,
+                                 const reader_types::event_filter_t& filter = {}) const;
 
     /**
      * @brief Get events across all tracks matching filter
@@ -274,6 +309,43 @@ struct reader_t
         const reader_types::time_window_t& window = {}) const;
 
 private:
+    friend class common::connection;
+    friend void populate_reader_catalog(common::thread_pool&     workers,
+                                        common::connection_pool& connections,
+                                        reader_catalog_t&        catalog);
+
+    // Pooled/shared-catalog construction: `catalog` is shared with sibling
+    // connections in the same pool and may be populated by any of them (see
+    // populate_reader_catalog). Caller guarantees non-null.
+    reader_t(std::unique_ptr<profiler_hub::storage_t> storage,
+             std::shared_ptr<reader_catalog_t>        catalog);
+
+    /**
+     * @brief Independently-buildable metadata categories (see
+     *        reader_catalog_t). Only used by populate_reader_catalog.
+     */
+    enum class catalog_category_t
+    {
+        string_list,
+        nodes,
+        processes,
+        threads,
+        agents,
+        tracks,
+        code_objects,
+        kernel_symbols,
+        streams,
+        queues,
+        pmc_infos,
+    };
+
+    // Builds one category of `catalog` using this reader's own connection.
+    // Caller (populate_reader_catalog) is responsible for respecting the dependency
+    // order documented on reader_catalog_t.
+    void build_catalog_category(catalog_category_t category, reader_catalog_t& catalog);
+
+    void ensure_track_topology_indexes();
+
     struct impl;
     std::unique_ptr<impl> m_impl;
 };

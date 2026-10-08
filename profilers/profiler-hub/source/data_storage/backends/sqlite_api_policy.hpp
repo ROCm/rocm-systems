@@ -35,7 +35,13 @@ struct sqlite_api_policy
 
     static int open(const char* path, database_t* out_db) noexcept
     {
-        return sqlite3_open(path, out_db);
+#if defined(PH_USE_NOMUTEX_OPTIMIZATION)
+        constexpr int flags =
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX;
+#else
+        constexpr int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+#endif
+        return sqlite3_open_v2(path, out_db, flags, nullptr);
     }
 
     static int close(database_t db) noexcept { return sqlite3_close(db); }

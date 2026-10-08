@@ -185,15 +185,31 @@ public:
         } }
         {}
 
+        template <typename Fn>
+        void for_each(Fn&& fn)
+        {
+            auto raw = m_stmt.raw();
+            T    row;
+            int  rc = SqlitePolicy::result_done;
+            while((rc = SqlitePolicy::step(raw)) == SqlitePolicy::result_row)
+            {
+                m_extractor(*m_backend, raw, row);
+                fn(std::as_const(row));
+            }
+            m_backend->validate_sqlite3_result(rc, "", "Failed to read rows");
+        }
+
         std::vector<T> to_vector()
         {
             std::vector<T> results;
             auto           raw = m_stmt.raw();
-            while(SqlitePolicy::step(raw) == SqlitePolicy::result_row)
+            int            rc  = SqlitePolicy::result_done;
+            while((rc = SqlitePolicy::step(raw)) == SqlitePolicy::result_row)
             {
                 results.emplace_back();
                 m_extractor(*m_backend, raw, results.back());
             }
+            m_backend->validate_sqlite3_result(rc, "", "Failed to read rows");
             return results;
         }
 
@@ -448,7 +464,7 @@ private:
                 using inner_type_t = typename decayed_t::value_type;
                 inner_type_t inner_value;
                 extract_column(stmt, position, inner_value);
-                value = inner_value;
+                value = std::move(inner_value);
             }
         }
         else if constexpr(std::is_same_v<decayed_t, std::string>)

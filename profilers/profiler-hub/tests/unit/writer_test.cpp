@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "profiler-hub/reader.hpp"
-#include "profiler-hub/storage.hpp"
-#include "profiler-hub/writer.hpp"
-#include "profiler-hub/writer_types.hpp"
+#include "profiler-hub/cpp/reader.hpp"
+#include "profiler-hub/cpp/storage.hpp"
+#include "profiler-hub/cpp/writer.hpp"
+#include "profiler-hub/cpp/writer_types.hpp"
 
 #include <gtest/gtest.h>
 
@@ -91,6 +91,23 @@ TEST_F(writer_test, register_node_info_is_readable_after_flush)
     EXPECT_EQ(nodes[0]->node_id, 1);
     EXPECT_EQ(nodes[0]->hash, 42);
     EXPECT_EQ(nodes[0]->machine_id, "machine-1");
+}
+
+TEST_F(writer_test, get_storage_version_reads_schema_version_from_trace)
+{
+    auto writer = make_writer();
+
+    const writer_types::node_info_t node_info{ 1, 42, "machine-1" };
+    writer->register_node_info(node_info);
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    storage_t  storage{ m_db_path, m_uuid };
+    const auto version = storage.get_storage_version();
+
+    EXPECT_EQ(version.major, 3);
+    EXPECT_EQ(version.minor, 0);
+    EXPECT_EQ(version.patch, 1);
 }
 
 TEST_F(writer_test, register_process_info_is_readable_after_flush)
@@ -448,7 +465,7 @@ TEST_F(writer_test, register_kernel_symbol_info_is_readable_after_flush)
     EXPECT_EQ(kernel_symbols[0]->code_object_info->id, code_object_info.id);
 }
 
-TEST_F(writer_test, register_track_info_is_readable_after_flush)
+TEST_F(writer_test, register_track_info_does_not_throw)
 {
     auto writer = make_writer();
 
@@ -457,18 +474,9 @@ TEST_F(writer_test, register_track_info_is_readable_after_flush)
 
     writer_types::track_info_t track_info;
     track_info.node_id = node_info.node_id;
-    writer->register_track_info(track_info);
 
-    writer->flush_in_memory_data_to_disk();
-    writer.reset();
-
-    auto reader =
-        std::make_unique<reader_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
-    const auto tracks = reader->get_all_tracks();
-
-    ASSERT_EQ(tracks.size(), 1);
-    ASSERT_NE(tracks[0]->node_info, nullptr);
-    EXPECT_EQ(tracks[0]->node_info->node_id, node_info.node_id);
+    EXPECT_NO_THROW(writer->register_track_info(track_info));
+    EXPECT_NO_THROW(writer->flush_in_memory_data_to_disk());
 }
 
 TEST_F(writer_test, register_string_does_not_throw)

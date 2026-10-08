@@ -147,6 +147,9 @@ public:
     join_clause_builder& right_join(std::string_view table,
                                     std::string_view alias,
                                     std::string_view on_condition);
+    join_clause_builder& join_in_order(std::string_view table,
+                                       std::string_view alias,
+                                       std::string_view on_condition);
 
     where_clause_builder& where(std::string_view condition);
 
