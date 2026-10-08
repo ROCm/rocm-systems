@@ -488,6 +488,11 @@ public:
     return page_table_mutation_epoch_;
   }
 
+  /// @brief Retained admission state for immutable copied PTE snapshots.
+  std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state() const {
+    return page_table_cache_state_;
+  }
+
   /// @brief Return the lease shared by page-table readers and mutations.
   std::shared_ptr<util::DistributedSharedMutex> page_table_request_mutex() const {
     return page_table_request_mutex_;
@@ -540,6 +545,7 @@ public:
     uint32_t gpu_ordinal;
     uint32_t doorbell_offset;
     amdgpu::QueueHandle queue_handle;
+    std::optional<uint32_t> pm4_target_xcc;
   };
   std::unordered_map<uint32_t, QueueDoorbellInfo> queue_doorbell_map_;
 
@@ -838,6 +844,7 @@ private:
   // that throws before publishing the ordinary translation generation.
   void invalidate_page_policies_locked() {
     page_table_mutation_epoch_->fetch_add(1, std::memory_order_release);
+    page_table_cache_state_->invalidate_and_wait();
   }
 
   void publish_page_table_mutation_locked() { ++page_table_generation_; }
@@ -855,6 +862,8 @@ private:
   /// @details Invalidate before mutation, including partially throwing updates.
   std::shared_ptr<std::atomic<uint64_t>> page_table_mutation_epoch_ =
       std::make_shared<std::atomic<uint64_t>>(1);
+  std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state_ =
+      std::make_shared<amdgpu::LegacyPageTableCacheState>();
 };
 
 } // namespace rocjitsu

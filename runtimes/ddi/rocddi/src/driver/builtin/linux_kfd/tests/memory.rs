@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Native ownership tests use real anonymous reservations and scripted KFD
 //! replies. Scripts model errno and output progress independently, including
 //! failures after the kernel has finished every per-device mapping operation.
@@ -7,7 +10,7 @@
 use super::*;
 use crate::driver::AllocationDriver;
 use crate::host_storage::Allocator;
-use crate::memory::MemoryKind;
+use crate::memory::{HostCachePolicy, MemoryKind};
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::fs::FileExt;
 use std::sync::Arc;
@@ -25,8 +28,11 @@ enum Reply {
     ExportDmaBuf(i32, Option<i32>),
     IpcImport(u64, u64, u32, Option<i32>),
     IpcExport([u32; 4], Option<i32>),
+    Ais(uapi::AisInput, uapi::AisOutput, Option<i32>),
     Map(u32, u32, Option<i32>),
     Unmap(u32, u32, Option<i32>),
+    MapDevices(&'static [u32], u32, u32, Option<i32>),
+    UnmapDevices(&'static [u32], u32, u32, Option<i32>),
     Free(Option<i32>),
 }
 
@@ -122,6 +128,28 @@ impl Fixture {
         render: File,
         owned_userptr: bool,
     ) -> Self {
+        Self::with_allocator(
+            replies,
+            expected_flags,
+            expected_devices,
+            render,
+            owned_userptr,
+            Allocator::default(),
+        )
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the scripted native-call matcher keeps each ownership test explicit"
+    )]
+    fn with_allocator(
+        replies: impl IntoIterator<Item = Reply>,
+        expected_flags: u32,
+        expected_devices: &[u32],
+        render: File,
+        owned_userptr: bool,
+        allocator: Allocator,
+    ) -> Self {
         let replies = Arc::new(Mutex::new(replies.into_iter().collect::<VecDeque<_>>()));
         let pending = replies.clone();
         let expected_devices = expected_devices.to_vec();
@@ -129,7 +157,7 @@ impl Fixture {
         let loss_signal = lost.clone();
         let scratch_base = Arc::new(AtomicU64::new(0));
         let observed_scratch_base = scratch_base.clone();
-        let kfd = shared(sys::Kfd::with_hook(
+        let kfd = shared(sys::Kfd::with_hook_allocator(
             File::open("/dev/null").unwrap(),
             Arc::new(move |call| {
                 match call {
@@ -166,7 +194,14 @@ impl Fixture {
                     }
                     (sys::Call::Allocate(args), Reply::Allocate(handle, errno)) => {
                         assert_eq!(args.va % 65536, 0);
-                        assert_eq!(args.size, 65536);
+                        let page = util::page_size().unwrap() as u64;
+                        let expected_size = if expected_flags & uapi::USERPTR != 0 && !owned_userptr
+                        {
+                            (65536 + (0x12345 & (page - 1))).div_ceil(page) * page
+                        } else {
+                            65536
+                        };
+                        assert_eq!(args.size, expected_size);
                         assert_eq!(args.gpu_id, 42);
                         assert_eq!(args.flags, expected_flags);
                         let expected_mmap_offset = if expected_flags & uapi::USERPTR == 0 {
@@ -174,7 +209,7 @@ impl Fixture {
                         } else if owned_userptr {
                             args.va
                         } else {
-                            0x12000
+                            0x12345 & !(page - 1)
                         };
                         assert_eq!(args.mmap_offset, expected_mmap_offset);
                         args.handle = handle;
@@ -235,9 +270,28 @@ impl Fixture {
                         args.share_handle = handle;
                         errno
                     }
+                    (sys::Call::Ais(args), Reply::Ais(expected, output, errno)) => {
+                        assert_eq!(args.requested_input(), expected);
+                        args.set_completed_output(output);
+                        errno
+                    }
                     (sys::Call::Map(args, devices), Reply::Map(before, after, errno))
                     | (sys::Call::Unmap(args, devices), Reply::Unmap(before, after, errno)) => {
                         assert_eq!(*devices, expected_devices.as_slice());
+                        assert_eq!(args.handle, 17);
+                        assert_eq!(args.success, before);
+                        args.success = after;
+                        errno
+                    }
+                    (
+                        sys::Call::Map(args, devices),
+                        Reply::MapDevices(expected, before, after, errno),
+                    )
+                    | (
+                        sys::Call::Unmap(args, devices),
+                        Reply::UnmapDevices(expected, before, after, errno),
+                    ) => {
+                        assert_eq!(*devices, expected);
                         assert_eq!(args.handle, 17);
                         assert_eq!(args.success, before);
                         args.success = after;
@@ -251,35 +305,45 @@ impl Fixture {
                 };
                 errno.map_or(Ok(()), |errno| Err(io::Error::from_raw_os_error(errno)))
             }),
+            allocator,
         ));
-        let vm = shared(DeviceVm {
-            loss: shared(LossEvent {
-                kfd,
-                hardware_event_id: AtomicU32::new(19),
-                memory_event_id: AtomicU32::new(20),
-                hardware_destroy_uncertain: AtomicBool::new(false),
-                memory_destroy_uncertain: AtomicBool::new(false),
-                memory_event_claimed: Mutex::new(false),
-                lost: AtomicBool::new(false),
-            }),
-            render: Some(render),
-            system_dma_buf_import: false,
-            gpu_id: 42,
-            render_minor: 128,
-            identity: [0; 16],
-            unique_id: Some(123),
-            base: 0x10000,
-            limit: isize::MAX as u64,
-            lds_base: 0x1000_0000_0000,
-            scratch_base: 0x2000_0000_0000,
-            scratch: scratch_pool(),
-            vmem: Mutex::new(super::super::vmem::VmState::new(Allocator::default())),
-            version: uapi::Version {
-                major: 1,
-                minor: 23,
+        let vm = Shared::new(
+            DeviceVm {
+                loss: Shared::new(
+                    LossEvent {
+                        kfd,
+                        hardware_event_id: AtomicU32::new(19),
+                        memory_event_id: AtomicU32::new(20),
+                        hardware_destroy_uncertain: AtomicBool::new(false),
+                        memory_destroy_uncertain: AtomicBool::new(false),
+                        memory_event_claimed: Mutex::new(false),
+                        lost: AtomicBool::new(false),
+                    },
+                    allocator,
+                )
+                .unwrap(),
+                render: Some(render),
+                system_dma_buf_import: false,
+                gpu_id: 42,
+                render_minor: 128,
+                identity: [0; 16],
+                unique_id: Some(123),
+                base: 0x10000,
+                limit: isize::MAX as u64,
+                lds_base: 0x1000_0000_0000,
+                scratch_base: 0x2000_0000_0000,
+                sdma_next_engine: AtomicU32::new(0),
+                scratch: scratch_pool(),
+                vmem: Mutex::new(super::super::vmem::VmState::new(Allocator::default())),
+                version: uapi::Version {
+                    major: 1,
+                    minor: 23,
+                },
+                doorbells: super::super::queue::Doorbells::default(),
             },
-            doorbells: super::super::queue::Doorbells::default(),
-        });
+            allocator,
+        )
+        .unwrap();
         Self {
             replies,
             lost,
@@ -301,6 +365,7 @@ impl Fixture {
             limit,
             lds_base: 0x3000_0000_0000,
             scratch_base: 0x4000_0000_0000,
+            sdma_next_engine: AtomicU32::new(0),
             scratch: scratch_pool(),
             vmem: Mutex::new(super::super::vmem::VmState::new(Allocator::default())),
             version: self.vm.version,
@@ -322,6 +387,7 @@ impl Fixture {
         )
     }
 
+    #[allow(unsafe_code)]
     fn allocate(
         &self,
         kind: MemoryKind,
@@ -329,9 +395,11 @@ impl Fixture {
     ) -> Result<Owned<KfdAllocation>, Error> {
         let kind = match kind {
             MemoryKind::System => BufferKind::Gtt,
-            MemoryKind::OwnedHost => BufferKind::OwnedUserptr { uncached: false },
-            MemoryKind::RegisteredHost { address, uncached } => {
-                BufferKind::Userptr { address, uncached }
+            MemoryKind::OwnedHost { cache } => BufferKind::OwnedUserptr { cache },
+            MemoryKind::RegisteredHost { address, cache } => {
+                // SAFETY: Scripted KFD replies cannot access this synthetic
+                // address; the fixture tests metadata and rollback only.
+                BufferKind::Userptr(unsafe { BorrowedHostPages::new(address, cache) })
             }
             MemoryKind::DeviceLocal {
                 host_visible,
@@ -361,8 +429,10 @@ impl Fixture {
                 ..node()
             },
             lifetime,
+            gpu_counter_frequency_hz: 0,
         };
-        super::super::LinuxKfdDriver::new(Allocator::default()).allocate(
+        let kind = crate::memory::OwnedMemoryKind::try_from(kind)?;
+        super::super::LinuxKfdDriver::new(Allocator::default()).allocate_owned(
             &device,
             &[],
             kind,
@@ -417,13 +487,150 @@ impl Fixture {
 }
 
 #[test]
+fn ais_uses_the_mapped_vram_handle_and_preserves_native_failure() {
+    let fixture = Fixture::new([
+        Reply::Allocate(17, None),
+        Reply::Map(0, 1, None),
+        Reply::Ais(
+            uapi::AisInput {
+                handle: 17,
+                handle_offset: 4096 + 32,
+                file_offset: 8192,
+                size: 128,
+                operation: uapi::AIS_READ,
+                descriptor: 3,
+            },
+            uapi::AisOutput {
+                size_copied: 96,
+                status: 0,
+                pad: 0,
+            },
+            None,
+        ),
+        Reply::Ais(
+            uapi::AisInput {
+                handle: 17,
+                handle_offset: 4096 + 256,
+                file_offset: 16384,
+                size: 512,
+                operation: uapi::AIS_WRITE,
+                descriptor: 4,
+            },
+            uapi::AisOutput {
+                size_copied: 64,
+                status: -5,
+                pad: 0,
+            },
+            Some(5),
+        ),
+        Reply::Unmap(0, 1, None),
+        Reply::Free(None),
+    ]);
+    let mut allocation = fixture.create().unwrap();
+    // Model a logical slice of a larger KFD handle, as with imported VRAM.
+    allocation.device_byte_offset = 4096;
+    allocation.logical_size = 8192;
+    let result = allocation
+        .ais_transfer(3, 32, 128, 8192, uapi::AIS_READ)
+        .unwrap();
+    assert_eq!(result.size_copied, 96);
+    assert_eq!(result.status, 0);
+
+    assert_eq!(
+        allocation
+            .ais_transfer(3, 8191, 2, 0, uapi::AIS_READ)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidArgument
+    );
+    assert_eq!(
+        allocation
+            .ais_transfer(-1, 32, 128, 0, uapi::AIS_READ)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidArgument
+    );
+    let failure = allocation
+        .ais_transfer(4, 256, 512, 16384, uapi::AIS_WRITE)
+        .unwrap_err();
+    assert_eq!(failure.native_error_code(), Some(5));
+    allocation.free().unwrap();
+    drop(allocation);
+    fixture.exhausted();
+}
+
+#[test]
+fn ais_rejects_non_vram_backing_without_a_native_transfer() {
+    let fixture = Fixture::with_devices(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::Unmap(0, 1, None),
+            Reply::Free(None),
+        ],
+        uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        &[42],
+        backing_file(desc().size),
+    );
+    let mut allocation = fixture
+        .allocate(MemoryKind::System, DeviceAccess::READ | DeviceAccess::WRITE)
+        .unwrap();
+    assert_eq!(
+        allocation
+            .ais_transfer(3, 0, 4096, 0, uapi::AIS_READ)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Unsupported
+    );
+    allocation.free().unwrap();
+    drop(allocation);
+    fixture.exhausted();
+}
+
+#[test]
+fn ais_file_read_rejects_read_only_vram_before_native_transfer() {
+    let fixture = Fixture::with_flags(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::Unmap(0, 1, None),
+            Reply::Free(None),
+        ],
+        uapi::VRAM | uapi::NO_SUBSTITUTE,
+    );
+    let mut allocation = fixture
+        .allocate(
+            MemoryKind::DeviceLocal {
+                host_visible: false,
+                coherent: false,
+                uncached: false,
+                contiguous: false,
+            },
+            DeviceAccess::READ,
+        )
+        .unwrap();
+    assert_eq!(
+        allocation
+            .ais_transfer(3, 0, 4096, 0, uapi::AIS_READ)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Unsupported
+    );
+    allocation.free().unwrap();
+    drop(allocation);
+    fixture.exhausted();
+}
+
+#[test]
 fn secondary_context_rejects_owned_userptr_before_native_allocation() {
     let fixture = Fixture::new([]);
     assert_eq!(
         fixture
             .allocate_with_lifetime(
                 crate::session::SessionLifetime::Session,
-                MemoryKind::OwnedHost,
+                MemoryKind::OwnedHost {
+                    cache: HostCachePolicy::Fine,
+                },
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
             .err()
@@ -435,16 +642,77 @@ fn secondary_context_rejects_owned_userptr_before_native_allocation() {
 }
 
 #[test]
+#[allow(unsafe_code)]
+fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
+    let fixture = Fixture::new([]);
+    let make_device = |gfx_target| super::super::DeviceState {
+        vm: fixture.vm.clone(),
+        native: sysfs::NativeNode {
+            queues: sysfs::NativeQueueProperties {
+                gfx_target,
+                ..sysfs::NativeQueueProperties::default()
+            },
+            ..node()
+        },
+        lifetime: crate::session::SessionLifetime::Session,
+        gpu_counter_frequency_hz: 0,
+    };
+    let driver = super::super::LinuxKfdDriver::new(Allocator::default());
+    let gfx1201 = make_device(120_001);
+    let other = make_device(110_000);
+    let request = crate::memory::HostRegistration {
+        address: 0x10000,
+        cache: HostCachePolicy::Extended,
+        size: desc().size,
+        alignment: desc().alignment,
+        permissions: DeviceAccess::READ | DeviceAccess::WRITE,
+    };
+
+    // SAFETY: /dev/null rejects GEM USERPTR before it can retain the
+    // synthetic page cover.
+    let error = unsafe { driver.register_host(&gfx1201, &[], request) }
+        .err()
+        .unwrap();
+    assert!(matches!(
+        error,
+        Error::NativeOperation {
+            operation: "DRM GEM USERPTR registration",
+            ..
+        }
+    ));
+    // SAFETY: The unsupported targets are rejected before native access.
+    let error = unsafe { driver.register_host(&other, &[], request) }
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+    // SAFETY: An unsupported peer is rejected before native access.
+    let error = unsafe { driver.register_host(&gfx1201, &[&other], request) }
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+
+    drop(gfx1201);
+    drop(other);
+    fixture.exhausted();
+    assert_eq!(Shared::strong_count(&fixture.vm), 1);
+}
+
+#[test]
+#[allow(unsafe_code)]
 fn failed_secondary_drm_registration_releases_its_vm_dependency() {
     let fixture = Fixture::new([]);
-    let result = super::super::registered_host::DrmRegisteredHost::create(
-        fixture.vm.clone(),
-        std::iter::empty(),
-        desc(),
-        0x10000,
-        DeviceAccess::READ | DeviceAccess::WRITE,
-        false,
-    );
+    // SAFETY: The scripted render endpoint rejects registration before it
+    // can retain or access the synthetic host address.
+    let result = unsafe {
+        super::super::registered_host::DrmRegisteredHost::create(
+            fixture.vm.clone(),
+            std::iter::empty(),
+            desc(),
+            0x10000,
+            DeviceAccess::READ | DeviceAccess::WRITE,
+            false,
+        )
+    };
     // The scripted VM uses /dev/null as its render endpoint. GEM USERPTR must
     // fail without retaining that VM or its speculative GPU VA.
     assert_eq!(result.err().unwrap().kind(), ErrorKind::Unsupported);
@@ -545,6 +813,40 @@ fn ipc_import_rejects_fragments_and_inconsistent_extents_before_kfd() {
 }
 
 #[test]
+#[allow(unsafe_code)]
+fn scratch_owner_metadata_failure_does_not_acquire_a_native_range() {
+    let allocator_state = crate::test_support::allocator::State::default();
+    // SAFETY: The allocator state remains live until after the fixture drops.
+    let allocator = unsafe { allocator_state.allocator() };
+    let fixture = Fixture::with_allocator(
+        [],
+        uapi::VRAM | uapi::WRITABLE | uapi::NO_SUBSTITUTE,
+        &[42],
+        File::open("/dev/null").unwrap(),
+        false,
+        allocator,
+    );
+    assert!(!fixture.vm.allocator().is_system());
+    let before = allocator_state.allocations.load(Ordering::Relaxed);
+    allocator_state.fail_at.store(before + 2, Ordering::Relaxed);
+    let result = KfdAllocation::create_scratch(
+        &fixture.vm,
+        AllocationDesc {
+            size: desc().size,
+            alignment: 4096,
+        },
+    );
+    assert_eq!(result.err().unwrap().kind(), ErrorKind::ResourceExhausted);
+    assert_eq!(
+        allocator_state.allocations.load(Ordering::Relaxed),
+        before + 2
+    );
+    assert_eq!(allocator_state.frees.load(Ordering::Relaxed), 1);
+    assert!(fixture.vm.scratch.lock().unwrap().reservation.is_none());
+    fixture.exhausted();
+}
+
+#[test]
 fn scratch_backing_programs_one_process_base_and_reuses_released_ranges() {
     let fixture = Fixture::with_devices(
         [
@@ -585,7 +887,7 @@ fn scratch_backing_programs_one_process_base_and_reuses_released_ranges() {
     let scratch = fixture.vm.scratch.lock().unwrap();
     assert_eq!(scratch.ranges.len(), 1);
     assert!(!scratch.ranges[0].allocated);
-    assert_eq!(scratch.ranges[0].size, GFX12_SCRATCH_BYTES_PER_XCC);
+    assert_eq!(scratch.ranges[0].size, 8_u64 << 30);
     drop(scratch);
     fixture.exhausted();
 }
@@ -744,6 +1046,185 @@ fn local_allocation_maps_every_qualified_peer_vm() {
 }
 
 #[test]
+fn access_replacement_maps_new_peer_before_unmapping_the_old_device() {
+    let fixture = Fixture::with_devices(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::MapDevices(&[53], 0, 1, None),
+            Reply::UnmapDevices(&[42], 0, 1, None),
+            Reply::MapDevices(&[42], 0, 1, None),
+            Reply::UnmapDevices(&[53], 0, 1, None),
+            Reply::UnmapDevices(&[42], 0, 1, None),
+            Reply::Free(None),
+        ],
+        uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        &[42],
+        backing_file(desc().size),
+    );
+    let peer = fixture.peer(53, 0x20000, isize::MAX as u64);
+    let mut allocation = KfdAllocation::create(
+        fixture.vm.clone(),
+        desc(),
+        BufferKind::Gtt,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+    )
+    .unwrap();
+    allocation.set_access(&[&peer]).unwrap();
+    assert!(allocation.device_address(&peer).is_ok());
+    assert_eq!(
+        allocation.device_address(&fixture.vm).unwrap_err().kind(),
+        ErrorKind::Unsupported
+    );
+    allocation.set_access(&[&fixture.vm]).unwrap();
+    assert!(allocation.device_address(&fixture.vm).is_ok());
+    assert_eq!(
+        allocation.device_address(&peer).unwrap_err().kind(),
+        ErrorKind::Unsupported
+    );
+    allocation.free().unwrap();
+    drop(allocation);
+    fixture.exhausted();
+    assert_eq!(Shared::strong_count(&peer), 1);
+}
+
+#[test]
+fn failed_peer_map_keeps_old_access_and_retries_its_completed_prefix() {
+    let fixture = Fixture::with_devices(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::MapDevices(&[53], 0, 1, Some(4)),
+            Reply::MapDevices(&[53], 1, 1, None),
+            Reply::UnmapDevices(&[42], 0, 1, None),
+            Reply::UnmapDevices(&[53], 0, 1, None),
+            Reply::Free(None),
+        ],
+        uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        &[42],
+        backing_file(desc().size),
+    );
+    let peer = fixture.peer(53, 0x20000, isize::MAX as u64);
+    let mut allocation = KfdAllocation::create(
+        fixture.vm.clone(),
+        desc(),
+        BufferKind::Gtt,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+    )
+    .unwrap();
+    assert!(allocation.set_access(&[&peer]).is_err());
+    assert!(allocation.device_address(&fixture.vm).is_ok());
+    assert_eq!(
+        allocation.device_address(&peer).unwrap_err().kind(),
+        ErrorKind::Unsupported
+    );
+    allocation.set_access(&[&peer]).unwrap();
+    assert!(allocation.device_address(&peer).is_ok());
+    allocation.free().unwrap();
+    drop(allocation);
+    fixture.exhausted();
+    assert_eq!(Shared::strong_count(&peer), 1);
+}
+
+#[test]
+fn failed_peer_unmap_is_not_reported_as_available_until_retry() {
+    let fixture = Fixture::with_devices(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::MapDevices(&[53], 0, 1, None),
+            Reply::UnmapDevices(&[42], 0, 1, Some(4)),
+            Reply::UnmapDevices(&[42], 1, 1, None),
+            Reply::UnmapDevices(&[53], 0, 1, None),
+            Reply::Free(None),
+        ],
+        uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        &[42],
+        backing_file(desc().size),
+    );
+    let peer = fixture.peer(53, 0x20000, isize::MAX as u64);
+    let mut allocation = KfdAllocation::create(
+        fixture.vm.clone(),
+        desc(),
+        BufferKind::Gtt,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+    )
+    .unwrap();
+    assert!(allocation.set_access(&[&peer]).is_err());
+    assert!(allocation.device_address(&peer).is_ok());
+    assert_eq!(
+        allocation.device_address(&fixture.vm).unwrap_err().kind(),
+        ErrorKind::Unsupported
+    );
+    allocation.set_access(&[&peer]).unwrap();
+    allocation.free().unwrap();
+    drop(allocation);
+    fixture.exhausted();
+}
+
+#[test]
+fn access_replacement_rejects_an_incompatible_peer_before_mapping() {
+    let fixture = Fixture::with_devices(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::Unmap(0, 1, None),
+            Reply::Free(None),
+        ],
+        uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        &[42],
+        backing_file(desc().size),
+    );
+    let mut allocation = KfdAllocation::create(
+        fixture.vm.clone(),
+        desc(),
+        BufferKind::Gtt,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+    )
+    .unwrap();
+    let address = allocation.cached_info().device_address;
+    let peer = fixture.peer(53, address + desc().size, address + desc().size * 2 - 1);
+    assert_eq!(
+        allocation.set_access(&[&peer]).unwrap_err().kind(),
+        ErrorKind::Unsupported
+    );
+    assert!(allocation.device_address(&fixture.vm).is_ok());
+    allocation.free().unwrap();
+    drop(allocation);
+    fixture.exhausted();
+}
+
+#[test]
+fn free_completes_a_pending_peer_map_before_releasing_backing() {
+    let fixture = Fixture::with_devices(
+        [
+            Reply::Allocate(17, None),
+            Reply::Map(0, 1, None),
+            Reply::MapDevices(&[53], 0, 1, Some(4)),
+            Reply::MapDevices(&[53], 1, 1, None),
+            Reply::UnmapDevices(&[42, 53], 0, 2, None),
+            Reply::Free(None),
+        ],
+        uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        &[42],
+        backing_file(desc().size),
+    );
+    let peer = fixture.peer(53, 0x20000, isize::MAX as u64);
+    let mut allocation = KfdAllocation::create(
+        fixture.vm.clone(),
+        desc(),
+        BufferKind::Gtt,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+    )
+    .unwrap();
+    assert!(allocation.set_access(&[&peer]).is_err());
+    allocation.free().unwrap();
+    drop(allocation);
+    fixture.exhausted();
+    assert_eq!(Shared::strong_count(&peer), 1);
+}
+
+#[test]
 fn incompatible_vm_apertures_fail_before_native_allocation() {
     let fixture = Fixture::with_devices(
         [],
@@ -764,6 +1245,7 @@ fn incompatible_vm_apertures_fail_before_native_allocation() {
         unique_id: Some(64),
         lds_base: 0x5000_0000_0000,
         scratch_base: 0x6000_0000_0000,
+        sdma_next_engine: AtomicU32::new(0),
         scratch: scratch_pool(),
         vmem: Mutex::new(super::super::vmem::VmState::new(Allocator::default())),
         version: fixture.vm.version,
@@ -912,8 +1394,28 @@ fn allocation_permissions_reach_kfd_without_widening_access() {
                 uapi::GTT | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE,
             ),
             (
-                MemoryKind::OwnedHost,
+                MemoryKind::OwnedHost {
+                    cache: HostCachePolicy::Coarse,
+                },
+                uapi::USERPTR | uapi::NO_SUBSTITUTE,
+            ),
+            (
+                MemoryKind::OwnedHost {
+                    cache: HostCachePolicy::Fine,
+                },
                 uapi::USERPTR | uapi::COHERENT | uapi::NO_SUBSTITUTE,
+            ),
+            (
+                MemoryKind::OwnedHost {
+                    cache: HostCachePolicy::Extended,
+                },
+                uapi::USERPTR | uapi::COHERENT | uapi::EXT_COHERENT | uapi::NO_SUBSTITUTE,
+            ),
+            (
+                MemoryKind::OwnedHost {
+                    cache: HostCachePolicy::Uncached,
+                },
+                uapi::USERPTR | uapi::COHERENT | uapi::UNCACHED | uapi::NO_SUBSTITUTE,
             ),
             (
                 MemoryKind::DeviceLocal {
@@ -927,7 +1429,7 @@ fn allocation_permissions_reach_kfd_without_widening_access() {
         ] {
             // Verify exact flags before an injected allocation failure, without
             // needing a real render device for these CPU-visible placements.
-            let fixture = if kind == MemoryKind::OwnedHost {
+            let fixture = if matches!(kind, MemoryKind::OwnedHost { .. }) {
                 Fixture::with_owned_userptr([Reply::Allocate(0, Some(12))], placement | flags)
             } else {
                 Fixture::with_flags([Reply::Allocate(0, Some(12))], placement | flags)
@@ -999,6 +1501,7 @@ fn dma_buf_import_maps_the_full_backing_and_exposes_the_logical_subrange() {
 
 #[test]
 fn dma_buf_import_validates_permissions_origin_placement_and_range() {
+    let page = util::page_size().unwrap() as u64;
     let file = backing_file(2 * 65536);
     let descriptor = file.as_raw_fd();
     let fixture = Fixture::new([]);
@@ -1007,8 +1510,8 @@ fn dma_buf_import_validates_permissions_origin_placement_and_range() {
             .import(
                 descriptor,
                 0,
-                4096,
-                4096,
+                page,
+                page,
                 DeviceAccess::READ | DeviceAccess::WRITE
             )
             .err()
@@ -1024,8 +1527,8 @@ fn dma_buf_import_validates_permissions_origin_placement_and_range() {
             .import(
                 descriptor,
                 1,
-                4096,
-                4096,
+                page,
+                page,
                 DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
             )
             .err()
@@ -1036,9 +1539,9 @@ fn dma_buf_import_validates_permissions_origin_placement_and_range() {
     fixture.exhausted();
 
     for (gpu_id, flags, offset, length, expected) in [
-        (53, uapi::GTT, 0, 4096, ErrorKind::Unsupported),
-        (42, uapi::VRAM, 0, 4096, ErrorKind::Unsupported),
-        (42, uapi::GTT | (1 << 12), 0, 4096, ErrorKind::Unsupported),
+        (53, uapi::GTT, 0, page, ErrorKind::Unsupported),
+        (42, uapi::VRAM, 0, page, ErrorKind::Unsupported),
+        (42, uapi::GTT | (1 << 12), 0, page, ErrorKind::Unsupported),
         (42, uapi::GTT, 2 * 65536, 1, ErrorKind::InvalidArgument),
     ] {
         let fixture = Fixture::new([Reply::DmaBufInfo(2 * 65536, gpu_id, flags, &[], None)]);
@@ -1048,7 +1551,7 @@ fn dma_buf_import_validates_permissions_origin_placement_and_range() {
                     descriptor,
                     offset,
                     length,
-                    4096,
+                    page,
                     DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
                 )
                 .err()
@@ -1195,7 +1698,7 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
         .allocate(
             MemoryKind::RegisteredHost {
                 address: 0x12345,
-                uncached: false,
+                cache: HostCachePolicy::Fine,
             },
             DeviceAccess::READ | DeviceAccess::WRITE,
         )
@@ -1203,8 +1706,16 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
     let reservation = allocation.reservation.as_ref().unwrap().address();
     let info = allocation.cached_info();
     assert_eq!(info.host_address, Some(0x12345));
-    assert_eq!(info.device_address, reservation as u64 + 0x345);
+    let page = util::page_size().unwrap() as u64;
+    assert_eq!(
+        info.device_address,
+        reservation as u64 + (0x12345 & (page - 1))
+    );
     assert_eq!(info.size, 65536);
+    assert_eq!(
+        info.native_size,
+        (65536 + (0x12345 & (page - 1))).div_ceil(page) * page
+    );
     assert_ne!(info.device_address, 0x12345);
     assert_eq!(
         allocation.device_address(&fixture.vm).unwrap(),
@@ -1218,28 +1729,38 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
 }
 
 #[test]
-fn registered_uncached_host_pages_reach_kfd_without_coherent_caching() {
-    let fixture = Fixture::with_flags(
-        [
-            Reply::Allocate(17, None),
-            Reply::Map(0, 1, None),
-            Reply::Unmap(0, 1, None),
-            Reply::Free(None),
-        ],
-        uapi::USERPTR | uapi::UNCACHED | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
-    );
-    let mut allocation = fixture
-        .allocate(
-            MemoryKind::RegisteredHost {
-                address: 0x12345,
-                uncached: true,
-            },
-            DeviceAccess::READ | DeviceAccess::WRITE,
-        )
-        .unwrap();
-    allocation.free().unwrap();
-    drop(allocation);
-    fixture.exhausted();
+fn registered_host_cache_policies_reach_kfd() {
+    for (cache, flags) in [
+        (HostCachePolicy::Coarse, 0),
+        (HostCachePolicy::Fine, uapi::COHERENT),
+        (
+            HostCachePolicy::Extended,
+            uapi::COHERENT | uapi::EXT_COHERENT,
+        ),
+        (HostCachePolicy::Uncached, uapi::COHERENT | uapi::UNCACHED),
+    ] {
+        let fixture = Fixture::with_flags(
+            [
+                Reply::Allocate(17, None),
+                Reply::Map(0, 1, None),
+                Reply::Unmap(0, 1, None),
+                Reply::Free(None),
+            ],
+            uapi::USERPTR | flags | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        );
+        let mut allocation = fixture
+            .allocate(
+                MemoryKind::RegisteredHost {
+                    address: 0x12345,
+                    cache,
+                },
+                DeviceAccess::READ | DeviceAccess::WRITE,
+            )
+            .unwrap();
+        allocation.free().unwrap();
+        drop(allocation);
+        fixture.exhausted();
+    }
 }
 
 #[test]
@@ -1255,7 +1776,9 @@ fn owned_system_pages_use_one_cpu_and_gpu_address() {
     );
     let mut allocation = fixture
         .allocate(
-            MemoryKind::OwnedHost,
+            MemoryKind::OwnedHost {
+                cache: HostCachePolicy::Fine,
+            },
             DeviceAccess::READ | DeviceAccess::WRITE,
         )
         .unwrap();
@@ -1281,7 +1804,7 @@ fn invalid_registered_host_address_fails_before_native_observation() {
             .allocate(
                 MemoryKind::RegisteredHost {
                     address: 0,
-                    uncached: false,
+                    cache: HostCachePolicy::Fine,
                 },
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )

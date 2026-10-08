@@ -61,8 +61,10 @@ public:
         const auto kind =
             static_cast<SdkBackend::buffer_tracing_kind_t>(m_definition.meta.id);
 
-        SdkBackend::configure_buffer_tracing_service(m_context, kind, m_operations.data(),
-                                                     m_operations.size(), m_buffer);
+        auto*      ops_data  = m_operations.empty() ? nullptr : m_operations.data();
+        const auto ops_count = m_operations.size();
+        SdkBackend::configure_buffer_tracing_service(m_context, kind, ops_data, ops_count,
+                                                     m_buffer);
 
         typename SdkBackend::callback_thread_id_t thread{};
         SdkBackend::create_callback_thread(&thread);
@@ -84,6 +86,14 @@ public:
         return m_definition.meta.name;
     }
     [[nodiscard]] SdkBackend::buffer_id_t buffer_id() const noexcept { return m_buffer; }
+
+    void finalize()
+    {
+        if(m_definition.on_finalize)
+        {
+            m_definition.on_finalize();
+        }
+    }
 
 private:
     [[nodiscard]] static bool is_valid(const SdkBackend::buffer_id_t& buf) noexcept

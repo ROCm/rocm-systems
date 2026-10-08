@@ -17,7 +17,10 @@
 #include "core/perfetto/engine.hpp"
 #include "core/track_registry.hpp"
 #include "core/utility.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
+#include "library/pmc/collectors/hipfile/types.hpp"
 #include "library/thread_info.hpp"
+#include "rocprofiler-systems/categories.h"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/sample_type.hpp"
 
@@ -37,6 +40,7 @@
 #include <string_view>
 #include <utility>
 
+#include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/context.h>
 
 using rocprofsys::common::units::bytes;
@@ -47,6 +51,7 @@ using rocprofsys::common::units::megabytes;
 
 namespace rocprofsys::trace_cache
 {
+
 namespace
 {
 constexpr const char* ROCM_COUNTER_UNIT = "Unit Count";
@@ -507,7 +512,7 @@ perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<agent_manager>& agent_mngr, int pid, [[maybe_unused]] int ppid,
     [[maybe_unused]] output_file_registry& output_registry,
     rocprofsys::track_registry&            tracks)
-: processor_t<perfetto_processor_t>()
+: sample_processor_interface()
 , m_metadata(*metadata)
 , m_process_id(pid)
 , m_agent_manager(*agent_mngr)
@@ -673,19 +678,18 @@ perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 void
 perfetto_processor_t::handle(const scratch_memory_sample& _sms)
 {
-    auto        _corr_id           = _sms.correlation_id_internal;
-    auto        _stream_id         = _sms.stream_handle;
-    auto        _queue_id_handle   = _sms.queue_id_handle;
-    const auto& _t_info            = thread_info::get(_sms.thread_id, SystemTID);
-    const auto  _thread_id_sequent = _t_info->index_data->sequent_value;
-    auto        _beg_ts            = _sms.start_timestamp;
-    auto        _end_ts            = _sms.end_timestamp;
+    auto        _corr_id         = _sms.correlation_id_internal;
+    auto        _stream_id       = _sms.stream_handle;
+    auto        _queue_id_handle = _sms.queue_id_handle;
+    const auto& _t_info =
+        thread_info::get(static_cast<std::int64_t>(_sms.thread_id), SystemTID);
+    const auto _thread_id_sequent =
+        (_t_info && _t_info->index_data) ? _t_info->index_data->sequent_value : 0U;
+    auto _beg_ts = _sms.start_timestamp;
+    auto _end_ts = _sms.end_timestamp;
 
     auto _agent_device_id =
         m_agent_manager.get_agent_by_handle(_sms.agent_id_handle).device_type_index;
-    auto _name = std::string{ m_metadata.get_buffer_name_info().at(
-        static_cast<rocprofiler_buffer_tracing_kind_t>(_sms.kind),
-        static_cast<rocprofiler_tracing_operation_t>(_sms.operation)) };
 
 // Scratch memory samples from SDK versions prior to 7.0.2 do not include
 // allocation_size field, so counter tracks are not needed
@@ -728,7 +732,7 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
                             { .key = "queue", .value = _queue_id_handle },
                             { .key = "allocation_size", .value = _sms.allocation_size },
                             { .key = "agent_id", .value = _agent_device_id },
-                            { .key = "operation", .value = _name },
+                            { .key = "operation", .value = std::string{ _sms.name } },
                             { .key = "flags", .value = _sms.flags } });
     };
 
@@ -736,8 +740,8 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
         return get_or_create_track(category::rocm_scratch_memory{}, _track_desc_events);
     };
     emit_grouped_event(_group_by_queue, category::rocm_scratch_memory{},
-                       _make_queue_track, _stream_id, _name.c_str(), "", _beg_ts, _end_ts,
-                       _corr_id, add_perfetto_annotations);
+                       _make_queue_track, _stream_id, _sms.name.data(), "", _beg_ts,
+                       _end_ts, _corr_id, add_perfetto_annotations);
 }
 
 void
@@ -753,9 +757,6 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
         m_agent_manager.get_agent_by_handle(_mcs.src_agent_id_handle).logical_node_id;
     auto _dst_agent_log_node_id =
         m_agent_manager.get_agent_by_handle(_mcs.dst_agent_id_handle).logical_node_id;
-    auto _name = std::string{ m_metadata.get_buffer_name_info().at(
-        static_cast<rocprofiler_buffer_tracing_kind_t>(_mcs.kind),
-        static_cast<rocprofiler_tracing_operation_t>(_mcs.operation)) };
 
     auto _track_desc = [](std::int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
         const auto& _tid_v = thread_info::get(_tid, SystemTID);
@@ -780,7 +781,7 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
                             { .key = "bytes", .value = _mcs.bytes },
                             { .key = "src_agent_id", .value = _src_agent_log_node_id },
                             { .key = "dst_agent_id", .value = _dst_agent_log_node_id },
-                            { .key = "operation", .value = _name },
+                            { .key = "operation", .value = std::string{ _mcs.name } },
                             { .key = "src_address", .value = _mcs.src_address_value },
                             { .key = "dst_address", .value = _mcs.dst_address_value } });
     };
@@ -790,7 +791,7 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
                                    _dst_agent_log_node_id, _thrd_id);
     };
     emit_grouped_event(_group_by_queue, category::rocm_memory_copy{}, _make_queue_track,
-                       _stream_id, _name.c_str(), "", _beg_ts, _end_ts, _corr_id,
+                       _stream_id, _mcs.name.data(), "", _beg_ts, _end_ts, _corr_id,
                        add_perfetto_annotations);
 }
 
@@ -1567,6 +1568,37 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
             trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
             amd_smi_nic_req_rx_impl_nak_seq_err_track::at(_device_id, 0), _ts,
             static_cast<double>(_nic_sample.metric_values.req_rx_impl_nak_seq_err));
+    }
+}
+
+void
+perfetto_processor_t::handle(const hipfile_pmc_sample& _hipfile_sample)
+{
+    using hipfile_track = core::perfetto::counter_track<category::hipfile>;
+    namespace collector = pmc::collectors::hipfile;
+
+    const auto _ts        = _hipfile_sample.timestamp;
+    const auto _device_id = _hipfile_sample.device_id;
+    const auto _enabled   = _hipfile_sample.enabled_metric.value;
+
+    for(const auto& _metric : collector::METRIC_TABLE)
+    {
+        if((_enabled & (1U << _metric.bit)) == 0U)
+        {
+            continue;
+        }
+
+        auto       _name      = collector::track_name(_device_id, _metric.suffix);
+        const auto _track_key = std::hash<std::string>{}(_name);
+
+        if(!hipfile_track::exists(_track_key))
+        {
+            hipfile_track::emplace(_track_key, _name, _metric.unit);
+        }
+
+        TRACE_COUNTER(trait::name<category::hipfile>::value,
+                      hipfile_track::at(_track_key, 0), _ts,
+                      _metric.value(_hipfile_sample.metric_values));
     }
 }
 

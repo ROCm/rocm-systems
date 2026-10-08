@@ -507,7 +507,9 @@ enum hip_api_id_t {
   HIP_API_ID_hipDeviceGetLuid = 485,
   HIP_API_ID_hipInitDevice = 486,
   HIP_API_ID_hipModuleEnumerateFunctions = 487,
-  HIP_API_ID_LAST = 487,
+  HIP_API_ID_hipDeviceFlushGPUDirectRDMAWrites = 488,
+  HIP_API_ID_hipLibraryGetModule = 489,
+  HIP_API_ID_LAST = 489,
 
 
   HIP_API_ID_hipBindTexture = HIP_API_ID_NONE,
@@ -578,6 +580,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDeviceComputeCapability: return "hipDeviceComputeCapability";
     case HIP_API_ID_hipDeviceDisablePeerAccess: return "hipDeviceDisablePeerAccess";
     case HIP_API_ID_hipDeviceEnablePeerAccess: return "hipDeviceEnablePeerAccess";
+    case HIP_API_ID_hipDeviceFlushGPUDirectRDMAWrites: return "hipDeviceFlushGPUDirectRDMAWrites";
     case HIP_API_ID_hipDeviceGet: return "hipDeviceGet";
     case HIP_API_ID_hipDeviceGetAttribute: return "hipDeviceGetAttribute";
     case HIP_API_ID_hipDeviceGetByPCIBusId: return "hipDeviceGetByPCIBusId";
@@ -804,6 +807,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipLibraryGetKernel: return "hipLibraryGetKernel";
     case HIP_API_ID_hipLibraryGetKernelCount: return "hipLibraryGetKernelCount";
     case HIP_API_ID_hipLibraryGetManaged: return "hipLibraryGetManaged";
+    case HIP_API_ID_hipLibraryGetModule: return "hipLibraryGetModule";
     case HIP_API_ID_hipLibraryLoadData: return "hipLibraryLoadData";
     case HIP_API_ID_hipLibraryLoadFromFile: return "hipLibraryLoadFromFile";
     case HIP_API_ID_hipLibraryUnload: return "hipLibraryUnload";
@@ -1059,6 +1063,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDeviceComputeCapability", name) == 0) return HIP_API_ID_hipDeviceComputeCapability;
   if (strcmp("hipDeviceDisablePeerAccess", name) == 0) return HIP_API_ID_hipDeviceDisablePeerAccess;
   if (strcmp("hipDeviceEnablePeerAccess", name) == 0) return HIP_API_ID_hipDeviceEnablePeerAccess;
+  if (strcmp("hipDeviceFlushGPUDirectRDMAWrites", name) == 0) return HIP_API_ID_hipDeviceFlushGPUDirectRDMAWrites;
   if (strcmp("hipDeviceGet", name) == 0) return HIP_API_ID_hipDeviceGet;
   if (strcmp("hipDeviceGetAttribute", name) == 0) return HIP_API_ID_hipDeviceGetAttribute;
   if (strcmp("hipDeviceGetByPCIBusId", name) == 0) return HIP_API_ID_hipDeviceGetByPCIBusId;
@@ -1285,6 +1290,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipLibraryGetKernel", name) == 0) return HIP_API_ID_hipLibraryGetKernel;
   if (strcmp("hipLibraryGetKernelCount", name) == 0) return HIP_API_ID_hipLibraryGetKernelCount;
   if (strcmp("hipLibraryGetManaged", name) == 0) return HIP_API_ID_hipLibraryGetManaged;
+  if (strcmp("hipLibraryGetModule", name) == 0) return HIP_API_ID_hipLibraryGetModule;
   if (strcmp("hipLibraryLoadData", name) == 0) return HIP_API_ID_hipLibraryLoadData;
   if (strcmp("hipLibraryLoadFromFile", name) == 0) return HIP_API_ID_hipLibraryLoadFromFile;
   if (strcmp("hipLibraryUnload", name) == 0) return HIP_API_ID_hipLibraryUnload;
@@ -1694,6 +1700,10 @@ typedef struct hip_api_data_s {
       int peerDeviceId;
       unsigned int flags;
     } hipDeviceEnablePeerAccess;
+    struct {
+      enum hipFlushGPUDirectRDMAWritesTarget target;
+      enum hipFlushGPUDirectRDMAWritesScope scope;
+    } hipDeviceFlushGPUDirectRDMAWrites;
     struct {
       hipDevice_t* device;
       hipDevice_t device__val;
@@ -3032,6 +3042,11 @@ typedef struct hip_api_data_s {
       const char* name;
       char name__val;
     } hipLibraryGetManaged;
+    struct {
+      hipModule_t* pMod;
+      hipModule_t pMod__val;
+      hipLibrary_t library;
+    } hipLibraryGetModule;
     struct {
       hipLibrary_t* library;
       hipLibrary_t library__val;
@@ -4611,6 +4626,11 @@ typedef struct hip_api_data_s {
   cb_data.args.hipDeviceEnablePeerAccess.peerDeviceId = (int)peerDeviceId; \
   cb_data.args.hipDeviceEnablePeerAccess.flags = (unsigned int)flags; \
 };
+// hipDeviceFlushGPUDirectRDMAWrites[('hipFlushGPUDirectRDMAWritesTarget', 'target'), ('hipFlushGPUDirectRDMAWritesScope', 'scope')]
+#define INIT_hipDeviceFlushGPUDirectRDMAWrites_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDeviceFlushGPUDirectRDMAWrites.target = (hipFlushGPUDirectRDMAWritesTarget)target; \
+  cb_data.args.hipDeviceFlushGPUDirectRDMAWrites.scope = (hipFlushGPUDirectRDMAWritesScope)scope; \
+};
 // hipDeviceGet[('hipDevice_t*', 'device'), ('int', 'ordinal')]
 #define INIT_hipDeviceGet_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipDeviceGet.device = (hipDevice_t*)device; \
@@ -5950,6 +5970,11 @@ typedef struct hip_api_data_s {
   cb_data.args.hipLibraryGetManaged.bytes = (size_t*)bytes; \
   cb_data.args.hipLibraryGetManaged.library = (hipLibrary_t)library; \
   cb_data.args.hipLibraryGetManaged.name = (name) ? strdup(name) : NULL; \
+};
+// hipLibraryGetModule[('hipModule_t*', 'pMod'), ('hipLibrary_t', 'library')]
+#define INIT_hipLibraryGetModule_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipLibraryGetModule.pMod = (hipModule_t*)pMod; \
+  cb_data.args.hipLibraryGetModule.library = (hipLibrary_t)library; \
 };
 // hipLibraryLoadData[('hipLibrary_t*', 'library'), ('const void*', 'code'), ('hipJitOption*', 'jitOptions'), ('void**', 'jitOptionsValues'), ('unsigned int', 'numJitOptions'), ('hipLibraryOption*', 'libraryOptions'), ('void**', 'libraryOptionValues'), ('unsigned int', 'numLibraryOptions')]
 #define INIT_hipLibraryLoadData_CB_ARGS_DATA(cb_data) { \
@@ -7562,6 +7587,9 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipDeviceEnablePeerAccess[('int', 'peerDeviceId'), ('unsigned int', 'flags')]
     case HIP_API_ID_hipDeviceEnablePeerAccess:
       break;
+// hipDeviceFlushGPUDirectRDMAWrites[('hipFlushGPUDirectRDMAWritesTarget', 'target'), ('hipFlushGPUDirectRDMAWritesScope', 'scope')]
+    case HIP_API_ID_hipDeviceFlushGPUDirectRDMAWrites:
+      break;
 // hipDeviceGet[('hipDevice_t*', 'device'), ('int', 'ordinal')]
     case HIP_API_ID_hipDeviceGet:
       if (data->args.hipDeviceGet.device) data->args.hipDeviceGet.device__val = *(data->args.hipDeviceGet.device);
@@ -8475,6 +8503,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipLibraryGetManaged.dptr) data->args.hipLibraryGetManaged.dptr__val = *(data->args.hipLibraryGetManaged.dptr);
       if (data->args.hipLibraryGetManaged.bytes) data->args.hipLibraryGetManaged.bytes__val = *(data->args.hipLibraryGetManaged.bytes);
       if (data->args.hipLibraryGetManaged.name) data->args.hipLibraryGetManaged.name__val = *(data->args.hipLibraryGetManaged.name);
+      break;
+// hipLibraryGetModule[('hipModule_t*', 'pMod'), ('hipLibrary_t', 'library')]
+    case HIP_API_ID_hipLibraryGetModule:
+      if (data->args.hipLibraryGetModule.pMod) data->args.hipLibraryGetModule.pMod__val = *(data->args.hipLibraryGetModule.pMod);
       break;
 // hipLibraryLoadData[('hipLibrary_t*', 'library'), ('const void*', 'code'), ('hipJitOption*', 'jitOptions'), ('void**', 'jitOptionsValues'), ('unsigned int', 'numJitOptions'), ('hipLibraryOption*', 'libraryOptions'), ('void**', 'libraryOptionValues'), ('unsigned int', 'numLibraryOptions')]
     case HIP_API_ID_hipLibraryLoadData:
@@ -9585,6 +9617,12 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "hipDeviceEnablePeerAccess(";
       oss << "peerDeviceId="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceEnablePeerAccess.peerDeviceId);
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceEnablePeerAccess.flags);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDeviceFlushGPUDirectRDMAWrites:
+      oss << "hipDeviceFlushGPUDirectRDMAWrites(";
+      oss << "target="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceFlushGPUDirectRDMAWrites.target);
+      oss << ", scope="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceFlushGPUDirectRDMAWrites.scope);
       oss << ")";
     break;
     case HIP_API_ID_hipDeviceGet:
@@ -11387,6 +11425,13 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.library);
       if (data->args.hipLibraryGetManaged.name == NULL) oss << ", name=NULL";
       else { oss << ", name="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.name__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipLibraryGetModule:
+      oss << "hipLibraryGetModule(";
+      if (data->args.hipLibraryGetModule.pMod == NULL) oss << "pMod=NULL";
+      else { oss << "pMod="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetModule.pMod__val); }
+      oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetModule.library);
       oss << ")";
     break;
     case HIP_API_ID_hipLibraryLoadData:
