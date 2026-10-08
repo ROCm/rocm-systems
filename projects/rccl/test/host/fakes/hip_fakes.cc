@@ -55,6 +55,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamBatchMemOp,           hipStreamBatchMemOp);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWriteValue64,         hipStreamWriteValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
+ASSERT_HOOK_MATCHES_PROD(g_hipExtLaunchKernel,            hipExtLaunchKernel);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -384,6 +385,12 @@ std::function<hipError_t(hipStream_t)> g_hipStreamDestroy = DefaultHipStreamDest
 std::function<hipError_t(hipStreamCaptureMode*)>
     g_hipThreadExchangeStreamCaptureMode = DefaultHipThreadExchangeStreamCaptureMode;
 std::function<hipError_t(void)> g_hipGetLastError = DefaultHipGetLastError;
+static hipError_t DefaultHipExtLaunchKernel(const void*, dim3, dim3, void**, size_t, hipStream_t, hipEvent_t,
+                                            hipEvent_t, int) {
+    FailLoudUnfaked("hip_fakes", "hipExtLaunchKernel");
+}
+std::function<hipError_t(const void*, dim3, dim3, void**, size_t, hipStream_t, hipEvent_t, hipEvent_t, int)>
+    g_hipExtLaunchKernel = DefaultHipExtLaunchKernel;
 
 // --- the working host-memory VMM stand-in (opt-in) -----------------------
 // A reserved VA range mirrors cuMemAddressReserve with an uncommitted anonymous
@@ -622,6 +629,7 @@ void ResetHipFakes()
     g_hipStreamDestroy              = DefaultHipStreamDestroy;
     g_hipThreadExchangeStreamCaptureMode = DefaultHipThreadExchangeStreamCaptureMode;
     g_hipGetLastError               = DefaultHipGetLastError;
+    g_hipExtLaunchKernel            = DefaultHipExtLaunchKernel;
     g_hipEventRecord                = DefaultHipEventRecord;
     g_hipStreamWaitEvent            = DefaultHipStreamWaitEvent;
     g_hipEventQueryRequiresRecord   = false;
@@ -1002,6 +1010,28 @@ hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return 
 extern "C" {
 #define RCCL_DEFINE_HIP_STUB(name, params) \
   hipError_t name params { FailLoudUnfaked("hip_fakes", #name); }
-RCCL_HIP_PROFILE_INTERCEPTORS(RCCL_DEFINE_HIP_STUB)
+RCCL_HIP_PROFILE_INTERCEPTORS_FAIL_LOUD(RCCL_DEFINE_HIP_STUB)
 #undef RCCL_DEFINE_HIP_STUB
+
+hipError_t hipExtLaunchKernel(const void* function, dim3 grid, dim3 block, void** args, size_t sharedMemBytes,
+                              hipStream_t stream, hipEvent_t startEvent, hipEvent_t stopEvent, int flags) {
+  return g_hipExtLaunchKernel(function, grid, block, args, sharedMemBytes, stream, startEvent, stopEvent, flags);
+}
+}  // extern "C"
+
+// ---- Kernel registration the compiler emits for a TU that defines __global__ functions ----
+// Reached from static init of a test TU that #includes a .cu; the launches themselves go through
+// g_hipExtLaunchKernel. Such a TU must embed a GPU binary (-fcuda-include-gpubinary) or clang
+// also references an external __hip_fatbin_<cuid> that nothing defines.
+extern "C" {
+void** __hipRegisterFatBinary(const void*) {
+  static void* handle = nullptr;
+  return &handle;
+}
+void __hipRegisterFunction(void**, const void*, char*, const char*, unsigned int, void*, void*, void*, void*,
+                           int*) {}
+void __hipUnregisterFatBinary(void**) {}
+hipError_t __hipPopCallConfiguration(dim3*, dim3*, size_t*, hipStream_t*) {
+  FailLoudUnfaked("hip_fakes", "__hipPopCallConfiguration");
+}
 }  // extern "C"
