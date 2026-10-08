@@ -645,9 +645,12 @@
     },
 
     "cast_wqe_lat_qp_sharing": {
-      "extends": "cast_wqe_lat",
+      "extends": "cast_base",
       "timeout": 120,
       "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_IB_WQE_LATENCY_THRESHOLD_NS": "1000",
         "RCCL_IB_QP_SHARING_ENABLE": "1",
         "RCCL_IB_COMM_NGROUPS": "1"
       },

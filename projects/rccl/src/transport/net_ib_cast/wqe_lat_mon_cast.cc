@@ -244,6 +244,10 @@ bool IbCastWqeLatMonCheckStall(struct ncclIbCastWqeLatMon* m, uint64_t nowNs, ui
   if (outInflight) *outInflight = m->inflight;
 
   if (age <= ncclIbCastWqeLatThresholdNs) return false;
+  // Count every stall detection, independent of the once-per-second log
+  // rate-limiter below, so introspection can observe stalls that happened
+  // between two rate-limited log lines.
+  m->stallCount++;
   if (m->lastStallWarnNs && (nowNs - m->lastStallWarnNs) < kReportIntervalNs) return false;
   m->lastStallWarnNs = nowNs;
   return true;
@@ -259,6 +263,8 @@ struct peerInfo {
   uint16_t localLid;
   uint16_t remoteLid;
   uint8_t peerPort;
+  uint8_t localIbPort;
+  uint32_t remoteQpNum;
 };
 
 static void getPeerInfo(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQp* qp, struct peerInfo* info) {
@@ -280,8 +286,25 @@ static void getPeerInfo(struct ncclIbNetCommBase* base, int devIndex, struct ncc
   }
   info->localLid = (uint16_t)IbCastDevs[devBase->ibDevN].portAttr.lid;
   info->remoteLid = (uint16_t)qp->rtrAttr.remoteLid;
+  info->localIbPort = qp->rtrAttr.localIbPort;
+  info->remoteQpNum = qp->rtrAttr.remoteQpNum;
   if (qp->remDevIdx >= 0 && qp->remDevIdx < base->nRemDevs) {
     info->peerPort = base->remDevs[qp->remDevIdx].ib_port;
+  }
+  // QP-sharing secondaries skip RTR/RTS setup and borrow an already-connected
+  // QP from the primary, so rtrAttr is never populated for them (localIbPort
+  // stays 0). Fall back to querying the live QP so peer identifiers in these
+  // logs aren't blank for secondaries.
+  if (info->localIbPort == 0 && qp->qp != NULL) {
+    struct ibv_qp_attr attr;
+    struct ibv_qp_init_attr initAttr;
+    memset(&attr, 0, sizeof(attr));
+    memset(&initAttr, 0, sizeof(initAttr));
+    if (wrap_ibv_query_qp(qp->qp, &attr, IBV_QP_DEST_QPN | IBV_QP_AV | IBV_QP_PORT, &initAttr) == ncclSuccess) {
+      info->localIbPort = attr.port_num;
+      info->remoteQpNum = attr.dest_qp_num;
+      info->remoteLid = attr.ah_attr.dlid;
+    }
   }
 }
 
@@ -295,7 +318,7 @@ static void reportSlow(struct ncclIbNetCommBase* base, int devIndex, struct nccl
        "thr=%luns delta=%luns mean=%.0fns stddev=%.0fns "
        "p50=%luns p90=%luns p99=%luns p99.9=%luns max=%luns count=%lu | "
        "t_post=%lu t_poll=%lu",
-       p.sock, qpn, p.hca, qp->rtrAttr.localIbPort, (unsigned)p.localLid, p.localGid, qp->rtrAttr.remoteQpNum,
+       p.sock, qpn, p.hca, p.localIbPort, (unsigned)p.localLid, p.localGid, p.remoteQpNum,
        (unsigned)p.peerPort, (unsigned)p.remoteLid, p.remoteGid, (unsigned long)ncclIbCastWqeLatThresholdNs,
        (unsigned long)deltaNs, s->meanNs, s->stddevNs, (unsigned long)s->p50Ns, (unsigned long)s->p90Ns,
        (unsigned long)s->p99Ns, (unsigned long)s->p999Ns, (unsigned long)s->maxNs, (unsigned long)s->count,
@@ -310,8 +333,8 @@ static void reportStall(struct ncclIbNetCommBase* base, int devIndex, struct ncc
        "NET/IB-CAST: WQE stall (no CQE): peer=%s | local: qpn=%u dev=%s port=%u lid=%u localGid=%s | "
        "remote: qpn=%u port=%u lid=%u remoteGid=%s | "
        "stall_thr=%luns age=%luns inflight=%u",
-       p.sock, qp->qp->qp_num, p.hca, qp->rtrAttr.localIbPort, (unsigned)p.localLid, p.localGid,
-       qp->rtrAttr.remoteQpNum, (unsigned)p.peerPort, (unsigned)p.remoteLid, p.remoteGid,
+       p.sock, qp->qp->qp_num, p.hca, p.localIbPort, (unsigned)p.localLid, p.localGid,
+       p.remoteQpNum, (unsigned)p.peerPort, (unsigned)p.remoteLid, p.remoteGid,
        (unsigned long)ncclIbCastWqeLatThresholdNs, (unsigned long)ageNs, inflight);
 }
 
@@ -342,7 +365,12 @@ void IbCastWqeLatScanStalls(struct ncclIbNetCommBase* base, int devIndex) {
   int nqpsPerDev = base->nqps / base->vProps.ndevs;
   uint64_t now = ncclIbCastWqeLatMonNowNs();
   for (int k = 0; k < nqpsPerDev; k++) {
-    struct ncclIbQp* qp = &base->qps[base->vProps.ndevs * k + devIndex];
+    // Use activeQps[], not qps[], so a slot replaced by AINIC port-recovery
+    // (p2p_resiliency.cc's IbCastResiliencyReplaceQps) is scanned at its new
+    // location instead of leaving the abandoned old slot's stale tracking
+    // state reporting a permanent false stall.
+    struct ncclIbQp* qp = base->activeQps[base->vProps.ndevs * k + devIndex];
+    if (qp == NULL) continue;
     uint64_t age = 0;
     uint32_t inflight = 0;
     if (IbCastWqeLatMonCheckStall(&qp->latMon, now, &age, &inflight)) {
@@ -378,6 +406,7 @@ extern "C" ncclResult_t ncclIbCastGetWqeLatState(void* sendOrRecvComm, struct nc
     out->qps[i].qpNum = qp->qp ? qp->qp->qp_num : 0;
     out->qps[i].count = s.count;
     out->qps[i].slowCount = s.slowCount;
+    out->qps[i].stallCount = qp->latMon.stallCount;
     out->qps[i].meanNs = s.meanNs;
     out->qps[i].stddevNs = s.stddevNs;
     out->qps[i].maxNs = s.maxNs;
@@ -400,7 +429,7 @@ void IbCastWqeLatReportQpSummary(struct ncclIbNetCommBase* base, int devIndex, s
        "NET/IB-CAST: WQE latency summary [%s peer=%s dev=%s qpn=%u port=%u]: "
        "n=%lu slow=%lu thr=%luns | post-to-poll ns: mean=%.0f std=%.0f "
        "p50=%lu p90=%lu p99=%lu p99.9=%lu max=%lu",
-       base->isSend ? "send" : "recv", p.sock, p.hca, qp->qp->qp_num, qp->rtrAttr.localIbPort, (unsigned long)s.count,
+       base->isSend ? "send" : "recv", p.sock, p.hca, qp->qp->qp_num, p.localIbPort, (unsigned long)s.count,
        (unsigned long)s.slowCount, (unsigned long)ncclIbCastWqeLatThresholdNs, s.meanNs, s.stddevNs,
        (unsigned long)s.p50Ns, (unsigned long)s.p90Ns, (unsigned long)s.p99Ns, (unsigned long)s.p999Ns,
        (unsigned long)s.maxNs);

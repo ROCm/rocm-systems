@@ -2634,13 +2634,14 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
     bool isSharing = IbCastCommIsSharing(&comm->base);
     if (comm->base.vProps.ndevs > 0)
       rcclTelemetryAddCqPolls(comm->base.vProps.devs[0], comm->base.telCqPollCount);
-    NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     // Acquire QP sharing mutex only when this comm participates in sharing
     std::unique_lock<std::mutex> lock(g_IbCastQpSharingGlobalMutex, std::defer_lock);
     if (isSharing) lock.lock();
 
-    // QP teardown: refcount-based for shared, direct destroy for non-shared
+    // QP teardown: refcount-based for shared, direct destroy for non-shared.
+    // Report the WQE latency summary (reads the peer address off the socket)
+    // before closing the socket below, or the peer= field logs blank.
     struct IbCastSharedQp* slot0 = NULL;
     for (int q = 0; q < comm->base.nqps; q++) {
       if (comm->base.qps[q].qp == NULL) continue;
@@ -2661,6 +2662,8 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
         NCCLCHECK(wrap_ibv_destroy_qp(comm->base.qps[q].qp));
       }
     }
+
+    NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     if (comm->base.resiliency) {
       NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
@@ -2736,7 +2739,6 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
     struct IbCastSharedQp* slot0 = NULL;
     for (int q = 0; q < comm->base.nqps; q++) {
       if (comm->base.qps[q].qp == NULL) continue;
-      IbCastWqeLatReportQpSummary(&comm->base, comm->base.qps[q].devIndex, &comm->base.qps[q]);
       if (isSharing) {
         struct IbCastSharedQp* slot = IbCastFindSharedQpByQpn(comm->base.qps[q].qp->qp_num, false);
         if (slot) {

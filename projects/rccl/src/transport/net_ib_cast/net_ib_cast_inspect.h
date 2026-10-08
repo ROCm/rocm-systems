@@ -104,6 +104,7 @@ struct ncclIbCastWqeLatQpState {
   uint32_t qpNum;
   uint64_t count;
   uint64_t slowCount;
+  uint64_t stallCount;
   double   meanNs;
   double   stddevNs;
   uint64_t maxNs;

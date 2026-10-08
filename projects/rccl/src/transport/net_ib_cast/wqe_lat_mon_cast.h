@@ -48,6 +48,7 @@ struct ncclIbCastWqeLatMon {
   double m2Ns;
   uint64_t maxNs;
   uint64_t slowCount;
+  uint64_t stallCount;
 
   struct ncclIbCastP2Quantile p2[NCCL_IB_CAST_WQE_LAT_NUM_PCTL];
 

@@ -10,7 +10,7 @@
 #ifdef MPI_TESTS_ENABLED
 
 // Skip unless the WQE-latency monitor is armed. NCCL_IB_WQE_LATENCY_THRESHOLD_NS
-// is read once per process inside wqe_lat_mon.cc's ensureInitialized(), gated by
+// is read once per process inside wqe_lat_mon_cast.cc's ensureInitialized(), gated by
 // std::call_once -- a runtime setenv() from inside a test body would have no
 // effect, so this must be set via the MPI launch environment.
 #define WQE_LAT_ENV_CHECK_OR_SKIP()                                                        \
@@ -20,7 +20,7 @@
         if (_thrVal <= 0) {                                                                \
             GTEST_SKIP() << "Requires NCCL_IB_WQE_LATENCY_THRESHOLD_NS > 0, set via the "  \
                             "MPI launch environment (ensureInitialized() in "              \
-                            "wqe_lat_mon.cc caches it once per process via "                \
+                            "wqe_lat_mon_cast.cc caches it once per process via "          \
                             "std::call_once).";                                            \
         }                                                                                   \
     } while (0)
@@ -97,11 +97,14 @@ TEST_F(NetIbMPITest, WqeLatMonNonSharingStampComplete) {
         EXPECT_EQ(memcmp(sendBuf, recvBuf, sizeof(sendBuf)), 0) << "data mismatch";
 
     if (rank == kCastSenderRank) {
+        // EXPECT_, not ASSERT_: this runs only on the sender rank, and an
+        // ASSERT_* early-return here would skip the MPI_Barrier below on this
+        // rank while the receiver rank still reaches it, deadlocking the test.
         struct ncclIbCastWqeLatState state = {};
-        ASSERT_EQ(ncclIbCastGetWqeLatState(sendComm, &state), ncclSuccess);
+        EXPECT_EQ(ncclIbCastGetWqeLatState(sendComm, &state), ncclSuccess);
         EXPECT_TRUE(state.enabled);
         EXPECT_GT(state.thresholdNs, 0u);
-        ASSERT_GT(state.nqps, 0);
+        EXPECT_GT(state.nqps, 0);
 
         // The WRR scheduler (mandatory for cast tests, see CAST_ENV_CHECK_OR_SKIP)
         // picks one effective QP per small (below-split-threshold) logical send
@@ -118,8 +121,11 @@ TEST_F(NetIbMPITest, WqeLatMonNonSharingStampComplete) {
             EXPECT_LE(qp.p90Ns, qp.p99Ns) << "qp " << qp.qpNum << ": p90 > p99";
             EXPECT_LE(qp.p99Ns, qp.p999Ns) << "qp " << qp.qpNum << ": p99 > p999";
             EXPECT_LE(qp.p999Ns, qp.maxNs) << "qp " << qp.qpNum << ": p999 > observed max";
-            EXPECT_GE(qp.meanNs, 0.0);
-            EXPECT_GE(qp.stddevNs, 0.0);
+            // meanNs/stddevNs are non-negative by construction (Welford on
+            // non-negative deltas / sqrt of variance), so checking >= 0 would
+            // assert nothing; check a real completion was actually measured.
+            EXPECT_GT(qp.meanNs, 0.0)
+                << "qp " << qp.qpNum << ": mean post-to-poll latency must be positive for real completions";
         }
         EXPECT_EQ(totalCount, static_cast<uint64_t>(kNSends))
             << "latMon must record exactly one completion per signaled send, summed across QPs";
@@ -139,11 +145,12 @@ TEST_F(NetIbMPITest, WqeLatMonNonSharingStampComplete) {
 // latMon count reflects only its own traffic -- no cross-comm contamination --
 // which holds by construction since completions are routed to the owning
 // logical comm (by wr_id/commId/immData) before any latency code runs. Also
-// covers comm-close teardown (scenario d): closing both sharing comms in
-// sequence must not crash/double-free, which is safe because
-// IbCastWqeLatReportQpSummary is called unconditionally per comm in the
-// teardown loop (connect.cc IbCastCloseSend), independent of the physical-QP
-// refcount that gates the actual ibv_destroy_qp.
+// exercises comm-close teardown (scenario d): sequentially closing both
+// sharing comms, each of which unconditionally calls IbCastWqeLatReportQpSummary
+// in its per-QP teardown loop (connect.cc IbCastCloseSend) ahead of the
+// physical-QP refcount check that gates the actual ibv_destroy_qp. This is
+// smoke-level coverage only -- a crash/double-free would fail the test
+// process itself, but no assertion below specifically detects one.
 // =============================================================================
 TEST_F(NetIbMPITest, WqeLatMonQpSharingPerCommIsolation) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
@@ -248,6 +255,23 @@ TEST_F(NetIbMPITest, WqeLatMonQpSharingPerCommIsolation) {
             << "comm1 latMon count must reflect only comm1's own sends";
         EXPECT_EQ(total2, static_cast<uint64_t>(kNSends) * st2.nqps)
             << "comm2 latMon count must reflect only comm2's own sends";
+
+        // Per-QP ladder checks on both comms' shared (secondary) QPs: this is
+        // the invariant that would break if a QP-sharing secondary's latMon
+        // were left un-initialized (e.g. a dropped IbCastWqeLatMonInit call in
+        // the secondary setup path), since an un-initialized/stale latMon
+        // would not produce a self-consistent percentile ladder.
+        for (const auto* st : {&st1, &st2}) {
+            for (int i = 0; i < st->nqps; i++) {
+                const auto& qp = st->qps[i];
+                if (qp.count == 0) continue;
+                EXPECT_LE(qp.p50Ns, qp.p90Ns) << "qp " << qp.qpNum << ": p50 > p90";
+                EXPECT_LE(qp.p90Ns, qp.p99Ns) << "qp " << qp.qpNum << ": p90 > p99";
+                EXPECT_LE(qp.p99Ns, qp.p999Ns) << "qp " << qp.qpNum << ": p99 > p999";
+                EXPECT_LE(qp.p999Ns, qp.maxNs) << "qp " << qp.qpNum << ": p999 > observed max";
+                EXPECT_GT(qp.meanNs, 0.0) << "qp " << qp.qpNum << ": mean post-to-poll latency must be positive";
+            }
+        }
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -341,10 +365,11 @@ TEST_F(NetIbMPITest, WqeLatMonNoSpuriousCompletionBeforePoll) {
 
         struct ncclIbCastWqeLatState after = {};
         ASSERT_EQ(ncclIbCastGetWqeLatState(sendComm, &after), ncclSuccess);
-        uint64_t afterCount = 0, afterSlow = 0;
+        uint64_t afterCount = 0, afterSlow = 0, afterMax = 0;
         for (int i = 0; i < after.nqps; i++) {
             afterCount += after.qps[i].count;
             afterSlow  += after.qps[i].slowCount;
+            afterMax = std::max(afterMax, after.qps[i].maxNs);
         }
         // WRR picks one effective QP for this single small logical send (see
         // WqeLatMonNonSharingStampComplete), so exactly one completion is
@@ -353,6 +378,11 @@ TEST_F(NetIbMPITest, WqeLatMonNoSpuriousCompletionBeforePoll) {
             << "exactly one completion must be recorded once the delayed poll runs";
         EXPECT_GE(afterSlow, baselineSlow + 1)
             << "the deliberately-delayed send must be classified as exceeding the latency threshold";
+        // The recorded latency must actually reflect the deliberate delay, not
+        // just a count bump -- guards against a stamp/complete wiring bug that
+        // increments count/slowCount without capturing a real delta.
+        EXPECT_GE(afterMax, sleepUs * 1000ULL)
+            << "recorded max latency must be at least as large as the deliberate poll delay";
     } else {
         void*  bufs[1]    = {recvBuf};
         size_t sizes[1]   = {kMsgSz};
