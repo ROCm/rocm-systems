@@ -3173,10 +3173,10 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 // ---------------------------------------------------------------------------
-// Manual playback: hipHostMalloc / hipMallocHost
+// Manual playback: hipHostMalloc. hipMallocHost, hipHostFree and hipFreeHost
+// are generated; the two frees wait for pending pinned host restores.
 // ---------------------------------------------------------------------------
 // hipHostMalloc:  ret(4) ptr(8) size(8) flags(4)
-// hipMallocHost:  ret(4) ptr(8) size(8)
 
 hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(pl);
@@ -3184,35 +3184,6 @@ hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
     hipError_t r = hipHostMalloc(&live, static_cast<size_t>(a->size), a->flags);
     if (r == hipSuccess)
         ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
-    return r;
-}
-
-hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipMallocHost*>(pl);
-    void* live = nullptr;
-    hipError_t r = hipMallocHost(&live, static_cast<size_t>(a->size));
-    if (r == hipSuccess)
-        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
-    return r;
-}
-
-hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipFreeHost*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
-    if (!live) return hipSuccess;
-    hrr_wait_host_restores(ctx, live);
-    hipError_t r = hipFreeHost(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
-    return r;
-}
-
-hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
-    if (!live) return hipSuccess;
-    hrr_wait_host_restores(ctx, live);
-    hipError_t r = hipHostFree(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
     return r;
 }
 
