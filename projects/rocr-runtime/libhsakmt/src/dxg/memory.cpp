@@ -1304,7 +1304,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHand
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
-
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSize(HSAuint32 Node, HSAuint64 CacheSize)
 {
   return HSAKMT_STATUS_NOT_SUPPORTED;
