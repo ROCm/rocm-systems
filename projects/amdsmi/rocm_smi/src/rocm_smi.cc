@@ -1992,6 +1992,9 @@ static rsmi_status_t topo_get_numa_node_number(uint32_t dv_ind, uint32_t* numa_n
       GET_DEV_AND_KFDNODE_FROM_INDX
 
           * numa_node_number = kfd_node->numa_node_number();
+  if (*numa_node_number == amd::smi::kInvalidNumaNode) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   return RSMI_STATUS_SUCCESS;
   CATCH
@@ -2003,6 +2006,9 @@ static rsmi_status_t topo_get_numa_node_weight(uint32_t dv_ind, uint64_t* weight
       GET_DEV_AND_KFDNODE_FROM_INDX
 
           * weight = kfd_node->numa_node_weight();
+  if (*weight == amd::smi::kInvalidNumaNodeWeight) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   return RSMI_STATUS_SUCCESS;
   CATCH
@@ -3246,6 +3252,29 @@ rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
   rsmi_status_t ubb_status =
       amd::smi::get_ubb_power_limit(*board_path_str, &ubb_power_threshold_raw);
 
+  // Get platform max node power limit (optional - don't fail if not available).
+  // This is descriptive metadata (used by callers, e.g. amd-smi CLI, to bound
+  // requests to rsmi_dev_npm_limit_set()), not on the critical read path.
+  uint64_t npm_max_limit = UINT64_MAX;
+  rsmi_status_t max_limit_status =
+      amd::smi::get_npm_board_max_limit(*board_path_str, &npm_max_limit);
+  if (max_limit_status != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_board_max_limit returned "
+       << getRSMIStatusString(max_limit_status) << " ; using sentinel max limit";
+    LOG_DEBUG(ss);
+    npm_max_limit = UINT64_MAX;
+  }
+
+  // Get current node power (optional - don't fail if not available). This is
+  // descriptive telemetry, not on the critical read path.
+  uint64_t node_power_raw = UINT64_MAX;
+  rsmi_status_t node_power_status = amd::smi::get_npm_node_power(*board_path_str, &node_power_raw);
+  if (node_power_status != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_node_power returned "
+       << getRSMIStatusString(node_power_status) << " ; using sentinel node power";
+    LOG_DEBUG(ss);
+  }
+
   // fill output
   std::memset(npm_info, 0, sizeof(*npm_info));
   npm_info->status = npm_status ? RSMI_NPM_STATUS_ENABLED : RSMI_NPM_STATUS_DISABLED;
@@ -3255,11 +3284,95 @@ rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
       (ubb_status == RSMI_STATUS_SUCCESS && ubb_power_threshold_raw <= kU32Max)
           ? static_cast<uint32_t>(ubb_power_threshold_raw)
           : std::numeric_limits<uint32_t>::max();
+  npm_info->max_node_power_limit = npm_max_limit;
+  npm_info->current_node_power =
+      (node_power_status == RSMI_STATUS_SUCCESS && node_power_raw <= kU32Max)
+          ? static_cast<uint32_t>(node_power_raw)
+          : std::numeric_limits<uint32_t>::max();
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
      << getRSMIStatusString(RSMI_STATUS_SUCCESS);
   LOG_TRACE(ss);
   return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uint64_t limit) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind << ", limit=" << limit;
+  LOG_TRACE(ss);
+
+  REQUIRE_ROOT_ACCESS
+
+  CHECK_DV_IND_RANGE
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  // Reject the write outright when NPM is disabled on this node: writing
+  // board/cur_node_power_limit has no defined effect in that state. This is
+  // the authoritative check -- the CLI's own pre-check (amdsmi_helpers.py)
+  // is a fail-fast convenience for that one caller, not a substitute for
+  // enforcing this here for every caller of rsmi_dev_npm_limit_set().
+  bool npm_enabled = false;
+  rsmi_status_t status_ret = amd::smi::get_npm_board_status(*board_path_str, &npm_enabled);
+  if (status_ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | get_npm_board_status failed: " << getRSMIStatusString(status_ret, false)
+       << " -> rejecting write (fail closed)";
+    LOG_ERROR(ss);
+    return status_ret;
+  }
+  if (!npm_enabled) {
+    ss << __PRETTY_FUNCTION__ << " | NPM disabled on this node -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  // Mirror rsmi_dev_power_cap_set(): query the platform bound before ever
+  // touching sysfs, and reject out-of-range requests with
+  // RSMI_STATUS_INVALID_ARGS. Fail closed if the bound itself can't be
+  // read (e.g. sysfs missing/unexpected contents) -- propagate that error
+  // and do not fall through to the write, rather than silently allowing an
+  // unbounded value through, consistent with the CLI layer's own
+  // fail-closed handling of an unreadable platform max.
+  uint64_t max_limit = 0;
+  rsmi_status_t ret = amd::smi::get_npm_board_max_limit(*board_path_str, &max_limit);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | get_npm_board_max_limit failed: " << getRSMIStatusString(ret, false)
+       << " -> rejecting write (fail closed)";
+    LOG_ERROR(ss);
+    return ret;
+  }
+
+  if (limit == 0 || limit > max_limit) {
+    ss << __PRETTY_FUNCTION__ << " | limit=" << limit << " out of range (valid range is "
+       << "1.." << max_limit << ") -> returning " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  ret = amd::smi::set_npm_board_limit(*board_path_str, limit);
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(ret, false);
+  LOG_TRACE(ss);
+  return ret;
   CATCH
 }
 
@@ -5452,12 +5565,10 @@ rsmi_status_t rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst
           }
           status = RSMI_STATUS_SUCCESS;
         } else {
-          assert(false);  // Error to read numa node number
-          status = RSMI_STATUS_INIT_ERROR;
+          status = RSMI_STATUS_NOT_SUPPORTED;
         }
       } else {
-        assert(false);  // Error to read numa node weight
-        status = RSMI_STATUS_INIT_ERROR;
+        status = RSMI_STATUS_NOT_SUPPORTED;
       }
     } else {
       status = RSMI_STATUS_NOT_SUPPORTED;
@@ -5531,7 +5642,7 @@ rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, 
   // handle the link type for CPU
   if (dv_ind_dst == CPU_NODE_INDEX) {
     // No CPU connected
-    if (kfd_node->numa_node_weight() == 0) {
+    if (kfd_node->numa_node_weight() == amd::smi::kInvalidNumaNodeWeight) {
       return RSMI_STATUS_NOT_SUPPORTED;
     }
     amd::smi::IO_LINK_TYPE io_link_type = kfd_node->numa_node_type();
@@ -5582,8 +5693,7 @@ rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, 
         *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
         status = RSMI_STATUS_SUCCESS;
       } else {
-        assert(false);  // Error to get numa node number
-        status = RSMI_STATUS_INIT_ERROR;
+        status = RSMI_STATUS_NOT_SUPPORTED;
       }
     } else {
       status = RSMI_STATUS_NOT_SUPPORTED;

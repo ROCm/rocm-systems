@@ -163,7 +163,7 @@ void check_revshift(const char *name, uint32_t op, uint64_t exec) {
       fx.write64(vb + kDstVgpr, lane, dst_sentinel(lane));
     }
     fx.wf->set_exec(exec);
-    fx.cu->execute_instruction(inst, *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = fx.read64(vb + kDstVgpr, lane);
@@ -200,7 +200,7 @@ void check_lshl_add(uint64_t exec) {
       fx.write64(vb + kDstVgpr, lane, dst_sentinel(lane));
     }
     fx.wf->set_exec(exec);
-    fx.cu->execute_instruction(inst, *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = fx.read64(vb + kDstVgpr, lane);
@@ -283,7 +283,7 @@ void check_mad64(const char *name, uint32_t op, bool is_signed, uint64_t exec) {
     }
     fx.write_sgpr64(sb, SDST_SENTINEL);
     fx.wf->set_exec(exec);
-    fx.cu->execute_instruction(inst, *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     Mad64Output out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out.dst[lane] = fx.read64(vb + kDstVgpr, lane);
@@ -355,7 +355,7 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
       fx.write64(vb + kDstVgpr, 0, 0u);
       fx.write_sgpr64(sb, 0u);
       fx.wf->set_exec(1u);
-      fx.cu->execute_instruction(inst.get(), *fx.wf);
+      EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
       EXPECT_EQ(fx.read64(vb + kDstVgpr, 0), test.expected)
           << "signed " << test.is_signed << " scalar " << force_scalar;
       EXPECT_EQ(fx.read_sgpr64(sb) & 1u, 1u)

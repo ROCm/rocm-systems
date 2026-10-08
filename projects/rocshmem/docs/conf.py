@@ -18,7 +18,7 @@ left_nav_title = f"rocSHMEM {version_number} documentation"
 # for PDF output on Read the Docs
 project = "rocSHMEM"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
@@ -34,3 +34,13 @@ exclude_patterns = ["README.md"]
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+html_theme_options.update(
+    {
+        "repository_url": "https://github.com/ROCm/rocm-systems",
+        "path_to_docs": "projects/rocshmem/docs",
+        "use_repository_button": True,
+        "use_issues_button": True,
+        "use_download_button": True,
+    }
+)

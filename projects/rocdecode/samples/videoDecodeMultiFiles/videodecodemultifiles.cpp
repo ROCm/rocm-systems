@@ -22,16 +22,18 @@ THE SOFTWARE.
 
 #include <iostream>
 #include <iomanip>
-#include <unistd.h>
 #include <vector>
 #include <string>
 #include <fstream>
 #include <sstream>
 #include <chrono>
 #include <deque>
+#ifndef _WIN32
+#include <unistd.h>
 #include <sys/stat.h>
 #include <libgen.h>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#endif
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
 #else
     #include <experimental/filesystem>
@@ -204,7 +206,7 @@ int main(int argc, char **argv) {
             std::string device_name, gcn_arch_name;
             int pci_bus_id, pci_domain_id, pci_device_id;
 
-            std::size_t found_file = file_data.in_file.find_last_of('/');
+            std::size_t found_file = file_data.in_file.find_last_of("/\\");
             std::cout << "info: Input file: " << file_data.in_file.substr(found_file + 1) << std::endl;
             viddec->GetDeviceinfo(device_name, gcn_arch_name, pci_bus_id, pci_domain_id, pci_device_id);
             std::cout << "info: Using GPU device " << device_id << " - " << device_name << "[" << gcn_arch_name << "] on PCI bus " <<
@@ -218,7 +220,6 @@ int main(int argc, char **argv) {
             uint8_t *pframe = nullptr;
             int64_t pts = 0;
             OutputSurfaceInfo *surf_info;
-            uint32_t width, height;
             double total_dec_time = 0;
 
             do {

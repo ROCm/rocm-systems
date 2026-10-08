@@ -39,7 +39,6 @@ namespace amd::smi {
 
 static bool is_number(const std::string& s);
 static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
-static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
 static const char* kKFDVramPrefix = "vram_";
 
 // Tri-state result of inspecting a PID's open file descriptors for /dev/kfd.
@@ -296,7 +295,7 @@ static std::vector<std::string> GetSecondaryContextPaths(const std::string& proc
 }
 
 static std::string KFDDevicePath(uint32_t dev_id) {
-  std::string node_path = kKFDNodesPathRoot;
+  std::string node_path = KFDNodesPathRoot();
   node_path += '/';
   node_path += std::to_string(dev_id);
   return node_path;
@@ -972,7 +971,7 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes) {
   std::shared_ptr<KFDNode> node;
   uint32_t node_indx;
 
-  auto kfd_node_dir = opendir(kKFDNodesPathRoot);
+  auto kfd_node_dir = opendir(KFDNodesPathRoot());
   if (kfd_node_dir == nullptr) {
     return errno;
   }
@@ -996,9 +995,16 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes) {
       continue;
     }
 
+    int ret;
+
     node = std::make_shared<KFDNode>(node_indx);
 
-    node->Initialize();
+    ret = node->Initialize();
+    if (ret != 0) {
+      std::cerr << "Failed to initialize kfd node " << node->node_index() << "." << std::endl;
+      closedir(kfd_node_dir);
+      return ret;
+    }
 
     if (node->gpu_id() == 0) {
       // Don't add; this is a cpu node.
@@ -1008,7 +1014,6 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes) {
 
     uint64_t kfd_gpu_node_bus_fn;
     uint64_t kfd_gpu_node_domain;
-    int ret;
     ret = node->get_property_value(kKFDNodePropLOCATION_IDStr, &kfd_gpu_node_bus_fn);
     if (ret != 0) {
       std::cerr << "Failed to open properties file for kfd node " << node->node_index() << "."
@@ -1033,7 +1038,7 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes) {
 
   if (closedir(kfd_node_dir)) {
     std::string err_str = "Failed to close KFD node directory ";
-    err_str += kKFDNodesPathRoot;
+    err_str += KFDNodesPathRoot();
     err_str += ".";
     perror(err_str.c_str());
     return 1;
@@ -1116,6 +1121,12 @@ int KFDNode::Initialize(void) {
   uint64_t node_to_gpu_id;
   std::shared_ptr<IOLink> link;
   bool numa_node_found = false;
+  // Reset in case Initialize() is ever invoked again on this node (construction
+  // already sets the sentinel for the first call).
+  numa_node_number_ = kInvalidNumaNode;
+  numa_node_weight_ = kInvalidNumaNodeWeight;
+  numa_node_type_ = IOLINK_TYPE_UNDEFINED;
+
   for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
     io_link_map_[it->first] = it->second;
     node_to = it->first;
@@ -1234,7 +1245,7 @@ int KFDNode::get_total_memory(uint64_t* total) {
   }
   *total = 0;
 
-  std::string f_path = kKFDNodesPathRoot;
+  std::string f_path = KFDNodesPathRoot();
   f_path += "/";
   f_path += std::to_string(node_indx_);
   f_path += "/mem_banks";
@@ -1413,7 +1424,7 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t* info) {
   if (ret != 0) return ret;
 
   // /sys/class/kfd/kfd/topology/nodes/1/caches/0/properties
-  std::string f_path = kKFDNodesPathRoot;
+  std::string f_path = KFDNodesPathRoot();
   f_path += "/";
   f_path += std::to_string(node_indx_);
   f_path += "/";

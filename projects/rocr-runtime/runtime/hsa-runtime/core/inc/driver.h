@@ -55,6 +55,7 @@
 namespace rocr {
 namespace core {
 
+class Driver;
 class Queue;
 
 enum class DriverQuery { GET_DRIVER_VERSION };
@@ -74,7 +75,7 @@ struct DriverMemoryHandle {
   /// - allocation address / thunk buffer handle for @ref KfdDriver
   /// - XDNA BO handle for @ref XdnaDriver
   uint64_t handle{};
-  /// Virtual address of this allocation, or nullptr if the driver exposes none.
+  /// @brief Virtual address of this allocation, or nullptr if the driver exposes none.
   /// Whether FreeMemory unmaps it is driver-defined: an allocation may borrow a
   /// mapping owned by something else, in which case FreeMemory leaves it intact.
   void* vaddr{};
@@ -82,9 +83,17 @@ struct DriverMemoryHandle {
   uint64_t mmap_offset{0};
   size_t size{0};
   hsa_fabric_handle_t fabric_handle{};
-
-  bool operator<(const DriverMemoryHandle& b) const { return handle < b.handle; }
-  bool operator==(const DriverMemoryHandle& b) const { return handle == b.handle; }
+  /// @brief Driver that created this handle.
+  ///
+  /// Native ids are only meaningful to their own driver and are not unique across drivers, so
+  /// this is what lets a driver recognize one of its own handles when one is passed back to it.
+  const Driver* owner{nullptr};
+  /// @brief False when the allocation is borrowed from the handle that owns it and so
+  /// must not be released when this handle is destroyed.
+  ///
+  /// Only @ref Driver::ImportMemoryHandle can produce a borrowed handle, and only when the
+  /// import resolves to an allocation the importing driver already owns.
+  bool owns_allocation{true};
 };
 
 /// @brief Format of a shareable memory handle for export and import.
@@ -309,7 +318,6 @@ public:
   virtual hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes,
                                         uint32_t* timeout, uint32_t* size_copied,
                                         void* dest_mem_addr, bool* is_spm_data_loss) const = 0;
-
   /// @brief Open anonymous file descriptor to enable events and read SMI events.
   /// @param[in] node_id Node ID to receive the SMI event from.
   /// @param[out] fd Anonymous file descriptor.
@@ -477,6 +485,11 @@ public:
   /// @return HSA_STATUS_SUCCESS if the driver successfully returns the queue save area information
   virtual hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const = 0;
 
+  /// @brief Sets the persisting GL2 cache size for a GPU node.
+  /// @param[in] node_id Node ID of the agent.
+  /// @param[in] cache_size The requested cache size in bytes.
+  /// @return HSA_STATUS_SUCCESS if the driver successfully sets the persisting cache size.
+  virtual hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) = 0;
 
   /// @brief Checks if the accelerator is ready to be used.
   /// @param[in] agent Agent to check the readiness of.

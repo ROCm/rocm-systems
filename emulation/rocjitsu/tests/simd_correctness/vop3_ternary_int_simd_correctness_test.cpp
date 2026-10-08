@@ -146,7 +146,7 @@ struct Fixture {
 
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_inputs(rot, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -263,7 +263,7 @@ TEST(Vop3TernaryIntSimdCorrectness, IsaGoldenByteOperations) {
       fx.cu->write_vgpr(base + 2, 0, golden.src2);
       fx.cu->write_vgpr(base + kDstVgpr, 0, DST_SENTINEL);
       fx.cu->write_vgpr(base + kDstVgpr, 1, DST_SENTINEL);
-      fx.cu->execute_instruction(inst.get(), *fx.wf);
+      EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
 
       EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 0), golden.expected);
       EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 1), DST_SENTINEL);

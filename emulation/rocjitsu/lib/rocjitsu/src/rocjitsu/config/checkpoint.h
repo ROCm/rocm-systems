@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/soc.h"
 
 #include <cstdint>
+#include <span>
 #include <string>
 
 namespace rocjitsu {
@@ -25,8 +26,19 @@ namespace config {
 /// @param soc The SoC to serialize.
 /// @param tick Current simulation tick.
 /// @param engine_config Engine configuration to persist alongside the SoC state.
+/// @param cpu_dispatch_threads Original functional dispatch-width request. Zero
+/// selects automatic sizing; nonzero values are explicit per-SoC widths.
+/// @param cpu_thread_budget Original total budget request; zero uses receiving-host affinity.
+/// @param thread_allocations Preferred allocations to re-evaluate when restoring.
+/// @param legacy_auto_dispatch Preserve an old automatic-dispatch checkpoint's
+/// absent allocation vector when saving it again; false for new configurations.
+/// @param async_helper_threads Original helper request; -1 selects the table.
+/// Zero preserves disabled-helper behavior for existing save callers.
 void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
-                     const simdojo::SimulationEngine::Config &engine_config);
+                     const simdojo::SimulationEngine::Config &engine_config,
+                     uint32_t cpu_dispatch_threads, uint32_t cpu_thread_budget = 0,
+                     std::span<const ExecutionThreadChoice> thread_allocations = {},
+                     bool legacy_auto_dispatch = false, int32_t async_helper_threads = 0);
 
 /// @brief Restore simulation state from a binary FlatBuffer checkpoint.
 ///

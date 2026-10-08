@@ -148,9 +148,6 @@ def process_panels_to_dataframes(
     decimal_precision = getattr(args, "decimal", 2) if args else 2
 
     for panel_id, panel in arch_configs.panel_configs.items():
-        if panel_id == 3000 and not args.membw_analysis:
-            continue
-
         if panel_id in config.HIDDEN_SECTIONS:
             continue
 

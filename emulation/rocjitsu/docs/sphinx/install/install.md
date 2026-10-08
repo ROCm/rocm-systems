@@ -10,16 +10,17 @@ myst:
 
 rocJITsu requires:
 
--   **CMake** 3.22 or later
+-   **CMake** 3.22 or later (3.28 or later when
+    `ROCJITSU_ENABLE_VFIO=ON`)
 -   **C++20 compiler**: GCC 13 or later, or Clang 16 or later
 -   **pthreads** (found automatically by CMake `find_package(Threads)`)
 
 Optional prerequisites:
 
--   **Python 3.10 or later** --- required only for ISA code generation
-    with the `amdisa` pipeline. See
+-   **Python 3.10 or later** --- required for ISA code generation with the
+    `amdisa` pipeline and for the VFIO guest launcher. See
     [Regenerate ISA and DBT source files](../how-to/regenerate-isa-codegen.md)
-    for details.
+    and [Run a VFIO guest with QEMU](../how-to/qemu-vfio.md) for details.
 -   **AMD ROCm toolchain** (`hipcc`, `libhsa-runtime64`) --- required
     only for HIP kernel tests and daemon-mode tests. When the ROCm
     toolchain is not found, those tests are disabled automatically.
@@ -59,20 +60,28 @@ ctest --test-dir build
 
 #### `ROCM_PATH` configuration
 
-CMake resolves the ROCm installation path in this order:
+When `BUILD_TESTING=ON`, CMake resolves the ROCm installation path for
+optional ROCm-dependent tests in this order:
 
 1.  The `ROCM_PATH` CMake variable, if set explicitly.
 2.  The `ROCM_PATH` environment variable, if set.
 3.  `/opt/rocm`, if the directory exists.
 
 When `ROCM_PATH` is set explicitly (by variable or environment) and the
-directory does not exist, the configure step fails with an error.
+nonempty directory path does not exist, the configure step fails with an
+error. An explicitly empty CMake value (`-DROCM_PATH=`) disables the
+environment and `/opt/rocm` fallbacks. Some test tools and libraries can
+still be found through normal system search paths.
+
+`ROCM_PATH` does not select the compiler used to build rocJITsu. Use
+`CMAKE_C_COMPILER` and `CMAKE_CXX_COMPILER`, or the `CC` and `CXX`
+environment variables, to select those compilers.
 
 #### Install prefix
 
-When `CMAKE_INSTALL_PREFIX` is not set by the user and `ROCM_PATH` is
-available, the install prefix defaults to the value of `ROCM_PATH`. This
-matches the convention used by other AMD ROCm projects.
+The install destination is controlled by `CMAKE_INSTALL_PREFIX`, using
+CMake's default when it is not set explicitly. It is independent of
+`ROCM_PATH`.
 
 #### Install targets
 
@@ -106,6 +115,7 @@ inside the source tree by default. To relocate the download directory
 | `RJ_SANITIZER` | *(empty)* | Enable a sanitizer build. Accepted values: `asan`, `ubsan`, `tsan`, `msan`. |
 | `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis during the build. |
 | `LTO` | `OFF` | Enable link-time optimization (IPO) for `Release` and `RelWithDebInfo` configurations. Incompatible with `RJ_SANITIZER`; setting both causes a fatal error. |
+| `ROCJITSU_ENABLE_VFIO` | `OFF` | Build Linux VFIO-user support. Requires CMake 3.28 or later and Linux 6.1 or later UAPI headers. |
 | `RJ_ENABLE_EXPENSIVE_CHECKS` | `OFF` | Enable expensive exhaustive test suites such as MFMA and WMMA SIMD bit-exactness checks. |
 | `BUILD_TESTING` | `ON` | Standard CMake option. Set to `OFF` to skip building the test suite. |
 
@@ -191,7 +201,7 @@ mode:
 cd /workspace
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json -- \
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- \
   python3 -c "import torch; print(torch.randn(4,4,device='cuda'))"
 ```
 

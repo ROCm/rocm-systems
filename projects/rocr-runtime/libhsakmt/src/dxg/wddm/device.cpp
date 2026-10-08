@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <cinttypes>
+#include <algorithm>
 #include <bitset>
 
 #if defined(__linux__)
@@ -61,8 +62,6 @@
 namespace wsl {
 namespace thunk {
 
-const uint32_t WDDMDevice::cmdbuf_aql_frame_num_ = 0x1000;
-
 WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id)
   : adapter_(adapter), adapter_luid_(adapter_luid), node_id_(node_id), init_status_(kDeviceSuccess) {
   memset(&device_info_, 0, sizeof(device_info_));
@@ -70,10 +69,22 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   NTSTATUS ret = ParseDeviceInfo();
   pr_rocr_info("kmd_version:%" PRIu32 "\n", device_info_.kmd_version);
   device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
-  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64 "\n",
+  // The KMD only accepts PM4 packets on COMPUTE0, but wkmi defaults compute_schedid
+  // to COMPUTE1 whenever AQL-on-compute1 is supported. Override to COMPUTE0 for the
+  // PM4 path.
+  if (dxg_runtime->use_pm4_) {
+     if (EngineOrdinal(kSchedulerIdCompute0, &device_info_) >= 0) {
+       device_info_.compute_schedid = kSchedulerIdCompute0;
+     } else {
+       pr_err("PM4 path requires COMPUTE0 schedId=%" PRIu32 " but it is not present; keeping compute_schedid=%" PRIu32 "\n",
+              kSchedulerIdCompute0, device_info_.compute_schedid);
+     }
+  }
+  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64
+           " compute_schedid=%" PRIu32 "\n",
            device_info_.hwsInfo.hwsMask.aql_queue,
            device_info_.hwsInfo.hwsMask.computeHwsEnabled,
-           (uint64_t)dxg_runtime->use_pm4_);
+           (uint64_t)dxg_runtime->use_pm4_, device_info_.compute_schedid);
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
@@ -665,10 +676,86 @@ void WDDMDevice::InitCmdbufInfo(void) {
     sizeof(DispatchTemplate) +
     sizeof(AtomicTemplate) * 2;
 
-  // Add safety margin to account for alignment and future additions
-  cmdbuf_aql_frame_size_ += 128;
+  // Worst-case PM4 of a single AQL packet, before the PMC headroom is added.
+  const uint32_t aql_packet_size = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+
+  // WSL multi-counter PM4 frame headroom (computed worst case).
+  //
+  // A vendor-specific (PMC) AQL packet is expanded in
+  // VendorSpecificAqlToPm4() by inlining the aqlprofile-built PM4 IB that
+  // programs and reads the hardware counters, followed by the fixed
+  // completion trailer already budgeted above. That inlined IB is what
+  // overflowed the previous small margin on multi-counter collection
+  // ("used 616 bytes, limit 544 bytes"). Its size grows with the number of
+  // counters in a pass and, per counter, with the number of block instances
+  // the counter is read from, so we size for the worst case here (device
+  // init runs before any --pmc set is known).
+  //
+  // Byte costs use the real gfx11 PM4 packet sizes (see gfx11_cmd_builder.h):
+  //   SET_UCONFIG_REG (GRBM index / control) = 3 dw = 12 B
+  //   COPY_DATA       (select / read)         = 6 dw = 24 B
+  // Per counter, worst case:
+  //   start: GRBM index (12) + select (24) + control (24)      = 60 B -> 64
+  //   read : per instance -> GRBM index (12) + 2x COPY_DATA(48) = 60 B -> 64
+  // The heaviest blocks (WGP-class on gfx11) are read once per WGP, so a
+  // single counter's worst-case read-instance count is the device WGP count
+  // (CU/2); that also upper-bounds the SE*SA fanout of other blocks. The 32
+  // below is only a byte budget, not a ceiling anyone enforces: no upstream
+  // invariant caps the events in a pass, and the one hardware limit that is
+  // checked is per (block, block_index) in CounterPacketConstruct::can_collect(),
+  // so a pass may emit many more events than this. What keeps an oversized pass
+  // from overflowing the frame is the runtime bounds check in
+  // VendorSpecificAqlToPm4() - and, since every translation path now measures
+  // the frame cumulatively, the matching checks in KernelDispatchAqlToPm4() and
+  // BarrierGenericAqlToPm4() - not this constant. The original 128 B alignment
+  // slack is retained, and the per-counter cost still scales with device
+  // geometry instead of being a blunt over-allocation.
+  constexpr uint32_t kFrameAlignmentMargin    = 128;
+  // Per-pass fixed overhead independent of the counter count: the shared PMC
+  // programming aqlprofile emits once around the per-counter loop
+  // (pmc_builder.h GpuPmcBuilder::Start/Stop/Read/Enable/Disable/WaitIdle).
+  // Rough gfx11 tally, using the packet sizes in gfx11_cmd_builder.h
+  // (EVENT_WRITE 2 dw = 8 B, SET_SH/UCONFIG_REG 3 dw = 12 B, COPY_DATA 6 dw =
+  // 24 B, ACQUIRE_MEM 8 dw = 32 B):
+  //   perfmon ctrl : CP_PERFMON_CNTL reset/start/stop + SQ_PERFCOUNTER_CTRL/CTRL2
+  //                  + GRBM broadcast resets, ~10 writes @ 12-24 B     ~= 220 B
+  //   wait-idle    : ~4 x EVENT_WRITE barrier @ 8 B                    ~=  32 B
+  //   cache flush  : ~2 x ACQUIRE_MEM @ 32 B                           ~=  64 B
+  //   enable/disable: 2 x COMPUTE_PERFCOUNT_ENABLE SET_SH_REG @ 12 B   ~=  24 B
+  //   sync waits   : ~2 x WAIT_REG_MEM (7 dw = 28 B)                   ~=  56 B
+  //                                                          subtotal  ~= 396 B
+  // 512 rounds that up with ~115 B slack (per-counter / per-instance costs are
+  // budgeted separately below), so it is a safe fixed bound.
+  constexpr uint32_t kPmcFixedOverheadBytes   = 512;  // perfmon ctrl + wait-idle barriers + cache flush + enable
+  constexpr uint32_t kPmcStartBytesPerCounter = 64;
+  constexpr uint32_t kPmcReadBytesPerInstance = 64;
+  constexpr uint32_t kMaxPmcCountersPerPass   = 32;
+
+  const uint32_t wgp_count = std::max<uint32_t>(1u, ComputeUnitCount() / 2);
+  const uint32_t sesa =
+    std::max<uint32_t>(1u, NumShaderEngine() * ShaderArrayPerShaderEngine());
+  const uint32_t max_counter_instances = std::max(wgp_count, sesa);
+  const uint32_t per_counter_bytes =
+    kPmcStartBytesPerCounter + max_counter_instances * kPmcReadBytesPerInstance;
+
+  cmdbuf_aql_frame_size_ += kFrameAlignmentMargin + kPmcFixedOverheadBytes +
+                            kMaxPmcCountersPerPass * per_counter_bytes;
 
   cmdbuf_aql_frame_size_ = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+
+  // Only a vendor-specific (PMC) frame uses the headroom above, but all frames
+  // are sized alike, so cap the ring depth instead of letting the whole
+  // allocation scale with the frame size.
+  constexpr uint32_t kCmdbufBudgetBytes = 2 * 1024 * 1024;
+
+  cmdbuf_aql_frame_num_ =
+      std::clamp(kCmdbufBudgetBytes / cmdbuf_aql_frame_size_, 1u, kMaxAqlFrameNum);
+
+  // SwitchAql2PM4() keeps merging consecutive dispatch packets into the current
+  // frame until the write index reaches a multiple of this limit, so a merge
+  // run must not be able to outgrow one frame.
+  cmdbuf_aql_merge_limit_ =
+      std::clamp(cmdbuf_aql_frame_size_ / aql_packet_size, 1u, cmdbuf_aql_frame_num_);
 
   cmdbuf_size_ = rocr::AlignUp(cmdbuf_aql_frame_num_ * cmdbuf_aql_frame_size_, 0x1000);
 }
@@ -1054,16 +1141,14 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
   uint32_t* doorbell_loc = nullptr;
-  // amd_queue_memory_ / KmtHandle and AQL parameters only apply when the queue
-  // is an AQL ComputeQueue. SDMAQueue (and SwsCompute non-AQL queues) must not
-  // be down-cast to ComputeQueue here -- doing so reads garbage and crashes.
-  ComputeQueue* compute_queue = dynamic_cast<ComputeQueue*>(queue);
+  // ComputeQueue (AQL or PM4) has amd_queue_t memory -> pass its user-queue handle; SDMAQueue
+  // returns nullptr -> resource=0. resource must NOT be gated on is_aql (that zeroed it -> KMD c0000001).
+  GpuMemory* queue_memory = queue->GetAmdQueueMemory();
   D3DKMT_HANDLE resource = 0;
   bool is_aql = false;
-  if (compute_queue != nullptr && IsAqlSupported()) {
-    auto queue_memory = compute_queue->GetAmdQueueMemory();
+  if (queue_memory != nullptr) {
     resource = queue_memory->KmtHandle();
-    is_aql = true;
+    is_aql = IsAqlSupported();
   }
   Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, is_aql,
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),

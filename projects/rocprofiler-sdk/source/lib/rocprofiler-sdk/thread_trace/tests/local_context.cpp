@@ -120,14 +120,14 @@ register_agents_and_find_traceable(thread_trace::DispatchThreadTracer&          
 
     for(const auto& [_, cache] : supported)
     {
-        if(tracer.get_agents().count(cache.get_hsa_agent()) == 1) return &cache;
+        if(tracer.get_agents().count(cache.get_rocp_agent()->id) == 1) return &cache;
     }
 
     return nullptr;
 }
 
 // pre_kernel_call() only reaches dispatch_cb_fn once the tracer's agent map and the fake queue's
-// AgentCache resolve to the same hsa_agent_t and the agent admits a dispatch. Neither is something
+// AgentCache resolve to the same agent and the agent admits a dispatch. Neither is something
 // the override decides, so establish that a dispatch lands before asserting anything about the
 // override. Without this the forced-off expectation below passes on a node that never dispatches
 // at all, which is indistinguishable from the skip it is meant to prove.
@@ -264,4 +264,33 @@ TEST(thread_trace, local_context_override_forced_on_still_invokes_dispatch_cb)
     }
 
     tracer.resource_deinit();
+}
+
+TEST(thread_trace, resource_deinit_does_not_release_foreign_serialization_owner)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto* controller = hsa::get_queue_controller();
+    ASSERT_NE(controller, nullptr);
+    ASSERT_FALSE(controller->get_supported_agents().empty());
+
+    const auto& agent = controller->get_supported_agents().begin()->second;
+    ASSERT_NE(agent.get_rocp_agent(), nullptr);
+
+    FakeQueue queue{agent, {.handle = 9}};
+    controller->serializer(&queue);
+
+    thread_trace::DispatchThreadTracer tracer{};
+
+    controller->enable_serialization();
+    tracer.start_context();
+    tracer.stop_context();
+    tracer.resource_deinit();
+
+    EXPECT_TRUE(controller->is_serialization_enabled(agent.get_rocp_agent()->id))
+        << "resource_deinit must not release another owner's serialization hold";
+
+    controller->disable_serialization();
+    EXPECT_FALSE(controller->is_serialization_enabled(agent.get_rocp_agent()->id));
 }

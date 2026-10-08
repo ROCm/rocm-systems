@@ -1,8 +1,11 @@
 /*************************************************************************
- * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef COMMON_H_
 #define COMMON_H_
@@ -11,6 +14,8 @@
 typedef unsigned long pid_t;
 #endif
 
+// NCCL_LOG_ERROR shifts every later level by one; keep in sync with
+// src/include/nccl_common.h.
 typedef enum {NCCL_LOG_NONE=0, NCCL_LOG_ERROR=1, NCCL_LOG_VERSION=2, NCCL_LOG_WARN=3, NCCL_LOG_INFO=4, NCCL_LOG_ABORT=5, NCCL_LOG_TRACE=6} ncclDebugLogLevel;
 typedef enum {NCCL_INIT=1, NCCL_COLL=2, NCCL_P2P=4, NCCL_SHM=8, NCCL_NET=16, NCCL_GRAPH=32, NCCL_TUNING=64, NCCL_ENV=128, NCCL_ALLOC=256, NCCL_CALL=512, NCCL_PROXY=1024, NCCL_NVLS=2048, NCCL_BOOTSTRAP=4096, NCCL_REG=8192, NCCL_PROFILE=16384, NCCL_RAS=32768, NCCL_DESTROY=65536, NCCL_ALLOC_HOST=131072, NCCL_ALL=~0} ncclDebugLogSubSys;
 

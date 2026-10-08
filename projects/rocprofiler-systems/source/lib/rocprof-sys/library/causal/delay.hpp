@@ -9,15 +9,12 @@
 #include "library/thread_data.hpp"
 
 #include <timemory/components/base.hpp>
-#include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
 
 #include <atomic>
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace causal
+namespace rocprofsys::causal
 {
 struct delay : comp::empty_base
 {
@@ -37,5 +34,4 @@ struct delay : comp::empty_base
     static std::int64_t  get(std::int64_t _tid = threading::get_id());
     static std::uint64_t compute_total_delay(std::uint64_t);
 };
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal
