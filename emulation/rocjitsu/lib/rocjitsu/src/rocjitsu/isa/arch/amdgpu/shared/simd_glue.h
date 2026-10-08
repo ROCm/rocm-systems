@@ -62,6 +62,30 @@ using float32_t = float;
 /// flip at runtime.
 inline bool simd_force_scalar() { return util::force_scalar(); }
 
+/// SIMD families exposed to test-only execution-path observation.
+enum class SimdFastPath : uint8_t {
+  VOP3_BINARY_FP16,
+  VOP3_BINARY_MODE_FP16,
+  VOP3_UNARY_FP16,
+  VOP3_TERNARY_FP16,
+  VOP3_TERNARY_TRUE16_RAW_FP16,
+  VOP3_FMA_FP16,
+  VOP_WORDS,
+};
+
+namespace detail {
+
+/// Optional per-thread destination for test-only SIMD path observations.
+/// Production execution leaves this null and only pays the unlikely branch.
+inline thread_local uint64_t *active_simd_fast_path_bits = nullptr;
+
+inline void record_simd_fast_path(SimdFastPath path) {
+  if (active_simd_fast_path_bits != nullptr)
+    *active_simd_fast_path_bits |= uint64_t{1} << static_cast<uint8_t>(path);
+}
+
+} // namespace detail
+
 /// True when a source-selector field names one of the nine inline float
 /// constants (0.5 .. 1/(2*pi)). A 32-bit literal is selector 255, so it never
 /// matches here even when its value lands in the same range.
@@ -2235,8 +2259,9 @@ template <typename T, typename Inst, typename BinOp>
 /// stay on the SIMD path. This helper still selects source and destination halves.
 template <bool True16, typename T, typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf,
-                                                           BinOp bin_op) {
+[[nodiscard]] inline bool
+try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf, BinOp bin_op,
+                                 SimdFastPath fast_path = SimdFastPath::VOP3_BINARY_FP16) {
   static_assert(std::is_same_v<T, uint32_t>);
   if (!floating_operation::applies_modifiers_v<BinOp> &&
       (inst.inst_.abs != 0u || inst.inst_.neg != 0u || inst.inst_.omod != 0u ||
@@ -2285,11 +2310,13 @@ template <bool True16, typename T, typename Inst, typename BinOp>
       dst.template store_native<T>(base, r, chunk);
     }
   }
+  detail::record_simd_fast_path(fast_path);
   return true;
 }
 
 template <bool True16, typename T, typename Inst, typename BinOp>
-[[nodiscard]] bool try_execute_binary_vop3_f16_simd(Inst &, Wavefront &, BinOp) {
+[[nodiscard]] bool try_execute_binary_vop3_f16_simd(Inst &, Wavefront &, BinOp,
+                                                    SimdFastPath = SimdFastPath::VOP3_BINARY_FP16) {
   return false;
 }
 
@@ -2310,7 +2337,8 @@ template <fp_mode::Arithmetic operation, bool True16, typename Inst>
     return binary_f16_simd<operation>(a, b, denorm, ovfl);
   };
   return try_execute_binary_vop3_f16_simd<True16, uint32_t>(
-      inst, wf, vop3_float_operation<fp_format::F16>(inst, wf, raw_operation));
+      inst, wf, vop3_float_operation<fp_format::F16>(inst, wf, raw_operation),
+      SimdFastPath::VOP3_BINARY_MODE_FP16);
 }
 
 template <fp_mode::Arithmetic operation, bool True16, typename Inst>
@@ -2678,6 +2706,7 @@ try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op, bool tra
       dst.template store_native<T>(base, out, chunk);
     }
   }
+  detail::record_simd_fast_path(SimdFastPath::VOP3_UNARY_FP16);
   return true;
 }
 
@@ -2950,6 +2979,7 @@ template <bool True16, typename Inst, typename TernOp>
       dst.template store_native<T>(base, out, chunk);
     }
   }
+  detail::record_simd_fast_path(SimdFastPath::VOP3_TERNARY_FP16);
   return true;
 }
 
@@ -3018,6 +3048,7 @@ template <bool True16, typename Inst>
       dst.template store_native<T>(base, out, chunk);
     }
   }
+  detail::record_simd_fast_path(SimdFastPath::VOP3_FMA_FP16);
   return true;
 }
 
@@ -5170,8 +5201,11 @@ template <bool Vop3, typename Inst>
   return
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_RAW_FP16(Fmt, ...)                                   \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop3_true16_simd<uint32_t>(                          \
-          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
-  return
+          inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__))) {       \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16);                           \
+    return;                                                                                        \
+  }
 
 /// VOP3 f32 ternary counterpart (per-source abs/neg, result omod/clamp).
 /// Functor takes already-modified `native<float>` arguments; variadic.

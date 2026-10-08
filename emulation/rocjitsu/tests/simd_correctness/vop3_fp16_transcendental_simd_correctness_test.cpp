@@ -15,6 +15,7 @@
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -153,7 +154,13 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, abs, neg, omod, clamp, words);
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    amdgpu::ScopedSimdFastPathTracker tracker;
     auto out = fx.run(inst, exec, lane_input);
+    if (force_scalar)
+      EXPECT_TRUE(tracker.none_was_executed()) << c.name << ": forced-scalar execution used SIMD";
+    else
+      EXPECT_TRUE(tracker.only_was_executed(amdgpu::SimdFastPath::VOP3_UNARY_FP16))
+          << c.name << ": eligible execution did not use the unary F16 SIMD path";
     delete inst;
     return out;
   };
